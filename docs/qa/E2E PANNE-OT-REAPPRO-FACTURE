@@ -1,0 +1,135 @@
+Voici un **test E2E unique** (métier réaliste) que tu peux exécuter de A à Z.
+
+## Préparation (5 min)
+Données de test:
+1. Véhicule: `TN-TEST-001` (statut initial `Opérationnel`).
+2. Pièce: `Filtre test` (réf `FT-001`) avec:
+- Stock initial: **1**
+- Seuil mini: 1
+- Fournisseur lié: `AUTO PIECES EXPRESS`
+3. Comptes connectables (logins réels — voir `docs/qa/COMPTES_ENVIRONNEMENT.md`):
+- Technicien → `ali` (Ali Sawadogo)
+- Chef d’atelier → `terry` (Terry Koulibaly)
+- Secrétaire → `dana` (Dana Del Rey)
+- Magasinier → `fatou` (Fatoumata Diallo)
+- Admin → `admin` (Administrateur Système, mot de passe `admin123`)
+
+Objectif: forcer **épuisement**, puis **réappro**, puis **clôture OT**.
+
+## Scénario complet
+
+1. **Chef d’atelier**: crée une OT depuis le détail véhicule (`/vehicles` -> détail -> Créer OT) via le wizard 4 étapes.
+- Étape 1 `Contexte panne`: 
+- Type d’intervention: `Curative`
+- Motif principal: `Moteur`
+- Précision motif: `Bruit métallique + perte de puissance`
+- Véhicule: `TN-TEST-001`
+- Priorité: `Haute`
+- Vérifier: badge risque = **Risque élevé**, statut initial affiché = **En attente**.
+- Étape 2 `Détails de l’intervention`:
+- Titre: clique `Suggérer un titre`, puis garde la valeur proposée.
+- Symptomes: `Claquement moteur au ralenti`
+- Impact opérationnel: `Véhicule indisponible pour mission du jour`
+- Action demandée: `Diagnostic + remplacement filtre`
+- Checklist:
+- Risque sécurité: `Oui`
+- Véhicule immobilisé: `Oui`
+- Urgence opérationnelle: `Oui`
+- Clique `Générer la description depuis le guide`.
+- Vérifier: le champ description est bien rempli automatiquement.
+- Étape 3 `Planification et options`:
+- Date début: `aujourd’hui`
+- Technicien: `Non assigné` (on assignera juste après)
+- Première visite: `Non`
+- Étape 4 `Validation finale`:
+- Vérifier que le récap contient bien: type, motif, checklist, priorité/risque.
+- Créer l’OT.
+- Statut attendu à la création: **En attente**.
+
+2. **Chef d’atelier**: assigne ensuite l’OT au technicien.
+- Résultat attendu: OT visible côté technicien.
+
+3. **Technicien**: démarre l’intervention.
+- Ajoute un diagnostic initial.
+- Statut OT attendu: **En cours**
+
+4. **Technicien**: ajoute la pièce `FT-001` quantité **1** dans l’OT.
+- Résultat attendu: succès
+- Stock pièce attendu: passe de **1 à 0** (épuisée)
+
+5. **Technicien**: tente d’ajouter encore `FT-001` quantité **1**.
+- Résultat attendu: erreur stock insuffisant (ou OT en attente pièces selon ton flux UI)
+
+6. **Technicien ou Chef d’atelier**: crée une **demande de pièce** (`/inventory/requests`) pour `FT-001` (qty 2 par exemple).
+- Statut demande attendu: **En attente**
+
+7. **Validateur**:
+- Si demande faite par technicien: **Chef d’atelier** valide.
+- Si demande faite par chef d’atelier: **Secrétaire** valide.
+- Statut attendu: **Approuvée**
+
+8. **Magasinier**: clique **Passer par Achats** pour générer la commande fournisseur.
+- PO attendu: créée en **À préparer** avec demande liée.
+
+9. **Magasinier / Secrétaire / Admin**: envoie au fournisseur.
+- PO attendu: **Transmise**
+
+10. **Secrétaire / Admin / Magasinier / Logisticien**: confirme fournisseur.
+- PO attendu: **Confirmée**
+
+11. **Magasinier**: enregistre la réception (date réelle + BL si demandé).
+- PO attendu: **Réception** (ou **Clôturée** si direct)
+- Demande pièce attendue: **Réceptionnée**
+- Stock pièce attendu: augmente (ex: +2)
+
+12. **Facture fournisseur (auto)**: vérifier qu’une facture liée à la commande existe dans `/procurement/invoices`.
+- Statut facture attendu à la création auto: **Reçue**
+
+13. **Validation/approbation facture**:
+- Validation:
+  - Scope pièces atelier: `Admin / Magasinier / Chef d’atelier`
+  - Scope hors atelier: `Admin / Secrétaire / Logistique`
+- Puis approbation: `Admin / Secrétaire`
+- Statut attendu: **Approuvée**
+
+14. **Règlement fournisseur + rapprochement**:
+- `Admin / Secrétaire` saisit un règlement (montant, date, méthode, référence) dans le détail facture.
+- **Justificatif obligatoire**: uploader une preuve `PDF/JPG/PNG/WEBP` (capture, avis de débit, reçu bancaire, etc.).
+- La ligne de règlement apparaît en statut **Saisi**.
+- `Admin / Secrétaire` clique **Rapprocher**.
+- Attendu:
+  - le règlement passe **Rapproché**
+  - le solde facture diminue
+  - si solde = 0, facture passe **Payée**
+
+15. **Magasinier/Admin**: sortie atelier (issue) si ton flux sépare réception et sortie.
+- Demande attendue: **Sortie/Issue**
+
+16. **Technicien**: retourne sur l’OT, ajoute la pièce manquante qty 1, finalise intervention.
+- Statut OT attendu: **Terminée**
+
+17. Vérification finale véhicule.
+- Si aucune autre OT active: véhicule revient **Opérationnel**.
+
+18. Vérification de traçabilité des nouveaux champs OT.
+- Ouvrir le détail OT et vérifier que la description contient aussi le bloc métier ajouté automatiquement:
+- `Type d'intervention: ...`
+- `Motif: ...`
+- `Checklist: Sécurité critique=..., Immobilisation=..., Urgence opérationnelle=...`
+
+## Contrôles finaux obligatoires (PASS/FAIL)
+1. OT: `En attente -> En cours -> Terminée`
+2. Demande pièce: `En attente -> Approuvée -> Commandée -> Réceptionnée -> Sortie`
+3. Commande fournisseur: `À préparer -> Transmise -> Confirmée -> Réception/Clôturée`
+4. Facture fournisseur: `Reçue -> Validée -> Approuvée -> Payée` (après rapprochement)
+5. Règlements visibles dans le détail facture:
+- statut **Saisi** puis **Rapproché**
+- solde qui baisse uniquement après rapprochement
+6. Mouvements de stock visibles:
+- Entrée à la réception
+- Sortie à l’affectation OT
+7. Coût OT inclut bien les pièces utilisées.
+8. Véhicule pas bloqué en maintenance après clôture OT (si aucune autre OT active).
+9. Les nouveaux champs wizard sont bien présents dans le récap et dans la description finale OT.
+
+Si tu veux, je te fais la même chose en **version check-list QA prête à cocher** (copier-coller dans `docs/qa/`).
