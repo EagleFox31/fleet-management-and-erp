@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+      --background: 0 0% 100%;
+--foreground: 20 14.3% 4.1%;
+--muted: 60 4.8% 95.9%;
+--muted-foreground: 25 5.3% 44.7%;
+--popover: 0 0% 100%;
+--popover-foreground: 20 14.3% 4.1%;
+--card: 0 0% 100%;
+--card-foreground: 20 14.3% 4.1%;
+--border: 20 5.9% 90%;
+--input: 20 5.9% 90%;
+--primary: 142 69% 36%;
+--primary-foreground: 0 0% 100%;
+--secondary: 60 4.8% 95.9%;
+--secondary-foreground: 24 9.8% 10%;
+--accent: 60 4.8% 95.9%;
+--accent-foreground: 24 9.8% 10%;
+--destructive: 0 84.2% 60.2%;
+--destructive-foreground: 60 9.1% 97.8%;
+--warning: 38 92% 50%;
+--warning-foreground: 60 9.1% 97.8%;
+--ring: 20 14.3% 4.1%;
+--radius: 0.5rem;
+  }
+  .dark {
+      --background: 240 10% 3.9%;
+--foreground: 0 0% 98%;
+--muted: 240 3.7% 15.9%;
+--muted-foreground: 240 5% 64.9%;
+--popover: 240 10% 3.9%;
+--popover-foreground: 0 0% 98%;
+--card: 240 10% 3.9%;
+--card-foreground: 0 0% 98%;
+--border: 240 3.7% 15.9%;
+--input: 240 3.7% 15.9%;
+--primary: 142 69% 36%;
+--primary-foreground: 0 0% 100%;
+--secondary: 240 3.7% 15.9%;
+--secondary-foreground: 0 0% 98%;
+--accent: 240 3.7% 15.9%;
+--accent-foreground: 0 0% 98%;
+--destructive: 0 62.8% 30.6%;
+--destructive-foreground: 0 0% 98%;
+--warning: 38 92% 50%;
+--warning-foreground: 0 0% 98%;
+--ring: 240 4.9% 83.9%;
+--radius: 0.5rem;
+  }
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Densité d'affichage sur écrans portables
+
+   Tailwind est entièrement en rem : réduire la taille de police racine réduit
+   proportionnellement le texte, les paddings, les gaps, les hauteurs et les
+   rayons. C'est le seul levier qui donne un "90 % de tout" cohérent.
+
+   Cible : les portables 13-15 pouces (1280 à 1599 px de large). Ils déclenchent
+   quand même les breakpoints `lg`/`xl`, donc ils reçoivent des tailles pensées
+   pour un grand écran dans un viewport nettement moins haut.
+
+   Sous 1280 px on ne réduit pas : les layouts sont déjà passés en 1 ou 2
+   colonnes, et réduire davantage nuirait à la lisibilité et aux zones tactiles.
+
+   Limite connue : les tailles écrites en px en dur (`text-[11px]` et
+   similaires, ~720 occurrences dans client/src) ne suivent pas cette règle.
+   C'est volontaire : ces libellés denses sont déjà à la limite basse de
+   lisibilité et passeraient sous 10 px.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1280px) and (max-width: 1599px) {
+  html {
+    font-size: 90%; /* 16px -> 14.4px */
+  }
+}
+
+@keyframes kpi-critical-vibrate {
+  0% {
+    transform: translateX(0);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35);
+  }
+  20% {
+    transform: translateX(-1px);
+  }
+  40% {
+    transform: translateX(1px);
+  }
+  60% {
+    transform: translateX(-1px);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+  }
+  80% {
+    transform: translateX(1px);
+  }
+  100% {
+    transform: translateX(0);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.kpi-critical-vibrate {
+  animation: kpi-critical-vibrate 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-critical-vibrate {
+    animation: none;
+  }
+
+  .help-spotlight {
+    animation: none;
+  }
+}
+
+.help-spotlight {
+  animation: help-spotlight-pulse 2.4s ease-out;
+  outline: 3px solid rgb(34 197 94);
+  outline-offset: 3px;
+  border-radius: 12px;
+  scroll-margin-top: 96px;
+  scroll-margin-bottom: 48px;
+}
+
+@keyframes help-spotlight-pulse {
+  0% {
+    outline-color: rgb(34 197 94);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45);
+  }
+  40% {
+    box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+  }
+  100% {
+    outline-color: rgb(22 163 74);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}

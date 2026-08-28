@@ -1,0 +1,27 @@
+{
+  "name": "Yaro FleetOS - T.A.Y",
+  "short_name": "Yaro FleetOS",
+  "description": "Application de gestion de flotte T.A.Y",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#16a34a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "lang": "fr",
+  "dir": "ltr"
+}

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Yaro FleetOS - Gestion de Flotte</title>
+    <link rel="icon" type="image/jpg" href="/favicon.jpg" />
+    <meta name="description" content="Système de gestion de flotte pour Société Transport ABOUBAKAR yaroro" />
+    
+    <!-- Google Fonts - Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Pinyon+Script&display=swap" rel="stylesheet">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Yaro FleetOS" />
+    
+    <!-- PWA Icons -->
+    <link rel="apple-touch-icon" href="/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512x512.png" />
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loader initial -->
+      <div id="initial-loader" style="min-height: 100vh; background: linear-gradient(160deg, #0a2016 0%, #071a11 55%, #051009 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem;">
+        <div style="max-width: 22rem; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2rem;">
+
+          <!-- Logo + titre -->
+          <div style="text-align: center;">
+            <div style="display: inline-flex; align-items: center; justify-content: center; width: 4.5rem; height: 4.5rem; background: rgba(74,222,128,0.10); border-radius: 1.25rem; margin-bottom: 1.25rem; border: 1px solid rgba(74,222,128,0.18);">
+              <svg style="width: 2.2rem; height: 2.2rem; color: rgb(74,222,128);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"></path>
+              </svg>
+            </div>
+            <h1 style="font-size: 1.75rem; font-weight: 700; color: white; margin: 0 0 0.35rem 0; font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.02em;">Yaro FleetOS</h1>
+            <p style="color: rgba(255,255,255,0.35); margin: 0; font-size: 0.8rem; font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: 0.06em; text-transform: uppercase;">CMMS & Fleet Management</p>
+          </div>
+
+          <!-- Barre de progression -->
+          <div style="width: 100%; display: flex; flex-direction: column; gap: 0.6rem;">
+            <div style="height: 3px; background: rgba(255,255,255,0.07); border-radius: 9999px; overflow: hidden;">
+              <div id="progress-bar" style="height: 100%; background: linear-gradient(to right, rgb(34,197,94), rgb(134,239,172)); width: 0%; transition: width 0.25s ease-out; border-radius: 9999px;"></div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span id="step-text" style="color: rgba(255,255,255,0.40); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 0.75rem;">Chargement...</span>
+              <span id="progress-text" style="color: rgb(134,239,172); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 0.75rem; font-weight: 600;">0%</span>
+            </div>
+          </div>
+
+          <!-- Branding footer -->
+          <div style="text-align: center; margin-top: 0.5rem;">
+            <span style="font-family: 'Pinyon Script', cursive; font-size: 1.2rem; color: rgba(74,222,128,0.45); font-style: italic;">by</span>
+            <span style="color: rgba(255,255,255,0.25); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 0.72rem; margin-left: 0.3rem;">Trigenys Group</span>
+          </div>
+        </div>
+      </div>
+
+      <style>
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; pointer-events: none; }
+        }
+      </style>
+
+      <script>
+        (function() {
+          let progress = 0;
+          const steps = [
+            "Chargement de la flotte...",
+            "Initialisation du système...",
+            "Prêt !"
+          ];
+          let isPageLoaded = false;
+
+          window.addEventListener('load', () => { isPageLoaded = true; });
+
+          const interval = setInterval(() => {
+            let increment;
+            // Phase 1 : démarrage fluide jusqu'à 40%
+            if (progress < 40) increment = 1.5;
+            // Phase 2 : ralentissement jusqu'à 70%
+            else if (progress < 70) increment = 0.8;
+            // Phase 3 : quasi-stop, attend l'app réelle
+            else if (progress < 88) increment = 0.12;
+            // Page chargée : finir rapidement
+            else if (isPageLoaded) increment = 3;
+            // Pas encore : presque immobile
+            else increment = 0.04;
+
+            progress = Math.min(progress + increment, 100);
+
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const stepText = document.getElementById('step-text');
+
+            if (progressBar) progressBar.style.width = Math.floor(progress) + '%';
+            if (progressText) progressText.textContent = Math.floor(progress) + '%';
+            if (stepText) {
+              if (progress < 40) stepText.textContent = steps[0];
+              else if (progress < 85) stepText.textContent = steps[1];
+              else stepText.textContent = steps[2];
+            }
+
+            if (progress >= 100) {
+              clearInterval(interval);
+              const loader = document.getElementById('initial-loader');
+              if (loader) {
+                loader.style.animation = 'fadeOut 0.3s ease forwards';
+                setTimeout(() => { loader.style.display = 'none'; }, 300);
+              }
+            }
+          }, 35);
+        })();
+      </script>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->
+    <script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
+  </body>
+</html>
