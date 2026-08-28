@@ -1,0 +1,51 @@
+# Dépendances et build
+node_modules
+dist
+server/public
+vite.config.ts.*
+*.tar.gz
+
+# Système
+.DS_Store
+Thumbs.db
+
+# --- Secrets -----------------------------------------------------------------
+# CRITIQUE: .env contient DATABASE_URL (chaîne Neon) et le secret de session.
+# Ne jamais committer. Une fois dans l'historique, il faut le réécrire pour l'en
+# sortir — et considérer les identifiants comme compromis.
+.env
+.env.*
+!.env.example
+
+# Fichier de cookies produit par les tests manuels curl: contient des cookies
+# de session valides.
+cookies.txt
+
+# --- Artefacts de test -------------------------------------------------------
+playwright-report
+test-results
+.playwright
+
+# Dossiers de vérification temporaires (Playwright ad hoc) et scripts jetables.
+pw-*/
+tmp-*.ts
+tmp-*.py
+
+# --- Captures et exports de débogage ----------------------------------------
+# Captures d'écran laissées à la racine pendant le développement.
+# `generated-icon.png` est un vrai asset (icône PWA): on le garde.
+/*.png
+!/generated-icon.png
+
+# Exports générés pendant les tests (xlsx, pdf) déposés à la racine.
+/*.xlsx
+/*.pdf
+
+# --- Données d'exécution ------------------------------------------------------
+# `uploads/` contient les fichiers déposés par les utilisateurs (justificatifs,
+# factures fournisseurs, preuves de renouvellement). C'est de la donnée de
+# production, pas du code: elle se sauvegarde, elle ne se versionne pas.
+# L'arborescence est conservée par les .gitkeep.
+uploads/**
+!uploads/**/
+!uploads/**/.gitkeep

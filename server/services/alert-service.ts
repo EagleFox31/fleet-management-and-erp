@@ -1,0 +1,696 @@
+import { storage } from "../storage";
+import type { Vehicle, Alert } from "../../shared/schema";
+import { db } from "../db";
+import { missions, assignments, suppliers } from "../../shared/schema";
+import { and, inArray, isNull, lt, eq } from "drizzle-orm";
+
+type AlertRecipientRole =
+  | "admin"
+  | "workshop_manager"
+  | "technician"
+  | "secretary"
+  | "logistics"
+  | "warehouse";
+
+export class AlertService {
+  private readonly maintenanceRecipients: AlertRecipientRole[] = [
+    "admin",
+    "workshop_manager",
+    "secretary",
+  ];
+
+  private readonly workOrderRecipients: AlertRecipientRole[] = [
+    "admin",
+    "workshop_manager",
+    "secretary",
+  ];
+
+  private readonly fuelRecipients: AlertRecipientRole[] = [
+    "admin",
+    "logistics",
+  ];
+
+  private readonly missionRecipients: AlertRecipientRole[] = [
+    "admin",
+    "logistics",
+    "secretary",
+  ];
+
+  // Fiches fournisseurs à qualifier: c'est l'administration qui détient les
+  // données commerciales (cf. docs/analysis/MATRICE_ROLES_GAP.md).
+  private readonly procurementRecipients: AlertRecipientRole[] = [
+    "admin",
+    "secretary",
+  ];
+
+  // Sortie exceptionnelle: le magasin doit savoir ce qui est parti sans lui
+  // pour rapprocher l'étagère, l'admin pour surveiller l'usage de la soupape.
+  private readonly stockOverrideRecipients: AlertRecipientRole[] = [
+    "admin",
+    "warehouse",
+  ];
+
+  /**
+   * Une fiche fournisseur est "à compléter" quand elle ne porte que son nom.
+   * Cas produit par la création inline depuis le formulaire pièce: le magasinier
+   * peut nommer un fournisseur, mais pas renseigner ses données commerciales.
+   */
+  static isSupplierIncomplete(supplier: {
+    contactName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    category?: string | null;
+  }): boolean {
+    const renseigne = (valeur?: string | null) => Boolean(valeur && valeur.trim().length > 0);
+    return (
+      !renseigne(supplier.contactName) &&
+      !renseigne(supplier.email) &&
+      !renseigne(supplier.phone) &&
+      !renseigne(supplier.category)
+    );
+  }
+
+  /**
+   * Alerte immédiate à la création d'une fiche fournisseur incomplète.
+   * Appelée depuis `POST /api/suppliers`; le rappel périodique ci-dessous prend
+   * le relais tant que la fiche n'est pas qualifiée.
+   */
+  async notifyIncompleteSupplierCreated(supplier: {
+    id: number;
+    name: string;
+  }, createdByName?: string | null): Promise<void> {
+    await this.createAlertIfNotExists({
+      type: "procurement",
+      title: "Fiche fournisseur à compléter",
+      message: createdByName
+        ? `« ${supplier.name} » a été créé par ${createdByName} avec le nom seul. Complétez contact, catégorie et conditions.`
+        : `« ${supplier.name} » a été créé avec le nom seul. Complétez contact, catégorie et conditions.`,
+      priority: "medium",
+      link: `/procurement/suppliers/${supplier.id}/edit`,
+      entityType: "supplier",
+      entityId: supplier.id,
+      targetRoles: this.procurementRecipients,
+    });
+  }
+
+  /**
+   * Sortie exceptionnelle du stock par le chef d'atelier (magasin fermé).
+   *
+   * Le magasinier n'a pas remis la pièce: il doit pouvoir rapprocher son
+   * étagère lundi matin. L'alerte est donc immédiate et nominative, pas un
+   * rappel périodique — au prochain cycle, l'information serait déjà froide.
+   *
+   * Le titre porte le numéro de demande: `createAlertIfNotExists` déduplique
+   * sur le titre, et deux sorties exceptionnelles distinctes ne doivent jamais
+   * se masquer l'une l'autre. Une demande n'étant sortie qu'une fois (`issued`
+   * est final), l'unicité est acquise par construction.
+   */
+  async notifyExceptionalStockIssue(params: {
+    requirementId: number;
+    partName: string;
+    quantity: number;
+    workOrderId: number;
+    reason: string;
+    issuedByName?: string | null;
+  }): Promise<void> {
+    const auteur = params.issuedByName ? ` par ${params.issuedByName}` : "";
+
+    await this.createAlertIfNotExists({
+      type: "inventory",
+      title: `Sortie exceptionnelle — demande #${params.requirementId}`,
+      message:
+        `${params.quantity} × « ${params.partName} » est sorti du stock${auteur} ` +
+        `sans passer par le magasin (OT #${params.workOrderId}). ` +
+        `Motif: ${params.reason}. À rapprocher avec l'étagère.`,
+      priority: "high",
+      link: `/work-orders/${params.workOrderId}`,
+      entityType: "part_requirement",
+      entityId: params.requirementId,
+      targetRoles: this.stockOverrideRecipients,
+    });
+  }
+
+  /**
+   * Rappel périodique: relance tant qu'une fiche fournisseur reste au nom seul.
+   * `createAlertIfNotExists` empêche l'accumulation d'alertes identiques.
+   */
+  async checkIncompleteSupplierAlerts(): Promise<void> {
+    console.log("🔍 Vérification des fiches fournisseurs à compléter...");
+
+    const incomplets = await db
+      .select({
+        id: suppliers.id,
+        name: suppliers.name,
+        createdAt: suppliers.createdAt,
+      })
+      .from(suppliers)
+      .where(
+        and(
+          eq(suppliers.isActive, true),
+          isNull(suppliers.contactName),
+          isNull(suppliers.email),
+          isNull(suppliers.phone),
+          isNull(suppliers.category),
+        ),
+      );
+
+    for (const fournisseur of incomplets) {
+      const joursDepuisCreation = Math.floor(
+        (Date.now() - new Date(fournisseur.createdAt).getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      await this.createAlertIfNotExists({
+        type: "procurement",
+        title: "Fiche fournisseur à compléter",
+        message:
+          joursDepuisCreation > 0
+            ? `« ${fournisseur.name} » est au nom seul depuis ${joursDepuisCreation} jour(s). Complétez contact, catégorie et conditions.`
+            : `« ${fournisseur.name} » est au nom seul. Complétez contact, catégorie et conditions.`,
+        priority: joursDepuisCreation >= 7 ? "high" : "medium",
+        link: `/procurement/suppliers/${fournisseur.id}/edit`,
+        entityType: "supplier",
+        entityId: fournisseur.id,
+        targetRoles: this.procurementRecipients,
+      });
+    }
+
+    console.log(`   ${incomplets.length} fiche(s) fournisseur à compléter`);
+  }
+
+  private async resolveRecipientUserIds(
+    roles: AlertRecipientRole[] = [],
+    explicitUserIds: number[] = []
+  ): Promise<number[]> {
+    const roleUsers = await Promise.all(roles.map((role) => storage.getUsersByRole(role)));
+    const roleUserIds = roleUsers.flat().map((user) => user.id);
+
+    return Array.from(
+      new Set(
+        [...roleUserIds, ...explicitUserIds].filter(
+          (id): id is number => typeof id === "number" && id > 0
+        )
+      )
+    );
+  }
+  
+  /**
+   * Vérifie toutes les alertes véhicules et crée les alertes manquantes
+   */
+  async checkVehicleAlerts(): Promise<void> {
+    console.log("🔍 Vérification des alertes véhicules...");
+    
+    // Récupérer tous les véhicules
+    const { vehicles } = await storage.getVehicles();
+    const activeVehicles = vehicles.filter((v: Vehicle) => v.status !== 'out_of_service');
+
+    for (const vehicle of activeVehicles) {
+      await this.checkVehicleMaintenanceAlerts(vehicle);
+      await this.checkVehicleDocumentAlerts(vehicle);
+      await this.checkVehicleMileageAlerts(vehicle);
+    }
+  }
+
+  /**
+   * Vérifie toutes les alertes ordres de travail
+   */
+  async checkWorkOrderAlerts(): Promise<void> {
+    console.log("🔍 Vérification des alertes ordres de travail...");
+    
+    const { workOrders } = await storage.getWorkOrders();
+    const today = new Date();
+    
+    for (const wo of workOrders) {
+      // Ordres en retard
+      if ((wo.status === 'pending' || wo.status === 'in_progress') && wo.startDate) {
+        const startDate = new Date(wo.startDate);
+        const daysPast = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysPast > 0) {
+          await this.createAlertIfNotExists({
+            workOrderId: wo.id,
+            type: 'work_order',
+            title: 'Ordre de travail en retard',
+            message: `OT #${wo.id} "${wo.title}" - En retard de ${daysPast} jours`,
+            priority: daysPast > 7 ? 'critical' : 'high',
+            link: `/work-orders/${wo.id}`,
+            targetRoles: this.workOrderRecipients,
+            targetUserIds: [wo.technicianId]
+          });
+        }
+      }
+      
+      // Ordres critiques non traités
+      if (wo.status === 'pending' && wo.priority === 'critical') {
+        const createdAt = new Date(wo.createdAt);
+        const hoursWaiting = Math.floor((today.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
+        
+        await this.createAlertIfNotExists({
+          workOrderId: wo.id,
+          type: 'work_order',
+          title: 'OT critique non traité',
+          message: `OT #${wo.id} "${wo.title}" - Critique non traité depuis ${hoursWaiting}h`,
+          priority: 'critical',
+          link: `/work-orders/${wo.id}`,
+          targetRoles: this.workOrderRecipients,
+          targetUserIds: [wo.technicianId]
+        });
+      }
+    }
+  }
+
+  /**
+   * Vérifie les alertes de planification maintenance
+   */
+  async checkMaintenanceScheduleAlerts(): Promise<void> {
+    console.log("🔍 Vérification des alertes planification maintenance...");
+    
+    const { vehicles } = await storage.getVehicles();
+    const today = new Date().toISOString().split('T')[0];
+    
+    for (const vehicle of vehicles) {
+      const schedules = await storage.getMaintenanceSchedulesByVehicleId(vehicle.id);
+
+      for (const schedule of schedules) {
+        if (!schedule.isActive) continue;
+
+        // Maintenance due par date
+        if (schedule.scheduledDate && schedule.scheduledDate <= today) {
+          const daysPast = Math.floor((new Date().getTime() - new Date(schedule.scheduledDate).getTime()) / (1000 * 60 * 60 * 24));
+          
+          await this.createAlertIfNotExists({
+            maintenanceScheduleId: schedule.id,
+            vehicleId: schedule.vehicleId,
+            type: 'maintenance',
+            title: 'Maintenance préventive programmée due',
+            message: `"${schedule.title}" - Échéance préventive dépassée de ${daysPast} jours (date planifiée)`,
+            priority: daysPast > 7 ? 'high' : 'medium',
+            link: `/maintenance/schedules/${schedule.id}`,
+            targetRoles: this.maintenanceRecipients
+          });
+        }
+        
+        // Maintenance due par kilométrage
+        if (schedule.scheduledMileage && vehicle.mileage >= schedule.scheduledMileage) {
+          const excessKm = vehicle.mileage - schedule.scheduledMileage;
+          
+          await this.createAlertIfNotExists({
+            maintenanceScheduleId: schedule.id,
+            vehicleId: schedule.vehicleId,
+            type: 'maintenance',
+            title: 'Maintenance préventive kilométrage due',
+            message: `"${schedule.title}" - Échéance préventive kilométrique dépassée de ${excessKm} km (${vehicle.registrationNumber})`,
+            priority: excessKm > 10000 ? 'high' : 'medium',
+            link: `/maintenance/schedules/${schedule.id}`,
+            targetRoles: this.maintenanceRecipients
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Vérifie les alertes de maintenance pour un véhicule
+   */
+  private async checkVehicleMaintenanceAlerts(vehicle: Vehicle): Promise<void> {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Alerte maintenance en retard
+    if (vehicle.nextMaintenanceDate && vehicle.nextMaintenanceDate < today) {
+      const daysPast = Math.floor((new Date().getTime() - new Date(vehicle.nextMaintenanceDate).getTime()) / (1000 * 60 * 60 * 24));
+      
+      await this.createAlertIfNotExists({
+        vehicleId: vehicle.id,
+        type: 'maintenance',
+        title: 'Maintenance en retard',
+        message: `Véhicule ${vehicle.registrationNumber} - Échéance de maintenance préventive dépassée de ${daysPast} jours (date planifiée)`,
+        priority: daysPast > 30 ? 'critical' : 'high',
+        entityType: 'vehicle',
+        entityId: vehicle.id,
+        targetRoles: this.maintenanceRecipients
+      });
+    }
+
+    // Alerte maintenance due dans les 7 jours
+    if (vehicle.nextMaintenanceDate) {
+      const nextMaintenanceDate = new Date(vehicle.nextMaintenanceDate);
+      const daysUntil = Math.floor((nextMaintenanceDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysUntil > 0 && daysUntil <= 7) {
+        await this.createAlertIfNotExists({
+          vehicleId: vehicle.id,
+          type: 'maintenance',
+          title: 'Maintenance programmée',
+          message: `Véhicule ${vehicle.registrationNumber} - Maintenance préventive à effectuer dans ${daysUntil} jours (date planifiée)`,
+          priority: 'medium',
+          entityType: 'vehicle',
+          entityId: vehicle.id,
+          targetRoles: this.maintenanceRecipients
+        });
+      }
+    }
+  }
+
+  /**
+   * Vérifie les alertes de documents pour un véhicule
+   */
+  private async checkVehicleDocumentAlerts(vehicle: Vehicle): Promise<void> {
+    const today = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(today.getDate() + 30);
+
+    const documents: Array<{
+      field: "insuranceExpiry" | "technicalInspectionDate" | "licensePlateExpiry";
+      name: string;
+    }> = [
+      { field: 'insuranceExpiry', name: 'Assurance' },
+      { field: 'technicalInspectionDate', name: 'Contrôle technique' },
+      { field: 'licensePlateExpiry', name: 'Plaque d\'immatriculation' }
+    ];
+
+    for (const doc of documents) {
+      const expiryDate = vehicle[doc.field];
+      if (!expiryDate) continue;
+
+      const expiry = new Date(expiryDate);
+      const daysUntilExpiry = Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Document expiré
+      if (expiry < today) {
+        await this.createAlertIfNotExists({
+          vehicleId: vehicle.id,
+          type: 'maintenance',
+          title: 'Document expiré',
+          message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jours`,
+          priority: 'critical',
+          entityType: 'vehicle_document',
+          entityId: vehicle.id,
+          targetRoles: this.maintenanceRecipients
+        });
+      }
+      // Document expire dans les 30 jours
+      else if (expiry <= thirtyDaysFromNow) {
+        await this.createAlertIfNotExists({
+          vehicleId: vehicle.id,
+          type: 'maintenance',
+          title: 'Document expire bientôt',
+          message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire dans ${daysUntilExpiry} jours`,
+          priority: daysUntilExpiry <= 7 ? 'high' : 'medium',
+          entityType: 'vehicle_document',
+          entityId: vehicle.id,
+          targetRoles: this.maintenanceRecipients
+        });
+      }
+    }
+  }
+
+  /**
+   * Vérifie les alertes de kilométrage pour un véhicule
+   */
+  private async checkVehicleMileageAlerts(vehicle: Vehicle): Promise<void> {
+    if (!vehicle.nextMaintenanceMileage || !vehicle.mileage) return;
+
+    const remainingKm = vehicle.nextMaintenanceMileage - vehicle.mileage;
+
+    // Kilométrage dépassé
+    if (remainingKm <= 0) {
+      await this.createAlertIfNotExists({
+        vehicleId: vehicle.id,
+        type: 'maintenance',
+        title: 'Kilométrage de maintenance dépassé',
+        message: `Véhicule ${vehicle.registrationNumber} - Kilométrage dépassé de ${Math.abs(remainingKm)} km`,
+        priority: 'critical',
+        entityType: 'vehicle',
+        entityId: vehicle.id,
+        targetRoles: this.maintenanceRecipients
+      });
+    }
+    // Kilométrage proche (dans les 5000 km)
+    else if (remainingKm <= 5000) {
+      await this.createAlertIfNotExists({
+        vehicleId: vehicle.id,
+        type: 'maintenance',
+        title: 'Kilométrage de maintenance proche',
+        message: `Véhicule ${vehicle.registrationNumber} - Plus que ${remainingKm} km avant maintenance`,
+        priority: remainingKm <= 1000 ? 'high' : 'medium',
+        entityType: 'vehicle',
+        entityId: vehicle.id,
+        targetRoles: this.maintenanceRecipients
+      });
+    }
+  }
+
+  /**
+   * Vérifie les alertes de consommation carburant
+   */
+  async checkFuelConsumptionAlerts(): Promise<void> {
+    console.log("🔍 Vérification des alertes consommation carburant...");
+
+    const { vehicles } = await storage.getVehicles();
+
+    for (const vehicle of vehicles) {
+      const fuelHistory = await storage.getFuelRecordsByVehicleId(vehicle.id);
+      if (fuelHistory.length < 3) continue;
+
+      const sortedByDate = [...fuelHistory].sort((a, b) => {
+        const aTime = a.date ? new Date(a.date).getTime() : 0;
+        const bTime = b.date ? new Date(b.date).getTime() : 0;
+        return aTime - bTime;
+      });
+
+      const consumptions: number[] = [];
+
+      for (let i = 1; i < sortedByDate.length; i++) {
+        const previous = sortedByDate[i - 1];
+        const current = sortedByDate[i];
+
+        if (!previous.mileage || !current.mileage) continue;
+
+        const distance = current.mileage - previous.mileage;
+        if (distance <= 0) continue;
+
+        const consumption = (current.quantity / distance) * 100;
+        if (Number.isFinite(consumption) && consumption > 0) {
+          consumptions.push(consumption);
+        }
+      }
+
+      if (consumptions.length < 3) continue;
+
+      const avgConsumption = consumptions.reduce((sum, value) => sum + value, 0) / consumptions.length;
+      const recentConsumptions = consumptions.slice(-3);
+      const recentAvg = recentConsumptions.reduce((sum, value) => sum + value, 0) / recentConsumptions.length;
+
+      if (recentAvg > avgConsumption * 1.2) {
+        const excessPercent = Math.round(((recentAvg - avgConsumption) / avgConsumption) * 100);
+
+        await this.createAlertIfNotExists({
+          vehicleId: vehicle.id,
+          type: 'fuel',
+          title: 'Consommation carburant élevée',
+          message: `Véhicule ${vehicle.registrationNumber} - Consommation +${excessPercent}% vs moyenne`,
+          priority: excessPercent > 50 ? 'high' : 'medium',
+          entityType: 'fuel_record',
+          entityId: vehicle.id,
+          targetRoles: this.fuelRecipients
+        });
+      }
+    }
+  }
+
+  /**
+   * Crée une alerte seulement si elle n'existe pas déjà
+   */
+  private async createAlertIfNotExists(alertData: {
+    vehicleId?: number;
+    workOrderId?: number;
+    maintenanceScheduleId?: number;
+    type: Alert['type'];
+    title: string;
+    message: string;
+    priority: Alert['priority'];
+    link?: string;
+    entityType?: string;
+    entityId?: number;
+    targetRoles?: AlertRecipientRole[];
+    targetUserIds?: Array<number | null | undefined>;
+  }): Promise<void> {
+    try {
+      const recipientUserIds = await this.resolveRecipientUserIds(
+        alertData.targetRoles,
+        (alertData.targetUserIds ?? []).filter(
+          (id): id is number => typeof id === "number" && id > 0
+        )
+      );
+
+      if (recipientUserIds.length === 0) {
+        return;
+      }
+
+      let resolvedLink = alertData.link ?? '';
+      if (!resolvedLink) {
+        if (alertData.vehicleId) {
+          resolvedLink = `/vehicles/${alertData.vehicleId}`;
+        } else if (alertData.workOrderId) {
+          resolvedLink = `/work-orders/${alertData.workOrderId}`;
+        } else if (alertData.maintenanceScheduleId) {
+          resolvedLink = `/maintenance/schedules/${alertData.maintenanceScheduleId}`;
+        }
+      }
+
+      for (const userId of recipientUserIds) {
+        const unreadAlerts = await storage.getUnreadAlertsByUserId(userId);
+
+        const existingAlert = unreadAlerts.find((alert) => {
+          const sameType = alert.type === alertData.type;
+          const sameTitle = alert.title === alertData.title;
+          const sameLink = resolvedLink ? alert.link === resolvedLink : true;
+          return sameType && sameTitle && sameLink;
+        });
+
+        if (existingAlert) {
+          continue;
+        }
+
+        const created = await storage.createAlert({
+          userId,
+          title: alertData.title,
+          message: alertData.message,
+          type: alertData.type,
+          priority: alertData.priority,
+          link: resolvedLink || undefined,
+        });
+
+        // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
+        // n'apparaissait qu'au prochain rafraîchissement, sans rien signaler.
+        // Scope `user`: une alerte est nominative, elle ne concerne pas tout le monde.
+        const broadcastUpdate = (global as any).broadcastUpdate;
+        if (typeof broadcastUpdate === "function" && created?.id) {
+          broadcastUpdate("alert_created", {
+            entity: "alert",
+            entityId: created.id,
+            payload: {
+              alertId: created.id,
+              userId,
+              title: alertData.title,
+              message: alertData.message,
+              type: alertData.type,
+              priority: alertData.priority,
+              link: resolvedLink || null,
+            },
+            scope: { type: "user", userIds: [userId] },
+          });
+        }
+      }
+
+      console.log(`✅ Alerte créée: ${alertData.title}`);
+    } catch (error) {
+      console.error('Erreur création alerte:', error);
+    }
+  }
+
+  /**
+   * Vérifie les alertes liées aux missions (retards de départ, retards de livraison)
+   */
+  async checkMissionAlerts(): Promise<void> {
+    console.log("🚚 Vérification des alertes missions...");
+    const now = new Date();
+
+    // 1. Missions en retard au départ : planned/assigned, pickupDate < now, pas encore démarrées
+    const overdueAtDeparture = await db
+      .select({
+        id: missions.id,
+        orderNumber: missions.orderNumber,
+        pickupDate: missions.pickupDate,
+        deliveryDate: missions.deliveryDate,
+        status: missions.status,
+      })
+      .from(missions)
+      .where(
+        and(
+          inArray(missions.status, ["planned", "assigned"]),
+          lt(missions.pickupDate, now),
+        )
+      );
+
+    for (const mission of overdueAtDeparture) {
+      // Vérifier qu'aucune assignment n'a de startedAt (mission pas encore lancée)
+      const started = await db
+        .select({ startedAt: assignments.startedAt })
+        .from(assignments)
+        .where(and(eq(assignments.missionId, mission.id), isNull(assignments.startedAt)))
+        .limit(1);
+
+      if (started.length === 0) continue; // mission déjà démarrée
+
+      const pickupDate = mission.pickupDate!;
+      const delayMs = now.getTime() - new Date(pickupDate).getTime();
+      const delayH = Math.floor(delayMs / 3600000);
+      const delayMin = Math.floor((delayMs % 3600000) / 60000);
+      const delayText = delayH > 0 ? `${delayH}h${delayMin > 0 ? ` ${delayMin}min` : ""}` : `${delayMin}min`;
+
+      await this.createAlertIfNotExists({
+        type: "mission",
+        title: "Retard au départ",
+        message: `Mission ${mission.orderNumber} — départ prévu dépassé de ${delayText}. Mission non encore lancée (statut: ${mission.status}).`,
+        priority: delayH >= 24 ? "critical" : "high",
+        link: `/missions/${mission.id}`,
+        targetRoles: this.missionRecipients,
+      });
+    }
+
+    // 2. Missions en retard à la livraison : in_progress, deliveryDate < now
+    const overdueAtDelivery = await db
+      .select({
+        id: missions.id,
+        orderNumber: missions.orderNumber,
+        deliveryDate: missions.deliveryDate,
+      })
+      .from(missions)
+      .where(
+        and(
+          eq(missions.status, "in_progress"),
+          lt(missions.deliveryDate, now),
+        )
+      );
+
+    for (const mission of overdueAtDelivery) {
+      const delayMs = now.getTime() - new Date(mission.deliveryDate!).getTime();
+      const delayH = Math.floor(delayMs / 3600000);
+      const delayMin = Math.floor((delayMs % 3600000) / 60000);
+      const delayText = delayH > 0 ? `${delayH}h${delayMin > 0 ? ` ${delayMin}min` : ""}` : `${delayMin}min`;
+
+      await this.createAlertIfNotExists({
+        type: "mission",
+        title: "Retard à la livraison",
+        message: `Mission ${mission.orderNumber} — livraison prévue dépassée de ${delayText}. Mission toujours en cours.`,
+        priority: delayH >= 24 ? "critical" : "high",
+        link: `/missions/${mission.id}`,
+        targetRoles: this.missionRecipients,
+      });
+    }
+
+    console.log(`✅ Alertes missions: ${overdueAtDeparture.length} retards départ, ${overdueAtDelivery.length} retards livraison vérifiés`);
+  }
+
+  /**
+   * Lance toutes les vérifications d'alertes
+   */
+  async runAllAlertChecks(): Promise<void> {
+    console.log("🚨 Démarrage vérification complète des alertes...");
+
+    try {
+      await this.checkVehicleAlerts();
+      await this.checkWorkOrderAlerts();
+      await this.checkMaintenanceScheduleAlerts();
+      await this.checkFuelConsumptionAlerts();
+      await this.checkMissionAlerts();
+      await this.checkIncompleteSupplierAlerts();
+
+      console.log("✅ Vérification des alertes terminée");
+    } catch (error) {
+      console.error("❌ Erreur lors de la vérification des alertes:", error);
+    }
+  }
+}
+
+export const alertService = new AlertService();
