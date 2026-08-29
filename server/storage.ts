@@ -18,6 +18,7 @@ import {
   type PartVariant, type InsertPartVariant, type FaultCatalog, type InsertFaultCatalog,
   type TireRotation
 } from "@shared/schema";
+import { describeStatusChange } from "@shared/constants/vehicle-status";
 
 type StockMovementType = "in" | "out" | "adjustment" | "initial";
 type FleetStatsSnapshot = {
@@ -465,9 +466,33 @@ export class DatabaseStorage implements IStorage {
     return await vehicleStatusService.getFleetStatistics();
   }
 
+  /**
+   * Conformité de l'entretien préventif sur toute la flotte.
+   *
+   * `overdue`   : la date d'entretien programmée est dépassée.
+   * `compliant` : elle ne l'est pas — ou aucune date n'est programmée, auquel
+   *               cas il n'y a rien à être en retard.
+   *
+   * Le comptage se fait en base, pas en mémoire: charger la flotte entière
+   * pour la filtrer côté serveur coûterait cher sans rien apporter.
+   *
+   * Comparaison à la date du jour côté SQL (`CURRENT_DATE`): `next_maintenance_date`
+   * est une colonne `date` sans heure, et l'horloge Node ne doit pas décider
+   * si un entretien du jour est en retard.
+   */
   async getMaintenanceCompliance(): Promise<{ compliant: number, overdue: number, total: number }> {
     try {
-      return { compliant: 0, overdue: 0, total: 0 };
+      const [row] = await db
+        .select({
+          total: count(vehicles.id),
+          overdue: sql<number>`COUNT(*) FILTER (WHERE ${vehicles.nextMaintenanceDate} IS NOT NULL AND ${vehicles.nextMaintenanceDate} < CURRENT_DATE)`,
+        })
+        .from(vehicles);
+
+      const total = Number(row?.total || 0);
+      const overdue = Number(row?.overdue || 0);
+
+      return { compliant: total - overdue, overdue, total };
     } catch (error) {
       console.error('Error getting maintenance compliance:', error);
       return { compliant: 0, overdue: 0, total: 0 };
@@ -486,9 +511,41 @@ export class DatabaseStorage implements IStorage {
     return await vehicleStatusService.getFleetKPI();
   }
 
+  /**
+   * Coût de main-d'œuvre atelier sur la période.
+   *
+   * Base retenue: ordres de travail **terminés**, sur `created_at`. Un OT
+   * ouvert n'a pas encore coûté son montant final; le compter gonflerait la
+   * période en cours puis la ferait chuter à la clôture.
+   *
+   * `workOrders.cost` est le coût de base (main-d'œuvre): les pièces ne sont
+   * pas incluses, elles vivent dans `parts_used` et entrent dans les charges
+   * par leur facture fournisseur — voir le commentaire sur la colonne dans
+   * `shared/schema.ts`.
+   *
+   * ⚠️ `getFleetKPI` somme de son côté **tous** les OT sans filtre de statut,
+   * pour son `maintenanceCostPerVehicle`. Les deux chiffres ne se réconcilient
+   * donc pas tant que des OT sont ouverts. À unifier si l'écart gêne.
+   */
   async getMaintenanceCost(period: 'week' | 'month' | 'quarter' | 'year'): Promise<number> {
     try {
-      return 0;
+      const debut = new Date();
+      const jours = { week: 7, month: 30, quarter: 90, year: 365 }[period] ?? 30;
+      debut.setDate(debut.getDate() - jours);
+
+      const [row] = await db
+        .select({
+          total: sql<string>`COALESCE(SUM(COALESCE(${workOrders.cost}, 0)), 0)`,
+        })
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.status, 'completed'),
+            gte(workOrders.createdAt, debut),
+          ),
+        );
+
+      return Number(row?.total || 0);
     } catch (error) {
       console.error('Error getting maintenance cost:', error);
       return 0;
@@ -800,7 +857,15 @@ export class DatabaseStorage implements IStorage {
       
       // Si le statut a changé, enregistrer dans l'historique automatiquement
       if (vehicle.status && vehicle.status !== currentVehicle.status) {
-        await this.recordStatusChange(id, vehicle.status, currentVehicle.status, updatedById);
+        // Chemin de la fiche véhicule: c'est un humain qui a choisi. Le dire,
+        // sinon l'historique est indistinguable d'un changement automatique.
+        await this.recordStatusChange(
+          id,
+          vehicle.status,
+          currentVehicle.status,
+          updatedById,
+          describeStatusChange("manual", vehicle.status, currentVehicle.status),
+        );
       }
       
       return updatedVehicle;
@@ -846,28 +911,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Méthode pour enregistrer automatiquement les changements de statut
+  /**
+   * Délègue au service de statut, qui est le seul écrivain de
+   * `status_history`. Cette méthode avait sa propre insertion et son propre
+   * libellé générique: deux auteurs pour la même table produisaient deux
+   * historiques au vocabulaire différent selon le chemin emprunté.
+   */
   private async recordStatusChange(
     vehicleId: number,
     newStatus: Vehicle["status"],
     oldStatus: Vehicle["status"],
-    updatedById?: number
+    updatedById?: number,
+    raison?: string,
   ): Promise<void> {
-    try {
-      const vehicle = await this.getVehicle(vehicleId);
-      if (!vehicle) return;
-
-      await db.insert(statusHistory).values({
-        vehicleId: vehicleId,
-        status: newStatus as InsertStatusHistory["status"],
-        date: new Date().toISOString().split('T')[0],
-        notes: `Statut changé automatiquement de ${oldStatus} à ${newStatus}`,
-        updatedById: updatedById || null,
-      });
-
-      console.log(`Historique de statut enregistré pour le véhicule ${vehicle.registrationNumber}: ${oldStatus} -> ${newStatus}`);
-    } catch (error) {
-      console.error('Erreur lors de l\'enregistrement de l\'historique du statut:', error);
-    }
+    await vehicleStatusService.recordStatusChange(
+      vehicleId,
+      newStatus,
+      oldStatus,
+      updatedById,
+      raison,
+    );
   }
 
   // Méthode pour changer automatiquement le statut d'un véhicule en maintenance
