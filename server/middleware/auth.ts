@@ -1,26 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { storage } from "../storage";
+import { ALL_APP_ROLES, type AppRole } from "@shared/constants/roles";
 
-type AppRole =
-  | "admin"
-  | "workshop_manager"
-  | "technician"
-  | "user"
-  | "secretary"
-  | "warehouse"
-  | "logistics"
-  | "client";
-
-const ALL_ROLES: readonly AppRole[] = [
-  "admin",
-  "workshop_manager",
-  "technician",
-  "user",
-  "secretary",
-  "warehouse",
-  "logistics",
-  "client",
-] as const;
+const ALL_ROLES = ALL_APP_ROLES;
 
 const ROLE_ALIASES: Record<string, AppRole> = {
   admin: "admin",
@@ -37,6 +19,10 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   logisticien: "logistics",
   warehouse: "warehouse",
   magasinier: "warehouse",
+  management: "management",
+  direction: "management",
+  directeur: "management",
+  dg: "management",
   client: "client",
   user: "user",
 };
@@ -176,3 +162,4 @@ export const isTireCatalogManager = authorize(['admin', 'warehouse']);
 export const isPartRequester = authorize(['admin', 'workshop_manager', 'technician', 'warehouse']);
 export const isDriverManager = authorize(['admin', 'logistics', 'secretary']);
 export const isFuelCardManager = authorize(['admin', 'logistics', 'secretary']);
+export const isManagementOrAdmin = authorize(['admin', 'management']);

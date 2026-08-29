@@ -1,15 +1,5 @@
 import "express-session";
-
-type AppRole =
-  | "admin"
-  | "workshop_manager"
-  | "technician"
-  | "user"
-  | "secretary"
-  | "warehouse"
-  | "logistics"
-  | "client"
-  | "driver";
+import type { AppRole } from "@shared/constants/roles";
 
 declare module "express-session" {
   interface SessionData {

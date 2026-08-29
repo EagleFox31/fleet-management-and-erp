@@ -19,6 +19,7 @@ export const users = pgTable("users", {
       "secretary",         // Secrétaire - Saisie, documentation, facturation
       "logistics",         // Logisticien - Planification missions, FDR
       "warehouse",         // Magasinier - Stock, alertes CDE
+      "management",        // Direction - Vue exécutive lecture seule
       "client",
       "driver",  // Chauffeur - Interface mobile PWA dédiée
       "user"
@@ -260,6 +261,11 @@ export const workOrders = pgTable("work_orders", {
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
   duration: integer("duration"), // in minutes
+  // Coût de BASE de l'intervention (main-d'œuvre), pas un total.
+  // Les pièces ne sont PAS incluses ici: elles vivent dans `parts_used` et sont
+  // additionnées à part (cf. `calculateWorkOrderCosts`). Y ajouter les pièces
+  // les compterait deux fois dans le tableau de bord Direction, qui somme déjà
+  // les factures fournisseurs.
   cost: numeric("cost", { precision: 15, scale: 2 }).default("0"),
   isPreventive: boolean("is_preventive").default(false),
   isFirstVisit: boolean("is_first_visit").default(false),

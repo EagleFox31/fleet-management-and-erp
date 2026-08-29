@@ -1,17 +1,18 @@
+import type { AppRole } from "./roles";
+
 export type SupplierRatingField =
   | "qualityRating"
   | "reliabilityRating"
   | "priceCompetitiveness";
 
-export type SupplierRatingRole =
-  | "admin"
-  | "workshop_manager"
-  | "technician"
-  | "user"
-  | "secretary"
-  | "warehouse"
-  | "logistics"
-  | "client";
+/**
+ * Quatrieme copie de la liste des roles avant unification: elle ignorait
+ * `management` et `driver`, donc ajouter un role au schema cassait la
+ * compilation ici. Le `switch` de `getSupplierRatingFieldPermissions` a un
+ * `default` qui refuse tout, donc un nouveau role n'obtient aucun droit de
+ * notation tant qu'on ne l'a pas decide explicitement — le bon defaut.
+ */
+export type SupplierRatingRole = AppRole;
 
 export const SUPPLIER_RATING_FIELDS: Array<{
   field: SupplierRatingField;

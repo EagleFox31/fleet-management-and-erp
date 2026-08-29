@@ -5,6 +5,7 @@ import { ShieldCheck, UserCheck, UserX, Users } from "lucide-react";
 
 export type UsersOverviewRole =
   | "admin"
+  | "management"
   | "workshop_manager"
   | "technician"
   | "secretary"

@@ -9,18 +9,9 @@ import {
 } from "../../shared/constants/supplier-ratings";
 import { z } from "zod";
 import { storage } from "../storage";
+import type { AppRole } from "@shared/constants/roles";
 
 const router = Router();
-
-type AppRole =
-  | "admin"
-  | "workshop_manager"
-  | "technician"
-  | "user"
-  | "secretary"
-  | "warehouse"
-  | "logistics"
-  | "client";
 
 type RatingField = SupplierRatingField;
 

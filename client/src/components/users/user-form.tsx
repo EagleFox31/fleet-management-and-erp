@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -24,9 +25,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { suggestUsernameFromFullName } from "@/lib/username-suggestion";
 
 const userRoles = [
   "admin",
+  "management",
   "workshop_manager",
   "technician",
   "secretary",
@@ -63,6 +66,7 @@ interface UserFormProps {
 export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCancel }: UserFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [usernameAutoSync, setUsernameAutoSync] = useState(!isEdit);
 
   // Configuration du formulaire avec react-hook-form et zod
   const form = useForm<UserFormValues>({
@@ -79,6 +83,15 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
       role: (initialData?.role as UserRole | undefined) || "user",
     },
   });
+
+  const watchedName = form.watch("name");
+  const watchedUsername = form.watch("username");
+  const suggestedUsername = suggestUsernameFromFullName(watchedName);
+  const showsUsernameSuggestion =
+    !isEdit &&
+    usernameAutoSync &&
+    suggestedUsername.length > 0 &&
+    watchedUsername === suggestedUsername;
 
   // Mutation pour créer ou mettre à jour un utilisateur
   const queryClient = useQueryClient();
@@ -106,6 +119,7 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
         onSuccess();
       }
       form.reset();
+      setUsernameAutoSync(true);
     },
     onError: (error: any) => {
       toast({
@@ -150,7 +164,20 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
                   <FormItem>
                     <FormLabel>Nom complet</FormLabel>
                     <FormControl>
-                      <Input placeholder="Jean Dupont" {...field} />
+                      <Input
+                        placeholder="Jean Dupont"
+                        {...field}
+                        onChange={(event) => {
+                          field.onChange(event);
+                          if (!isEdit && usernameAutoSync) {
+                            form.setValue(
+                              "username",
+                              suggestUsernameFromFullName(event.target.value),
+                              { shouldValidate: true },
+                            );
+                          }
+                        }}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -164,8 +191,34 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
                   <FormItem>
                     <FormLabel>Nom d'utilisateur</FormLabel>
                     <FormControl>
-                      <Input placeholder="jdupont" {...field} />
+                      <Input
+                        placeholder="jdupont"
+                        {...field}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          field.onChange(event);
+
+                          if (isEdit) {
+                            return;
+                          }
+
+                          if (nextValue === "") {
+                            setUsernameAutoSync(true);
+                            return;
+                          }
+
+                          const suggestion = suggestUsernameFromFullName(form.getValues("name"));
+                          if (nextValue !== suggestion) {
+                            setUsernameAutoSync(false);
+                          }
+                        }}
+                      />
                     </FormControl>
+                    {showsUsernameSuggestion ? (
+                      <FormDescription>
+                        Proposé automatiquement — cliquez pour personnaliser
+                      </FormDescription>
+                    ) : null}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -202,6 +255,7 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="admin">Administrateur</SelectItem>
+                        <SelectItem value="management">Direction (DG)</SelectItem>
                         <SelectItem value="workshop_manager">Gestionnaire atelier</SelectItem>
                         <SelectItem value="technician">Technicien</SelectItem>
                         <SelectItem value="secretary">Secrétaire</SelectItem>

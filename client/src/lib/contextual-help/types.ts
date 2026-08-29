@@ -5,6 +5,7 @@ export const APP_ROLES = [
   "secretary",
   "logistics",
   "warehouse",
+  "management",
   "client",
   "driver",
   "user",

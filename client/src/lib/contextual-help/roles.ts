@@ -7,6 +7,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   secretary: "Secrétaire",
   logistics: "Logisticien",
   warehouse: "Magasinier",
+  management: "Direction",
   client: "Client",
   driver: "Chauffeur",
   user: "Utilisateur",
@@ -18,6 +19,9 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   "secrétaire": "secretary",
   logisticien: "logistics",
   magasinier: "warehouse",
+  directeur: "management",
+  direction: "management",
+  dg: "management",
 };
 
 export function normalizeRole(role: string | null | undefined): AppRole {

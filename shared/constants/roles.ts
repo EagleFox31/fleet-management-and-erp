@@ -1,3 +1,4 @@
+import { users } from "@shared/schema";
 /**
  * Source unique des groupes de rôles partagés entre le serveur et l'interface.
  *
@@ -28,3 +29,20 @@ export type DriverManagerRole = (typeof DRIVER_MANAGER_ROLES)[number];
 export function canManageDrivers(role: string | null | undefined): boolean {
   return DRIVER_MANAGER_ROLES.includes(String(role ?? "") as DriverManagerRole);
 }
+
+/**
+ * Rôle applicatif — dérivé du schéma, jamais recopié.
+ *
+ * Il existait trois déclarations locales et divergentes de ce type
+ * (`middleware/auth.ts`, `types/auth-session.d.ts`, `api/suppliers.routes.ts`):
+ * l'une connaissait `management` sans `driver`, l'autre l'inverse, la troisième
+ * ni l'un ni l'autre. Ajouter un rôle au schéma cassait donc la compilation à
+ * des endroits sans rapport.
+ *
+ * En dérivant du schéma, un rôle ajouté à `users.role` est connu partout sans
+ * autre geste.
+ */
+export type AppRole = NonNullable<typeof users.$inferSelect>["role"];
+
+/** Liste des rôles à l'exécution, dans l'ordre du schéma. */
+export const ALL_APP_ROLES = users.role.enumValues as readonly AppRole[];
