@@ -18,6 +18,7 @@ import {
   Settings,
   Workflow,
   User,
+  Users,
   Map,
   Store,
   ShoppingCart,
@@ -33,6 +34,10 @@ import {
   X,
   FileCheck,
   Receipt,
+  Award,
+  Banknote,
+  Sparkles,
+  Mail,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -299,7 +304,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
       case 'management':
         return [
           { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
-          { label: "Rapports Direction", href: "/management/reports", icon: FileText },
+          { label: "Corridors CEMAC", href: "/management/corridor-map", icon: Map },
+          { label: "Mon équipe", href: "/management/team", icon: Users },
+          {
+            label: "Rapports Direction",
+            icon: FileText,
+            menuKey: "management-reports",
+            submenu: [
+              { label: "Board Pack Stratégique", href: "/management/reports/board-pack", icon: Sparkles },
+              { label: "Trésorerie & Recouvrement", href: "/management/reports/finance", icon: Banknote },
+              { label: "Audit Flotte & TCO", href: "/management/reports/fleet", icon: Truck },
+              { label: "Performance Chauffeurs", href: "/management/reports/drivers", icon: Award },
+              { label: "Distribution & Envois", href: "/management/reports/scheduled", icon: Mail },
+            ]
+          },
         ];
 
       case 'client':

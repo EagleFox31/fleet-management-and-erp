@@ -632,6 +632,19 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       const createdWorkOrder = extractWorkOrderFromPayload(payload);
       if (createdWorkOrder) {
         patchWorkOrderCaches(createdWorkOrder, true);
+        const assignedTo =
+          toNumericId(createdWorkOrder.assignedTo) ??
+          toNumericId(createdWorkOrder.technicianId) ??
+          toNumericId(createdWorkOrder.assignedToId);
+
+        if (currentUserId && assignedTo === currentUserId) {
+          const title = typeof createdWorkOrder.title === "string" ? createdWorkOrder.title : "Intervention assignée";
+          const woId = createdWorkOrder.id ? `OT #${createdWorkOrder.id} : ` : "";
+          toast({
+            title: "Nouvel Ordre de Travail assigné",
+            description: `${woId}${title}`,
+          });
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] });
@@ -650,6 +663,19 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       const updatedWorkOrder = extractWorkOrderFromPayload(payload);
       if (updatedWorkOrder) {
         patchWorkOrderCaches(updatedWorkOrder, false);
+        const assignedTo =
+          toNumericId(updatedWorkOrder.assignedTo) ??
+          toNumericId(updatedWorkOrder.technicianId) ??
+          toNumericId(updatedWorkOrder.assignedToId);
+
+        if (currentUserId && assignedTo === currentUserId && update.actor?.userId !== currentUserId) {
+          const title = typeof updatedWorkOrder.title === "string" ? updatedWorkOrder.title : "Intervention mise à jour";
+          const woId = updatedWorkOrder.id ? `OT #${updatedWorkOrder.id} : ` : "";
+          toast({
+            title: "Ordre de Travail mis à jour",
+            description: `${woId}${title}`,
+          });
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] });

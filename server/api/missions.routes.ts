@@ -10,6 +10,10 @@ import {
   getMissionEligibility,
   formatEligibilityRefusal,
 } from "@shared/constants/vehicle-eligibility";
+import {
+  extractMissionActualRoadExpensesHT,
+  mergeMissionActualFdrCost,
+} from "@shared/constants/management-mission-profitability";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -2159,7 +2163,7 @@ router.patch("/:id", async (req, res) => {
 router.put("/:id/status", async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
-    const { status } = req.body || {};
+    const { status, actualFdrCost: actualFdrCostBody } = req.body || {};
     const targetStatus = String(status || "").trim();
 
     if (!targetStatus) {
@@ -2376,6 +2380,33 @@ router.put("/:id/status", async (req, res) => {
       workflowDataForStatus.execution = executionData;
     }
 
+    let nextWorkflowData: Record<string, unknown> = workflowDataForStatus;
+    let hasWorkflowDataPatch = hasExecutionDataPatch;
+
+    if (targetStatus === "completed") {
+      let actualFdrCost: number | null = null;
+
+      if (actualFdrCostBody !== undefined && actualFdrCostBody !== null && actualFdrCostBody !== "") {
+        actualFdrCost = parseBudgetNumber(actualFdrCostBody);
+        if (actualFdrCost === null || actualFdrCost < 0) {
+          return res.status(400).json({
+            message: "FDR réels invalides. Saisissez un montant HT ≥ 0 (0 si aucun frais de route).",
+          });
+        }
+      } else {
+        actualFdrCost = extractMissionActualRoadExpensesHT(mission.workflowData);
+        if (actualFdrCost === null) {
+          return res.status(400).json({
+            message:
+              "FDR réels obligatoires à la clôture. Saisissez le montant HT réel des frais de route (0 si aucun).",
+          });
+        }
+      }
+
+      nextWorkflowData = mergeMissionActualFdrCost(nextWorkflowData, actualFdrCost);
+      hasWorkflowDataPatch = true;
+    }
+
     const [updatedMission] = await db
       .update(missions)
       .set({
@@ -2386,7 +2417,7 @@ router.put("/:id/status", async (req, res) => {
           : mission.currentStep,
         completedAt: targetStatus === "completed" ? now : undefined,
         cancelledAt: targetStatus === "cancelled" ? now : undefined,
-        workflowData: hasExecutionDataPatch ? workflowDataForStatus : mission.workflowData,
+        workflowData: hasWorkflowDataPatch ? nextWorkflowData : mission.workflowData,
       })
       .where(eq(missions.id, missionId))
       .returning();

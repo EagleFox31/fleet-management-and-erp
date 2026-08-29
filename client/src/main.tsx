@@ -6,10 +6,15 @@ import App from "./App";
 // la synchro temps réel travaillaient sur deux QueryClient distincts, et toutes
 // les invalidations/patches temps réel tombaient dans un client fantôme.
 import { queryClient } from "@/lib/queryClient";
+import { registerPwaServiceWorker } from "@/lib/pwa-register";
 import "./index.css";
+
+// Enregistrement PWA Service Worker (Hors-Ligne + Installation Mobile)
+registerPwaServiceWorker();
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <App />
   </QueryClientProvider>,
 );
+

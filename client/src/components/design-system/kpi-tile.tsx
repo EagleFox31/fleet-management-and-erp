@@ -45,7 +45,7 @@ export function KpiTile({
   return (
     <div
       className={cn(
-        "rounded-xl border px-4 py-3.5 flex flex-col gap-1",
+        "rounded-xl border px-3.5 py-3 sm:px-4 sm:py-3.5 flex flex-col gap-1",
         featured
           ? featuredTone === "danger"
             ? "border-transparent bg-gradient-to-br from-red-600 to-rose-700 shadow-sm"

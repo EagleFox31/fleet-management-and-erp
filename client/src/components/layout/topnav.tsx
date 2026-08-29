@@ -49,6 +49,8 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       "/operations": ["Facturation client"],
       "/missions": ["Missions transport"],
       "/reports": ["Analyse", "Rapports"],
+      "/management/reports": ["Direction", "Rapports Direction"],
+      "/management/dashboard": ["Direction", "Tableau de bord"],
       "/alerts": ["Alertes"],
       "/admin/users": ["Administration", "Utilisateurs"],
       "/workflows": ["Administration", "Workflows"],
@@ -158,16 +160,18 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
     <div
       className={`pl-6 pr-6 py-3 flex items-center justify-between sticky top-0 z-20 border-b border-gray-100 bg-white ${className}`}
     >
-      {/* Hamburger mobile */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="md:hidden text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl mr-1"
-        onClick={onMenuClick}
-        aria-label="Ouvrir le menu"
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
+      {/* Hamburger mobile (masqué pour le technicien qui utilise la Bottom App Bar PWA) */}
+      {user?.role !== "technician" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="md:hidden text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl mr-1"
+          onClick={onMenuClick}
+          aria-label="Ouvrir le menu"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+      )}
 
       {/* Logo mobile */}
       <div className="md:hidden flex items-center space-x-3">

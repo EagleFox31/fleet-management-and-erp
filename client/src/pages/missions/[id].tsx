@@ -18,6 +18,7 @@ import React, { useEffect, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -478,6 +479,8 @@ export default function MissionDetailsPage() {
   const [openMissionBudgetDialog, setOpenMissionBudgetDialog] = useState(false);
   const [openFuelDialog, setOpenFuelDialog] = useState(false);
   const [openNoFuelConfirm, setOpenNoFuelConfirm] = useState(false);
+  const [openCloseMissionDialog, setOpenCloseMissionDialog] = useState(false);
+  const [closeMissionFdrInput, setCloseMissionFdrInput] = useState("");
   const [fuelDialogMode, setFuelDialogMode] = useState<"standard" | "regularization">("standard");
   const [fuelRegularizationReason, setFuelRegularizationReason] = useState("");
   const [noFuelDeclarationReason, setNoFuelDeclarationReason] = useState("");
@@ -566,6 +569,7 @@ export default function MissionDetailsPage() {
   });
 
   const missionBudgetValues = extractMissionBudgetValues(mission);
+  const missionActualFdrCost = extractMissionActualRoadExpensesHT(mission?.workflowData);
   const missionBudgetSuggestionValues: Record<MissionBudgetField, number | null> = {
     fuelBudget: toNumericBudget(launchReadiness?.budgetSuggestion?.fuelBudget),
     roadExpensesBudget: toNumericBudget(launchReadiness?.budgetSuggestion?.roadExpensesBudget),
@@ -675,11 +679,22 @@ export default function MissionDetailsPage() {
   });
 
   const updateMissionStatusMutation = useMutation({
-    mutationFn: async (nextStatus: string) => {
-      const response = await apiRequest("PUT", `/api/missions/${missionId}/status`, { status: nextStatus });
+    mutationFn: async (
+      params: string | { nextStatus: string; actualFdrCost?: number },
+    ) => {
+      const nextStatus = typeof params === "string" ? params : params.nextStatus;
+      const actualFdrCost = typeof params === "string" ? undefined : params.actualFdrCost;
+      const body: Record<string, unknown> = { status: nextStatus };
+      if (actualFdrCost !== undefined) {
+        body.actualFdrCost = actualFdrCost;
+      }
+      const response = await apiRequest("PUT", `/api/missions/${missionId}/status`, body);
       return parseJsonIfPresent(response);
     },
-    onSuccess: (data: any, nextStatus) => {
+    onSuccess: (data: any, params) => {
+      const nextStatus = typeof params === "string" ? params : params.nextStatus;
+      setOpenCloseMissionDialog(false);
+      setCloseMissionFdrInput("");
       setLaunchBlockedDocumentTypes([]);
       const updatedMissionRecord =
         data && typeof data === "object" ? (data as Record<string, any>) : null;
@@ -692,6 +707,7 @@ export default function MissionDetailsPage() {
         const nextMission = {
           ...old,
           status: nextStatus,
+          workflowData: updatedMissionRecord?.workflowData ?? old.workflowData,
           updatedAt: updatedMissionRecord?.updatedAt ?? nowIso,
           actualStartDate:
             nextStatus === "in_progress"
@@ -925,7 +941,7 @@ export default function MissionDetailsPage() {
       });
 
       if (closeAfterDeclaration) {
-        updateMissionStatusMutation.mutate("completed");
+        openMissionCloseDialog();
       }
     },
     onError: (error: unknown) => {
@@ -1232,6 +1248,40 @@ export default function MissionDetailsPage() {
     return null;
   })();
 
+  const openMissionCloseDialog = () => {
+    const existingFdr = extractMissionActualRoadExpensesHT(mission?.workflowData);
+    setCloseMissionFdrInput(
+      existingFdr !== null && Number.isFinite(existingFdr) ? String(Math.round(existingFdr)) : "",
+    );
+    setOpenCloseMissionDialog(true);
+  };
+
+  const submitMissionClosure = () => {
+    const rawValue = closeMissionFdrInput.trim();
+    if (rawValue === "") {
+      setErrorModal({
+        title: "FDR réels obligatoires",
+        description:
+          "Saisissez le montant HT réel des frais de route pour clôturer la mission. Indiquez 0 s'il n'y en a pas eu.",
+      });
+      return;
+    }
+
+    const parsedValue = Number(rawValue.replace(",", "."));
+    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+      setErrorModal({
+        title: "Montant invalide",
+        description: "Le montant FDR doit être un nombre ≥ 0.",
+      });
+      return;
+    }
+
+    updateMissionStatusMutation.mutate({
+      nextStatus: "completed",
+      actualFdrCost: Math.round(parsedValue),
+    });
+  };
+
   const handlePrimaryMissionAction = () => {
     if (!primaryMissionAction) return;
 
@@ -1251,6 +1301,11 @@ export default function MissionDetailsPage() {
       !missionNoRefuelDeclaration
     ) {
       setOpenNoFuelConfirm(true);
+      return;
+    }
+
+    if (primaryMissionAction.nextStatus === "completed") {
+      openMissionCloseDialog();
       return;
     }
 
@@ -2244,6 +2299,12 @@ export default function MissionDetailsPage() {
                               <span className="text-sm font-bold text-green-600">{formatPrice(mission.actualFuelCost)}</span>
                             </div>
                           )}
+                          {missionActualFdrCost !== null && (
+                            <div className="flex justify-between items-center py-1.5 border-t border-gray-50">
+                              <span className="text-xs text-gray-400">FDR réels (clôture)</span>
+                              <span className="text-sm font-bold text-green-600">{formatPrice(missionActualFdrCost)}</span>
+                            </div>
+                          )}
                           {mission.actualFuelQuantity && (
                             <div className="flex justify-between items-center text-xs text-gray-400">
                               <span>Quantité consommée</span>
@@ -2747,6 +2808,70 @@ export default function MissionDetailsPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={openCloseMissionDialog}
+        onOpenChange={(open) => {
+          setOpenCloseMissionDialog(open);
+          if (!open) {
+            setCloseMissionFdrInput("");
+          }
+        }}
+      >
+        <DialogTrigger asChild><span /></DialogTrigger>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Clôturer la mission — FDR réels</DialogTitle>
+            <DialogDescription>
+              Saisissez le montant HT réel des frais de route (péages, rations, escortes…). Indiquez 0
+              s&apos;il n&apos;y en a pas eu. Le budget prévisionnel ne remplace pas cette mesure.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {missionBudgetValues.roadExpensesBudget !== null ? (
+              <p className="text-xs text-muted-foreground">
+                Budget FDR prévisionnel : {formatPrice(missionBudgetValues.roadExpensesBudget)} (référence
+                uniquement)
+              </p>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="mission-close-fdr">FDR réels HT (FCFA)</Label>
+              <Input
+                id="mission-close-fdr"
+                inputMode="numeric"
+                placeholder="0"
+                value={closeMissionFdrInput}
+                onChange={(e) => setCloseMissionFdrInput(e.target.value)}
+                data-testid="input-mission-close-fdr"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setOpenCloseMissionDialog(false);
+                setCloseMissionFdrInput("");
+              }}
+              disabled={updateMissionStatusMutation.isPending}
+            >
+              Annuler
+            </Button>
+            <Button
+              type="button"
+              className="bg-green-600 hover:bg-green-700 text-white"
+              onClick={submitMissionClosure}
+              disabled={updateMissionStatusMutation.isPending}
+              data-testid="button-confirm-mission-close-fdr"
+            >
+              {updateMissionStatusMutation.isPending ? "Clôture..." : "Clôturer la mission"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={openNoFuelConfirm}

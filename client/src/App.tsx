@@ -29,6 +29,8 @@ import LogisticsDashboard from "@/pages/logistics/dashboard";
 import WarehouseDashboard from "@/pages/warehouse/dashboard";
 import ManagementDashboard from "@/pages/management/dashboard";
 import ManagementReportsPage from "@/pages/management/reports";
+import ManagementCorridorMapPage from "@/pages/management/corridor-map";
+import ManagementTeamPage from "@/pages/management/team";
 import ClientDashboard from "@/pages/client/dashboard";
 
 import VehiclesIndex from "@/pages/vehicles/index";
@@ -253,11 +255,34 @@ function App() {
             <Route path="/" component={LandingPage} />
             
             {/* Protected routes - Smart dashboard routing */}
+            {/* AppLayout obligatoire: sans lui la page s'ouvre sans barre
+                latérale ni en-tête, et le DG perd toute navigation — il n'a
+                plus que le bouton retour du navigateur. `/dashboard` échappait
+                au problème parce que `SmartDashboardRoute` enveloppe lui-même. */}
             <Route path="/management/dashboard">
-              <RoleRoute component={ManagementDashboard} allowedRoles={["management", "admin"]} />
+              <AppLayout>
+                <RoleRoute component={ManagementDashboard} allowedRoles={["management", "admin"]} />
+              </AppLayout>
             </Route>
             <Route path="/management/reports">
-              <RoleRoute component={ManagementReportsPage} allowedRoles={["management", "admin"]} />
+              <AppLayout>
+                <RoleRoute component={ManagementReportsPage} allowedRoles={["management", "admin"]} />
+              </AppLayout>
+            </Route>
+            <Route path="/management/reports/:subpage*">
+              <AppLayout>
+                <RoleRoute component={ManagementReportsPage} allowedRoles={["management", "admin"]} />
+              </AppLayout>
+            </Route>
+            <Route path="/management/corridor-map">
+              <AppLayout>
+                <RoleRoute component={ManagementCorridorMapPage} allowedRoles={["management", "admin"]} />
+              </AppLayout>
+            </Route>
+            <Route path="/management/team">
+              <AppLayout>
+                <RoleRoute component={ManagementTeamPage} allowedRoles={["management", "admin"]} />
+              </AppLayout>
             </Route>
 
             <Route path="/dashboard">
@@ -642,6 +667,12 @@ function App() {
             </Route>
 
             {/* Routes Technicien */}
+            <Route path="/technician/dashboard">
+              <AppLayout>
+                <PrivateRoute component={TechnicianDashboard} />
+              </AppLayout>
+            </Route>
+
             <Route path="/technician/fleet-status">
               <AppLayout>
                 <PrivateRoute component={FleetStatusPage} />

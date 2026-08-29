@@ -2,7 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 
 type IconSquareSize = "sm" | "lg";
-type IconSquareTone = "green" | "blue" | "amber" | "red" | "gray";
+export type IconSquareTone = "green" | "blue" | "amber" | "red" | "gray";
 
 const SIZE_CLASS: Record<IconSquareSize, string> = {
   sm: "h-7 w-7 rounded-lg",
