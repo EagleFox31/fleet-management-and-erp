@@ -15,6 +15,7 @@ import supplierInvoicesRoutes from "./supplier-invoices.routes";
 import workOrderPartsRoutes from "./work-order-parts.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
+import managementRoutes from "./management.routes";
 
 /**
  * Router API Factory - Phase 2 Sprint 3
@@ -50,6 +51,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/work-orders", workOrderPartsRoutes);
   apiRouter.use("/part-requirements", partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
+  apiRouter.use("/management", managementRoutes);
 
   // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts
   // for backward compatibility. New billing features use /api/billing/*
