@@ -103,6 +103,7 @@ export default function OperationsDashboard() {
           <KpiGrid columns={4}>
             <KpiTile
               label="Missions actives"
+              featured // le pouls de l'exploitation
               value={formatNumber(totalMissions)}
               subValue={`${activeMissionsCount} en cours`}
               icon={<ClipboardList className="h-4 w-4" />}

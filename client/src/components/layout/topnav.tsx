@@ -67,7 +67,14 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       .filter(([route]) => path.startsWith(route + "/"))
       .sort((a, b) => b[0].length - a[0].length)[0];
 
-    if (prefixMatch) return [...prefixMatch[1], "Détail"];
+    if (prefixMatch) {
+      // Une page de création n'est pas un détail: annoncer « Détail » sur
+      // `/maintenance/work-orders/new` désoriente autant que ça informe.
+      const dernierSegment = path.split("/").filter(Boolean).pop();
+      if (dernierSegment === "new") return [...prefixMatch[1], "Nouveau"];
+      if (dernierSegment === "edit") return [...prefixMatch[1], "Modification"];
+      return [...prefixMatch[1], "Détail"];
+    }
 
     return [];
   };
@@ -140,6 +147,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       secretary: "Secrétaire",
       logistics: "Logisticien",
       warehouse: "Magasinier",
+      management: "Direction",
       client: "Client",
       user: "Utilisateur"
     };

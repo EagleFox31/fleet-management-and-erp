@@ -154,6 +154,7 @@ export default function WarehouseDashboard() {
             <KpiTile
               data-testid="warehouse-kpi-value"
               label="Valeur stock total"
+              featured // c'est ce dont le magasinier repond a l'inventaire
               value={formatPrice(totalStockValue)}
               // Le nombre de pièces est déjà la valeur de la tuile suivante:
               // on affiche ici la valeur moyenne, qui n'apparaît nulle part ailleurs.

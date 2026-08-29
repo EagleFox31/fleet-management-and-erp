@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
+import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 
 const WORKFLOW_STEPS = [
   { number: 1, title: "Client & Mission", description: "Informations de base" },
@@ -57,10 +58,14 @@ export default function NewMission() {
     queryKey: ["/api/clients"],
   });
 
-  // Fetch available vehicles (operational)
+  // On ne filtre plus la liste: un véhicule inéligible reste visible mais
+  // désactivé, avec son motif. Le masquer laissait le logisticien chercher un
+  // camion qu'il voit dans la cour sans comprendre pourquoi il a disparu.
+  // Même règle que le serveur, via `getMissionEligibility`.
   const { data: vehicles, isLoading: vehiclesLoading } = useQuery<any>({
     queryKey: ["/api/vehicles/all"],
-    select: (data: any[]) => data?.filter(v => v.status === "operational") || [],
+    select: (data: any[]) =>
+      (data || []).map((v) => ({ ...v, eligibilite: getMissionEligibility(v) })),
   });
 
   // Fetch active drivers
@@ -458,8 +463,17 @@ export default function NewMission() {
                     </SelectTrigger>
                     <SelectContent>
                       {vehicles?.map((vehicle: any) => (
-                        <SelectItem key={vehicle.id} value={vehicle.id.toString()}>
+                        <SelectItem
+                          key={vehicle.id}
+                          value={vehicle.id.toString()}
+                          disabled={!vehicle.eligibilite.eligible}
+                        >
                           {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model} ({vehicle.tonnage}T)
+                          {!vehicle.eligibilite.eligible && (
+                            <span className="ml-2 text-xs text-amber-700">
+                              — {vehicle.eligibilite.blockers.map((b: any) => b.reason).join(" ; ")}
+                            </span>
+                          )}
                         </SelectItem>
                       ))}
                     </SelectContent>

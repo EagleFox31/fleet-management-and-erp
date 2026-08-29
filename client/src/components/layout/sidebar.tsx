@@ -296,6 +296,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
           },
         ];
 
+      case 'management':
+        return [
+          { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
+          { label: "Rapports Direction", href: "/management/reports", icon: FileText },
+        ];
+
       case 'client':
         return [
           { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },

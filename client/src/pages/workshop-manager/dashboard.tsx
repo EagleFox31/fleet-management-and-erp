@@ -14,12 +14,14 @@ import { StockValueChart } from "@/components/charts/stock-value-chart";
 import { VehicleStatusChart } from "@/components/charts/vehicle-status-chart";
 import { CPCUpdateForm } from "@/components/drivers/cpc-update-form";
 import { OverdueInvoicesAlert } from "@/components/dashboard/overdue-invoices-alert";
-import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav } from "@/components/design-system";
+import { HeaderCard, KpiGrid, KpiTile, CardShell, SectionLabel, PremiumTabsNav } from "@/components/design-system";
+import { useLocation } from "wouter";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
 
 export default function WorkshopManagerDashboard() {
+  const [, setLocation] = useLocation();
   const warehouse = useWarehouse();
 
   const { data: workOrderStats } = useQuery<any>({ queryKey: ["/api/work-orders/statistics"] });
@@ -60,6 +62,16 @@ export default function WorkshopManagerDashboard() {
   const activeOrderStatuses = new Set(["pending", "in_progress", "awaiting_parts"]);
   const workshopInProgressCount =
     Number(workOrderStats?.inProgress || 0) + Number(workOrderStats?.awaitingParts || 0);
+
+  // Repartition de la charge atelier. Le denominateur est la somme des trois
+  // segments affiches: compter les annules gonflerait le total sans que la
+  // barre les represente.
+  const otEnAttente = Number(workOrderStats?.pending || 0);
+  const otEnCours = workshopInProgressCount;
+  const otTermines = Number(workOrderStats?.completed || 0);
+  const otTotal = otEnAttente + otEnCours + otTermines;
+  const otAnnules = Number(workOrderStats?.cancelled || 0);
+  const atelierArrete = otEnCours === 0 && otEnAttente > 0;
 
   const assignedWorkOrders = allWorkOrders.filter((wo: any) => {
     const id = Number(wo?.technicianId);
@@ -110,19 +122,31 @@ export default function WorkshopManagerDashboard() {
           <KpiTile
             data-testid="wm-kpi-vehicles-maintenance"
             label="Véhicules en maintenance"
+            featured // les camions immobilises sont son probleme numero un
             value={`${maintenanceVehicles}/${totalVehicles}`}
             subValue="maintenance / flotte"
             icon={<Wrench className="h-4 w-4" />}
             iconWrapperClassName={maintenanceVehicles > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
+            onClick={() => setLocation("/vehicles")}
           />
           <KpiTile
             data-testid="wm-kpi-compliance"
             label="Conformité maintenance"
             value={maintenanceComplianceTotal > 0 ? `${complianceRate.toFixed(0)}%` : "N/A"}
-            subValue={overdueMaintenance > 0 ? `${overdueMaintenance} en retard` : "À jour"}
+            // Sans donnée, ne rien affirmer: le sous-titre disait « À jour »
+            // alors que rien n'avait été vérifié — `overdue` valait zéro parce
+            // que le calcul n'existait pas, pas parce que la flotte l'était.
+            subValue={
+              maintenanceComplianceTotal === 0
+                ? "Aucun entretien programmé"
+                : overdueMaintenance > 0
+                  ? `${overdueMaintenance} en retard sur ${maintenanceComplianceTotal}`
+                  : `${maintenanceComplianceTotal} véhicules à jour`
+            }
             icon={<CheckCircle2 className="h-4 w-4" />}
             iconWrapperClassName={overdueMaintenance > 0 ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"}
             valueClassName={overdueMaintenance > 0 ? "text-red-600" : undefined}
+            onClick={() => setLocation("/maintenance/preventive")}
           />
           <KpiTile
             data-testid="wm-kpi-availability"
@@ -132,6 +156,7 @@ export default function WorkshopManagerDashboard() {
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName={availabilityRate >= 70 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}
             valueClassName={availabilityRate < 70 ? "text-red-600" : undefined}
+            onClick={() => setLocation("/vehicles")}
           />
           <KpiTile
             label="Alertes stock"
@@ -140,6 +165,7 @@ export default function WorkshopManagerDashboard() {
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName={reorderAlertsCount > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
             valueClassName={reorderAlertsCount > 0 ? "text-amber-600" : undefined}
+            onClick={() => setLocation("/inventory")}
           />
         </KpiGrid>
       </HeaderCard>
@@ -154,29 +180,57 @@ export default function WorkshopManagerDashboard() {
 
         {/* ── Atelier ── */}
         <TabsContent value="workshop" className="space-y-4">
-          <KpiGrid columns={3}>
-            <KpiTile
-              label="En attente"
-              value={workOrderStats?.pending || 0}
-              subValue="Ordres de travail"
-              icon={<ClipboardList className="h-4 w-4" />}
-              iconWrapperClassName="bg-blue-50 text-blue-600"
-            />
-            <KpiTile
-              label="En cours"
-              value={workshopInProgressCount}
-              subValue="Ordres de travail"
-              icon={<Wrench className="h-4 w-4" />}
-              iconWrapperClassName="bg-orange-50 text-orange-600"
-            />
-            <KpiTile
-              label="Terminés"
-              value={workOrderStats?.completed || 0}
-              subValue="Ordres de travail"
-              icon={<CheckCircle2 className="h-4 w-4" />}
-              iconWrapperClassName="bg-green-50 text-green-600"
-            />
-          </KpiGrid>
+          <CardShell>
+            <div className="px-5 py-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <SectionLabel>Ordres de travail</SectionLabel>
+                <span className="text-xs text-gray-500">
+                  {otTotal} au total
+                  {otAnnules > 0 ? ` · ${otAnnules} annulé${otAnnules > 1 ? "s" : ""}` : ""}
+                </span>
+              </div>
+
+              {/* Barre de proportion: on lit la charge de l'atelier d'un coup
+                  d'oeil, ce que trois nombres cote a cote ne donnent pas. */}
+              <div className="mt-3 flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+                {otTotal > 0 && (
+                  <>
+                    <div className="bg-blue-500" style={{ width: `${(otEnAttente / otTotal) * 100}%` }} />
+                    <div className="bg-orange-500" style={{ width: `${(otEnCours / otTotal) * 100}%` }} />
+                    <div className="bg-green-500" style={{ width: `${(otTermines / otTotal) * 100}%` }} />
+                  </>
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+                {[
+                  { couleur: "bg-blue-500", libelle: "En attente", valeur: otEnAttente, statut: "pending" },
+                  { couleur: "bg-orange-500", libelle: "En cours", valeur: otEnCours, statut: "in_progress" },
+                  { couleur: "bg-green-500", libelle: "Terminés", valeur: otTermines, statut: "completed" },
+                ].map((segment) => (
+                  <button
+                    key={segment.statut}
+                    type="button"
+                    onClick={() => setLocation(`/maintenance/work-orders?status=${segment.statut}`)}
+                    className="group flex items-center gap-2 rounded-md px-1.5 py-1 -mx-1.5 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${segment.couleur}`} />
+                    <span className="text-sm text-gray-600 group-hover:text-gray-900">{segment.libelle}</span>
+                    <span className="text-base font-bold text-gray-900 tabular-nums">{segment.valeur}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Rien en cours alors que des OT attendent: c'est le signal le
+                  plus fort de l'ecran, il ne doit pas etre du meme gris que le reste. */}
+              {atelierArrete && (
+                <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-amber-700">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Aucune intervention en cours alors que {otEnAttente} attende{otEnAttente > 1 ? "nt" : ""} — l'atelier est à l'arrêt.
+                </p>
+              )}
+            </div>
+          </CardShell>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CardShell>
@@ -240,6 +294,7 @@ export default function WorkshopManagerDashboard() {
               <KpiTile
                 data-testid="wm-kpi-stock-value"
                 label="Valeur stock pièces"
+                onClick={() => setLocation("/inventory")}
                 value={formatPrice(stockValue)}
                 subValue={`${totalStockParts} références · ${stockRiskCount} sous seuil`}
                 icon={<Package className="h-4 w-4" />}
@@ -252,6 +307,7 @@ export default function WorkshopManagerDashboard() {
               <KpiTile
                 data-testid="wm-kpi-reorder"
                 label="Alertes réappro"
+                onClick={() => setLocation("/inventory")}
                 value={`${reorderAlertsCount}/${totalStockParts}`}
                 subValue={`Coût estimé ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost || 0)}`}
                 icon={<AlertTriangle className="h-4 w-4" />}
@@ -264,6 +320,7 @@ export default function WorkshopManagerDashboard() {
               <KpiTile
                 data-testid="wm-kpi-lowstock"
                 label="Stock bas / épuisé"
+                onClick={() => setLocation("/inventory")}
                 value={`${stockRiskCount}/${totalStockParts}`}
                 subValue={`${lowStockCount} bas · ${outOfStockCount} épuisés`}
                 icon={<Package className="h-4 w-4" />}
@@ -304,6 +361,7 @@ export default function WorkshopManagerDashboard() {
             <KpiTile
               data-testid="wm-team-kpi-technicians"
               label="Techniciens actifs"
+                onClick={() => setLocation("/technicians")}
               value={`${activeTechsCount}/${techniciansOnly.length}`}
               subValue="avec OT actif / total"
               icon={<Users className="h-4 w-4" />}
@@ -312,6 +370,7 @@ export default function WorkshopManagerDashboard() {
             <KpiTile
               data-testid="wm-team-kpi-active-workorders"
               label="OT en cours équipe"
+                onClick={() => setLocation("/maintenance/work-orders?status=in_progress")}
               value={`${teamActiveWorkOrders.length}/${assignedWorkOrders.length}`}
               subValue={`${unassignedWorkOrdersCount} non assignés`}
               icon={<ClipboardList className="h-4 w-4" />}

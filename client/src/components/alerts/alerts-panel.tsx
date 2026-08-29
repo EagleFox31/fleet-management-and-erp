@@ -753,12 +753,20 @@ export function AlertsPanel() {
         <div className="mt-5 pt-5 border-t border-gray-100 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-3">
           <KpiTile
             label="Total"
+            onClick={() => {
+              setCategoryFilter("all");
+              setPriorityFilter("all");
+            }}
             value={counts.total}
             icon={<AlertCircle className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
           />
           <KpiTile
             label="Critiques"
+            onClick={() =>
+              setPriorityFilter((actuel) => (actuel === "critical" ? "all" : "critical"))
+            }
+            className={priorityFilter === "critical" ? "ring-2 ring-red-300" : undefined}
             value={counts.critical}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-600"
@@ -766,42 +774,70 @@ export function AlertsPanel() {
           />
           <KpiTile
             label="Documents"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "document" ? "all" : "document"))
+            }
+            className={categoryFilter === "document" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.document}
             icon={<FileWarning className="h-4 w-4" />}
             iconWrapperClassName="bg-amber-50 text-amber-600"
           />
           <KpiTile
             label="Entretiens"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "maintenance" ? "all" : "maintenance"))
+            }
+            className={categoryFilter === "maintenance" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.maintenance}
             icon={<Gauge className="h-4 w-4" />}
             iconWrapperClassName="bg-sky-50 text-sky-600"
           />
           <KpiTile
             label="Ordres"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "work_order" ? "all" : "work_order"))
+            }
+            className={categoryFilter === "work_order" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.work_order}
             icon={<Clock className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-600"
           />
           <KpiTile
             label="Carburant"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "fuel" ? "all" : "fuel"))
+            }
+            className={categoryFilter === "fuel" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.fuel}
             icon={<Gauge className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-600"
           />
           <KpiTile
             label="Stock"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "stock" ? "all" : "stock"))
+            }
+            className={categoryFilter === "stock" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.stock}
             icon={<Package className="h-4 w-4" />}
             iconWrapperClassName="bg-yellow-50 text-yellow-600"
           />
           <KpiTile
             label="Pneus"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "tire" ? "all" : "tire"))
+            }
+            className={categoryFilter === "tire" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.tire}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-rose-50 text-rose-600"
           />
           <KpiTile
             label="Missions"
+            onClick={() =>
+              setCategoryFilter((actuel) => (actuel === "mission" ? "all" : "mission"))
+            }
+            className={categoryFilter === "mission" ? "ring-2 ring-gray-300" : undefined}
             value={counts.byCategory.mission}
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"

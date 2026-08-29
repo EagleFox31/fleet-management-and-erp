@@ -27,6 +27,8 @@ import TechnicianDashboard from "@/pages/technician/dashboard";
 import SecretaryDashboard from "@/pages/secretary/dashboard";
 import LogisticsDashboard from "@/pages/logistics/dashboard";
 import WarehouseDashboard from "@/pages/warehouse/dashboard";
+import ManagementDashboard from "@/pages/management/dashboard";
+import ManagementReportsPage from "@/pages/management/reports";
 import ClientDashboard from "@/pages/client/dashboard";
 
 import VehiclesIndex from "@/pages/vehicles/index";
@@ -210,6 +212,8 @@ function SmartDashboardRoute() {
         return <LogisticsDashboard />;
       case "warehouse":
         return <WarehouseDashboard />;
+      case "management":
+        return <ManagementDashboard />;
       case "client":
         return <ClientDashboard />;
       default:
@@ -249,6 +253,13 @@ function App() {
             <Route path="/" component={LandingPage} />
             
             {/* Protected routes - Smart dashboard routing */}
+            <Route path="/management/dashboard">
+              <RoleRoute component={ManagementDashboard} allowedRoles={["management", "admin"]} />
+            </Route>
+            <Route path="/management/reports">
+              <RoleRoute component={ManagementReportsPage} allowedRoles={["management", "admin"]} />
+            </Route>
+
             <Route path="/dashboard">
               <PrivateRoute component={SmartDashboardRoute} />
             </Route>

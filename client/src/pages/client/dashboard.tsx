@@ -35,6 +35,7 @@ export default function ClientDashboard() {
           <KpiTile
             data-testid="client-kpi-vehicles"
             label="Mes véhicules"
+            featured // son parc, la raison de sa connexion
             value={vehiclesCount}
             subValue="Total flotte"
             icon={<Truck className="h-4 w-4" />}

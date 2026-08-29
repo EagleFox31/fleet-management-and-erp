@@ -112,6 +112,7 @@ export default function AdminDashboard() {
           <KpiTile
             data-testid="admin-kpi-fleet"
             label="Véhicules actifs"
+            featured // un transporteur vit du nombre de camions qui roulent
             value={`${formatNumber(operationalVehicles)} / ${formatNumber(totalVehicles)}`}
             subValue="Opérationnels / Total"
             icon={<Truck className="h-4 w-4" />}

@@ -14,7 +14,16 @@ import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
 export default function WorkOrdersIndex() {
   const [, setLocation] = useLocation();
   const [period, setPeriod] = useState("month");
-  const [activeStatusFilter, setActiveStatusFilter] = useState<string | null>(null);
+  // Le filtre est amorçable par l'URL (`?status=pending`) pour qu'une tuile KPI
+  // d'un autre tableau de bord arrive sur la liste déjà filtrée, au lieu de
+  // lâcher l'utilisateur sur la liste complète à refaire le tri à la main.
+  const STATUTS_VALIDES = ["pending", "in_progress", "awaiting_parts", "completed", "cancelled"];
+  const statutInitial = (() => {
+    if (typeof window === "undefined") return null;
+    const demande = new URLSearchParams(window.location.search).get("status");
+    return demande && STATUTS_VALIDES.includes(demande) ? demande : null;
+  })();
+  const [activeStatusFilter, setActiveStatusFilter] = useState<string | null>(statutInitial);
   const { toast } = useToast();
 
   const { data: stats } = useQuery<any>({

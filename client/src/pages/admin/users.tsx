@@ -57,6 +57,7 @@ interface User {
   name: string;
   role:
     | "admin"
+    | "management"
     | "workshop_manager"
     | "technician"
     | "secretary"
@@ -102,6 +103,7 @@ interface DriverCpcStatistics {
 
 const roleOrder: UsersOverviewRole[] = [
   "admin",
+  "management",
   "workshop_manager",
   "technician",
   "secretary",
@@ -113,6 +115,7 @@ const roleOrder: UsersOverviewRole[] = [
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-red-50 text-red-700 border border-red-200",
+  management: "bg-slate-100 text-slate-800 border border-slate-300",
   workshop_manager: "bg-blue-50 text-blue-700 border border-blue-200",
   technician: "bg-purple-50 text-purple-700 border border-purple-200",
   secretary: "bg-orange-50 text-orange-700 border border-orange-200",
@@ -321,6 +324,7 @@ export default function UsersAdminPage() {
   const getRoleLabel = (role: string) =>
     ({
       admin: "Administrateur",
+      management: "Direction",
       workshop_manager: "Gestionnaire d'atelier",
       technician: "Technicien",
       secretary: "Secrétaire",

@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, Plus } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Plus } from "lucide-react";
 
 const parsePositiveInt = (value: string | null): number | undefined => {
   if (!value) return undefined;
@@ -137,6 +137,18 @@ export default function WorkOrderNew() {
         <div className="relative px-5 py-4 md:px-6 md:py-5">
           {/* Title */}
           <div className="flex items-center gap-3">
+            {/* Sortie explicite: sans elle, quitter l'assistant passe par le
+                bouton retour du navigateur ou le fil d'Ariane, deux gestes que
+                personne ne fait quand un formulaire est a moitie rempli. */}
+            <button
+              type="button"
+              onClick={() => setLocation("/maintenance/work-orders")}
+              className="w-8 h-8 rounded-lg border border-green-200 bg-white/70 flex items-center justify-center shrink-0 text-green-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600"
+              aria-label="Retour aux ordres de travail"
+              title="Retour aux ordres de travail"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
             <div className="w-8 h-8 rounded-lg bg-green-600/10 border border-green-200 flex items-center justify-center shrink-0">
               <Plus className="h-4 w-4 text-green-700" />
             </div>

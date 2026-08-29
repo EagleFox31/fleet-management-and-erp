@@ -117,6 +117,7 @@ export default function TechnicianDashboard() {
           <KpiTile
             data-testid="tech-kpi-assigned"
             label="Ordres assignés"
+            featured // sa file de travail du jour
             value={activeWorkOrders.length}
             subValue="À traiter"
             icon={<ClipboardList className="h-4 w-4" />}

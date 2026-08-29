@@ -275,6 +275,7 @@ export default function LogisticsDashboard() {
               <KpiTile
                 data-testid="logistics-kpi-balance"
                 label="Solde carte carburant"
+                featured // a zero, les camions s'arretent
                 value={formatPrice(fuelBalanceAmount)}
                 subValue={`${Math.round(fuelCard.balance.data?.fuelBalance || 0)} L disponibles`}
                 icon={<Fuel className="h-4 w-4" />}

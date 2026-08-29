@@ -21,6 +21,7 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageFleetVehicles } from "@/lib/auth";
+import { useLocation } from "wouter";
 
 interface SecretaryVehicle {
   id: number;
@@ -34,6 +35,7 @@ const getEffectiveMileage = (v: SecretaryVehicle) =>
   Math.max(v.lastMileage ?? 0, v.mileage ?? 0, v.currentKilometers ?? 0);
 
 export default function SecretaryDashboard() {
+  const [, setLocation] = useLocation();
   const { user } = useAuth();
   const canAddVehicle = canManageFleetVehicles(user);
   const { data: vehicles } = useQuery<SecretaryVehicle[]>({ queryKey: ["/api/vehicles/all"] });
@@ -98,6 +100,10 @@ export default function SecretaryDashboard() {
           <KpiTile
             data-testid="secretary-kpi-documents"
             label="Documents à renouveler"
+            featured // un document expire immobilise un vehicule
+            // Carte grise, assurance, visite technique: la page qui les liste
+            // est « Documents & Conformité », déjà dans le menu de la secrétaire.
+            onClick={() => setLocation("/vehicles/documents")}
             value={documentsToRenew}
             subValue={`${expiredDocuments} expiré(s) · ${expiringDocumentsSoon} à venir`}
             icon={<FileText className="h-4 w-4" />}

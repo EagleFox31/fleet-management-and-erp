@@ -53,9 +53,6 @@ export default function Dashboard() {
   const { data: scheduledMaintenanceData } = useQuery<any>({
     queryKey: ["/api/statistics/scheduled-maintenance", { period }],
   });
-  const { data: costData } = useQuery<any>({
-    queryKey: ["/api/statistics/maintenance-cost", { period }],
-  });
   const { data: fuelStats } = useQuery<any>({
     queryKey: ["/api/fuel-records/statistics", { period }],
   });
@@ -126,6 +123,7 @@ export default function Dashboard() {
         <KpiGrid columns={4}>
           <KpiTile
             label="Véhicules actifs"
+            featured // vue generique: la flotte disponible reste le chiffre directeur
             value={`${formatNumber(operationalVehicles)} / ${formatNumber(totalVehicles)}`}
             subValue="Opérationnels / Total"
             icon={<Truck className="h-4 w-4" />}
