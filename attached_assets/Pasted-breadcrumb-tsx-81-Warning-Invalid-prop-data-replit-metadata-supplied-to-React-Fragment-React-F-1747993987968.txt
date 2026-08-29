@@ -1,0 +1,19 @@
+breadcrumb.tsx:81 Warning: Invalid prop `data-replit-metadata` supplied to `React.Fragment`. React.Fragment can only have `key` and `children` props.
+    at Breadcrumb (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/breadcrumb.tsx?t=1747992347176:22:30)
+    at div
+    at WorkOrderDetails (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/maintenance/work-orders/[id].tsx?t=1747993295113:114:3)
+    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?t=1747993295113&v=g5oodtgXmm4KRNcF5Ywl7:52:36)
+    at main
+    at div
+    at div
+    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx:19:22)
+    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=3685ae19:323:16)
+    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=3685ae19:379:17)
+    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…unner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=3685ae19:38:15)
+    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…rkspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=3685ae19:63:5)
+    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…rkspace/node_modules/.vite/deps/@tanstack_react-query.js?v=3685ae19:2805:3)
+    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?t=1747993295113&v=g5oodtgXmm4KRNcF5Ywl7:98:29)
+(anonymous)	@	breadcrumb.tsx:81
+Breadcrumb	@	breadcrumb.tsx:80
+

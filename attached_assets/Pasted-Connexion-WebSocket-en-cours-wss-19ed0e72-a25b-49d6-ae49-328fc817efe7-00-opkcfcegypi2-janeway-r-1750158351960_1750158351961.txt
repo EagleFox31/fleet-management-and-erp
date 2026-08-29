@@ -1,0 +1,35 @@
+Connexion WebSocket en cours... wss://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/ws
+fleet-status.tsx:151 🔍 [FLEET] Données technicien unifiées reçues: Object
+fleet-status.tsx:152 🔍 [FLEET] User ID: 2
+fleet-status.tsx:153 🔍 [FLEET] Ordres extraits: 6
+fleet-status.tsx:154 🔍 [FLEET] Stats reçues de l'API: Object
+fleet-status.tsx:155 🔍 [FLEET] Erreur API: null
+fleet-status.tsx:156 🔍 [FLEET] Loading state: false
+fleet-status.tsx:176 🔍 [FLEET] Stats ordres calculées: Object
+fleet-status.tsx:177 🔍 [FLEET] Stats API brutes: Object
+useRealTimeSync.ts:28 WebSocket connecté - Synchronisation temps réel active
+fleet-status.tsx:151 🔍 [FLEET] Données technicien unifiées reçues: Object
+fleet-status.tsx:152 🔍 [FLEET] User ID: 2
+fleet-status.tsx:153 🔍 [FLEET] Ordres extraits: 6
+fleet-status.tsx:154 🔍 [FLEET] Stats reçues de l'API: Object
+fleet-status.tsx:155 🔍 [FLEET] Erreur API: null
+fleet-status.tsx:156 🔍 [FLEET] Loading state: false
+fleet-status.tsx:176 🔍 [FLEET] Stats ordres calculées: Object
+fleet-status.tsx:177 🔍 [FLEET] Stats API brutes: Object
+useRealTimeSync.ts:42 Mise à jour temps réel reçue: auth_success undefined
+fleet-status.tsx:151 🔍 [FLEET] Données technicien unifiées reçues: Object
+fleet-status.tsx:152 🔍 [FLEET] User ID: 2
+fleet-status.tsx:153 🔍 [FLEET] Ordres extraits: 6
+fleet-status.tsx:154 🔍 [FLEET] Stats reçues de l'API: Object
+fleet-status.tsx:155 🔍 [FLEET] Erreur API: null
+fleet-status.tsx:156 🔍 [FLEET] Loading state: false
+fleet-status.tsx:176 🔍 [FLEET] Stats ordres calculées: Object
+fleet-status.tsx:177 🔍 [FLEET] Stats API brutes: Object
+fleet-status.tsx:151 🔍 [FLEET] Données technicien unifiées reçues: Object
+fleet-status.tsx:152 🔍 [FLEET] User ID: 2
+fleet-status.tsx:153 🔍 [FLEET] Ordres extraits: 6
+fleet-status.tsx:154 🔍 [FLEET] Stats reçues de l'API: Objectcompleted: 6inProgress: 0overdue: 0pending: 0total: 6[[Prototype]]: Object
+fleet-status.tsx:155 🔍 [FLEET] Erreur API: null
+fleet-status.tsx:156 🔍 [FLEET] Loading state: false
+fleet-status.tsx:176 🔍 [FLEET] Stats ordres calculées: Objectcompleted: 6in_progress: 0overdue: 0pending: 0total: 6[[Prototype]]: Object
+fleet-status.tsx:177 🔍 [FLEET] Stats API brutes: 

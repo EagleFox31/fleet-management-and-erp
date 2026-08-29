@@ -1,0 +1,81 @@
+✅ Données d'entrée :
+Historique des statuts de véhicules (status_history)
+
+UI attendue : graphique affichant le statut courant des véhicules par période (semaine/mois/trimestre/année)
+
+Comportement souhaité : refléter l'état final (dernier statut connu) pour chaque véhicule à chaque point de l’intervalle de temps, même en l'absence de changement de statut.
+
+🔄 Traitement / Règle métier à appliquer :
+1. Intervalle temporel selon la granularité sélectionnée :
+Vue	Axe X attendu	Détail intervalle
+Semaine	7 derniers jours (rolling)	Du today - 6 à today inclus
+Mois	Jours du mois courant	Du 1er au dernier jour du mois (ex: 1 à 30/31)
+Trimestre	3 mois glissants ou fixes	Affichage par semaine ou par mois (à définir avec l’équipe produit)
+Année	Mois de l’année	Janvier à Décembre, chaque point = état agrégé par mois
+
+2. Statut affiché :
+Pour chaque jour/semaine/mois du graphique :
+
+On affiche le dernier statut connu à cette date (même s’il date de plusieurs jours avant).
+
+Si un véhicule n’a jamais eu de statut avant la date considérée, on l’ignore dans les stats (ou marqué "non renseigné").
+
+3. Déduction du statut courant :
+Pour chaque véhicule V, pour chaque date D de l’intervalle :
+
+Rechercher le dernier enregistrement de statut de V antérieur ou égal à D.
+
+Compter les statuts pour tous les véhicules à cette date.
+
+Regrouper les véhicules par operational, maintenance, out_of_service.
+
+🛠️ Logique du service à implémenter (NestJS + TypeScript)
+➤ Méthode : getFleetStatus(timeframe: 'week' | 'month' | 'quarter' | 'year')
+🔁 Étapes générales :
+Déterminer l’intervalle temporel (liste des dates à analyser) en fonction du timeframe
+
+Récupérer les statuts historiques des véhicules jusqu’à la date max de l’intervalle
+
+Pour chaque date dans l’intervalle :
+
+Pour chaque véhicule :
+
+Trouver le dernier statut connu avant ou à cette date
+
+Calculer l’agrégation operational, maintenance, out_of_service
+
+📦 Exemple d’API GET /fleet-status?timeframe=week
+✅ Payload de réponse attendu (pour 7 jours par exemple) :
+ts
+Copier
+Modifier
+type FleetStatusPerDay = {
+  date: string; // YYYY-MM-DD
+  operational: number;
+  maintenance: number;
+  out_of_service: number;
+};
+
+type FleetStatusResponse = FleetStatusPerDay[];
+📁 Structure de code recommandée :
+graphql
+Copier
+Modifier
+src/
+│
+├── fleet/
+│   ├── fleet.controller.ts      # Endpoint REST
+│   ├── fleet.service.ts         # Logique métier
+│   ├── dto/
+│   │   └── fleet-status.dto.ts  # Typage de réponse
+│   ├── utils/
+│   │   └── interval.util.ts     # Génère la liste des dates de l’intervalle
+│   └── repository/
+│       └── status-history.repo.ts # Méthode custom SQL pour extraire le statut courant
+📌 Proposition technique : optimisation des statuts courants
+Au lieu de scanner tous les statuts pour chaque jour → pré-traiter :
+
+Charger tous les statuts d’un véhicule par ordre descendant
+
+Utiliser une structure de balayage (sweep line) pour retenir le statut courant au fil du temps.
+

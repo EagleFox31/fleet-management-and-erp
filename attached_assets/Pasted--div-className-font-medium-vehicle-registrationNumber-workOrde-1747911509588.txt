@@ -1,0 +1,57 @@
+            <div className="font-medium">
+              {vehicle?.registrationNumber || `#${workOrder.vehicleId}`}
+              {vehicle && (
+                <span className="text-muted-foreground ml-2 text-sm">
+                  {vehicle.brand} {vehicle.model}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Technicien</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-medium">
+              {technician?.name || (workOrder.technicianId ? `#${workOrder.technicianId}` : "Non assigné")}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Date début</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-medium">
+              {formatDate(workOrder.startDate)}
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Date fin</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-medium">
+              {workOrder.endDate ? formatDate(workOrder.endDate) : "Non terminé"}
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Priorité</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge className={getStatusColor(workOrder?.priority || "medium")}>
+              {translateStatus(workOrder?.priority || "medium")}
+            </Badge>
+          </CardContent>
+        </Card>
+      </div>

@@ -1,0 +1,106 @@
+Erreur lors de la génération du rapport: TypeError: workOrders.filter is not a function
+    at exportMaintenanceCostReport (pdf-export.ts?t=1748006437624:384:43)
+    at async handleGenerateReport (index.tsx:61:21)
+exportMaintenanceCostReport @ pdf-export.ts?t=1748006437624:435
+await in exportMaintenanceCostReport
+handleGenerateReport @ index.tsx:61
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=c565e313:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=c565e313:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=c565e313:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=c565e313:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=c565e313:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=c565e313:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=c565e313:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=c565e313:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=c565e313:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=c565e313:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=c565e313:5449Understand this error
+index.tsx:83 Erreur génération rapport: Error: Erreur lors de la génération du rapport des coûts de maintenance
+    at exportMaintenanceCostReport (pdf-export.ts?t=1748006437624:436:11)
+    at async handleGenerateReport (index.tsx:61:21)
+handleGenerateReport @ index.tsx:83
+await in handleGenerateReport
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=c565e313:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=c565e313:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=c565e313:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=c565e313:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=c565e313:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=c565e313:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=c565e313:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=c565e313:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=c565e313:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=c565e313:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=c565e313:5449Understand this error
+main.js?attr=-cBxAw9OcRvqikhqOXaddYXu3PTVPXYMUwkiltK75A7kLmdophiA6igeYKY3uUVoXm7wmD0v6Frl7H-3gGtS7HbqzC5vYzpii-tHwiy9XqZDvP2mPPeAb_xKErbuEyqv236-ah-UHBXQTslkDqzptQ:5398 
+            
+            
+           GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/parts/stock-movements 400 (Bad Request)
+fetchCallImpl @ main.js?attr=-cBxAw9OcRvqikhqOXaddYXu3PTVPXYMUwkiltK75A7kLmdophiA6igeYKY3uUVoXm7wmD0v6Frl7H-3gGtS7HbqzC5vYzpii-tHwiy9XqZDvP2mPPeAb_xKErbuEyqv236-ah-UHBXQTslkDqzptQ:5398
+fetch @ main.js?attr=-cBxAw9OcRvqikhqOXaddYXu3PTVPXYMUwkiltK75A7kLmdophiA6igeYKY3uUVoXm7wmD0v6Frl7H-3gGtS7HbqzC5vYzpii-tHwiy9XqZDvP2mPPeAb_xKErbuEyqv236-ah-UHBXQTslkDqzptQ:5404
+exportPartsInventoryReport @ pdf-export.ts:683
+await in exportPartsInventoryReport
+handleGenerateReport @ index.tsx:67
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=c565e313:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=c565e313:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=c565e313:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=c565e313:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=c565e313:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=c565e313:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=c565e313:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=c565e313:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=c565e313:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=c565e313:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=c565e313:5449Understand this error
+pdf-export.ts:756 Erreur lors de la génération du rapport: TypeError: allMovements.filter is not a function
+    at exportPartsInventoryReport (pdf-export.ts:687:44)
+    at async handleGenerateReport (index.tsx:67:21)
+exportPartsInventoryReport @ pdf-export.ts:756
+await in exportPartsInventoryReport
+handleGenerateReport @ index.tsx:67
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=c565e313:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=c565e313:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=c565e313:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=c565e313:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=c565e313:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=c565e313:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=c565e313:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=c565e313:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=c565e313:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=c565e313:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=c565e313:5449Understand this error
+index.tsx:83 Erreur génération rapport: Error: Erreur lors de la génération du rapport d'inventaire des pièces
+    at exportPartsInventoryReport (pdf-export.ts:757:11)
+    at async handleGenerateReport (index.tsx:67:21)
+handleGenerateReport @ index.tsx:83
+await in handleGenerateReport
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=c565e313:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=c565e313:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=c565e313:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=c565e313:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=c565e313:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=c565e313:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=c565e313:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=c565e313:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=c565e313:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=c565e313:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=c565e313:5449Understand this error

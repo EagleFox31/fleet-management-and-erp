@@ -1,0 +1,37 @@
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/vehicles/check-alerts 404 (Not Found)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+(anonymous)	@	queryClient.ts:57
+
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/tires/low-stock 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+(anonymous)	@	queryClient.ts:57
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/tires 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+(anonymous)	@	queryClient.ts:57
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/tires/statistics 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+queryFn	@	index.tsx:92
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/vehicle-tires 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+queryFn	@	index.tsx:101
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/tire-inspections/recent 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+queryFn	@	index.tsx:110
+main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398 
+ GET https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/tires/low-stock 500 (Internal Server Error)
+fetchCallImpl	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5398
+fetch	@	main.js?attr=4oudyqY…ILF4tHP3JMB8eA:5404
+(anonymous)	@	queryClient.ts:57
+

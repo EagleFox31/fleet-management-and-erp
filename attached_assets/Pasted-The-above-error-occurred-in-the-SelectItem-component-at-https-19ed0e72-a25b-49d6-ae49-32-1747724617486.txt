@@ -1,0 +1,45 @@
+The above error occurred in the <SelectItem> component:
+
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-select.js?v=3f9d8778:842:7
+    at _c11 (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/select.tsx:208:13)
+    at div
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-PALV7G7K.js?v=3f9d8778:42:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:79:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:56:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-45OWABQZ.js?v=3f9d8778:39:15
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-select.js?v=3f9d8778:753:13
+    at div
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:79:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:56:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-45OWABQZ.js?v=3f9d8778:39:15
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-IFTONRVK.js?v=3f9d8778:38:15)
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-select.js?v=3f9d8778:296:58
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:79:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LXTJ4TFU.js?v=3f9d8778:56:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-PALV7G7K.js?v=3f9d8778:42:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-Y72F2U74.js?v=3f9d8778:258:22
+    at SelectPortal
+    at _c7 (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/select.tsx:123:12)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-IFTONRVK.js?v=3f9d8778:38:15)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-IFTONRVK.js?v=3f9d8778:38:15)
+    at CollectionProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-45OWABQZ.js?v=3f9d8778:29:13)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-IFTONRVK.js?v=3f9d8778:38:15)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-IFTONRVK.js?v=3f9d8778:38:15)
+    at Popper (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-TXC3AMMR.js?v=3f9d8778:1919:11)
+    at Select (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-select.js?v=3f9d8778:84:5)
+    at div
+    at div
+    at div
+    at DataTable (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/data-table.tsx:32:3)
+    at div
+    at VehicleTable (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/vehicles/vehicle-table.tsx:25:32)
+    at div
+    at div
+    at div
+    at Dashboard (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/dashboard.tsx:28:31)
+    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=aqI79oT7RGJbks9YdaxVh:42:36)
+    at main
+    at div
+    at div
+    at AppLayout…
+A  must have a value prop that is not an empty string. This is because the Select value can be set to an empty string to clear the selection and show the placeholder.

@@ -1,0 +1,27 @@
+chunk-RPCDYKBN.js?v=baadf279:521 Warning: Encountered two children with the same key, `/inventory`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+    at ul
+    at nav
+    at div
+    at div
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…unner/workspace/node_modules/.vite/deps/chunk-AXMZZQ2X.js?v=baadf279:42:13
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…e/node_modules/.vite/deps/@radix-ui_react-scroll-area.js?v=baadf279:116:13
+    at div
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…unner/workspace/node_modules/.vite/deps/chunk-AXMZZQ2X.js?v=baadf279:42:13
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…unner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=baadf279:38:15)
+    at https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…ace/node_modules/.vite/deps/@radix-ui_react-scroll-area.js?v=baadf279:54:7
+    at _c (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/scroll-area.tsx:21:11)
+    at div
+    at Sidebar (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/sidebar.tsx?t=1748026058427:38:27)
+    at div
+    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx?t=1748026058427:19:22)
+    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=baadf279:323:16)
+    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=baadf279:379:17)
+    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…unner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=baadf279:38:15)
+    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…rkspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=baadf279:64:5)
+    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit…rkspace/node_modules/.vite/deps/@tanstack_react-query.js?v=baadf279:2805:3)
+    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?t=1748027285268&v=2AhaxoayLoRH6gtiRBvH5:147:29)
+
+[id].tsx:165 Données de la pièce: undefined Loading: false Error: null
+﻿
+

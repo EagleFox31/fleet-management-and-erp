@@ -1,0 +1,89 @@
+URL de requête complète: /api/vehicles?search=&limit=10&offset=0
+queryClient.ts:54 URL de requête complète: /api/statistics/scheduled-maintenance?0=m&1=o&2=n&3=t&4=h
+queryClient.ts:54 URL de requête complète: /api/statistics/maintenance-cost?0=m&1=o&2=n&3=t&4=h
+queryClient.ts:54 URL de requête complète: /api/fuel-records/statistics?0=m&1=o&2=n&3=t&4=h
+/api/vehicles/check-alerts:1 
+            
+            
+           Failed to load resource: the server responded with a status of 404 (Not Found)Understand this error
+queryClient.ts:54 URL de requête complète: /api/fuel-records/consumption-history?0=m&1=o&2=n&3=t&4=h
+/api/vehicles/check-alerts:1 
+            
+            
+           Failed to load resource: the server responded with a status of 404 (Not Found)Understand this error
+index.tsx:37 Navigation vers /vehicles/EF456GH
+2queryClient.ts:54 URL de requête complète: /api/maintenance-schedules/vehicle
+/api/work-orders:1 
+            
+            
+           Failed to load resource: the server responded with a status of 400 (Bad Request)Understand this error
+/api/work-orders:1 
+            
+            
+           Failed to load resource: the server responded with a status of 400 (Bad Request)Understand this error
+main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5398 
+            
+            
+           POST https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/work-orders 400 (Bad Request)
+fetchCallImpl @ main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5398
+fetch @ main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5404
+apiRequest @ queryClient.ts:15
+mutationFn @ work-order-form.tsx:150
+fn @ @tanstack_react-query.js?v=f855bbc4:1189
+run @ @tanstack_react-query.js?v=f855bbc4:494
+start @ @tanstack_react-query.js?v=f855bbc4:536
+execute @ @tanstack_react-query.js?v=f855bbc4:1225
+await in execute
+mutate @ @tanstack_react-query.js?v=f855bbc4:2630
+(anonymous) @ @tanstack_react-query.js?v=f855bbc4:3295
+onSubmit @ work-order-form.tsx:199
+(anonymous) @ chunk-4BFJKWC4.js?v=f855bbc4:1465
+await in (anonymous)
+callCallback2 @ chunk-RPCDYKBN.js?v=f855bbc4:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=f855bbc4:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=f855bbc4:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=f855bbc4:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=f855bbc4:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=f855bbc4:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=f855bbc4:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=f855bbc4:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=f855bbc4:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=f855bbc4:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=f855bbc4:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=f855bbc4:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=f855bbc4:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=f855bbc4:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=f855bbc4:5449Understand this error
+main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5398 
+            
+            
+           POST https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/api/work-orders 400 (Bad Request)
+fetchCallImpl @ main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5398
+fetch @ main.js?attr=rBp_NRuON5LeaclNtQ6umBMHX5fRD66hJS0qDin4sMZXOOfOj65FCFpjMVVQj7JZQFu-jB5d6AzYmI8_NFKo8LJcfUfWLn4MdWI40TASJ-f9Cfz1A7kaHTkCQLesQr5G_r4mliPp-U-Q5yj5X7w0IA:5404
+apiRequest @ queryClient.ts:15
+mutationFn @ work-order-form.tsx:150
+fn @ @tanstack_react-query.js?v=f855bbc4:1189
+run @ @tanstack_react-query.js?v=f855bbc4:494
+start @ @tanstack_react-query.js?v=f855bbc4:536
+execute @ @tanstack_react-query.js?v=f855bbc4:1225
+await in execute
+mutate @ @tanstack_react-query.js?v=f855bbc4:2630
+(anonymous) @ @tanstack_react-query.js?v=f855bbc4:3295
+onSubmit @ work-order-form.tsx:199
+(anonymous) @ chunk-4BFJKWC4.js?v=f855bbc4:1465
+await in (anonymous)
+callCallback2 @ chunk-RPCDYKBN.js?v=f855bbc4:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=f855bbc4:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=f855bbc4:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-RPCDYKBN.js?v=f855bbc4:3736
+executeDispatch @ chunk-RPCDYKBN.js?v=f855bbc4:7014
+processDispatchQueueItemsInOrder @ chunk-RPCDYKBN.js?v=f855bbc4:7034
+processDispatchQueue @ chunk-RPCDYKBN.js?v=f855bbc4:7043
+dispatchEventsForPlugins @ chunk-RPCDYKBN.js?v=f855bbc4:7051
+(anonymous) @ chunk-RPCDYKBN.js?v=f855bbc4:7174
+batchedUpdates$1 @ chunk-RPCDYKBN.js?v=f855bbc4:18913
+batchedUpdates @ chunk-RPCDYKBN.js?v=f855bbc4:3579
+dispatchEventForPluginEventSystem @ chunk-RPCDYKBN.js?v=f855bbc4:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-RPCDYKBN.js?v=f855bbc4:5478
+dispatchEvent @ chunk-RPCDYKBN.js?v=f855bbc4:5472
+dispatchDiscreteEvent @ chunk-RPCDYKBN.js?v=f855bbc4:5449

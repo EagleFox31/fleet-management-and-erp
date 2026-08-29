@@ -1,0 +1,190 @@
+%-------------------------
+% Resume in Latex
+% Author : Jennifer Lawrynn Akaa
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{fontawesome5}
+\usepackage{multicol} % Pour les colonnes multiples
+\setlength{\multicolsep}{0.0pt}
+\setlength{\columnsep}{0.5in}
+\input{glyphtounicode}
+
+\usepackage{mathptmx}
+\setlength{\footskip}{4.08003pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Margins
+\addtolength{\oddsidemargin}{-0.8in}
+\addtolength{\evensidemargin}{-0.8in}
+\addtolength{\textwidth}{1.6in}
+\addtolength{\topmargin}{-1in}
+\addtolength{\textheight}{1.8in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Section formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large\bfseries
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{\item\small{#1\vspace{-1pt}}}
+\newcommand{\resumeSubheading}[4]{%
+  \vspace{-1pt}\item
+  \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+    \textbf{#1} & \textbf{\small #2} \\
+    \textit{\small#3} & \textit{\small #4} \\
+  \end{tabular*}\vspace{-5pt}
+}
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+%----------HEADING----------
+\begin{center}
+  {\Huge \scshape Jennifer Lawrynn AKA'A NYANGONO} \\ \vspace{1pt}
+  Ingénieure Logicielle \\
+  \small 
+  \faPhone\ +237 6 90 77 78 59 \quad
+  \href{mailto:lawrynnjennifer@gmail.com}{\faEnvelope\ lawrynnjennifer@gmail.com} \quad
+  \href{https://linkedin.com/in/jennifer-lawrynn-aka-a-79842b1b3}{\faLinkedin\ linkedin.com/in/jennifer-lawrynn-aka-a-79842b1b3} \quad
+  \href{https://view.tempo-dev.app/6c33cb1e-9943-4386-8c52-826d409ac72d}{\faGlobe\ Portfolio}
+  \vspace{-8pt}
+\end{center}
+
+%----------SUMMARY----------
+\section{Profil}
+\small
+Ingénieure Logicielle fullstack (Python, PHP, JavaScript) certifiée AWS avec 2+ ans d’expérience dans la conception et le déploiement de solutions métiers scalables (LMS, GMAO, plateformes web). Passionnée par la performance, la sécurité et l’impact utilisateur, je recherche un rôle stimulant où je pourrai innover et contribuer à la transformation numérique.
+
+%-----------CERTIFICATIONS-----------
+\section{Certifications}
+\resumeSubHeadingListStart
+  \resumeSubheading
+    {AWS Certified Solutions Architect – Associate}{Juillet 2023}
+    {Credly : \href{https://www.credly.com/badges/e6af30ab-2ca1-4f71-8c0e-c528913bd948/linked_in_profile}{Lien complet}}{}
+\resumeSubHeadingListEnd
+
+%-----------EDUCATION-----------
+\section{Éducation}
+\resumeSubHeadingListStart
+  \resumeSubheading
+    {Université Protestante d'Afrique Centrale}{Sept. 2020 -- Août 2022}
+    {Master en Sciences de l'Ingénierie, Génie Informatique}{Yaoundé, Cameroun}
+    \resumeItemListStart
+      \resumeItem{Développement d’un Dossier Patient Numérique couplé à une aide au diagnostic assistée par ML (Python, Laravel, MySQL).}
+    \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+%-----------EXPERIENCE-----------
+\section{Expériences Professionnelles}
+\resumeSubHeadingListStart
+
+  \resumeSubheading
+    {CFAO Mobility Academy}{Oct. 2024 -- Présent}
+    {Développeuse Fullstack – Stage professionnel}{Yaoundé, Cameroun}
+    \resumeItemListStart
+      \resumeItem{Conception, développement et déploiement d’un Système de Gestion de l’Apprentissage (LMS) modulable (PHP, JavaScript, MongoDB).}
+      \resumeItem{Optimisation des requêtes MongoDB (+80\% de vitesse de chargement) et architecture UML évolutive.}
+      \resumeItem{Module d’administration modulaire déployé en 2 phases, fiabilité et satisfaction utilisateur garanties.}
+      \resumeItem{Revue de code, débogage avancé et alignement des process avec les objectifs métier.}
+    \resumeItemListEnd
+
+  \resumeSubheading
+    {CAMI (CFAO Mobility)}{Juil. 2024 -- Sept. 2024}
+    {Assistante Analyste Système \& Réseau – Stage professionnel}{Yaoundé, Cameroun}
+    \resumeItemListStart
+      \resumeItem{Support informatique et assistance utilisateurs.}
+      \resumeItem{Administration systèmes et réseaux, coordination d’une plateforme de suivi des réparations.}
+    \resumeItemListEnd
+
+  \resumeSubheading
+    {Orange Cameroun}{Août 2023 -- Fév. 2024}
+    {Stagiaire Analyste \& Backend Programmeuse}{Douala, Cameroun}
+    \resumeItemListStart
+      \resumeItem{Application de gestion des demandes (ASP.NET Core MVC, Entity Framework).}
+      \resumeItem{Tests unitaires (xUnit), API (Swagger, Postman), Authentification Keycloak.}
+      \resumeItem{Rédaction des spécifications techniques et fonctionnelles.}
+    \resumeItemListEnd
+
+  \resumeSubheading
+    {CAMTEL}{Mars 2020 -- Juil. 2020}
+    {Stagiaire Fullstack Programmeuse}{Yaoundé, Cameroun}
+    \resumeItemListStart
+      \resumeItem{Plateforme de collecte de plaintes clients (Java EE, Oracle DB) – satisfaction +36\%.}
+      \resumeItem{Tests, débogage, et optimisation des workflows – délai de résolution –17\%.}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+%-----------SKILLS-----------
+\section{Compétences}
+\begin{multicols}{2}
+  \small
+  \textbf{Back-end} : Python, C\#, PHP, Django, Laravel, ASP.NET Core MVC \\  
+  \textbf{Front-end} : JavaScript, HTML5, CSS, React, Vue.js, Next.js \\  
+  \textbf{API} : Django REST, Swagger, Postman, Webhooks \\  
+  \textbf{Cloud} : AWS (EC2, Lambda, RDS, S3, VPC, ELB, CloudFront, IAM, KMS, CloudWatch, CloudFormation, SNS, SQS) \\  
+  \textbf{Bases de données} : MongoDB, PostgreSQL, MySQL, OracleDB, SQLite \\  
+  \textbf{Outils \& CI/CD} : Git, GitHub, Docker, Keycloak \\  
+  \textbf{Méthodologies} : UML, TDD, Code First \\  
+  \textbf{Sécurité} : Authentification, Autorisation, Protection des données \\  
+  \textbf{Soft skills} : Résolution de problèmes, Collaboration, Gestion du temps  
+\end{multicols}
+
+%-----------PROJECTS-----------
+\section{Projets}
+\resumeItemListStart
+  \resumeItem{\textbf{Dossier Patient Numérique} – Conception d’une solution ML pour l’aide au diagnostic (Python, Laravel, MySQL).}
+  \resumeItem{\textbf{LMS interne CFAO} – Déploiement d’un Système de Gestion de l’Apprentissage modulable (PHP, JS, MongoDB).}
+  \resumeItem{\textbf{Plateforme plaintes CAMTEL} – Collecte & suivi client réduisant de 17\% le délai de résolution (Java EE, OracleDB).}
+\resumeItemListEnd
+
+%-----------LANGUAGES-----------
+\section{Langues}
+\begin{itemize}[leftmargin=0.15in]
+  \small
+  \item \textbf{Français} : Langue maternelle  
+  \item \textbf{Anglais} : Intermédiaire  
+\end{itemize}
+
+%-----------INTERESTS-----------
+\section{Centres d'Intérêt}
+\begin{itemize}[leftmargin=0.15in]
+  \small
+  \item Test d’outils IA, prompting, automatisation de workflows  
+  \item Culture sud-coréenne, Football, Puzzles  
+\end{itemize}
+
+\end{document}

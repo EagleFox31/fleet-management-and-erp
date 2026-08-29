@@ -1,0 +1,83 @@
+Correctifs minimum
+1. Sécuriser les logs antécédents
+sql
+Copier
+Modifier
+-- Empêche d’enregistrer un statut avant la date de mise en flotte
+ALTER TABLE status_history
+ADD CONSTRAINT chk_status_after_creation
+CHECK (date >= (
+  SELECT created_at::date FROM vehicles WHERE id = vehicle_id
+));
+Ou, côté service :
+
+ts
+Copier
+Modifier
+await db.insert(statusHistory).values({ … })
+  .where(sql`$date >= (SELECT created_at::date FROM vehicles WHERE id = ${vehicleId})`);
+2. Éviter les “lignes fantômes” dans l’agrégat
+sql
+Copier
+Modifier
+...
+latest_status AS (
+  SELECT DISTINCT ON (sh.vehicle_id)
+         sh.vehicle_id,
+         sh.status
+    FROM status_history sh
+    JOIN   vehicles v ON v.id = sh.vehicle_id
+   WHERE sh.date <= ${targetDate}
+     AND sh.date >= v.created_at::date -- NEW  👈
+   ORDER BY sh.vehicle_id, sh.date DESC, sh.created_at DESC
+)
+...
+3. Afficher Mai même si toutes les valeurs sont à 0
+Recharts masque une barre 0 ? Pas de souci : ajoute un garde-fou :
+
+ts
+Copier
+Modifier
+quarterlyData.push({
+  date: monthName,
+  operational: monthlyStatus.operational ?? 0,
+  maintenance: monthlyStatus.maintenance ?? 0,
+  outOfService: monthlyStatus.outOfService ?? 0
+});
+4. Bonus : remplir les jours manquants “à la veille”
+Pour respecter la règle « si un jour manque, on reprend la veille », génère la série côté SQL :
+
+sql
+Copier
+Modifier
+WITH d AS (
+  SELECT generate_series(
+           ${startDate}::date,
+           ${endDate}::date,
+           '1 day'
+         ) AS d
+),
+latest AS (
+  SELECT v.id,
+         (SELECT sh.status
+            FROM status_history sh
+           WHERE sh.vehicle_id = v.id
+             AND sh.date <= d.d
+           ORDER BY sh.date DESC
+           LIMIT 1) AS status
+    FROM vehicles v, d
+   WHERE v.created_at::date <= d.d
+)
+SELECT d.d AS date,
+       COUNT(*) FILTER (WHERE status = 'operational') AS operational,
+       COUNT(*) FILTER (WHERE status = 'maintenance')  AS maintenance,
+       COUNT(*) FILTER (WHERE status = 'out_of_service') AS out_of_service
+  FROM d
+  JOIN latest ON TRUE
+ GROUP BY d.d
+ ORDER BY d.d;
+Ainsi :
+
+Toutes les dates sont présentes.
+
+Le dernier statut connu “coule” naturellement.

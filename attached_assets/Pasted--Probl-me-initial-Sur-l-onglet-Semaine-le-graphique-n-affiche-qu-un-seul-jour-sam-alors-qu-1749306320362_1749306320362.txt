@@ -1,0 +1,76 @@
+❓ Problème initial
+Sur l’onglet "Semaine", le graphique n’affiche qu’un seul jour ("sam."), alors qu’il devrait en afficher 7.
+
+🔎 Analyse du Dashboard.tsx
+Tu déclares :
+
+tsx
+Copier
+Modifier
+<FleetStatusChart 
+  data={[]} // Tableau vide comme valeur par défaut, le composant va récupérer les données lui-même
+  className="lg:col-span-2"
+/>
+🧨 Problème ici : tu ne passes aucune period au composant FleetStatusChart.
+Donc soit il ne connaît pas la période, soit il par défaut utilise "samedi aujourd'hui".
+
+✅ Solution 1 : passer explicitement la période
+Modifie ton appel :
+
+tsx
+Copier
+Modifier
+<FleetStatusChart 
+  period={period} // <- à ajouter
+  className="lg:col-span-2"
+/>
+Et dans FleetStatusChart.tsx, assure-toi que tu as :
+
+tsx
+Copier
+Modifier
+export function FleetStatusChart({ period }: { period: 'week' | 'month' | 'quarter' | 'year' }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/statistics/fleet-status", { period }],
+    queryFn: () => fetchFleetStatus(period),
+  });
+
+  // ... reste du rendering
+}
+✅ Solution 2 : fallback dans FleetStatusChart
+Si tu veux que le composant soit autonome, alors dans FleetStatusChart.tsx, ajoute un useState :
+
+tsx
+Copier
+Modifier
+const [period, setPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('week');
+Mais ⚠️ incohérence possible avec le sélecteur global du Dashboard.
+
+Donc 👉 meilleure approche : le composant Dashboard doit passer period pour unifier les filtres.
+
+✅ Bonus : log d’inspection
+Tu peux temporairement logger dans le composant :
+
+tsx
+Copier
+Modifier
+console.log("Période sélectionnée :", period);
+et
+
+tsx
+Copier
+Modifier
+console.log("Données reçues :", data);
+pour vérifier si le backend renvoie bien 7 lignes distinctes avec des dates différentes.
+
+✅ Résumé des actions à faire
+Corrige dans Dashboard.tsx :
+
+tsx
+Copier
+Modifier
+<FleetStatusChart period={period} className="lg:col-span-2" />
+Modifie FleetStatusChart.tsx pour accepter period en props et l’utiliser dans useQuery.
+
+Vérifie que le backend renvoie des dates uniques pour la semaine.
+(via getFleetStatusAtDate() + formatWeeklyData() → clé date doit être "2025-06-01", etc.)

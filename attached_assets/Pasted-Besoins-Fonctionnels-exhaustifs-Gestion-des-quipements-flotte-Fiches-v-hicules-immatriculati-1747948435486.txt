@@ -1,0 +1,103 @@
+Besoins Fonctionnels (exhaustifs)
+Gestion des équipements (flotte)
+
+Fiches véhicules : immatriculation, modèle, marque, année, kilométrage, documents (carte grise, assurance…).
+
+Import initial et mise à jour depuis Excel.
+
+Planification des maintenances préventives
+
+Définition de calendriers basés sur dates et/ou kilométrage.
+
+Rappels automatiques avant échéance (visuels et dans le dashboard).
+
+Suivi des interventions correctives
+
+Création et suivi d’Ordres de Travail (OT) pour chaque panne.
+
+Historique détaillé : diagnostic, pièces utilisées, durée, coût, date de clôture.
+
+Gestion des techniciens & affectation des tâches
+
+Comptes et rôles Chef d’atelier vs Technicien.
+
+Assignation d’OT à des techniciens, suivi de leur progression.
+
+Alertes automatiques
+
+Notifications visuelles (pastilles) et dans le dashboard pour :
+
+Entretien préventif à venir / en retard
+
+Stock de pièces sous seuil
+
+Pannes critiques
+
+Gestion du stock de pièces détachées
+
+Catalogue pièces avec quantités, seuil minimum, emplacement.
+
+Décrémentation liée aux OT, seuils d’alerte.
+
+Tableau de bord & indicateurs
+
+KPI en temps réel :
+
+Nombre d’incidents par mois
+
+Taux de respect des maintenances préventives
+
+Coût moyen par intervention
+
+Consommation moyenne de carburant (Phase 1)
+
+Graphiques simples et exports Excel/Word/PDF.
+
+Mini-module Carburant (Phase 1)
+
+Saisie manuelle des pleins (litres, coût, kilométrage).
+
+Calcul de la consommation moyenne L/100 km par véhicule.
+
+Suivi en temps réel & planification d’itinéraires
+
+Localisation temps réel des véhicules (GPS ou API intégrée).
+
+Planification et optimisation des itinéraires dans l’outil.
+
+Application mobile (ou web mobile)
+
+Interface simplifiée pour techniciens : consultation OT, mise à jour de statut, photo avant/après.
+
+Alertes push ou notifications terrain.
+
+Import / migration de données
+
+Migration initiale depuis Excel et ancien logiciel (fichiers .xlsx/.csv).
+
+Outils de mapping et nettoyage de données.
+
+Export & reporting
+
+Génération d’ordres de travail, bons de sortie ou rapports en Word/PDF.
+
+Exports de données exhaustifs vers Excel/Word en 1 clic.
+
+Authentification & SSO
+
+Connexion via Single Sign-On (compte entreprise) ou email/mot de passe.
+
+Gestion fine des droits d’accès par rôle.
+
+Audit & traçabilité
+
+Journalisation complète des actions (création, modification, suppression).
+
+Consultation de l’historique d’un enregistrement.
+
+Self-service workflows
+
+Recherche et filtres avancés sur chaque liste (véhicules, OT, pièces, carburant).
+
+Possibilité d’ajouter des champs personnalisés (paramétrage simple).
+

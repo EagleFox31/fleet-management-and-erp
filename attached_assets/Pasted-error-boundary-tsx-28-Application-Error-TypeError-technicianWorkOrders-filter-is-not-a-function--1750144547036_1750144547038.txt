@@ -1,0 +1,21 @@
+error-boundary.tsx:28 Application Error: TypeError: technicianWorkOrders.filter is not a function
+    at FleetTechnicianPWA (fleet-status.tsx:139:44)
+ 
+{componentStack: '\n    at FleetTechnicianPWA (https://19ed0e72-a25b-…t.dev/src/App.tsx?v=mvY65cNSqvmAkHOEmJekz:170:29)'}
+componentStack
+: 
+"\n    at FleetTechnicianPWA (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/technician/fleet-status.tsx:41:35)\n    at main\n    at div\n    at div\n    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx:19:22)\n    at SmartDashboardRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=mvY65cNSqvmAkHOEmJekz:108:31)\n    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=mvY65cNSqvmAkHOEmJekz:67:36)\n    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=733df166:323:16)\n    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=733df166:379:17)\n    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)\n    at OnboardingProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/hooks/use-onboarding.tsx:22:38)\n    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=733df166:38:15)\n    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=733df166:64:5)\n    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=733df166:2805:3)\n    at ErrorBoundary (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/ui/error-boundary.tsx:11:5)\n    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=mvY65cNSqvmAkHOEmJekz:170:29)"
+[[Prototype]]
+: 
+Object
+componentDidCatch	@	error-boundary.tsx:28
+
+useRealTimeSync.ts:109 WebSocket connection to 'wss://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/ws' failed: WebSocket is closed before the connection is established.
+useRealTimeSync.ts:96 Erreur WebSocket: 
+Event {isTrusted: true, type: 'error', target: WebSocket, currentTarget: WebSocket, eventPhase: 2, …}
+ws.onerror	@	useRealTimeSync.ts:96
+useRealTimeSync.ts:85 Connexion WebSocket fermée
+useRealTimeSync.ts:90 Tentative de reconnexion WebSocket...
+useRealTimeSync.ts:22 Connexion WebSocket en cours... wss://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/ws
+useRealTimeSync.ts:28 WebSocket connecté - Synchronisation temps réel active
+useRealTimeSync.ts:42 Mise à jour temps réel reçue: auth_success undefined

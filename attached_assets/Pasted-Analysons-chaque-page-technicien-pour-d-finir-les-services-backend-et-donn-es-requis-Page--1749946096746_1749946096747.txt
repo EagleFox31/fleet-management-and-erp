@@ -1,0 +1,60 @@
+Analysons chaque page technicien pour définir les services backend et données requis :
+
+📊 Page "État de la flotte" (fleet-status.tsx)
+Services Backend nécessaires :
+
+GET /api/vehicles - Liste complète des véhicules avec statuts
+GET /api/work-orders - Ordres de travail avec filtrage par statut
+GET /api/maintenance-schedules - Plannings de maintenance à venir
+GET /api/dashboard/technician-stats - Statistiques spécifiques technicien
+Données BD requises :
+
+Table vehicles : status, mileage, nextMaintenanceDate
+Table work_orders : status, priority, assignedTo (filtré par technicien)
+Table maintenance_schedules : scheduledDate, vehicleId, status
+Table users : pour identifier le technicien connecté
+🚛 Page "Véhicules de la flotte" (vehicles.tsx)
+Services Backend nécessaires :
+
+GET /api/vehicles - Liste complète identique admin
+GET /api/maintenance-schedules - Pour afficher prochaines maintenances
+GET /api/work-orders - Pour ordres en cours par véhicule
+Données BD requises :
+
+Table vehicles : tous les champs (registrationNumber, brand, model, status, mileage, etc.)
+Table maintenance_schedules : scheduledDate, vehicleId, maintenanceType
+Table work_orders : vehicleId, status, priority, title
+🔧 Page "Mes Ordres de Travail" (my-work-orders.tsx)
+Services Backend nécessaires :
+
+GET /api/work-orders/technician/{id} - Ordres assignés au technicien
+PATCH /api/work-orders/{id}/status - Mise à jour statut ordre
+POST /api/work-orders/{id}/notes - Ajout notes/commentaires
+GET /api/vehicles/{id} - Détails véhicule pour chaque ordre
+Données BD requises :
+
+Table work_orders : assignedTo, status, priority, title, description, vehicleId
+Table vehicles : registrationNumber, brand, model (pour affichage)
+Table users : pour filtrer par technicien connecté
+Table work_order_notes : commentaires et mises à jour
+👤 Page "Mon Profil" (profile.tsx)
+Services Backend nécessaires :
+
+GET /api/users/profile - Profil du technicien connecté
+GET /api/work-orders/stats/{technicianId} - Statistiques personnelles
+GET /api/inventory/parts/assigned - Pièces assignées au technicien
+GET /api/fuel-records/technician/{id} - Historique carburant du technicien
+PATCH /api/users/profile - Mise à jour profil
+Données BD requises :
+
+Table users : name, email, phone, specialties, hireDate
+Table work_orders : pour calculs statistiques (complétés, en cours, etc.)
+Table inventory_parts : pièces en stock assignées
+Table fuel_records : si le technicien gère le carburant
+Table technician_skills : compétences/certifications
+Services manquants à créer :
+
+Endpoint statistiques technicien spécifique
+Gestion des notes sur ordres de travail
+Filtrage des ordres par technicien assigné
+Profil utilisateur avec statistiques personnalisées

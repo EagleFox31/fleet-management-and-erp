@@ -1,0 +1,65 @@
+Est-ce que le chef d’atelier doit “faire autant” ?
+
+Pas forcément. En pratique, le chef d’atelier est owner opérationnel (priorités, urgence, cohérence technique), mais il ne devrait pas être partout par défaut.
+
+Ce qui est cohérent pour lui (valeur ajoutée forte)
+
+Valider (APPROVED/REJECTED) : oui, parce qu’il connaît l’urgence et l’impact atelier.
+
+Arbitrer les priorités (urgent / sécurité / immobilisation véhicule).
+
+Contrôler que la pièce demandée est la bonne (évite les commandes inutiles).
+
+Ce qui ne devrait pas être systématiquement chez lui (sinon burnout + faibles contrôles)
+
+Passer la commande (ORDERED) : ça peut être Admin/Acheteur (ou magasinier selon orga).
+
+Réceptionner (PARTIAL/DELIVERED) : normalement magasinier (c’est son territoire).
+
+Confirmer l’utilisation (FULFILLED) : ça peut être automatisé dès que la pièce est “sortie du stock” sur un OT (ordre de travail), avec éventuellement validation finale par chef d’atelier sur l’OT.
+
+👉 Donc : le chef d’atelier doit être gate d’approbation + supervision, pas “l’employé multi-tool”.
+
+2) Les statuts : petite amélioration pour éviter les ambiguïtés
+
+Ton “PARTIAL/DELIVERED” est compréhensible, mais “DELIVERED” veut souvent dire “le fournisseur a livré”, pas “nous avons réceptionné”.
+
+Je te conseille une nomenclature plus carrée :
+
+PENDING (demande soumise)
+
+APPROVED / REJECTED (au lieu de tout mettre en CANCELLED)
+
+ORDERED (commande envoyée)
+
+PARTIALLY_RECEIVED (réception partielle en magasin)
+
+RECEIVED (réception totale en magasin)
+
+ISSUED (pièce sortie du stock pour un technicien / OT) ← étape très utile
+
+FULFILLED (pièce installée, OT clôturé)
+
+Et CANCELLED reste un “terminal”, mais idéalement avec des règles :
+
+Avant APPROVED : annulation simple
+
+Après ORDERED : plutôt “CANCEL_REQUESTED” puis décision (car il peut y avoir pénalités / commande déjà expédiée)
+
+3) Répartition “pro” (séparation des tâches = contrôle interne)
+
+Si tu veux une version clean et réaliste :
+
+Demande (PENDING) : Technicien
+
+Validation (APPROVED/REJECTED) : Chef d’atelier (ou Admin si petite structure)
+
+Commande (ORDERED) : Admin/Acheteur (ou magasinier si c’est lui qui gère les fournisseurs)
+
+Réception (PARTIALLY_RECEIVED / RECEIVED) : Magasinier
+
+Sortie stock (ISSUED) : Magasinier (remet la pièce, trace le mouvement)
+
+Utilisation (FULFILLED) : Technicien ou auto via clôture de l’OT, avec supervision chef d’atelier
+
+🎯 Bénéfice : tu évites le scénario catastrophe “la même personne demande, valide, commande, réceptionne” = fraude + erreurs + stock fantôme.

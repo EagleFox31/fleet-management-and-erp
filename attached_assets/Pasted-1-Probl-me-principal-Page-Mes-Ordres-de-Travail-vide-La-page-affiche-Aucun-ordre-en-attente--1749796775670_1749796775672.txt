@@ -1,0 +1,70 @@
+1. Problème principal : Page "Mes Ordres de Travail" vide
+La page affiche "Aucun ordre en attente" alors que les données existent
+Les images 2 et 3 montrent des ordres de travail assignés à Darren Thay
+Besoin de connecter cette page aux bonnes APIs
+2. Interface et UX améliorées
+Affichage sous forme de cards élégantes
+Interface intuitive pour les techniciens
+Permettre la sélection des ordres non terminés
+3. Système de notifications
+Notifications statiques dans la navbar
+Alertes pour les techniciens assignés
+4. Workflow de réalisation des OT
+Processus complet de traitement des ordres de travail
+Suivi du statut depuis l'assignation jusqu'à la completion
+Plan d'action immédiat
+1. Correction de la page "Mes Ordres de Travail"
+Analyser l'API actuelle et corriger la connexion
+Implémenter l'affichage en cards
+Filtrer par technicien connecté
+2. Amélioration de l'interface
+Design moderne avec cards interactives
+Système de statuts visuels
+Actions contextuelles
+3. Système de notifications
+Badge de notification dans la navbar
+Compteur d'ordres en attente
+Proposition de workflow pour les ordres de travail
+Workflow A : Cycle de vie standard d'un OT
+Création automatique/manuelle
+
+Génération depuis maintenance préventive
+Création manuelle par chef d'atelier
+Statut initial : "En attente"
+Assignation
+
+Attribution à un technicien
+Notification envoyée
+Statut : "Assigné"
+Prise en charge
+
+Technicien accepte/démarre l'OT
+Statut : "En cours"
+Début de suivi temporel
+Exécution
+
+Mise à jour du progrès
+Ajout de notes/photos
+Consommation de pièces
+Validation
+
+Marquage "Terminé" par technicien
+Validation par chef d'atelier
+Statut final : "Validé"
+Workflow B : Gestion des priorités
+Critique : Intervention immédiate
+Haute : Dans les 24h
+Moyenne : Dans la semaine
+Faible : Planifié
+Workflow C : Notifications
+Pour techniciens :
+
+Nouvel OT assigné
+OT urgent
+Rappel d'échéance
+Pour chefs d'atelier :
+
+OT en retard
+Validation requise
+Problèmes signalés
+Voulez-vous que je procède à la correction de la page "Mes Ordres de Travail" pendant que vous validez ces propositions de workflow ?

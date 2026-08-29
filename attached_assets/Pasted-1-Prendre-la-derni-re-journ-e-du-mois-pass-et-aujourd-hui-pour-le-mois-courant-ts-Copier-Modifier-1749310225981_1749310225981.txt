@@ -1,0 +1,68 @@
+1. Prendre la dernière journée du mois passé, et aujourd’hui pour le mois courant
+ts
+Copier
+Modifier
+private async formatQuarterlyData(): Promise<any[]> {
+  const quarterlyData: any[] = [];
+  const now = new Date();
+  const currentMonth = now.getMonth();        // 0-11
+  const quarterStart = Math.floor(currentMonth / 3) * 3; // Avril, Juil, Oct, Jan
+
+  for (let i = 0; i <= currentMonth - quarterStart; i++) {
+    const monthIndex = quarterStart + i;
+
+    // 🔥 Si c’est le mois en cours → aujourd’hui, sinon dernier jour du mois
+    const targetDate =
+      monthIndex === currentMonth
+        ? now
+        : new Date(now.getFullYear(), monthIndex + 1, 0); // 0 ⇒ dernier jour
+
+    const dateStr = targetDate.toISOString().split("T")[0];
+    const monthlyStatus = await this.getFleetStatusAtDate(dateStr);
+
+    quarterlyData.push({
+      date: targetDate.toLocaleDateString("fr-FR", { month: "short" }),
+      operational: monthlyStatus.operational ?? 0,
+      maintenance: monthlyStatus.maintenance ?? 0,
+      outOfService: monthlyStatus.outOfService ?? 0,
+    });
+  }
+
+  return quarterlyData;
+}
+Même logique pour formatYearlyData() :
+
+ts
+Copier
+Modifier
+for (let m = 0; m <= currentMonth; m++) {
+  const monthEnd = new Date(now.getFullYear(), m + 1, 0); // dernier jour
+  const dateStr = monthEnd.toISOString().split("T")[0];
+
+  const status = await this.getFleetStatusAtDate(dateStr);
+  yearlyData.push({
+    date: monthNames[m],
+    operational: status.operational ?? 0,
+    maintenance: status.maintenance ?? 0,
+    outOfService: status.outOfService ?? 0,
+  });
+}
+2. (Optionnel mais solide) : tout décaler côté SQL
+Un simple :
+
+sql
+Copier
+Modifier
+SELECT
+  date_trunc('month', sh.date)::date AS month,
+  COUNT(*) FILTER (WHERE sh.status = 'operational')  AS operational,
+  COUNT(*) FILTER (WHERE sh.status = 'maintenance')  AS maintenance,
+  COUNT(*) FILTER (WHERE sh.status = 'out_of_service') AS out_of_service
+FROM status_history sh
+JOIN vehicles v ON v.id = sh.vehicle_id
+WHERE sh.date <= CURRENT_DATE   -- ou ta borne
+  AND sh.date >= date_trunc('quarter', CURRENT_DATE)  -- pour la vue trimestre
+GROUP BY 1
+ORDER BY 1;
+puis tu renvoies directement les mois du trimestre ; plus de boucle JS, plus de souci de jour “pivot”.
+

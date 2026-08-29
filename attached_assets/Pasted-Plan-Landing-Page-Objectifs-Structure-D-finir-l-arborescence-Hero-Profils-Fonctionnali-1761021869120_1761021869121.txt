@@ -1,0 +1,58 @@
+Plan Landing Page
+
+Objectifs & Structure
+
+Définir l’arborescence : Hero → Profils → Fonctionnalités globales → Tutoriel interactif → CTA “Se connecter”.
+Préciser les composants React (LandingLayout, HeroSection, ProfilesSection, FeaturesSection, TutorialModal, Footer).
+Hero Header
+
+Bloc full-width avec valeur produit, sous-titre et CTA “Découvrir” + “Se connecter”.
+Visuel illustrant la gestion de flotte (image ou animation Lottie).
+Ajouter un liseré rappelant les profils (icônes + badges).
+Section Profils & Permissions
+
+Cartes pour admin, chef d’atelier, logisticien, etc.
+Pour chaque carte : icône, description, liste “Peut / Ne peut pas”.
+Intégrer un tableau comparatif condensé (matrix permissions) accessible via bouton “Comparer les rôles”.
+Section Fonctionnalités Globales
+
+Grille 3x2 présentant les modules (véhicules, maintenance, approvisionnement, factures, workflows, reporting).
+Chaque bloc : titre, pitch, badge “Rôle principal” avec icônes.
+CTA secondaire “Voir toutes les fonctionnalités” ouvrant une lightbox de détails.
+Tutoriel Lightbox par Profil
+
+Bouton “Guide interactif” lançant un TutorialModal.
+Modal à onglets (un onglet par profil) avec étapes : slider ou accordéon (Capture → Explication → Tips).
+Navigation “Étape suivante / précédente”, option “Se connecter” finale.
+Persister l’état (localStorage) pour ne pas réafficher si déjà parcouru.
+Zone CTA Finale
+
+Bandeau “Prêt à optimiser votre flotte ?” avec bouton principal “Se connecter” (redirige /login).
+Bouton secondaire “Voir la démo” (ouvre tutoriel).
+Navigation & Intégration
+
+Ajouter route /landing dans client/src/App.tsx, accessible sans authentification.
+Mettre à jour redirections (page login → lien “Retour à l’accueil”).
+Ajouter point d’entrée (logo ou domaine racine) vers /landing.
+Design & Accessibilité
+
+Palette cohérente avec app (couleurs primaires). Contraste AA.
+Responsiveness mobile-first : hero stack, carrousels convertis en swipe.
+Sémantique ARIA pour onglets et modals (Focus trap, aria-labelledby).
+Contenus & Données
+
+Rassembler textes depuis FONCTIONNALITES_PAR_PROFIL.md et PLANIFICATION_MVP_COMPLETE.md.
+Préparer assets (icônes Lucide, captures d’écran).
+Implementation Steps
+
+Créer squelette de page et routing.
+Implémenter Hero + CTA.
+Ajouter section Profils (carte + comparatif).
+Développer section Fonctionnalités.
+Coder TutorialModal (onglets profil, Lightbox).
+Intégrer CTA final + navigation vers login.
+Tests responsifs, accessibilité, QA contenu.
+Déploiement
+
+Prévoir redirection from root / → /landing pour visiteurs non connectés.
+Documenter activation future (feature flag si nécessaire).

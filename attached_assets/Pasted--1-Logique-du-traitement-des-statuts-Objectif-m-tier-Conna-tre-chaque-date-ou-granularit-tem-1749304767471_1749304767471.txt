@@ -1,0 +1,72 @@
+✅ 1. Logique du traitement des statuts
+Objectif métier :
+Connaître à chaque date (ou granularité temporelle) le statut courant de chaque véhicule, même s'il n’a pas changé ce jour-là.
+
+🧠 Règle de traitement :
+Pour un jour donné D, le statut courant d’un véhicule est le dernier statut enregistré avant ou à la date D.
+
+✅ 2. Faut-il une table de statut courant ?
+💡 Deux approches possibles :
+🔹 Approche A - Calcul à la volée
+À chaque appel API (par semaine, mois...), on recherche dynamiquement le dernier statut de chaque véhicule pour chaque date.
+
+Avantages : pas de redondance, données toujours à jour.
+
+Inconvénients : traitement potentiellement lourd (requêtes SQL avec LAG() ou FILTER()/DISTINCT ON() pour chaque point).
+
+🔹 Approche B - Stockage du statut courant (matérialisé)
+On maintient une table vehicle_current_status :
+
+sql
+Copier
+Modifier
+CREATE TABLE vehicle_current_status (
+  vehicle_id INT PRIMARY KEY,
+  status TEXT,
+  status_date DATE,
+  updated_at TIMESTAMP DEFAULT now()
+);
+À chaque insertion dans status_history, un trigger SQL met à jour cette table avec la nouvelle ligne si elle est la plus récente.
+
+✅ 3. Trigger SQL – Recommandé pour la performance
+🎯 Objectif du trigger :
+Mettre à jour automatiquement vehicle_current_status lorsqu’un nouvel enregistrement est inséré dans status_history.
+
+🔁 Exemple de Trigger PostgreSQL :
+sql
+Copier
+Modifier
+CREATE OR REPLACE FUNCTION update_vehicle_current_status()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (NEW.date >= (
+    SELECT COALESCE(MAX(status_date), '1900-01-01')
+    FROM vehicle_current_status
+    WHERE vehicle_id = NEW.vehicle_id
+  )) THEN
+    INSERT INTO vehicle_current_status (vehicle_id, status, status_date, updated_at)
+    VALUES (NEW.vehicle_id, NEW.status, NEW.date, now())
+    ON CONFLICT (vehicle_id) DO UPDATE
+    SET status = EXCLUDED.status,
+        status_date = EXCLUDED.status_date,
+        updated_at = now();
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_current_status
+AFTER INSERT ON status_history
+FOR EACH ROW
+EXECUTE FUNCTION update_vehicle_current_status();
+🧩 Intégration dans le backend NestJS
+Deux options selon approche choisie :
+Approche	Requête backend	Performance
+Calcul à la volée	SELECT ... WHERE date <= X ORDER BY date DESC LIMIT 1 pour chaque véhicule	Moyenne/faible selon taille
+Table vehicle_current_status	Simple SELECT * FROM vehicle_current_status	Excellente
+
+✅ Recommandation
+Cas	Recommandation
+Moins de 1000 véhicules	Calcul à la volée possible sans trigger
++1000 véhicules ou requêtes fréquentes	Table vehicle_current_status + Trigger
+

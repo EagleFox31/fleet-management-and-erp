@@ -1,0 +1,55 @@
+chunk-RPCDYKBN.js?v=f855bbc4:9129 Uncaught Error: A <Select.Item /> must have a value prop that is not an empty string. This is because the Select value can be set to an empty string to clear the selection and show the placeholder.
+    at @radix-ui_react-sele…s?v=f855bbc4:871:13
+    at renderWithHooks (chunk-RPCDYKBN.js?v=f855bbc4:11548:26)
+    at updateForwardRef (chunk-RPCDYKBN.js?v=f855bbc4:14325:28)
+    at beginWork (chunk-RPCDYKBN.js?v=f855bbc4:15946:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=f855bbc4:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=f855bbc4:19198:20)
+    at workLoopSync (chunk-RPCDYKBN.js?v=f855bbc4:19137:13)
+    at renderRootSync (chunk-RPCDYKBN.js?v=f855bbc4:19116:15)
+    at recoverFromConcurrentError (chunk-RPCDYKBN.js?v=f855bbc4:18736:28)
+    at performSyncWorkOnRoot (chunk-RPCDYKBN.js?v=f855bbc4:18879:28)
+(anonymous)	@	@radix-ui_react-select.js?v=f855bbc4:871
+renderWithHooks	@	chunk-RPCDYKBN.js?v=f855bbc4:11548
+updateForwardRef	@	chunk-RPCDYKBN.js?v=f855bbc4:14325
+beginWork	@	chunk-RPCDYKBN.js?v=f855bbc4:15946
+beginWork$1	@	chunk-RPCDYKBN.js?v=f855bbc4:19753
+performUnitOfWork	@	chunk-RPCDYKBN.js?v=f855bbc4:19198
+workLoopSync	@	chunk-RPCDYKBN.js?v=f855bbc4:19137
+renderRootSync	@	chunk-RPCDYKBN.js?v=f855bbc4:19116
+recoverFromConcurrentError	@	chunk-RPCDYKBN.js?v=f855bbc4:18736
+performSyncWorkOnRoot	@	chunk-RPCDYKBN.js?v=f855bbc4:18879
+flushSyncCallbacks	@	chunk-RPCDYKBN.js?v=f855bbc4:9119
+(anonymous)	@	chunk-RPCDYKBN.js?v=f855bbc4:18627
+setTimeout		
+scheduleFn	@	@tanstack_react-query.js?v=f855bbc4:555
+flush	@	@tanstack_react-query.js?v=f855bbc4:569
+batch	@	@tanstack_react-query.js?v=f855bbc4:587
+dispatch_fn	@	@tanstack_react-query.js?v=f855bbc4:996
+onError	@	@tanstack_react-query.js?v=f855bbc4:861
+reject	@	@tanstack_react-query.js?v=f855bbc4:465
+(anonymous)	@	@tanstack_react-query.js?v=f855bbc4:508
+Promise.catch		
+run	@	@tanstack_react-query.js?v=f855bbc4:498
+start	@	@tanstack_react-query.js?v=f855bbc4:536
+fetch	@	@tanstack_react-query.js?v=f855bbc4:926
+executeFetch_fn	@	@tanstack_react-query.js?v=f855bbc4:2211
+onSubscribe	@	@tanstack_react-query.js?v=f855bbc4:1898
+subscribe	@	@tanstack_react-query.js?v=f855bbc4:24
+(anonymous)	@	@tanstack_react-query.js?v=f855bbc4:3022
+subscribeToStore	@	chunk-RPCDYKBN.js?v=f855bbc4:11984
+commitHookEffectListMount	@	chunk-RPCDYKBN.js?v=f855bbc4:16915
+commitPassiveMountOnFiber	@	chunk-RPCDYKBN.js?v=f855bbc4:18156
+commitPassiveMountEffects_complete	@	chunk-RPCDYKBN.js?v=f855bbc4:18129
+commitPassiveMountEffects_begin	@	chunk-RPCDYKBN.js?v=f855bbc4:18119
+commitPassiveMountEffects	@	chunk-RPCDYKBN.js?v=f855bbc4:18109
+flushPassiveEffectsImpl	@	chunk-RPCDYKBN.js?v=f855bbc4:19490
+flushPassiveEffects	@	chunk-RPCDYKBN.js?v=f855bbc4:19447
+commitRootImpl	@	chunk-RPCDYKBN.js?v=f855bbc4:19416
+commitRoot	@	chunk-RPCDYKBN.js?v=f855bbc4:19277
+performSyncWorkOnRoot	@	chunk-RPCDYKBN.js?v=f855bbc4:18895
+flushSyncCallbacks	@	chunk-RPCDYKBN.js?v=f855bbc4:9119
+(anonymous)	@	chunk-RPCDYKBN.js?v=f855bbc4:18627
+
+﻿
+
