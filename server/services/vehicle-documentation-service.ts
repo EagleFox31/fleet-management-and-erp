@@ -121,14 +121,34 @@ export class VehicleDocumentationService {
       isDateExpiringSoon(v.technicalInspectionDate, nowStr, expiryDateStr),
     );
     
+    // Documents jamais renseignés. Ils n'expirent pas, donc ils échappaient à
+    // toutes les alertes — un véhicule sans date d'assurance était invisible,
+    // alors que c'est précisément celui dont on ne sait rien. Ni « à jour »,
+    // ni « expiré »: absent.
+    const nonRenseignes = allVehicles
+      .map((v) => ({
+        vehicle: v,
+        manquants: [
+          !v.licensePlateExpiry ? ("carte_grise" as const) : null,
+          !v.insuranceExpiry ? ("assurance" as const) : null,
+          !v.technicalInspectionDate ? ("visite_technique" as const) : null,
+        ].filter((type): type is "carte_grise" | "assurance" | "visite_technique" => type !== null),
+      }))
+      .filter((entree) => entree.manquants.length > 0)
+      .map((entree) => ({ ...entree.vehicle, missingDocuments: entree.manquants }));
+
     const result = {
       carteGrise,
       assurance,
       visiteTechnique,
-      totalExpiring: carteGrise.length + assurance.length + visiteTechnique.length
+      nonRenseignes,
+      totalExpiring: carteGrise.length + assurance.length + visiteTechnique.length,
+      totalMissing: nonRenseignes.reduce((somme, v) => somme + v.missingDocuments.length, 0),
     };
-    
-    console.log(`Found ${result.totalExpiring} documents expiring soon`);
+
+    console.log(
+      `Found ${result.totalExpiring} documents expiring soon, ${result.totalMissing} non renseignés`,
+    );
     return result;
   }
   

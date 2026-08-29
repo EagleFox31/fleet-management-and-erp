@@ -626,7 +626,10 @@ export default function LogisticsDashboard() {
                 icon: <FileText className="h-4 w-4" />,
                 detail:
                   expiredDocumentsCount > 0
-                    ? `${expiredDocumentsCount} expiré(s) · ${expiringDocumentsCount} à renouveler`
+                    // « à renouveler » était faux: un document expiré est le
+                    // plus à renouveler de tous. Ce compteur mesure ce qui
+                    // approche de l'échéance, pas ce qui doit être traité.
+                    ? `${expiredDocumentsCount} expiré(s) · ${expiringDocumentsCount} expire(nt) bientôt`
                     : `${expiringDocumentsCount} expiration(s) proche(s)`,
               },
               {

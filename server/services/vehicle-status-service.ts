@@ -1,4 +1,4 @@
-import { eq, gte, count, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, ne, count, sql } from "drizzle-orm";
 import { db } from "../db";
 import { vehicles, statusHistory, workOrders, fleetKpiCache, users } from "@shared/schema";
 import { describeStatusChange } from "@shared/constants/vehicle-status";
@@ -262,6 +262,29 @@ export class VehicleStatusService {
     try {
       const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
       if (!vehicle || vehicle.status === 'operational') return;
+
+      // Un véhicule peut porter plusieurs OT en parallèle (moteur + pneus).
+      // Clôturer l'un ne le rend pas apte: il reste au pont pour les autres.
+      // Sans ce contrôle, le camion repassait « opérationnel » et redevenait
+      // affectable à une mission alors qu'il était encore en réparation.
+      const [autreOtOuvert] = await db
+        .select({ id: workOrders.id })
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.vehicleId, vehicleId),
+            ne(workOrders.id, workOrderId),
+            inArray(workOrders.status, ['pending', 'in_progress', 'awaiting_parts']),
+          ),
+        )
+        .limit(1);
+
+      if (autreOtOuvert) {
+        console.log(
+          `Véhicule ${vehicleId} maintenu en maintenance: OT #${autreOtOuvert.id} encore ouvert.`,
+        );
+        return;
+      }
 
       await db.update(vehicles).set({ status: 'operational' }).where(eq(vehicles.id, vehicleId));
       

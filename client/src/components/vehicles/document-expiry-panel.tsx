@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/utils";
-import { CheckCircle2, IdCard, Shield, Wrench } from "lucide-react";
+import { CheckCircle2, HelpCircle, IdCard, Shield, Wrench } from "lucide-react";
 
 interface Vehicle {
   id: number;
@@ -15,12 +16,27 @@ interface Vehicle {
   technicalInspectionDate: string | null;
 }
 
+type MissingDocumentType = "carte_grise" | "assurance" | "visite_technique";
+
+interface VehicleWithMissingDocs extends Vehicle {
+  missingDocuments: MissingDocumentType[];
+}
+
 interface ExpiringDocuments {
   carteGrise: Vehicle[];
   assurance: Vehicle[];
   visiteTechnique: Vehicle[];
+  /** Véhicules dont au moins une date n'est pas saisie. */
+  nonRenseignes?: VehicleWithMissingDocs[];
   totalExpiring: number;
+  totalMissing?: number;
 }
+
+const MISSING_DOCUMENT_LABELS: Record<MissingDocumentType, string> = {
+  carte_grise: "Carte grise",
+  assurance: "Assurance",
+  visite_technique: "Visite technique",
+};
 
 type ExpiredDocumentType = "carte_grise" | "assurance" | "visite_technique";
 
@@ -34,6 +50,7 @@ interface ExpiredVehicle extends Vehicle {
 }
 
 export function DocumentExpiryPanel() {
+  const [, setLocation] = useLocation();
   const { data: expiringDocs, isLoading } = useQuery<ExpiringDocuments>({
     queryKey: ["/api/vehicles/expiring-docs"],
   });
@@ -42,9 +59,11 @@ export function DocumentExpiryPanel() {
     queryKey: ["/api/vehicles/expired-docs"],
   });
 
+  const nonRenseignes = expiringDocs?.nonRenseignes ?? [];
+
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         {[1, 2, 3].map((i) => (
           <Card key={i}>
             <CardHeader>
@@ -109,7 +128,7 @@ export function DocumentExpiryPanel() {
   return (
     <div className="space-y-6">
       {/* Panneaux documents expirant bientôt */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         {/* Cartes Grises */}
         <Card data-testid="card-expiring-carte-grise">
           <CardHeader>
@@ -126,7 +145,16 @@ export function DocumentExpiryPanel() {
                   return (
                     <div
                       key={vehicle.id}
-                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setLocation(`/vehicles/${vehicle.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setLocation(`/vehicles/${vehicle.id}`);
+                        }
+                      }}
+                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       data-testid={`vehicle-carte-grise-${vehicle.id}`}
                     >
                       <div>
@@ -172,7 +200,16 @@ export function DocumentExpiryPanel() {
                   return (
                     <div
                       key={vehicle.id}
-                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setLocation(`/vehicles/${vehicle.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setLocation(`/vehicles/${vehicle.id}`);
+                        }
+                      }}
+                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       data-testid={`vehicle-assurance-${vehicle.id}`}
                     >
                       <div>
@@ -218,7 +255,16 @@ export function DocumentExpiryPanel() {
                   return (
                     <div
                       key={vehicle.id}
-                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setLocation(`/vehicles/${vehicle.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setLocation(`/vehicles/${vehicle.id}`);
+                        }
+                      }}
+                      className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       data-testid={`vehicle-visite-technique-${vehicle.id}`}
                     >
                       <div>
@@ -243,6 +289,63 @@ export function DocumentExpiryPanel() {
               <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-4">
                 <CheckCircle2 className="h-4 w-4 text-green-600" />
                 Aucune visite technique à planifier
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Documents jamais saisis: ils n'expirent pas, donc aucune alerte ne
+            les signale. Un véhicule sans date d'assurance n'est ni à jour ni
+            expiré — il est absent, et c'est le plus inquiétant des trois. */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <HelpCircle className="h-5 w-5 text-gray-500" />
+              Non renseignés
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {nonRenseignes.length > 0 ? (
+              <div className="space-y-3">
+                {nonRenseignes.map((vehicle) => (
+                  <div
+                    key={vehicle.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setLocation(`/vehicles/${vehicle.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setLocation(`/vehicles/${vehicle.id}`);
+                      }
+                    }}
+                    className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    data-testid={`vehicle-missing-docs-${vehicle.id}`}
+                  >
+                    <div>
+                      <p className="font-medium text-sm">{vehicle.registrationNumber}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {vehicle.brand} {vehicle.model}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant="outline" className="text-gray-600">
+                        {vehicle.missingDocuments.length} manquant
+                        {vehicle.missingDocuments.length > 1 ? "s" : ""}
+                      </Badge>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {vehicle.missingDocuments
+                          .map((type) => MISSING_DOCUMENT_LABELS[type])
+                          .join(", ")}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-4">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                Toutes les dates sont saisies
               </p>
             )}
           </CardContent>
