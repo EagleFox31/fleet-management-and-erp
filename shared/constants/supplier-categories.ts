@@ -10,9 +10,35 @@ export const SUPPLIER_CATEGORIES = [
 
 export type SupplierCategory = (typeof SUPPLIER_CATEGORIES)[number];
 
+/** Sous-chaîne de reconnaissance — attrape « Pneus », « pneu », « Pneumatique », etc. */
+export const TIRE_SUPPLIER_CATEGORY_NEEDLE = "pneu" as const;
+
+/** Pattern ILIKE aligné sur `isTireSupplierCategory` (serveur SQL, filtres Direction). */
+export const TIRE_SUPPLIER_CATEGORY_ILIKE_PATTERN = `%${TIRE_SUPPLIER_CATEGORY_NEEDLE}%` as const;
+
+/** Sous-chaîne assurance — attrape « Assurance », « assurance flotte », etc. */
+export const INSURANCE_SUPPLIER_CATEGORY_NEEDLE = "assurance" as const;
+
+/** Pattern ILIKE pour assurances fournisseurs (TCO flotte, pas par véhicule). */
+export const INSURANCE_SUPPLIER_CATEGORY_ILIKE_PATTERN = `%${INSURANCE_SUPPLIER_CATEGORY_NEEDLE}%` as const;
+
+/** Catégories référentiel explicitement pneus (source unique pour inArray). */
+export const TIRE_SUPPLIER_CATEGORIES = SUPPLIER_CATEGORIES.filter((category) =>
+  isTireSupplierCategory(category),
+);
+
 export function isTireSupplierCategory(category: string | null | undefined): boolean {
   const normalized = (category ?? "").toLowerCase();
-  return normalized.includes("pneu");
+  return normalized.includes(TIRE_SUPPLIER_CATEGORY_NEEDLE);
+}
+
+/**
+ * `supplier_invoices.family` reprend souvent la catégorie fournisseur à la réception
+ * (cf. procurement-service : `family: supplierCategory || "Approvisionnement"`).
+ * Saisie semi-structurée — même règle que la catégorie fournisseur.
+ */
+export function isTireSupplierInvoiceFamily(family: string | null | undefined): boolean {
+  return isTireSupplierCategory(family);
 }
 
 export function isPartsSupplierCategory(category: string | null | undefined): boolean {

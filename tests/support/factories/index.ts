@@ -1,12 +1,16 @@
 import bcrypt from "bcryptjs";
 import { db } from "../../../server/db";
 import {
+  clientInvoices,
+  clients,
   fuelRecords,
   parts,
   supplierInvoices,
   suppliers,
   users,
   vehicles,
+  type Client,
+  type ClientInvoice,
   type FuelRecord,
   type Part,
   type Supplier,
@@ -134,6 +138,47 @@ export async function createTestSupplierInvoice(
       taxAmount: overrides.taxAmount ?? vatAmount,
       balance: overrides.balance ?? totalTTC,
       status: overrides.status ?? "received",
+    })
+    .returning();
+  return row;
+}
+
+export async function createTestClient(
+  overrides: Partial<typeof clients.$inferInsert> = {},
+): Promise<Client> {
+  const token = uniqueTestToken("client");
+  const [row] = await db
+    .insert(clients)
+    .values({
+      name: overrides.name ?? token,
+      email: overrides.email ?? `${token}@client.test`,
+      isActive: overrides.isActive ?? true,
+      createdBy: overrides.createdBy,
+    })
+    .returning();
+  return row;
+}
+
+export async function createTestClientInvoice(
+  overrides: Partial<typeof clientInvoices.$inferInsert> & { clientId: number },
+): Promise<ClientInvoice> {
+  const token = uniqueTestToken("cinv");
+  const amountHT = overrides.amountHT ?? "100000.00";
+  const vatAmount = overrides.vatAmount ?? "19250.00";
+  const amountTTC = overrides.amountTTC ?? "119250.00";
+  const [row] = await db
+    .insert(clientInvoices)
+    .values({
+      clientId: overrides.clientId,
+      invoiceNumber: overrides.invoiceNumber ?? token,
+      invoiceDate: overrides.invoiceDate ?? "2026-01-15",
+      dueDate: overrides.dueDate ?? "2026-02-15",
+      amountHT,
+      vatAmount,
+      amountTTC,
+      balance: overrides.balance ?? amountTTC,
+      status: overrides.status ?? "pending",
+      createdBy: overrides.createdBy,
     })
     .returning();
   return row;

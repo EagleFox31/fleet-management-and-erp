@@ -1,6 +1,8 @@
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
+  clientInvoices,
+  clients,
   fuelRecords,
   parts,
   supplierInvoices,
@@ -16,6 +18,8 @@ export type CreatedIds = {
   vehicleIds: number[];
   supplierIds: number[];
   invoiceIds: number[];
+  clientIds: number[];
+  clientInvoiceIds: number[];
   fuelRecordIds: number[];
 };
 
@@ -26,6 +30,8 @@ export function createIdBag(): CreatedIds {
     vehicleIds: [],
     supplierIds: [],
     invoiceIds: [],
+    clientIds: [],
+    clientInvoiceIds: [],
     fuelRecordIds: [],
   };
 }
@@ -33,6 +39,9 @@ export function createIdBag(): CreatedIds {
 export async function cleanupCreated(ids: CreatedIds): Promise<void> {
   if (ids.fuelRecordIds.length > 0) {
     await db.delete(fuelRecords).where(inArray(fuelRecords.id, ids.fuelRecordIds));
+  }
+  if (ids.clientInvoiceIds.length > 0) {
+    await db.delete(clientInvoices).where(inArray(clientInvoices.id, ids.clientInvoiceIds));
   }
   if (ids.invoiceIds.length > 0) {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.id, ids.invoiceIds));
@@ -46,6 +55,9 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
   if (ids.supplierIds.length > 0) {
     await db.delete(suppliers).where(inArray(suppliers.id, ids.supplierIds));
   }
+  if (ids.clientIds.length > 0) {
+    await db.delete(clients).where(inArray(clients.id, ids.clientIds));
+  }
   if (ids.userIds.length > 0) {
     await db.delete(users).where(inArray(users.id, ids.userIds));
   }
@@ -54,6 +66,8 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
 /** Filet si un test a crashé avant d'enregistrer un id. */
 export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(fuelRecords).where(like(fuelRecords.notes, `${TEST_PREFIX}%`));
+  await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, `${TEST_PREFIX}%`));
+  await db.delete(clients).where(like(clients.name, `${TEST_PREFIX}%`));
   await db.delete(supplierInvoices).where(like(supplierInvoices.invoiceNumber, `${TEST_PREFIX}%`));
   await db.delete(parts).where(like(parts.reference, `${TEST_PREFIX}%`));
   await db.delete(vehicles).where(like(vehicles.registrationNumber, `${TEST_PREFIX}%`));

@@ -1,3 +1,23 @@
+import type { ManagementExecutiveKpis } from "./management-executive-kpis";
+import type { ManagementMissionProfitability } from "./management-mission-profitability";
+import type { ManagementVehicleTco } from "./management-vehicle-tco";
+import type { ManagementDriverScorecard } from "./management-driver-scorecard";
+import type { ManagementVehicleObsolescence } from "./management-vehicle-obsolescence";
+import type { LiveCorridorVehicle } from "./cemac-corridors";
+
+export type {
+  ManagementExecutiveKpis,
+  ManagementMissionProfitability,
+  ManagementVehicleTco,
+  ManagementDriverScorecard,
+  ManagementVehicleObsolescence,
+  LiveCorridorVehicle,
+};
+export type { ManagementMissionProfitabilityItem } from "./management-mission-profitability";
+export type { ManagementVehicleTcoItem } from "./management-vehicle-tco";
+export type { ManagementDriverScorecardItem } from "./management-driver-scorecard";
+export type { ManagementVehicleObsolescenceItem } from "./management-vehicle-obsolescence";
+
 export const MANAGEMENT_PERIODS = ["week", "month", "quarter", "year"] as const;
 
 export type ManagementPeriod = (typeof MANAGEMENT_PERIODS)[number];
@@ -155,6 +175,10 @@ export type ManagementDashboardResponse = {
     fuel: number;
     maintenance: number;
     suppliers: number;
+    /** FDR réels missions (`workflowData.costs.actualFdrCost`) sur la période. */
+    roadExpenses: number;
+    roadExpensesMissionCount: number;
+    roadExpensesMissingCount: number;
     total: number;
   };
   result: {
@@ -185,8 +209,15 @@ export type ManagementDashboardResponse = {
     totalWeight: number;
   }>;
   trends: ManagementDashboardTrends;
+  executiveKpis: ManagementExecutiveKpis;
+  missionProfitability: ManagementMissionProfitability;
+  vehicleTco: ManagementVehicleTco;
+  driverScorecard: ManagementDriverScorecard;
+  vehicleObsolescence: ManagementVehicleObsolescence;
+  corridorFleet: LiveCorridorVehicle[];
   alerts: {
     overdueInvoices: number;
     outOfServiceVehicles: number;
+    vehiclesImmobilizedOver48h: number;
   };
 };
