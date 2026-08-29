@@ -472,15 +472,140 @@ GET /api/clients                 → ≥ 2 clients actifs
 
 **But :** valider la chaîne Atelier: création WO par encadrement, exécution par technicien, impact stock.
 
+**Prérequis :** P1 terminé (véhicules `LT-P1-001`, `LT-P1-002`, `LT-P1-003`).
+
+**Accès création :** `/maintenance/work-orders/new` — réservé à `admin` et `terry` (`workshop_manager`). Le technicien `ali` ne peut pas créer d'OT.
+
+**Entrées possibles :**
+- Menu **Maintenance → Ordres de travail → Créer**
+- Fiche véhicule → **Créer OT** (préremplit le véhicule via `?vehicleId=` ou immatriculation)
+- Plan de maintenance → lien avec `?scheduleId=` (bascule automatiquement en **Préventive**)
+
+Le formulaire est un **assistant en 4 étapes** (`Assistant OT`). À la création, le statut est **toujours verrouillé à En attente** — il n'est pas choisissable dans le wizard.
+
+---
+
+### Données formulaire — OT #1 P2 (`terry` → `/maintenance/work-orders/new`)
+
+Utiliser le véhicule **LT-P1-001** (Volvo FH16, opérationnel après P1). Cet OT sert aux étapes 1 à 7 du tableau P2 ci-dessous.
+
+#### Étape 1 — Contexte panne
+
+| Champ UI | Valeur |
+|----------|--------|
+| Type d'intervention | `Curative` |
+| Motif principal | `Freinage` |
+| Précision du motif (optionnel) | `QA P2 — pédale molle, bruit au freinage` |
+| Véhicule concerné | `LT-P1-001 — Volvo FH16` |
+| Priorité intervention | `Haute` |
+
+**Contrôles visuels :** badge **Risque élevé** ; encart « Statut initial: En attente ».
+
+#### Étape 2 — Détails de l'intervention
+
+| Champ UI | Valeur |
+|----------|--------|
+| Titre OT | Cliquer **Suggérer un titre** → conserver `Panne à traiter - LT-P1-001` (ou saisir `QA P2 — contrôle freinage LT-P1-001`) |
+| Symptôme constaté | `Pédale molle, bruit métallique au freinage` |
+| Impact opérationnel | `Mission Douala reportée — véhicule indisponible` |
+| Action demandée | `Diagnostic freinage + remplacement plaquettes/disques si usure` |
+| Checklist rapide — Risque sécurité | coché |
+| Checklist rapide — Véhicule immobilisé | non coché |
+| Checklist rapide — Urgence opérationnelle | coché |
+| Description des travaux | Cliquer **Générer la description depuis le guide** (ou coller le texte généré) |
+
+> Les trois champs guide + checklist sont **concaténés** dans la description finale, avec un bloc métier supplémentaire (`Type d'intervention`, `Motif`, `Checklist: …`) — visible sur la fiche OT après création.
+
+#### Étape 3 — Planification et options
+
+| Champ UI | Valeur |
+|----------|--------|
+| Date de début | Date du jour |
+| Assignation technicien (optionnel) | `Non assigné` *(assignation à l'étape P2 n°2, sur la fiche OT)* |
+| Première visite | `Non` *(auto si premier OT sur ce véhicule)* |
+
+> Si **Préventive** (étape 1) : champ **Plan de maintenance associé** — liste les plans du véhicule sélectionné. Hors scope OT #1 curatif.
+
+#### Étape 4 — Validation finale
+
+| Action | Résultat attendu |
+|--------|------------------|
+| Vérifier le récap (véhicule, priorité, type, motif, date, technicien, titre, description, checklist) | Cohérent avec les étapes 1 à 3 |
+| Cliquer **Créer l'ordre de travail** | Toast succès ; redirection `/maintenance/work-orders` ; statut **En attente** (`pending`) |
+
+**Résultat attendu création :** véhicule `LT-P1-001` passe **En maintenance** ; historique véhicule « Ordre de travail #… créé ».
+
+---
+
+### Données formulaire — OT #2 P2b (second OT, même véhicule)
+
+À créer **après** l'OT #1, toujours sur `LT-P1-001`, pour le scénario P2b (plusieurs OT ouverts).
+
+| Étape | Champs clés | Valeurs |
+|-------|-------------|---------|
+| 1 — Contexte | Type / Motif / Véhicule / Priorité | `Curative` · `Panne mécanique` · `LT-P1-001` · `Moyenne` |
+| 2 — Intervention | Titre + description | `QA P2b — second OT même véhicule` · `Contrôle complémentaire suspension — OT parallèle` |
+| 3 — Planification | Date / Technicien | Aujourd'hui · `Non assigné` |
+| 4 — Validation | Créer | Statut **En attente** ; véhicule **reste** en maintenance |
+
+---
+
+### Motifs principaux disponibles (liste réelle du formulaire)
+
+| Valeur UI | Usage QA suggéré |
+|-----------|------------------|
+| Panne mécanique | OT #2 P2b |
+| Panne électrique | — |
+| Freinage | OT #1 P2 |
+| Moteur | Voir aussi `docs/qa/E2E PANNE-OT-REAPPRO-FACTURE` |
+| Pneumatique | Montage / contrôle pneu |
+| Incident / accident | Sinistre |
+| Autre motif | Cas hors référentiel |
+
+---
+
+### Après création — étapes hors wizard
+
+| Étape P2 | Où | Action |
+|----------|-----|--------|
+| 2 — Assignation | Fiche OT `/maintenance/work-orders/:id` → **Modifier** (ou démarrage technicien) | Technicien : `Ali Sawadogo` (`ali`) |
+| 3 — Démarrage | Fiche OT, bouton **Commencer l'intervention** | Statut → **En cours** ; saisir **Diagnostic** (champ disponible en édition / fiche, pas à la création) |
+| 6 — Clôture | Fiche OT | Statut → **Terminé** (`completed`) |
+
+Parcours pièces + stock détaillé : `docs/qa/E2E PANNE-OT-REAPPRO-FACTURE`.
+
+---
+
 | Étape | Profil connecté | Action | Résultat attendu |
 |------|------------------|--------|------------------|
-| 1 | Admin/chef d'atelier | Créer un Work Order lié à un véhicule | WO visible en statut initial (`pending` ou équivalent) |
-| 2 | Admin/chef d'atelier | Assigner le WO à un technicien existant | Technicien voit le WO dans son dashboard |
-| 3 | Technicien | Passer le WO en `in_progress` puis saisir les infos d'intervention | Historique du WO mis à jour |
-| 4 | Technicien | Demander ou consommer une pièce liée au WO | Mouvement stock tracé |
-| 5 | Magasinier | Valider la sortie pièce | Quantité stock décrémentée |
-| 6 | Technicien | Clôturer le WO (`completed`) | Feed admin "Work Orders" mis à jour |
-| 7 | Admin | Vérifier dashboard admin | Widgets WO + activité récente cohérents |
+| 1 | `terry` ou `admin` | Créer l'OT #1 avec les valeurs ci-dessus (`LT-P1-001`) | WO **En attente** ; véhicule en maintenance |
+| 2 | `terry` ou `admin` | Assigner l'OT #1 à `ali` (fiche OT ou au démarrage) | Technicien voit le WO dans **Mes ordres de travail** |
+| 3 | `ali` | **Commencer l'intervention** puis saisir diagnostic / notes | Statut **En cours** ; historique mis à jour |
+| 4 | `ali` | Demander ou consommer une pièce liée au WO | Mouvement stock tracé |
+| 5 | `fatou` | Valider la sortie pièce | Quantité stock décrémentée |
+| 6 | `ali` | Clôturer le WO (**Terminé**) | Feed admin « Work Orders » mis à jour |
+| 7 | `admin` | Vérifier dashboard admin | Widgets WO + activité récente cohérents |
+
+### P2b — Statut véhicule : véhicule sain vs véhicule déjà immobilisé
+
+**Pourquoi.** Les deux cas ne suivent pas le même chemin de code : sur un
+véhicule sain, la création d'OT déclenche le passage en maintenance ; sur un
+véhicule déjà immobilisé, `setVehicleToMaintenance` sort immédiatement. La
+différence se voit surtout **à la clôture**, quand plusieurs OT coexistent.
+
+| Étape | Profil connecté | Action | Résultat attendu |
+|------|------------------|--------|------------------|
+| 1 | `terry` | Sur un véhicule **opérationnel** (`LT-P1-001`), créer l'OT #1 (valeurs P2 ci-dessus) | Véhicule passe **en maintenance** ; ligne d'historique « Ordre de travail #… créé » |
+| 2 | `terry` | Sur le **même véhicule**, créer l'OT #2 (valeurs P2b ci-dessus) | Véhicule **reste** en maintenance ; **aucune** nouvelle ligne d'historique (il y était déjà) |
+| 3 | `issouf` | Tenter d'affecter ce véhicule à une mission | Refus : « véhicule à l'atelier (en maintenance) » |
+| 4 | `ali` | Clôturer **l'OT #2** uniquement | Véhicule **reste en maintenance** — l'OT #1 est encore ouvert. Aucune ligne « remis en service » |
+| 5 | `issouf` | Retenter l'affectation en mission | Toujours refusé |
+| 6 | `ali` | Clôturer **l'OT #1** | Véhicule repasse **opérationnel** ; ligne « remis en service - Ordre de travail #… terminé » |
+| 7 | `issouf` | Affecter le véhicule à une mission | Accepté (si documents à jour) |
+
+**Régression couverte.** Avant correction, l'étape 4 remettait le véhicule en
+service alors qu'il était toujours au pont pour l'OT #1 — et le rendait
+immédiatement affectable à une mission.
 
 ---
 
@@ -819,7 +944,7 @@ Statuts : `draft` → `validated` → `archived`.
 | 3 | `terry` | Associer des pièces types à la panne | Pièces liées visibles sur la fiche |
 | 4 | `ali` (technicien) | Ouvrir le catalogue | Consultation possible |
 | 5 | `ali` | Tenter de créer une panne | **Refusé** : lecture seule pour le technicien |
-| 6 | `terry` | Créer un OT en s'appuyant sur cette panne (P2) | Panne et pièces types reprises dans l'OT |
+| 6 | `terry` | *(Hors wizard actuel)* Le catalogue des pannes **n'est pas encore branché** au formulaire de création d'OT (motifs = liste fixe étape 1). Reporter cette étape ou créer l'OT avec motif **Moteur** après validation du catalogue en P5e. | — |
 | 7 | `terry` | Tenter de supprimer la panne | **403** : suppression réservée à l'admin |
 | 8 | `admin` | Archiver la panne (`archived`) | Elle ne remonte plus dans la sélection à la création d'OT |
 

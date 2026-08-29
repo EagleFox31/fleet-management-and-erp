@@ -1,5 +1,32 @@
 # Lessons Learned
 
+## 2026-08-29 — Instrumenter avant d'optimiser (cache dashboard Direction)
+
+### Constat
+Le dashboard Direction a reçu 4 tables cache, 5 triggers et une migration de
+backfill **sans mesure du temps de réponse avant/après**. Sur une flotte de
+6 véhicules et quelques centaines de factures, deux scans SQL complets peuvent
+tenir en quelques dizaines de millisecondes — le remède peut coûter plus cher
+que le mal (complexité permanente, logique métier en SQL non testée).
+
+Parallèle avec `refetchType: "none"` le même matin : hypothèse séduisante,
+application immédiate, régression.
+
+### Règles
+1. **Chronométrer avant de corriger** : `npm run benchmark:management-dashboard`
+   (inclut `SELECT 1` pour isoler la latence Neon).
+2. **Gate de retrait** : si le ping Neon ≈ le temps dashboard, l'agrégation SQL
+   n'est pas le goulot — ne pas ajouter tables cache/triggers.
+3. **Filet de tests** : l'agrégation HT Direction se teste via le **service**
+   TypeScript (`tests/integration/management-dashboard-service.test.ts`), pas
+   via des tables SQL parallèles où HT/TTC peut diverger silencieusement.
+
+### Décision août 2026
+Cache `management_daily_metrics` **retiré** après benchmark : year (475 ms) <
+week (809 ms artefact cold start) malgré 52× plus de jours. Index dates conservés.
+
+---
+
 ## 2026-08-29 - Dériver les types métier du schéma, jamais les recopier
 
 ### Constat
