@@ -13,10 +13,17 @@ export function ManagementTrendBadge({
   higherIsBetter = true,
   className,
 }: ManagementTrendBadgeProps) {
+  // `percent` est null dans un seul cas: la période N-1 valait zéro, donc la
+  // variation n'est pas calculable. Le dire tel quel — « Nouveau » laissait
+  // croire que l'indicateur était récent, alors que c'est l'activité qui part
+  // de zéro, ce qui est une information forte et pas un état d'attente.
   if (percent == null) {
     return (
-      <span className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground", className)}>
-        Nouveau
+      <span
+        className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums", className)}
+        title="Période précédente à zéro : variation non calculable"
+      >
+        N-1 : 0
       </span>
     );
   }

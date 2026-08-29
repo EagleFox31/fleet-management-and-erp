@@ -15,6 +15,20 @@ function formatTrend(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)} %`;
 }
 
+function formatFcfPerKm(value: number | null): string {
+  if (value == null) {
+    return "Km réels insuffisants";
+  }
+  return `${formatPrice(Math.round(value))}/km`;
+}
+
+function formatHours(value: number | null): string {
+  if (value == null) {
+    return "—";
+  }
+  return `${value.toFixed(1)} h / OT`;
+}
+
 export function exportManagementBoardPackPdf(data: ManagementDashboardResponse): void {
   const exporter = new PDFExporter();
   const periodLabel = MANAGEMENT_PERIOD_LABELS[data.period];
@@ -48,7 +62,64 @@ export function exportManagementBoardPackPdf(data: ManagementDashboardResponse):
         Carburant: formatPrice(data.expenses.fuel),
         Maintenance: formatPrice(data.expenses.maintenance),
         "Achats fournisseurs": formatPrice(data.expenses.suppliers),
+        "FDR missions (réels)": formatPrice(data.expenses.roadExpenses),
       },
+    },
+    {
+      title: "TCO véhicule (période)",
+      data: {
+        "Véhicules avec activité": String(data.vehicleTco.summary.vehicleCount),
+        "CA attribué HT": formatPrice(data.vehicleTco.summary.totalRevenueHT),
+        "Coûts opérationnels HT": formatPrice(data.vehicleTco.summary.totalPeriodCostsHT),
+        "Marge opérationnelle HT": formatPrice(data.vehicleTco.summary.totalPeriodMarginHT),
+        "Assurances flotte HT": formatPrice(data.vehicleTco.summary.fleetInsuranceHT),
+      },
+    },
+    {
+      title: "Top véhicules (marge opérationnelle HT)",
+      data: Object.fromEntries(
+        data.vehicleTco.topByMargin.length > 0
+          ? data.vehicleTco.topByMargin.map((vehicle, index) => [
+              `${index + 1}. ${vehicle.registrationNumber}`,
+              `${formatPrice(vehicle.periodMarginHT)} · ${vehicle.missionCount} mission(s)`,
+            ])
+          : [["—", "Aucun véhicule rentable sur la période"]],
+      ),
+    },
+    {
+      title: "Scorecard chauffeurs",
+      data: {
+        "Chauffeurs actifs": String(data.driverScorecard.summary.driverCount),
+        "Note moyenne flotte": data.driverScorecard.summary.averageOverallScore != null
+          ? `${Math.round(data.driverScorecard.summary.averageOverallScore)}/100`
+          : "—",
+        "Médiane consommation": data.driverScorecard.summary.fleetMedianConsumptionL100 != null
+          ? `${data.driverScorecard.summary.fleetMedianConsumptionL100.toFixed(1)} L/100 km`
+          : "—",
+        "Chauffeurs avec incident": String(data.driverScorecard.summary.driversWithIncidents),
+      },
+    },
+    {
+      title: "Top chauffeurs (note globale)",
+      data: Object.fromEntries(
+        data.driverScorecard.topPerformers.length > 0
+          ? data.driverScorecard.topPerformers.map((driver, index) => [
+              `${index + 1}. ${driver.driverName}`,
+              `${Math.round(driver.overallScore ?? 0)}/100 · ${driver.missionCount} mission(s)`,
+            ])
+          : [["—", "Aucun chauffeur noté sur la période"]],
+      ),
+    },
+    {
+      title: "Indice vétusté — candidats remplacement",
+      data: Object.fromEntries(
+        data.vehicleObsolescence.candidates.length > 0
+          ? data.vehicleObsolescence.candidates.map((vehicle, index) => [
+              `${index + 1}. ${vehicle.registrationNumber}`,
+              `${formatPrice(vehicle.annualizedMaintenanceHT)} annualisé · résiduel ${formatPrice(vehicle.residualValueHT)}`,
+            ])
+          : [["—", "Aucun candidat sur la période"]],
+      ),
     },
     {
       title: "Flotte",
@@ -93,10 +164,57 @@ export function exportManagementBoardPackPdf(data: ManagementDashboardResponse):
       ),
     },
     {
+      title: "Rentabilité par mission",
+      data: {
+        "Missions analysées": String(data.missionProfitability.summary.analyzedCount),
+        "Missions rentables": String(data.missionProfitability.summary.profitableCount),
+        "Missions déficitaires": String(data.missionProfitability.summary.deficitCount),
+        "Marge cumulée HT": formatPrice(data.missionProfitability.summary.totalMarginHT),
+        "Données incomplètes": String(data.missionProfitability.summary.incompleteDataCount),
+      },
+    },
+    {
+      title: "Top missions rentables (marge HT)",
+      data: Object.fromEntries(
+        data.missionProfitability.topProfitable.length > 0
+          ? data.missionProfitability.topProfitable.map((mission, index) => [
+              `${index + 1}. ${mission.orderNumber}`,
+              `${formatPrice(mission.marginHT)} · ${mission.destination}`,
+            ])
+          : [["—", "Aucune mission rentable sur la période"]],
+      ),
+    },
+    {
+      title: "Missions déficitaires",
+      data: Object.fromEntries(
+        data.missionProfitability.worstDeficit.length > 0
+          ? data.missionProfitability.worstDeficit.map((mission, index) => [
+              `${index + 1}. ${mission.orderNumber}`,
+              `${formatPrice(mission.marginHT)} · ${mission.destination}`,
+            ])
+          : [["—", "Aucune mission déficitaire sur la période"]],
+      ),
+    },
+    {
+      title: "Indicateurs exécutifs",
+      data: {
+        "PRK (FCFA/km)": formatFcfPerKm(data.executiveKpis.prk.fcfPerKm),
+        "Km réels missions": String(data.executiveKpis.prk.totalKm),
+        "Missions avec km réel": String(data.executiveKpis.prk.missionCount),
+        "Missions exclues (km manquant)": String(data.executiveKpis.prk.missionsExcludedMissingKm),
+        "Charges directes HT": formatPrice(data.executiveKpis.prk.directChargesHT),
+        "CPK maintenance (FCFA/km)": formatFcfPerKm(data.executiveKpis.cpkMaintenance.fcfPerKm),
+        "Achats pneus HT (fournisseur)": formatPrice(data.executiveKpis.cpkMaintenance.tireSupplierHT),
+        "Immobilisation cumulée (h)": String(data.executiveKpis.downtime.totalImmobilizationHours),
+        "Immobilisation moyenne / OT": formatHours(data.executiveKpis.downtime.averageHoursPerCompletedOrder),
+      },
+    },
+    {
       title: "Alertes",
       data: {
         "Factures client en retard": String(data.alerts.overdueInvoices),
         "Véhicules hors service": String(data.alerts.outOfServiceVehicles),
+        "Véhicules immobilisés > 48 h": String(data.alerts.vehiclesImmobilizedOver48h),
       },
     },
   ];

@@ -1,39 +1,27 @@
 import { useState } from "react";
-import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle,
-  Banknote,
-  Download,
+  Gauge,
   LayoutDashboard,
-  Receipt,
   TrendingUp,
   Truck,
   Wallet,
 } from "lucide-react";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  AlertBannerCard,
-  HeaderCard,
-  KpiGrid,
-  KpiTile,
   PremiumTabsNav,
   StatusMetricStrip,
 } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
-import { ManagementPeriodSelector } from "@/components/management/management-period-selector";
-import { ManagementDashboardInfoTip } from "@/components/management/management-dashboard-info-tip";
+import { ManagementIndicatorsTab } from "@/components/management/management-indicators-tab";
 import { MoneyFlowPanel } from "@/components/management/money-flow-panel";
-import { ManagementRankingPanel } from "@/components/management/management-ranking-panel";
-import { ManagementTrendBadge } from "@/components/management/management-trend-badge";
 import { useAuth } from "@/hooks/useAuth";
-import { exportManagementBoardPackPdf } from "@/lib/management-board-pack-pdf";
-import { formatPrice } from "@/lib/utils";
-import { formatManagementGreeting } from "@/lib/management-greeting";
 import type { ManagementDashboardResponse, ManagementPeriod } from "@shared/constants/management-dashboard";
 import { ClientRevenueChart } from "@/components/dashboard/client-revenue-chart";
+import { ManagementFinancialOverview } from "@/components/management/management-financial-overview";
+import { ManagementProfitabilityBento } from "@/components/management/management-profitability-bento";
+import { ManagementExecutiveHero } from "@/components/management/management-executive-hero";
 
 export default function ManagementDashboard() {
   const { user } = useAuth();
@@ -55,139 +43,50 @@ export default function ManagementDashboard() {
 
   const fleetAvailable = data?.fleet.operational ?? 0;
   const fleetTotal = data?.fleet.total ?? 0;
-  const trendHint = data ? `vs ${data.trends.previousPeriodLabel.toLowerCase()}` : "";
 
   return (
-    <div className="space-y-5">
-      <HeaderCard
-        moduleLabel="Direction · Pilotage"
-        title={user?.name ? formatManagementGreeting(user.name) : "Tableau de bord Direction"}
-        subtitle="CA facturé, charges et résultat — lecture synthétique, sans saisie opérationnelle"
-        icon={<LayoutDashboard className="h-5 w-5" />}
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-1">
-              <ManagementPeriodSelector value={period} onChange={setPeriod} />
-              {!isLoading && data ? (
-                <ManagementDashboardInfoTip
-                  periodStart={data.periodStart}
-                  periodEnd={data.periodEnd}
-                  previousPeriodStart={data.previousPeriodStart}
-                  previousPeriodEnd={data.previousPeriodEnd}
-                />
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!data}
-                onClick={() => data && exportManagementBoardPackPdf(data)}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Rapport Direction (PDF)
-              </Button>
-              <Button type="button" variant="outline" size="sm" asChild>
-                <Link href="/management/reports">Rapports Direction</Link>
-              </Button>
-            </div>
+    <div className="space-y-6">
+      {/* 1. Header & Quatuor Bento Hero Exécutif */}
+      {isLoading || !data ? (
+        <div className="space-y-4">
+          <Skeleton className="h-28 w-full rounded-3xl" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <Skeleton className="h-36 w-full rounded-3xl" />
+            <Skeleton className="h-36 w-full rounded-3xl" />
+            <Skeleton className="h-36 w-full rounded-3xl" />
+            <Skeleton className="h-36 w-full rounded-3xl" />
           </div>
-
-          {isLoading || !data ? (
-            <Skeleton className="h-10 w-full max-w-3xl" />
-          ) : (
-            <KpiGrid columns={4}>
-              <KpiTile
-                label="CA facturé (TTC)"
-                value={formatPrice(data.revenue.invoicedTTC)}
-                subValue={
-                  <span className="flex flex-col gap-0.5">
-                    <span>{data.revenue.invoiceCount} facture(s)</span>
-                    <ManagementTrendBadge percent={data.trends.revenueTTC} />
-                    <span className="text-[10px] text-muted-foreground">{trendHint}</span>
-                  </span>
-                }
-                icon={<Receipt className="h-4 w-4" />}
-              />
-              <KpiTile
-                label="Encaissé"
-                value={formatPrice(data.revenue.collectedTTC)}
-                subValue="Entrées réalisées"
-                icon={<Banknote className="h-4 w-4" />}
-                iconWrapperClassName="bg-emerald-50 text-emerald-700"
-              />
-              <KpiTile
-                label="Charges totales"
-                value={formatPrice(data.expenses.total)}
-                subValue={
-                  <span className="flex flex-col gap-0.5">
-                    <span>Carburant + atelier + fournisseurs</span>
-                    <ManagementTrendBadge
-                      percent={data.trends.expensesTotal}
-                      higherIsBetter={false}
-                    />
-                    <span className="text-[10px] text-muted-foreground">{trendHint}</span>
-                  </span>
-                }
-                icon={<Wallet className="h-4 w-4" />}
-                iconWrapperClassName="bg-red-50 text-red-600"
-              />
-              <KpiTile
-                featured
-                featuredTone={data.result.grossHT >= 0 ? "default" : "danger"}
-                label="Résultat brut (HT)"
-                value={formatPrice(data.result.grossHT)}
-                subValue={
-                  <span className="flex flex-col gap-0.5">
-                    <span>Marge {data.result.marginPercent.toFixed(1)} %</span>
-                    <ManagementTrendBadge percent={data.trends.grossHT} />
-                    <span className="text-[10px] text-white/70">{trendHint}</span>
-                  </span>
-                }
-                icon={<TrendingUp className="h-4 w-4" />}
-              />
-            </KpiGrid>
-          )}
         </div>
-      </HeaderCard>
+      ) : (
+        <ManagementExecutiveHero
+          data={data}
+          period={period}
+          onPeriodChange={setPeriod}
+          userName={user?.name}
+        />
+      )}
 
-      {!isLoading && data && (data.alerts.overdueInvoices > 0 || data.alerts.outOfServiceVehicles > 0) ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {data.alerts.overdueInvoices > 0 ? (
-            <AlertBannerCard
-              variant="warning"
-              title={`${data.alerts.overdueInvoices} facture(s) client en retard`}
-              description="Des encaissements attendus ne sont pas revenus à l'échéance."
-              icon={<AlertTriangle className="h-4 w-4" />}
-            />
-          ) : null}
-          {data.alerts.outOfServiceVehicles > 0 ? (
-            <AlertBannerCard
-              variant="danger"
-              title={`${data.alerts.outOfServiceVehicles} véhicule(s) hors service`}
-              description="Une part de la flotte n'est pas disponible pour produire du chiffre."
-              icon={<Truck className="h-4 w-4" />}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      <Tabs defaultValue="overview">
+      {/* 2. Navigation par Onglets Bento */}
+      <Tabs defaultValue="overview" className="space-y-5">
         <PremiumTabsNav
           tabs={[
             { value: "overview", label: "Vue d'ensemble", icon: <TabIcon icon={LayoutDashboard} /> },
             { value: "money", label: "Flux d'argent", icon: <TabIcon icon={Wallet} /> },
+            { value: "indicators", label: "Indicateurs", icon: <TabIcon icon={Gauge} /> },
             { value: "rankings", label: "Rentabilité", icon: <TabIcon icon={TrendingUp} /> },
           ]}
         />
 
-        <TabsContent value="overview" className="space-y-4">
+        {/* Onglet 1 : Vue d'ensemble */}
+        <TabsContent value="overview" className="space-y-5">
           {isLoading || !data ? (
-            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-64 w-full rounded-2xl" />
           ) : (
             <>
+              {/* Analyse Financière Visuelle Google-like */}
+              <ManagementFinancialOverview data={data} />
+              
+              {/* Flotte Opérationnelle & Portefeuille Clients */}
               <StatusMetricStrip
                 items={[
                   {
@@ -229,9 +128,10 @@ export default function ManagementDashboard() {
           )}
         </TabsContent>
 
+        {/* Onglet 2 : Flux d'argent */}
         <TabsContent value="money" className="space-y-4">
           {isLoading || !data ? (
-            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-64 w-full rounded-2xl" />
           ) : (
             <MoneyFlowPanel
               revenueTTC={data.revenue.invoicedTTC}
@@ -245,48 +145,21 @@ export default function ManagementDashboard() {
           )}
         </TabsContent>
 
+        {/* Onglet 3 : Indicateurs */}
+        <TabsContent value="indicators" className="space-y-4">
+          {isLoading || !data ? (
+            <Skeleton className="h-64 w-full rounded-2xl" />
+          ) : (
+            <ManagementIndicatorsTab data={data} />
+          )}
+        </TabsContent>
+
+        {/* Onglet 4 : Rentabilité */}
         <TabsContent value="rankings" className="space-y-4">
           {isLoading || !data ? (
-            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-64 w-full rounded-2xl" />
           ) : (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ManagementRankingPanel
-                title="Top clients — CA facturé"
-                emptyLabel="Aucune facture client sur la période."
-                amountLabel="Factures"
-                items={data.topClients.map((client) => ({
-                  label: client.clientName,
-                  primary: `${client.invoiceCount} facture(s)`,
-                  secondary: `Encaissé ${formatPrice(client.collectedTTC)}`,
-                  amount: client.invoicedTTC,
-                }))}
-              />
-              <ManagementRankingPanel
-                title="Top marchandises — activité"
-                emptyLabel="Aucune mission avec cargo sur la période."
-                amountLabel="Missions"
-                items={data.topCargoTypes.map((cargo) => ({
-                  label: cargo.cargoLabel,
-                  primary: `${cargo.missionCount} mission(s)`,
-                  secondary:
-                    cargo.totalWeight > 0
-                      ? `${cargo.totalWeight.toFixed(1)} T · carburant ${formatPrice(cargo.fuelCost)}`
-                      : `Carburant ${formatPrice(cargo.fuelCost)}`,
-                  amount: cargo.missionCount,
-                }))}
-              />
-              <ManagementRankingPanel
-                title="Top destinations — lignes transport"
-                emptyLabel="Aucune mission livrée sur la période."
-                amountLabel="Coût carburant missions"
-                items={data.topDestinations.map((destination) => ({
-                  label: destination.destination,
-                  primary: `${destination.missionCount} mission(s)`,
-                  secondary: "Volume d'activité sur la ligne",
-                  amount: destination.fuelCost,
-                }))}
-              />
-            </div>
+            <ManagementProfitabilityBento data={data} />
           )}
         </TabsContent>
       </Tabs>
