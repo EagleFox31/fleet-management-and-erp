@@ -15,6 +15,7 @@ Ces comptes remplacent les identifiants de démo (`technician`, `workshop_manage
 | Secrétaire (`secretary`) | `dana` | Dana Del Rey | dana@yaro.os | `secretary123` |
 | Logisticien (`logistics`) | `issouf` | Issouf Coulibaly | issouf@yaro.os | `logistics123` |
 | Magasinier (`warehouse`) | `fatou` | Fatoumata Diallo | fatou@yaro.os | `warehouse123` |
+| Direction (`management`) | *(à créer via Admin > Utilisateurs)* | — | — | — |
 | Chauffeur (`driver`) | `jean.mballa` | Jean Mballa | hatemenow045@gmail.com | PIN `1234` (inchangé) |
 
 ## Correspondance rôle → login (tests multi-profils)
@@ -27,6 +28,7 @@ Ces comptes remplacent les identifiants de démo (`technician`, `workshop_manage
 | Secrétaire | `dana` |
 | Logisticien | `issouf` |
 | Magasinier | `fatou` |
+| Direction (DG) | Créer un compte `management` via `admin` |
 | Chauffeur | `jean.mballa` |
 
 ## Notes

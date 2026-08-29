@@ -1,5 +1,101 @@
 # Lessons Learned
 
+## 2026-08-29 - Dériver les types métier du schéma, jamais les recopier
+
+### Constat
+Le type `AppRole` existait en **quatre exemplaires divergents** :
+
+| Fichier | `management` | `driver` |
+|---|---|---|
+| `server/middleware/auth.ts` | oui | non |
+| `server/types/auth-session.d.ts` | non | oui |
+| `server/api/suppliers.routes.ts` | non | non |
+| `shared/constants/supplier-ratings.ts` (`SupplierRatingRole`) | non | non |
+
+Conséquence : ajouter le rôle `management` au schéma cassait la compilation dans
+`supplier-invoices.routes.ts` et `routes.ts` — deux fichiers **sans rapport**
+avec la Direction. La quatrième copie n'est apparue qu'après unification des
+trois premières : la plus permissive masquait les suivantes.
+
+C'est la **quatrième occurrence** du même motif dans le projet, après les
+libellés de statut des demandes de pièces, les permissions de sortie de stock et
+les groupes de rôles chauffeur.
+
+### Règle Projet (obligatoire)
+- Un type qui **énumère des valeurs métier** se dérive de `shared/schema.ts`, il
+  ne se recopie pas :
+  ```ts
+  export type AppRole = NonNullable<typeof users.$inferSelect>["role"];
+  export const ALL_APP_ROLES = users.role.enumValues as readonly AppRole[];
+  ```
+- **Si une valeur est lue des deux côtés, elle vit dans `shared/`.** Vaut pour
+  les rôles, les statuts, les libellés, les seuils.
+- Élargir un type dérivé n'est sûr que si le `switch` qui le consomme a un
+  `default` : `SupplierRatingRole` refuse tout par défaut, donc un nouveau rôle
+  n'obtient aucun droit tant qu'on ne l'a pas décidé — le bon défaut.
+
+### Signal à reconnaître
+Une erreur de compilation dans un fichier qui n'a rien à voir avec ce qu'on
+vient de modifier. C'est presque toujours une table de vérité dupliquée.
+
+### Anti-patterns à éviter
+- Recopier une union de chaînes « pour éviter un import ».
+- Corriger l'erreur là où elle sort plutôt que là où elle naît : ajouter le rôle
+  manquant à la copie fautive aurait tenu jusqu'au rôle suivant.
+
+---
+
+## 2026-08-29 - Marge Direction : ne jamais mélanger HT et TTC
+
+### Constat
+`management-dashboard-service.ts` calculait le résultat brut ainsi :
+
+```
+CA HT − (carburant + maintenance + fournisseurs)
+```
+
+Les recettes étaient bien accumulées en HT (`invoice.amountHT`), mais la charge
+fournisseurs lisait `COALESCE(totalTTC, totalAmount, amountHT, 0)` — donc **TVA
+comprise**. La TVA sur achats étant récupérable, elle était comptée comme une
+charge : à 19,25 %, sur 10 M FCFA d'achats dans la période, la marge affichée au
+DG manquait **1,9 M FCFA**, et l'écart grandit avec le volume.
+
+Le défaut était **visible dans la documentation** : `DIRECTION-DASHBOARD.md`
+annonçait « Charge fournisseurs → `supplier_invoices.total_ttc` » deux lignes
+au-dessus de « Résultat brut → CA **HT** − charges ».
+
+### Règle Projet (obligatoire)
+- **Nommer les variables avec leur base fiscale** : `invoicedHT`, `expensesHT`.
+  Un mélange saute alors aux yeux à la relecture.
+- Un `COALESCE` en cascade n'est légitime **qu'entre colonnes équivalentes**.
+  Empiler `totalTTC`, `totalAmount` et `amountHT` « au cas où » revient à laisser
+  la base fiscale du résultat dépendre de quelle colonne est nulle.
+- Vérifier la contrepartie avant de conclure : ici, quelle colonne était
+  réellement accumulée côté recettes.
+
+### Méthode : lire le document et le code ensemble
+Le tableau de formules d'un document de chantier se lit **ligne contre ligne**.
+Les incohérences d'unité (HT/TTC, litres/pourcentage, unités/références) s'y
+voient avant d'exister en base.
+
+### Anti-patterns à éviter
+- Filtrer la sortie de `tsc` sur les fichiers qu'on vient de toucher **et en
+  conclure que le projet compile**. Cette habitude a masqué plusieurs heures
+  durant un `ClientDashboard` référencé sans import dans `App.tsx`, et une
+  erreur préexistante dans `tires/index.tsx`. Le décompte qui fait foi :
+  `npx tsc --noEmit | grep -c "error TS"` sur tout le projet.
+- Laisser du code correct **qui a l'air faux** sans commentaire. Deux calculs de
+  charges paraissaient bugués (double comptage pièces, ambiguïté carburant) ;
+  ils étaient justes. Un commentaire qui dit *ce que casserait l'inversion*
+  vaut mieux qu'un commentaire qui affirme que c'est correct : une conclusion se
+  conteste, un mécanisme se vérifie.
+- Neutraliser une propriété de style dans une variante sans énumérer ce qu'elle
+  portait. `KpiTile` en mode `featured` ignore `valueClassName` — qui portait le
+  rouge du déficit : un résultat négatif se serait affiché **en blanc sur vert**.
+  Un état « mis en avant » doit pouvoir annoncer une mauvaise nouvelle.
+
+---
+
 ## 2026-08-20 - Schéma Drizzle ≠ colonnes réelles : brancher `init-database.ts`
 
 ### Constat

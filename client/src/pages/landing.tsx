@@ -133,7 +133,7 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
   );
 }
 
-// Types de profils utilisateurs
+// Types de profils utilisateurs (9 profils métier)
 const userProfiles = [
   {
     id: "admin",
@@ -153,7 +153,7 @@ const userProfiles = [
     bgColor: "bg-blue-500/10",
     description: "Supervision des opérations de maintenance et gestion d'équipe",
     permissions: ["Ordres de travail", "Planification", "Équipe", "Rapports", "Pièces", "Validation"],
-    credential: "workshop_manager / workshop123"
+    credential: "terry / workshop123"
   },
   {
     id: "technician",
@@ -162,8 +162,8 @@ const userProfiles = [
     color: "text-orange-500",
     bgColor: "bg-orange-500/10",
     description: "Exécution des tâches de maintenance et interventions techniques",
-    permissions: ["Mes ordres", "Interventions", "Historique", "Pièces"],
-    credential: "technician / tech123"
+    permissions: ["Mes ordres", "Interventions", "Historique", "Demandes pièces", "Inspections pneus"],
+    credential: "ali / tech123"
   },
   {
     id: "secretary",
@@ -171,9 +171,9 @@ const userProfiles = [
     icon: FileText,
     color: "text-purple-500",
     bgColor: "bg-purple-500/10",
-    description: "Gestion administrative et documentation",
-    permissions: ["Documents", "Factures", "Planification", "Contacts"],
-    credential: "secretary / secretary123"
+    description: "Gestion administrative, conformité documentaire et facturation",
+    permissions: ["Documents flotte", "Factures fournisseurs", "Contrôle 3 voies", "Dossiers RH chauffeurs"],
+    credential: "dana / secretary123"
   },
   {
     id: "logistics",
@@ -181,9 +181,9 @@ const userProfiles = [
     icon: Truck,
     color: "text-cyan-500",
     bgColor: "bg-cyan-500/10",
-    description: "Coordination des missions et gestion de la flotte",
-    permissions: ["Missions", "Véhicules", "Chauffeurs", "Suivi"],
-    credential: "logistics / logistics123"
+    description: "Coordination des missions, suivi carburant et gestion de flotte",
+    permissions: ["Missions transport", "Consommation carburant", "Feuilles de route", "Affectations"],
+    credential: "issouf / logistics123"
   },
   {
     id: "warehouse",
@@ -191,9 +191,19 @@ const userProfiles = [
     icon: Package,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
-    description: "Gestion des stocks, pièces et inventaire",
-    permissions: ["Inventaire", "Commandes", "Réception", "Stock"],
-    credential: "warehouse / warehouse123"
+    description: "Gestion complète des stocks, pièces détachées et inventaire pneus",
+    permissions: ["Inventaire pièces", "Réceptions / Entrées", "Sorties stock OT", "Catalogue pneus"],
+    credential: "fatou / warehouse123"
+  },
+  {
+    id: "management",
+    name: "Direction (DG)",
+    icon: Briefcase,
+    color: "text-emerald-400",
+    bgColor: "bg-emerald-500/10",
+    description: "Dashboard exécutif, marge brute après charges, rentabilité et CA",
+    permissions: ["CA facturé & encaissé", "Marge brute HT", "Top clients & lignes", "Rapport Direction PDF"],
+    credential: "Création via Admin > Utilisateurs"
   },
   {
     id: "client",
@@ -201,22 +211,33 @@ const userProfiles = [
     icon: Users,
     color: "text-indigo-500",
     bgColor: "bg-indigo-500/10",
-    description: "Consultation de vos missions et factures",
-    permissions: ["Mes missions", "Factures", "Historique"],
+    description: "Consultation exclusive de vos véhicules, missions et factures",
+    permissions: ["Ses véhicules", "Ses missions", "Historique factures", "Export PDF"],
     credential: "client / client123"
+  },
+  {
+    id: "driver",
+    name: "Chauffeur",
+    icon: KeyRound,
+    color: "text-amber-500",
+    bgColor: "bg-amber-500/10",
+    description: "Interface PWA mobile dédiée avec connexion rapide par code PIN",
+    permissions: ["Mission du jour", "Feuille de route", "Relevé km départ/arrivée", "Alertes incident"],
+    credential: "jean.mballa / PIN 1234"
   }
 ];
 
-// Matrice des permissions (simplifié pour l'affichage)
-const permissionsMatrix = {
-  "Gestion véhicules": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: false, client: false },
-  "Maintenance": { admin: true, workshop_manager: true, technician: true, secretary: false, logistics: false, warehouse: false, client: false },
-  "Inventaire/Pièces": { admin: true, workshop_manager: true, technician: true, secretary: true, logistics: true, warehouse: true, client: false },
-  "Commandes": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, client: false },
-  "Factures clients": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: false, warehouse: false, client: true },
-  "Missions": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: true, warehouse: false, client: true },
-  "Rapports": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, client: false },
-  "Utilisateurs": { admin: true, workshop_manager: false, technician: false, secretary: false, logistics: false, warehouse: false, client: false },
+// Matrice des permissions granulaire par profil
+const permissionsMatrix: Record<string, Record<string, boolean>> = {
+  "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: false, management: true, client: false, driver: false },
+  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, logistics: false, warehouse: false, management: true, client: false, driver: false },
+  "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, logistics: false, warehouse: true, management: false, client: false, driver: false },
+  "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
+  "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, management: false, client: false, driver: false },
+  "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: false, warehouse: false, management: true, client: true, driver: false },
+  "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: true, warehouse: false, management: true, client: true, driver: true },
+  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, management: true, client: false, driver: false },
+  "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, logistics: false, warehouse: false, management: false, client: false, driver: false },
 };
 
 type FeatureStoryChapter = {
@@ -732,16 +753,46 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
   },
   client: {
     steps: [
-      "Connectez-vous pour accéder à votre espace client",
-      "Consultez vos missions en cours et terminées",
-      "Visualisez et téléchargez vos factures",
-      "Suivez l'historique de vos prestations",
-      "Contactez le support si besoin"
+      "Connectez-vous pour accéder à votre espace client sécurisé",
+      "Consultez l'état et la disponibilité de votre flotte dédiée",
+      "Suivez l'avancement de vos missions de transport en temps réel",
+      "Visualisez et téléchargez vos factures et justificatifs",
+      "Consultez l'historique complet des interventions sur vos véhicules"
     ],
     tips: [
-      "Téléchargez vos factures pour vos archives",
-      "Suivez régulièrement l'avancement de vos missions",
-      "Signalez rapidement toute anomalie"
+      "Téléchargez vos factures et rapports d'interventions en PDF",
+      "Suivez régulièrement l'avancement de vos missions en direct",
+      "Vos accès sont strictement cloisonnés à vos véhicules d'entreprise"
+    ]
+  },
+  management: {
+    steps: [
+      "Connectez-vous avec votre compte Direction créé par l'administrateur",
+      "Accédez au tableau de bord exécutif Direction pour consulter le CA et la marge",
+      "Analysez les flux financiers : CA facturé, encaissé et charges directes",
+      "Consultez le classement des top clients et des lignes les plus rentables",
+      "Examinez la disponibilité de la flotte en un coup d'œil",
+      "Exportez le rapport mensuel Direction en PDF pour votre comité de direction"
+    ],
+    tips: [
+      "Filtrez par période (mois en cours, trimestre) pour analyser la dynamique",
+      "Consultez les impayés pour anticiper le besoin en fonds de roulement",
+      "La marge brute est calculée strictement en HT pour une fidélité comptable parfaite"
+    ]
+  },
+  driver: {
+    steps: [
+      "Accédez à l'application mobile PWA sur votre smartphone ou tablette",
+      "Connectez-vous rapidement avec votre identifiant chauffeur et votre code PIN à 4 chiffres",
+      "Consultez votre mission active du jour et votre destination",
+      "Prenez connaissance des détails de la feuille de route et du véhicule assigné",
+      "Enregistrez votre kilométrage au départ puis à l'arrivée",
+      "Signalez toute anomalie ou incident directement depuis votre mobile"
+    ],
+    tips: [
+      "Installez l'application sur l'écran d'accueil de votre téléphone pour un accès direct",
+      "Vérifiez vos documents de bord avant chaque départ en mission",
+      "En cas d'oubli de PIN, contactez la secrétaire ou le logisticien pour le réinitialiser"
     ]
   }
 };
@@ -853,8 +904,7 @@ function HeroLiveCockpit() {
           </div>
         </div>
       </motion.div>
-
-      {/* Badge flottant décoratif */}
+{/* Badge flottant décoratif */}
       <motion.div
         animate={{ y: [0, -6, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
@@ -864,6 +914,222 @@ function HeroLiveCockpit() {
         <span>Disponibilité Flotte : <strong className="text-emerald-300">96.8%</strong></span>
       </motion.div>
     </div>
+  );
+}
+
+// Composant Storytelling Transformation Avant / Après
+function StorytellingTransformationSection() {
+  const [tab, setTab] = useState<"before" | "after">("after");
+
+  return (
+    <section className="relative py-20 lg:py-28 bg-slate-950/75 backdrop-blur-sm text-white overflow-hidden border-t border-white/10">
+      {/* Halo ambiant diffus */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/15 blur-3xl -z-10 pointer-events-none" />
+
+      <div className="container mx-auto px-4">
+        {/* En-tête de section */}
+        <div className="text-center max-w-3xl mx-auto mb-12">
+          <Badge variant="outline" className="mb-4 bg-emerald-500/10 text-emerald-300 border-emerald-500/30 px-3.5 py-1 inline-flex items-center gap-1.5 text-xs font-medium rounded-full">
+            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+            Impact Opérationnel • Corridors CEMAC
+          </Badge>
+          <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
+            La transformation de votre{" "}
+            <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
+              quotidien logistique
+            </span>
+          </h2>
+          <p className="text-slate-300 text-base md:text-lg mb-8 leading-relaxed">
+            Mesurez concrètement l'écart entre la gestion manuelle sur papier et la puissance d'un cockpit unifié en temps réel.
+          </p>
+
+          {/* Sélecteur interactif Google-like (Pill Switcher) */}
+          <div className="inline-flex items-center p-1.5 rounded-full bg-slate-900/90 border border-white/15 backdrop-blur-xl shadow-xl">
+            <button
+              onClick={() => setTab("before")}
+              data-testid="toggle-story-before"
+              className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${
+                tab === "before"
+                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${tab === "before" ? "bg-rose-400 animate-pulse" : "bg-slate-500"}`} />
+              Sans Yaro FleetOS (Manuel)
+            </button>
+            <button
+              onClick={() => setTab("after")}
+              data-testid="toggle-story-after"
+              className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${
+                tab === "after"
+                  ? "bg-white text-slate-950 shadow-lg hover:bg-slate-100"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${tab === "after" ? "bg-emerald-500 animate-pulse" : "bg-slate-500"}`} />
+              Avec Yaro FleetOS (Digital)
+            </button>
+          </div>
+        </div>
+
+        {/* Contenu dynamique Avant / Après avec transition fluide */}
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="max-w-6xl mx-auto rounded-3xl border border-white/15 bg-gradient-to-b from-slate-900/70 to-slate-950/80 backdrop-blur-2xl shadow-2xl p-6 sm:p-8 lg:p-10 overflow-hidden"
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+            {/* Colonne Image avec badge flottant */}
+            <div className="lg:col-span-6 relative group">
+              <div className="relative overflow-hidden rounded-2xl border border-white/15 shadow-2xl">
+                <img
+                  src={tab === "before" ? "/storytelling/director-before.jpg" : "/storytelling/director-after.jpg"}
+                  alt={tab === "before" ? "Gestion manuelle avant Yaro FleetOS" : "Contrôle en direct avec Yaro FleetOS"}
+                  className="w-full h-[320px] sm:h-[400px] object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
+
+                {/* Badge flottant en bas de l'image */}
+                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md border shadow-lg ${
+                      tab === "before"
+                        ? "bg-rose-950/80 text-rose-300 border-rose-500/40"
+                        : "bg-emerald-950/80 text-emerald-300 border-emerald-500/40"
+                    }`}
+                  >
+                    {tab === "before" ? (
+                      <>
+                        <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                        Pertes de données & Surcharge mentale
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                        Contrôle 100% Digital & Sérénité
+                      </>
+                    )}
+                  </span>
+                  <span className="text-[11px] text-slate-300 bg-slate-950/70 px-2.5 py-1 rounded-full border border-white/10 backdrop-blur-md">
+                    Corridor Douala — Garoua
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Colonne Détails & Points Clés */}
+            <div className="lg:col-span-6 space-y-6">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-2">
+                  {tab === "before" ? "État des lieux sans logiciel" : "Expérience avec FleetOS"}
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">
+                  {tab === "before"
+                    ? "Le fardeau de la paperasse, des fiches égarées et des litiges"
+                    : "Un poste de commandement unifié, fluide et sans angle mort"}
+                </h3>
+                <p className="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
+                  {tab === "before"
+                    ? "Sans synchronisation en direct entre l'atelier, la route et la direction, chaque imprévu entraîne des retards coûteux, des litiges fournisseurs et une usure prématurée de la flotte."
+                    : "Grâce à la synchronisation WebSocket temps réel, les 9 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
+                </p>
+              </div>
+
+              {/* 4 Puces Comparatives */}
+              <div className="space-y-3 pt-2">
+                {tab === "before" ? (
+                  <>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/5 border border-rose-500/15">
+                      <XCircle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Manifestes & bons de livraison papier</span>
+                        <p className="text-xs text-slate-400 mt-0.5">Documents physiques égarés sur le trajet Douala - Ngaoundéré - Garoua, retards de validation.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/5 border border-rose-500/15">
+                      <XCircle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Stock atelier opaque & pièces introuvables</span>
+                        <p className="text-xs text-slate-400 mt-0.5">Camions immobilisés des jours entiers faute de pièces répertoriées ou commandées à temps.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/5 border border-rose-500/15">
+                      <XCircle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Anomalies de carburant invisibles</span>
+                        <p className="text-xs text-slate-400 mt-0.5">Surconsommations et écarts de litrage découverts trop tard, sans lien direct avec les kilomètres réels.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/5 border border-rose-500/15">
+                      <XCircle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Marge et rentabilité découvertes en fin de mois</span>
+                        <p className="text-xs text-slate-400 mt-0.5">La Direction navigue à vue sur les impayés et la rentabilité réelle de chaque client ou marchandise.</p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Traçabilité numérique intégrale des corridors</span>
+                        <p className="text-xs text-slate-300 mt-0.5">Feuilles de route numériques, relevés kilométriques départ/arrivée sur smartphone chauffeur.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">GMAO & 487 pièces en stock synchronisées</span>
+                        <p className="text-xs text-slate-300 mt-0.5">Alertes automatiques stock bas, sorties réservées pour les OT et historique pneus au kilomètre.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Contrôle 3 voies & détection anomalies carburant</span>
+                        <p className="text-xs text-slate-300 mt-0.5">Rapprochement automatique Bon de commande / Réception / Facture et alertes surconsommation.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-sm font-semibold text-white">Marge brute HT & Top rentabilité en temps réel</span>
+                        <p className="text-xs text-slate-300 mt-0.5">Dashboard exécutif pour le DG avec CA facturé, encaissé et board pack mensuel en PDF.</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Bouton d'action contextuel */}
+              <div className="pt-2">
+                {tab === "before" ? (
+                  <Button
+                    size="lg"
+                    onClick={() => setTab("after")}
+                    className="rounded-full h-11 px-6 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md transition-all duration-200 group active:scale-[0.98]"
+                  >
+                    Voir la transformation avec Yaro FleetOS <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </Button>
+                ) : (
+                  <Link href="/login">
+                    <Button
+                      size="lg"
+                      className="rounded-full h-11 px-7 text-sm font-semibold bg-white text-slate-950 hover:bg-slate-100 shadow-xl transition-all duration-200 group active:scale-[0.98]"
+                    >
+                      Accéder à la plateforme <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                    </Button>
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </section>
   );
 }
 
@@ -911,7 +1177,10 @@ export default function LandingPage() {
               Fonctionnalités
             </a>
             <a href="#profiles" className="hover:text-emerald-400 transition-colors">
-              7 Rôles Métier
+              9 Rôles Métier
+            </a>
+            <a href="#transformation" className="hover:text-emerald-400 transition-colors">
+              Transformation
             </a>
             <a href="#stats" className="hover:text-emerald-400 transition-colors">
               Chiffres Clés
@@ -987,7 +1256,7 @@ export default function LandingPage() {
                   <div className="text-xs text-slate-400">Traçabilité pièces & OT</div>
                 </div>
                 <div>
-                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">7 Rôles</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">9 Rôles</div>
                   <div className="text-xs text-slate-400">Interconnectés en direct</div>
                 </div>
               </div>
@@ -1014,13 +1283,13 @@ export default function LandingPage() {
               Gouvernance & Sécurité RBAC
             </Badge>
             <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
-              7 Profils Métier,{" "}
+              9 Profils Métier,{" "}
               <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
                 une collaboration fluide
               </span>
             </h2>
             <p className="text-slate-400 text-base md:text-lg mb-4 leading-relaxed">
-              Des accès sur mesure et une séparation rigoureuse des responsabilités pour chaque acteur de votre chaîne logistique.
+              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 9 rôles clés de votre organisation.
             </p>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-300">
               <Info className="h-3.5 w-3.5 text-emerald-400" />
@@ -1028,8 +1297,8 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Grille des 7 cartes de profils avec effets glassmorphism */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-20">
+          {/* Grille des 9 cartes de profils avec effets glassmorphism */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 mb-20">
             {userProfiles.map((profile, idx) => {
               const Icon = profile.icon;
               return (
@@ -1144,6 +1413,11 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Section Storytelling Transformation Avant / Après */}
+      <div id="transformation">
+        <StorytellingTransformationSection />
+      </div>
+
       <FeatureStorySection />
 
       {/* Section Statistiques — Dark Glassmorphic Translucide */}
@@ -1204,7 +1478,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="rounded-full h-12 sm:h-13 px-7 text-sm sm:text-base font-medium text-white border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 backdrop-blur-md transition-all duration-200 active:scale-[0.98] min-w-[200px]" asChild>
-                <a href="#profiles">Explorer les 7 rôles</a>
+                <a href="#profiles">Explorer les 9 rôles</a>
               </Button>
             </div>
 
@@ -1212,7 +1486,7 @@ export default function LandingPage() {
             <div className="pt-6 border-t border-white/10 flex flex-wrap items-center justify-center gap-6 text-xs sm:text-sm text-slate-400">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                <span>7 profils métier prêts à l'emploi</span>
+                <span>9 profils métier prêts à l'emploi</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />

@@ -41,6 +41,37 @@ Mots de passe documentés : voir **`docs/qa/COMPTES_ENVIRONNEMENT.md`** (tous le
 
 ---
 
+## Suivi d'exécution
+
+> Mettre à jour **cette table** au fil de la campagne : c'est le seul endroit à
+> lire pour savoir où on en est. Chaque parcours porte aussi son propre marqueur
+> d'état juste sous son titre.
+>
+> États : `À faire` · `En cours` · `✅ Fait` · `⚠️ Fait avec réserve` · `❌ Bloqué`
+
+| Parcours | État | Date | Testeur | Remarques |
+|---|---|---|---|---|
+| P0 — Contrôle d'accès par rôle | ✅ Fait | | | |
+| P1 — Référentiel de base | ✅ Fait | | | |
+| P2 — Maintenance inter-profils | En cours | | | |
+| P3 — Réapprovisionnement inter-profils | À faire | | | |
+| P4 — Opérations inter-profils | À faire | | | |
+| P5 — Conformité documentaire | À faire | | | |
+| P5b — Cycle de vie des pneus | À faire | | | |
+| P5c — Carburant et carte rechargeable | À faire | | | |
+| P5d — Renouvellement de documents | À faire | | | |
+| P5e — Catalogue des pannes | À faire | | | |
+| P6 — Connexions et activité récente | À faire | | | |
+| P7 — Consolidation dashboard + export | À faire | | | |
+
+### Anomalies relevées
+
+| ID | Parcours | Gravité | Description | État |
+|---|---|---|---|---|
+| | | | | |
+
+---
+
 ## Ordre d'exécution obligatoire
 
 | Ordre | Parcours | Dépend de |
@@ -69,6 +100,8 @@ Mots de passe documentés : voir **`docs/qa/COMPTES_ENVIRONNEMENT.md`** (tous le
 
 ## P0 — Contrôle d'accès par rôle
 
+**État : ✅ Fait**
+
 **But :** vérifier que les profils non-admin ne peuvent pas accéder à `/admin/dashboard`.
 
 | Étape | Profil connecté | Action | Résultat attendu |
@@ -82,6 +115,8 @@ Mots de passe documentés : voir **`docs/qa/COMPTES_ENVIRONNEMENT.md`** (tous le
 ---
 
 ## P1 — Référentiel de base
+
+**État : ✅ Fait**
 
 **But :** préparer les objets de référence qui alimenteront les parcours métiers.
 
@@ -433,6 +468,8 @@ GET /api/clients                 → ≥ 2 clients actifs
 
 ## P2 — Maintenance inter-profils (WO + pièces)
 
+**État : En cours**
+
 **But :** valider la chaîne Atelier: création WO par encadrement, exécution par technicien, impact stock.
 
 | Étape | Profil connecté | Action | Résultat attendu |
@@ -448,6 +485,8 @@ GET /api/clients                 → ≥ 2 clients actifs
 ---
 
 ## P3 — Réapprovisionnement inter-profils
+
+**État : À faire**
 
 **But :** valider les 2 parcours possibles :
 - **Flux magasin direct** (demande de pièce jusqu'à la réception/sortie stock)
@@ -478,6 +517,8 @@ avec les mêmes données.
 ---
 
 ## P4 — Opérations inter-profils (mission à paiement)
+
+**État : À faire**
 
 **But :** valider la chaîne client complète: mission, facturation, encaissement.
 
@@ -659,6 +700,8 @@ Si mission C exécutée en plus:
 
 ## P5 — Conformité documentaire
 
+**État : À faire**
+
 **But :** valider les alertes de conformité qui alimentent la zone "Alertes & urgences".
 
 | Étape | Profil connecté | Action | Résultat attendu |
@@ -671,6 +714,8 @@ Si mission C exécutée en plus:
 ---
 
 ## P5b — Cycle de vie des pneus (magasin ↔ atelier)
+
+**État : À faire**
 
 **But :** valider le module pneus en exploitation. P1 étape 2b crée **2 fiches**
 (admin + fatou) ; ce parcours teste ce qu'on en fait ensuite.
@@ -705,6 +750,8 @@ la feuille Excel PNEUMATIQUE (voir `AGENTS.md` §5, « RBAC pneus »).
 
 ## P5c — Carburant et carte rechargeable
 
+**État : À faire**
+
 **But :** valider le module carburant, absent des parcours jusqu'ici alors qu'il
 porte son propre service et une carte à solde.
 
@@ -725,6 +772,8 @@ porte son propre service et une carte à solde.
 ---
 
 ## P5d — Renouvellement de documents véhicules
+
+**État : À faire**
 
 **But :** valider le workflow qui prend le relais de P5. P5 s'arrête à l'alerte
 d'expiration ; ici on traite la demande jusqu'au document renouvelé.
@@ -753,6 +802,8 @@ document véhicule.
 ---
 
 ## P5e — Catalogue des pannes
+
+**État : À faire**
 
 **But :** valider le référentiel de pannes utilisé à la création d'un ordre de
 travail.
@@ -792,6 +843,8 @@ document doit décrire ce que l'application fait, pas ce qu'elle pourrait faire.
 
 ## P6 — Connexions utilisateurs et activité récente
 
+**État : À faire**
+
 **But :** valider la cohérence des données temporelles de connexion et du feed multi-modules.
 
 | Étape | Profil connecté | Action | Résultat attendu |
@@ -805,6 +858,8 @@ document doit décrire ce que l'application fait, pas ce qu'elle pourrait faire.
 ---
 
 ## P7 — Consolidation dashboard admin + export mensuel
+
+**État : À faire**
 
 **But :** vérifier la cohérence globale après enchaînement des parcours.
 

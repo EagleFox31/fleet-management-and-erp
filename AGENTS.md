@@ -257,6 +257,13 @@ Exemple réel (août 2026) : `canRoleEvaluateSupplierCategory` importé deux foi
 `client/src/pages/procurement/suppliers/[id].tsx` après fusion de blocs d'imports
 sans suppression de l'original.
 
+### Source unique des rôles
+
+Le type `AppRole` et la liste `ALL_APP_ROLES` vivent dans `shared/constants/roles.ts`
+et se **dérivent du schéma** (`users.role.enumValues`). Ne pas redéclarer une liste
+de rôles locale : ajouter un rôle dans `shared/schema.ts` suffit, sauf libellés UI
+(`getRoleLabel`, formulaire admin).
+
 ---
 
 ## 8. Vérifications avant de rendre la main
@@ -273,10 +280,9 @@ Arborescence et règles : `tests/README.md`. Ne pas colocaliser de `*.test.ts` d
 
 Notes :
 
-- `npm run check` remonte actuellement 2 erreurs préexistantes non liées aux
-  changements récents : `client/src/pages/maintenance/interventions.tsx` (typage
-  `LucideIcon`) et `server/services/parts-service.ts` (`conditions` inféré
-  `never[]`). Toute erreur supplémentaire vient de la modification en cours.
+- Lancer **`npm run check` sur tout le projet** — ne pas filtrer la sortie sur ses
+  seuls fichiers pour conclure « c'est bon ». Le décompte qui vaut : zéro `error TS`
+  global.
 - `npx playwright` ne fonctionne pas ici : les shims de `node_modules/.bin` font
   0 octet (dépendances installées sous Linux puis copiées). Utiliser
   `node node_modules/@playwright/test/cli.js test`.
