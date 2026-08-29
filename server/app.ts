@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import compression from "compression";
 import path from "path";
 import type { Server } from "http";
 import { registerRoutes } from "./routes";
@@ -25,6 +26,11 @@ export async function createApp(
   const initializeDb = options.initializeDb !== false;
 
   const app = express();
+
+  // Compression avant tout le reste: le JSON des listes se réduit de 80 à 90 %,
+  // et la liaison vers ce déploiement est lente (≈475 ms d'aller-retour Neon
+  // mesurés). C'est le gain le moins cher de la chaîne.
+  app.use(compression());
   app.disable("etag");
 
   app.use((req, res, next) => {

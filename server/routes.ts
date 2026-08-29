@@ -169,17 +169,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const currentLoginAt = new Date();
       const currentLoginCount = Number(user.loginCount ?? 0) + 1;
-      try {
-        await db
-          .update(users)
-          .set({
-            lastLoginAt: currentLoginAt,
-            loginCount: currentLoginCount,
-          })
-          .where(eq(users.id, user.id));
-      } catch (lastLoginError) {
-        console.error("Update last login error:", lastLoginError);
-      }
+      // Télémétrie de connexion: elle ne conditionne rien et ne doit pas
+      // retarder l'entrée dans l'application. Sur cette liaison (~475 ms
+      // d'aller-retour), l'attendre coûtait une demi-seconde à chaque login.
+      // Lancée sans await; un échec se journalise sans bloquer l'utilisateur.
+      void db
+        .update(users)
+        .set({
+          lastLoginAt: currentLoginAt,
+          loginCount: currentLoginCount,
+        })
+        .where(eq(users.id, user.id))
+        .catch((lastLoginError) => {
+          console.error("Update last login error:", lastLoginError);
+        });
       
       // Set user session and persist it BEFORE returning response.
       // This avoids race conditions where frontend redirects before session is stored.

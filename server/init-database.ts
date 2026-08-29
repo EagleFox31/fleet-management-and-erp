@@ -78,6 +78,13 @@ async function applyPerformanceIndexes() {
     `CREATE INDEX IF NOT EXISTS idx_document_renewal_requests_vehicle_status ON document_renewal_requests (vehicle_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_document_renewal_requests_document_status ON document_renewal_requests (vehicle_document_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_document_renewal_requests_created_at ON document_renewal_requests (created_at DESC)`,
+
+    // Dashboard Direction — filtres par date
+    `CREATE INDEX IF NOT EXISTS idx_client_invoices_invoice_date_status ON client_invoices (invoice_date, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_fuel_records_date ON fuel_records (date)`,
+    `CREATE INDEX IF NOT EXISTS idx_supplier_invoices_invoice_date_status ON supplier_invoices (invoice_date, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_missions_delivery_date_status ON missions (delivery_date, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_work_orders_completed_created_at ON work_orders (status, created_at) WHERE status = 'completed'`,
   ];
 
   for (const statement of indexStatements) {
