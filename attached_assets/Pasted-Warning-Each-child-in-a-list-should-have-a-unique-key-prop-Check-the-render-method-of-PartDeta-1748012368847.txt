@@ -1,0 +1,482 @@
+Warning: Each child in a list should have a unique "key" prop.
+
+Check the render method of `PartDetails`. See https://reactjs.org/link/warning-keys for more information.
+    at div
+    at PartDetails (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/inventory/[id].tsx:58:39)
+    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:52:36)
+    at main
+    at div
+    at div
+    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx:19:22)
+    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:323:16)
+    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:379:17)
+    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=c565e313:38:15)
+    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=c565e313:63:5)
+    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=c565e313:2805:3)
+    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:98:29)
+printWarning @ react_jsx-dev-runtime.js?v=c565e313:64
+error @ react_jsx-dev-runtime.js?v=c565e313:48
+validateExplicitKey @ react_jsx-dev-runtime.js?v=c565e313:724
+validateChildKeys @ react_jsx-dev-runtime.js?v=c565e313:737
+jsxWithValidation @ react_jsx-dev-runtime.js?v=c565e313:855
+PartDetails @ [id].tsx:1737
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=c565e313:14582
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15924
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19753
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18874
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=c565e313:555
+flush @ @tanstack_react-query.js?v=c565e313:569
+batch @ @tanstack_react-query.js?v=c565e313:587
+dispatch_fn @ @tanstack_react-query.js?v=c565e313:996
+setData @ @tanstack_react-query.js?v=c565e313:696
+onSuccess @ @tanstack_react-query.js?v=c565e313:897
+resolve @ @tanstack_react-query.js?v=c565e313:456
+Promise.then
+run @ @tanstack_react-query.js?v=c565e313:498
+start @ @tanstack_react-query.js?v=c565e313:536
+fetch @ @tanstack_react-query.js?v=c565e313:926
+executeFetch_fn @ @tanstack_react-query.js?v=c565e313:2211
+onSubscribe @ @tanstack_react-query.js?v=c565e313:1898
+subscribe @ @tanstack_react-query.js?v=c565e313:24
+(anonymous) @ @tanstack_react-query.js?v=c565e313:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=c565e313:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=c565e313:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=c565e313:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=c565e313:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=c565e313:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=c565e313:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19416
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627Understand this error
+queryClient.ts:54 URL de requête complète: /api/fuel-records
+index.tsx?t=1748012209256:95 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx?t=1748012209256:95:43
+    at updateMemo (chunk-RPCDYKBN.js?v=c565e313:12210:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12726:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx?t=1748012209256:91:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=c565e313:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15924:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=c565e313:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=c565e313:3699:24)
+(anonymous) @ index.tsx?t=1748012209256:95
+updateMemo @ chunk-RPCDYKBN.js?v=c565e313:12210
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12726
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx?t=1748012209256:91
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=c565e313:14582
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15924
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18874
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=c565e313:555
+flush @ @tanstack_react-query.js?v=c565e313:569
+batch @ @tanstack_react-query.js?v=c565e313:587
+dispatch_fn @ @tanstack_react-query.js?v=c565e313:996
+setData @ @tanstack_react-query.js?v=c565e313:696
+onSuccess @ @tanstack_react-query.js?v=c565e313:897
+resolve @ @tanstack_react-query.js?v=c565e313:456
+Promise.then
+run @ @tanstack_react-query.js?v=c565e313:498
+start @ @tanstack_react-query.js?v=c565e313:536
+fetch @ @tanstack_react-query.js?v=c565e313:926
+executeFetch_fn @ @tanstack_react-query.js?v=c565e313:2211
+onSubscribe @ @tanstack_react-query.js?v=c565e313:1898
+subscribe @ @tanstack_react-query.js?v=c565e313:24
+(anonymous) @ @tanstack_react-query.js?v=c565e313:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=c565e313:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=c565e313:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=c565e313:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=c565e313:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=c565e313:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=c565e313:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19416
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+flushSync @ chunk-RPCDYKBN.js?v=c565e313:18959
+scheduleRefresh @ chunk-RPCDYKBN.js?v=c565e313:20004
+(anonymous) @ @react-refresh:267
+performReactRefresh @ @react-refresh:256
+(anonymous) @ @react-refresh:677
+setTimeout
+(anonymous) @ @react-refresh:666
+validateRefreshBoundaryAndEnqueueUpdate @ @react-refresh:728
+(anonymous) @ index.tsx?t=1748012187203:1107
+(anonymous) @ client:34
+(anonymous) @ client:218
+(anonymous) @ client:193
+queueUpdate @ client:193
+await in queueUpdate
+(anonymous) @ client:642
+handleMessage @ client:640
+(anonymous) @ client:550Understand this error
+index.tsx?t=1748012209256:95 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx?t=1748012209256:95:43
+    at updateMemo (chunk-RPCDYKBN.js?v=c565e313:12210:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12726:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx?t=1748012209256:91:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=c565e313:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15924:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=c565e313:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=c565e313:3699:24)
+(anonymous) @ index.tsx?t=1748012209256:95
+updateMemo @ chunk-RPCDYKBN.js?v=c565e313:12210
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12726
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx?t=1748012209256:91
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=c565e313:14582
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15924
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=c565e313:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=c565e313:555
+flush @ @tanstack_react-query.js?v=c565e313:569
+batch @ @tanstack_react-query.js?v=c565e313:587
+dispatch_fn @ @tanstack_react-query.js?v=c565e313:996
+setData @ @tanstack_react-query.js?v=c565e313:696
+onSuccess @ @tanstack_react-query.js?v=c565e313:897
+resolve @ @tanstack_react-query.js?v=c565e313:456
+Promise.then
+run @ @tanstack_react-query.js?v=c565e313:498
+start @ @tanstack_react-query.js?v=c565e313:536
+fetch @ @tanstack_react-query.js?v=c565e313:926
+executeFetch_fn @ @tanstack_react-query.js?v=c565e313:2211
+onSubscribe @ @tanstack_react-query.js?v=c565e313:1898
+subscribe @ @tanstack_react-query.js?v=c565e313:24
+(anonymous) @ @tanstack_react-query.js?v=c565e313:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=c565e313:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=c565e313:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=c565e313:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=c565e313:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=c565e313:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=c565e313:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19416
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+flushSync @ chunk-RPCDYKBN.js?v=c565e313:18959
+scheduleRefresh @ chunk-RPCDYKBN.js?v=c565e313:20004
+(anonymous) @ @react-refresh:267
+performReactRefresh @ @react-refresh:256
+(anonymous) @ @react-refresh:677
+setTimeout
+(anonymous) @ @react-refresh:666
+validateRefreshBoundaryAndEnqueueUpdate @ @react-refresh:728
+(anonymous) @ index.tsx?t=1748012187203:1107
+(anonymous) @ client:34
+(anonymous) @ client:218
+(anonymous) @ client:193
+queueUpdate @ client:193
+await in queueUpdate
+(anonymous) @ client:642
+handleMessage @ client:640
+(anonymous) @ client:550Understand this error
+@react-refresh:267 The above error occurred in the <TechniciansIndex> component:
+
+    at TechniciansIndex (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/technicians/index.tsx?t=1748012209256:53:21)
+    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:52:36)
+    at main
+    at div
+    at div
+    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx:19:22)
+    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:323:16)
+    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:379:17)
+    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=c565e313:38:15)
+    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=c565e313:63:5)
+    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=c565e313:2805:3)
+    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:98:29)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+logCapturedError @ chunk-RPCDYKBN.js?v=c565e313:14032
+update.callback @ chunk-RPCDYKBN.js?v=c565e313:14052
+callCallback @ chunk-RPCDYKBN.js?v=c565e313:11248
+commitUpdateQueue @ chunk-RPCDYKBN.js?v=c565e313:11265
+commitLayoutEffectOnFiber @ chunk-RPCDYKBN.js?v=c565e313:17093
+commitLayoutMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:17980
+commitLayoutEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:17969
+commitLayoutEffects @ chunk-RPCDYKBN.js?v=c565e313:17920
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19353
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=c565e313:555
+flush @ @tanstack_react-query.js?v=c565e313:569
+batch @ @tanstack_react-query.js?v=c565e313:587
+dispatch_fn @ @tanstack_react-query.js?v=c565e313:996
+setData @ @tanstack_react-query.js?v=c565e313:696
+onSuccess @ @tanstack_react-query.js?v=c565e313:897
+resolve @ @tanstack_react-query.js?v=c565e313:456
+Promise.then
+run @ @tanstack_react-query.js?v=c565e313:498
+start @ @tanstack_react-query.js?v=c565e313:536
+fetch @ @tanstack_react-query.js?v=c565e313:926
+executeFetch_fn @ @tanstack_react-query.js?v=c565e313:2211
+onSubscribe @ @tanstack_react-query.js?v=c565e313:1898
+subscribe @ @tanstack_react-query.js?v=c565e313:24
+(anonymous) @ @tanstack_react-query.js?v=c565e313:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=c565e313:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=c565e313:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=c565e313:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=c565e313:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=c565e313:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=c565e313:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19416
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+flushSync @ chunk-RPCDYKBN.js?v=c565e313:18959
+scheduleRefresh @ chunk-RPCDYKBN.js?v=c565e313:20004
+(anonymous) @ @react-refresh:267
+performReactRefresh @ @react-refresh:256
+(anonymous) @ @react-refresh:677
+setTimeout
+(anonymous) @ @react-refresh:666
+validateRefreshBoundaryAndEnqueueUpdate @ @react-refresh:728
+(anonymous) @ index.tsx?t=1748012187203:1107
+(anonymous) @ client:34
+(anonymous) @ client:218
+(anonymous) @ client:193
+queueUpdate @ client:193
+await in queueUpdate
+(anonymous) @ client:642
+handleMessage @ client:640
+(anonymous) @ client:550Understand this error
+chunk-RPCDYKBN.js?v=c565e313:9129 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx?t=1748012209256:95:43
+    at updateMemo (chunk-RPCDYKBN.js?v=c565e313:12210:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12726:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx?t=1748012209256:91:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=c565e313:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15924:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=c565e313:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=c565e313:19198:20)
+(anonymous) @ index.tsx?t=1748012209256:95
+updateMemo @ chunk-RPCDYKBN.js?v=c565e313:12210
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12726
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx?t=1748012209256:91
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=c565e313:14582
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15924
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19753
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=c565e313:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=c565e313:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=c565e313:555
+flush @ @tanstack_react-query.js?v=c565e313:569
+batch @ @tanstack_react-query.js?v=c565e313:587
+dispatch_fn @ @tanstack_react-query.js?v=c565e313:996
+setData @ @tanstack_react-query.js?v=c565e313:696
+onSuccess @ @tanstack_react-query.js?v=c565e313:897
+resolve @ @tanstack_react-query.js?v=c565e313:456
+Promise.then
+run @ @tanstack_react-query.js?v=c565e313:498
+start @ @tanstack_react-query.js?v=c565e313:536
+fetch @ @tanstack_react-query.js?v=c565e313:926
+executeFetch_fn @ @tanstack_react-query.js?v=c565e313:2211
+onSubscribe @ @tanstack_react-query.js?v=c565e313:1898
+subscribe @ @tanstack_react-query.js?v=c565e313:24
+(anonymous) @ @tanstack_react-query.js?v=c565e313:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=c565e313:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=c565e313:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=c565e313:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=c565e313:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=c565e313:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=c565e313:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19416
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=c565e313:9119
+flushSync @ chunk-RPCDYKBN.js?v=c565e313:18959
+scheduleRefresh @ chunk-RPCDYKBN.js?v=c565e313:20004
+(anonymous) @ @react-refresh:267
+performReactRefresh @ @react-refresh:256
+(anonymous) @ @react-refresh:677
+setTimeout
+(anonymous) @ @react-refresh:666
+validateRefreshBoundaryAndEnqueueUpdate @ @react-refresh:728
+(anonymous) @ index.tsx?t=1748012187203:1107
+(anonymous) @ client:34
+(anonymous) @ client:218
+(anonymous) @ client:193
+queueUpdate @ client:193
+await in queueUpdate
+(anonymous) @ client:642
+handleMessage @ client:640
+(anonymous) @ client:550Understand this error
+index.tsx:98 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx:98:43
+    at mountMemo (chunk-RPCDYKBN.js?v=c565e313:12194:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12518:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx:92:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=c565e313:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=c565e313:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=c565e313:3699:24)
+(anonymous) @ index.tsx:98
+mountMemo @ chunk-RPCDYKBN.js?v=c565e313:12194
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12518
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx:92
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=c565e313:14926
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15914
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18678
+workLoop @ chunk-RPCDYKBN.js?v=c565e313:197
+flushWork @ chunk-RPCDYKBN.js?v=c565e313:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=c565e313:384Understand this error
+index.tsx:98 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx:98:43
+    at mountMemo (chunk-RPCDYKBN.js?v=c565e313:12194:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12518:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx:92:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=c565e313:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=c565e313:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=c565e313:3699:24)
+(anonymous) @ index.tsx:98
+mountMemo @ chunk-RPCDYKBN.js?v=c565e313:12194
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12518
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx:92
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=c565e313:14926
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15914
+callCallback2 @ chunk-RPCDYKBN.js?v=c565e313:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=c565e313:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=c565e313:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=c565e313:18736
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18684
+workLoop @ chunk-RPCDYKBN.js?v=c565e313:197
+flushWork @ chunk-RPCDYKBN.js?v=c565e313:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=c565e313:384Understand this error
+chunk-RPCDYKBN.js?v=c565e313:14032 The above error occurred in the <TechniciansIndex> component:
+
+    at TechniciansIndex (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/pages/technicians/index.tsx?t=1748012260621:54:21)
+    at PrivateRoute (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:52:36)
+    at main
+    at div
+    at div
+    at AppLayout (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/components/layout/app-layout.tsx:19:22)
+    at Route (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:323:16)
+    at Switch (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=c565e313:379:17)
+    at VehicleProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/context/vehicle-context.tsx:20:35)
+    at Provider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=c565e313:38:15)
+    at TooltipProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=c565e313:63:5)
+    at QueryClientProvider (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=c565e313:2805:3)
+    at App (https://19ed0e72-a25b-49d6-ae49-328fc817efe7-00-opkcfcegypi2.janeway.replit.dev/src/App.tsx?v=F0nSfxlnuj0pBGETPhVAt:98:29)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+logCapturedError @ chunk-RPCDYKBN.js?v=c565e313:14032
+update.callback @ chunk-RPCDYKBN.js?v=c565e313:14052
+callCallback @ chunk-RPCDYKBN.js?v=c565e313:11248
+commitUpdateQueue @ chunk-RPCDYKBN.js?v=c565e313:11265
+commitLayoutEffectOnFiber @ chunk-RPCDYKBN.js?v=c565e313:17093
+commitLayoutMountEffects_complete @ chunk-RPCDYKBN.js?v=c565e313:17980
+commitLayoutEffects_begin @ chunk-RPCDYKBN.js?v=c565e313:17969
+commitLayoutEffects @ chunk-RPCDYKBN.js?v=c565e313:17920
+commitRootImpl @ chunk-RPCDYKBN.js?v=c565e313:19353
+commitRoot @ chunk-RPCDYKBN.js?v=c565e313:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=c565e313:18760
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18718
+workLoop @ chunk-RPCDYKBN.js?v=c565e313:197
+flushWork @ chunk-RPCDYKBN.js?v=c565e313:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=c565e313:384Understand this error
+chunk-RPCDYKBN.js?v=c565e313:19413 Uncaught TypeError: workOrders.filter is not a function
+    at index.tsx:98:43
+    at mountMemo (chunk-RPCDYKBN.js?v=c565e313:12194:27)
+    at Object.useMemo (chunk-RPCDYKBN.js?v=c565e313:12518:24)
+    at useMemo (chunk-QCHXOAYK.js?v=c565e313:1094:29)
+    at TechniciansIndex (index.tsx:92:22)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=c565e313:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=c565e313:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=c565e313:15914:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=c565e313:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=c565e313:19198:20)
+(anonymous) @ index.tsx:98
+mountMemo @ chunk-RPCDYKBN.js?v=c565e313:12194
+useMemo @ chunk-RPCDYKBN.js?v=c565e313:12518
+useMemo @ chunk-QCHXOAYK.js?v=c565e313:1094
+TechniciansIndex @ index.tsx:92
+renderWithHooks @ chunk-RPCDYKBN.js?v=c565e313:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=c565e313:14926
+beginWork @ chunk-RPCDYKBN.js?v=c565e313:15914
+beginWork$1 @ chunk-RPCDYKBN.js?v=c565e313:19753
+performUnitOfWork @ chunk-RPCDYKBN.js?v=c565e313:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=c565e313:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=c565e313:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=c565e313:18736
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=c565e313:18684
+workLoop @ chunk-RPCDYKBN.js?v=c565e313:197
+flushWork @ chunk-RPCDYKBN.js?v=c565e313:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=c565e313:384Understand this error
