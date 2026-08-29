@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { VEHICLE_STATUS_LABELS } from "@shared/constants/vehicle-status";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -118,9 +119,9 @@ export const translateStatus = (status: string | undefined): string => {
   if (!status) return "Inconnu";
   
   const statusMap: Record<string, string> = {
-    operational: "Opérationnel",
-    maintenance: "En maintenance", 
-    out_of_service: "Hors service",
+    // Statuts véhicule: délégués à la source partagée, que le serveur utilise
+    // aussi pour écrire l'historique. Ne pas les recopier ici.
+    ...VEHICLE_STATUS_LABELS,
     pending: "En attente",
     in_progress: "En cours",
     awaiting_parts: "Attente pièces",

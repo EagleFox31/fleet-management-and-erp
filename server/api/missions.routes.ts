@@ -6,6 +6,10 @@ import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService } from "../services/fuel-card-service";
 import { storage } from "../storage";
 import { z } from "zod";
+import {
+  getMissionEligibility,
+  formatEligibilityRefusal,
+} from "@shared/constants/vehicle-eligibility";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -1712,6 +1716,10 @@ router.post("/", async (req, res) => {
           id: vehicles.id,
           registrationNumber: vehicles.registrationNumber,
           tonnage: vehicles.tonnage,
+          status: vehicles.status,
+          insuranceExpiry: vehicles.insuranceExpiry,
+          technicalInspectionDate: vehicles.technicalInspectionDate,
+          licensePlateExpiry: vehicles.licensePlateExpiry,
         })
         .from(vehicles)
         .where(eq(vehicles.id, assignmentVehicleId))
@@ -1719,6 +1727,22 @@ router.post("/", async (req, res) => {
 
       if (!selectedVehicle) {
         return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
+      }
+
+      // Le filtre de l'écran de création ne portait que sur `status`, et
+      // seulement côté client: l'API acceptait n'importe quel véhicule, y
+      // compris un camion à l'atelier ou sans assurance valide. Le refus vit
+      // ici, et nomme chaque motif — « à l'atelier » et « plus d'assurance »
+      // n'appellent pas la même action du logisticien.
+      const eligibilite = getMissionEligibility(selectedVehicle);
+      if (!eligibilite.eligible) {
+        return res.status(400).json({
+          message: formatEligibilityRefusal(
+            selectedVehicle.registrationNumber,
+            eligibilite.blockers,
+          ),
+          blockers: eligibilite.blockers,
+        });
       }
 
       const [selectedDriver] = await db

@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
 import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
+import { vehicleStatusService } from "./vehicle-status-service";
+import { describeStatusChange } from "@shared/constants/vehicle-status";
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -131,7 +133,9 @@ export class PreventiveMaintenanceService {
       const generatedWorkOrders: WorkOrder[] = [];
 
       for (const vehicle of vehiclesToCheck) {
-        let createdForVehicle = false;
+        // On garde l'OT declencheur, pas juste un booleen: l'historique de
+        // statut doit pouvoir nommer la cause de l'immobilisation.
+        let declencheur: WorkOrder | null = null;
 
         // Vérifier nextMaintenanceDate (seulement si alertType absent ou === 'maintenance')
         if (!alertType || alertType === 'maintenance') {
@@ -145,7 +149,7 @@ export class PreventiveMaintenanceService {
                 'maintenance',
                 createdBy
               );
-              if (workOrder) { generatedWorkOrders.push(workOrder); createdForVehicle = true; }
+              if (workOrder) { generatedWorkOrders.push(workOrder); declencheur = declencheur ?? workOrder; }
             }
           }
         }
@@ -201,13 +205,18 @@ export class PreventiveMaintenanceService {
           }
         }
 
-        // Mise à jour statut véhicule → "maintenance" si un OT de maintenance a été créé
-        if (createdForVehicle && vehicle.status === 'operational') {
-          await db
-            .update(vehicles)
-            .set({ status: 'maintenance' })
-            .where(eq(vehicles.id, vehicle.id));
-          console.log(`🔧 Statut véhicule ${vehicle.registrationNumber} → maintenance`);
+        // Immobilisation du véhicule: passer par `vehicleStatusService`, jamais
+        // par un `db.update` direct. Le service historise le changement dans
+        // `status_history` avec sa cause; l'écriture directe ne laissait qu'une
+        // ligne de log serveur, donc un véhicule en maintenance sans trace
+        // consultable ni OT visible à l'écran.
+        if (declencheur && vehicle.status === 'operational') {
+          await vehicleStatusService.setVehicleToMaintenance(
+            vehicle.id,
+            declencheur.id,
+            createdBy,
+            `${describeStatusChange("preventive", "maintenance", vehicle.status)} — OT #${declencheur.id} généré automatiquement`,
+          );
         }
       }
 

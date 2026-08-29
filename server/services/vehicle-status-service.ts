@@ -1,6 +1,7 @@
 import { eq, gte, count, sql } from "drizzle-orm";
 import { db } from "../db";
 import { vehicles, statusHistory, workOrders, fleetKpiCache, users } from "@shared/schema";
+import { describeStatusChange } from "@shared/constants/vehicle-status";
 
 export class VehicleStatusService {
   
@@ -207,7 +208,10 @@ export class VehicleStatusService {
         vehicleId: vehicleId,
         status: newStatus as any,
         date: validDate,
-        notes: reason || `Statut changé automatiquement de ${oldStatus} à ${newStatus}`,
+        // Sans raison explicite, on ne prétend pas connaître l'origine: le
+        // libellé précédent affirmait « automatiquement » y compris quand un
+        // humain venait de cliquer dans la fiche véhicule.
+        notes: reason || describeStatusChange("system", newStatus, oldStatus),
         updatedById: updatedById || null,
       });
 
@@ -220,7 +224,18 @@ export class VehicleStatusService {
   /**
    * Change automatiquement le statut d'un véhicule en maintenance
    */
-  async setVehicleToMaintenance(vehicleId: number, workOrderId: number, updatedById?: number): Promise<void> {
+  async setVehicleToMaintenance(
+    vehicleId: number,
+    workOrderId: number,
+    updatedById?: number,
+    /**
+     * Cause de l'immobilisation, telle qu'elle sera lue dans l'historique.
+     * Par defaut: OT cree manuellement. Le declencheur preventif passe la
+     * sienne — sans quoi rien ne distingue « le chef a ouvert un OT » de
+     * « le planificateur a immobilise le camion tout seul ».
+     */
+    raison?: string,
+  ): Promise<void> {
     try {
       const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
       if (!vehicle || vehicle.status === 'maintenance') return;
@@ -233,7 +248,7 @@ export class VehicleStatusService {
         'maintenance', 
         vehicle.status, 
         updatedById,
-        `Véhicule passé en maintenance - Ordre de travail #${workOrderId} créé`
+        raison ?? `Véhicule passé en maintenance - Ordre de travail #${workOrderId} créé`,
       );
     } catch (error) {
       console.error('Erreur lors du passage en maintenance:', error);
