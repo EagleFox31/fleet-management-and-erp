@@ -1,5 +1,30 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+/**
+ * Résout les URLs d'API relatives en URLs complètes lorsque l'application s'exécute
+ * dans un wrapper natif Android APK (Capacitor) ou dans un environnement multi-origines.
+ */
+export function resolveApiUrl(path: string): string {
+  if (
+    !path ||
+    path.startsWith("http://") ||
+    path.startsWith("https://") ||
+    path.startsWith("blob:") ||
+    path.startsWith("data:")
+  ) {
+    return path;
+  }
+
+  const apiBase =
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
+    (typeof window !== "undefined" && (window as any).__FLEETOS_API_URL__) ||
+    "";
+
+  const normalizedBase = apiBase.replace(/\/$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return normalizedBase ? `${normalizedBase}${normalizedPath}` : normalizedPath;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -64,22 +89,23 @@ export async function apiRequest(
     method = a.toUpperCase();
     url = b;
     body = c;
-  // Signature: apiRequest("/api/...", "METHOD", data?)
+    // Signature: apiRequest("/api/...", "METHOD", data?)
   } else if (typeof b === "string" && isMethod(b)) {
     method = b.toUpperCase();
     url = a;
     body = c;
-  // Signature: apiRequest("/api/...", { method, body, ... })
+    // Signature: apiRequest("/api/...", { method, body, ... })
   } else if (typeof b === "object" && b !== null) {
     url = a;
     init = b;
     method = (b.method || "GET").toUpperCase();
     body = b.body;
-  // Signature: apiRequest("/api/...")
+    // Signature: apiRequest("/api/...")
   } else {
     url = a;
   }
 
+  const resolvedUrl = resolveApiUrl(url);
   const hasJsonBody = isBodyJsonSerializable(body);
   const serializedBody =
     typeof body === "string"
@@ -88,7 +114,7 @@ export async function apiRequest(
         ? JSON.stringify(body)
         : (body as BodyInit | null | undefined);
 
-  const res = await fetch(url, {
+  const res = await fetch(resolvedUrl, {
     ...init,
     method,
     headers: buildHeaders(init.headers, hasJsonBody),
@@ -119,29 +145,29 @@ export const getQueryFn: <T>(options: {
     // Récupère l'URL de base et les paramètres
     const baseUrl = queryKey[0] as string;
     const params = queryKey[1] as Record<string, any> | undefined;
-    
+
     // Construit l'URL avec les paramètres
     let url = baseUrl;
     if (params) {
       const searchParams = new URLSearchParams();
-      
+
       // Ajoute uniquement les paramètres qui ne sont pas undefined
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined) {
           searchParams.append(key, String(value));
         }
       });
-      
+
       // Ajoute les paramètres à l'URL si au moins un paramètre existe
       const searchString = searchParams.toString();
       if (searchString) {
         url = `${baseUrl}?${searchString}`;
       }
-      
-      console.log("URL de requête complète:", url);
     }
-    
-    const res = await fetch(url, {
+
+    const resolvedUrl = resolveApiUrl(url);
+
+    const res = await fetch(resolvedUrl, {
       credentials: "include",
       cache: "no-store",
       headers: {
@@ -152,8 +178,8 @@ export const getQueryFn: <T>(options: {
 
     // Some browsers can still serve conditional responses in dev; force a hard fetch.
     if (res.status === 304) {
-      const separator = url.includes("?") ? "&" : "?";
-      const freshRes = await fetch(`${url}${separator}_ts=${Date.now()}`, {
+      const separator = resolvedUrl.includes("?") ? "&" : "?";
+      const freshRes = await fetch(`${resolvedUrl}${separator}_ts=${Date.now()}`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -173,15 +199,17 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
+      networkMode: "offlineFirst", // Sert instantanément les données en cache si déconnecté
       staleTime: 5 * 60 * 1000, // Données fraîches pendant 5 minutes
-      gcTime: 10 * 60 * 1000, // Cache pendant 10 minutes
-      refetchOnWindowFocus: false, // Pas de rafraîchissement sur focus
-      refetchOnMount: true, // Rafraîchir lors du montage seulement
-      refetchOnReconnect: false, // Pas de rafraîchissement sur reconnexion
-      refetchInterval: false, // Pas de rafraîchissement automatique
-      retry: false,
+      gcTime: 24 * 60 * 60 * 1000, // Conserve le cache 24h
+      refetchOnWindowFocus: false,
+      refetchOnMount: true,
+      refetchOnReconnect: "always",
+      refetchInterval: false,
+      retry: 1,
     },
     mutations: {
+      networkMode: "offlineFirst",
       retry: false,
     },
   },

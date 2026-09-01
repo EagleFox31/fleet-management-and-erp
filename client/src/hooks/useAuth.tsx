@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useRef } from "react";
+import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
 import { login as apiLogin, logout as apiLogout, getCurrentUser, User, LoginCredentials } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -20,7 +20,7 @@ export const AuthContext = createContext<AuthContextValue>({
   logout: async () => {},
 });
 
-export function useAuthProvider() {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true); // bootstrap auth check
   const [isAuthenticating, setIsAuthenticating] = useState(false); // login/logout actions
@@ -135,7 +135,7 @@ export function useAuthProvider() {
     }
   };
 
-  return {
+  const value: AuthContextValue = {
     user,
     isLoading,
     isAuthenticating,
@@ -143,6 +143,8 @@ export function useAuthProvider() {
     login,
     logout,
   };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

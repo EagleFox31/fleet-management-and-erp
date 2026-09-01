@@ -43,6 +43,39 @@ export async function createApp(
     next();
   });
 
+  app.set("trust proxy", 1);
+
+  // Configuration CORS dynamique & sécurisée compatible cookies de session (Credentials: true)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      const allowedOrigins = [
+        "https://localhost",
+        "http://localhost",
+        "capacitor://localhost",
+        process.env.APP_URL,
+        process.env.CORS_ORIGIN,
+      ].filter(Boolean) as string[];
+
+      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin);
+      const isAllowed = allowedOrigins.includes(origin) || (process.env.NODE_ENV !== "production" && isLocalhost);
+
+      if (isAllowed) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Cookie");
+        res.setHeader("Vary", "Origin");
+      }
+    }
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+
+    next();
+  });
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

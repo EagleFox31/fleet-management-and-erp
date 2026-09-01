@@ -4,23 +4,28 @@ import { pool } from "../db";
 
 const PgSession = connectPgSimple(session);
 
+const isProduction = process.env.NODE_ENV === "production";
+const useCrossSiteCookies = process.env.ALLOW_CROSS_SITE_COOKIES === "true" || isProduction;
+
 /**
  * Shared session middleware instance with PostgreSQL storage
- * This ensures sessions persist across server restarts and hot reloads
+ * Compatible avec les requêtes inter-origines de l'APK Capacitor (https://localhost)
+ * et le web local / distant.
  */
 export const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || "YaroFleetOSSecretKey",
   resave: false,
   saveUninitialized: false,
-  cookie: { 
-    secure: false, // Allow cookies over HTTP in production for Replit
+  cookie: {
+    // Si sameSite vaut 'none', le cookie DOIT obligatoirement avoir secure: true
+    secure: useCrossSiteCookies,
     httpOnly: true,
-    sameSite: 'lax', // Allow cookies to be sent with GET requests
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    sameSite: useCrossSiteCookies ? "none" : "lax",
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
   },
   store: new PgSession({
     pool: pool,
-    tableName: 'session',
-    createTableIfMissing: true
-  })
+    tableName: "session",
+    createTableIfMissing: true,
+  }),
 });
