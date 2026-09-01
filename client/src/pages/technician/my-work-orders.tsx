@@ -15,6 +15,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
 import { useToast } from "@/hooks/use-toast";
 import { formatPrice, cn } from "@/lib/utils";
+import {
+  invalidateTechnicianWorkOrderQueries,
+  TECHNICIAN_MY_WORK_ORDERS_KEY,
+} from "@/lib/technician-work-orders-query";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 
@@ -47,10 +51,9 @@ export default function MyWorkOrdersPage() {
   const [mileageUpdate, setMileageUpdate] = useState<string>("");
 
   const { data: workOrdersData, isLoading } = useQuery<any>({
-    queryKey: ['/api/technician/work-orders', user?.id],
-    queryFn: () => fetch(`/api/technician/work-orders/${user?.id}`).then(res => res.json()),
-    enabled: !!user?.id,
-    staleTime: 30000,
+    queryKey: TECHNICIAN_MY_WORK_ORDERS_KEY,
+    enabled: !!user?.id && user?.role === "technician",
+    staleTime: 0,
   });
 
   const { data: partsData } = useQuery<any>({ queryKey: ['/api/parts'] });
@@ -76,9 +79,11 @@ export default function MyWorkOrdersPage() {
     },
     onSuccess: () => {
       toast({ title: "Statut mis à jour", description: "L'ordre de travail a été mis à jour avec succès." });
-      queryClient.invalidateQueries({ queryKey: ['/api/technician/work-orders', user?.id] });
+      invalidateTechnicianWorkOrderQueries(user?.id);
       if (selectedWorkOrder) {
+        queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${selectedWorkOrder.id}`] });
         queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${selectedWorkOrder.id}/parts`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/work-orders/vehicle/${selectedWorkOrder.vehicleId}`] });
         queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${selectedWorkOrder.vehicleId}`] });
       }
       setIsUpdateModalOpen(false);
@@ -142,19 +147,34 @@ export default function MyWorkOrdersPage() {
     switch (workOrder.status) {
       case 'pending':
         return (
-          <Button size="sm" onClick={() => handleUpdateStatus(workOrder, 'in_progress')} className="gap-1.5 text-xs h-8" data-help-target="tech-wo-start">
+          <Button
+            size="sm"
+            onClick={() => handleUpdateStatus(workOrder, 'in_progress')}
+            className="gap-1.5 text-xs h-8 flex-1 sm:flex-initial min-w-[120px] bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-xs"
+            data-help-target="tech-wo-start"
+          >
             <Play className="h-3.5 w-3.5" />
             Commencer
           </Button>
         );
       case 'in_progress':
         return (
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => handleUpdateStatus(workOrder, 'in_progress')} className="gap-1.5 text-xs h-8" data-help-target="tech-wo-update">
+          <div className="flex gap-2 flex-1 sm:flex-initial w-full sm:w-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleUpdateStatus(workOrder, 'in_progress')}
+              className="gap-1.5 text-xs h-8 flex-1 sm:flex-initial min-w-[110px]"
+              data-help-target="tech-wo-update"
+            >
               <Wrench className="h-3.5 w-3.5" />
               Mettre à jour
             </Button>
-            <Button size="sm" onClick={() => handleUpdateStatus(workOrder, 'completed')} className="gap-1.5 text-xs h-8">
+            <Button
+              size="sm"
+              onClick={() => handleUpdateStatus(workOrder, 'completed')}
+              className="gap-1.5 text-xs h-8 flex-1 sm:flex-initial min-w-[100px] bg-orange-600 hover:bg-orange-500 text-white font-medium shadow-xs"
+            >
               <CheckSquare className="h-3.5 w-3.5" />
               Terminer
             </Button>
@@ -175,21 +195,47 @@ export default function MyWorkOrdersPage() {
     }
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high':   return 'text-red-600';
-      case 'medium': return 'text-orange-600';
-      case 'low':    return 'text-green-600';
-      default:       return 'text-gray-600';
+  const getPriorityColor = (priority: string | undefined | null) => {
+    switch (priority?.toLowerCase()) {
+      case 'critical':
+      case 'critique':
+        return 'text-rose-600 font-bold';
+      case 'high':
+      case 'haute':
+      case 'elevee':
+      case 'élevée':
+        return 'text-red-600';
+      case 'medium':
+      case 'moyenne':
+        return 'text-orange-600';
+      case 'low':
+      case 'basse':
+      case 'faible':
+        return 'text-green-600';
+      default:
+        return 'text-gray-600';
     }
   };
 
-  const getPriorityLabel = (priority: string) => {
-    switch (priority) {
-      case 'high':   return 'Haute';
-      case 'medium': return 'Moyenne';
-      case 'low':    return 'Basse';
-      default:       return 'Non définie';
+  const getPriorityLabel = (priority: string | undefined | null) => {
+    switch (priority?.toLowerCase()) {
+      case 'critical':
+      case 'critique':
+        return 'Critique';
+      case 'high':
+      case 'haute':
+      case 'elevee':
+      case 'élevée':
+        return 'Haute';
+      case 'medium':
+      case 'moyenne':
+        return 'Moyenne';
+      case 'low':
+      case 'basse':
+      case 'faible':
+        return 'Basse';
+      default:
+        return 'Non définie';
     }
   };
 
@@ -211,21 +257,26 @@ export default function MyWorkOrdersPage() {
 
   const WorkOrderCard = ({ workOrder }: { workOrder: any }) => {
     const statusInfo = getStatusInfo(workOrder.status);
+    const isCritical = workOrder.priority?.toLowerCase() === 'critical' || workOrder.priority?.toLowerCase() === 'critique';
     return (
-      <CardShell className={cn(
-        workOrder.priority === 'high' ? "border-l-[3px] border-l-red-400" :
-        workOrder.priority === 'medium' ? "border-l-[3px] border-l-orange-400" :
-        "border-l-[3px] border-l-gray-200"
-      )}>
-        <div className="px-5 py-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-gray-900 truncate">{workOrder.title}</p>
-              <div className="flex items-center gap-1.5 mt-0.5 text-xs text-gray-400">
-                <Truck className="h-3 w-3" />
-                <span>{workOrder.vehicleRegistrationNumber}</span>
-                <span className="text-gray-200">•</span>
-                <span>{workOrder.vehicleBrand} {workOrder.vehicleModel}</span>
+      <CardShell
+        className={cn(
+          "w-full max-w-full overflow-hidden transition-all",
+          isCritical ? "border-l-[4px] border-l-rose-600 bg-rose-50/20 dark:bg-rose-950/20 shadow-xs" :
+          workOrder.priority === 'high' ? "border-l-[3px] border-l-red-500" :
+          workOrder.priority === 'medium' ? "border-l-[3px] border-l-orange-400" :
+          "border-l-[3px] border-l-gray-200"
+        )}
+      >
+        <div className="p-3.5 sm:px-5 sm:py-4 space-y-2.5 sm:space-y-3 min-w-0">
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{workOrder.title}</p>
+              <div className="flex items-center gap-1.5 mt-0.5 text-xs text-gray-500 dark:text-gray-400 truncate">
+                <Truck className="h-3 w-3 shrink-0" />
+                <span className="font-medium text-gray-700 dark:text-gray-300 shrink-0">{workOrder.vehicleRegistrationNumber}</span>
+                <span className="text-gray-300 dark:text-gray-600 shrink-0">•</span>
+                <span className="truncate">{workOrder.vehicleBrand} {workOrder.vehicleModel}</span>
               </div>
             </div>
             <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0", statusInfo.color)}>
@@ -234,31 +285,31 @@ export default function MyWorkOrdersPage() {
           </div>
 
           {workOrder.description && (
-            <p className="text-xs text-gray-500 line-clamp-2">{workOrder.description}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2 leading-relaxed">{workOrder.description}</p>
           )}
 
-          <div className="flex items-center gap-4 text-xs flex-wrap">
+          <div className="flex items-center gap-3 sm:gap-4 text-xs flex-wrap text-muted-foreground">
             <span className={cn("font-semibold", getPriorityColor(workOrder.priority))}>
               Priorité {getPriorityLabel(workOrder.priority)}
             </span>
             {workOrder.startDate && (
-              <span className="flex items-center gap-1 text-gray-400">
+              <span className="flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
                 {new Date(workOrder.startDate).toLocaleDateString('fr-FR')}
               </span>
             )}
-            <span className="ml-auto text-gray-700 font-semibold">{formatPrice(workOrder.cost || 0)}</span>
+            <span className="ml-auto text-gray-900 dark:text-gray-100 font-semibold">{formatPrice(workOrder.cost || 0)}</span>
           </div>
 
           {workOrder.diagnosis && (
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-0.5">Diagnostic</p>
-              <p className="text-xs text-blue-700 line-clamp-2">{workOrder.diagnosis}</p>
+            <div className="rounded-lg bg-blue-50/80 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-0.5">Diagnostic</p>
+              <p className="text-xs text-blue-800 dark:text-blue-200 line-clamp-2">{workOrder.diagnosis}</p>
             </div>
           )}
 
-          <div className="flex items-center gap-2 pt-1 flex-wrap">
-            <Button variant="outline" size="sm" asChild className="flex-1 text-xs h-8">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1 w-full">
+            <Button variant="outline" size="sm" asChild className="flex-1 min-w-[110px] text-xs h-8">
               <Link href={`/maintenance/work-orders/${workOrder.id}`}>Voir détails</Link>
             </Button>
             {getNextActionButton(workOrder)}
@@ -376,19 +427,19 @@ export default function MyWorkOrdersPage() {
 
       {/* Modal de mise à jour */}
       <Dialog open={isUpdateModalOpen} onOpenChange={setIsUpdateModalOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
+        <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-[650px] max-h-[88vh] flex flex-col p-0 overflow-hidden rounded-2xl mx-auto shadow-2xl border border-gray-200 dark:border-slate-800">
+          <DialogHeader className="p-4 sm:p-6 pb-3 shrink-0 border-b border-gray-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+            <DialogTitle className="text-base sm:text-lg">
               {newStatus === 'completed' ? "Terminer l'intervention" :
                selectedWorkOrder?.status === 'in_progress' && newStatus === 'in_progress' ? "Mettre à jour l'intervention" :
                "Commencer l'intervention"}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs sm:text-sm">
               {selectedWorkOrder && (
                 <>
-                  <span className="font-medium">{selectedWorkOrder.title}</span>
+                  <span className="font-medium text-foreground">{selectedWorkOrder.title}</span>
                   <br />
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {selectedWorkOrder.vehicleRegistrationNumber} • {selectedWorkOrder.vehicleBrand} {selectedWorkOrder.vehicleModel}
                   </span>
                 </>
@@ -396,9 +447,9 @@ export default function MyWorkOrdersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-6 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="notes">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="notes" className="text-xs sm:text-sm font-semibold">
                 {newStatus === 'completed' ? "Rapport d'intervention final" :
                  selectedWorkOrder?.status === 'in_progress' && newStatus === 'in_progress' ? "Mise à jour du diagnostic" :
                  "Diagnostic initial"}
@@ -415,28 +466,30 @@ export default function MyWorkOrdersPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
+                className="text-xs sm:text-sm resize-none rounded-xl"
               />
             </div>
 
             <Separator />
 
-            <div className="grid gap-2">
-              <Label htmlFor="mileage">Mise à jour du kilométrage (optionnel)</Label>
+            <div className="space-y-2">
+              <Label htmlFor="mileage" className="text-xs sm:text-sm font-semibold">Mise à jour du kilométrage (optionnel)</Label>
               <Input
                 id="mileage"
                 type="number"
                 placeholder={`Ex: ${selectedVehicleMileage !== null ? selectedVehicleMileage + 50 : '125000'}`}
                 value={mileageUpdate}
                 onChange={(e) => setMileageUpdate(e.target.value)}
+                className="rounded-xl text-xs sm:text-sm"
               />
               <div className={cn(
-                "rounded-md border px-3 py-2",
-                selectedVehicleMileage !== null ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
+                "rounded-xl border px-3 py-2",
+                selectedVehicleMileage !== null ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-900/50" : "border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/50"
               )}>
-                <p className={cn("text-[11px] font-medium uppercase tracking-wide", selectedVehicleMileage !== null ? "text-emerald-700" : "text-amber-700")}>
+                <p className={cn("text-[10px] font-semibold uppercase tracking-wide", selectedVehicleMileage !== null ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>
                   Kilométrage actuel véhicule
                 </p>
-                <p className={cn("text-lg font-bold", selectedVehicleMileage !== null ? "text-emerald-800" : "text-amber-800")}>
+                <p className={cn("text-base sm:text-lg font-bold", selectedVehicleMileage !== null ? "text-emerald-800 dark:text-emerald-200" : "text-amber-800 dark:text-amber-200")}>
                   {selectedVehicleMileage !== null ? `${selectedVehicleMileage.toLocaleString()} km` : "Non renseigné"}
                 </p>
               </div>
@@ -444,10 +497,10 @@ export default function MyWorkOrdersPage() {
 
             <Separator />
 
-            <div className="grid gap-4" data-help-target="tech-wo-parts">
+            <div className="space-y-3" data-help-target="tech-wo-parts">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-medium">Pièces utilisées</Label>
-                <span className="text-sm text-muted-foreground">{partsUsed.length} pièce(s) ajoutée(s)</span>
+                <Label className="text-xs sm:text-sm font-semibold">Pièces utilisées</Label>
+                <span className="text-xs text-muted-foreground">{partsUsed.length} pièce(s) ajoutée(s)</span>
               </div>
 
               {partsUsed.length > 0 && (
@@ -455,25 +508,28 @@ export default function MyWorkOrdersPage() {
                   {partsUsed.map((part, index) => {
                     const partInfo = Array.isArray(partsData?.parts) ? partsData.parts.find((p: any) => p.id.toString() === part.partId) : null;
                     return (
-                      <div key={part.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex-1">
-                          <div className="font-medium">{partInfo?.name || `Pièce #${part.partId}`}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Quantité: {part.quantity} {part.notes && `• Notes: ${part.notes}`}
+                      <div key={part.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700">
+                        <div className="flex-1 min-w-0 pr-2">
+                          <div className="font-semibold text-xs sm:text-sm truncate">{partInfo?.name || `Pièce #${part.partId}`}</div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            Quantité: {part.quantity} {part.notes && `• ${part.notes}`}
                           </div>
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => removePartFromList(index)}>Retirer</Button>
+                        <Button size="sm" variant="outline" onClick={() => removePartFromList(index)} className="h-7 text-xs text-rose-600 hover:bg-rose-50 rounded-lg shrink-0">
+                          Retirer
+                        </Button>
                       </div>
                     );
                   })}
                 </div>
               )}
 
-              <div className="grid grid-cols-12 gap-2 p-3 border rounded-lg">
-                <div className="col-span-5">
+              {/* Grille responsive : flex-col sur mobile, grid sur écran sm+ */}
+              <div className="flex flex-col sm:grid sm:grid-cols-12 gap-2 p-3 bg-slate-50/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl">
+                <div className="w-full sm:col-span-5">
                   <Label htmlFor="newPart" className="sr-only">Pièce</Label>
                   <Select value={newPartId} onValueChange={setNewPartId}>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full text-xs h-9 rounded-lg">
                       <SelectValue placeholder="Sélectionner une pièce" />
                     </SelectTrigger>
                     <SelectContent>
@@ -485,34 +541,40 @@ export default function MyWorkOrdersPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="col-span-2">
-                  <Label htmlFor="newQuantity" className="sr-only">Quantité</Label>
-                  <Input id="newQuantity" type="number" placeholder="Qté" value={newPartQuantity} onChange={(e) => setNewPartQuantity(e.target.value)} />
+                <div className="flex gap-2 sm:contents">
+                  <div className="flex-1 sm:col-span-2">
+                    <Label htmlFor="newQuantity" className="sr-only">Quantité</Label>
+                    <Input id="newQuantity" type="number" placeholder="Qté" value={newPartQuantity} onChange={(e) => setNewPartQuantity(e.target.value)} className="text-xs h-9 rounded-lg" />
+                  </div>
+                  <div className="flex-2 sm:col-span-3">
+                    <Label htmlFor="newPartNotes" className="sr-only">Notes</Label>
+                    <Input id="newPartNotes" placeholder="Notes (optionnel)" value={newPartNotes} onChange={(e) => setNewPartNotes(e.target.value)} className="text-xs h-9 rounded-lg" />
+                  </div>
                 </div>
-                <div className="col-span-3">
-                  <Label htmlFor="newPartNotes" className="sr-only">Notes</Label>
-                  <Input id="newPartNotes" placeholder="Notes (optionnel)" value={newPartNotes} onChange={(e) => setNewPartNotes(e.target.value)} />
-                </div>
-                <div className="col-span-2">
-                  <Button size="sm" onClick={addPartToList} disabled={!newPartId || !newPartQuantity} className="w-full">Ajouter</Button>
+                <div className="w-full sm:col-span-2">
+                  <Button size="sm" onClick={addPartToList} disabled={!newPartId || !newPartQuantity} className="w-full h-9 text-xs rounded-lg">
+                    Ajouter
+                  </Button>
                 </div>
               </div>
             </div>
 
             {newStatus === 'completed' && (
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-800">
+              <div className="p-3 bg-blue-50/90 dark:bg-blue-950/40 rounded-xl border border-blue-100 dark:border-blue-900/50">
+                <p className="text-xs text-blue-800 dark:text-blue-200 leading-relaxed">
                   <strong>Rappel :</strong> En terminant cette intervention, le statut du véhicule sera automatiquement mis à jour selon le type de maintenance effectuée.
                 </p>
               </div>
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUpdateModalOpen(false)}>Annuler</Button>
-            <Button onClick={confirmUpdateStatus} disabled={updateStatusMutation.isPending}>
+          <DialogFooter className="p-4 sm:p-6 pt-3 shrink-0 border-t border-gray-100 dark:border-slate-800 flex flex-col-reverse sm:flex-row gap-2 bg-slate-50/60 dark:bg-slate-900/60">
+            <Button variant="outline" onClick={() => setIsUpdateModalOpen(false)} className="w-full sm:w-auto text-xs h-9 rounded-xl">
+              Annuler
+            </Button>
+            <Button onClick={confirmUpdateStatus} disabled={updateStatusMutation.isPending} className="w-full sm:w-auto text-xs h-9 rounded-xl">
               {updateStatusMutation.isPending ? (
-                <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />Mise à jour...</>
+                <><div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current mr-2" />Mise à jour...</>
               ) : (
                 newStatus === 'completed' ? "Terminer l'intervention" :
                 selectedWorkOrder?.status === 'in_progress' && newStatus === 'in_progress' ? "Mettre à jour" :

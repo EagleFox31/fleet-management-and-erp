@@ -186,7 +186,7 @@ export interface IStorage {
   
   // Work order methods
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
-  getWorkOrdersByVehicleId(vehicleId: number): Promise<WorkOrder[]>;
+  getWorkOrdersByVehicleId(vehicleId: number): Promise<WorkOrderListItem[]>;
   getWorkOrdersByTechnicianId(technicianId: number): Promise<WorkOrder[]>;
   getWorkOrders(status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
   getWorkOrdersByOwner(ownerId: number, status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
@@ -1125,10 +1125,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(workOrders.id, id));
     return workOrder;
   }
-  async getWorkOrdersByVehicleId(vehicleId: number): Promise<WorkOrder[]> {
+  async getWorkOrdersByVehicleId(vehicleId: number): Promise<WorkOrderListItem[]> {
     return await db
-      .select()
+      .select({
+        id: workOrders.id,
+        vehicleId: workOrders.vehicleId,
+        vehicleRegistration: vehicles.registrationNumber,
+        vehicleBrand: vehicles.brand,
+        vehicleModel: vehicles.model,
+        vehicleRegistrationNumber: vehicles.registrationNumber,
+        technicianId: workOrders.technicianId,
+        technicianName: users.name,
+        title: workOrders.title,
+        description: workOrders.description,
+        diagnosis: workOrders.diagnosis,
+        status: workOrders.status,
+        priority: workOrders.priority,
+        startDate: workOrders.startDate,
+        endDate: workOrders.endDate,
+        duration: workOrders.duration,
+        cost: workOrders.cost,
+        isPreventive: workOrders.isPreventive,
+        isFirstVisit: workOrders.isFirstVisit,
+        maintenanceScheduleId: workOrders.maintenanceScheduleId,
+        createdAt: workOrders.createdAt,
+      })
       .from(workOrders)
+      .leftJoin(vehicles, eq(workOrders.vehicleId, vehicles.id))
+      .leftJoin(users, eq(workOrders.technicianId, users.id))
       .where(eq(workOrders.vehicleId, vehicleId))
       .orderBy(desc(workOrders.createdAt));
   }
@@ -1356,7 +1380,9 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return updatedWorkOrder;
+      // Retour enrichi (technicianName, createdByName…) — le `.returning()` brut
+      // laissait la fiche détail sur « Inconnu » après une affectation.
+      return await this.getWorkOrder(id);
     } catch (error) {
       console.error('Error updating work order:', error);
       throw new Error('Erreur lors de la mise à jour de l\'ordre de travail');

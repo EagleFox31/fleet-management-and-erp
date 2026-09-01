@@ -313,12 +313,12 @@ export default function NewMission() {
                 <h2 className="text-2xl font-bold">Trajet & Cargo</h2>
               </div>
 
-              {/* Pickup */}
+              {/* Enlèvement */}
               <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                <h3 className="font-semibold mb-4 text-blue-700 dark:text-blue-300">📍 Point de départ</h3>
+                <h3 className="font-semibold mb-4 text-blue-700 dark:text-blue-300">Point de départ</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="md:col-span-3 space-y-2">
-                    <Label htmlFor="pickupAddress">Adresse Pickup *</Label>
+                    <Label htmlFor="pickupAddress">Adresse d&apos;enlèvement *</Label>
                     <Input
                       id="pickupAddress"
                       value={formData.pickupAddress}
@@ -328,7 +328,7 @@ export default function NewMission() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="pickupDate">Date Pickup <span className="text-xs text-gray-500">(facultative)</span></Label>
+                    <Label htmlFor="pickupDate">Date d&apos;enlèvement <span className="text-xs text-gray-500">(facultative)</span></Label>
                     <Input
                       id="pickupDate"
                       type="date"
@@ -338,7 +338,7 @@ export default function NewMission() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="pickupTime">Heure Pickup <span className="text-xs text-gray-500">(facultative)</span></Label>
+                    <Label htmlFor="pickupTime">Heure d&apos;enlèvement <span className="text-xs text-gray-500">(facultative)</span></Label>
                     <Input
                       id="pickupTime"
                       type="time"
@@ -352,7 +352,7 @@ export default function NewMission() {
 
               {/* Delivery */}
               <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-                <h3 className="font-semibold mb-4 text-green-700 dark:text-green-300">🎯 Destination</h3>
+                <h3 className="font-semibold mb-4 text-green-700 dark:text-green-300">Destination</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="md:col-span-3 space-y-2">
                     <Label htmlFor="deliveryAddress">Adresse Livraison *</Label>

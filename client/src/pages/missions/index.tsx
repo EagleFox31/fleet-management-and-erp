@@ -167,7 +167,7 @@ export default function MissionsPage() {
                   <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">N° Commande</th>
                   <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Client</th>
                   <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Trajet</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Date Pickup</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Date enlèvement</th>
                   <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Date Livraison</th>
                   <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Véhicule</th>

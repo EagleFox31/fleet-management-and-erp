@@ -1,8 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
-  BarChart3, ClipboardList, Gauge, GraduationCap, Plus, TrendingUp,
-  UserCircle2, Users, Wrench, Package, AlertTriangle, CheckCircle2, XCircle, Truck,
+  BarChart3,
+  ClipboardList,
+  Gauge,
+  GraduationCap,
+  Plus,
+  TrendingUp,
+  UserCircle2,
+  Users,
+  Wrench,
+  Package,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Truck,
+  ArrowRight,
+  Clock,
+  Sparkles,
+  ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -15,7 +32,6 @@ import { VehicleStatusChart } from "@/components/charts/vehicle-status-chart";
 import { CPCUpdateForm } from "@/components/drivers/cpc-update-form";
 import { OverdueInvoicesAlert } from "@/components/dashboard/overdue-invoices-alert";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, SectionLabel, PremiumTabsNav } from "@/components/design-system";
-import { useLocation } from "wouter";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
@@ -63,9 +79,6 @@ export default function WorkshopManagerDashboard() {
   const workshopInProgressCount =
     Number(workOrderStats?.inProgress || 0) + Number(workOrderStats?.awaitingParts || 0);
 
-  // Repartition de la charge atelier. Le denominateur est la somme des trois
-  // segments affiches: compter les annules gonflerait le total sans que la
-  // barre les represente.
   const otEnAttente = Number(workOrderStats?.pending || 0);
   const otEnCours = workshopInProgressCount;
   const otTermines = Number(workOrderStats?.completed || 0);
@@ -102,8 +115,11 @@ export default function WorkshopManagerDashboard() {
     return {
       id: techId,
       name: tech?.name || tech?.username || `Technicien #${techId}`,
-      pendingCount: pending, inProgressCount: inProgress, awaitingPartsCount: awaiting,
-      completedCount: completed, activeCount: pending + inProgress + awaiting,
+      pendingCount: pending,
+      inProgressCount: inProgress,
+      awaitingPartsCount: awaiting,
+      completedCount: completed,
+      activeCount: pending + inProgress + awaiting,
     };
   }).sort((a: any, b: any) => b.activeCount - a.activeCount);
 
@@ -111,20 +127,29 @@ export default function WorkshopManagerDashboard() {
   const activeTechsCount = workloadByTechnician.filter((t: any) => t.activeCount > 0).length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* 1. Header Card Exécutif Atelier */}
       <HeaderCard
         moduleLabel="Tableau de bord · Chef d'Atelier"
-        title="Gestion de l'Atelier"
-        subtitle="Ordres de travail, équipe, inventaire et formations CPC"
+        title="Gestion &amp; Pilotage de l'Atelier"
+        subtitle="Supervision de la charge mécanique, disponibilité flotte, pièces détachées et certifications"
         icon={<Wrench className="h-5 w-5" />}
+        actions={
+          <Link href="/maintenance/work-orders/new">
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer">
+              <Plus className="h-4 w-4" />
+              Créer un OT
+            </Button>
+          </Link>
+        }
       >
         <KpiGrid columns={4}>
           <KpiTile
             data-testid="wm-kpi-vehicles-maintenance"
             label="Véhicules en maintenance"
-            featured // les camions immobilises sont son probleme numero un
+            featured
             value={`${maintenanceVehicles}/${totalVehicles}`}
-            subValue="maintenance / flotte"
+            subValue="immobilisés / total flotte"
             icon={<Wrench className="h-4 w-4" />}
             iconWrapperClassName={maintenanceVehicles > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
             onClick={() => setLocation("/vehicles")}
@@ -133,9 +158,6 @@ export default function WorkshopManagerDashboard() {
             data-testid="wm-kpi-compliance"
             label="Conformité maintenance"
             value={maintenanceComplianceTotal > 0 ? `${complianceRate.toFixed(0)}%` : "N/A"}
-            // Sans donnée, ne rien affirmer: le sous-titre disait « À jour »
-            // alors que rien n'avait été vérifié — `overdue` valait zéro parce
-            // que le calcul n'existait pas, pas parce que la flotte l'était.
             subValue={
               maintenanceComplianceTotal === 0
                 ? "Aucun entretien programmé"
@@ -159,9 +181,9 @@ export default function WorkshopManagerDashboard() {
             onClick={() => setLocation("/vehicles")}
           />
           <KpiTile
-            label="Alertes stock"
+            label="Alertes stock magasin"
             value={reorderAlertsCount}
-            subValue={`${stockRiskCount} sous seuil`}
+            subValue={`${stockRiskCount} références sous seuil`}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName={reorderAlertsCount > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
             valueClassName={reorderAlertsCount > 0 ? "text-amber-600" : undefined}
@@ -170,126 +192,207 @@ export default function WorkshopManagerDashboard() {
         </KpiGrid>
       </HeaderCard>
 
-      <Tabs defaultValue="workshop">
+      {/* 2. Navigation par Onglets Bento Modernes */}
+      <Tabs defaultValue="workshop" className="space-y-6">
         <PremiumTabsNav tabs={[
-          { value: "workshop", label: "Atelier", icon: <TabIcon icon={Wrench} /> },
-          { value: "inventory", label: "Inventaire", icon: <TabIcon icon={ClipboardList} /> },
-          { value: "team", label: "Équipe", icon: <TabIcon icon={Users} /> },
-          { value: "cpc", label: "CPC", icon: <TabIcon icon={GraduationCap} /> },
+          { value: "workshop", label: "Atelier & Charge", icon: <TabIcon icon={Wrench} /> },
+          { value: "inventory", label: "Inventaire & Pièces", icon: <TabIcon icon={Package} /> },
+          { value: "team", label: "Équipe & Techniciens", icon: <TabIcon icon={Users} /> },
+          { value: "cpc", label: "Certifications CPC", icon: <TabIcon icon={GraduationCap} /> },
         ]} />
 
-        {/* ── Atelier ── */}
-        <TabsContent value="workshop" className="space-y-4">
-          <CardShell>
-            <div className="px-5 py-4">
-              <div className="flex items-baseline justify-between gap-3">
-                <SectionLabel>Ordres de travail</SectionLabel>
-                <span className="text-xs text-gray-500">
-                  {otTotal} au total
-                  {otAnnules > 0 ? ` · ${otAnnules} annulé${otAnnules > 1 ? "s" : ""}` : ""}
-                </span>
-              </div>
-
-              {/* Barre de proportion: on lit la charge de l'atelier d'un coup
-                  d'oeil, ce que trois nombres cote a cote ne donnent pas. */}
-              <div className="mt-3 flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
-                {otTotal > 0 && (
-                  <>
-                    <div className="bg-blue-500" style={{ width: `${(otEnAttente / otTotal) * 100}%` }} />
-                    <div className="bg-orange-500" style={{ width: `${(otEnCours / otTotal) * 100}%` }} />
-                    <div className="bg-green-500" style={{ width: `${(otTermines / otTotal) * 100}%` }} />
-                  </>
-                )}
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-                {[
-                  { couleur: "bg-blue-500", libelle: "En attente", valeur: otEnAttente, statut: "pending" },
-                  { couleur: "bg-orange-500", libelle: "En cours", valeur: otEnCours, statut: "in_progress" },
-                  { couleur: "bg-green-500", libelle: "Terminés", valeur: otTermines, statut: "completed" },
-                ].map((segment) => (
-                  <button
-                    key={segment.statut}
-                    type="button"
-                    onClick={() => setLocation(`/maintenance/work-orders?status=${segment.statut}`)}
-                    className="group flex items-center gap-2 rounded-md px-1.5 py-1 -mx-1.5 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span className={`h-2.5 w-2.5 rounded-full ${segment.couleur}`} />
-                    <span className="text-sm text-gray-600 group-hover:text-gray-900">{segment.libelle}</span>
-                    <span className="text-base font-bold text-gray-900 tabular-nums">{segment.valeur}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Rien en cours alors que des OT attendent: c'est le signal le
-                  plus fort de l'ecran, il ne doit pas etre du meme gris que le reste. */}
-              {atelierArrete && (
-                <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-amber-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Aucune intervention en cours alors que {otEnAttente} attende{otEnAttente > 1 ? "nt" : ""} — l'atelier est à l'arrêt.
+        {/* ========================================================================= */}
+        {/* ONGLET 1 : Atelier & Charge Opérationnelle                                */}
+        {/* ========================================================================= */}
+        <TabsContent value="workshop" className="space-y-5">
+          {/* Bento Hero : Répartition de la Charge Atelier */}
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <SectionLabel>Charge Globale de l'Atelier</SectionLabel>
+                  {atelierArrete ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" /> Atelier à l'arrêt
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      <Zap className="h-3 w-3" /> Atelier en activité
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Visualisation en temps réel de l'avancement des ordres de travail
                 </p>
+              </div>
+
+              <span className="text-xs font-semibold text-muted-foreground">
+                {otTotal} OT au total {otAnnules > 0 ? `· ${otAnnules} annulé(s)` : ""}
+              </span>
+            </div>
+
+            {/* Barre de proportion moderne tricolore */}
+            <div className="h-3.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200/60 dark:border-slate-700 flex">
+              {otTotal > 0 && (
+                <>
+                  <div
+                    className="bg-blue-500 rounded-l-full transition-all duration-300"
+                    style={{ width: `${(otEnAttente / otTotal) * 100}%` }}
+                    title={`En attente: ${otEnAttente}`}
+                  />
+                  <div
+                    className="bg-amber-500 transition-all duration-300"
+                    style={{ width: `${(otEnCours / otTotal) * 100}%` }}
+                    title={`En cours: ${otEnCours}`}
+                  />
+                  <div
+                    className="bg-emerald-500 rounded-r-full transition-all duration-300"
+                    style={{ width: `${(otTermines / otTotal) * 100}%` }}
+                    title={`Terminés: ${otTermines}`}
+                  />
+                </>
               )}
             </div>
-          </CardShell>
 
+            {/* Boutons de filtres interactifs */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              {[
+                {
+                  couleurBg: "bg-blue-50/70 dark:bg-blue-950/30 border-blue-200/60 text-blue-700 dark:text-blue-300",
+                  dotColor: "bg-blue-500",
+                  libelle: "En attente",
+                  valeur: otEnAttente,
+                  statut: "pending",
+                  desc: "Assignations en file",
+                },
+                {
+                  couleurBg: "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200/60 text-amber-700 dark:text-amber-300",
+                  dotColor: "bg-amber-500",
+                  libelle: "En cours & pièces",
+                  valeur: otEnCours,
+                  statut: "in_progress",
+                  desc: "Interventions actives",
+                },
+                {
+                  couleurBg: "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/60 text-emerald-700 dark:text-emerald-300",
+                  dotColor: "bg-emerald-500",
+                  libelle: "Terminés",
+                  valeur: otTermines,
+                  statut: "completed",
+                  desc: "Clôturés avec succès",
+                },
+              ].map((segment) => (
+                <button
+                  key={segment.statut}
+                  type="button"
+                  onClick={() => setLocation(`/maintenance/work-orders?status=${segment.statut}`)}
+                  className={`p-3.5 rounded-2xl border text-left transition-all hover:scale-[1.01] cursor-pointer flex items-center justify-between ${segment.couleurBg}`}
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${segment.dotColor}`} />
+                      <span className="text-xs font-bold">{segment.libelle}</span>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground block">{segment.desc}</span>
+                  </div>
+                  <span className="text-2xl font-black tabular-nums">{segment.valeur}</span>
+                </button>
+              ))}
+            </div>
+
+            {atelierArrete && (
+              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                <span>Attention : Aucune intervention en cours alors que {otEnAttente} OT attendent d'être traités.</span>
+              </div>
+            )}
+          </div>
+
+          {/* Grille 2 colonnes : Actions Rapides & Véhicules Critiques */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CardShell>
-              <div className="px-5 py-4">
-                <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Actions rapides</p>
-                <div className="flex flex-col gap-2">
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-600" /> Actions Rapides Atelier
+                </p>
+                <div className="space-y-2">
                   <Link href="/maintenance/work-orders/new">
-                    <Button size="sm" className="justify-start gap-2 w-full" data-testid="btn-new-workorder">
-                      <Plus className="h-3.5 w-3.5" /> Créer un ordre de travail
+                    <Button size="sm" className="w-full justify-between bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        <Plus className="h-4 w-4" /> Créer un ordre de travail
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 opacity-70" />
                     </Button>
                   </Link>
                   <Link href="/maintenance/work-orders">
-                    <Button variant="outline" size="sm" className="justify-start gap-2 w-full" data-testid="btn-view-workorders">
-                      <ClipboardList className="h-3.5 w-3.5" /> Voir tous les ordres de travail
+                    <Button variant="outline" size="sm" className="w-full justify-between rounded-xl">
+                      <span className="flex items-center gap-2">
+                        <ClipboardList className="h-4 w-4 text-blue-600" /> Tous les ordres de travail
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 opacity-70" />
                     </Button>
                   </Link>
                   <Link href="/maintenance/preventive">
-                    <Button variant="outline" size="sm" className="justify-start gap-2 w-full" data-testid="btn-preventive">
-                      <Wrench className="h-3.5 w-3.5" /> Maintenance préventive
+                    <Button variant="outline" size="sm" className="w-full justify-between rounded-xl">
+                      <span className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-purple-600" /> Maintenance préventive &amp; vidanges
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 opacity-70" />
                     </Button>
                   </Link>
                 </div>
               </div>
-            </CardShell>
-            <CardShell>
-              <div className="px-5 py-4">
-                <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Véhicules critiques</p>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between py-1.5 border-b border-gray-50">
-                    <span className="text-sm text-gray-500">Hors service</span>
-                    <span className={`text-sm font-bold ${outOfServiceVehicles > 0 ? "text-red-600" : "text-gray-400"}`}>{outOfServiceVehicles}</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Véhicules Critiques &amp; Retards
+                </p>
+                <div className="space-y-2.5">
+                  <div className="p-3 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200/60 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-rose-900 dark:text-rose-300">Véhicules Hors Service</span>
+                      <span className="text-[11px] text-muted-foreground block">Immobilisés en urgence</span>
+                    </div>
+                    <span className="text-xl font-black text-rose-700 dark:text-rose-400 tabular-nums">
+                      {outOfServiceVehicles}
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between py-1.5">
-                    <span className="text-sm text-gray-500">Maintenances en retard</span>
-                    <span className={`text-sm font-bold ${overdueMaintenance > 0 ? "text-orange-600" : "text-gray-400"}`}>{overdueMaintenance}</span>
+
+                  <div className="p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-amber-900 dark:text-amber-300">Entretiens en Retard</span>
+                      <span className="text-[11px] text-muted-foreground block">Échéances kilométriques dépassées</span>
+                    </div>
+                    <span className="text-xl font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                      {overdueMaintenance}
+                    </span>
                   </div>
                 </div>
               </div>
-            </CardShell>
+            </div>
           </div>
 
-          <CardShell>
-            <div className="px-5 py-4">
-              <div className="flex items-center gap-2 mb-3">
-                <BarChart3 className="h-4 w-4 text-blue-500" />
-                <span className="text-sm font-semibold text-gray-800">Statut de la Flotte</span>
-              </div>
-              <VehicleStatusChart />
+          {/* Graphique Statut Flotte */}
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-emerald-600" />
+              <span className="text-sm font-bold text-foreground">Disponibilité Globale du Parc Roulant</span>
             </div>
-          </CardShell>
+            <VehicleStatusChart />
+          </div>
 
           <OverdueInvoicesAlert />
         </TabsContent>
 
-        {/* ── Inventaire ── */}
-        <TabsContent value="inventory" className="space-y-4">
+        {/* ========================================================================= */}
+        {/* ONGLET 2 : Inventaire & Pièces Détachées                                  */}
+        {/* ========================================================================= */}
+        <TabsContent value="inventory" className="space-y-5">
           <KpiGrid columns={3}>
             {warehouse.inventoryValue.isLoading ? (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5"><Skeleton className="h-8 w-8 rounded-lg mb-2" /><Skeleton className="h-3 w-20" /></div>
+              <Skeleton className="h-28 w-full rounded-3xl" />
             ) : (
               <KpiTile
                 data-testid="wm-kpi-stock-value"
@@ -302,11 +405,11 @@ export default function WorkshopManagerDashboard() {
               />
             )}
             {warehouse.reorderAlerts.isLoading ? (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5"><Skeleton className="h-8 w-8 rounded-lg mb-2" /><Skeleton className="h-3 w-20" /></div>
+              <Skeleton className="h-28 w-full rounded-3xl" />
             ) : (
               <KpiTile
                 data-testid="wm-kpi-reorder"
-                label="Alertes réappro"
+                label="Alertes réappro magasin"
                 onClick={() => setLocation("/inventory")}
                 value={`${reorderAlertsCount}/${totalStockParts}`}
                 subValue={`Coût estimé ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost || 0)}`}
@@ -315,7 +418,7 @@ export default function WorkshopManagerDashboard() {
               />
             )}
             {warehouse.statistics.isLoading ? (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5"><Skeleton className="h-8 w-8 rounded-lg mb-2" /><Skeleton className="h-3 w-20" /></div>
+              <Skeleton className="h-28 w-full rounded-3xl" />
             ) : (
               <KpiTile
                 data-testid="wm-kpi-lowstock"
@@ -330,38 +433,53 @@ export default function WorkshopManagerDashboard() {
             )}
           </KpiGrid>
 
-          <CardShell>
-            <div className="px-5 py-4">
-              <div className="flex gap-2">
-                <Link href="/inventory"><Button size="sm" className="gap-2" data-testid="btn-view-inventory"><Package className="h-3.5 w-3.5" /> Inventaire</Button></Link>
-                <Link href="/inventory-requests"><Button variant="outline" size="sm" className="gap-2" data-testid="btn-view-requests"><ClipboardList className="h-3.5 w-3.5" /> Demandes de pièces</Button></Link>
-              </div>
+          {/* Raccourcis d'inventaire */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground font-medium">
+              Accès direct au catalogue des pièces détachées et aux demandes de réassort
+            </span>
+            <div className="flex items-center gap-2">
+              <Link href="/inventory">
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl gap-1.5 cursor-pointer">
+                  <Package className="h-3.5 w-3.5" /> Catalogue Pièces
+                </Button>
+              </Link>
+              <Link href="/inventory-requests">
+                <Button variant="outline" size="sm" className="rounded-xl gap-1.5">
+                  <ClipboardList className="h-3.5 w-3.5 text-blue-600" /> Demandes de Pièces
+                </Button>
+              </Link>
             </div>
-          </CardShell>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CardShell>
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3"><BarChart3 className="h-4 w-4 text-blue-500" /><span className="text-sm font-semibold text-gray-800">Top Pièces Consommées</span></div>
-                <PartsConsumptionChart />
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-bold text-foreground">Top Pièces Consommées en Atelier</span>
               </div>
-            </CardShell>
-            <CardShell>
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3"><TrendingUp className="h-4 w-4 text-green-500" /><span className="text-sm font-semibold text-gray-800">Évolution Valeur Stock</span></div>
-                <StockValueChart />
+              <PartsConsumptionChart />
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
+                <span className="text-sm font-bold text-foreground">Évolution de la Valeur du Stock</span>
               </div>
-            </CardShell>
+              <StockValueChart />
+            </div>
           </div>
         </TabsContent>
 
-        {/* ── Équipe ── */}
-        <TabsContent value="team" className="space-y-4">
+        {/* ========================================================================= */}
+        {/* ONGLET 3 : Équipe & Techniciens                                          */}
+        {/* ========================================================================= */}
+        <TabsContent value="team" className="space-y-5">
           <KpiGrid columns={4}>
             <KpiTile
               data-testid="wm-team-kpi-technicians"
               label="Techniciens actifs"
-                onClick={() => setLocation("/technicians")}
+              onClick={() => setLocation("/technicians")}
               value={`${activeTechsCount}/${techniciansOnly.length}`}
               subValue="avec OT actif / total"
               icon={<Users className="h-4 w-4" />}
@@ -370,7 +488,7 @@ export default function WorkshopManagerDashboard() {
             <KpiTile
               data-testid="wm-team-kpi-active-workorders"
               label="OT en cours équipe"
-                onClick={() => setLocation("/maintenance/work-orders?status=in_progress")}
+              onClick={() => setLocation("/maintenance/work-orders?status=in_progress")}
               value={`${teamActiveWorkOrders.length}/${assignedWorkOrders.length}`}
               subValue={`${unassignedWorkOrdersCount} non assignés`}
               icon={<ClipboardList className="h-4 w-4" />}
@@ -395,99 +513,129 @@ export default function WorkshopManagerDashboard() {
           </KpiGrid>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <CardShell>
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3"><Gauge className="h-4 w-4 text-blue-500" /><span className="text-sm font-semibold text-gray-800">Répartition des OT équipe</span></div>
-                <div className="space-y-3">
-                  {[
-                    { label: "En attente", count: teamPendingWorkOrders.length, color: "bg-blue-500" },
-                    { label: "En cours", count: teamInProgressWorkOrders.length, color: "bg-orange-500" },
-                    { label: "Attente pièces", count: teamAwaitingPartsWorkOrders.length, color: "bg-amber-500" },
-                    { label: "Terminés", count: teamCompletedWorkOrders.length, color: "bg-green-500" },
-                  ].map(({ label, count, color }) => (
-                    <div key={label}>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-gray-500">{label}</span>
-                        <span className="font-semibold text-gray-800">{count}</span>
+            {/* Répartition des OT par Statut */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-bold text-foreground">Répartition des OT de l'Équipe</span>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { label: "En attente", count: teamPendingWorkOrders.length, color: "bg-blue-500" },
+                  { label: "En cours", count: teamInProgressWorkOrders.length, color: "bg-orange-500" },
+                  { label: "Attente pièces", count: teamAwaitingPartsWorkOrders.length, color: "bg-amber-500" },
+                  { label: "Terminés", count: teamCompletedWorkOrders.length, color: "bg-emerald-500" },
+                ].map(({ label, count, color }) => (
+                  <div key={label} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="font-bold text-foreground">{count}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${color}`}
+                        style={{ width: `${Math.min(100, (count / Math.max(1, assignedWorkOrders.length)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Charge détaillée par Technicien */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-bold text-foreground">Charge de Travail par Technicien</span>
+              </div>
+              {workloadByTechnician.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Aucun technicien disponible.</p>
+              ) : (
+                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                  {workloadByTechnician.slice(0, 6).map((tech: any) => (
+                    <div key={tech.id} className="p-3 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                          <UserCircle2 className="h-4 w-4 text-slate-400" />
+                          {tech.name}
+                        </span>
+                        <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                          {tech.activeCount} OT actif(s)
+                        </span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-gray-100">
-                        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${Math.min(100, (count / Math.max(1, assignedWorkOrders.length)) * 100)}%` }} />
+                      <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${Math.min(100, (tech.activeCount / maxTechLoad) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                        <span>En cours : {tech.inProgressCount}</span>
+                        <span>En attente : {tech.pendingCount}</span>
+                        <span>Terminés : {tech.completedCount}</span>
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            </CardShell>
-
-            <CardShell>
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3"><Users className="h-4 w-4 text-purple-500" /><span className="text-sm font-semibold text-gray-800">Charge par technicien</span></div>
-                {workloadByTechnician.length === 0 ? (
-                  <p className="text-xs text-gray-400">Aucun technicien disponible.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {workloadByTechnician.slice(0, 6).map((tech: any) => (
-                      <div key={tech.id} className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
-                            <UserCircle2 className="h-3.5 w-3.5 text-gray-400" />{tech.name}
-                          </span>
-                          <span className="text-xs font-bold text-gray-600">{tech.activeCount} actifs</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-gray-200">
-                          <div className="h-1.5 rounded-full bg-green-500" style={{ width: `${Math.min(100, (tech.activeCount / maxTechLoad) * 100)}%` }} />
-                        </div>
-                        <div className="flex gap-3 mt-1 text-[10px] text-gray-400">
-                          <span>En cours: {tech.inProgressCount}</span>
-                          <span>Attente: {tech.pendingCount}</span>
-                          <span>Terminés: {tech.completedCount}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CardShell>
+              )}
+            </div>
           </div>
 
-          <CardShell>
-            <div className="px-5 py-4">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Gestion de l'équipe</p>
-              <p className="text-xs text-gray-400 mb-3">{teamMembers.length} membres · {unassignedWorkOrdersCount} OT non assignés</p>
-              <div className="flex flex-col gap-2">
-                <Link href="/technicians"><Button size="sm" className="justify-start gap-2 w-full" data-testid="btn-view-technicians"><Users className="h-3.5 w-3.5" /> Voir les techniciens</Button></Link>
-                <Link href="/maintenance/work-orders"><Button variant="outline" size="sm" className="justify-start gap-2 w-full" data-testid="btn-assign-workorders"><ClipboardList className="h-3.5 w-3.5" /> Assigner / suivre les ordres de travail</Button></Link>
-                <Link href="/maintenance/interventions"><Button variant="outline" size="sm" className="justify-start gap-2 w-full" data-testid="btn-view-interventions"><Wrench className="h-3.5 w-3.5" /> Historique interventions</Button></Link>
+          {/* Raccourcis Équipe */}
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Pilotage des Effectifs</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{teamMembers.length} membres de l'atelier · {unassignedWorkOrdersCount} OT non assignés</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link href="/technicians">
+                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl gap-1.5 cursor-pointer">
+                    <Users className="h-3.5 w-3.5" /> Fiches Techniciens
+                  </Button>
+                </Link>
+                <Link href="/maintenance/work-orders">
+                  <Button variant="outline" size="sm" className="rounded-xl gap-1.5">
+                    <ClipboardList className="h-3.5 w-3.5 text-blue-600" /> Assigner les OT
+                  </Button>
+                </Link>
+                <Link href="/maintenance/interventions">
+                  <Button variant="outline" size="sm" className="rounded-xl gap-1.5">
+                    <Wrench className="h-3.5 w-3.5 text-purple-600" /> Historique Travaux
+                  </Button>
+                </Link>
               </div>
             </div>
-          </CardShell>
+          </div>
         </TabsContent>
 
-        {/* ── CPC ── */}
-        <TabsContent value="cpc" className="space-y-4">
+        {/* ========================================================================= */}
+        {/* ONGLET 4 : Certifications & Formations CPC                                */}
+        {/* ========================================================================= */}
+        <TabsContent value="cpc" className="space-y-5">
           <KpiGrid columns={3}>
             <KpiTile
               data-testid="wm-kpi-cpc-formed"
-              label="Chauffeurs formés"
+              label="Chauffeurs certifiés CPC"
               value={cpcFormed}
-              subValue={`/ ${cpcTotal} total`}
+              subValue={`/ ${cpcTotal} chauffeurs au total`}
               icon={<CheckCircle2 className="h-4 w-4" />}
-              iconWrapperClassName="bg-green-50 text-green-600"
+              iconWrapperClassName="bg-emerald-50 text-emerald-600"
             />
             <KpiTile
               data-testid="wm-kpi-cpc-to-form"
-              label="À former"
+              label="À recycler / former"
               value={cpcToTrain}
-              subValue="Alertes actives"
+              subValue="Alertes échéances actives"
               icon={<AlertTriangle className="h-4 w-4" />}
-              iconWrapperClassName={cpcToTrain > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={cpcToTrain > 0 ? "text-orange-600" : undefined}
+              iconWrapperClassName={cpcToTrain > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
+              valueClassName={cpcToTrain > 0 ? "text-amber-600" : undefined}
             />
             <KpiTile
               data-testid="wm-kpi-cpc-not-formed"
-              label="Non formés"
+              label="Non certifiés"
               value={cpcNotFormed}
-              subValue="Nécessite formation"
+              subValue="Formation requise"
               icon={<XCircle className="h-4 w-4" />}
               iconWrapperClassName={cpcNotFormed > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
               valueClassName={cpcNotFormed > 0 ? "text-red-600" : undefined}
@@ -495,33 +643,45 @@ export default function WorkshopManagerDashboard() {
           </KpiGrid>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CardShell>
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3"><BarChart3 className="h-4 w-4 text-purple-500" /><span className="text-sm font-semibold text-gray-800">Répartition Statuts CPC</span></div>
-                <CPCStatusChart />
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-bold text-foreground">Répartition des Certifications CPC</span>
               </div>
-            </CardShell>
+              <CPCStatusChart />
+            </div>
+
             <CPCAlertsPanel />
           </div>
 
-          <CardShell>
-            <div className="px-5 py-4">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Mise à jour certifications CPC</p>
-              <p className="text-xs text-gray-400 mb-3">Mettez à jour les dates de formation CPC pour les chauffeurs de votre équipe.</p>
+          {/* Formulaires de mise à jour rapide */}
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Mise à Jour des Certifications CPC</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Enregistrement rapide des dates de validité pour les chauffeurs</p>
             </div>
-          </CardShell>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {driversStatus?.slice(0, 6).map((driver: any) => (
-              <CPCUpdateForm key={driver.id} driverId={driver.id} driverName={`${driver.firstName} ${driver.lastName}`} currentCPCDate={driver.cpcTrainingDate} currentStatus={driver.cpcStatus} />
-            ))}
-          </div>
-          {driversStatus && driversStatus.length > 6 && (
-            <CardShell>
-              <div className="px-5 py-3 text-center">
-                <p className="text-xs text-gray-400">Affichage des 6 premiers. <Link href="/drivers"><span className="text-green-600 hover:underline cursor-pointer">Voir tous les chauffeurs</span></Link></p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {driversStatus?.slice(0, 6).map((driver: any) => (
+                <CPCUpdateForm
+                  key={driver.id}
+                  driverId={driver.id}
+                  driverName={`${driver.firstName} ${driver.lastName}`}
+                  currentCPCDate={driver.cpcTrainingDate}
+                  currentStatus={driver.cpcStatus}
+                />
+              ))}
+            </div>
+
+            {driversStatus && driversStatus.length > 6 && (
+              <div className="text-center pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-muted-foreground">
+                Affichage des 6 premiers chauffeurs.{" "}
+                <Link href="/drivers">
+                  <span className="text-emerald-600 font-bold hover:underline cursor-pointer">Voir tous les conducteurs</span>
+                </Link>
               </div>
-            </CardShell>
-          )}
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

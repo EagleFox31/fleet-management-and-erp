@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Edit, Trash2, Clock, Package, Truck, CheckCircle, ArrowRight, User, Wrench, FileText,
-  Search, ChevronLeft, ChevronRight, AlertCircle, Info,
+  Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -347,12 +347,53 @@ export function PartTable({ onRowClick }: PartTableProps) {
       cell: (part) => (
         <TooltipProvider>
         <div className="flex items-center justify-end gap-0.5">
-          {/* Pas de bouton "voir": la ligne entière est déjà cliquable (onRowClick). */}
+          {/* Bouton Voir la fiche pour tous les utilisateurs */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setLocation(`/inventory/${part.id}`); }}
+                aria-label={`Voir la fiche de ${part.name}`}
+                data-testid={`btn-view-part-${part.id}`}
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Voir la fiche détaillée</TooltipContent>
+          </Tooltip>
+
+          {/* Bouton Demander cette pièce (Chef d'atelier / Technicien / Admin) */}
+          {(user?.role === "workshop_manager" || user?.role === "technician" || user?.role === "admin") && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="p-1.5 rounded-lg hover:bg-emerald-50 text-emerald-600 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onRowClick) {
+                      onRowClick(part.id);
+                    } else {
+                      setLocation(`/inventory-requests?partId=${part.id}`);
+                    }
+                  }}
+                  aria-label={`Demander la pièce ${part.name}`}
+                  data-testid={`btn-request-part-${part.id}`}
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Demander cette pièce (Besoin OT)</TooltipContent>
+            </Tooltip>
+          )}
+
           {canEditParts && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
+                    type="button"
                     className="p-1.5 rounded-lg hover:bg-amber-50 text-amber-500 transition-colors"
                     onClick={(e) => { e.stopPropagation(); setStockDialogPart(part); setStockAdjustment(0); }}
                     aria-label={`Ajuster le stock de ${part.name}`}
@@ -366,6 +407,7 @@ export function PartTable({ onRowClick }: PartTableProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
+                    type="button"
                     className="p-1.5 rounded-lg hover:bg-green-50 text-green-500 transition-colors"
                     onClick={(e) => { e.stopPropagation(); setLocation(`/inventory/${part.id}?tab=edit`); }}
                     aria-label={`Modifier ${part.name}`}
@@ -385,6 +427,7 @@ export function PartTable({ onRowClick }: PartTableProps) {
                   <TooltipTrigger asChild>
                     <AlertDialogTrigger asChild>
                       <button
+                        type="button"
                         className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors"
                         onClick={(e) => e.stopPropagation()}
                         aria-label={`Supprimer ${part.name}`}

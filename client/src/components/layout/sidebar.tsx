@@ -38,6 +38,7 @@ import {
   Banknote,
   Sparkles,
   Mail,
+  CalendarDays,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -94,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
             icon: Wrench,
             menuKey: "maintenance",
             submenu: [
-              { label: "Tableau Maintenance", href: "/maintenance", icon: Gauge },
+              { label: "Planning & Calendrier", href: "/maintenance", icon: CalendarDays },
               { label: "Ordres de travail", href: "/maintenance/work-orders", icon: ClipboardList },
               { label: "Planifications préventives", href: "/maintenance/preventive", icon: CalendarCheck },
             ]
@@ -158,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
             icon: Wrench,
             menuKey: "maintenance",
             submenu: [
-              { label: "Tableau Maintenance", href: "/maintenance", icon: Gauge },
+              { label: "Planning & Calendrier", href: "/maintenance", icon: CalendarDays },
               { label: "Ordres de travail", href: "/maintenance/work-orders", icon: ClipboardList },
               { label: "Planifications préventives", href: "/maintenance/preventive", icon: CalendarCheck },
             ]

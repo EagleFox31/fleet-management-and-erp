@@ -867,8 +867,8 @@ export default function TiresInventoryPage() {
           canAddTires || canMountFromStock ? (
             <div className="flex items-center gap-2 flex-wrap justify-end">
               {canMountFromStock && (
-                <Button
-                  variant="outline"
+              <Button
+                variant="outline"
                   onClick={() => openMountDialog()}
                   data-testid="button-mount-tire"
                 >
@@ -881,14 +881,14 @@ export default function TiresInventoryPage() {
                   <Button
                     variant="outline"
                     comingSoon="La commande de pneus auprès d'un fournisseur"
-                  >
-                    <ShoppingCart className="h-4 w-4 mr-2" />
-                    Commander
-                  </Button>
-                  <Button onClick={() => setActiveTab("new-tire")} data-testid="button-new-tire">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Nouveau pneu
-                  </Button>
+              >
+                <ShoppingCart className="h-4 w-4 mr-2" />
+                Commander
+              </Button>
+              <Button onClick={() => setActiveTab("new-tire")} data-testid="button-new-tire">
+                <Plus className="h-4 w-4 mr-2" />
+                Nouveau pneu
+              </Button>
                 </>
               )}
             </div>
@@ -1191,11 +1191,11 @@ export default function TiresInventoryPage() {
           <CardShell>
             <div className="px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <SectionLabel>Etat flotte</SectionLabel>
-                <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2 mt-1">
-                  <Truck className="h-4 w-4 text-green-600" />
-                  Pneus montes sur vehicules
-                </h3>
+              <SectionLabel>Etat flotte</SectionLabel>
+              <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2 mt-1">
+                <Truck className="h-4 w-4 text-green-600" />
+                Pneus montes sur vehicules
+              </h3>
               </div>
               {canMountFromStock && (
                 <Button size="sm" variant="outline" onClick={() => openMountDialog()} data-testid="button-mount-from-mounted-tab">
@@ -1495,7 +1495,7 @@ export default function TiresInventoryPage() {
                 }}
               >
                 <DialogTitle asChild>
-                  <div>
+              <div>
                     <p className="text-[10px] font-bold tracking-widest uppercase text-green-600 mb-1">
                       Inventaire pneus
                     </p>
@@ -1505,7 +1505,7 @@ export default function TiresInventoryPage() {
                     <p className="text-green-700/60 text-[12px] mt-0.5">
                       {selectedTire.size} · {formatTireUsageLabel(selectedTire.tireType)}
                     </p>
-                  </div>
+              </div>
                 </DialogTitle>
               </div>
 
@@ -1536,7 +1536,7 @@ export default function TiresInventoryPage() {
                       >
                         En stock
                       </p>
-                    </div>
+              </div>
                     <p className="font-bold text-[15px] text-gray-800">
                       {selectedTire.stockQuantity} unité{selectedTire.stockQuantity > 1 ? "s" : ""}
                     </p>
@@ -1545,7 +1545,7 @@ export default function TiresInventoryPage() {
                         seuil d'alerte : {selectedTire.minStockLevel}
                       </p>
                     )}
-                  </div>
+              </div>
 
                   <div className="rounded-xl p-3" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                     <div className="flex items-center gap-1 mb-0.5">
@@ -1553,12 +1553,12 @@ export default function TiresInventoryPage() {
                       <p className="text-[10px] font-bold tracking-widest uppercase text-gray-400">
                         Prix d'achat
                       </p>
-                    </div>
+              </div>
                     <p className="font-bold text-[15px] text-gray-800">
                       {formatPrice(selectedTire.purchasePrice)}
                     </p>
                     <p className="text-[11px] text-gray-400">par unité</p>
-                  </div>
+              </div>
 
                   <div className="rounded-xl p-3" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                     <div className="flex items-center gap-1 mb-0.5">
@@ -1566,11 +1566,11 @@ export default function TiresInventoryPage() {
                       <p className="text-[10px] font-bold tracking-widest uppercase text-gray-400">
                         Fournisseur
                       </p>
-                    </div>
+              </div>
                     <p className="text-sm font-semibold text-gray-800">
                       {selectedTire.supplier || "Non spécifié"}
                     </p>
-                  </div>
+              </div>
 
                   <div className="rounded-xl p-3" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                     <div className="flex items-center gap-1 mb-0.5">
@@ -1578,15 +1578,15 @@ export default function TiresInventoryPage() {
                       <p className="text-[10px] font-bold tracking-widest uppercase text-gray-400">
                         Emplacement
                       </p>
-                    </div>
+            </div>
                     <p className="text-sm font-semibold text-gray-800">
                       {selectedTire.location || "Non spécifié"}
                     </p>
-                  </div>
-                </div>
-              </div>
+            </div>
+          </div>
+        </div>
             </>
-          )}
+      )}
         </DialogContent>
       </Dialog>
 

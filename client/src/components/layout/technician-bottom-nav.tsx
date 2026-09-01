@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
+import { TECHNICIAN_MY_WORK_ORDERS_KEY } from "@/lib/technician-work-orders-query";
 
 interface NavItem {
   id: "dashboard" | "work_orders" | "vehicles" | "fuel" | "profile";
@@ -38,8 +39,8 @@ export function TechnicianBottomNav() {
     workOrders?: Array<{ status: string }>;
     stats?: { inProgress: number; pending: number };
   }>({
-    queryKey: ["/api/technician/work-orders", user?.id],
-    enabled: !!user?.id,
+    queryKey: TECHNICIAN_MY_WORK_ORDERS_KEY,
+    enabled: !!user?.id && user?.role === "technician",
     staleTime: 15_000,
   });
 

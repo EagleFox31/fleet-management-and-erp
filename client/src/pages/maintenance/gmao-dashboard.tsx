@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -24,20 +23,24 @@ import {
   Users,
   Wrench,
   TrendingUp,
-  Calendar as CalendarIcon,
   Plus,
   ChevronDown,
   ChevronUp,
   RefreshCw,
   Gauge,
-  Trash2
+  Trash2,
+  ArrowRight,
+  ShieldAlert,
+  Sparkles,
+  CalendarCheck,
+  CheckCircle2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
-import { HeaderCard, KpiGrid, KpiTile, PremiumTabsNav } from "@/components/design-system";
+import { HeaderCard, KpiGrid, KpiTile, PremiumTabsNav, SectionLabel } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 
 interface WorkOrder {
@@ -51,7 +54,7 @@ interface WorkOrder {
   vehicleModel?: string;
   technicianId?: number;
   technicianName?: string;
-  status: "pending" | "in_progress" | "completed" | "cancelled";
+  status: "pending" | "in_progress" | "completed" | "cancelled" | "awaiting_parts";
   priority: "low" | "medium" | "high" | "critical";
   estimatedDuration?: number;
   scheduledDate?: string;
@@ -73,7 +76,7 @@ interface MaintenanceSchedule {
 export default function GMAODashboard() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedTechnician, setSelectedTechnician] = useState<number | null>(null);
-  const [activeView, setActiveView] = useState("overview");
+  const [activeView, setActiveView] = useState("calendar");
   const [isChecking, setIsChecking] = useState(false);
   const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
   const [, setLocation] = useLocation();
@@ -95,25 +98,26 @@ export default function GMAODashboard() {
 
   // Charger les données
   const { data: workOrdersData } = useQuery<any>({
-    queryKey: ['/api/work-orders'],
+    queryKey: ["/api/work-orders"],
   });
 
   const { data: schedulesData } = useQuery<any>({
-    queryKey: ['/api/maintenance-schedules'],
+    queryKey: ["/api/maintenance-schedules"],
   });
 
   const { data: usersData } = useQuery<any>({
-    queryKey: ['/api/users'],
+    queryKey: ["/api/users"],
   });
 
-  // Charger les statistiques de performance depuis la BDD
   const { data: performanceStats } = useQuery<any>({
-    queryKey: ['/api/work-orders/statistics'],
+    queryKey: ["/api/work-orders/statistics"],
   });
 
-  const workOrders = Array.isArray(workOrdersData) ? workOrdersData : (workOrdersData?.workOrders || []);
+  const workOrders = Array.isArray(workOrdersData) ? workOrdersData : workOrdersData?.workOrders || [];
   const schedules = Array.isArray(schedulesData) ? schedulesData : [];
-  const technicians = Array.isArray(usersData) ? usersData.filter((user: any) => user.role === 'technician' || user.role === 'workshop_manager') : [];
+  const technicians = Array.isArray(usersData)
+    ? usersData.filter((u: any) => u.role === "technician" || u.role === "workshop_manager")
+    : [];
 
   // Mutation pour vérifier toutes les maintenances
   const checkAllMaintenanceMutation = useMutation({
@@ -122,11 +126,11 @@ export default function GMAODashboard() {
       const response = await fetch("/api/check-all-maintenance", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
-        }
+          "Content-Type": "application/json",
+        },
       });
       if (!response.ok) {
-        throw new Error('Erreur lors de la vérification');
+        throw new Error("Erreur lors de la vérification");
       }
       return response.json();
     },
@@ -137,76 +141,107 @@ export default function GMAODashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance-schedules"] });
     },
     onError: (error) => {
-      console.error('Erreur:', error);
+      console.error("Erreur:", error);
     },
     onSettled: () => {
       setIsChecking(false);
-    }
+    },
   });
 
   // Statistiques rapides
   const stats = {
     totalWorkOrders: workOrders.length,
-    pendingWorkOrders: workOrders.filter((wo: WorkOrder) => wo.status === 'pending').length,
-    inProgressWorkOrders: workOrders.filter((wo: WorkOrder) => wo.status === 'in_progress').length,
+    pendingWorkOrders: workOrders.filter((wo: WorkOrder) => wo.status === "pending").length,
+    inProgressWorkOrders: workOrders.filter((wo: WorkOrder) => wo.status === "in_progress" || wo.status === "awaiting_parts").length,
     unassignedWorkOrders: workOrders.filter((wo: WorkOrder) => !wo.technicianId).length,
-    overdueSchedules: schedules.filter((s: MaintenanceSchedule) => s.status === 'overdue').length,
+    overdueSchedules: schedules.filter((s: MaintenanceSchedule) => s.status === "overdue").length,
     availableTechnicians: technicians.length,
   };
 
   // Interventions du jour sélectionné
-  const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const selectedDateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : "";
   const dayInterventions = [
-    // Work orders (correctives si non planifiées, préventives si planifiées)
-    ...workOrders.filter((wo: WorkOrder) => 
-      wo.scheduledDate === selectedDateStr || 
-      (!wo.scheduledDate && format(new Date(wo.createdAt), 'yyyy-MM-dd') === selectedDateStr)
-    ).map((wo: WorkOrder) => ({ ...wo, isPreventive: !!wo.scheduledDate })),
-    // Maintenances préventives planifiées (toujours préventives)
-    ...schedules.filter((s: MaintenanceSchedule) => s.scheduledDate === selectedDateStr)
-      .map((s: MaintenanceSchedule) => ({ ...s, isPreventive: true }))
+    ...workOrders
+      .filter(
+        (wo: WorkOrder) =>
+          wo.scheduledDate === selectedDateStr ||
+          (!wo.scheduledDate && format(new Date(wo.createdAt), "yyyy-MM-dd") === selectedDateStr),
+      )
+      .map((wo: WorkOrder) => ({ ...wo, isPreventive: !!wo.scheduledDate })),
+    ...schedules
+      .filter((s: MaintenanceSchedule) => s.scheduledDate === selectedDateStr)
+      .map((s: MaintenanceSchedule) => ({ ...s, isPreventive: true })),
   ];
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'critical': return 'bg-red-500';
-      case 'high': return 'bg-orange-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'low': return 'bg-green-500';
-      default: return 'bg-gray-500';
+      case "critical":
+        return "bg-rose-500 text-white";
+      case "high":
+        return "bg-amber-500 text-white";
+      case "medium":
+        return "bg-blue-500 text-white";
+      case "low":
+        return "bg-emerald-500 text-white";
+      default:
+        return "bg-slate-500 text-white";
     }
   };
 
   const getPriorityLabel = (priority: string) => {
     switch (priority) {
-      case 'critical': return 'Critique';
-      case 'high': return 'Élevée';
-      case 'medium': return 'Moyenne';
-      case 'low': return 'Faible';
-      default: return priority;
+      case "critical":
+        return "Critique";
+      case "high":
+        return "Élevée";
+      case "medium":
+        return "Moyenne";
+      case "low":
+        return "Faible";
+      default:
+        return priority;
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-500';
-      case 'in_progress': return 'bg-blue-500';
-      case 'pending': return 'bg-orange-500';
-      case 'overdue': return 'bg-red-500';
-      case 'cancelled': return 'bg-black';
-      default: return 'bg-gray-400';
+      case "completed":
+        return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200";
+      case "in_progress":
+        return "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200";
+      case "awaiting_parts":
+        return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200";
+      case "pending":
+        return "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 border-orange-200";
+      case "overdue":
+        return "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200";
+      case "planned":
+        return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200";
+      case "cancelled":
+        return "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300 border-slate-300";
+      default:
+        return "bg-slate-100 text-slate-700 border-slate-200";
     }
   };
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'completed': return 'Terminé';
-      case 'in_progress': return 'En cours';
-      case 'pending': return 'En attente';
-      case 'cancelled': return 'Annulé';
-      case 'planned': return 'Planifié';
-      case 'overdue': return 'En retard';
-      default: return status;
+      case "completed":
+        return "Terminé";
+      case "in_progress":
+        return "En cours";
+      case "awaiting_parts":
+        return "Attente pièces";
+      case "pending":
+        return "En attente";
+      case "cancelled":
+        return "Annulé";
+      case "planned":
+        return "Planifié";
+      case "overdue":
+        return "En retard";
+      default:
+        return status;
     }
   };
 
@@ -215,62 +250,66 @@ export default function GMAODashboard() {
         ((performanceStats as any).completed /
           Math.max(
             (performanceStats as any).pending +
-            (performanceStats as any).inProgress +
-            (performanceStats as any).completed +
-            (performanceStats as any).cancelled,
-            1
-          )) * 100
+              (performanceStats as any).inProgress +
+              (performanceStats as any).completed +
+              (performanceStats as any).cancelled,
+            1,
+          )) *
+          100,
       )
     : 0;
 
   const gmaoTabItems = [
+    {
+      value: "calendar",
+      label: "Calendrier & Agenda",
+      icon: <TabIcon icon={CalendarDays} />,
+    },
     {
       value: "overview",
       label: "Vue d'ensemble",
       icon: <TabIcon icon={Gauge} />,
     },
     {
-      value: "calendar",
-      label: "Calendrier",
-      icon: <TabIcon icon={CalendarDays} />,
-    },
-    {
       value: "assignments",
-      label: "Affectations",
+      label: "Affectations Équipe",
       icon: <TabIcon icon={Users} />,
     },
     {
       value: "analytics",
-      label: "Analyses",
+      label: "Analyses & Résolution",
       icon: <TabIcon icon={TrendingUp} />,
     },
   ];
 
   return (
     <div className="space-y-6">
+      {/* 1. Header Card Planning & Calendrier GMAO */}
       <HeaderCard
-        moduleLabel="Maintenance"
-        title="Tableau de bord Maintenance"
+        moduleLabel="Maintenance · Atelier"
+        title="Planning &amp; Calendrier des Interventions"
         subtitle={
           <>
-            Suivi global · interventions correctives et préventives
+            Ordonnancement des réparations, planning atelier et contrôle des échéances
             {lastCheckTime && (
-              <span className="ml-1">· Vérifié à {format(lastCheckTime, "HH:mm", { locale: fr })}</span>
+              <span className="ml-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                · Vérifié à {format(lastCheckTime, "HH:mm", { locale: fr })}
+              </span>
             )}
           </>
         }
-        icon={<Gauge className="h-5 w-5" />}
+        icon={<CalendarDays className="h-5 w-5" />}
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               onClick={() => checkAllMaintenanceMutation.mutate()}
               disabled={isChecking}
               variant="outline"
               size="sm"
-              className="border-gray-200 text-gray-600 hover:bg-gray-50 gap-1.5"
+              className="rounded-xl border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isChecking ? "animate-spin" : ""}`} />
-              {isChecking ? "Vérification..." : "Vérifier"}
+              <RefreshCw className={`h-3.5 w-3.5 ${isChecking ? "animate-spin text-emerald-600" : ""}`} />
+              {isChecking ? "Synchronisation…" : "Vérifier échéances"}
             </Button>
 
             {user?.role === "admin" && (
@@ -279,13 +318,13 @@ export default function GMAODashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="border-red-200 text-red-600 hover:bg-red-50 gap-1.5"
+                    className="rounded-xl border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:hover:bg-rose-950/30 gap-1.5"
                     disabled={deletePendingMutation.isPending || stats.unassignedWorkOrders === 0}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     Purger OT
                     {stats.unassignedWorkOrders > 0 && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-600">
+                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 text-rose-700">
                         {stats.unassignedWorkOrders}
                       </span>
                     )}
@@ -294,13 +333,13 @@ export default function GMAODashboard() {
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle className="flex items-center gap-2">
-                      <Trash2 className="h-5 w-5 text-red-500" />
+                      <Trash2 className="h-5 w-5 text-rose-600" />
                       Supprimer les OT non assignés
                     </AlertDialogTitle>
                     <AlertDialogDescription>
                       Tous les ordres de travail <strong>"En attente"</strong> sans technicien seront supprimés définitivement.
                       <br /><br />
-                      <span className="font-semibold text-red-600">
+                      <span className="font-semibold text-rose-600">
                         {stats.unassignedWorkOrders} ordre(s) concerné(s) · action irréversible.
                       </span>
                     </AlertDialogDescription>
@@ -309,7 +348,7 @@ export default function GMAODashboard() {
                     <AlertDialogCancel>Annuler</AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => deletePendingMutation.mutate()}
-                      className="bg-red-600 hover:bg-red-700 text-white"
+                      className="bg-rose-600 hover:bg-rose-700 text-white"
                     >
                       Supprimer
                     </AlertDialogAction>
@@ -321,529 +360,466 @@ export default function GMAODashboard() {
             <Button
               size="sm"
               onClick={() => setLocation("/maintenance/work-orders/new")}
-              className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer"
             >
-              <Plus className="h-3.5 w-3.5" />
-              Nouvelle intervention
+              <Plus className="h-4 w-4" />
+              Créer un OT
             </Button>
-          </>
+          </div>
         }
       >
         <KpiGrid columns={6}>
           <KpiTile
-            label="Total OT"
+            label="Total OT atelier"
             value={stats.totalWorkOrders}
             icon={<Wrench className="h-4 w-4" />}
-            iconWrapperClassName="bg-green-50 text-green-600"
+            iconWrapperClassName="bg-emerald-50 text-emerald-600"
+            onClick={() => setLocation("/maintenance/work-orders")}
           />
           <KpiTile
             label="En attente"
             value={stats.pendingWorkOrders}
             icon={<Clock className="h-4 w-4" />}
-            iconWrapperClassName="bg-amber-50 text-amber-500"
-            valueClassName={stats.pendingWorkOrders > 0 ? "text-amber-700" : undefined}
+            iconWrapperClassName="bg-amber-50 text-amber-600"
+            valueClassName={stats.pendingWorkOrders > 0 ? "text-amber-600" : undefined}
+            onClick={() => setLocation("/maintenance/work-orders?status=pending")}
           />
           <KpiTile
             label="En cours"
             value={stats.inProgressWorkOrders}
             icon={<TrendingUp className="h-4 w-4" />}
-            iconWrapperClassName="bg-blue-50 text-blue-500"
-            valueClassName={stats.inProgressWorkOrders > 0 ? "text-blue-700" : undefined}
+            iconWrapperClassName="bg-blue-50 text-blue-600"
+            valueClassName={stats.inProgressWorkOrders > 0 ? "text-blue-600" : undefined}
+            onClick={() => setLocation("/maintenance/work-orders?status=in_progress")}
           />
           <KpiTile
             label="Non assignées"
             value={stats.unassignedWorkOrders}
             icon={<AlertTriangle className="h-4 w-4" />}
-            iconWrapperClassName="bg-orange-50 text-orange-500"
-            valueClassName={stats.unassignedWorkOrders > 0 ? "text-orange-700" : undefined}
+            iconWrapperClassName="bg-orange-50 text-orange-600"
+            valueClassName={stats.unassignedWorkOrders > 0 ? "text-orange-600" : undefined}
           />
           <KpiTile
             label="En retard"
             value={stats.overdueSchedules}
             icon={<CalendarDays className="h-4 w-4" />}
-            iconWrapperClassName="bg-red-50 text-red-500"
-            valueClassName={stats.overdueSchedules > 0 ? "text-red-700" : undefined}
+            iconWrapperClassName="bg-rose-50 text-rose-600"
+            valueClassName={stats.overdueSchedules > 0 ? "text-rose-600" : undefined}
+            onClick={() => setLocation("/maintenance/preventive")}
           />
           <KpiTile
             label="Techniciens"
             value={stats.availableTechnicians}
             icon={<Users className="h-4 w-4" />}
-            iconWrapperClassName="bg-violet-50 text-violet-500"
+            iconWrapperClassName="bg-purple-50 text-purple-600"
+            onClick={() => setLocation("/technicians")}
           />
         </KpiGrid>
       </HeaderCard>
 
-      {/* ── Alertes mutation ── */}
-      {deletePendingMutation.isSuccess && (
-        <Alert className="border-green-200 bg-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-700">
-            {(deletePendingMutation.data as any)?.message || "Suppression effectuée avec succès."}
-          </AlertDescription>
-        </Alert>
-      )}
-      {deletePendingMutation.isError && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <AlertDescription className="text-red-700">Erreur lors de la suppression des ordres de travail.</AlertDescription>
-        </Alert>
-      )}
-      {checkAllMaintenanceMutation.isError && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-500" />
-          <AlertDescription className="text-red-700">Erreur lors de la vérification des maintenances.</AlertDescription>
-        </Alert>
-      )}
+      {/* Alertes d'état de synchronisation */}
       {checkAllMaintenanceMutation.isSuccess && checkAllMaintenanceMutation.data && (
-        <Alert className="border-green-200 bg-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-700">
-            {checkAllMaintenanceMutation.data.message}
-            {checkAllMaintenanceMutation.data.details?.total > 0 && (
-              <div className="mt-1 text-sm">
-                · Kilométrique : {checkAllMaintenanceMutation.data.details.kilometerBased.workOrdersCreated} ordres
-                &nbsp;· Date : {checkAllMaintenanceMutation.data.details.dateBased.workOrdersCreated} ordres
-              </div>
-            )}
-          </AlertDescription>
-        </Alert>
+        <div className="p-4 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span>{checkAllMaintenanceMutation.data.message}</span>
+          </div>
+          {checkAllMaintenanceMutation.data.details?.total > 0 && (
+            <span className="font-bold">
+              +{checkAllMaintenanceMutation.data.details.total} OT préventifs générés
+            </span>
+          )}
+        </div>
       )}
 
-      {/* ── Tabs ── */}
-      <Tabs value={activeView} onValueChange={setActiveView} className="space-y-5">
+      {/* 2. Onglets Bento de Planning & Supervision */}
+      <Tabs value={activeView} onValueChange={setActiveView} className="space-y-6">
         <PremiumTabsNav tabs={gmaoTabItems} />
 
-        {/* ── Vue d'ensemble ── */}
-        <TabsContent value="overview" className="space-y-0">
+        {/* ========================================================================= */}
+        {/* ONGLET 1 : Calendrier & Agenda Quotidien                                   */}
+        {/* ========================================================================= */}
+        <TabsContent value="calendar" className="space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Colonne Gauche : Sélecteur de Calendrier */}
+            <div className="lg:col-span-1 p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <CalendarDays className="h-4 w-4 text-emerald-600" />
+                <span className="text-sm font-bold text-foreground">Sélecteur de Date</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Cliquez sur un jour pour filtrer l'agenda de l'atelier</p>
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                locale={fr}
+                className="rounded-2xl border border-slate-100 dark:border-slate-800 w-full p-2 bg-slate-50/50 dark:bg-slate-900/50"
+              />
+            </div>
 
-            {/* Urgentes */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-red-500 to-rose-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-red-50 flex items-center justify-center">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+            {/* Colonne Droite : Interventions du jour sélectionné */}
+            <div className="lg:col-span-2 p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-emerald-600" />
+                    <span className="text-sm font-bold text-foreground">
+                      {selectedDate ? format(selectedDate, "EEEE dd MMMM yyyy", { locale: fr }) : "Date sélectionnée"}
+                    </span>
                   </div>
-                  Interventions urgentes
-                  <span className="ml-auto text-xs font-normal text-red-400 bg-red-50 px-2 py-0.5 rounded-full">
-                    {workOrders.filter((wo: WorkOrder) => wo.priority === 'critical' || wo.priority === 'high').length}
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200">
+                    {dayInterventions.length} intervention{dayInterventions.length !== 1 ? "s" : ""}
                   </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {workOrders.filter((wo: WorkOrder) => wo.priority === 'critical' || wo.priority === 'high').length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <div className="w-9 h-9 rounded-full bg-green-50 flex items-center justify-center mb-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                    </div>
-                    <p className="text-xs text-gray-400">Aucune intervention urgente</p>
+                </div>
+
+                {dayInterventions.length === 0 ? (
+                  <div className="py-12 flex flex-col items-center justify-center text-center rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-dashed border-slate-200 dark:border-slate-700">
+                    <CalendarCheck className="h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+                    <p className="text-xs font-semibold text-foreground">Aucune intervention programmée ce jour</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Sélectionnez une autre date sur le calendrier ou planifiez un nouvel ordre de travail.
+                    </p>
                   </div>
                 ) : (
-                  workOrders
-                    .filter((wo: WorkOrder) => wo.priority === 'critical' || wo.priority === 'high')
-                    .slice(0, 5)
-                    .map((wo: WorkOrder) => (
-                      <div key={wo.id} className="flex items-start justify-between gap-2 p-2.5 bg-red-50/60 rounded-lg border border-red-100/60">
-                        <div className="min-w-0">
-                          <p className="font-medium text-[13px] text-gray-800 truncate">{wo.title}</p>
-                          <p className="text-[11px] text-gray-400 mt-0.5">{wo.vehicleRegistrationNumber || wo.vehicleRegistration || `#${wo.vehicleId}`}</p>
-                          {(wo.vehicleBrand || wo.vehicleModel) && (
-                            <p className="text-[11px] text-gray-400">{wo.vehicleBrand} {wo.vehicleModel}</p>
+                  <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {dayInterventions.map((intervention: any) => (
+                      <div
+                        key={`${intervention.vehicleId || "schedule"}-${intervention.id}`}
+                        className="p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 hover:bg-slate-100/70 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-foreground">{intervention.title}</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                intervention.isPreventive
+                                  ? "text-blue-700 bg-blue-50 border-blue-200"
+                                  : "text-amber-700 bg-amber-50 border-amber-200"
+                              }`}
+                            >
+                              {intervention.isPreventive ? "Préventive" : "Corrective"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Véhicule :{" "}
+                            <span className="font-semibold text-foreground">
+                              {intervention.vehicleRegistrationNumber || intervention.vehicleRegistration || `#${intervention.vehicleId}`}
+                            </span>
+                            {intervention.technicianName && (
+                              <span className="ml-2">· Technicien : {intervention.technicianName}</span>
+                            )}
+                            {intervention.estimatedDuration && (
+                              <span className="ml-2">· Durée est. : {intervention.estimatedDuration} h</span>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {intervention.priority && (
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getPriorityColor(
+                                intervention.priority,
+                              )}`}
+                            >
+                              {getPriorityLabel(intervention.priority)}
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getStatusBadge(
+                              intervention.status,
+                            )}`}
+                          >
+                            {getStatusLabel(intervention.status)}
+                          </span>
+                          {intervention.id && (
+                            <Link href={`/maintenance/work-orders/${intervention.id}`}>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-lg">
+                                <ArrowRight className="h-4 w-4 text-slate-500" />
+                              </Button>
+                            </Link>
                           )}
                         </div>
-                        <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full text-white ${getPriorityColor(wo.priority)}`}>
-                          {getPriorityLabel(wo.priority)}
-                        </span>
                       </div>
-                    ))
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Non assignées */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-orange-500 to-amber-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-orange-50 flex items-center justify-center">
-                    <Users className="w-3.5 h-3.5 text-orange-500" />
+                    ))}
                   </div>
-                  Non assignées
-                  <span className="ml-auto text-xs font-normal text-orange-400 bg-orange-50 px-2 py-0.5 rounded-full">
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Cliquez sur un OT pour ouvrir le suivi détaillé d'intervention</span>
+                <Link href="/maintenance/work-orders/new">
+                  <span className="text-emerald-600 font-bold hover:underline cursor-pointer flex items-center gap-1">
+                    <Plus className="h-3.5 w-3.5" /> Ajouter à cette date
+                  </span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ========================================================================= */}
+        {/* ONGLET 2 : Vue d'ensemble (Urgences, Non assignés, Préventif)            */}
+        {/* ========================================================================= */}
+        <TabsContent value="overview" className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Carte 1 : Urgences */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-rose-600" /> Interventions Urgentes
+                  </span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                    {workOrders.filter((wo: WorkOrder) => wo.priority === "critical" || wo.priority === "high").length}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {workOrders
+                    .filter((wo: WorkOrder) => wo.priority === "critical" || wo.priority === "high")
+                    .slice(0, 4)
+                    .map((wo: WorkOrder) => (
+                      <div key={wo.id} className="p-2.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40">
+                        <p className="text-xs font-bold text-foreground truncate">{wo.title}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {wo.vehicleRegistrationNumber || `#${wo.vehicleId}`} · {getPriorityLabel(wo.priority)}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Carte 2 : À Assigner */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-amber-600" /> À Assigner
+                  </span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                     {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length}
                   </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <div className="w-9 h-9 rounded-full bg-green-50 flex items-center justify-center mb-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                    </div>
-                    <p className="text-xs text-gray-400">Toutes les interventions sont assignées</p>
-                  </div>
-                ) : (
-                  workOrders
-                    .filter((wo: WorkOrder) => !wo.technicianId)
-                    .slice(0, 5)
-                    .map((wo: WorkOrder) => (
-                      <div key={wo.id} className="flex items-start justify-between gap-2 p-2.5 bg-orange-50/60 rounded-lg border border-orange-100/60">
-                        <div className="min-w-0">
-                          <p className="font-medium text-[13px] text-gray-800 truncate">{wo.title}</p>
-                          <p className="text-[11px] text-gray-400 mt-0.5">{wo.vehicleRegistrationNumber || wo.vehicleRegistration || `#${wo.vehicleId}`}</p>
-                          {(wo.vehicleBrand || wo.vehicleModel) && (
-                            <p className="text-[11px] text-gray-400">{wo.vehicleBrand} {wo.vehicleModel}</p>
-                          )}
-                        </div>
-                        <Button size="sm" variant="outline" className="shrink-0 h-7 text-[11px] px-2.5">
-                          Assigner
-                        </Button>
-                      </div>
-                    ))
-                )}
-              </CardContent>
-            </Card>
+                </div>
 
-            {/* Maintenance préventive */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-blue-500 to-indigo-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-blue-50 flex items-center justify-center">
-                    <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
-                  </div>
-                  Maintenance préventive
-                  <span className="ml-auto text-xs font-normal text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full">
+                <div className="space-y-2">
+                  {workOrders
+                    .filter((wo: WorkOrder) => !wo.technicianId)
+                    .slice(0, 4)
+                    .map((wo: WorkOrder) => (
+                      <div key={wo.id} className="p-2.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 flex items-center justify-between">
+                        <div className="min-w-0 pr-2">
+                          <p className="text-xs font-bold text-foreground truncate">{wo.title}</p>
+                          <p className="text-[11px] text-muted-foreground">{wo.vehicleRegistrationNumber || `#${wo.vehicleId}`}</p>
+                        </div>
+                        <Link href="/maintenance/work-orders">
+                          <Button size="sm" className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg">
+                            Assigner
+                          </Button>
+                        </Link>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Carte 3 : Maintenances Préventives */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+                    <CalendarCheck className="h-3.5 w-3.5 text-blue-600" /> Échéances Programmées
+                  </span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                     {schedules.length}
                   </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {schedules.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center mb-2">
-                      <CalendarIcon className="w-4 h-4 text-blue-400" />
+                </div>
+
+                <div className="space-y-2">
+                  {schedules.slice(0, 4).map((schedule: MaintenanceSchedule) => (
+                    <div key={schedule.id} className="p-2.5 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
+                      <p className="text-xs font-bold text-foreground truncate">{schedule.title}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {schedule.vehicleRegistrationNumber} · {format(new Date(schedule.scheduledDate), "dd/MM/yyyy", { locale: fr })}
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-400">Aucune planification active</p>
-                  </div>
-                ) : (
-                  schedules.slice(0, 5).map((schedule: MaintenanceSchedule) => (
-                    <div key={schedule.id} className="flex items-start justify-between gap-2 p-2.5 bg-blue-50/60 rounded-lg border border-blue-100/60">
-                      <div className="min-w-0">
-                        <p className="font-medium text-[13px] text-gray-800 truncate">{schedule.title}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          {schedule.vehicleRegistrationNumber} · {format(new Date(schedule.scheduledDate), 'dd/MM/yyyy', { locale: fr })}
-                        </p>
-                      </div>
-                      <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full text-white ${getStatusColor(schedule.status)}`}>
-                        {getStatusLabel(schedule.status)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </TabsContent>
 
-        {/* ── Calendrier ── */}
-        <TabsContent value="calendar" className="space-y-0">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            <Card className="lg:col-span-1 overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-green-50 flex items-center justify-center">
-                    <CalendarDays className="w-3.5 h-3.5 text-green-600" />
-                  </div>
-                  Calendrier
-                </CardTitle>
-                <CardDescription className="text-xs text-gray-400">Sélectionnez une date</CardDescription>
-              </CardHeader>
-              <CardContent className="px-5 pb-4">
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  locale={fr}
-                  className="rounded-xl border border-gray-100 w-full"
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2 overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-green-50 flex items-center justify-center">
-                    <Wrench className="w-3.5 h-3.5 text-green-600" />
-                  </div>
-                  {selectedDate ? format(selectedDate, 'dd MMMM yyyy', { locale: fr }) : 'Jour sélectionné'}
-                  <span className="ml-auto text-xs font-normal text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                    {dayInterventions.length} intervention{dayInterventions.length !== 1 ? 's' : ''}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {dayInterventions.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center mb-2">
-                      <CalendarDays className="w-5 h-5 text-gray-300" />
-                    </div>
-                    <p className="text-sm text-gray-400">Aucune intervention pour cette date</p>
-                  </div>
-                ) : (
-                  dayInterventions.map((intervention: any) => (
-                    <div key={`${intervention.vehicleId || 'schedule'}-${intervention.id}`}
-                      className="flex items-start justify-between gap-3 p-3 bg-gray-50/70 rounded-xl border border-gray-100">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <p className="font-medium text-[13px] text-gray-800">{intervention.title}</p>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${intervention.isPreventive ? 'text-blue-600 border-blue-200 bg-blue-50' : 'text-orange-600 border-orange-200 bg-orange-50'}`}>
-                            {intervention.isPreventive ? 'Préventive' : 'Corrective'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400">
-                          {intervention.vehicleRegistrationNumber}
-                          {intervention.technicianName && ` · ${intervention.technicianName}`}
-                          {intervention.estimatedDuration && ` · ${intervention.estimatedDuration}h`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {intervention.priority && (
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full text-white ${getPriorityColor(intervention.priority)}`}>
-                            {getPriorityLabel(intervention.priority)}
-                          </span>
-                        )}
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full text-white ${getStatusColor(intervention.status)}`}>
-                          {getStatusLabel(intervention.status)}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* ── Affectations ── */}
-        <TabsContent value="assignments" className="space-y-0">
+        {/* ========================================================================= */}
+        {/* ONGLET 3 : Affectations & Charge par Technicien                            */}
+        {/* ========================================================================= */}
+        <TabsContent value="assignments" className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-            {/* Techniciens */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-violet-500 to-purple-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-violet-50 flex items-center justify-center">
-                    <Users className="w-3.5 h-3.5 text-violet-500" />
-                  </div>
-                  Techniciens
-                </CardTitle>
-                <CardDescription className="text-xs text-gray-400">Charge de travail par technicien</CardDescription>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {technicians.length === 0 ? (
-                  <p className="text-xs text-gray-400 py-4 text-center">Aucun technicien trouvé</p>
-                ) : technicians.map((tech: any) => {
-                  const techTasks = workOrders.filter((wo: WorkOrder) =>
-                    wo.technicianId === tech.id && (wo.status === 'in_progress' || wo.status === 'pending')
+            {/* Charge des techniciens */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Users className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-bold text-foreground">Charge de Travail par Technicien</span>
+              </div>
+              <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                {technicians.map((tech: any) => {
+                  const techTasks = workOrders.filter(
+                    (wo: WorkOrder) =>
+                      wo.technicianId === tech.id && (wo.status === "in_progress" || wo.status === "pending"),
                   );
                   const isOpen = selectedTechnician === tech.id;
                   return (
-                    <div key={tech.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div key={tech.id} className="border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden bg-slate-50/50 dark:bg-slate-900/40">
                       <div
-                        className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50/70 transition-colors"
+                        className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100/60 transition-colors"
                         onClick={() => setSelectedTechnician(isOpen ? null : tech.id)}
                       >
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center text-[11px] font-bold text-violet-600">
-                            {(tech.name || tech.username || 'T').charAt(0).toUpperCase()}
+                          <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 font-bold text-xs flex items-center justify-center">
+                            {(tech.name || tech.username || "T").charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-medium text-[13px] text-gray-800">{tech.name}</p>
-                            <p className="text-[11px] text-gray-400">{techTasks.length} tâche{techTasks.length !== 1 ? 's' : ''} en cours</p>
+                            <p className="font-bold text-xs text-foreground">{tech.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{techTasks.length} tâche(s) active(s)</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-100">
-                            {tech.role === 'workshop_manager' ? 'Chef d\'atelier' : 'Technicien'}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {tech.role === "workshop_manager" ? "Chef d'atelier" : "Technicien"}
                           </span>
-                          {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-gray-400" /> : <ChevronDown className="h-3.5 w-3.5 text-gray-400" />}
+                          {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
                         </div>
                       </div>
                       {isOpen && (
-                        <div className="px-3 pb-3 border-t border-gray-50 bg-gray-50/50 space-y-1.5 pt-2">
+                        <div className="px-3 pb-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5 pt-2">
                           {techTasks.length === 0 ? (
-                            <p className="text-xs text-gray-400 py-1">Aucune tâche assignée</p>
-                          ) : techTasks.map((task: WorkOrder) => (
-                            <div key={task.id} className="bg-white p-2.5 rounded-lg border border-gray-100">
-                              <div className="flex justify-between items-start gap-2">
-                                <div className="min-w-0">
-                                  <p className="font-medium text-[12px] text-gray-800 truncate">{task.title}</p>
-                                  <p className="text-[10px] text-gray-400 mt-0.5">
-                                    {task.vehicleRegistration || `#${task.vehicleId}`} · Depuis {new Date(task.createdAt).toLocaleDateString('fr-FR')}
-                                  </p>
+                            <p className="text-xs text-muted-foreground py-1">Aucune tâche assignée actuellement</p>
+                          ) : (
+                            techTasks.map((task: WorkOrder) => (
+                              <div key={task.id} className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                                <div>
+                                  <p className="text-xs font-bold text-foreground">{task.title}</p>
+                                  <p className="text-[10px] text-muted-foreground">{task.vehicleRegistration || `#${task.vehicleId}`}</p>
                                 </div>
-                                <div className="flex flex-col gap-1 shrink-0">
-                                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full text-white ${getPriorityColor(task.priority)}`}>
-                                    {getPriorityLabel(task.priority)}
-                                  </span>
-                                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full text-white ${getStatusColor(task.status)}`}>
-                                    {getStatusLabel(task.status)}
-                                  </span>
-                                </div>
+                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${getPriorityColor(task.priority)}`}>
+                                  {getPriorityLabel(task.priority)}
+                                </span>
                               </div>
-                            </div>
-                          ))}
+                            ))
+                          )}
                         </div>
                       )}
                     </div>
                   );
                 })}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
 
-            {/* À assigner */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-orange-500 to-amber-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-orange-50 flex items-center justify-center">
-                    <AlertTriangle className="w-3.5 h-3.5 text-orange-500" />
-                  </div>
-                  Interventions à assigner
-                  <span className="ml-auto text-xs font-normal text-orange-400 bg-orange-50 px-2 py-0.5 rounded-full">
-                    {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <div className="w-9 h-9 rounded-full bg-green-50 flex items-center justify-center mb-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                    </div>
-                    <p className="text-xs text-gray-400">Tout est assigné</p>
-                  </div>
-                ) : (
-                  workOrders.filter((wo: WorkOrder) => !wo.technicianId).map((wo: WorkOrder) => (
-                    <div key={wo.id} className="flex items-start justify-between gap-2 p-2.5 bg-orange-50/40 rounded-xl border border-orange-100/60">
-                      <div className="min-w-0">
-                        <p className="font-medium text-[13px] text-gray-800 truncate">{wo.title}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          {wo.vehicleRegistrationNumber || wo.vehicleRegistration || `#${wo.vehicleId}`}
-                          {(wo.vehicleBrand || wo.vehicleModel) && ` · ${wo.vehicleBrand} ${wo.vehicleModel}`}
+            {/* Interventions à affecter */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm font-bold text-foreground">File d'Attente sans Technicien</span>
+                </div>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                  {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length}
+                </span>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                {workOrders
+                  .filter((wo: WorkOrder) => !wo.technicianId)
+                  .map((wo: WorkOrder) => (
+                    <div key={wo.id} className="p-3 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-foreground">{wo.title}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {wo.vehicleRegistrationNumber || `#${wo.vehicleId}`}
                         </p>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full text-white ${getPriorityColor(wo.priority)}`}>
-                          {getPriorityLabel(wo.priority)}
-                        </span>
-                        <Button size="sm" className="h-7 text-[11px] px-2.5 bg-green-600 hover:bg-green-700 text-white">
+                      <Link href={`/maintenance/work-orders`}>
+                        <Button size="sm" className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
                           Assigner
                         </Button>
-                      </div>
+                      </Link>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                  ))}
+              </div>
+            </div>
           </div>
         </TabsContent>
 
-        {/* ── Analyses ── */}
-        <TabsContent value="analytics" className="space-y-0">
+        {/* ========================================================================= */}
+        {/* ONGLET 4 : Analyses & Performance                                         */}
+        {/* ========================================================================= */}
+        <TabsContent value="analytics" className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
+                <span className="text-sm font-bold text-foreground">Performance de Clôture &amp; Délais</span>
+              </div>
 
-            {/* Performance */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-green-50 flex items-center justify-center">
-                    <TrendingUp className="w-3.5 h-3.5 text-green-600" />
-                  </div>
-                  Performance des interventions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-4">
-                {/* Taux de résolution */}
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <span className="text-[12px] text-gray-600">Taux de résolution</span>
-                    <span className="text-[13px] font-bold text-green-700">{resolutionRate}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all"
-                      style={{ width: `${resolutionRate}%` }}
-                    />
-                  </div>
+              <div>
+                <div className="flex justify-between items-center mb-1.5 text-xs">
+                  <span className="text-muted-foreground">Taux de résolution globale</span>
+                  <span className="font-extrabold text-emerald-600">{resolutionRate}%</span>
                 </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="bg-red-50 rounded-xl p-3 border border-red-100/60">
-                    <p className="text-[10px] text-red-500 font-medium uppercase tracking-wide">En retard</p>
-                    <p className="text-2xl font-bold text-red-600 mt-0.5">{stats.overdueSchedules}</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-xl p-3 border border-blue-100/60">
-                    <p className="text-[10px] text-blue-500 font-medium uppercase tracking-wide">Temps moyen</p>
-                    <p className="text-2xl font-bold text-blue-600 mt-0.5">
-                      {performanceStats ? Math.round((performanceStats as any).avgResolutionTime || 0) : 0}
-                      <span className="text-sm font-normal ml-1">j</span>
-                    </p>
-                  </div>
+                <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    style={{ width: `${resolutionRate}%` }}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Répartition par priorité */}
-            <Card className="overflow-hidden border border-gray-100 shadow-sm">
-              <div className="h-0.5 bg-gradient-to-r from-amber-500 to-yellow-400" />
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-                  <div className="w-6 h-6 rounded-md bg-amber-50 flex items-center justify-center">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                  </div>
-                  Répartition par priorité
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-3">
-                {['critical', 'high', 'medium', 'low'].map(priority => {
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/60">
+                  <p className="text-[10px] text-rose-700 font-bold uppercase tracking-wider">Échéances en retard</p>
+                  <p className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-0.5">{stats.overdueSchedules}</p>
+                </div>
+                <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60">
+                  <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wider">Délai moyen résolution</p>
+                  <p className="text-2xl font-black text-blue-700 dark:text-blue-400 mt-0.5">
+                    {performanceStats ? Math.round((performanceStats as any).avgResolutionTime || 0) : 0}
+                    <span className="text-sm font-semibold ml-1">j</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="text-sm font-bold text-foreground">Répartition par Niveau de Priorité</span>
+              </div>
+
+              <div className="space-y-3">
+                {["critical", "high", "medium", "low"].map((priority) => {
                   const count = workOrders.filter((wo: WorkOrder) => wo.priority === priority).length;
                   const percentage = workOrders.length > 0 ? (count / workOrders.length) * 100 : 0;
-                  const barColors: Record<string, string> = {
-                    critical: 'from-red-500 to-rose-400',
-                    high: 'from-orange-500 to-amber-400',
-                    medium: 'from-yellow-500 to-yellow-400',
-                    low: 'from-green-500 to-emerald-400',
+                  const colors: Record<string, string> = {
+                    critical: "bg-rose-500",
+                    high: "bg-amber-500",
+                    medium: "bg-blue-500",
+                    low: "bg-emerald-500",
                   };
                   return (
-                    <div key={priority}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <div className={`w-2 h-2 rounded-full ${getPriorityColor(priority)}`} />
-                          <span className="text-[12px] text-gray-600">{getPriorityLabel(priority)}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[12px] font-semibold text-gray-700">{count}</span>
-                          <span className="text-[11px] text-gray-400">({Math.round(percentage)}%)</span>
-                        </div>
+                    <div key={priority} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{getPriorityLabel(priority)}</span>
+                        <span className="font-bold text-foreground">
+                          {count} ({Math.round(percentage)}%)
+                        </span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full bg-gradient-to-r ${barColors[priority]} transition-all`}
-                          style={{ width: `${percentage}%` }}
-                        />
+                      <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div className={`h-full rounded-full ${colors[priority]}`} style={{ width: `${percentage}%` }} />
                       </div>
                     </div>
                   );
                 })}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

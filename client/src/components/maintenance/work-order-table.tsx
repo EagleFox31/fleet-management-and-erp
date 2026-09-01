@@ -10,7 +10,7 @@ import {
 import { WorkOrderEditModal } from "./work-order-edit-modal";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
+import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -107,7 +107,6 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
   const [autoStartingWorkOrderId, setAutoStartingWorkOrderId] = useState<number | null>(null);
   const { setSelectedVehicle } = useVehicle();
   const { user } = useAuth();
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const itemsPerPage = 10;
   const canAssignTechnician = user?.role === "admin" || user?.role === "workshop_manager";
@@ -136,18 +135,32 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
     mutationFn: async ({ workOrderId, technicianId }: { workOrderId: number; technicianId: number }) => {
       await apiRequest("PATCH", `/api/work-orders/${workOrderId}`, { technicianId });
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
+      const vehicleIdToRefresh = assignTargetWorkOrder?.vehicleId ?? vehicleId;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${variables.workOrderId}`] }),
+        ...(vehicleIdToRefresh
+          ? [queryClient.invalidateQueries({ queryKey: [`/api/work-orders/vehicle/${vehicleIdToRefresh}`] })]
+          : []),
       ]);
-      toast({ title: "Technicien assigné", description: "L'ordre de travail a été mis à jour." });
+      invalidateAlertQueries();
+      appToast({
+        title: "Technicien assigné",
+        description: "Le technicien a été notifié dans sa cloche d'alertes.",
+        variant: "success",
+      });
       setAssignModalOpen(false);
       setAssignTargetWorkOrder(null);
       setSelectedTechnicianId("");
     },
     onError: (error: any) => {
-      toast({ title: "Échec de l'assignation", description: error?.message || "Impossible d'assigner ce technicien.", variant: "destructive" });
+      appToast({
+        title: "Échec de l'assignation",
+        description: error?.message || "Impossible d'assigner ce technicien.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -166,10 +179,10 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
         queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] }),
       ]);
-      toast({ title: "OT démarré", description: "L'ordre de travail a été auto-assigné et démarré." });
+      appToast({ title: "OT démarré", description: "L'ordre de travail a été auto-assigné et démarré.", variant: "success" });
     },
     onError: (error: any) => {
-      toast({ title: "Échec du démarrage", description: error?.message || "Impossible de démarrer cet OT.", variant: "destructive" });
+      appToast({ title: "Échec du démarrage", description: error?.message || "Impossible de démarrer cet OT.", variant: "destructive" });
     },
     onSettled: () => { setAutoStartingWorkOrderId(null); },
   });
@@ -189,12 +202,12 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
   const handleAssignTechnician = () => {
     if (!assignTargetWorkOrder) return;
     if (!selectedTechnicianId) {
-      toast({ title: "Technicien requis", description: "Sélectionnez un technicien pour continuer.", variant: "destructive" });
+      appToast({ title: "Technicien requis", description: "Sélectionnez un technicien pour continuer.", variant: "destructive" });
       return;
     }
     const technicianId = Number(selectedTechnicianId);
     if (!Number.isFinite(technicianId) || technicianId <= 0) {
-      toast({ title: "Technicien invalide", description: "La sélection du technicien est invalide.", variant: "destructive" });
+      appToast({ title: "Technicien invalide", description: "La sélection du technicien est invalide.", variant: "destructive" });
       return;
     }
     assignTechnicianMutation.mutate({ workOrderId: assignTargetWorkOrder.id, technicianId });
@@ -202,7 +215,7 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
 
   const handleAutoAssignAndStart = (workOrderId: number) => {
     if (!user?.id) {
-      toast({ title: "Session invalide", description: "Reconnectez-vous puis réessayez.", variant: "destructive" });
+      appToast({ title: "Session invalide", description: "Reconnectez-vous puis réessayez.", variant: "destructive" });
       return;
     }
     autoAssignAndStartMutation.mutate(workOrderId);

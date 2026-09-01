@@ -337,9 +337,8 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* Tuiles: 5 au lieu de 6. « Type » est passé dans le sous-titre,
-              il n'avait pas besoin d'une tuile pour deux mots. */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-5 border-t border-gray-100">
+          {/* Tuiles KPI — « Type » dans le sous-titre ; OT actives en 6e tuile */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-5 border-t border-gray-100">
             <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-1">
               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
                 <Gauge className="h-4 w-4 text-blue-600" />
@@ -403,26 +402,82 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
               onClick={() => setActiveTab("documents")}
               data-testid="vehicle-deadline-inspection"
             />
+            <div
+              className={`rounded-xl border px-4 py-3.5 flex flex-col gap-1 cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+                activeWorkOrders.length > 0
+                  ? "border-amber-200 bg-amber-50/80"
+                  : "border-gray-100 bg-gray-50"
+              }`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveTab("work-orders")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setActiveTab("work-orders");
+                }
+              }}
+              data-testid="vehicle-kpi-active-work-orders"
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                activeWorkOrders.length > 0 ? "bg-amber-100" : "bg-gray-100"
+              }`}>
+                <Wrench className={`h-4 w-4 ${activeWorkOrders.length > 0 ? "text-amber-700" : "text-gray-500"}`} />
+              </div>
+              <p className="text-[11px] font-medium text-gray-500 mt-1">OT actives</p>
+              <p className={`text-[13px] font-bold ${activeWorkOrders.length > 0 ? "text-amber-900" : "text-gray-800"}`}>
+                {activeWorkOrders.length === 0 ? "Aucune" : activeWorkOrders.length}
+              </p>
+              <p className="text-[10px] text-gray-400">
+                {activeWorkOrders.length === 0
+                  ? "Aucune intervention ouverte"
+                  : activeWorkOrders.length === 1
+                    ? "1 intervention en cours"
+                    : `${activeWorkOrders.length} interventions en cours`}
+              </p>
+            </div>
           </div>
 
           {/* Maintenance alert */}
-          {vehicle.status === "maintenance" && (
+          {(vehicle.status === "maintenance" || activeWorkOrders.length > 0) && (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
               <div className="flex items-start gap-3">
                 <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-amber-900">Pourquoi "En maintenance" ?</p>
-                  <p className="text-xs text-amber-800 mt-0.5">{activeTrigger.title} — {activeTrigger.details}</p>
-                  <p className="text-xs text-amber-700 font-medium mt-1">{workshopAction}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {vehicle.status === "maintenance"
+                      ? 'Pourquoi "En maintenance" ?'
+                      : `${activeWorkOrders.length} OT active${activeWorkOrders.length > 1 ? "s" : ""}`}
+                  </p>
                   {activeWorkOrder && (
-                    <button
-                      onClick={() => setLocation(`/maintenance/work-orders/${activeWorkOrder.id}`)}
-                      className="text-xs text-amber-900 underline mt-1 hover:text-amber-700"
-                    >
-                      Voir OT active #{activeWorkOrder.id}
-                    </button>
+                    <p className="text-xs text-amber-800 mt-0.5">{activeTrigger.title} — {activeTrigger.details}</p>
+                  )}
+                  {activeWorkOrders.length > 0 && (
+                    <p className="text-xs text-amber-800 font-medium mt-1">
+                      {activeWorkOrders.length} OT active{activeWorkOrders.length > 1 ? "s" : ""} — le véhicule reste en maintenance tant qu&apos;au moins une n&apos;est pas clôturée.
+                    </p>
+                  )}
+                  <p className="text-xs text-amber-700 font-medium mt-1">{workshopAction}</p>
+                  {activeWorkOrders.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {activeWorkOrders.map((wo: { id: number; status: string; title?: string }) => (
+                        <li key={wo.id}>
+                          <button
+                            type="button"
+                            onClick={() => setLocation(`/maintenance/work-orders/${wo.id}`)}
+                            className="text-xs text-amber-900 underline hover:text-amber-700 text-left"
+                          >
+                            OT #{wo.id} · {translateStatus(wo.status)}{wo.title ? ` · ${wo.title}` : ""}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-amber-700 mt-1">
+                      Aucune OT ouverte trouvée — le statut semble défini manuellement.
+                    </p>
                   )}
                 </div>
               </div>

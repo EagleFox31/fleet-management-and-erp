@@ -143,7 +143,6 @@ const userProfiles = [
     bgColor: "bg-red-500/10",
     description: "Contrôle total du système avec accès à toutes les fonctionnalités",
     permissions: ["Gestion complète", "Configuration", "Rapports", "Utilisateurs", "Sécurité", "Exports"],
-    credential: "admin / admin123"
   },
   {
     id: "workshop_manager",
@@ -153,7 +152,6 @@ const userProfiles = [
     bgColor: "bg-blue-500/10",
     description: "Supervision des opérations de maintenance et gestion d'équipe",
     permissions: ["Ordres de travail", "Planification", "Équipe", "Rapports", "Pièces", "Validation"],
-    credential: "terry / workshop123"
   },
   {
     id: "technician",
@@ -163,7 +161,6 @@ const userProfiles = [
     bgColor: "bg-orange-500/10",
     description: "Exécution des tâches de maintenance et interventions techniques",
     permissions: ["Mes ordres", "Interventions", "Historique", "Demandes pièces", "Inspections pneus"],
-    credential: "ali / tech123"
   },
   {
     id: "secretary",
@@ -173,7 +170,6 @@ const userProfiles = [
     bgColor: "bg-purple-500/10",
     description: "Gestion administrative, conformité documentaire et facturation",
     permissions: ["Documents flotte", "Factures fournisseurs", "Contrôle 3 voies", "Dossiers RH chauffeurs"],
-    credential: "dana / secretary123"
   },
   {
     id: "logistics",
@@ -183,7 +179,6 @@ const userProfiles = [
     bgColor: "bg-cyan-500/10",
     description: "Coordination des missions, suivi carburant et gestion de flotte",
     permissions: ["Missions transport", "Consommation carburant", "Feuilles de route", "Affectations"],
-    credential: "issouf / logistics123"
   },
   {
     id: "warehouse",
@@ -193,7 +188,6 @@ const userProfiles = [
     bgColor: "bg-green-500/10",
     description: "Gestion complète des stocks, pièces détachées et inventaire pneus",
     permissions: ["Inventaire pièces", "Réceptions / Entrées", "Sorties stock OT", "Catalogue pneus"],
-    credential: "fatou / warehouse123"
   },
   {
     id: "management",
@@ -203,7 +197,6 @@ const userProfiles = [
     bgColor: "bg-emerald-500/10",
     description: "Dashboard exécutif, marge brute après charges, rentabilité et CA",
     permissions: ["CA facturé & encaissé", "Marge brute HT", "Top clients & lignes", "Rapport Direction PDF"],
-    credential: "Création via Admin > Utilisateurs"
   },
   {
     id: "client",
@@ -213,7 +206,6 @@ const userProfiles = [
     bgColor: "bg-indigo-500/10",
     description: "Consultation exclusive de vos véhicules, missions et factures",
     permissions: ["Ses véhicules", "Ses missions", "Historique factures", "Export PDF"],
-    credential: "client / client123"
   },
   {
     id: "driver",
@@ -223,7 +215,6 @@ const userProfiles = [
     bgColor: "bg-amber-500/10",
     description: "Interface PWA mobile dédiée avec connexion rapide par code PIN",
     permissions: ["Mission du jour", "Feuille de route", "Relevé km départ/arrivée", "Alertes incident"],
-    credential: "jean.mballa / PIN 1234"
   }
 ];
 
@@ -1347,14 +1338,11 @@ export default function LandingPage() {
                         </div>
                       </div>
 
-                      <div className="pt-3 border-t border-white/10">
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
-                          <span>Identifiants démo</span>
-                          <span className="text-[10px] text-slate-500">login / pass</span>
-                        </div>
-                        <code className="text-xs bg-black/40 text-emerald-300/90 px-2.5 py-1.5 rounded-lg border border-white/5 block font-mono text-center tracking-wide">
-                          {profile.credential}
-                        </code>
+                      <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                        <span>Rôle système</span>
+                        <span className="font-semibold text-emerald-400 text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          Actif
+                        </span>
                       </div>
                     </CardContent>
                   </Card>
@@ -1536,12 +1524,12 @@ export default function LandingPage() {
               </DialogHeader>
 
               <div className="space-y-6 mt-4">
-                {/* Identifiants de test */}
+                {/* Identifiants et accès */}
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4">
-                  <h4 className="font-semibold text-emerald-400 mb-2 flex items-center gap-2">
-                    <KeyRound className="h-4 w-4" /> Identifiants de test
+                  <h4 className="font-semibold text-emerald-400 mb-1 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4" /> Accès &amp; Authentification
                   </h4>
-                  <code className="text-sm text-foreground font-mono">{userProfiles.find(p => p.id === selectedProfile)?.credential}</code>
+                  <p className="text-xs text-slate-300">Connexion sécurisée via identifiants d'entreprise ou code PIN chauffeur personnel.</p>
                 </div>
 
                 {/* Étapes du guide */}

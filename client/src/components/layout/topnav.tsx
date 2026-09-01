@@ -158,14 +158,14 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
 
   return (
     <div
-      className={`pl-6 pr-6 py-3 flex items-center justify-between sticky top-0 z-20 border-b border-gray-100 bg-white ${className}`}
+      className={`px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between sticky top-0 z-20 border-b border-gray-100 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm max-w-full overflow-hidden ${className}`}
     >
       {/* Hamburger mobile (masqué pour le technicien qui utilise la Bottom App Bar PWA) */}
       {user?.role !== "technician" && (
         <Button
           variant="ghost"
           size="sm"
-          className="md:hidden text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl mr-1"
+          className="md:hidden text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl mr-1 shrink-0"
           onClick={onMenuClick}
           aria-label="Ouvrir le menu"
         >
@@ -174,22 +174,24 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       )}
 
       {/* Logo mobile */}
-      <div className="md:hidden flex items-center space-x-3">
-        <Link href="/dashboard" className="flex items-center space-x-2">
+      <div className="md:hidden flex items-center min-w-0 shrink">
+        <Link href="/dashboard" className="flex items-center space-x-2 min-w-0">
           <img
             src="/logo.jpg"
             alt="T.A.Y. Logo"
-            className="w-8 h-8 rounded-xl object-cover ring-1 ring-green-100"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl object-cover ring-1 ring-green-100 shrink-0"
             style={{ objectPosition: 'center' }}
           />
-          <span className="font-semibold text-[15px] text-green-900 tracking-tight">Yaro FleetOS</span>
+          <span className="font-semibold text-sm sm:text-[15px] text-green-900 dark:text-green-400 tracking-tight truncate">
+            Yaro FleetOS
+          </span>
         </Link>
       </div>
 
       {/* Breadcrumb */}
-      <div className="flex-1 flex items-center pl-2">
+      <div className="flex-1 flex items-center pl-2 min-w-0">
         {breadcrumbs.length > 0 && (
-          <div className="hidden md:flex items-center gap-1.5">
+          <div className="hidden md:flex items-center gap-1.5 min-w-0">
             {breadcrumbs.map((crumb, i) => (
               <React.Fragment key={i}>
                 {i > 0 && <ChevronRight className="h-3 w-3 text-gray-300" />}
@@ -209,7 +211,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       </div>
 
       {/* Actions à droite */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <ContextualHelpButton />
 
         {/* Notifications */}

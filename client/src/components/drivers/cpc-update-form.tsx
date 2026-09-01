@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { GraduationCap, Calendar, Check, Loader2 } from "lucide-react";
+import { formatDate } from "@/lib/utils";
 
 interface CPCUpdateFormProps {
   driverId: number;
@@ -34,7 +34,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/expiring-cpc"] });
       toast({
         title: "Formation CPC mise à jour",
-        description: `La certification CPC de ${driverName} a été mise à jour avec succès.`,
+        description: `La certification CPC de ${driverName} a été enregistrée avec succès.`,
       });
       setCpcDate("");
     },
@@ -49,7 +49,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!cpcDate) {
       toast({
         title: "Date requise",
@@ -61,7 +61,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
 
     const selectedDate = new Date(cpcDate);
     const today = new Date();
-    
+
     if (selectedDate > today) {
       toast({
         title: "Date invalide",
@@ -74,68 +74,88 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
     mutation.mutate(cpcDate);
   };
 
-  const getStatusColor = (status?: string) => {
+  const getStatusBadge = (status?: string) => {
     switch (status) {
-      case 'FORMÉ':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-      case 'À FORMER':
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
-      case 'NON FORMÉ':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+      case "FORMÉ":
+        return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/80";
+      case "À FORMER":
+        return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/80";
+      case "NON FORMÉ":
+        return "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200/80";
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+        return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200";
     }
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">👨‍🎓 Mise à jour Formation CPC</CardTitle>
-        <CardDescription className="flex items-center gap-2 flex-wrap">
-          <span>Chauffeur: <span className="font-semibold">{driverName}</span></span>
-          {currentStatus && (
-            <Badge className={getStatusColor(currentStatus)}>
-              {currentStatus}
-            </Badge>
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {currentCPCDate && (
-            <div className="bg-muted p-3 rounded-md">
-              <p className="text-sm text-muted-foreground">
-                Date de formation actuelle: <span className="font-semibold">{new Date(currentCPCDate).toLocaleDateString('fr-FR')}</span>
-              </p>
+    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+      <div className="space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-300 shrink-0">
+              <GraduationCap className="h-4 w-4" />
             </div>
+            <div>
+              <p className="font-bold text-xs text-foreground leading-tight">{driverName}</p>
+              <p className="text-[11px] text-muted-foreground">Conducteur</p>
+            </div>
+          </div>
+          {currentStatus && (
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(
+                currentStatus,
+              )}`}
+            >
+              {currentStatus}
+            </span>
           )}
+        </div>
 
-          <div>
-            <Label htmlFor={`cpc-date-${driverId}`}>Date de la formation CPC</Label>
+        {currentCPCDate && (
+          <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-[11px] text-muted-foreground flex items-center justify-between">
+            <span>Dernière session :</span>
+            <span className="font-bold text-foreground">{formatDate(currentCPCDate)}</span>
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-2.5 pt-1">
+        <div className="space-y-1">
+          <Label htmlFor={`cpc-date-${driverId}`} className="text-[11px] font-semibold text-muted-foreground">
+            Nouvelle date de formation
+          </Label>
+          <div className="relative">
             <Input
               id={`cpc-date-${driverId}`}
               type="date"
               value={cpcDate}
               onChange={(e) => setCpcDate(e.target.value)}
-              max={new Date().toISOString().split('T')[0]}
+              max={new Date().toISOString().split("T")[0]}
               required
               data-testid={`input-cpc-date-${driverId}`}
+              className="h-9 text-xs rounded-xl bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
             />
-            <p className="text-sm text-muted-foreground mt-1">
-              La certification CPC est valable 731 jours (environ 2 ans)
-            </p>
           </div>
+        </div>
 
-          <Button
-            type="submit"
-            disabled={mutation.isPending}
-            className="w-full"
-            data-testid={`btn-update-cpc-${driverId}`}
-          >
-            {mutation.isPending ? "Mise à jour..." : "Mettre à jour la formation"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        <Button
+          type="submit"
+          disabled={mutation.isPending || !cpcDate}
+          size="sm"
+          className="w-full h-8 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 cursor-pointer"
+          data-testid={`btn-update-cpc-${driverId}`}
+        >
+          {mutation.isPending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Enregistrement…
+            </>
+          ) : (
+            <>
+              <Check className="h-3.5 w-3.5" /> Enregistrer validation
+            </>
+          )}
+        </Button>
+      </form>
+    </div>
   );
 }
