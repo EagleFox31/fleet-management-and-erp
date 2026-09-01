@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
+import { useRetourArriere } from "@/hooks/useRetourArriere";
 
 interface PurchaseOrderLine {
   id: number;
@@ -181,6 +182,7 @@ const getLineStatusDisplay = (lineStatus: string, orderStatus: string) => {
 };
 
 export default function PurchaseOrderDetailsPage() {
+  const retourArriere = useRetourArriere("/procurement/orders");
   const params   = useParams();
   const orderId  = parseInt(params.id!);
   const [, setLocation] = useLocation();
@@ -381,10 +383,10 @@ export default function PurchaseOrderDetailsPage() {
             variant="ghost"
             size="sm"
             className="mb-4 -ml-1 text-muted-foreground hover:text-foreground"
-            onClick={() => setLocation("/procurement/orders")}
+            onClick={retourArriere}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
-            Commandes
+            Retour
           </Button>
 
           {/* Badges */}

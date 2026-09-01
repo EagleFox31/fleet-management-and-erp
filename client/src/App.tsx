@@ -4,11 +4,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
-import { AuthContext, useAuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { VehicleProvider } from "@/context/vehicle-context";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { OnboardingProvider } from "@/hooks/use-onboarding";
 import { PARTS_INVENTORY_ROLES } from "@/lib/auth";
+import { queryClient } from "@/lib/queryClient";
+import { setupOfflinePersistence } from "@/lib/offline-storage";
+import {
+  isNativePlatform,
+  setupHardwareBackButton,
+  setupNotificationClickListener,
+} from "@/lib/native-mobile";
 
 // Components
 import NotFound from "@/pages/not-found";
@@ -63,7 +70,7 @@ import ProfilePage from "@/pages/profile";
 import UsersIndex from "@/pages/users/index";
 import AdminUsersPage from "@/pages/admin/users";
 import DocumentationPage from "@/pages/admin/documentation";
-import { DRIVER_MANAGER_ROLES } from "@shared/constants/roles";
+import { DRIVER_MANAGER_ROLES, PROCUREMENT_ROLES } from "@shared/constants/roles";
 import ImportBackup from "@/pages/admin/import-backup";
 import { WorkflowsIndex } from "@/pages/workflows/index";
 import { VehicleAcquisitionWorkflow } from "@/pages/workflows/vehicle-acquisition";
@@ -230,14 +237,60 @@ function SmartDashboardRoute() {
   );
 }
 
+function RootRoute() {
+  const { isAuthenticated, isAuthenticating } = useAuth();
+
+  // Sur l'application native Android APK (Capacitor) : jamais de landing page marketing
+  if (isNativePlatform()) {
+    if (isAuthenticating) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+            <p className="text-xs text-slate-400 font-semibold">Chargement de FleetOS...</p>
+          </div>
+        </div>
+      );
+    }
+    if (isAuthenticated) {
+      return <SmartDashboardRoute />;
+    }
+    return <Login />;
+  }
+
+  // Sur le Web desktop : si déjà connecté, aller directement au dashboard
+  if (isAuthenticated) {
+    return <SmartDashboardRoute />;
+  }
+
+  // Si visiteur web public non connecté : afficher la vitrine
+  return <LandingPage />;
+}
 
 function App() {
-  const authProviderValue = useAuthProvider();
+  const [location, setLocation] = useLocation();
+
+  useEffect(() => {
+    // 1. Initialisation de la persistance IndexedDB & Rejeu hors-ligne
+    const cleanupOffline = setupOfflinePersistence(queryClient);
+
+    // 2. Gestion du bouton retour matériel Android (évite la fermeture de l'app)
+    const cleanupBack = setupHardwareBackButton(setLocation, location);
+
+    // 3. Navigation sur clic de notification native Android
+    const cleanupNotifications = setupNotificationClickListener(setLocation);
+
+    return () => {
+      cleanupOffline();
+      cleanupBack();
+      cleanupNotifications();
+    };
+  }, [location, setLocation]);
   
   return (
     <ErrorBoundary>
       <TooltipProvider>
-        <AuthContext.Provider value={authProviderValue}>
+        <AuthProvider>
           <OnboardingProvider>
             <VehicleProvider>
               <Toaster />
@@ -251,8 +304,8 @@ function App() {
               <Route path="/dev/profiles" component={ProfilesDevPage} />
             )}
             
-            {/* Landing page as home */}
-            <Route path="/" component={LandingPage} />
+            {/* Smart root routing (APK -> Login/Dashboard, Web -> Landing/Dashboard) */}
+            <Route path="/" component={RootRoute} />
             
             {/* Protected routes - Smart dashboard routing */}
             {/* AppLayout obligatoire: sans lui la page s'ouvre sans barre
@@ -531,20 +584,20 @@ function App() {
             {/* Procurement routes */}
             <Route path="/procurement/suppliers">
               <AppLayout>
-                <PrivateRoute component={SuppliersListPage} />
+                <RoleRoute component={SuppliersListPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/suppliers/new">
               <AppLayout>
-                <PrivateRoute component={NewSupplierPage} />
+                <RoleRoute component={NewSupplierPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/suppliers/:id/edit">
               {(params) => (
                 <AppLayout>
-                  <PrivateRoute component={EditSupplierPage} params={params} />
+                  <RoleRoute component={EditSupplierPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
                 </AppLayout>
               )}
             </Route>
@@ -552,7 +605,7 @@ function App() {
             <Route path="/procurement/suppliers/:id">
               {(params) => (
                 <AppLayout>
-                  <PrivateRoute component={SupplierDetailsPage} params={params} />
+                  <RoleRoute component={SupplierDetailsPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
                 </AppLayout>
               )}
             </Route>
@@ -560,26 +613,26 @@ function App() {
             {/* Purchase Orders routes */}
             <Route path="/procurement/orders">
               <AppLayout>
-                <PrivateRoute component={PurchaseOrdersListPage} />
+                <RoleRoute component={PurchaseOrdersListPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/orders/new">
               <AppLayout>
-                <PrivateRoute component={NewPurchaseOrderPage} />
+                <RoleRoute component={NewPurchaseOrderPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/orders/group">
               <AppLayout>
-                <PrivateRoute component={GroupPurchaseOrdersPage} />
+                <RoleRoute component={GroupPurchaseOrdersPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/orders/:id">
               {(params) => (
                 <AppLayout>
-                  <PrivateRoute component={PurchaseOrderDetailsPage} params={params} />
+                  <RoleRoute component={PurchaseOrderDetailsPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
                 </AppLayout>
               )}
             </Route>
@@ -587,32 +640,32 @@ function App() {
             {/* Supplier Invoices routes */}
             <Route path="/procurement/supplier-invoices">
               <AppLayout>
-                <PrivateRoute component={SupplierInvoicesListPage} />
+                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
 
             <Route path="/procurement/invoices">
               <AppLayout>
-                <PrivateRoute component={SupplierInvoicesListPage} />
+                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/new">
               <AppLayout>
-                <PrivateRoute component={NewSupplierInvoicePage} />
+                <RoleRoute component={NewSupplierInvoicePage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/discrepancies">
               <AppLayout>
-                <PrivateRoute component={InvoiceDiscrepanciesPage} />
+                <RoleRoute component={InvoiceDiscrepanciesPage} allowedRoles={PROCUREMENT_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/:id">
               {(params) => (
                 <AppLayout>
-                  <PrivateRoute component={SupplierInvoiceDetailsPage} params={params} />
+                  <RoleRoute component={SupplierInvoiceDetailsPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
                 </AppLayout>
               )}
             </Route>
@@ -741,7 +794,7 @@ function App() {
             </Switch>
             </VehicleProvider>
           </OnboardingProvider>
-        </AuthContext.Provider>
+        </AuthProvider>
       </TooltipProvider>
     </ErrorBoundary>
   );

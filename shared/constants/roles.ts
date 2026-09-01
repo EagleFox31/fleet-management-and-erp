@@ -46,3 +46,24 @@ export type AppRole = NonNullable<typeof users.$inferSelect>["role"];
 
 /** Liste des rôles à l'exécution, dans l'ordre du schéma. */
 export const ALL_APP_ROLES = users.role.enumValues as readonly AppRole[];
+
+/**
+ * Approvisionnement — fournisseurs, commandes, factures fournisseur.
+ *
+ * Le chef d'atelier et le technicien en sont exclus: ils **demandent** des
+ * pièces (`part_requirements`), ils ne passent pas les commandes ni ne
+ * traitent les factures. C'est ce que dit déjà le menu — l'entrée
+ * « Approvisionnement » n'existe que pour ces quatre profils — mais les routes
+ * étaient en `PrivateRoute`, donc atteignables par n'importe quel connecté.
+ *
+ * Le lien demande → commande reste visible côté atelier: il est enrichi par
+ * `attachPurchaseOrderContext` sur l'endpoint des demandes, sans passer par
+ * l'API commandes.
+ */
+export const PROCUREMENT_ROLES = ["admin", "secretary", "logistics", "warehouse"] as const;
+
+export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
+
+export function canAccessProcurement(role: string | null | undefined): boolean {
+  return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
+}

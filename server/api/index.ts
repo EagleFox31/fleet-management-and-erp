@@ -45,9 +45,14 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/operations", operationsRoutes);
   apiRouter.use("/billing", billingRoutes);
   apiRouter.use("/exports", exportsRoutes);
-  apiRouter.use("/suppliers", suppliersRoutes);
-  apiRouter.use("/purchase-orders", purchaseOrdersRoutes);
-  apiRouter.use("/supplier-invoices", supplierInvoicesRoutes);
+  // Approvisionnement: garde au montage plutôt que route par route, pour
+  // qu'une route ajoutée plus tard soit couverte d'office. Le chef d'atelier
+  // et le technicien demandent des pièces, ils ne passent pas les commandes —
+  // c'est déjà ce que dit le menu, ce n'était pas ce qu'appliquait l'API.
+  const gardeApprovisionnement = authorize([...PROCUREMENT_ROLES]);
+  apiRouter.use("/suppliers", gardeApprovisionnement, suppliersRoutes);
+  apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
+  apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
   apiRouter.use("/part-requirements", partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
@@ -85,4 +90,6 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
+import { authorize } from "../middleware/auth";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);
