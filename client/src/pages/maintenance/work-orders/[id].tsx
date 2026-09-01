@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
@@ -14,6 +14,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { WorkOrderForm } from "@/components/maintenance/work-order-form";
+import { FormattedWorkOrderDescription } from "@/components/maintenance/formatted-work-order-description";
 import {
   formatDate,
   formatCurrency,
@@ -180,6 +181,10 @@ export default function WorkOrderDetails({
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
   const [partQuantity, setPartQuantity] = useState(1);
   const [showStartConfirm, setShowStartConfirm] = useState(false);
+  // Reprise: quand celui qui démarre n'est pas le technicien assigné, on lui
+  // demande s'il prend l'intervention à son nom. Deviner serait faux dans les
+  // deux sens — le chef démarre souvent pour un technicien déjà sous le camion.
+  const [reprendreAMonNom, setReprendreAMonNom] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<number | null>(null);
   const [stockWarningAcknowledged, setStockWarningAcknowledged] = useState(false);
@@ -255,6 +260,25 @@ export default function WorkOrderDetails({
     queryKey: ["/api/users/technicians"],
   });
 
+  const technicianLabel = useMemo(() => {
+    if (!workOrder?.technicianId) {
+      return "Non assigné";
+    }
+    if (typeof workOrder.technicianName === "string" && workOrder.technicianName.trim()) {
+      return workOrder.technicianName;
+    }
+    const match = technicians.find(
+      (tech: TechnicianData) => Number(tech.id) === Number(workOrder.technicianId),
+    );
+    return match?.name || "Inconnu";
+  }, [workOrder?.technicianId, workOrder?.technicianName, technicians]);
+
+  // Celui qui démarre n'est pas le technicien assigné: on lui propose de
+  // reprendre l'OT à son nom, sans le décider à sa place.
+  const demarreurEstAutre = Boolean(
+    workOrder?.technicianId && user?.id && Number(workOrder.technicianId) !== Number(user.id),
+  );
+
   // Fetch parts used in this work order
   const {
     data: partsUsed = [],
@@ -322,7 +346,7 @@ export default function WorkOrderDetails({
         title: "Ordre de travail supprimé",
         description: "L'ordre de travail a été supprimé avec succès.",
       });
-      setLocation("/maintenance/work-orders");
+      setLocation(user?.role === "technician" ? "/technician/my-work-orders" : "/maintenance/work-orders");
     },
     onError: (error) => {
       toast({
@@ -764,7 +788,7 @@ export default function WorkOrderDetails({
 
       drawInfoCard(margin + cardWidth + cardGap, currentY, cardWidth, "Responsables", [
         { label: "Créé par", value: getWorkOrderCreatorLabel(workOrder) },
-        { label: "Technicien", value: workOrder.technicianName || "Non assigné" },
+        { label: "Technicien", value: technicianLabel },
         { label: "Début", value: workOrder.startDate ? formatDate(workOrder.startDate) : "Non démarré" },
         { label: "Fin", value: workOrder.endDate ? formatDate(workOrder.endDate) : "Non terminé" },
       ]);
@@ -985,8 +1009,8 @@ export default function WorkOrderDetails({
           <p className="text-muted-foreground mb-4">
             L'ordre de travail demandé n'existe pas ou n'a pas pu être chargé.
           </p>
-          <Button onClick={() => setLocation("/maintenance/work-orders")}>
-            Retour aux ordres de travail
+          <Button onClick={() => setLocation(user?.role === "technician" ? "/technician/my-work-orders" : "/maintenance/work-orders")}>
+            Retour {user?.role === "technician" ? "à mes interventions" : "aux ordres de travail"}
           </Button>
         </div>
       </div>
@@ -1099,19 +1123,25 @@ export default function WorkOrderDetails({
           }}
         />
 
-        <div className="relative px-5 py-4 md:px-6 md:py-5">
+        <div className="relative px-3.5 py-3 sm:px-6 sm:py-5">
           {/* Back + Action buttons */}
           <div className="flex flex-wrap gap-2 justify-between mb-2">
             <Button
               variant="ghost"
               size="sm"
               className="-ml-1 text-green-800 hover:bg-green-100/60"
-              onClick={() => setLocation("/maintenance/work-orders")}
+              onClick={() => {
+                if (window.history.length > 1) {
+                  window.history.back();
+                } else {
+                  setLocation(user?.role === "technician" ? "/technician/my-work-orders" : "/maintenance/work-orders");
+                }
+              }}
               data-testid="btn-back-work-orders"
             >
-              <ArrowLeft className="h-4 w-4 mr-1" /> Ordres de travail
+              <ArrowLeft className="h-4 w-4 mr-1" /> {user?.role === "technician" ? "Mes interventions" : "Ordres de travail"}
             </Button>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {canProcessWorkOrder && workOrder.status === "pending" && (
                 <Button
                   size="sm"
@@ -1154,25 +1184,28 @@ export default function WorkOrderDetails({
                       Modifier
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
+                  <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-3xl max-h-[85vh] flex flex-col p-0 overflow-hidden rounded-2xl mx-auto shadow-2xl">
+                    <DialogHeader className="p-4 sm:p-6 pb-3 shrink-0 border-b border-gray-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
                       <DialogTitle>Modifier l'ordre de travail</DialogTitle>
                       <DialogDescription>
                         Modifiez les détails de l'ordre de travail.
                       </DialogDescription>
                     </DialogHeader>
-                    <WorkOrderForm
-                      initialData={workOrder}
-                      isEdit
-                      workOrderId={workOrder.id}
-                      onSuccess={() => {
-                        queryClient.invalidateQueries({ queryKey: ["/api/work-orders", workOrderId] });
-                      }}
-                    />
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                      <WorkOrderForm
+                        initialData={workOrder}
+                        isEdit
+                        workOrderId={workOrder.id}
+                        onSuccess={() => {
+                          queryClient.invalidateQueries({ queryKey: ["/api/work-orders", workOrderId] });
+                        }}
+                      />
+                    </div>
                   </DialogContent>
                 </Dialog>
               )}
 
+              {canEditWorkOrder && (
               <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
@@ -1198,12 +1231,13 @@ export default function WorkOrderDetails({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+              )}
             </div>
           </div>
 
           {/* Title + badges */}
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <h1 className="text-lg font-bold text-green-950 leading-tight">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap mt-3">
+            <h1 className="text-base sm:text-lg font-bold text-green-950 leading-tight">
               {workOrder.title || `Ordre de travail #${workOrder.id}`}
             </h1>
             <Badge className={getStatusColor(workOrder.status)}>
@@ -1221,42 +1255,42 @@ export default function WorkOrderDetails({
 
           {/* KPI tiles */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-            <div className="bg-white/55 backdrop-blur-sm rounded-lg px-3 py-2.5 border border-green-100 flex items-center gap-3">
+            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
               <Car className="h-4 w-4 text-green-600 shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Véhicule</div>
-                <div className="text-sm font-semibold text-green-950 truncate">{getVehicleRegistration()}</div>
+                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">{getVehicleRegistration()}</div>
                 {getVehicleBrandModel() && (
                   <div className="text-[10px] text-green-700 truncate">{getVehicleBrandModel()}</div>
                 )}
               </div>
             </div>
 
-            <div className="bg-white/55 backdrop-blur-sm rounded-lg px-3 py-2.5 border border-green-100 flex items-center gap-3">
+            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
               <User className="h-4 w-4 text-green-600 shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Technicien</div>
-                <div className="text-sm font-semibold text-green-950 truncate">
-                  {workOrder.technicianId ? (workOrder.technicianName || "Inconnu") : "Non assigné"}
+                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">
+                  {technicianLabel}
                 </div>
               </div>
             </div>
 
-            <div className="bg-white/55 backdrop-blur-sm rounded-lg px-3 py-2.5 border border-green-100 flex items-center gap-3">
+            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
               <Calendar className="h-4 w-4 text-green-600 shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Date de fin</div>
-                <div className="text-sm font-semibold text-green-950">
+                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">
                   {workOrder.endDate ? formatDate(workOrder.endDate) : "—"}
                 </div>
               </div>
             </div>
 
-            <div className="bg-white/55 backdrop-blur-sm rounded-lg px-3 py-2.5 border border-green-100 flex items-center gap-3">
+            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
               <DollarSign className="h-4 w-4 text-green-600 shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Coût total</div>
-                <div className="text-sm font-semibold text-green-950">{formatCurrency(grandTotal)}</div>
+                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">{formatCurrency(grandTotal)}</div>
               </div>
             </div>
           </div>
@@ -1280,7 +1314,9 @@ export default function WorkOrderDetails({
                   Cet ordre de travail n'est pas encore assigné. Veuillez sélectionner un technicien avant de commencer.
                 </span>
               ) : (
-                "Voulez-vous démarrer cet ordre de travail ? Le statut passera à \"En cours\" et la date de début sera enregistrée."
+                demarreurEstAutre
+                  ? `Cet ordre de travail est assigné à ${technicianLabel}. Le statut passera à « En cours ».`
+                  : "Voulez-vous démarrer cet ordre de travail ? Le statut passera à \"En cours\" et la date de début sera enregistrée."
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1309,17 +1345,37 @@ export default function WorkOrderDetails({
             </div>
           )}
 
+          {demarreurEstAutre && (
+            <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={reprendreAMonNom}
+                onChange={(event) => setReprendreAMonNom(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-amber-900">
+                Je reprends cette intervention à mon nom
+                <span className="block text-xs text-amber-700 mt-0.5">
+                  Sans cette case, l'intervention reste assignée à {technicianLabel}.
+                </span>
+              </span>
+            </label>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => {
               setLocation(`/maintenance/work-orders/${workOrderId}`);
               setSelectedTechnicianId(null);
+              setReprendreAMonNom(false);
             }}>
               Annuler
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 // If no technician assigned, use selected one; otherwise start without
-                const techId = workOrder?.technicianId ? undefined : selectedTechnicianId || undefined;
+                const techId = workOrder?.technicianId
+                  ? (reprendreAMonNom && user?.id ? Number(user.id) : undefined)
+                  : selectedTechnicianId || undefined;
                 startWorkOrderMutation.mutate(techId);
               }}
               className="bg-green-600 hover:bg-green-700"
@@ -1368,24 +1424,22 @@ export default function WorkOrderDetails({
 
         {/* ── DÉTAILS ── */}
         <TabsContent value="details" data-help-target="wo-details">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 overflow-hidden">
             <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
-            <div className="px-5 py-4">
+            <div className="px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                  <Wrench className="h-3.5 w-3.5 text-green-600" />
+                <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-950/40 flex items-center justify-center">
+                  <Wrench className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
                 </div>
-                <span className="text-sm font-semibold text-gray-800">Détails de l'intervention</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Détails de l'intervention</span>
               </div>
             <div className="space-y-4">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5" />
-                  Description
+                  <FileText className="h-3.5 w-3.5 text-emerald-600" />
+                  Description & Contexte d'intervention
                 </div>
-                <div className="p-3 bg-muted/50 rounded-lg text-sm leading-relaxed">
-                  {workOrder.description || <span className="italic text-muted-foreground">Aucune description fournie.</span>}
-                </div>
+                <FormattedWorkOrderDescription description={workOrder.description} />
               </div>
 
               <div className="space-y-1">
@@ -1890,7 +1944,7 @@ export default function WorkOrderDetails({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
                     { label: "Véhicule", value: getVehicleRegistration(), sub: getVehicleBrandModel(), icon: Car },
-                    { label: "Technicien", value: workOrder.technicianName || "Non assigné", icon: User },
+                    { label: "Technicien", value: technicianLabel, icon: User },
                     { label: "Date de début", value: workOrder.startDate ? formatDate(workOrder.startDate) : "N/A", icon: Calendar },
                     { label: "Date de fin", value: workOrder.endDate ? formatDate(workOrder.endDate) : "N/A", icon: Calendar },
                   ].map(({ label, value, sub, icon: Icon }) => (

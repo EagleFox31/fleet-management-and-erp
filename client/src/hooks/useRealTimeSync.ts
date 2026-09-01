@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { toast } from "@/hooks/use-toast";
+import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
+import { triggerNativeNotification } from "@/lib/native-mobile";
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -272,6 +273,19 @@ function extractWorkOrderFromPayload(payload: unknown): Record<string, unknown> 
   return null;
 }
 
+function isWorkOrderAssignmentUpdate(payload: unknown): boolean {
+  const payloadRecord = asRecord(payload);
+  if (!payloadRecord) {
+    return false;
+  }
+  const updates = asRecord(payloadRecord.updates);
+  if (!updates || !("technicianId" in updates)) {
+    return false;
+  }
+  const technicianId = toNumericId(updates.technicianId);
+  return technicianId !== null && technicianId > 0;
+}
+
 function getMissionId(value: unknown): number | null {
   const record = asRecord(value);
   if (!record) {
@@ -484,10 +498,19 @@ function patchWorkOrderCaches(workOrder: Record<string, unknown>, insertIfMissin
   }
 
   if (workOrderId) {
-    queryClient.setQueryData([`/api/work-orders/${workOrderId}`], (previousData: unknown) => {
-      const previousRecord = asRecord(previousData);
-      return previousRecord ? { ...previousRecord, ...workOrder } : workOrder;
-    });
+    const technicianId = toNumericId(workOrder.technicianId);
+    const technicianName =
+      typeof workOrder.technicianName === "string" ? workOrder.technicianName.trim() : "";
+    const patchMissingTechnicianName = technicianId !== null && technicianId > 0 && !technicianName;
+
+    if (patchMissingTechnicianName) {
+      queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
+    } else {
+      queryClient.setQueryData([`/api/work-orders/${workOrderId}`], (previousData: unknown) => {
+        const previousRecord = asRecord(previousData);
+        return previousRecord ? { ...previousRecord, ...workOrder } : workOrder;
+      });
+    }
   }
 }
 
@@ -637,12 +660,22 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           toNumericId(createdWorkOrder.technicianId) ??
           toNumericId(createdWorkOrder.assignedToId);
 
+        if (assignedTo) {
+          invalidateAlertQueries();
+        }
+
         if (currentUserId && assignedTo === currentUserId) {
           const title = typeof createdWorkOrder.title === "string" ? createdWorkOrder.title : "Intervention assignée";
           const woId = createdWorkOrder.id ? `OT #${createdWorkOrder.id} : ` : "";
-          toast({
+          appToast({
             title: "Nouvel Ordre de Travail assigné",
             description: `${woId}${title}`,
+            variant: "success",
+          });
+          triggerNativeNotification({
+            title: "Nouvel Ordre de Travail assigné",
+            body: `${woId}${title}`,
+            id: Number(createdWorkOrder.id) || undefined,
           });
         }
       }
@@ -661,6 +694,12 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "work_order_updated":
     case "work_order_status_changed": {
       const updatedWorkOrder = extractWorkOrderFromPayload(payload);
+      const assignmentUpdate = isWorkOrderAssignmentUpdate(payload);
+
+      if (assignmentUpdate) {
+        invalidateAlertQueries();
+      }
+
       if (updatedWorkOrder) {
         patchWorkOrderCaches(updatedWorkOrder, false);
         const assignedTo =
@@ -668,12 +707,25 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           toNumericId(updatedWorkOrder.technicianId) ??
           toNumericId(updatedWorkOrder.assignedToId);
 
-        if (currentUserId && assignedTo === currentUserId && update.actor?.userId !== currentUserId) {
+        // Affectation : le toast + la cloche passent par alert_created (nominatif).
+        // Ici on ne duplique pas le toast pour le technicien assigné.
+        if (
+          currentUserId &&
+          assignedTo === currentUserId &&
+          update.actor?.userId !== currentUserId &&
+          !assignmentUpdate
+        ) {
           const title = typeof updatedWorkOrder.title === "string" ? updatedWorkOrder.title : "Intervention mise à jour";
           const woId = updatedWorkOrder.id ? `OT #${updatedWorkOrder.id} : ` : "";
-          toast({
+          appToast({
             title: "Ordre de Travail mis à jour",
             description: `${woId}${title}`,
+            variant: "info",
+          });
+          triggerNativeNotification({
+            title: "Ordre de Travail mis à jour",
+            body: `${woId}${title}`,
+            id: Number(updatedWorkOrder.id) || undefined,
           });
         }
       }
@@ -844,21 +896,42 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       const message = typeof payloadRecord.message === "string" ? payloadRecord.message : undefined;
       const priorite = typeof payloadRecord.priority === "string" ? payloadRecord.priority : "medium";
 
-      toast({
+      appToast({
         title: titre,
         description: message,
-        variant: priorite === "critical" ? "destructive" : "default",
+        variant:
+          priorite === "critical"
+            ? "destructive"
+            : priorite === "high"
+              ? "warning"
+              : titre.toLowerCase().includes("assignée") || titre.toLowerCase().includes("assigne")
+                ? "success"
+                : "info",
       });
 
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
+      // Volet système Android: sans ça, l'alerte n'existait que dans un toast,
+      // donc uniquement si l'application était au premier plan. Un technicien
+      // qui range son téléphone ne voyait rien.
+      // Le lien voyage dans `extra.route`: l'écouteur de clic ouvre la fiche
+      // concernée au lieu de rouvrir l'app sur son écran par défaut.
+      {
+        const lien = typeof payloadRecord.link === "string" ? payloadRecord.link : undefined;
+        const alerteId = toNumber(payloadRecord.alertId);
+        triggerNativeNotification({
+          title: titre,
+          body: message ?? "",
+          id: alerteId ?? undefined,
+          extra: lien ? { route: lien } : undefined,
+        });
+      }
+
+      invalidateAlertQueries();
       break;
     }
 
     case "alert_updated":
     case "alert_read":
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
+      invalidateAlertQueries();
       break;
 
     case "client_created":

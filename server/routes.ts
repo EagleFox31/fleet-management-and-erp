@@ -27,6 +27,7 @@ import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
+import { alertService } from "./services/alert-service";
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -2164,12 +2165,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      if (workOrder.technicianId) {
+        const vehicule = workOrder.vehicleId
+          ? await storage.getVehicle(workOrder.vehicleId)
+          : null;
+
+        try {
+          await alertService.notifyWorkOrderAssigned({
+            workOrderId: workOrder.id,
+            workOrderTitle: workOrder.title,
+            technicianUserId: workOrder.technicianId,
+            assignedByName: (req.user as any)?.name ?? (req.user as any)?.username ?? null,
+            vehicleRegistration: vehicule?.registrationNumber ?? workOrder.vehicleRegistration ?? null,
+          });
+        } catch (error) {
+          console.error("Alerte d'affectation à la création non envoyée:", error);
+        }
+      }
+
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate("work_order_created", {
           workOrderId: workOrder.id,
           workOrder,
           source: "manual_work_order",
           triggeredBy: req.user?.id ?? null,
+          actor: actorUserId ? { userId: actorUserId } : null,
         });
       }
       
@@ -2218,13 +2238,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updatedWorkOrder = await storage.updateWorkOrder(id, updatedData);
-      
+
+      // Affectation à un technicien: le prévenir nommément. Sans ça, le chef
+      // d'atelier lisait « OT mis à jour » et le technicien ne voyait rien —
+      // il découvrait son travail en ouvrant la liste, ou pas du tout.
+      // Non bloquant: l'OT est enregistrée, une notification qui échoue ne doit
+      // pas faire échouer la réponse.
+      const nouveauTechnicien = Number(updatedData.technicianId);
+      const affectationChangee =
+        Number.isInteger(nouveauTechnicien) &&
+        nouveauTechnicien > 0 &&
+        nouveauTechnicien !== workOrder.technicianId;
+
+      if (affectationChangee) {
+        const vehicule = workOrder.vehicleId
+          ? await storage.getVehicle(workOrder.vehicleId)
+          : null;
+
+        try {
+          await alertService.notifyWorkOrderAssigned({
+            workOrderId: id,
+            workOrderTitle: updatedWorkOrder?.title || workOrder.title,
+            technicianUserId: nouveauTechnicien,
+            assignedByName: (req.user as any)?.name ?? (req.user as any)?.username ?? null,
+            vehicleRegistration: vehicule?.registrationNumber ?? null,
+          });
+        } catch (error) {
+          console.error("Alerte d'affectation non envoyée:", error);
+        }
+      }
+
+      // Avancement: remonter vers l'encadrement atelier. L'affectation
+      // descendait, rien ne remontait — or c'est le chef qui replace le camion
+      // une fois l'intervention finie, et qui débloque une pièce manquante.
+      const statutsRemontes = ["in_progress", "completed", "awaiting_parts"] as const;
+      type StatutRemonte = (typeof statutsRemontes)[number];
+      const nouveauStatut = String(updatedData.status || "");
+      const statutRemonte =
+        statutsRemontes.includes(nouveauStatut as StatutRemonte) &&
+        nouveauStatut !== workOrder.status;
+
+      if (statutRemonte) {
+        // Nommer celui qui a RÉELLEMENT agi, pas le technicien assigné: le chef
+        // d'atelier peut démarrer une intervention sans se l'attribuer, et
+        // annoncer « Ali a commencé » serait faux.
+        const acteurId = typeof req.session?.userId === "number" ? req.session.userId : null;
+        const technicienFinalId = updatedWorkOrder?.technicianId ?? workOrder.technicianId;
+
+        const [vehiculeOt, acteur] = await Promise.all([
+          workOrder.vehicleId ? storage.getVehicle(workOrder.vehicleId) : null,
+          acteurId ? storage.getUser(acteurId) : null,
+        ]);
+
+        alertService
+          .notifyWorkOrderProgress({
+            workOrderId: id,
+            workOrderTitle: updatedWorkOrder?.title || workOrder.title,
+            newStatus: nouveauStatut as StatutRemonte,
+            technicianName: acteur?.name ?? null,
+            vehicleRegistration: vehiculeOt?.registrationNumber ?? null,
+            // L'auteur n'a pas à être prévenu de son propre geste.
+            excludeUserId: acteurId,
+          })
+          .catch((error) => {
+            console.error("Alerte d'avancement non envoyée:", error);
+          });
+      }
+
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
+        const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
         (global as any).broadcastUpdate('work_order_updated', {
           workOrderId: id,
           updates: updatedData,
-          workOrder: updatedWorkOrder
+          workOrder: updatedWorkOrder,
+          actor: actorUserId ? { userId: actorUserId } : null,
         });
       }
       

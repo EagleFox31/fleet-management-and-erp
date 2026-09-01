@@ -94,6 +94,115 @@ export class AlertService {
   }
 
   /**
+   * Affectation d'un ordre de travail à un technicien.
+   *
+   * Alerte **nominative**: elle ne part qu'au technicien concerné, via
+   * `targetUserIds`. Sans elle, le chef d'atelier voyait « OT mis à jour » et
+   * le technicien ne voyait rien — il découvrait son travail en ouvrant la
+   * liste, ou pas.
+   *
+   * Le `link` pointe le détail de l'OT: la cloche du bandeau et le panneau
+   * d'alertes y naviguent au clic, sur ordinateur comme dans la PWA, qui est
+   * la même application.
+   *
+   * Le titre porte le numéro d'OT: `createAlertIfNotExists` déduplique sur le
+   * titre, et deux affectations distinctes ne doivent pas se masquer. Une
+   * réaffectation au même technicien ne crée pas de doublon tant que la
+   * première n'est pas lue — c'est le comportement voulu.
+   */
+  async notifyWorkOrderAssigned(params: {
+    workOrderId: number;
+    workOrderTitle: string;
+    technicianUserId: number;
+    assignedByName?: string | null;
+    vehicleRegistration?: string | null;
+  }): Promise<void> {
+    const parQui = params.assignedByName ? ` par ${params.assignedByName}` : "";
+    const surQuoi = params.vehicleRegistration ? ` — ${params.vehicleRegistration}` : "";
+
+    await this.createAlertIfNotExists({
+      type: "work_order",
+      title: `Nouvelle intervention assignée — OT #${params.workOrderId}`,
+      message: `« ${params.workOrderTitle} »${surQuoi} vous a été assigné${parQui}.`,
+      priority: "high",
+      link: `/maintenance/work-orders/${params.workOrderId}`,
+      entityType: "work_order",
+      entityId: params.workOrderId,
+      targetUserIds: [params.technicianUserId],
+    });
+  }
+
+  /**
+   * Avancement d'un ordre de travail — remontée vers l'encadrement atelier.
+   *
+   * L'affectation descendait du chef vers le technicien; rien ne remontait.
+   * Or c'est l'encadrement qui pilote: il doit savoir qu'un camion est entré
+   * en réparation, qu'il en ressort, et surtout qu'une intervention est
+   * bloquée.
+   *
+   * Chaque transition a son urgence propre et son geste attendu:
+   * - `in_progress`     : information, rien à faire.
+   * - `completed`       : le véhicule redevient disponible — il faut le placer.
+   * - `awaiting_parts`  : quelqu'un doit débloquer la pièce, sinon ça dort.
+   *
+   * L'appelant filtre l'auto-notification: le chef qui change lui-même un
+   * statut n'a pas à être prévenu de son propre geste.
+   */
+  async notifyWorkOrderProgress(params: {
+    workOrderId: number;
+    workOrderTitle: string;
+    newStatus: "in_progress" | "completed" | "awaiting_parts";
+    technicianName?: string | null;
+    vehicleRegistration?: string | null;
+    /** Auteur du changement: il ne se notifie pas lui-même. */
+    excludeUserId?: number | null;
+  }): Promise<void> {
+    const qui = params.technicianName || "Le technicien";
+    const camion = params.vehicleRegistration;
+
+    // Le titre porte le statut ET le numéro d'OT: `createAlertIfNotExists`
+    // déduplique sur le titre, et les trois étapes d'un même OT doivent
+    // pouvoir coexister dans la cloche.
+    const messages = {
+      in_progress: {
+        title: `Intervention démarrée — OT #${params.workOrderId}`,
+        message: camion
+          ? `${qui} a commencé « ${params.workOrderTitle} » sur ${camion}.`
+          : `${qui} a commencé « ${params.workOrderTitle} ».`,
+        priority: "low" as const,
+      },
+      completed: {
+        title: `Intervention terminée — OT #${params.workOrderId}`,
+        message: camion
+          ? `${qui} a terminé « ${params.workOrderTitle} ». ${camion} est de nouveau disponible.`
+          : `${qui} a terminé « ${params.workOrderTitle} ».`,
+        priority: "medium" as const,
+      },
+      awaiting_parts: {
+        title: `Intervention bloquée — OT #${params.workOrderId}`,
+        message: camion
+          ? `${qui} attend une pièce pour « ${params.workOrderTitle} ». ${camion} reste immobilisé.`
+          : `${qui} attend une pièce pour « ${params.workOrderTitle} ».`,
+        priority: "high" as const,
+      },
+    };
+
+    const contenu = messages[params.newStatus];
+
+    await this.createAlertIfNotExists({
+      type: "work_order",
+      title: contenu.title,
+      message: contenu.message,
+      priority: contenu.priority,
+      link: `/maintenance/work-orders/${params.workOrderId}`,
+      entityType: "work_order",
+      entityId: params.workOrderId,
+      targetRoles: this.workOrderRecipients,
+      excludeUserId: params.excludeUserId,
+    });
+  }
+
+  /**
    * Sortie exceptionnelle du stock par le chef d'atelier (magasin fermé).
    *
    * Le magasinier n'a pas remis la pièce: il doit pouvoir rapprocher son
@@ -512,15 +621,23 @@ export class AlertService {
     entityType?: string;
     entityId?: number;
     targetRoles?: AlertRecipientRole[];
+    /** Utilisateur à ne pas notifier: l'auteur du geste qui déclenche l'alerte. */
+    excludeUserId?: number | null;
     targetUserIds?: Array<number | null | undefined>;
   }): Promise<void> {
     try {
-      const recipientUserIds = await this.resolveRecipientUserIds(
+      const tousLesDestinataires = await this.resolveRecipientUserIds(
         alertData.targetRoles,
         (alertData.targetUserIds ?? []).filter(
           (id): id is number => typeof id === "number" && id > 0
         )
       );
+
+      // Retirer l'auteur du geste: personne n'a besoin qu'on lui annonce ce
+      // qu'il vient de faire, et une alerte non lue de plus dilue les vraies.
+      const recipientUserIds = alertData.excludeUserId
+        ? tousLesDestinataires.filter((userId) => userId !== alertData.excludeUserId)
+        : tousLesDestinataires;
 
       if (recipientUserIds.length === 0) {
         return;
