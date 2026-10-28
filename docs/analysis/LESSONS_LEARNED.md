@@ -326,3 +326,46 @@ Chaque étape déclenche désormais:
 - update locale UI,
 - event realtime,
 - invalidations ciblées.
+
+## 2026-10-28 - Routes API ouvertes sans session
+
+### Constat
+- `/api` n'a pas de garde globale (`server/app.ts`) : chaque route doit poser la sienne.
+- Le routeur missions n'en posait aucune et attribuait la création à l'utilisateur 1 par repli (`|| 1`).
+- `POST /api/auth/register` était public et acceptait `role` : création d'un admin sans connexion.
+- Routes de test et de développement exposées (génération d'OT, effacement de tous les OT).
+
+### Cause racine
+- Sécurité opt-in route par route, sans contrôle automatique : un oubli ne se voyait nulle part.
+- Classification : défaut de conception (garde par défaut absente) + absence de garde-fou.
+
+### Résolution
+- Gardes ajoutées (missions au montage, register `isAdmin`, technicien borné à lui-même), routes de test supprimées, repli `|| 1` retiré.
+
+### Prévention (vérifiable)
+- `tests/contract/api-auth-guard.contract.test.ts` : toute route `/api` sans garde marquée (`sessionGuard` dans `server/middleware/auth.ts`) hors liste blanche fait échouer le test.
+- `tests/contract/api-auth-sessions.contract.test.ts` : 401 anonyme, 403 hors rôle, auteur réel d'une mission.
+
+### Règle Projet (obligatoire)
+- Une nouvelle garde de session passe par `authenticate`, `authorize` ou `isAdmin` (marqués) ; un middleware maison non marqué n'est pas reconnu par le test.
+- Ajouter une route à la liste blanche est une décision de sécurité, justifiée en commentaire.
+- Jamais d'identifiant utilisateur par défaut : sans session, 401.
+
+## 2026-10-28 - Ajout de pièce à un OT : 500 sans prix, coût fixé par le client
+
+### Constat
+- Scénario `docs/qa/E2E PANNE-OT-REAPPRO-FACTURE`, étape 4 : `POST /api/work-orders/:id/parts` avec `{ partId, quantity }` renvoyait 500.
+- La route transmettait `req.body` tel quel : sans `unitPrice`, l'insertion `parts_used.unit_price` (NOT NULL) échouait ; avec, le client choisissait le prix imputé à l'OT.
+
+### Cause racine
+- Corps de requête propagé directement au stockage, sans contrat d'entrée. L'UI envoyait le prix du catalogue, ce qui masquait le défaut.
+- Classification : contrat d'API implicite + donnée de confiance prise côté client.
+
+### Résolution
+- La route construit la ligne : `partId`, `quantity` et `unitPrice` lu dans le catalogue (`server/routes.ts`).
+
+### Prévention (vérifiable)
+- `tests/contract/work-order-parts.contract.test.ts` : ajout sans prix → 201, prix catalogue, stock décrémenté ; un prix client est ignoré ; stock épuisé → 400.
+
+### Règle Projet (obligatoire)
+- Un montant (prix, coût) imputé côté serveur se lit en base, jamais dans le corps de la requête.
