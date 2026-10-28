@@ -65,9 +65,9 @@ Réutilisation design system : `HeaderCard`, `KpiGrid`, `KpiTile`, `CardShell`, 
 ### Phase 3 — Compte & QA
 
 - [x] Documenter création compte DG dans `docs/qa/COMPTES_ENVIRONNEMENT.md`
-- [ ] Test manuel : login Direction → dashboard sans menu admin
-  *(à faire par un humain: se connecter et regarder. Aucun agent ne peut
-  cocher cette case.)*
+- [x] Test manuel : login Direction → dashboard sans menu admin
+  *(validé le 2026-09-01 par connexion réelle au compte `management`.
+  Seul un humain pouvait cocher cette case.)*
 - [ ] Test régression : technicien / magasinier inchangés
   *(⚠️ Ces deux écrans **ont été modifiés** le 2026-08-29, commit `308b2c1`:
   ajout de la tuile mise en avant, sur demande explicite. La règle de

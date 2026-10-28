@@ -10,7 +10,6 @@ import {
   Calendar,
   CheckCircle2,
   ChevronRight,
-  Clock,
   DollarSign,
   Download,
   FileSpreadsheet,
@@ -29,7 +28,6 @@ import {
   TrendingDown,
   TrendingUp,
   Truck,
-  Users,
   Wallet,
   Wrench,
   Zap,
@@ -289,7 +287,7 @@ export default function ManagementReportsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="p-5 rounded-3xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Cash Encaissé sur Compte</span>
+                  <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Encaissé (factures clients réglées)</span>
                   <div className="text-3xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
                     {formatPrice(data.revenue.collectedTTC)}
                   </div>
@@ -432,59 +430,36 @@ export default function ManagementReportsPage() {
         {/* SOUS-MENU 5 : Distribution & Cadence Automatisée                          */}
         {/* ========================================================================= */}
         <TabsContent value="scheduled" className="space-y-6">
+          {/* Aucun service d'envoi n'existe côté serveur: l'onglet le dit, plutôt
+              que d'afficher une programmation et des destinataires fictifs. */}
           <div className="space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-foreground">Cadence &amp; Distribution Automatisée</h3>
-                <p className="text-xs text-muted-foreground">Programmation des envois automatiques des rapports par email aux membres du comité</p>
+                <h3 className="text-base font-bold text-foreground">Distribution des rapports</h3>
+                <p className="text-xs text-muted-foreground">Transmission des rapports aux membres du comité</p>
               </div>
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
-                Service Actif
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-500/10 text-muted-foreground border border-slate-500/30">
+                Non disponible
               </span>
             </div>
 
             <CardShell className="border border-slate-200/80 dark:border-slate-800 shadow-xs">
-              <div className="p-6 space-y-5">
+              <div className="p-6 space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-2xl bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">
+                  <div className="p-2.5 rounded-2xl bg-slate-500/10 text-muted-foreground border border-slate-500/30">
                     <Mail className="h-6 w-6" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-foreground">Configuration de la Distribution Automatique</h4>
-                    <p className="text-xs text-muted-foreground">Le Board Pack PDF et le rapport financier sont compilés et transmis automatiquement</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 space-y-2">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <Clock className="h-4 w-4 text-emerald-600" /> Fréquence d'Envoi Programmé
-                    </span>
-                    <p className="text-muted-foreground">
-                      <strong>Hebdomadaire :</strong> Chaque lundi matin à 08h00 (Bilan de la semaine écoulée).
-                    </p>
-                    <p className="text-muted-foreground">
-                      <strong>Mensuel :</strong> Le 1er de chaque mois à 07h00 (Clôture d'exploitation officielle).
+                    <h4 className="text-sm font-bold text-foreground">Envoi automatique non disponible</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Aucun rapport n'est envoyé par email pour l'instant, ni programmé.
                     </p>
                   </div>
-
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 space-y-2">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <Users className="h-4 w-4 text-blue-600" /> Destinataires Enregistrés
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      <span className="px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-foreground font-semibold text-[11px]">
-                        dg@yarofleet.cm (Directeur Général)
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-foreground font-semibold text-[11px]">
-                        daf@yarofleet.cm (Direction Financière)
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-foreground font-semibold text-[11px]">
-                        ops@yarofleet.cm (Exploitation Transport)
-                      </span>
-                    </div>
-                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground pt-2 border-t border-slate-100 dark:border-slate-800">
+                  Pour transmettre un rapport, utilisez <strong>Télécharger le PDF</strong> en haut de page,
+                  puis joignez le fichier à votre email.
+                </p>
               </div>
             </CardShell>
           </div>
