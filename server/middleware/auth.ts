@@ -27,7 +27,7 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   user: "user",
 };
 
-const normalizeRole = (role: string | null | undefined): AppRole => {
+export const normalizeRole = (role: string | null | undefined): AppRole => {
   const normalized = (role || "").trim().toLowerCase();
   const aliasRole = ROLE_ALIASES[normalized];
   if (aliasRole) {
@@ -41,7 +41,23 @@ const normalizeRole = (role: string | null | undefined): AppRole => {
   return "user";
 };
 
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Marque un middleware qui refuse toute requête sans session (401).
+ * Le test de contrat `api-auth-guard` parcourt les routes et exige qu'une garde
+ * marquée précède chacune d'elles, hors liste blanche des routes publiques.
+ */
+const SESSION_GUARD = Symbol.for("fleetos.sessionGuard");
+
+function sessionGuard<T extends Function>(fn: T): T {
+  (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] = true;
+  return fn;
+}
+
+export function isSessionGuard(fn: unknown): boolean {
+  return typeof fn === "function" && (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] === true;
+}
+
+export const authenticate = sessionGuard((req: Request, res: Response, next: NextFunction) => {
   const debugAuth = process.env.AUTH_DEBUG !== "0";
   if (debugAuth) {
     console.log(`🔐 [AUTH] ${req.method} ${req.path} - Session: ${!!req.session} - UserId: ${req.session?.userId || 'NONE'}`);
@@ -58,10 +74,10 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
     console.log(`✅ [AUTH] Accès autorisé - UserId: ${req.session.userId}`);
   }
   next();
-};
+});
 
 export const authorize = (roles: string[]) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
+  return sessionGuard(async (req: Request, res: Response, next: NextFunction) => {
     const debugAuth = process.env.AUTH_DEBUG !== "0";
     if (!req.session || !req.session.userId) {
       return res.status(401).json({ message: 'Non authentifié' });
@@ -104,11 +120,11 @@ export const authorize = (roles: string[]) => {
       console.error('Error in authorization middleware:', error);
       return res.status(500).json({ message: 'Erreur serveur' });
     }
-  };
+  });
 };
 
 // Middleware spécifique pour les administrateurs uniquement
-export const isAdmin = async (req: Request, res: Response, next: NextFunction) => {
+export const isAdmin = sessionGuard(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ message: 'Non authentifié' });
   }
@@ -136,7 +152,7 @@ export const isAdmin = async (req: Request, res: Response, next: NextFunction) =
     console.error('Error in admin authorization middleware:', error);
     return res.status(500).json({ message: 'Erreur serveur' });
   }
-};
+});
 
 export const isWorkshopManager = authorize(['admin', 'workshop_manager']);
 export const isTechnician = authorize(['admin', 'workshop_manager', 'technician']);

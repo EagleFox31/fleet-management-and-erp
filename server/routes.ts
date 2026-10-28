@@ -13,7 +13,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -278,7 +278,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/register", async (req, res) => {
+  // Réservé à l'admin: le corps accepte `role`, une inscription publique
+  // permettait de se créer un compte admin sans être connecté.
+  app.post("/api/auth/register", isAdmin, async (req, res) => {
     try {
       const parsedUser = insertUserSchema.parse(req.body);
       
@@ -1689,34 +1691,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Test endpoint pour déclencher maintenance kilométrique
-  app.post("/api/test-mileage-maintenance", async (req, res) => {
-    try {
-      const { vehicleId, currentMileage } = req.body;
-      
-      if (!vehicleId || !currentMileage) {
-        return res.status(400).json({ message: "vehicleId et currentMileage requis" });
-      }
-      
-      const generatedWorkOrders = await preventiveMaintenanceService.checkMileageBasedMaintenance(
-        vehicleId,
-        currentMileage
-      );
-      
-      return res.json({
-        message: `Vérification terminée pour véhicule ${vehicleId} à ${currentMileage}km`,
-        workOrdersGenerated: generatedWorkOrders.length,
-        workOrders: generatedWorkOrders
-      });
-    } catch (error) {
-      console.error('Test mileage maintenance error:', error);
-      return res.status(500).json({
-        message: "Erreur lors du test de maintenance kilométrique",
-        details: error instanceof Error ? error.message : "Erreur inconnue"
-      });
-    }
-  });
-
   // Générer un ordre de travail depuis une planification
   app.post("/api/maintenance-schedules/:id/generate-work-order", isWorkshopManager, async (req, res) => {
     try {
@@ -2500,12 +2474,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // API unifiée pour les ordres de travail du technicien - source unique pour toutes les pages
-  app.get("/api/technician/work-orders/:technicianId", async (req: Request, res: Response) => {
+  app.get("/api/technician/work-orders/:technicianId", isTechnician, async (req: Request, res: Response) => {
     try {
       const technicianId = parseInt(req.params.technicianId);
       
       if (isNaN(technicianId)) {
         return res.status(400).json({ message: "ID technicien invalide" });
+      }
+
+      // Un technicien ne lit que ses propres ordres; l'atelier lit ceux de tous.
+      if (req.user?.role === "technician" && req.user.id !== technicianId) {
+        return res.status(403).json({ message: "Accès non autorisé" });
       }
       
       console.log(`🔧 [UNIFIED-WO] API unifiée - Récupération des ordres pour le technicien ${technicianId}`);
@@ -5242,7 +5221,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route pour vérifier toutes les maintenances (kilométrage + dates)
-  app.post("/api/check-all-maintenance", authenticate, async (req, res) => {
+  app.post("/api/check-all-maintenance", isWorkshopManager, async (req, res) => {
     try {
       const { preventiveMaintenanceService } = await import('./services/preventive-maintenance-service');
       
@@ -5457,6 +5436,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const createdBy: number | undefined = req.session?.userId ?? undefined;
 
       if (alertType === 'maintenance') {
+        // Créer un OT relève de l'atelier, comme POST /api/work-orders; les
+        // demandes documentaires (branche suivante) restent ouvertes au secrétariat.
+        const actor = createdBy ? await storage.getUser(createdBy) : undefined;
+        if (!actor || !['admin', 'workshop_manager'].includes(normalizeRole(actor.role))) {
+          return res.status(403).json({ message: "Accès non autorisé" });
+        }
         const generatedWorkOrders = await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId, alertType, createdBy);
         
         // Sécurité: un clic par alerte ne doit jamais créer plusieurs OT
@@ -5543,21 +5528,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // [DEV] Suppression de tous les OT - utilitaire de nettoyage
-  app.delete("/api/dev/work-orders-all", authenticate, async (req, res) => {
-    try {
-      const { db } = await import("./db");
-      const { workOrders } = await import("../shared/schema");
-      await db.delete(workOrders);
-      return res.json({ message: "Tous les ordres de travail ont été supprimés." });
-    } catch (error) {
-      console.error("Dev cleanup error:", error);
-      return res.status(500).json({ message: "Erreur lors du nettoyage." });
-    }
-  });
-
   // Vérification globale de toutes les maintenances (tâche cron)
-  app.post("/api/check-all-maintenance", async (req, res) => {
+  app.post("/api/check-all-maintenance", isWorkshopManager, async (req, res) => {
     try {
       const dateWorkOrders = await preventiveMaintenanceService.checkDateBasedMaintenance();
       

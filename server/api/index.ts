@@ -40,7 +40,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/vehicles", vehiclesRoutes);
   apiRouter.use("/drivers", driversRoutes);
   apiRouter.use("/drivers", driversManagementRoutes);
-  apiRouter.use("/missions", missionsRoutes);
+  // Garde au montage: aucune route du routeur missions ne se protégeait seule.
+  apiRouter.use("/missions", authenticate, missionsRoutes);
   apiRouter.use("/clients", clientsRoutes);
   apiRouter.use("/operations", operationsRoutes);
   apiRouter.use("/billing", billingRoutes);
@@ -90,6 +91,6 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
-import { authorize } from "../middleware/auth";
+import { authenticate, authorize, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);

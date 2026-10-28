@@ -1688,7 +1688,13 @@ router.get("/:id/launch-readiness", async (req, res) => {
 // POST /api/missions - Créer une nouvelle mission
 router.post("/", async (req, res) => {
   try {
-    const userId = (req as any).session?.userId || 1;
+    // Le routeur est monté derrière authenticate: la session porte toujours
+    // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
+    // création à l'admin.
+    const userId = req.session.userId;
+    if (typeof userId !== "number") {
+      return res.status(401).json({ message: "Non authentifié" });
+    }
     const missionData = req.body;
 
     // Validate mission data

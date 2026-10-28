@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Vehicle {
   id: number;
@@ -57,6 +58,9 @@ export default function DateBasedAlertsPage() {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalError, setGlobalError] = useState(false);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Créer un OT relève de l'atelier (même règle que le serveur).
+  const canCreateWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager';
 
   const { data: vehiclesData, isLoading: loadingVehicles } = useQuery<any>({
     queryKey: ["/api/vehicles"]
@@ -309,7 +313,7 @@ export default function DateBasedAlertsPage() {
               Maintenance atelier (préventive/curative) donne lieu à une OT, conformité documentaire (assurance, visite technique, plaque) donne lieu à une demande administrative.
             </p>
           </div>
-          <Button
+          {canCreateWorkOrder && <Button
             onClick={generateAllOTs}
             disabled={globalLoading || pendingMaintenanceAlerts.length === 0}
             className="flex items-center gap-2"
@@ -320,7 +324,7 @@ export default function DateBasedAlertsPage() {
                 ? <><CheckCircle className="h-4 w-4" /> Tout traité</>
                 : <><CheckCircle className="h-4 w-4" /> Générer les OT atelier ({pendingMaintenanceAlerts.length})</>
             }
-          </Button>
+          </Button>}
         </div>
 
         {/* KPI Cards */}
@@ -524,6 +528,9 @@ export default function DateBasedAlertsPage() {
                               {isMaintenance ? "OT atelier créée" : "Demande administrative créée"}
                             </span>
                           );
+                        }
+                        if (isMaintenance && !canCreateWorkOrder) {
+                          return <span className="text-xs text-muted-foreground">Relève de l'atelier</span>;
                         }
                         return (
                           <Button
