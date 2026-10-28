@@ -1544,27 +1544,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Utilisateur non trouvé" });
       }
       
-      const schedules: any[] = [];
-      
-      // Filtrage par rôle
+      // Une seule requête, quel que soit le nombre de véhicules. La boucle
+      // précédente interrogeait la base une fois par camion: 7 allers-retours
+      // pour 6 véhicules, ~3 secondes à la latence de ce déploiement.
+      let schedules;
       if (user.role === 'client') {
-        // Les clients ne voient que les planifications de leurs véhicules
+        // Le client ne voit que son parc: on lui passe la liste de ses véhicules.
         const vehiclesResult = await storage.getVehiclesByOwner(user.id);
-        
-        for (const vehicle of vehiclesResult.vehicles) {
-          const vehicleSchedules = await storage.getMaintenanceSchedulesByVehicleId(vehicle.id);
-          schedules.push(...vehicleSchedules);
-        }
+        schedules = await storage.getMaintenanceSchedules(
+          vehiclesResult.vehicles.map((vehicle) => vehicle.id),
+        );
       } else {
-        // Admin, workshop_manager et technician voient toutes les planifications
-        const vehiclesResult = await storage.getVehicles();
-        
-        for (const vehicle of vehiclesResult.vehicles) {
-          const vehicleSchedules = await storage.getMaintenanceSchedulesByVehicleId(vehicle.id);
-          schedules.push(...vehicleSchedules);
-        }
+        schedules = await storage.getMaintenanceSchedules();
       }
-      
+
       return res.status(200).json(schedules);
     } catch (error) {
       console.error("Get all maintenance schedules error:", error);

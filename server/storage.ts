@@ -1018,10 +1018,12 @@ export class DatabaseStorage implements IStorage {
   async deleteVehicleDocument(id: number): Promise<boolean> { return false; }
   
   async getMaintenanceSchedule(id: number): Promise<MaintenanceSchedule | undefined> { return undefined; }
-  async getMaintenanceSchedulesByVehicleId(vehicleId: number): Promise<MaintenanceScheduleWithVehicle[]> {
-    try {
-      return await db
-        .select({
+  /**
+   * Forme commune aux deux lectures de planifications: une seule définition,
+   * pour que la liste globale et la liste par véhicule ne puissent pas
+   * renvoyer des colonnes différentes.
+   */
+  private readonly maintenanceScheduleSelection = {
           id: maintenanceSchedules.id,
           vehicleId: maintenanceSchedules.vehicleId,
           vehicleRegistrationNumber: vehicles.registrationNumber,
@@ -1042,7 +1044,46 @@ export class DatabaseStorage implements IStorage {
               ELSE 'scheduled'
             END
           `
-        })
+  };
+
+  /**
+   * Toutes les planifications, ou celles d'une liste de véhicules.
+   *
+   * Remplace une boucle qui interrogeait la base **une fois par véhicule**:
+   * 7 allers-retours pour 6 camions, soit ~3 secondes à la latence de ce
+   * déploiement — et 20 secondes à 40 véhicules. Le filtre par véhicule sert
+   * au rôle `client`, qui ne voit que son parc.
+   *
+   * Pas de vue SQL: la jointure porte deux tables et aucun calcul. Une vue
+   * ajouterait un objet à versionner et du SQL que ni le compilateur ni les
+   * tests ne lisent, sans rien simplifier.
+   */
+  async getMaintenanceSchedules(vehicleIds?: number[]): Promise<MaintenanceScheduleWithVehicle[]> {
+    try {
+      if (vehicleIds && vehicleIds.length === 0) {
+        return [];
+      }
+
+      const base = db
+        .select(this.maintenanceScheduleSelection)
+        .from(maintenanceSchedules)
+        .leftJoin(vehicles, eq(maintenanceSchedules.vehicleId, vehicles.id));
+
+      return vehicleIds
+        ? await base
+            .where(inArray(maintenanceSchedules.vehicleId, vehicleIds))
+            .orderBy(maintenanceSchedules.scheduledDate)
+        : await base.orderBy(maintenanceSchedules.scheduledDate);
+    } catch (error) {
+      console.error('Error getting maintenance schedules:', error);
+      return [];
+    }
+  }
+
+  async getMaintenanceSchedulesByVehicleId(vehicleId: number): Promise<MaintenanceScheduleWithVehicle[]> {
+    try {
+      return await db
+        .select(this.maintenanceScheduleSelection)
         .from(maintenanceSchedules)
         .leftJoin(vehicles, eq(maintenanceSchedules.vehicleId, vehicles.id))
         .where(eq(maintenanceSchedules.vehicleId, vehicleId))
