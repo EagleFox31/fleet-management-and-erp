@@ -20,5 +20,7 @@ export default defineConfig({
     pool: "forks",
     isolate: false,
     maxWorkers: 1,
+    // Le nettoyage (beforeAll/afterAll) enchaîne des requêtes Neon: 10 s par défaut ne suffisent pas.
+    hookTimeout: 120000,
   },
 });

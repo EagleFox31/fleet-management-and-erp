@@ -2901,9 +2901,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[AWAITING_PARTS] OT #${workOrderId} mis en attente de pièces (${part.name})`);
       }
       
+      // Le prix vient du catalogue, pas du client: un corps sans unitPrice
+      // faisait échouer l'insertion (NOT NULL) et le client pouvait fixer le coût.
       const partUsed = await storage.addPartToWorkOrder({
-        ...req.body,
-        workOrderId
+        workOrderId,
+        partId: part.id,
+        quantity: requestedQuantity,
+        unitPrice: part.unitPrice ?? "0",
       }, user?.id);
       
       // Diffuser la mise à jour via WebSocket temps réel
