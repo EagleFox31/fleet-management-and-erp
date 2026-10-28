@@ -610,10 +610,9 @@ import { createApp } from "./app";
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
+  // Port 5000 par défaut (API et client sur le même port); PORT permet de
+  // lancer l'app à côté d'un autre service qui occupe déjà 5000.
+  const port = Number(process.env.PORT) || 5000;
   server.listen(port, "0.0.0.0", () => {
     const networkInterfaces = os.networkInterfaces();
     let networkUrl = '';
