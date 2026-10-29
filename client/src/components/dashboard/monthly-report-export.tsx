@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, Download, Loader2 } from "lucide-react";
+import { toApiError } from "@/lib/api-error";
 
 const MONTHS = [
   { value: 1,  label: 'Janvier' },
@@ -37,8 +38,7 @@ export function MonthlyReportExport() {
         { credentials: 'include' }
       );
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `Erreur ${res.status}`);
+        throw await toApiError(res);
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

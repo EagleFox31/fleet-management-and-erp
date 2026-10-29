@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { toApiError } from "@/lib/api-error";
 
 /**
  * Résout les URLs d'API relatives en URLs complètes lorsque l'application s'exécute
@@ -27,8 +28,7 @@ export function resolveApiUrl(path: string): string {
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    throw await toApiError(res);
   }
 }
 

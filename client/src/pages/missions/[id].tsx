@@ -19,6 +19,7 @@ import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
+import { isApiError } from "@/lib/api-error";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -1163,7 +1164,7 @@ export default function MissionDetailsPage() {
 
   if (isError) {
     const errorMessage = error instanceof Error ? error.message : "Une erreur est survenue";
-    const is404 = errorMessage.includes("404") || errorMessage.toLowerCase().includes("not found");
+    const is404 = isApiError(error, 404) || errorMessage.toLowerCase().includes("not found");
     return (
       <div className="space-y-5">
         <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">

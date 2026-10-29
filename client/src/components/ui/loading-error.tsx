@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { AnimatedError } from "./animated-error";
 import { useAnimatedError } from "@/hooks/use-animated-error";
+import { userMessageOf } from "@/lib/api-error";
 
 interface LoadingErrorProps {
   isLoading?: boolean;
@@ -59,12 +60,7 @@ export function LoadingError({
     };
 
     const getErrorMessage = (error: any) => {
-      if (error?.message) return error.message;
-      if (error?.status === 404) return "La ressource demandée n'a pas été trouvée";
-      if (error?.status === 401) return "Veuillez vous reconnecter";
-      if (error?.status === 403) return "Accès non autorisé";
-      if (error?.status >= 500) return "Erreur du serveur";
-      return "Une erreur s'est produite";
+      return userMessageOf(error, "Le chargement a échoué. Réessayez dans un instant.");
     };
 
     return (

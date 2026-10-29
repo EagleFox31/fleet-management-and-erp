@@ -1,6 +1,9 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { AlertCircle, CheckCircle, Info, XCircle } from 'lucide-react';
+import { looksTechnical } from '@shared/errors';
+import { userMessageOf } from '@/lib/api-error';
+import { clientLogger } from '@/lib/logger';
 
 interface ErrorDetails {
   field?: string;
@@ -17,24 +20,16 @@ export function useErrorHandler() {
   const { toast } = useToast();
 
   const showError = (error: any, context: string = "Opération") => {
-    console.error(`${context} error:`, error);
+    clientLogger.error(`${context} en échec`, { error });
 
-    let title = "Erreur";
-    let description = "Une erreur inattendue s'est produite";
-    
+    let title = "Action impossible";
+    let description = userMessageOf(error);
+
     if (error?.response?.data) {
       const apiError: ApiError = error.response.data;
-      title = apiError.message || title;
-      
-      if (apiError.details) {
-        description = apiError.details;
-      } else if (apiError.errors && apiError.errors.length > 0) {
-        description = apiError.errors.map(err => 
-          err.field ? `${err.field}: ${err.message}` : err.message
-        ).join('\n');
-      }
-    } else if (error?.message) {
-      description = error.message;
+      const messages = [apiError.message, ...(apiError.errors ?? []).map((err) => err.message)]
+        .filter((m): m is string => typeof m === "string" && !looksTechnical(m));
+      if (messages.length > 0) description = messages.join(" ");
     }
 
     toast({
@@ -95,7 +90,7 @@ export function ValidationErrors({ errors, className = "" }: ValidationErrorsPro
         <XCircle className="h-5 w-5 text-red-400 mt-0.5 mr-2 flex-shrink-0" />
         <div className="text-sm">
           <h3 className="font-medium text-red-800 mb-1">
-            Erreurs de validation
+            Informations à corriger
           </h3>
           <ul className="text-red-700 space-y-1">
             {errors.map((error, index) => (

@@ -54,10 +54,10 @@ export const errorMessages: Record<string, string> = {
   'import_failed': 'L\'importation a échoué. Vérifiez le fichier',
 
   // Réseau & Serveur
-  'network_error': 'Erreur réseau. Vérifiez votre connexion',
-  'server_error': 'Erreur serveur (500). Veuillez réessayer',
-  'timeout': 'La requête a pris trop de temps. Veuillez réessayer',
-  'not_found': 'Ressource non trouvée (404)',
+  'network_error': 'Connexion au serveur impossible. Vérifiez votre réseau puis réessayez',
+  'server_error': 'Une erreur technique est survenue. Réessayez dans un instant',
+  'timeout': 'Le serveur met trop de temps à répondre. Réessayez dans un instant',
+  'not_found': 'L\'élément demandé n\'existe plus ou a été déplacé',
 };
 
 /**

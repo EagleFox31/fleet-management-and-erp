@@ -26,6 +26,7 @@ import { useState, useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { useAuth } from "@/hooks/useAuth";
+import { isApiError } from "@/lib/api-error";
 
 export default function FleetTechnicianPWA() {
   const [isOnline, setIsOnline] = useState(navigator.onLine !== false);
@@ -115,7 +116,7 @@ export default function FleetTechnicianPWA() {
   };
 
   // Gestion des erreurs d'authentification
-  if (dataError && (dataError as any).message?.includes('401')) {
+  if (isApiError(dataError, 401)) {
     return (
       <div className="flex flex-col items-center justify-center h-screen p-4">
         <AlertTriangle className="h-12 w-12 text-orange-600 mb-4" />

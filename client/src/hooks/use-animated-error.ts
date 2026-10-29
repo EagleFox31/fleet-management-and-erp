@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { userMessageOf } from "@/lib/api-error";
 
 export type ErrorType = "network" | "auth" | "validation" | "server" | "timeout" | "general";
 
@@ -57,35 +58,21 @@ export function useAnimatedError() {
           break;
         case 422:
         case 400:
-          showError(
-            error.message || "Les données fournies ne sont pas valides", 
-            "validation", 
-            error
-          );
+          showError(userMessageOf(error, "Les données fournies ne sont pas valides"), "validation", error);
           break;
         case 500:
         case 502:
         case 503:
-          showError("Le serveur rencontre des difficultés temporaires", "server", error);
+          // Le message de l'ApiError porte la référence à donner au support.
+          showError(userMessageOf(error, "Le serveur rencontre des difficultés temporaires"), "server", error);
           break;
         default:
-          showError(
-            error.message || "Une erreur inattendue s'est produite", 
-            "general", 
-            error
-          );
+          showError(userMessageOf(error), "general", error);
       }
       return;
     }
 
-    // Erreurs de validation
-    if (error.message && error.message.includes("validation")) {
-      showError(error.message, "validation", error);
-      return;
-    }
-
-    // Erreur générique
-    showError(error.message || "Une erreur s'est produite", "general", error);
+    showError(userMessageOf(error), "general", error);
   }, [showError]);
 
   const getErrorMessages = useCallback(() => {

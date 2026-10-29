@@ -1,11 +1,11 @@
-import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import express, { type Express } from "express";
 import compression from "compression";
 import path from "path";
 import type { Server } from "http";
 import { registerRoutes } from "./routes";
 import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
-import { log } from "./vite";
+import { accessLog, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
 
 export type CreateAppOptions = {
   /**
@@ -26,6 +26,13 @@ export async function createApp(
   const initializeDb = options.initializeDb !== false;
 
   const app = express();
+
+  // Gestion d'erreurs centralisée (server/middleware/error-handler.ts) :
+  // chaque requête reçoit un identifiant, chaque réponse d'erreur est mise au
+  // contrat `ApiErrorBody`, et le détail technique ne part qu'aux logs.
+  app.use(requestContext);
+  app.use(accessLog);
+  app.use(errorResponseGuard);
 
   // Compression avant tout le reste: le JSON des listes se réduit de 80 à 90 %,
   // et la liaison vers ce déploiement est lente (≈475 ms d'aller-retour Neon
@@ -94,34 +101,6 @@ export async function createApp(
     },
   }));
 
-  app.use((req, res, next) => {
-    const start = Date.now();
-    const requestPath = req.path;
-    let capturedJsonResponse: Record<string, unknown> | undefined;
-
-    const originalResJson = res.json;
-    res.json = function (bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    };
-
-    res.on("finish", () => {
-      const duration = Date.now() - start;
-      if (requestPath.startsWith("/api")) {
-        let logLine = `${req.method} ${requestPath} ${res.statusCode} in ${duration}ms`;
-        if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-        }
-        if (logLine.length > 80) {
-          logLine = logLine.slice(0, 79) + "…";
-        }
-        log(logLine);
-      }
-    });
-
-    next();
-  });
-
   if (initializeDb) {
     await initializeDatabase();
   }
@@ -129,12 +108,7 @@ export async function createApp(
   app.use("/api", apiRouter);
   const server = await registerRoutes(app);
 
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const error = err as { status?: number; statusCode?: number; message?: string };
-    const status = error.status || error.statusCode || 500;
-    const message = error.message || "Internal Server Error";
-    res.status(status).json({ message });
-  });
+  app.use(errorHandler);
 
   return { app, server };
 }
