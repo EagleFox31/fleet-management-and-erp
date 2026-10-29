@@ -523,3 +523,28 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Un contrôle de plafond (montant, quantité) compte aussi les opérations en attente, et se fait sous verrou dans la même transaction que l'écriture.
 - Une saisie financière a une clé d'idempotence métier (ici la référence de paiement) : le rejeu rend l'existant, il n'écrit pas.
+
+## 2026-10-29 - Encaissement client : paiement perdu, trop-perçu et solde NaN
+
+### Constat
+- `POST /api/billing/invoices/:id/payments` lisait le solde, l'écrivait, puis insérait le paiement, sans transaction ni verrou : deux paiements simultanés lisaient le même solde et le second écrasait le premier (paiement enregistré mais non déduit).
+- Aucun plafond : un paiement supérieur au solde passait, le solde devenait négatif ; une facture annulée acceptait un paiement.
+- Aucune clé d'idempotence : un retry réseau ou un second onglet créait un second paiement.
+- Validation réduite à `!amount` : `amount: "abc"` donnait `parseFloat` = `NaN`, écrit tel quel dans `balance` ; un mode de paiement inconnu sortait en 500 avec le texte SQL.
+
+### Cause racine
+- Lecture-calcul-écriture hors transaction (lost update) et règle de plafond absente.
+- Classification : course critique (T7) + validation absente (T3) + fuite de détail technique.
+
+### Résolution
+- `recordPayment` : transaction, verrou `FOR UPDATE` sur la facture ; référence identique et même montant -> paiement existant rendu (`replayed: true`) ; autre montant -> 409 ; facture annulée ou montant supérieur au solde -> 409 ; facture inconnue -> 404.
+- Route : schéma Zod (montant positif, date, mode dans l'énumération de la colonne), erreurs -> `next(error)`, pas de diffusion sur un rejeu.
+- Écran facture client : toast via `userMessageOf`.
+
+### Prévention (vérifiable)
+- `tests/integration/client-payment-idempotence.test.ts` (8 cas, 8 rouges avant correctif ; le cas « deux paiements partiels simultanés » est une vraie course, rouge de façon non déterministe sur l'ancien code).
+- `tests/contract/client-payment-idempotence.contract.test.ts` (7 cas, 5 rouges avant correctif) : 403, 400 lisibles avec solde intact, rejeu 200 même id, 409 lisible.
+
+### Règle Projet (obligatoire)
+- Un solde se lit et s'écrit sous verrou, dans la même transaction que l'écriture qui le justifie.
+- Un montant reçu du client passe par un schéma (nombre fini, positif) avant tout calcul.

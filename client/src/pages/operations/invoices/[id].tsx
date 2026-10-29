@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
 import { formatPrice } from "@/lib/utils";
 import { CardShell, HeaderCard, KpiGrid, KpiTile, PremiumTableShell, SectionLabel } from "@/components/design-system";
 
@@ -185,7 +186,7 @@ export default function ClientInvoiceDetailsPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Le paiement n'a pas pu être enregistré."),
         variant: "destructive",
       });
     },

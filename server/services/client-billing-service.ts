@@ -8,6 +8,10 @@ import {
   type ClientPayment
 } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("client-billing");
 
 /**
  * Service Facturation Clients
@@ -265,62 +269,112 @@ export class ClientBillingService {
     notes?: string;
     userId: number;
   }) {
-    console.log(`Recording payment for invoice ${invoiceId}...`);
+    log.info({ invoiceId }, "enregistrement d'un paiement client");
 
-    // Récupérer la facture
-    const [invoice] = await db
-      .select()
-      .from(clientInvoices)
-      .where(eq(clientInvoices.id, invoiceId))
-      .limit(1);
-
-    if (!invoice) {
-      throw new Error("Facture non trouvée");
+    if (!Number.isFinite(paymentData.amount) || paymentData.amount <= 0) {
+      throw new AppError(400, "Montant de paiement invalide.");
     }
 
-    const currentBalance = parseFloat(invoice.balance);
-    const newBalance = currentBalance - paymentData.amount;
+    const reference = paymentData.reference?.trim() || null;
 
-    // Déterminer le nouveau statut
-    let newStatus: "pending" | "partial" | "paid" = "pending";
-    if (newBalance <= 0) {
-      newStatus = "paid";
-    } else if (newBalance < parseFloat(invoice.amountTTC)) {
-      newStatus = "partial";
-    }
+    // Verrou sur la facture : le solde est lu puis réécrit dans la même
+    // transaction, deux paiements simultanés ne peuvent plus s'écraser.
+    const result = await db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select()
+        .from(clientInvoices)
+        .where(eq(clientInvoices.id, invoiceId))
+        .limit(1)
+        .for("update");
 
-    // Mettre à jour la facture
-    await db
-      .update(clientInvoices)
-      .set({
-        balance: newBalance.toString(),
+      if (!invoice) {
+        throw new AppError(404, "Cette facture n'existe plus.");
+      }
+
+      const currentBalance = parseFloat(invoice.balance);
+
+      // Même référence et même montant : c'est la même saisie rejouée (retry
+      // réseau, second onglet). On rend le paiement existant, sans doublon.
+      if (reference) {
+        const [sameReference] = await tx
+          .select()
+          .from(clientPayments)
+          .where(and(eq(clientPayments.invoiceId, invoiceId), eq(clientPayments.reference, reference)))
+          .limit(1);
+        if (sameReference) {
+          if (Math.abs(parseFloat(sameReference.amount) - paymentData.amount) < 0.005) {
+            return {
+              payment: sameReference,
+              previousBalance: currentBalance,
+              newBalance: currentBalance,
+              status: invoice.status,
+              replayed: true,
+            };
+          }
+          throw new AppError(409, `La référence ${reference} est déjà utilisée pour un autre paiement de cette facture.`);
+        }
+      }
+
+      if (invoice.status === "cancelled") {
+        throw new AppError(409, "Cette facture est annulée : elle ne peut plus recevoir de paiement.");
+      }
+
+      if (paymentData.amount - currentBalance > 0.005) {
+        throw new AppError(
+          409,
+          currentBalance <= 0
+            ? "Cette facture est déjà soldée."
+            : `Montant supérieur au solde restant (${currentBalance.toFixed(2)} FCFA).`
+        );
+      }
+
+      const newBalance = currentBalance - paymentData.amount;
+
+      // Déterminer le nouveau statut
+      let newStatus: "pending" | "partial" | "paid" = "pending";
+      if (newBalance <= 0) {
+        newStatus = "paid";
+      } else if (newBalance < parseFloat(invoice.amountTTC)) {
+        newStatus = "partial";
+      }
+
+      await tx
+        .update(clientInvoices)
+        .set({
+          balance: newBalance.toString(),
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(clientInvoices.id, invoiceId));
+
+      const [payment] = await tx
+        .insert(clientPayments)
+        .values({
+          invoiceId,
+          amount: paymentData.amount.toString(),
+          paymentDate: paymentData.paymentDate,
+          paymentMethod: paymentData.paymentMethod as any,
+          reference,
+          notes: paymentData.notes,
+          recordedBy: paymentData.userId,
+        })
+        .returning();
+
+      return {
+        payment,
+        previousBalance: currentBalance,
+        newBalance,
         status: newStatus,
-        updatedAt: new Date(),
-      })
-      .where(eq(clientInvoices.id, invoiceId));
+        replayed: false,
+      };
+    });
 
-    // Enregistrer le paiement
-    const [payment] = await db
-      .insert(clientPayments)
-      .values({
-        invoiceId,
-        amount: paymentData.amount.toString(),
-        paymentDate: paymentData.paymentDate,
-        paymentMethod: paymentData.paymentMethod as any,
-        reference: paymentData.reference,
-        notes: paymentData.notes,
-        recordedBy: paymentData.userId,
-      })
-      .returning();
+    log.info(
+      { invoiceId, amount: paymentData.amount, newBalance: result.newBalance, replayed: result.replayed },
+      "paiement client enregistré"
+    );
 
-    console.log(`Payment of ${paymentData.amount} FCFA recorded, new balance: ${newBalance} FCFA`);
-
-    return {
-      payment,
-      previousBalance: currentBalance,
-      newBalance,
-      status: newStatus,
-    };
+    return result;
   }
 
   /**

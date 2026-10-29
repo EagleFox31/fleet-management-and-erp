@@ -1,9 +1,23 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
+import { z } from "zod";
+import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
 
 const router = Router();
+
+const recordPaymentSchema = z.object({
+  amount: z.coerce.number({ invalid_type_error: "Le montant doit être un nombre." })
+    .positive("Le montant doit être supérieur à 0."),
+  paymentDate: z.string({ required_error: "La date de paiement est obligatoire." })
+    .regex(/^\d{4}-\d{2}-\d{2}/, "La date de paiement est invalide."),
+  paymentMethod: z.enum(clientPayments.paymentMethod.enumValues, {
+    errorMap: () => ({ message: "Mode de paiement inconnu." }),
+  }),
+  reference: z.string().trim().max(255).nullish(),
+  notes: z.string().nullish(),
+});
 
 type InvoicePdfItem = {
   description: string;
@@ -280,16 +294,11 @@ router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response
  * POST /api/billing/invoices/:id/payments
  * Enregistrer un paiement pour une facture
  */
-router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res: Response) => {
+router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { amount, paymentDate, paymentMethod, reference, notes } = req.body;
-
-    if (!amount || !paymentDate || !paymentMethod) {
-      return res.status(400).json({ 
-        error: "amount, paymentDate et paymentMethod sont requis" 
-      });
-    }
+    // Un montant non numérique devenait NaN et était écrit tel quel dans le solde.
+    const { amount, paymentDate, paymentMethod, reference, notes } = recordPaymentSchema.parse(req.body ?? {});
 
     if (!req.user?.id) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -298,14 +307,19 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
     const result = await clientBillingService.recordPayment(
       parseInt(id),
       {
-        amount: parseFloat(amount),
+        amount,
         paymentDate,
         paymentMethod,
-        reference,
-        notes,
+        reference: reference ?? undefined,
+        notes: notes ?? undefined,
         userId: req.user.id,
       }
     );
+
+    // Saisie rejouée : rien n'a changé, rien à diffuser.
+    if (result.replayed) {
+      return res.json(result);
+    }
 
     broadcastClientInvoiceUpdate(
       "client_invoice_payment_recorded",
@@ -322,8 +336,9 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
 
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error recording payment:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    // Le gestionnaire central journalise : ZodError -> 400 par champ,
+    // AppError -> son statut, le reste -> 500 générique avec référence.
+    next(error);
   }
 });
 
