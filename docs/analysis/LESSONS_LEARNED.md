@@ -412,3 +412,23 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Jamais `error.message` dans une réponse ou un toast ; le détail va au logger avec le `requestId`.
 - Un log ne se supprime pas : il se migre vers `moduleLogger` / `clientLogger`.
+
+## 2026-10-29 - Corps invalide renvoyé en 500
+
+### Constat
+- `POST /api/part-requirements` et `POST`/`PATCH /api/clients` renvoyaient 500 « Erreur serveur » sur un corps incomplet : l'utilisateur ne savait pas quel champ corriger.
+
+### Cause racine
+- Demande de pièce : aucun `parse` Zod, le corps allait jusqu'à l'`INSERT` et échouait sur une contrainte `NOT NULL`.
+- Clients : le `catch` local transformait la `ZodError` en 500 au lieu de la laisser au gestionnaire central.
+- Classification : validation absente ou interceptée par un `catch` générique.
+
+### Résolution
+- `insertPartRequirementSchema.parse` avant le service ; `if (error instanceof ZodError) return next(error)` dans les `catch` concernés (le gestionnaire central produit le 400 avec les champs).
+
+### Prévention (vérifiable)
+- `tests/contract/api-role-guard-and-validation.contract.test.ts` : 7 POST principaux, rôle interdit → 403 au contrat, rôle autorisé + corps vide → 400 lisible ; une demande valide reste acceptée.
+
+### Règle Projet (obligatoire)
+- Tout POST/PATCH valide son corps avec Zod, et un `catch` local ne convertit jamais une `ZodError` en 500 : `next(error)`.
+- Tout nouveau POST principal s'ajoute à la table `CASES` du test ci-dessus.

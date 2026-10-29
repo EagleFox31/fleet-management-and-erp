@@ -7,7 +7,11 @@ import {
 } from "../middleware/auth";
 import { partRequirementsService } from "../services/part-requirements-service";
 import { PartRequirementWorkflow } from "../services/part-requirements-workflow";
+import { insertPartRequirementSchema } from "@shared/schema";
+import { ZodError } from "zod";
+import { moduleLogger } from "../lib/logger";
 
+const log = moduleLogger("part-requirements-routes");
 const router = Router();
 
 router.get("/", authenticate, async (req, res) => {
@@ -16,12 +20,12 @@ router.get("/", authenticate, async (req, res) => {
     const requirements = await partRequirementsService.getPartRequirements(status);
     return res.status(200).json(requirements);
   } catch (error) {
-    console.error("Get part requirements error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get part requirements error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.get("/active-by-part", authenticate, async (_req, res) => {
+router.get("/active-by-part", authenticate, async (req, res) => {
   try {
     const activeByPart = await partRequirementsService.getActiveRequirementsByPart();
     const result: Record<number, { status: string; urgency: string; count: number }> = {};
@@ -30,7 +34,7 @@ router.get("/active-by-part", authenticate, async (_req, res) => {
     });
     return res.status(200).json(result);
   } catch (error) {
-    console.error("Get active requirements by part error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get active requirements by part error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -44,7 +48,7 @@ router.get("/by-part/:partId", authenticate, async (req, res) => {
     const requirements = await partRequirementsService.getRequirementsByPartId(partId);
     return res.status(200).json(requirements);
   } catch (error) {
-    console.error("Get requirements by part error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get requirements by part error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -78,19 +82,19 @@ router.get("/workflow/statuses", authenticate, async (req, res) => {
       all: allStatuses.map((status) => PartRequirementWorkflow.getStatusInfo(status as any)),
     });
   } catch (error) {
-    console.error("Get workflow statuses error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get workflow statuses error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.post("/", isPartRequester, async (req, res) => {
+router.post("/", isPartRequester, async (req, res, next) => {
   try {
     const userId = req.user?.id;
 
-    const requirement = await partRequirementsService.createPartRequirement({
-      ...req.body,
-      requestedBy: userId,
-    });
+    // Sans validation, un corps incomplet atteignait la base et revenait en 500.
+    const requirement = await partRequirementsService.createPartRequirement(
+      insertPartRequirementSchema.parse({ ...req.body, requestedBy: userId }),
+    );
 
     if ((global as any).broadcastUpdate) {
       (global as any).broadcastUpdate("part_requirement_created", {
@@ -111,7 +115,8 @@ router.post("/", isPartRequester, async (req, res) => {
 
     return res.status(201).json(requirement);
   } catch (error) {
-    console.error("Create part requirement error:", error);
+    if (error instanceof ZodError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Create part requirement error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -176,7 +181,7 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
 
     return res.status(200).json(result.data);
   } catch (error) {
-    console.error("Update part requirement error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update part requirement error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -215,7 +220,7 @@ router.delete("/:id", isWorkshopManager, async (req, res) => {
 
     return res.status(204).send();
   } catch (error) {
-    console.error("Delete part requirement error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Delete part requirement error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

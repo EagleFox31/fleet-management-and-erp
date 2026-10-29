@@ -4,7 +4,10 @@ import { clients, users } from "@shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { insertClientSchema } from "@shared/schema";
 import { authenticate, authorize } from "../middleware/auth";
+import { ZodError } from "zod";
+import { moduleLogger } from "../lib/logger";
 
+const log = moduleLogger("clients");
 const router = Router();
 router.use(authenticate);
 const updateClientSchema = insertClientSchema.partial();
@@ -138,13 +141,13 @@ router.get("/", async (req, res) => {
 
     return res.json(clientsWithCreator);
   } catch (error) {
-    console.error("Get clients error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get clients error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // GET /api/clients/all - Liste active + archivée (réservée profils gestion client)
-router.get("/all", authorize([...MANAGER_ROLES]), async (_req, res) => {
+router.get("/all", authorize([...MANAGER_ROLES]), async (req, res) => {
   try {
     const allClients = await db
       .select()
@@ -154,7 +157,7 @@ router.get("/all", authorize([...MANAGER_ROLES]), async (_req, res) => {
     const clientsWithCreator = await withCreatorNames(allClients);
     return res.json(clientsWithCreator);
   } catch (error) {
-    console.error("Get all clients error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get all clients error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -174,13 +177,13 @@ router.get("/:id", async (req, res) => {
 
     return res.json(client);
   } catch (error) {
-    console.error("Get client error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get client error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // POST /api/clients - Créer un nouveau client
-router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res) => {
+router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res, next) => {
   try {
     const clientData = req.body;
 
@@ -205,18 +208,20 @@ router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res
     broadcastClientUpdate("client_created", createdClient);
     return res.status(201).json(createdClient);
   } catch (error) {
+    // Corps invalide : 400 avec les champs en cause, via le gestionnaire central.
+    if (error instanceof ZodError) return next(error);
     if (isUniqueViolation(error)) {
       return res.status(409).json({
         message: "Un client avec ce nom existe déjà",
       });
     }
-    console.error("Create client error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create client error");
     return res.status(500).json({ message: "Erreur lors de la création du client" });
   }
 });
 
 // PATCH /api/clients/:id - Modifier un client
-router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res) => {
+router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
     if (!clientId) {
@@ -250,12 +255,13 @@ router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res) => {
     broadcastClientUpdate("client_updated", hydratedClient);
     return res.json(hydratedClient);
   } catch (error) {
+    if (error instanceof ZodError) return next(error);
     if (isUniqueViolation(error)) {
       return res.status(409).json({
         message: "Un client avec ce nom existe déjà",
       });
     }
-    console.error("Update client error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update client error");
     return res.status(500).json({ message: "Erreur lors de la mise à jour du client" });
   }
 });
@@ -289,7 +295,7 @@ router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res) => {
     broadcastClientUpdate("client_deleted", hydratedClient);
     return res.json(hydratedClient);
   } catch (error) {
-    console.error("Archive client error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Archive client error");
     return res.status(500).json({ message: "Erreur lors de l'archivage du client" });
   }
 });
@@ -323,7 +329,7 @@ router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res) => 
     broadcastClientUpdate("client_updated", hydratedClient);
     return res.json(hydratedClient);
   } catch (error) {
-    console.error("Restore client error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Restore client error");
     return res.status(500).json({ message: "Erreur lors de la restauration du client" });
   }
 });

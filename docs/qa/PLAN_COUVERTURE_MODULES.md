@@ -87,9 +87,9 @@ flowchart LR
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| T1 | Toute route `/api` : 401 sans session, 403 avec rôle non autorisé | C | Partiel (`api-auth-guard`, à étendre aux nouveaux routeurs) |
+| T1 | Toute route `/api` : 401 sans session, 403 avec rôle non autorisé | C | Partiel (`api-auth-guard` statique ; 403 par session réelle sur 7 POST principaux dans `api-role-guard-and-validation`) |
 | T2 | Sessions : création, expiration, révocation, logout | C | OK (`api-auth-sessions`) |
-| T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (contrat d'erreur central, JSON illisible → 400 ; à étendre aux POST principaux) |
+| T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux couverts par `api-role-guard-and-validation` ; reste PATCH et routes `server/routes.ts`) |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, `requestedBy` demande de pièce, ratchet `insert-schemas-server-fields`) |
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | À faire |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders`) |
