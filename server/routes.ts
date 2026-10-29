@@ -21,11 +21,11 @@ import {
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
   maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments,
-  faultCatalog, vehicleTires
+  faultCatalog, vehicleTires, insertFaultCatalogSchema
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
@@ -532,38 +532,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Ajouter un nouvel utilisateur - Réservé aux administrateurs
   app.post("/api/users", authenticate, isAdmin, async (req, res) => {
-    console.log("Création d'utilisateur - Requête reçue:", req.body);
-    
+    // Jamais le corps dans les logs : il porte le mot de passe en clair.
+    log.info({ requestId: req.requestId, username: req.body?.username }, "Création d'utilisateur - requête reçue");
+
     try {
       const parsedUser = insertUserSchema.parse(req.body);
-      console.log("Données utilisateur valides:", parsedUser);
-      
+      log.info({ requestId: req.requestId, username: parsedUser.username, role: parsedUser.role }, "Données utilisateur valides");
+
       // Vérifier si le nom d'utilisateur ou l'email existe déjà
       const existingUsername = await storage.getUserByUsername(parsedUser.username);
       if (existingUsername) {
-        console.log("Nom d'utilisateur déjà utilisé:", parsedUser.username);
+        log.info({ requestId: req.requestId, username: parsedUser.username }, "Nom d'utilisateur déjà utilisé");
         return res.status(400).json({ message: "Nom d'utilisateur déjà utilisé" });
       }
-      
+
       const existingEmail = await storage.getUserByEmail(parsedUser.email);
       if (existingEmail) {
-        console.log("Email déjà utilisé:", parsedUser.email);
+        log.info({ requestId: req.requestId }, "Email déjà utilisé");
         return res.status(400).json({ message: "Email déjà utilisé" });
       }
-      
+
       // Hasher le mot de passe
       const hashedPassword = await bcrypt.hash(parsedUser.password, 10);
-      
-      console.log("Tentative de création utilisateur dans la base de données");
-      
+
+      log.info({ requestId: req.requestId }, "Tentative de création utilisateur dans la base de données");
+
       try {
         const user = await storage.createUser({
           ...parsedUser,
           password: hashedPassword
         });
-        
-        console.log("Utilisateur créé avec succès:", user.id);
-        
+
+        log.info({ requestId: req.requestId, userId: user.id }, "Utilisateur créé avec succès");
+
         return res.status(201).json({
           id: user.id,
           username: user.username,
@@ -572,25 +573,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           role: user.role
         });
       } catch (dbError) {
-        console.error("Erreur lors de la création de l'utilisateur dans la base:", dbError);
+        log.error({ err: dbError, requestId: req.requestId }, "Erreur lors de la création de l'utilisateur dans la base");
         return res.status(500).json({ message: "Erreur lors de la création dans la base de données" });
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
-        console.error("Validation error:", error.errors);
-        return res.status(400).json({ 
+        log.warn({ requestId: req.requestId, issues: error.issues.map((issue) => issue.path.join(".")) }, "Validation error");
+        return res.status(400).json({
           message: "Données d'utilisateur invalides",
-          errors: error.errors 
+          errors: error.errors
         });
       }
-      
-      console.error("Create user error:", error);
+
+      log.error({ err: error, requestId: req.requestId }, "Create user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // Mettre à jour un utilisateur - Réservé aux administrateurs
-  app.patch("/api/users/:id", authenticate, isAdmin, async (req, res) => {
+  app.patch("/api/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -604,21 +605,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Utilisateur non trouvé" });
       }
       
-      // Si le mot de passe est fourni, le hasher
-      let userData = { ...req.body };
-      
-      // Supprimer explicitement updatedAt car la colonne n'existe pas dans la base de données
-      if ('updatedAt' in userData) {
-        delete userData.updatedAt;
+      // Les écrans renvoient la fiche entière (id, createdAt, loginCount...) :
+      // le schéma d'insertion écarte ces champs serveur et contrôle le reste.
+      // Avant, createdAt en chaîne faisait échouer l'écriture, avalée en 404.
+      const { password, ...rest } = req.body ?? {};
+      const userData = insertUserSchema.partial().parse(rest);
+
+      // Le stockage avale l'erreur d'unicité : la vérifier ici pour un 409 lisible.
+      if (userData.username) {
+        const owner = await storage.getUserByUsername(userData.username);
+        if (owner && owner.id !== id) return next(new AppError(409, "Ce nom d'utilisateur est déjà utilisé."));
       }
-      
-      if (userData.password) {
-        userData.password = await bcrypt.hash(userData.password, 10);
-      } else {
-        // Supprimer la propriété password si elle est vide
-        delete userData.password;
+      if (userData.email) {
+        const owner = await storage.getUserByEmail(userData.email);
+        if (owner && owner.id !== id) return next(new AppError(409, "Cette adresse e-mail est déjà utilisée."));
       }
-      
+
+      // Si le mot de passe est fourni, le hasher ; vide, il est ignoré
+      if (typeof password === "string" && password.trim() !== "") {
+        userData.password = await bcrypt.hash(password, 10);
+      }
+
+      if (Object.keys(userData).length === 0) {
+        return next(new AppError(400, "Aucune modification à enregistrer."));
+      }
+
       const updatedUser = await storage.updateUser(id, userData);
       
       if (!updatedUser) {
@@ -636,7 +647,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: updatedUser.lastLoginAt
       });
     } catch (error) {
-      console.error("Update user error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Update user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1409,7 +1421,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/documents/:id", isWorkshopManager, async (req, res) => {
+  app.patch("/api/documents/:id", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -1423,13 +1435,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Document non trouvé" });
       }
       
-      const { name, description, expiryDate } = req.body;
+      const { name, description, expiryDate } = req.body ?? {};
       const previousExpiryDate = document.expiryDate;
-      
+
+      // Le stockage avale l'erreur SQL : une date illisible revenait en 404.
+      const { data, errors } = prepareColumnUpdate(vehicleDocuments, { name, description, expiryDate });
+      if (typeof data.name === "string" && data.name.trim() === "") {
+        errors.push({ field: "name", message: "Ce champ est obligatoire." });
+      }
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations du document sont invalides.", { fieldErrors: errors }));
+      }
+
       const updatedDocument = await storage.updateVehicleDocument(id, {
-        name: name !== undefined ? name : undefined,
-        description: description !== undefined ? description : undefined,
-        expiryDate: expiryDate !== undefined ? expiryDate : undefined,
+        ...data,
         updatedBy: (req as any).user?.id || req.session?.userId || undefined,
       });
 
@@ -1519,7 +1538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(updatedDocument);
     } catch (error) {
-      console.error("Update vehicle document error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Update vehicle document error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1730,27 +1749,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Désactiver/Activer une planification
-  app.patch("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res) => {
+  // Activation (écran préventif, corps { isActive }) et édition complète
+  // (formulaire). Une ancienne route n'écrivait que isActive et masquait
+  // celle-ci : toute édition depuis le formulaire était perdue en silence.
+  app.patch("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res, next) => {
     try {
-      const { id } = req.params;
-      const { isActive } = req.body;
-      
-      const [updatedSchedule] = await db
-        .update(maintenanceSchedules)
-        .set({ isActive })
-        .where(eq(maintenanceSchedules.id, parseInt(id)))
-        .returning();
-      
-      if (!updatedSchedule) {
+      const id = parseInt(req.params.id);
+
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "ID de planification invalide" });
+      }
+
+      const schedule = await storage.getMaintenanceSchedule(id);
+
+      if (!schedule) {
         return res.status(404).json({ message: "Planification non trouvée" });
       }
-      
-      return res.json(updatedSchedule);
+
+      // Le formulaire renvoie la fiche entière : id et createdAt sont ignorés.
+      const { id: _id, createdAt: _createdAt, ...schedulePayload } = req.body ?? {};
+      const { data, errors } = prepareColumnUpdate(maintenanceSchedules, schedulePayload);
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations de la planification sont invalides.", { fieldErrors: errors }));
+      }
+      const columns = getTableColumns(maintenanceSchedules);
+      const updates = Object.fromEntries(Object.entries(data).filter(([key, value]) => key in columns && value !== undefined));
+      if (Object.keys(updates).length === 0) {
+        return next(new AppError(400, "Aucune modification à enregistrer."));
+      }
+
+      const updatedSchedule = await storage.updateMaintenanceSchedule(id, updates);
+
+      return res.status(200).json(updatedSchedule);
     } catch (error) {
-      console.error('Update maintenance schedule error:', error);
-      return res.status(500).json({
-        message: "Erreur lors de la modification de la planification"
-      });
+      log.error({ err: error, requestId: req.requestId }, "Update maintenance schedule error");
+      return res.status(500).json({ message: "Erreur lors de la modification de la planification" });
     }
   });
 
@@ -1774,29 +1807,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get upcoming maintenances error:", error);
       return res.status(500).json({ message: "Erreur lors de la récupération des maintenances à venir" });
-    }
-  });
-
-  app.patch("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de planification invalide" });
-      }
-      
-      const schedule = await storage.getMaintenanceSchedule(id);
-      
-      if (!schedule) {
-        return res.status(404).json({ message: "Planification non trouvée" });
-      }
-      
-      const updatedSchedule = await storage.updateMaintenanceSchedule(id, req.body);
-      
-      return res.status(200).json(updatedSchedule);
-    } catch (error) {
-      console.error("Update maintenance schedule error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
@@ -2116,7 +2126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/work-orders", isWorkshopManager, async (req, res) => {
     try {
-      console.log("Données reçues pour création OT:", JSON.stringify(req.body, null, 2));
+      log.debug({ requestId: req.requestId, body: req.body }, "Données reçues pour création OT");
       
       const parsedWorkOrder = insertWorkOrderSchema.parse(req.body);
       const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
@@ -3528,20 +3538,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fuel-records", authenticate, async (req, res) => {
+  // Nombre saisi dans un formulaire : "12" accepté, "12abc" refusé (parseFloat
+  // le tronquait en 12, et "abc" donnait NaN, stocké tel quel en colonne real).
+  const formNumber = (schema: z.ZodNumber) =>
+    z.preprocess((value) => {
+      if (value === null || (typeof value === "string" && value.trim() === "")) return undefined;
+      return typeof value === "string" ? Number(value) : value;
+    }, schema);
+
+  const fuelRecordBodySchema = z.object({
+    vehicleId: formNumber(z.number().int().positive()),
+    date: z.string().refine((value) => !Number.isNaN(Date.parse(value)), { message: "Doit être une date valide." }),
+    quantity: formNumber(z.number().positive()),
+    cost: formNumber(z.number().min(0)),
+    mileage: formNumber(z.number().int().min(0)),
+    fullTank: z.boolean().optional(),
+    notes: z.string().nullable().optional(),
+  });
+
+  app.post("/api/fuel-records", authenticate, async (req, res, next) => {
     try {
+      const input = fuelRecordBodySchema.parse(req.body);
       // Convertir les données du formulaire au format InsertFuelRecord
       const fuelRecordData = {
-        vehicleId: parseInt(req.body.vehicleId),
-        date: req.body.date,
-        quantity: parseFloat(req.body.quantity),
-        cost: req.body.cost.toString(), // Convertir en string pour numeric
-        mileage: parseInt(req.body.mileage),
-        fullTank: req.body.fullTank !== undefined ? req.body.fullTank : true,
-        notes: req.body.notes || null
+        vehicleId: input.vehicleId,
+        date: input.date,
+        quantity: input.quantity,
+        cost: input.cost.toString(), // Convertir en string pour numeric
+        mileage: input.mileage,
+        fullTank: input.fullTank !== undefined ? input.fullTank : true,
+        notes: input.notes || null
       };
 
-      console.log('Creating fuel record with data:', fuelRecordData);
+      log.info({ requestId: req.requestId, fuelRecordData }, "Creating fuel record with data");
       
       // Créer l'enregistrement de carburant via le service
       const fuelRecord = await fuelService.createFuelRecord(fuelRecordData, req.session.userId);
@@ -3567,20 +3596,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         
         if (generatedWorkOrders.length > 0) {
-          console.log(`✅ ${generatedWorkOrders.length} ordre(s) de travail générés automatiquement pour maintenance kilométrique`);
+          log.info({ requestId: req.requestId, count: generatedWorkOrders.length }, "Ordres de travail générés automatiquement pour maintenance kilométrique");
         }
       } catch (error) {
-        console.error('Erreur lors de la vérification des maintenances kilométriques:', error);
+        log.error({ err: error, requestId: req.requestId }, "Erreur lors de la vérification des maintenances kilométriques");
       }
-      
+
       return res.status(201).json(fuelRecord);
     } catch (error) {
-      console.error("Create fuel record error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Create fuel record error");
       return res.status(500).json({ message: "Erreur lors de l'enregistrement du plein" });
     }
   });
 
-  app.patch("/api/fuel-records/:id", authenticate, async (req, res) => {
+  app.patch("/api/fuel-records/:id", authenticate, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -3594,18 +3624,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Enregistrement de carburant non trouvé" });
       }
       
-      // Convertir les données du formulaire au bon format
+      // Convertir les données du formulaire au bon format ; champ absent = inchangé
+      const input = fuelRecordBodySchema.partial().parse(req.body ?? {});
       const updateData = {
-        vehicleId: req.body.vehicleId ? parseInt(req.body.vehicleId) : fuelRecord.vehicleId,
-        date: req.body.date || fuelRecord.date,
-        quantity: req.body.quantity ? parseFloat(req.body.quantity) : fuelRecord.quantity,
-        cost: req.body.cost ? req.body.cost.toString() : fuelRecord.cost,
-        mileage: req.body.mileage ? parseInt(req.body.mileage) : fuelRecord.mileage,
-        fullTank: req.body.fullTank !== undefined ? req.body.fullTank : fuelRecord.fullTank,
-        notes: req.body.notes !== undefined ? req.body.notes : fuelRecord.notes
+        vehicleId: input.vehicleId ?? fuelRecord.vehicleId,
+        date: input.date ?? fuelRecord.date,
+        quantity: input.quantity ?? fuelRecord.quantity,
+        cost: input.cost !== undefined ? input.cost.toString() : fuelRecord.cost,
+        mileage: input.mileage ?? fuelRecord.mileage,
+        fullTank: input.fullTank !== undefined ? input.fullTank : fuelRecord.fullTank,
+        notes: input.notes !== undefined ? input.notes : fuelRecord.notes
       };
       
-      console.log('Updating fuel record with data:', updateData);
+      log.info({ requestId: req.requestId, fuelRecordId: id, updateData }, "Updating fuel record with data");
       
       // Utiliser le service fuel-service au lieu de storage direct
       const updatedFuelRecord = await fuelService.updateFuelRecord(id, updateData, req.session.userId);
@@ -3640,16 +3671,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
           
           if (generatedWorkOrders.length > 0) {
-            console.log(`✅ ${generatedWorkOrders.length} ordre(s) de travail générés automatiquement pour maintenance kilométrique`);
+            log.info({ requestId: req.requestId, count: generatedWorkOrders.length }, "Ordres de travail générés automatiquement pour maintenance kilométrique");
           }
         } catch (error) {
-          console.error('Erreur lors de la vérification des maintenances kilométriques:', error);
+          log.error({ err: error, requestId: req.requestId }, "Erreur lors de la vérification des maintenances kilométriques");
         }
       }
-      
+
       return res.status(200).json(updatedFuelRecord);
     } catch (error) {
-      console.error("Update fuel record error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Update fuel record error");
       return res.status(500).json({ message: "Erreur lors de la mise à jour du plein" });
     }
   });
@@ -4950,15 +4982,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fault-catalog", isWorkshopManager, async (req, res) => {
+  app.post("/api/fault-catalog", isWorkshopManager, async (req, res, next) => {
     try {
-      const catalogData = req.body;
-      catalogData.createdBy = req.user?.id;
-      
+      // createdBy vient de la session, validatedBy d'une validation : jamais du corps.
+      const { createdBy: _createdBy, validatedBy: _validatedBy, ...catalogPayload } = req.body ?? {};
+      const catalogData = insertFaultCatalogSchema.parse({ ...catalogPayload, createdBy: req.user?.id });
+
       const catalog = await storage.createFaultCatalog(catalogData);
       res.status(201).json(catalog);
     } catch (error) {
-      console.error("Create fault catalog error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Create fault catalog error");
       res.status(500).json({ message: "Erreur serveur" });
     }
   });

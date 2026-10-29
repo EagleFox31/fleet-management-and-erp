@@ -89,11 +89,11 @@ flowchart LR
 |---|---|---|---|
 | T1 | Toute route `/api` : 401 sans session, 403 avec rôle non autorisé | C / E | Partiel (`api-auth-guard` statique ; 403 par session réelle sur 7 POST principaux dans `api-role-guard-and-validation` et sur l'ajustement de stock ; E : 403 forgé au contrat d'erreur, bouton de paiement désactivé avec sa raison, corbeille pièce masquée au magasinier, `e2e/07`, `e2e/08`) |
 | T2 | Sessions : création, expiration, révocation, logout | C | OK (`api-auth-sessions`) |
-| T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate`) |
+| T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; PATCH document, planification, utilisateur, POST/PATCH plein carburant, POST catalogue de pannes dans `secondary-routes-validation` ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate`) |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields`) |
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | À faire |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders`) |
-| T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07`) |
+| T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
 | T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | À faire |
 
 ---
@@ -106,7 +106,7 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | À faire |
+| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | Partiel (PATCH : 400 par champ, 409 doublon, champs serveur conservés, `secondary-routes-validation` ; 403 à faire) |
 | ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
 | ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | À faire |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
@@ -191,7 +191,7 @@ stateDiagram-v2
 | MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | À faire |
 | MNT2 | Déclenchement par date et par kilométrage | I | À faire |
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | À faire |
-| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | À faire |
+| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (POST : 400 lisible, `createdBy` de la session, `validatedBy` ignoré ; cycle de vie à faire) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | À faire |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | Partiel (`tests/unit/shared/work-order-items`) |
@@ -288,7 +288,7 @@ Tables : `fuelRecords`, cartes carburant.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service`) |
+| FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service` ; POST/PATCH plein : nombre illisible refusé au lieu d'être tronqué, `secondary-routes-validation`) |
 | FUEL2 | Consommation par véhicule | I | À faire |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 

@@ -62,6 +62,8 @@ import {
   FileText,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { formatCurrency } from "@/lib/utils";
 
 interface PartRequirement {
@@ -285,27 +287,31 @@ export default function PartRequestsIndex() {
     return null;
   };
 
-  // Mutation pour mettre à jour une demande
+  // Mutation pour mettre à jour une demande. L'id voyage avec les variables :
+  // lire selectedRequest ici prenait la sélection du rendu précédent, car
+  // Valider/Refuser appellent setSelectedRequest puis mutate dans le même clic.
   const updateRequestMutation = useMutation({
-    mutationFn: (data: any) =>
-      apiRequest("PATCH", `/api/part-requirements/${selectedRequest?.id}`, data),
+    mutationFn: ({ id, data }: { id: number; data: any }) =>
+      apiRequest("PATCH", `/api/part-requirements/${id}`, data),
     onSuccess: () => {
       toast({
-        title: "✅ Demande mise à jour",
+        title: "Demande mise à jour",
         description: "La demande de pièce a été mise à jour avec succès.",
       });
       setIsUpdateDialogOpen(false);
       queryClient.invalidateQueries({ queryKey: ["/api/part-requirements"] });
       resetUpdateForm();
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la mise à jour: ${error.message}`,
+        description: userMessageOf(error, "La demande n'a pas pu être mise à jour."),
       });
     },
   });
+  // Réception et sortie déplacent du stock : un seul envoi par clic.
+  const submitRequestUpdate = useSingleFlightMutate(updateRequestMutation.mutate);
 
   const resetUpdateForm = () => {
     setUpdateAction(null);
@@ -370,7 +376,7 @@ export default function PartRequestsIndex() {
       updateData.emergencyOverrideReason = emergencyOverrideReason.trim();
     }
 
-    updateRequestMutation.mutate(updateData);
+    submitRequestUpdate({ id: selectedRequest.id, data: updateData });
   };
 
   const getUrgencyBadge = (urgency: string) => {
@@ -834,10 +840,10 @@ export default function PartRequestsIndex() {
                           )}
                           {permissions.canApproveReject && (
                             <>
-                              <button className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 transition-colors" onClick={() => { setSelectedRequest(request); updateRequestMutation.mutate({ status: 'approved' }); }} disabled={updateRequestMutation.isPending} title="Valider" data-testid={`btn-approve-${request.id}`}>
+                              <button className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'approved' } }); }} disabled={updateRequestMutation.isPending} title="Valider" data-testid={`btn-approve-${request.id}`}>
                                 <ThumbsUp className="h-3.5 w-3.5" />
                               </button>
-                              <button className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" onClick={() => { setSelectedRequest(request); updateRequestMutation.mutate({ status: 'cancelled' }); }} disabled={updateRequestMutation.isPending} title="Refuser" data-testid={`btn-reject-${request.id}`}>
+                              <button className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'cancelled' } }); }} disabled={updateRequestMutation.isPending} title="Refuser" data-testid={`btn-reject-${request.id}`}>
                                 <ThumbsDown className="h-3.5 w-3.5" />
                               </button>
                             </>

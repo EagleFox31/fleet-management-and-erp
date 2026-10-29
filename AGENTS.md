@@ -295,6 +295,13 @@ Notes :
 
 - `server/routes.ts` (~5 700 lignes) contient des routes dupliquées. Ne rien y
   ajouter : créer un routeur dans `server/api/` et le monter dans `server/api/index.ts`.
+  Express sert la **première** déclaration : avant de corriger une route, chercher
+  son double. Liste gelée dans `tests/unit/server/routes-hygiene.test.ts`.
+- `server/storage.ts` contient des méthodes bouchons (`{ return undefined; }`).
+  Deux sont encore appelées : `deleteVehicleDocument` (DELETE document répond
+  succès sans rien supprimer) et `getWorkOrdersByTechnicianId` (toujours vide).
+  Liste gelée dans `tests/unit/server/storage-stubs.test.ts` : implémenter une
+  méthode avant de l'appeler.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock partielle : le mouvement d'entrée en stock est attribué au
@@ -322,6 +329,12 @@ Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, e
 - **Double clic** : un bouton qui écrit de l'argent ou du stock envoie via
   `useSingleFlightMutate(mutation.mutate)` (`client/src/hooks/use-single-flight.ts`).
   `disabled={isPending}` ne change qu'au rendu suivant : il n'empêche pas le second clic.
+- **Cible d'une mutation** : l'id passe par les variables (`mutate({ id, data })`),
+  jamais par un état lu dans la `mutationFn`. TanStack v5 applique les options dans
+  un `useEffect` : un `setSelected(x)` suivi de `mutate()` dans le même clic vise
+  l'élément précédent.
+- **Corps de requête** : ne le journaliser que par `moduleLogger` (masque
+  `*.password`), jamais par `console.*`.
 - Retrouver une erreur signalée par un utilisateur : chercher sa référence
   (`requestId`) dans les logs.
 - Transition qui déplace du stock : effet dans `onTransition(tx)` de

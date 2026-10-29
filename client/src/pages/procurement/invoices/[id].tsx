@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 
 interface SupplierInvoiceDetails {
   invoice: {
@@ -274,6 +275,9 @@ export default function SupplierInvoiceDetailsPage() {
       setReconcilingSettlementId(null);
     },
   });
+  // Double clic : disabled={isPending} ne change qu'au rendu suivant.
+  const submitRecordSettlement = useSingleFlightMutate(recordSettlementMutation.mutate);
+  const submitReconcileSettlement = useSingleFlightMutate(reconcileSettlementMutation.mutate);
 
   const formatCurrency = (amount: string | number) => formatPrice(Number(amount));
 
@@ -778,7 +782,7 @@ export default function SupplierInvoiceDetailsPage() {
                               size="sm"
                               variant="outline"
                               className="h-8"
-                              onClick={() => reconcileSettlementMutation.mutate(settlement.id)}
+                              onClick={() => submitReconcileSettlement(settlement.id)}
                               disabled={reconcileSettlementMutation.isPending && reconcilingSettlementId === settlement.id}
                               data-testid={`button-reconcile-settlement-${settlement.id}`}
                             >
@@ -922,7 +926,7 @@ export default function SupplierInvoiceDetailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPaymentDialog(false)}>Annuler</Button>
             <Button
-              onClick={() => recordSettlementMutation.mutate()}
+              onClick={() => submitRecordSettlement()}
               disabled={
                 recordSettlementMutation.isPending ||
                 !paymentAmount ||

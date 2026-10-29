@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -462,14 +464,16 @@ export default function WorkOrderDetails({
     onError: (error) => {
       toast({
         variant: "destructive",
-        title: "Ajout impossible",
-        description: `Erreur: ${error.message}`,
+        title: "Sortie impossible",
+        description: userMessageOf(error, "La pièce n'a pas pu être sortie du stock."),
       });
     },
     onSettled: () => {
       setIssuingRequirementId(null);
     },
   });
+  // Sortie de stock : un seul envoi par clic, disabled={isPending} arrive au rendu suivant.
+  const submitIssueRequirement = useSingleFlightMutate(issuePendingRequirementMutation.mutate);
 
   const removePartMutation = useMutation({
     mutationFn: (partUsedId: number) =>
@@ -1817,7 +1821,7 @@ export default function WorkOrderDetails({
                                     size="sm"
                                     className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700"
                                     onClick={() =>
-                                      issuePendingRequirementMutation.mutate({
+                                      submitIssueRequirement({
                                         requirementId: requirement.id,
                                       })
                                     }
@@ -2123,7 +2127,7 @@ export default function WorkOrderDetails({
               }
               onClick={() =>
                 overrideRequirementId !== null &&
-                issuePendingRequirementMutation.mutate({
+                submitIssueRequirement({
                   requirementId: overrideRequirementId,
                   overrideReason: overrideReason.trim(),
                 })

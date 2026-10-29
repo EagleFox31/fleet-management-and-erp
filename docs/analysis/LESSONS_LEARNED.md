@@ -632,3 +632,83 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Un toast d'erreur doit rester lisible même si une notification arrive juste après ; ne pas redescendre la limite à 1.
+
+## 2026-10-29 - Planification : modifications perdues, puis 404 sur toute édition
+
+### Constat
+- Le formulaire de planification de maintenance envoyait tous ses champs ; seul `isActive` était enregistré, sans erreur.
+- Une fois la route corrigée, toute édition ou suppression de planification répondait 404.
+
+### Cause racine
+- `PATCH /api/maintenance-schedules/:id` était déclarée deux fois dans `server/routes.ts`. Express sert la première, qui n'écrivait que `isActive` ; la complète, déclarée plus bas, ne s'exécutait jamais.
+- `storage.getMaintenanceSchedule` était un bouchon d'une ligne (`return undefined`) : la vérification d'existence échouait toujours.
+- Classification : code mort qui a l'air vivant (route dupliquée, méthode bouchon appelée).
+
+### Résolution
+- Une seule route : 404 si absente, `prepareColumnUpdate` (400 par champ), colonnes connues seulement, `id` et `createdAt` ignorés.
+- `getMaintenanceSchedule` implémentée.
+
+### Prévention (vérifiable)
+- `tests/unit/server/routes-hygiene.test.ts` : liste gelée des routes en double dans `server/routes.ts` (rouge sur la version précédente).
+- `tests/unit/server/storage-stubs.test.ts` : liste gelée des bouchons de `storage.ts` appelés par le serveur (rouge sans l'implémentation).
+- `tests/contract/secondary-routes-validation.contract.test.ts` : édition complète depuis le corps du formulaire.
+
+### Règle Projet (obligatoire)
+- Avant de corriger une route de `server/routes.ts`, chercher une autre déclaration du même verbe et chemin ; avant d'appeler une méthode de `storage`, vérifier qu'elle n'est pas un bouchon.
+
+## 2026-10-29 - Mot de passe en clair dans les journaux
+
+### Constat
+- `POST /api/users` journalisait `req.body` par `console.log`, mot de passe compris.
+
+### Cause racine
+- Journal de débogage resté en place, hors du logger : le masquage `*.password` de `moduleLogger` ne s'appliquait pas à `console.*`.
+- Classification : fuite de secret dans les journaux.
+
+### Résolution
+- Logs migrés vers `moduleLogger("routes")` sans le corps. Le seul autre corps journalisé (création d'OT) passe par `log.debug`, donc par le masquage.
+
+### Prévention (vérifiable)
+- `tests/unit/server/routes-hygiene.test.ts` : aucun `console.*` contenant `req.body` dans `server/` (rouge sur la version précédente, lignes 535 et 2119).
+
+### Règle Projet (obligatoire)
+- Un corps de requête ne se journalise que par `moduleLogger`, jamais par `console.*`.
+
+## 2026-10-29 - Erreurs de validation rendues en 404 ou en valeur tronquée
+
+### Constat
+- PATCH utilisateur avec `createdAt` en chaîne (corps renvoyé tel quel par la page techniciens) et PATCH document avec une date invalide : réponse 404 « introuvable ».
+- E-mail déjà pris au PATCH utilisateur : 404 au lieu de 409.
+- Carburant : `parseFloat("12abc")` enregistrait 12, `"abc"` enregistrait `NaN`, un POST sans coût donnait un 500.
+- `POST /api/fault-catalog` sans corps : 500 ; `validatedBy` accepté du client.
+
+### Cause racine
+- `catch` qui répondait 404 quelle que soit l'erreur, et conversions numériques sans contrôle.
+- Classification : erreur avalée et donnée corrompue en silence.
+
+### Résolution
+- Schémas Zod ou `prepareColumnUpdate`, erreurs passées à `next()` (400 par champ, 409 explicite), nombres de formulaire convertis puis validés, champs tenus par le serveur retirés du corps.
+
+### Prévention (vérifiable)
+- `tests/contract/secondary-routes-validation.contract.test.ts` (15 cas, 13 rouges sans les correctifs).
+
+### Règle Projet (obligatoire)
+- Un `catch` ne choisit pas le statut : il passe l'erreur à `next()`. Pas de `parseFloat` / `parseInt` sur un corps de requête sans validation du résultat.
+
+## 2026-10-29 - Valider ou refuser une demande visait la demande précédente
+
+### Constat
+- Sur `/inventory/requests`, les boutons Valider et Refuser envoyaient le PATCH à la demande sélectionnée au clic précédent, ou à `/api/part-requirements/undefined` au premier clic.
+
+### Cause racine
+- Le bouton appelait `setSelectedRequest(request)` puis `mutate()` dans le même clic, et la `mutationFn` lisait `selectedRequest`. TanStack Query v5 applique les options de `useMutation` dans un `useEffect` : la fonction exécutée est celle du rendu précédent.
+- Classification : fermeture périmée (état React lu avant son application).
+
+### Résolution
+- L'id voyage dans les variables de la mutation (`{ id, data }`) ; envoi par `useSingleFlightMutate`.
+
+### Prévention (vérifiable)
+- Checklist : règle ci-dessous, reprise dans AGENTS.md §10. Pas de test automatique : il faudrait un e2e sur une liste à au moins deux demandes, à ajouter avec le module demandes.
+
+### Règle Projet (obligatoire)
+- Une `mutationFn` ne lit pas un état React modifié dans le même gestionnaire : l'identifiant ciblé passe par les variables de `mutate`.

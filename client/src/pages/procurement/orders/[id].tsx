@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -233,14 +235,16 @@ export default function PurchaseOrderDetailsPage() {
       toast({ title: "Statut mis à jour", description: "Le statut de la commande a été modifié avec succès" });
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Le statut de la commande n'a pas pu être modifié."), variant: "destructive" });
     },
   });
+  // La livraison confirmée entre du stock : un seul envoi par clic.
+  const submitStatusUpdate = useSingleFlightMutate(updateStatusMutation.mutate);
 
   const handleStatusChange = (newStatus: string) => {
     if (newStatus === "delivered") { setPendingStatus(newStatus); setShowDeliveryDialog(true); }
     else if (newStatus === "cancellation_requested") { setPendingStatus(newStatus); setShowCancellationDialog(true); }
-    else updateStatusMutation.mutate({ status: newStatus });
+    else submitStatusUpdate({ status: newStatus });
   };
 
   const handleConfirmDelivery = () => {
@@ -248,7 +252,7 @@ export default function PurchaseOrderDetailsPage() {
       toast({ title: "Code requis", description: "Veuillez saisir un code de livraison", variant: "destructive" });
       return;
     }
-    updateStatusMutation.mutate({ status: pendingStatus!, deliveryCode: deliveryCode.trim() });
+    submitStatusUpdate({ status: pendingStatus!, deliveryCode: deliveryCode.trim() });
   };
 
   const handleConfirmCancellationRequest = () => {
@@ -256,7 +260,7 @@ export default function PurchaseOrderDetailsPage() {
       toast({ title: "Motif requis", description: "Veuillez saisir le motif d'annulation fournisseur", variant: "destructive" });
       return;
     }
-    updateStatusMutation.mutate({ status: pendingStatus!, cancellationReason: cancellationReason.trim() });
+    submitStatusUpdate({ status: pendingStatus!, cancellationReason: cancellationReason.trim() });
   };
 
   const formatCurrency = (amount: string | number) => formatPrice(Number(amount));

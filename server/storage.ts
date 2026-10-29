@@ -1028,7 +1028,12 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteVehicleDocument(id: number): Promise<boolean> { return false; }
   
-  async getMaintenanceSchedule(id: number): Promise<MaintenanceSchedule | undefined> { return undefined; }
+  // Était un bouchon renvoyant undefined : PATCH et DELETE d'une planification
+  // répondaient toujours 404.
+  async getMaintenanceSchedule(id: number): Promise<MaintenanceSchedule | undefined> {
+    const [schedule] = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.id, id));
+    return schedule;
+  }
   /**
    * Forme commune aux deux lectures de planifications: une seule définition,
    * pour que la liste globale et la liste par véhicule ne puissent pas
