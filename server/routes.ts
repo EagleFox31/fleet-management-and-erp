@@ -20,7 +20,8 @@ import {
   insertUserSchema, insertVehicleSchema, insertMaintenanceScheduleSchema, 
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
-  maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments
+  maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments,
+  faultCatalog, vehicleTires
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
 import { db } from "./db";
@@ -30,6 +31,9 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { AppError } from "./lib/app-error";
 import { prepareColumnUpdate } from "./lib/column-validation";
+import { moduleLogger } from "./lib/logger";
+
+const log = moduleLogger("routes");
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -2748,7 +2752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/parts/:id(\\d+)", authenticate, isPartsCatalogManager, async (req, res) => {
+  app.patch("/api/parts/:id(\\d+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -2767,15 +2771,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         req.body.unit = normalizedUnit;
       }
-      
-      const updatedPart = await partsService.updatePart(id, req.body, req.user?.id);
+
+      // Champs tenus par le serveur : jamais repris du corps (T4).
+      const {
+        id: _id,
+        createdBy: _createdBy,
+        createdAt: _createdAt,
+        updatedBy: _updatedBy,
+        updatedAt: _updatedAt,
+        ...partPayload
+      } = req.body ?? {};
+      const { data, errors } = prepareColumnUpdate(parts, partPayload);
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations de la pièce sont invalides.", { fieldErrors: errors }));
+      }
+
+      const updatedPart = await partsService.updatePart(id, data, req.user?.id);
       
       return res.status(200).json(updatedPart);
     } catch (error) {
-      console.error("Update part error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
+      // Le service signale ces deux cas par message : les traduire en statut
+      // plutôt que de renvoyer le texte de l'erreur au client.
+      const message = error instanceof Error ? error.message : "";
+      if (message === "Pièce non trouvée") {
+        return next(new AppError(404, "Cette pièce n'existe plus.", { cause: error }));
+      }
+      if (message === "Une pièce avec cette référence existe déjà") {
+        return next(new AppError(409, "Une pièce avec cette référence existe déjà.", { cause: error }));
+      }
+      log.error({ err: error, requestId: req.requestId }, "Update part error");
+      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
@@ -4932,17 +4957,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/fault-catalog/:id", isWorkshopManager, async (req, res) => {
+  app.patch("/api/fault-catalog/:id", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID invalide" });
       }
 
-      const catalog = await storage.updateFaultCatalog(id, req.body);
+      const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, ...catalogPayload } = req.body ?? {};
+      const { data, errors } = prepareColumnUpdate(faultCatalog, catalogPayload);
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations de la panne sont invalides.", { fieldErrors: errors }));
+      }
+
+      const catalog = await storage.updateFaultCatalog(id, data);
       res.json(catalog);
     } catch (error) {
-      console.error("Update fault catalog error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Update fault catalog error");
       res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5172,7 +5203,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/tires/:id", isTireCatalogManager, async (req, res) => {
+  app.patch("/api/tires/:id", isTireCatalogManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -5188,7 +5219,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       return res.status(200).json(tire);
     } catch (error) {
-      console.error("Update tire error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Update tire error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5616,18 +5648,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/vehicle-tires/:id", isWorkshopManager, async (req, res) => {
+  app.patch("/api/vehicle-tires/:id", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pneu véhicule invalide" });
       }
-      
-      const vehicleTire = await tiresService.updateVehicleTire(id, req.body);
+
+      const { data, errors } = prepareColumnUpdate(vehicleTires, req.body ?? {});
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations du pneu monté sont invalides.", { fieldErrors: errors }));
+      }
+
+      const vehicleTire = await tiresService.updateVehicleTire(id, data);
       return res.status(200).json(vehicleTire);
     } catch (error) {
-      console.error("Update vehicle tire error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Update vehicle tire error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

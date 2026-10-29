@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { partRequirements, vehicles, workOrders } from "../../shared/schema";
+import { faultCatalog, parts, partRequirements, tires, vehicles, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestPart, createTestSupplier, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -28,12 +28,17 @@ const CASES: Case[] = [
   { path: "/api/clients", forbidden: "warehouse", allowed: "secretary" },
 ];
 
+// Rôles utilisés seulement par les PATCH, sans cas POST.
+const EXTRA_ROLES: TestUserRole[] = ["warehouse"];
+
 let server: Server;
 let baseUrl = "";
 const ids = createIdBag();
 const cookies = new Map<TestUserRole, string>();
 const requirementIds: number[] = [];
 const workOrderIds: number[] = [];
+const tireIds: number[] = [];
+const faultCatalogIds: number[] = [];
 
 async function call(method: string, path: string, options: { body?: unknown; cookie?: string } = {}) {
   const response = await fetch(baseUrl + path, {
@@ -63,7 +68,7 @@ beforeAll(async () => {
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
 
-  const roles = [...new Set(CASES.flatMap((c) => [c.forbidden, c.allowed]))];
+  const roles = [...new Set([...CASES.flatMap((c) => [c.forbidden, c.allowed]), ...EXTRA_ROLES])];
   for (const role of roles) {
     const user = await createTestUser({ role });
     ids.userIds.push(user.id);
@@ -79,6 +84,12 @@ afterAll(async () => {
   }
   if (workOrderIds.length > 0) {
     await db.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
+  }
+  if (tireIds.length > 0) {
+    await db.delete(tires).where(inArray(tires.id, tireIds));
+  }
+  if (faultCatalogIds.length > 0) {
+    await db.delete(faultCatalog).where(inArray(faultCatalog.id, faultCatalogIds));
   }
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -173,6 +184,36 @@ describe("T3 : 400 lisible sur PATCH de type invalide", { timeout: 60000 }, () =
         return `/api/clients/${c.id}`;
       },
     },
+    {
+      name: "pièce",
+      role: "warehouse",
+      body: { quantity: "beaucoup" },
+      path: async () => {
+        const p = await createTestPart();
+        ids.partIds.push(p.id);
+        return `/api/parts/${p.id}`;
+      },
+    },
+    {
+      name: "pneu",
+      role: "warehouse",
+      body: { stockQuantity: "beaucoup" },
+      path: async () => {
+        const [t] = await db.insert(tires).values({ brand: "TEST-MARQUE", model: "TEST", size: "315/80R22.5" }).returning();
+        tireIds.push(t.id);
+        return `/api/tires/${t.id}`;
+      },
+    },
+    {
+      name: "panne du catalogue",
+      role: "workshop_manager",
+      body: { estimatedDuration: "longtemps" },
+      path: async () => {
+        const [f] = await db.insert(faultCatalog).values({ name: "TEST panne", description: "TEST", category: "TEST" }).returning();
+        faultCatalogIds.push(f.id);
+        return `/api/fault-catalog/${f.id}`;
+      },
+    },
   ];
 
   it.each(PATCH_CASES)("PATCH $name, type invalide, rôle $role", async ({ role, body, path }) => {
@@ -222,5 +263,39 @@ describe("non-régression : PATCH ordre de travail depuis l'écran détail", { t
     expect(row).toMatchObject({ status: "completed", technicianId });
     expect(row.startDate).toBeInstanceOf(Date);
     expect(row.endDate).toBeInstanceOf(Date);
+  });
+});
+
+describe("PATCH pièce : champs serveur et erreurs métier", { timeout: 60000 }, () => {
+  it("T4 : id, createdBy et createdAt du corps sont ignorés, updatedBy vient de la session", async () => {
+    const part = await createTestPart();
+    ids.partIds.push(part.id);
+    const [before] = await db.select().from(parts).where(eq(parts.id, part.id));
+    const res = await call("PATCH", `/api/parts/${part.id}`, {
+      cookie: cookies.get("warehouse"),
+      body: { name: "TEST-renommée", id: 999999, createdBy: ids.userIds[0], createdAt: "2001-01-01T00:00:00.000Z" },
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(parts).where(eq(parts.id, part.id));
+    expect(row.name).toBe("TEST-renommée");
+    expect(row.createdBy).toBe(before.createdBy);
+    expect(row.createdAt).toEqual(before.createdAt);
+    expect(row.updatedBy).not.toBeNull();
+    expect(row.updatedBy).not.toBe(ids.userIds[0]);
+  });
+
+  it("pièce inconnue : 404 au contrat", async () => {
+    const res = await call("PATCH", "/api/parts/999999999", { cookie: cookies.get("warehouse"), body: { name: "x" } });
+    expect(res.status).toBe(404);
+    expectErrorContract(res, "NOT_FOUND");
+  });
+
+  it("référence déjà prise : 409 lisible", async () => {
+    const a = await createTestPart();
+    const b = await createTestPart();
+    ids.partIds.push(a.id, b.id);
+    const res = await call("PATCH", `/api/parts/${b.id}`, { cookie: cookies.get("warehouse"), body: { reference: a.reference } });
+    expect(res.status).toBe(409);
+    expectErrorContract(res, "CONFLICT");
   });
 });

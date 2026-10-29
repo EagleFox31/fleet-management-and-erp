@@ -474,3 +474,25 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Toute table qui référence `users` et peut être alimentée par un test est purgée dans `cleanupCreated` avant les utilisateurs.
+
+## 2026-10-29 - PATCH pièce : texte d'erreur exposé et champs d'audit modifiables
+
+### Constat
+- `PATCH /api/parts/:id` renvoyait `error.message` au client en 500 (pièce inconnue, référence en double, mais aussi toute erreur SQL).
+- Le corps pouvait réécrire `id`, `createdBy`, `createdAt` de la fiche ; un type invalide (`quantity: "beaucoup"`) donnait 500.
+- `PATCH /api/tires/:id` validait avec Zod mais son `catch` transformait la `ZodError` en 500 ; `PATCH /api/fault-catalog/:id` et `/api/vehicle-tires/:id` passaient `req.body` brut.
+
+### Cause racine
+- Routes historiques de `server/routes.ts` sans validation, et `catch` générique qui renvoie le message brut.
+- Classification : validation absente + fuite de détail technique + champ serveur accepté du client (T4).
+
+### Résolution
+- Pièce : champs d'audit retirés du corps, `prepareColumnUpdate(parts)`, « Pièce non trouvée » -> 404, référence en double -> 409, sinon 500 générique journalisé.
+- Pneu : `ZodError` -> `next(error)`. Panne et pneu monté : `prepareColumnUpdate`.
+- `console.error` de ces routes migrés vers `moduleLogger("routes")`.
+
+### Prévention (vérifiable)
+- `tests/contract/api-role-guard-and-validation.contract.test.ts` : `PATCH_CASES` pièce, pneu, panne ; T4 pièce (champs d'audit ignorés) ; 404 et 409 au contrat.
+
+### Règle Projet (obligatoire)
+- Un `catch` ne renvoie jamais `error.message` : une erreur métier connue devient une `AppError` avec son statut.
