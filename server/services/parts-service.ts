@@ -1,7 +1,11 @@
-import { db } from "../db";
+import { db, type DbExecutor } from "../db";
 import { parts, partsStockMovements, users, workOrders, type Part, type InsertPart } from "@shared/schema";
 import { eq, desc, asc, sql, and, lte, gte, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("parts");
 
 const createdByUser = alias(users, "parts_created_by_user");
 const updatedByUser = alias(users, "parts_updated_by_user");
@@ -235,40 +239,60 @@ export class PartsService {
   }
 
   // Mettre à jour le stock d'une pièce
+  /**
+   * Ajustement manuel du stock, tracé par un mouvement.
+   *
+   * La ligne de la pièce est verrouillée (`FOR UPDATE`) : sans verrou, deux
+   * ajustements simultanés lisaient le même stock et l'un écrasait l'autre, alors
+   * que les deux mouvements restaient tracés. Un retrait au-delà du stock est
+   * refusé au lieu d'être ramené à 0 : le mouvement doit dire ce qui est sorti.
+   */
   async updateStock(id: number, adjustment: number, reason: string, userId?: number): Promise<Part> {
-    console.log(`Updating stock for part ${id}: adjustment=${adjustment}, reason=${reason}`);
-
-    const part = await this.getPartById(id);
-    if (!part) {
-      throw new Error("Pièce non trouvée");
+    if (!Number.isInteger(adjustment) || adjustment === 0) {
+      throw new AppError(400, "L'ajustement doit être un nombre entier non nul.");
     }
 
-    const newStock = Math.max(0, part.quantity + adjustment);
-    const movementType = adjustment > 0 ? "in" : "out";
+    const updatedPart = await db.transaction(async (tx) => {
+      const [part] = await tx.select().from(parts).where(eq(parts.id, id)).for("update");
+      if (!part) {
+        throw new AppError(404, "Cette pièce n'existe plus.");
+      }
 
-    // Mettre à jour le stock
-    const [updatedPart] = await db
-      .update(parts)
-      .set({
-        quantity: newStock,
-        updatedBy: userId ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(parts.id, id))
-      .returning();
+      const newStock = part.quantity + adjustment;
+      if (newStock < 0) {
+        throw new AppError(
+          409,
+          `Retrait impossible : ${part.quantity} unité(s) en stock, ${Math.abs(adjustment)} demandée(s).`,
+        );
+      }
 
-    // Créer un mouvement de stock
-    await this.createStockMovement({
-      partId: id,
-      movementType: adjustment > 0 ? "in" : "out",
-      quantity: Math.abs(adjustment),
-      previousStock: part.quantity,
-      newStock: newStock,
-      reason: reason,
-      createdBy: userId
+      const [row] = await tx
+        .update(parts)
+        .set({
+          quantity: newStock,
+          updatedBy: userId ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(parts.id, id))
+        .returning();
+
+      await this.createStockMovement(
+        {
+          partId: id,
+          movementType: adjustment > 0 ? "in" : "out",
+          quantity: Math.abs(adjustment),
+          previousStock: part.quantity,
+          newStock,
+          reason,
+          createdBy: userId,
+        },
+        tx,
+      );
+
+      return row;
     });
 
-    console.log("Stock updated successfully:", updatedPart);
+    log.info({ partId: id, adjustment, quantity: updatedPart.quantity, userId }, "stock ajusté");
     return updatedPart;
   }
 
@@ -283,10 +307,10 @@ export class PartsService {
     notes?: string;
     workOrderId?: number;
     createdBy?: number;
-  }) {
-    console.log("Creating stock movement:", movement);
+  }, executor: DbExecutor = db) {
+    log.debug({ movement }, "création d'un mouvement de stock");
 
-    const [newMovement] = await db
+    const [newMovement] = await executor
       .insert(partsStockMovements)
       .values({
         partId: movement.partId,
@@ -302,7 +326,7 @@ export class PartsService {
       })
       .returning();
 
-    console.log("Stock movement created:", newMovement);
+    log.debug({ movementId: newMovement.id }, "mouvement de stock créé");
     return newMovement;
   }
 

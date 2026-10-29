@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
 import { formatPrice } from "@/lib/utils";
@@ -191,6 +192,7 @@ export default function ClientInvoiceDetailsPage() {
       });
     },
   });
+  const submitPayment = useSingleFlightMutate(paymentMutation.mutate);
 
   const formatCurrency = (amount: string | number) => formatPrice(Number(amount || 0));
 
@@ -623,7 +625,7 @@ export default function ClientInvoiceDetailsPage() {
               Annuler
             </Button>
             <Button
-              onClick={() => paymentMutation.mutate()}
+              onClick={() => submitPayment()}
               disabled={paymentMutation.isPending || !paymentAmount || !paymentDate}
               data-testid="button-confirm-payment"
             >

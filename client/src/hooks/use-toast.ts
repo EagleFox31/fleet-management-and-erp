@@ -5,7 +5,9 @@ import type {
   ToastProps,
 } from "@/components/ui/toast"
 
-const TOAST_LIMIT = 1
+// Plus d'un toast à la fois : une alerte temps réel ne doit pas effacer le
+// toast d'erreur d'une action avant que l'utilisateur l'ait lu.
+const TOAST_LIMIT = 3
 const TOAST_REMOVE_DELAY = 1000000
 
 type ToasterToast = ToastProps & {

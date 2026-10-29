@@ -4,8 +4,10 @@ import { useLocation } from "wouter";
 import { formatPrice } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import {
   Edit, Trash2, Clock, Package, Truck, CheckCircle, ArrowRight, User, Wrench, FileText,
   Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart,
@@ -209,9 +211,10 @@ export function PartTable({ onRowClick }: PartTableProps) {
       setStockAdjustment(0);
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: `Ajustement impossible: ${error.message}`, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "L'ajustement de stock n'a pas pu être enregistré."), variant: "destructive" });
     },
   });
+  const submitStockAdjustment = useSingleFlightMutate(adjustStockMutation.mutate);
 
   const columns: PremiumDataTableColumn<Part>[] = [
     {
@@ -530,7 +533,7 @@ export function PartTable({ onRowClick }: PartTableProps) {
                 <Button
                   disabled={stockAdjustment === 0 || adjustStockMutation.isPending}
                   onClick={() =>
-                    adjustStockMutation.mutate({ id: stockDialogPart.id, adjustment: stockAdjustment })
+                    submitStockAdjustment({ id: stockDialogPart.id, adjustment: stockAdjustment })
                   }
                   data-testid="button-confirm-stock-adjustment"
                 >

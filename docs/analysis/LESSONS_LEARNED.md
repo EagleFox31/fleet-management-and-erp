@@ -548,3 +548,87 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Un solde se lit et s'écrit sous verrou, dans la même transaction que l'écriture qui le justifie.
 - Un montant reçu du client passe par un schéma (nombre fini, positif) avant tout calcul.
+
+## 2026-10-29 - Double clic : deux paiements, deux ajustements de stock
+
+### Constat
+- Sur la facture client, un double clic sur « Confirmer » enregistrait deux paiements (mesuré en e2e : 65 ms d'écart). Sans référence de paiement, le serveur ne peut pas distinguer un rejeu d'un second versement (choix assumé dans 9f9ca09).
+- Même chose sur l'ajustement de stock de l'inventaire : deux mouvements, quantité ajustée deux fois.
+- Les deux boutons portaient pourtant `disabled={mutation.isPending}`.
+
+### Cause racine
+- `isPending` ne passe à `true` qu'au rendu suivant ; le second clic d'un double clic arrive avant ce rendu et relance `mutate`.
+- Classification : course côté client (T7), protection d'affichage prise pour une protection fonctionnelle.
+
+### Résolution
+- `client/src/lib/single-flight.ts` + `client/src/hooks/use-single-flight.ts` : verrou pris de façon synchrone dans le gestionnaire de clic, rendu au `onSettled` de la mutation (succès ou erreur).
+- Branché sur l'encaissement client (`pages/operations/invoices/[id].tsx`) et l'ajustement de stock (`components/inventory/part-table.tsx`).
+
+### Prévention (vérifiable)
+- `tests/unit/client/single-flight.test.ts` (second envoi ignoré, verrou rendu après succès, après échec, après exception).
+- `e2e/07-double-submit-integrity.spec.ts` : `dblclick` réel, vérité lue en base ; rouge sans la garde (2 paiements, 2 mouvements), vert avec.
+
+### Règle Projet (obligatoire)
+- Un bouton qui écrit de l'argent ou du stock passe par `useSingleFlightMutate`. `disabled={isPending}` reste pour l'affichage, il ne protège rien.
+
+## 2026-10-29 - Ajustement de stock : mise à jour perdue, retrait plafonné en silence
+
+### Constat
+- `partsService.updateStock` lisait la quantité puis la réécrivait sans transaction ni verrou : deux ajustements simultanés de +3 sur 10 écrivaient tous deux 13 et traçaient deux mouvements « 10 -> 13 ». L'historique disait +6, le stock +3.
+- Un retrait au-delà du stock était ramené à 0 sans erreur, avec un mouvement qui mentait sur la quantité sortie.
+- `adjustment: "abc"` arrivait en `NaN` jusqu'au SQL : 500 avec le texte de l'erreur. Pièce inconnue : 500 au lieu de 404.
+
+### Cause racine
+- Lecture-calcul-écriture hors transaction (lost update), même motif que la réception de pièce (179015d) et les paiements (676de75, 9f9ca09).
+- Plafonnement silencieux au lieu d'un refus ; validation absente à la route.
+- Classification : course critique (T7) + validation absente (T3) + fuite de détail technique.
+
+### Résolution
+- Service : transaction, `FOR UPDATE` sur la pièce, mouvement écrit dans la même transaction (`createStockMovement(movement, tx)`), `AppError` 400 (entier non nul), 404, 409 lisible (« Retrait impossible : 5 unité(s) en stock, 8 demandée(s). »).
+- Route : schéma Zod (entier non nul, raison obligatoire), erreurs -> `next(error)` ; le `console.error` est remplacé par la journalisation du gestionnaire central (warn 4xx, error 5xx).
+- Écran : toast via `userMessageOf`.
+
+### Prévention (vérifiable)
+- `tests/integration/parts-stock-adjustment.test.ts` (7 cas, rouge avant correctif : 12 au lieu de 15 sur 5 ajustements simultanés).
+- `tests/contract/parts-stock-adjustment.contract.test.ts` (8 cas, 6 rouges avant correctif) : 403 technicien, 400 lisibles stock intact, 409, 404, deux ajustements simultanés additionnés.
+
+### Règle Projet (obligatoire)
+- Toute quantité de stock se lit et s'écrit sous verrou, dans la même transaction que son mouvement.
+- Un retrait impossible se refuse ; il ne se plafonne jamais en silence.
+
+## 2026-10-29 - Near miss : purge de test qui casse un e2e en cours
+
+### Constat
+- Pendant une exécution des specs e2e 07 et 08, un test s'est retrouvé sur l'écran de connexion : son utilisateur `TEST-` venait d'être supprimé de la base (`GET /api/auth/me` 404, clé étrangère violée sur `user_onboarding`).
+
+### Cause racine
+- Un test d'intégration lancé en parallèle : `setup-integration.ts` appelle `cleanupOrphanTestRows`, qui supprime toutes les lignes `TEST-` sans distinction de propriétaire. Les deux suites partagent la base de dev.
+- Classification : interférence entre suites (état partagé), pas un défaut du produit.
+
+### Résolution
+- Specs rejouées seules : vertes.
+
+### Prévention (vérifiable)
+- `e2e/README.md` (section Données de test) : interdiction de lancer intégration ou contrat pendant les specs 07 et 08, avec le symptôme à reconnaître.
+
+### Règle Projet (obligatoire)
+- Une seule suite qui écrit en base à la fois. Avant d'accuser le code d'un échec e2e intermittent, vérifier qu'aucune autre suite ne tournait.
+
+## 2026-10-29 - Toast d'erreur effacé par une alerte temps réel
+
+### Constat
+- Paiement au-delà du solde : le 409 et son message s'affichaient, puis disparaissaient en moins d'une seconde, remplacés par « Document expiré ». Vu en e2e (spec 08, T3), une exécution sur deux.
+
+### Cause racine
+- `TOAST_LIMIT = 1` dans `client/src/hooks/use-toast.ts` (valeur par défaut du composant). Chaque événement `alert_created` affiche un toast (`useRealTimeSync`) et évince celui qui était visible, quel que soit son importance.
+- Classification : erreur lisible côté serveur rendue illisible par l'interface.
+
+### Résolution
+- `TOAST_LIMIT = 3` : les toasts s'empilent, le plus ancien sort au quatrième.
+
+### Prévention (vérifiable)
+- `tests/unit/client/toast-limit.test.ts` (rouge avec la limite à 1).
+- `e2e/08-role-actions-and-error-toast.spec.ts` (T3) rejoué 3 fois de suite.
+
+### Règle Projet (obligatoire)
+- Un toast d'erreur doit rester lisible même si une notification arrive juste après ; ne pas redescendre la limite à 1.

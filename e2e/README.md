@@ -14,17 +14,23 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 | `04-procurement-three-way.spec.ts` | Procurement 3 voies | Page ecarts, KPIs, `GET /api/supplier-invoices/discrepancies`, navigation vers le detail facture fournisseur |
 | `05-mission-billing-payment.spec.ts` | Operations / Facturation | Dashboard operations, liste factures clients, detail facture, enregistrement d'un paiement |
 | `06-realtime-work-orders.spec.ts` | Temps reel **inter-profils** | Un OT cree par le **chef d'atelier** remonte dans la session d'un **magasinier** sans refresh. Verifie la trame WebSocket `work_order_created` recue par l'autre role, puis la reaction de l'UI |
+| `07-double-submit-integrity.spec.ts` | Double soumission (T7) et 403 force (T1) | Double clic sur « Confirmer » d'un encaissement client et d'un ajustement de stock : une seule ecriture en base. Meme reference saisie deux fois : un seul paiement. POST force par la logistique : 403 au contrat d'erreur (`code`, `requestId` = en-tete `x-request-id`), solde intact |
+| `08-role-actions-and-error-toast.spec.ts` | Refus lisibles et actions selon le role (T3, T1) | Paiement au-dela du solde : toast metier sans detail technique, rien en base. Logistique : facture visible, bouton de paiement desactive avec sa raison. Magasinier : modifier une piece oui, corbeille absente ; admin : corbeille presente |
 
 ## Commandes
 
 - `npm run test:e2e`
 - `npm run test:e2e:headed`
 - `npx playwright test e2e/06-realtime-work-orders.spec.ts` pour une spec isolee
+- Si `npx playwright` echoue (shims `node_modules/.bin` vides, voir `AGENTS.md` §8) :
+  `node --env-file=.env node_modules/@playwright/test/cli.js test e2e/07-double-submit-integrity.spec.ts`
 - `npx playwright show-report` pour ouvrir le rapport HTML apres un run
 
 ## Variables optionnelles
 
 - `E2E_BASE_URL`: URL d'une app deja demarree (sinon Playwright lance `npm run dev`)
+- `E2E_CHANNEL`: navigateur installe a utiliser a la place du Chromium de Playwright (`msedge`, `chrome`). Utile quand `playwright install` n'a pas ete lance sur le poste
+- `DATABASE_URL`: requise par les specs 07 et 08, qui creent leurs donnees directement en base (d'ou `node --env-file=.env`)
 - `E2E_USERNAME`: login e2e pour les specs 01 a 05 (defaut `admin`)
 - `E2E_PASSWORD`: mot de passe associe (defaut `admin123`)
 - `E2E_MANAGER_USERNAME` / `E2E_MANAGER_PASSWORD`: profil createur de la spec 06 (defaut `terry`, chef d'atelier). Doit avoir le droit de creer un OT (`admin` ou `workshop_manager`)
@@ -72,11 +78,16 @@ Les specs s'executent sur la **base reelle** pointee par `DATABASE_URL`, sans se
 - La spec 05 **ecrit** un paiement de `1` sur la premiere facture client trouvee, si le bouton d'enregistrement est disponible.
 - La spec 06 **cree un OT** nomme `E2E-RT-<timestamp>` sur le premier vehicule retourne par l'API, puis **le supprime** en fin de test (y compris si une assertion echoue). C'est la seule spec qui nettoie derriere elle.
 - La spec 06 se declare `skipped` si les comptes multi-profils n'existent pas: elle ne se rabat jamais sur un test mono-utilisateur.
+- Les specs 07 et 08 ne dependent d'aucun compte ni d'aucune donnee existante : elles creent leurs utilisateurs (un par role), clients, factures et pieces avec les fabriques de `tests/support/factories` (prefixe `TEST-`, voir `e2e/helpers/test-data.ts`), lisent la verite en base, puis suppriment tout en `afterAll` (`cleanupCreated`, plus les mouvements de stock crees).
+
+Ne pas lancer `npm run test:integration` ni `npm run test:contract` pendant les specs 07 et 08 : leur setup
+(`cleanupOrphanTestRows`) supprime **toutes** les lignes `TEST-`, y compris les utilisateurs que l'e2e vient de creer.
+Symptome : page de connexion au milieu d'un test, `GET /api/auth/me` en 404 dans les logs serveur.
 
 Ne pas lancer la suite contre une base de production. Pour un jeu de donnees de depart, voir `scripts/README-SEEDING.md`.
 
 ## Limites connues
 
-- Seule la spec 06 joue deux profils distincts. Les specs 01 a 05 utilisent un compte unique (`E2E_USERNAME`, `admin` par defaut) et ne valident donc aucune regle RBAC, alors que le metier repose sur 9 roles.
+- Les specs 06 a 08 jouent plusieurs profils distincts. Les specs 01 a 05 utilisent un compte unique (`E2E_USERNAME`, `admin` par defaut) et ne valident donc aucune regle RBAC, alors que le metier repose sur 9 roles.
 - Les specs 02 a 05 sont surtout des tests de **lecture et de navigation**. Le parcours metier complet panne -> OT -> demande de piece -> commande fournisseur -> reception -> facture -> reglement n'est couvert que **manuellement**, via `docs/qa/E2E PANNE-OT-REAPPRO-FACTURE`.
 - Pas de workflow CI dans le repo, bien que la config prevoie deja le cas `CI` (retries).

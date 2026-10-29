@@ -24,7 +24,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
     "http://127.0.0.1:5000";
 
   const startedAt = Date.now();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ channel: process.env.E2E_CHANNEL || undefined });
 
   try {
     const page = await browser.newPage();

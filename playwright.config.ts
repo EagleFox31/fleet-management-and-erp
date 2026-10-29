@@ -2,6 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:5000";
 const useManagedWebServer = !process.env.E2E_BASE_URL;
+// Navigateur installé à utiliser à la place du Chromium de Playwright (ex. `msedge`),
+// quand `playwright install` n'a pas été lancé sur le poste.
+const channel = process.env.E2E_CHANNEL || undefined;
 const configuredWorkers = Number(process.env.E2E_WORKERS ?? "1");
 const workers = Number.isFinite(configuredWorkers) && configuredWorkers > 0 ? configuredWorkers : 1;
 
@@ -29,7 +32,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], channel },
     },
   ],
   webServer: useManagedWebServer

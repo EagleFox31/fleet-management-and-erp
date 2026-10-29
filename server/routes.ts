@@ -3291,27 +3291,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/parts/:id/update-stock", authenticate, isInventoryManager, async (req, res) => {
+  const stockAdjustmentSchema = z.object({
+    adjustment: z.coerce
+      .number({ invalid_type_error: "L'ajustement doit être un nombre." })
+      .int("L'ajustement doit être un nombre entier.")
+      .refine((value) => value !== 0, "L'ajustement ne peut pas être nul."),
+    reason: z
+      .string({ required_error: "La raison de l'ajustement est obligatoire." })
+      .trim()
+      .min(1, "La raison de l'ajustement est obligatoire."),
+  });
+
+  app.post("/api/parts/:id/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
     try {
       const partId = parseInt(req.params.id);
-      const { adjustment, reason } = req.body;
-      
+
       if (isNaN(partId)) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
-      
-      if (!adjustment || !reason) {
-        return res.status(400).json({ message: "Ajustement et raison requis" });
-      }
-      
+
+      const { adjustment, reason } = stockAdjustmentSchema.parse(req.body);
       const updatedPart = await partsService.updateStock(partId, adjustment, reason, req.user?.id);
-      
+
       return res.status(200).json(updatedPart);
     } catch (error) {
-      console.error("Update part stock error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
+      // ZodError (400) et AppError (404, 409) : message métier et journalisation
+      // par le gestionnaire central (ancien `console.error` migré là-bas).
+      return next(error);
     }
   });
 

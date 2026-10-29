@@ -319,6 +319,9 @@ Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, e
   `{ err, requestId: req.requestId, ... }` ; `clientLogger` côté navigateur.
   Pas de `console.*` dans du code neuf. Un log ne se supprime pas, il se migre.
 - **Client** : afficher `userMessageOf(error, repli)` (`client/src/lib/api-error.ts`).
+- **Double clic** : un bouton qui écrit de l'argent ou du stock envoie via
+  `useSingleFlightMutate(mutation.mutate)` (`client/src/hooks/use-single-flight.ts`).
+  `disabled={isPending}` ne change qu'au rendu suivant : il n'empêche pas le second clic.
 - Retrouver une erreur signalée par un utilisateur : chercher sa référence
   (`requestId`) dans les logs.
 - Transition qui déplace du stock : effet dans `onTransition(tx)` de

@@ -115,6 +115,20 @@ export async function apiLogin(
   return context;
 }
 
+/**
+ * Connexion par l'API dans le contexte du navigateur.
+ *
+ * `page.request` partage les cookies du contexte : la page ouverte ensuite est
+ * déjà connectée, sans passer par l'écran de connexion (une navigation de 7 à
+ * 17 s en moins en dev). Réservé aux specs qui ne testent pas la connexion.
+ */
+export async function loginWithSession(page: Page, credentials: E2ECredentials): Promise<void> {
+  const response = await page.request.post("/api/auth/login", {
+    data: { username: credentials.username, password: credentials.password },
+  });
+  expect(response.ok(), `connexion ${credentials.label} (${credentials.username})`).toBeTruthy();
+}
+
 export async function loginAs(
   page: Page,
   credentials: E2ECredentials,
