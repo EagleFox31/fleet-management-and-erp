@@ -71,7 +71,9 @@ import {
   ClipboardCheck,
   Loader2,
   Circle,
+  Hammer,
 } from "lucide-react";
+import { WorkOrderItemsPanel } from "@/components/maintenance/work-order-items-panel";
 import jsPDF from 'jspdf';
 import headerImage from '@assets/TAY-header-final.png';
 
@@ -225,10 +227,12 @@ export default function WorkOrderDetails({
     
     if (tab === 'parts') {
       setActiveTab('parts');
+    } else if (tab === 'work') {
+      setActiveTab('work');
     } else if (tab === 'report') {
       setActiveTab('report');
     }
-    
+
     if (action === 'start') {
       setShowStartConfirm(true);
     } else if (action === 'complete') {
@@ -278,6 +282,19 @@ export default function WorkOrderDetails({
   const demarreurEstAutre = Boolean(
     workOrder?.technicianId && user?.id && Number(workOrder.technicianId) !== Number(user.id),
   );
+
+  // Même cache que le panneau Travaux: sert seulement au compteur de l'onglet.
+  const { data: workItemsData } = useQuery<{ items: unknown[] }>({
+    queryKey: [`/api/work-orders/${workOrderId}/items`],
+    enabled: !!workOrderId,
+  });
+  const workItemsCount = workItemsData?.items.length ?? 0;
+  // Saisie a posteriori permise sur un OT terminé; un OT annulé est figé.
+  // Un technicien ne saisit que sur ses OT: même règle que le serveur.
+  const canEditWorkItems =
+    canProcessWorkOrder &&
+    workOrder?.status !== 'cancelled' &&
+    !(user?.role === 'technician' && demarreurEstAutre);
 
   // Fetch parts used in this work order
   const {
@@ -1418,6 +1435,7 @@ export default function WorkOrderDetails({
         <PremiumTabsNav tabs={[
           { value: "details", label: "Détails", icon: <TabIcon icon={Wrench} />, helpTarget: "wo-tab-details" },
           { value: "parts", label: displayedPartsCount > 0 ? `Pièces (${displayedPartsCount})` : "Pièces", icon: <TabIcon icon={Package} />, helpTarget: "wo-tab-parts" },
+          { value: "work", label: workItemsCount > 0 ? `Travaux (${workItemsCount})` : "Travaux", icon: <TabIcon icon={Hammer} /> },
           { value: "tires", label: "Pneus", icon: <TabIcon icon={Circle} /> },
           ...(workOrder.status === 'completed' ? [{ value: "report", label: "Rapport", icon: <TabIcon icon={FileText} /> }] : []),
         ]} />
@@ -1840,6 +1858,16 @@ export default function WorkOrderDetails({
                 </div>
               )}
           </div>
+        </TabsContent>
+
+        {/* ── TRAVAUX ── */}
+        <TabsContent value="work">
+          <WorkOrderItemsPanel
+            workOrderId={workOrderId}
+            userId={user?.id}
+            canEdit={canEditWorkItems}
+            defaultTechnicianId={workOrder.technicianId}
+          />
         </TabsContent>
 
         {/* ── PNEUS ── */}

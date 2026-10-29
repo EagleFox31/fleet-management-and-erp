@@ -83,6 +83,78 @@ Toute nouvelle transition **doit** livrer les 3 couches (`docs/analysis/LESSONS_
 
 ---
 
+## Méthode d'exécution
+
+Le quoi est décidé plus haut. Voici comment le faire sans rouvrir les bugs que
+ce projet a déjà payés.
+
+### Règle 1 — Un lot = un changement d'état = les trois couches complètes
+
+C'est la raison du report écrite plus haut. Un lot qui touche au cycle de vie
+n'est **pas** terminé tant que les trois ne sont pas faites :
+
+1. correction du cache local au moment de la transition ;
+2. événement WebSocket avec la bonne portée (`user`, `roles` ou `broadcast`) ;
+3. **invalidation des écrans satellites** — tableau chef d'atelier, dashboard
+   admin, fiche véhicule, statistiques d'OT.
+
+Le troisième point est celui qu'on oublie, et c'est celui qui produit l'écran
+figé. Voir `.claude/skills/transition-metier/SKILL.md`.
+
+### Règle 2 — Commencer par le lot 3, pas le lot 1
+
+L'ordre d'écriture ci-dessous n'est pas l'ordre d'exécution recommandé.
+
+**Les lignes de travail (lot 3) n'ajoutent aucun état** : c'est une table fille
+sur un OT existant, donc aucun risque sur les transitions. Et elles débloquent
+ce qui manque vraiment — temps par technicien, coût réel d'atelier, MTTR.
+
+Réception et QC touchent au cycle de vie. Les faire **après** revient à les
+poser sur une base déjà instrumentée.
+
+### Règle 3 — Ordre interne d'un lot
+
+```
+shared/schema.ts → init-database.ts → service → route → écran → test
+```
+
+Deux points de vigilance :
+
+- **Le schéma et `init-database.ts` avancent ensemble.** Une colonne déclarée
+  dans Drizzle mais absente d'`init-database` plante sur une base vierge — c'est
+  la première leçon de `LESSONS_LEARNED.md`.
+- **Un seul écrivain par table.** La nouvelle table a son service ; aucune route
+  n'écrit directement par `storage`. Trois portes dérobées de ce type ont été
+  fermées en août 2026 (sortie de stock, statut véhicule, `status_history`).
+
+### Règle 4 — Figer le vocabulaire avant d'écrire
+
+Deux décisions à prendre **avant** le premier commit du lot 3 :
+
+- le nom affiché : *ligne de travail*, *tâche*, ou *prestation* ;
+- ce que devient `workOrders.cost`.
+
+La seconde est piégeuse. `workOrders.cost` est documenté dans le schéma comme
+« coût de base, main-d'œuvre, pas un total », et le tableau Direction s'appuie
+dessus (`getMaintenanceCost`, `getFleetKPI`). Si les lignes deviennent la
+vérité, `cost` doit devenir dérivé — et les deux calculs Direction corrigés
+**dans le même lot**.
+
+Sinon on obtient deux sources pour le coût atelier. C'est le motif qui a coûté
+quatre corrections successives sur le tableau Direction en août 2026.
+
+### Règle 5 — Le test de non-régression est déjà écrit
+
+Chaque lot touchant au cycle repasse le cas **P2b** de
+`docs/qa/QA-DASHBOARD-ADMIN.md` : véhicule sain contre véhicule déjà
+immobilisé, avec clôture d'un OT parmi plusieurs.
+
+C'est le scénario qui a révélé qu'on remettait un camion en service alors qu'il
+restait au pont pour un autre OT. Un nouvel état dans le cycle peut rouvrir
+exactement ce défaut.
+
+---
+
 ## Lots (ordre d'exécution)
 
 ### Lot 1 — Réception atelier

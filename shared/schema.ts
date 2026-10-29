@@ -3,6 +3,7 @@ import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
+import { WORK_ORDER_ITEM_STATUSES } from "./constants/work-order-items";
 
 // Users and authentication
 export const users = pgTable("users", {
@@ -284,6 +285,58 @@ export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({
   endDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
 });
 
+// Catalogue de main-d'œuvre: barème de comparaison, pas un tarif.
+// Aucune colonne de prix ici, volontairement — cf. docs/plans/lignes-de-travail-ot.md.
+export const laborCatalog = pgTable("labor_catalog", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  standardHours: numeric("standard_hours", { precision: 5, scale: 2 }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertLaborCatalogSchema = createInsertSchema(laborCatalog).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Lignes de travail d'un OT: qui a passé combien de temps sur quoi.
+// Table fille — n'ajoute aucun état au cycle de `work_orders`.
+export const workOrderItems = pgTable("work_order_items", {
+  id: serial("id").primaryKey(),
+  workOrderId: integer("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
+  laborCatalogId: integer("labor_catalog_id").references(() => laborCatalog.id, { onDelete: "set null" }),
+  // Obligatoire quand la ligne ne pointe pas un poste catalogue: sans libellé,
+  // l'historique du camion devient illisible.
+  customLabel: text("custom_label"),
+  technicianId: integer("technician_id").references(() => users.id, { onDelete: "set null" }),
+  estimatedHours: numeric("estimated_hours", { precision: 5, scale: 2 }),
+  // La donnée qui manquait: `work_orders.duration` porte une seule durée pour
+  // toute l'intervention, impossible d'y lire qui a fait quoi.
+  actualHours: numeric("actual_hours", { precision: 5, scale: 2 }),
+  status: text("status", { enum: WORK_ORDER_ITEM_STATUSES }).notNull().default("pending"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  notes: text("notes"),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({
+  id: true,
+  createdBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Parts inventory
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
@@ -557,6 +610,12 @@ export type InsertMaintenanceSchedule = z.infer<typeof insertMaintenanceSchedule
 
 export type WorkOrder = typeof workOrders.$inferSelect;
 export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
+
+export type LaborCatalog = typeof laborCatalog.$inferSelect;
+export type InsertLaborCatalog = z.infer<typeof insertLaborCatalogSchema>;
+
+export type WorkOrderItem = typeof workOrderItems.$inferSelect;
+export type InsertWorkOrderItem = z.infer<typeof insertWorkOrderItemSchema>;
 
 export type Part = typeof parts.$inferSelect;
 export type InsertPart = z.infer<typeof insertPartSchema>;

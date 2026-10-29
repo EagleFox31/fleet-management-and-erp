@@ -888,6 +888,25 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/reorder-alerts"] });
       break;
 
+    // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
+    // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).
+    case "work_order_item_changed":
+      {
+        const workOrderId = toNumber(payloadRecord.workOrderId);
+        if (workOrderId) {
+          queryClient.invalidateQueries({
+            queryKey: [`/api/work-orders/${workOrderId}/items`],
+          });
+          queryClient.invalidateQueries({
+            queryKey: [`/api/work-orders/${workOrderId}`],
+          });
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/technician/my-work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/technician-stats"] });
+      break;
+
     case "alert_created": {
       // L'alerte est nominative et diffusée en scope `user`: si on reçoit
       // l'événement, elle nous concerne. On la signale au lieu de la laisser

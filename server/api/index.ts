@@ -13,6 +13,12 @@ import suppliersRoutes from "./suppliers.routes";
 import purchaseOrdersRoutes from "./purchase-orders.routes";
 import supplierInvoicesRoutes from "./supplier-invoices.routes";
 import workOrderPartsRoutes from "./work-order-parts.routes";
+import {
+  laborCatalogRoutes,
+  laborCatalogWriteRoutes,
+  workOrderItemDetailRoutes,
+  workOrderItemsRoutes,
+} from "./work-order-items.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
 import managementRoutes from "./management.routes";
@@ -55,6 +61,12 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
   apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
+  apiRouter.use("/work-orders", workOrderItemsRoutes);
+  // Lignes de travail: préfixes dédiés, donc garde au montage — toute route
+  // ajoutée plus tard dans ces routeurs est couverte d'office.
+  apiRouter.use("/work-order-items", isTechnician, workOrderItemDetailRoutes);
+  apiRouter.use("/labor-catalog", laborCatalogRoutes);
+  apiRouter.use("/labor-catalog", isWorkshopManager, laborCatalogWriteRoutes);
   apiRouter.use("/part-requirements", partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
   apiRouter.use("/management", managementRoutes);

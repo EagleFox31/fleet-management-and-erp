@@ -1,0 +1,198 @@
+import { Router } from "express";
+import { authenticate, isTechnician } from "../middleware/auth";
+import { storage } from "../storage";
+import { workOrderItemsService } from "../services/work-order-items-service";
+
+/**
+ * Lignes de travail d'un ordre de travail — heures passées, sans valorisation.
+ *
+ * Trois routeurs plutôt qu'un, pour que la garde de rôle vive **au montage**
+ * (`server/api/index.ts`) partout où c'est sans risque :
+ *
+ * - `workOrderItemsRoutes` se greffe sur `/work-orders`, un préfixe que
+ *   `server/routes.ts` sert aussi. Une garde au montage y intercepterait les
+ *   routes historiques et renverrait 403 à des profils légitimes : la garde
+ *   reste donc par route, comme dans `work-order-parts.routes.ts`.
+ * - `workOrderItemDetailRoutes` et `laborCatalogRoutes` ont des préfixes qui
+ *   leur sont propres : la garde est posée au montage, et couvre d'office toute
+ *   route ajoutée plus tard.
+ */
+
+/** Le technicien ne travaille que sur les OT qui lui sont assignées. */
+async function refusPourCetteOT(workOrderId: number, user: Express.Request["user"]) {
+  const workOrder = await storage.getWorkOrder(workOrderId);
+  if (!workOrder) {
+    return { status: 404, message: "Ordre de travail non trouvé" };
+  }
+
+  if (user?.role === "technician" && workOrder.technicianId && workOrder.technicianId !== user.id) {
+    return { status: 403, message: "Accès refusé - OT assignée à un autre technicien" };
+  }
+
+  return null;
+}
+
+function diffuser(event: string, payload: Record<string, unknown>) {
+  const broadcast = (global as any).broadcastUpdate;
+  if (typeof broadcast === "function") {
+    broadcast(event, payload);
+  }
+}
+
+// --- Monté sur /work-orders ------------------------------------------------
+
+export const workOrderItemsRoutes = Router();
+
+workOrderItemsRoutes.get("/:workOrderId/items", authenticate, async (req, res) => {
+  try {
+    const workOrderId = Number.parseInt(req.params.workOrderId, 10);
+    if (Number.isNaN(workOrderId)) {
+      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+    }
+
+    return res.status(200).json(await workOrderItemsService.getItemsForWorkOrder(workOrderId));
+  } catch (error) {
+    console.error("Get work order items error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res) => {
+  try {
+    const workOrderId = Number.parseInt(req.params.workOrderId, 10);
+    if (Number.isNaN(workOrderId)) {
+      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+    }
+
+    const refus = await refusPourCetteOT(workOrderId, req.user);
+    if (refus) {
+      return res.status(refus.status).json({ message: refus.message });
+    }
+
+    const resultat = await workOrderItemsService.createItem(workOrderId, req.body ?? {}, req.user?.id);
+    if (!resultat.success) {
+      return res.status(400).json({ message: resultat.error });
+    }
+
+    diffuser("work_order_item_changed", {
+      workOrderId,
+      action: "created",
+      totals: resultat.data.totals,
+      actor: req.user ? { userId: req.user.id, role: req.user.role, username: req.user.username } : null,
+    });
+
+    return res.status(201).json(resultat.data);
+  } catch (error) {
+    console.error("Create work order item error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// --- Monté sur /work-order-items (garde isTechnician au montage) -----------
+
+export const workOrderItemDetailRoutes = Router();
+
+workOrderItemDetailRoutes.patch("/:id", async (req, res) => {
+  try {
+    const itemId = Number.parseInt(req.params.id, 10);
+    if (Number.isNaN(itemId)) {
+      return res.status(400).json({ message: "ID de ligne invalide" });
+    }
+
+    const ligne = await workOrderItemsService.getItem(itemId);
+    if (!ligne) {
+      return res.status(404).json({ message: "Ligne de travail introuvable" });
+    }
+
+    const refus = await refusPourCetteOT(ligne.workOrderId, req.user);
+    if (refus) {
+      return res.status(refus.status).json({ message: refus.message });
+    }
+
+    const resultat = await workOrderItemsService.updateItem(itemId, req.body ?? {});
+    if (!resultat.success) {
+      return res.status(400).json({ message: resultat.error });
+    }
+
+    diffuser("work_order_item_changed", {
+      workOrderId: resultat.data.workOrderId,
+      action: "updated",
+      itemId,
+      totals: resultat.data.totals,
+      actor: req.user ? { userId: req.user.id, role: req.user.role, username: req.user.username } : null,
+    });
+
+    return res.status(200).json(resultat.data);
+  } catch (error) {
+    console.error("Update work order item error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+workOrderItemDetailRoutes.delete("/:id", async (req, res) => {
+  try {
+    const itemId = Number.parseInt(req.params.id, 10);
+    if (Number.isNaN(itemId)) {
+      return res.status(400).json({ message: "ID de ligne invalide" });
+    }
+
+    const ligne = await workOrderItemsService.getItem(itemId);
+    if (!ligne) {
+      return res.status(404).json({ message: "Ligne de travail introuvable" });
+    }
+
+    const refus = await refusPourCetteOT(ligne.workOrderId, req.user);
+    if (refus) {
+      return res.status(refus.status).json({ message: refus.message });
+    }
+
+    const resultat = await workOrderItemsService.deleteItem(itemId);
+    if (!resultat.success) {
+      return res.status(400).json({ message: resultat.error });
+    }
+
+    diffuser("work_order_item_changed", {
+      workOrderId: resultat.data.workOrderId,
+      action: "deleted",
+      itemId,
+      totals: resultat.data.totals,
+      actor: req.user ? { userId: req.user.id, role: req.user.role, username: req.user.username } : null,
+    });
+
+    return res.status(200).json(resultat.data);
+  } catch (error) {
+    console.error("Delete work order item error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// --- Monté sur /labor-catalog ----------------------------------------------
+
+export const laborCatalogRoutes = Router();
+
+laborCatalogRoutes.get("/", authenticate, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === "1";
+    return res.status(200).json(await workOrderItemsService.getLaborCatalog(includeInactive));
+  } catch (error) {
+    console.error("Get labor catalog error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+/** Écriture du référentiel : la garde `isWorkshopManager` est posée au montage. */
+export const laborCatalogWriteRoutes = Router();
+
+laborCatalogWriteRoutes.post("/", async (req, res) => {
+  try {
+    const resultat = await workOrderItemsService.createLaborCatalogEntry(req.body ?? {}, req.user?.id);
+    if (!resultat.success) {
+      return res.status(400).json({ message: resultat.error });
+    }
+
+    return res.status(201).json(resultat.data);
+  } catch (error) {
+    console.error("Create labor catalog entry error:", error);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});

@@ -256,6 +256,41 @@ export async function initializeDatabase() {
       SET accreditation_number = 'AGR-' || LPAD(id::text, 4, '0')
       WHERE accreditation_number IS NULL OR trim(accreditation_number) = ''
     `);
+    // Lignes de travail d'un OT (lot 3) — doit rester ici ET dans
+    // server/db/migrations/20260901_work_order_items.sql (AGENTS.md §5).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS labor_catalog (
+        id serial PRIMARY KEY,
+        code text NOT NULL UNIQUE,
+        label text NOT NULL,
+        standard_hours numeric(5,2),
+        is_active boolean NOT NULL DEFAULT true,
+        created_by integer REFERENCES users(id),
+        updated_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS work_order_items (
+        id serial PRIMARY KEY,
+        work_order_id integer NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+        labor_catalog_id integer REFERENCES labor_catalog(id) ON DELETE SET NULL,
+        custom_label text,
+        technician_id integer REFERENCES users(id) ON DELETE SET NULL,
+        estimated_hours numeric(5,2),
+        actual_hours numeric(5,2),
+        status text NOT NULL DEFAULT 'pending',
+        started_at timestamp,
+        completed_at timestamp,
+        notes text,
+        created_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_work_order_items_work_order_id ON work_order_items (work_order_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_work_order_items_technician_id ON work_order_items (technician_id)`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS supplier_invoice_settlements (
         id serial PRIMARY KEY,
