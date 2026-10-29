@@ -1,11 +1,11 @@
 import { createServer, type Server } from "http";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { partRequirements } from "../../shared/schema";
+import { partRequirements, vehicles, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
-import { createTestPart, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { createTestClient, createTestPart, createTestSupplier, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 
 /**
  * Niveau C, sessions réelles par rôle.
@@ -33,6 +33,7 @@ let baseUrl = "";
 const ids = createIdBag();
 const cookies = new Map<TestUserRole, string>();
 const requirementIds: number[] = [];
+const workOrderIds: number[] = [];
 
 async function call(method: string, path: string, options: { body?: unknown; cookie?: string } = {}) {
   const response = await fetch(baseUrl + path, {
@@ -76,6 +77,9 @@ afterAll(async () => {
   if (requirementIds.length > 0) {
     await db.delete(partRequirements).where(inArray(partRequirements.id, requirementIds));
   }
+  if (workOrderIds.length > 0) {
+    await db.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
+  }
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
@@ -107,5 +111,116 @@ describe("non-régression : corps valide toujours accepté", { timeout: 60000 },
     expect(res.status).toBe(201);
     requirementIds.push(res.body.id);
     expect(res.body).toMatchObject({ partId: part.id, status: "pending" });
+  });
+
+  it("T4 : POST /api/part-requirements ignore le statut et la date de livraison du corps", async () => {
+    const part = await createTestPart();
+    ids.partIds.push(part.id);
+    const res = await call("POST", "/api/part-requirements", {
+      cookie: cookies.get("technician"),
+      body: { partId: part.id, quantityNeeded: 1, reason: "TEST statut forcé", status: "issued", actualDeliveryDate: "2026-01-01" },
+    });
+    expect(res.status).toBe(201);
+    requirementIds.push(res.body.id);
+    expect(res.body).toMatchObject({ status: "pending", actualDeliveryDate: null });
+  });
+});
+
+describe("T3 : 400 lisible sur PATCH de type invalide", { timeout: 60000 }, () => {
+  // Chaque fixture est créée pour le cas ; le corps invalide ne doit rien modifier.
+  type PatchCase = { name: string; role: TestUserRole; body: Record<string, unknown>; path: () => Promise<string> };
+
+  const PATCH_CASES: PatchCase[] = [
+    {
+      name: "véhicule",
+      role: "workshop_manager",
+      body: { year: "deux mille" },
+      path: async () => {
+        const v = await createTestVehicle();
+        ids.vehicleIds.push(v.id);
+        return `/api/vehicles/${v.id}`;
+      },
+    },
+    {
+      name: "ordre de travail",
+      role: "workshop_manager",
+      body: { duration: "longtemps" },
+      path: async () => {
+        const v = await createTestVehicle();
+        ids.vehicleIds.push(v.id);
+        const [wo] = await db.insert(workOrders).values({ vehicleId: v.id, title: "TEST patch invalide", status: "pending" }).returning();
+        workOrderIds.push(wo.id);
+        return `/api/work-orders/${wo.id}`;
+      },
+    },
+    {
+      name: "fournisseur",
+      role: "secretary",
+      body: { paymentTerms: "trente" },
+      path: async () => {
+        const s = await createTestSupplier();
+        ids.supplierIds.push(s.id);
+        return `/api/suppliers/${s.id}`;
+      },
+    },
+    {
+      name: "client",
+      role: "secretary",
+      body: { paymentTerms: "trente" },
+      path: async () => {
+        const c = await createTestClient();
+        ids.clientIds.push(c.id);
+        return `/api/clients/${c.id}`;
+      },
+    },
+  ];
+
+  it.each(PATCH_CASES)("PATCH $name, type invalide, rôle $role", async ({ role, body, path }) => {
+    const res = await call("PATCH", await path(), { cookie: cookies.get(role), body });
+    expect(res.status).toBe(400);
+    expectErrorContract(res, "VALIDATION");
+    // Actionnable : le champ en cause est nommé.
+    expect(res.body.errors?.map((e: { field: string }) => e.field)).toContain(Object.keys(body)[0]);
+  });
+});
+
+describe("non-régression : PATCH véhicule depuis le formulaire", { timeout: 60000 }, () => {
+  it("dates laissées vides (\"\") : la modification est enregistrée et les dates vidées", async () => {
+    const v = await createTestVehicle();
+    ids.vehicleIds.push(v.id);
+    const res = await call("PATCH", `/api/vehicles/${v.id}`, {
+      cookie: cookies.get("workshop_manager"),
+      body: { brand: "TEST-MARQUE", year: "2021", purchaseDate: "", insuranceExpiry: "", notes: "" },
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, v.id));
+    expect(row).toMatchObject({ brand: "TEST-MARQUE", year: 2021, purchaseDate: null, insuranceExpiry: null });
+  });
+});
+
+describe("non-régression : PATCH ordre de travail depuis l'écran détail", { timeout: 60000 }, () => {
+  it("commencer puis terminer : statuts, dates et affectation enregistrés", async () => {
+    const v = await createTestVehicle();
+    ids.vehicleIds.push(v.id);
+    const [wo] = await db.insert(workOrders).values({ vehicleId: v.id, title: "TEST démarrer terminer", status: "pending" }).returning();
+    workOrderIds.push(wo.id);
+    const technicianId = ids.userIds[0];
+
+    const start = await call("PATCH", `/api/work-orders/${wo.id}`, {
+      cookie: cookies.get("workshop_manager"),
+      body: { status: "in_progress", startDate: new Date().toISOString(), technicianId },
+    });
+    expect(start.status).toBe(200);
+
+    const done = await call("PATCH", `/api/work-orders/${wo.id}`, {
+      cookie: cookies.get("workshop_manager"),
+      body: { status: "completed", endDate: new Date().toISOString() },
+    });
+    expect(done.status).toBe(200);
+
+    const [row] = await db.select().from(workOrders).where(eq(workOrders.id, wo.id));
+    expect(row).toMatchObject({ status: "completed", technicianId });
+    expect(row.startDate).toBeInstanceOf(Date);
+    expect(row.endDate).toBeInstanceOf(Date);
   });
 });

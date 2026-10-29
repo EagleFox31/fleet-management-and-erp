@@ -28,6 +28,8 @@ import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull } from "drizz
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
+import { AppError } from "./lib/app-error";
+import { prepareColumnUpdate } from "./lib/column-validation";
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -1140,7 +1142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/vehicles/:id", isWorkshopManager, async (req, res) => {
+  app.patch("/api/vehicles/:id", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -1157,8 +1159,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Récupérer l'ID de l'utilisateur connecté depuis la session
       const userId = req.user?.id;
       
-      const updatedVehicle = await storage.updateVehicle(id, req.body, userId);
-      
+      // Corps brut du formulaire : "" vaut champ vidé, et un type invalide
+      // doit revenir en 400 plutôt qu'en échec silencieux du stockage.
+      const { data, errors } = prepareColumnUpdate(vehicles, req.body);
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations du véhicule sont invalides.", { fieldErrors: errors }));
+      }
+
+      const updatedVehicle = await storage.updateVehicle(id, data, userId);
+      // Le stockage rend undefined quand l'écriture échoue : ne pas répondre 200.
+      if (!updatedVehicle) {
+        return res.status(500).json({ message: "Erreur serveur" });
+      }
+
       return res.status(200).json(updatedVehicle);
     } catch (error) {
       console.error("Update vehicle error:", error);
@@ -2175,7 +2188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/work-orders/:id", isTechnician, async (req, res) => {
+  app.patch("/api/work-orders/:id", isTechnician, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -2189,7 +2202,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Ordre de travail non trouvé" });
       }
       
-      const updatedData = { ...req.body };
+      const { data: updatedData, errors } = prepareColumnUpdate(workOrders, { ...req.body });
+      if (errors.length > 0) {
+        return next(new AppError(400, "Certaines informations de l'ordre de travail sont invalides.", { fieldErrors: errors }));
+      }
       
       // Convert date strings to Date objects for Drizzle ORM
       if (updatedData.startDate && typeof updatedData.startDate === 'string') {

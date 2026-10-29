@@ -92,9 +92,13 @@ router.post("/", isPartRequester, async (req, res, next) => {
     const userId = req.user?.id;
 
     // Sans validation, un corps incomplet atteignait la base et revenait en 500.
-    const requirement = await partRequirementsService.createPartRequirement(
-      insertPartRequirementSchema.parse({ ...req.body, requestedBy: userId }),
-    );
+    // Statut et date de livraison sont tenus par le workflow (T4) : une
+    // demande naît toujours en attente, jamais déjà reçue ou sortie.
+    const requirement = await partRequirementsService.createPartRequirement({
+      ...insertPartRequirementSchema.parse({ ...req.body, requestedBy: userId }),
+      status: "pending",
+      actualDeliveryDate: null,
+    });
 
     if ((global as any).broadcastUpdate) {
       (global as any).broadcastUpdate("part_requirement_created", {

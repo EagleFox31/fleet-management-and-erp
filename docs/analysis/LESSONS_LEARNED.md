@@ -432,3 +432,45 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Tout POST/PATCH valide son corps avec Zod, et un `catch` local ne convertit jamais une `ZodError` en 500 : `next(error)`.
 - Tout nouveau POST principal s'ajoute à la table `CASES` du test ci-dessus.
+
+## 2026-10-29 - Modification de véhicule perdue en silence
+
+### Constat
+- Depuis le formulaire, enregistrer un véhicule dont une date (achat, assurance) était laissée vide renvoyait 200 mais **rien** n'était enregistré, y compris les autres champs modifiés.
+- `PATCH /api/work-orders/:id` avec un type invalide (`duration: "longtemps"`) renvoyait 500.
+
+### Cause racine
+- Le formulaire envoie `""` pour une date vide ; Postgres refuse `""` pour un horodatage.
+- `storage.updateVehicle` avalait l'erreur et renvoyait `undefined`, la route répondait quand même 200.
+- Ces deux PATCH de `server/routes.ts` passaient `req.body` au stockage sans aucune validation.
+- Classification : validation absente + erreur avalée par la couche stockage.
+
+### Résolution
+- `server/lib/column-validation.ts` : `prepareColumnUpdate(table, body)` dérive le contrôle des colonnes Drizzle (entier, décimal, date, booléen, énumération, obligatoire), convertit `""` en `null` hors colonnes texte et renvoie les erreurs par champ.
+- PATCH véhicule et OT : 400 `AppError` avec `fieldErrors` ; PATCH véhicule renvoie 500 si le stockage n'a rien mis à jour.
+
+### Prévention (vérifiable)
+- `tests/unit/server/column-validation.test.ts` (niveau U).
+- `tests/contract/api-role-guard-and-validation.contract.test.ts` : PATCH véhicule, OT, fournisseur, client avec type invalide → 400 nommant le champ ; PATCH véhicule « formulaire » avec dates vides → 200 et base modifiée ; démarrer puis terminer un OT → 200 et base modifiée.
+
+### Règle Projet (obligatoire)
+- Une route qui transmet `req.body` au stockage sans schéma Zod passe par `prepareColumnUpdate`.
+- Un stockage qui renvoie `undefined` sur une mise à jour n'est jamais traduit en 200.
+
+## 2026-10-29 - Nettoyage des tests bloqué par les alertes
+
+### Constat
+- `npm run test:contract` : tous les tests verts, mais un fichier en échec dans `afterAll` (`alerts_user_id_users_id_fk`) et des utilisateurs `TEST-` laissés en base.
+
+### Cause racine
+- Affecter ou faire avancer un OT crée des alertes nominatives ; `notifyWorkOrderProgress` part sans attente et peut arriver **après** le ménage des alertes.
+- Classification : effet asynchrone non attendu dans le nettoyage.
+
+### Résolution
+- `tests/support/cleanup.ts` : suppression des alertes des utilisateurs de test avant leur suppression, rejouée jusqu'à 5 fois si une alerte tardive bloque la clé étrangère ; même ménage dans `cleanupOrphanTestRows`.
+
+### Prévention (vérifiable)
+- Contrat complet vert (7 fichiers) et zéro utilisateur `TEST-` restant après exécution.
+
+### Règle Projet (obligatoire)
+- Toute table qui référence `users` et peut être alimentée par un test est purgée dans `cleanupCreated` avant les utilisateurs.

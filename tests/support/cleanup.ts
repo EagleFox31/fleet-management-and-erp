@@ -1,6 +1,7 @@
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
+  alerts,
   clientInvoices,
   clients,
   fuelRecords,
@@ -59,7 +60,20 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(clients).where(inArray(clients.id, ids.clientIds));
   }
   if (ids.userIds.length > 0) {
-    await db.delete(users).where(inArray(users.id, ids.userIds));
+    // Une affectation ou le planificateur crée des alertes nominatives :
+    // sans ce ménage, la clé étrangère bloque la suppression de l'utilisateur.
+    // Certaines alertes partent sans attente (avancement d'OT) et peuvent
+    // arriver après le ménage : on recommence quelques fois.
+    for (let attempt = 1; ; attempt++) {
+      await db.delete(alerts).where(inArray(alerts.userId, ids.userIds));
+      try {
+        await db.delete(users).where(inArray(users.id, ids.userIds));
+        break;
+      } catch (error) {
+        if (attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
   }
 }
 
@@ -72,5 +86,7 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(parts).where(like(parts.reference, `${TEST_PREFIX}%`));
   await db.delete(vehicles).where(like(vehicles.registrationNumber, `${TEST_PREFIX}%`));
   await db.delete(suppliers).where(like(suppliers.name, `${TEST_PREFIX}%`));
+  const testUsers = db.select({ id: users.id }).from(users).where(like(users.username, `${TEST_PREFIX}%`));
+  await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(like(users.username, `${TEST_PREFIX}%`));
 }
