@@ -93,7 +93,7 @@ flowchart LR
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields`) |
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | À faire |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders`) |
-| T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C | Partiel (réception et sortie de stock ; paiement à faire) |
+| T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C | Partiel (réception et sortie de stock, règlement et rapprochement fournisseur ; encaissement client `POST /api/billing/invoices/:id/payments` à faire) |
 | T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | À faire |
 
 ---

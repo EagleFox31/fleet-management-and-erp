@@ -8,8 +8,10 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
+import { moduleLogger } from "../lib/logger";
 
 const router = Router();
+const log = moduleLogger("supplier-invoices");
 
 type InvoiceWorkflowScope = "parts" | "non_parts" | "none";
 type UserRole = "admin" | "secretary" | "warehouse" | "logistics" | "workshop_manager" | "technician" | string;
@@ -638,7 +640,7 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
  * POST /api/supplier-invoices/:id/settlements
  * Enregistrer un règlement (saisie comptable, sans rapprochement bancaire automatique)
  */
-router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Response) => {
+router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Response, next: NextFunction) => {
   uploadSettlementProof(req, res, async (err) => {
     try {
       if (err) {
@@ -698,7 +700,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
 
       const proofReference = `/uploads/supplier-invoices/settlements/${req.file.filename}`;
 
-      const { settlement, invoice } = await threeWayMatchingService.recordInvoiceSettlement(
+      const { settlement, invoice, replayed } = await threeWayMatchingService.recordInvoiceSettlement(
         invoiceId,
         req.user.id,
         {
@@ -712,6 +714,17 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
           notes: payload.notes || undefined,
         }
       );
+
+      // Saisie rejouée : le règlement existe déjà avec son propre justificatif,
+      // le fichier qui vient d'arriver ne sert à rien, et rien n'a changé.
+      if (replayed) {
+        removeUploadedProof(req);
+        return res.status(200).json({
+          invoice,
+          settlement,
+          message: "Ce règlement était déjà enregistré.",
+        });
+      }
 
       broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_recorded", {
         invoiceId: invoice.id,
@@ -728,35 +741,29 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         message: "Règlement saisi. En attente de rapprochement bancaire.",
       });
     } catch (error) {
-      if (req.file?.path && fs.existsSync(req.file.path)) {
-        try {
-          fs.unlinkSync(req.file.path);
-        } catch (unlinkError) {
-          console.error("Erreur suppression justificatif après échec:", unlinkError);
-        }
-      }
-
-      console.error("Erreur lors de l'enregistrement du règlement:", error);
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          error: "Données invalides",
-          details: error.errors,
-        });
-      }
-
-      return res.status(500).json({
-        error: "Erreur lors de l'enregistrement du règlement",
-        details: error instanceof Error ? error.message : "Erreur inconnue",
-      });
+      removeUploadedProof(req);
+      // Le gestionnaire central journalise et rend une erreur lisible :
+      // ZodError -> 400 par champ, AppError -> son statut, le reste -> 500 générique.
+      return next(error);
     }
   });
 });
+
+function removeUploadedProof(req: Request) {
+  if (req.file?.path && fs.existsSync(req.file.path)) {
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (unlinkError) {
+      log.error({ err: unlinkError, requestId: req.requestId }, "suppression du justificatif téléversé impossible");
+    }
+  }
+}
 
 /**
  * PATCH /api/supplier-invoices/:id/settlements/:settlementId/reconcile
  * Rapprocher un règlement saisi avec la preuve bancaire
  */
-router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission, async (req: Request, res: Response) => {
+router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -794,11 +801,7 @@ router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission,
       message: "Règlement rapproché avec succès",
     });
   } catch (error) {
-    console.error("Erreur lors du rapprochement du règlement:", error);
-    res.status(500).json({
-      error: "Erreur lors du rapprochement du règlement",
-      details: error instanceof Error ? error.message : "Erreur inconnue",
-    });
+    next(error);
   }
 });
 
@@ -806,7 +809,7 @@ router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission,
  * POST /api/supplier-invoices/:id/payment
  * Enregistrer le règlement d'une facture (endpoint legacy compat)
  */
-router.post("/:id/payment", checkPaymentPermission, async (req: Request, res: Response) => {
+router.post("/:id/payment", checkPaymentPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -842,11 +845,7 @@ router.post("/:id/payment", checkPaymentPermission, async (req: Request, res: Re
       message: "Règlement enregistré avec succès"
     });
   } catch (error) {
-    console.error("Erreur lors de l'enregistrement du règlement:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de l'enregistrement du règlement",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(error);
   }
 });
 

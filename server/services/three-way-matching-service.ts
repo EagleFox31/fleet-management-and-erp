@@ -12,6 +12,7 @@ import {
   PurchaseOrder
 } from "@shared/schema";
 import { eq, and, desc, sql, gte, lte, or, lt, ne, inArray } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
 
 /**
  * Service de contrôle 3 voies pour les factures fournisseurs
@@ -611,7 +612,12 @@ export class ThreeWayMatchingService {
       .limit(1);
 
     if (!invoice) {
-      throw new Error(`Facture ${invoiceId} introuvable`);
+      throw new AppError(404, "Cette facture n'existe plus.");
+    }
+
+    // Déjà soldée : un second appel (double clic, retry) ne paie pas deux fois.
+    if (invoice.status === "paid") {
+      return invoice;
     }
 
     const totalInvoice = this.num(invoice.totalTTC || invoice.totalAmount);
@@ -660,58 +666,96 @@ export class ThreeWayMatchingService {
       proofReference?: string;
       notes?: string;
     }
-  ): Promise<{ settlement: SupplierInvoiceSettlement; invoice: SupplierInvoice }> {
-    const [invoice] = await db
-      .select()
-      .from(supplierInvoices)
-      .where(eq(supplierInvoices.id, invoiceId))
-      .limit(1);
-
-    if (!invoice) {
-      throw new Error(`Facture ${invoiceId} introuvable`);
-    }
-
-    if (!["approved", "paid"].includes(String(invoice.status))) {
-      throw new Error("La facture doit être approuvée avant enregistrement du règlement");
-    }
-
-    const totalInvoice = this.num(invoice.totalTTC || invoice.totalAmount);
-    const currentBalance = Math.max(this.num(invoice.balance || totalInvoice), 0);
+  ): Promise<{ settlement: SupplierInvoiceSettlement; invoice: SupplierInvoice; replayed: boolean }> {
     const amount = this.num(data.amount);
-
     if (amount <= 0) {
-      throw new Error("Montant de règlement invalide");
-    }
-
-    if (amount - currentBalance > 0.00001) {
-      throw new Error(`Montant supérieur au solde restant (${currentBalance.toFixed(2)} FCFA)`);
+      throw new AppError(400, "Montant de règlement invalide.");
     }
 
     const normalizedProofReference = String(data.proofReference || "").trim();
     if (!normalizedProofReference) {
-      throw new Error("Justificatif de règlement obligatoire (image ou PDF)");
+      throw new AppError(400, "Justificatif de règlement obligatoire (image ou PDF).");
     }
 
-    const [settlement] = await db
-      .insert(supplierInvoiceSettlements)
-      .values({
-        supplierInvoiceId: invoiceId,
-        amount: String(amount),
-        paymentMethod: data.paymentMethod as any,
-        paymentReference: data.paymentReference.trim(),
-        paymentDate: data.paymentDate,
-        valueDate: data.valueDate || null,
-        treasuryAccount: data.treasuryAccount || null,
-        proofReference: normalizedProofReference,
-        status: "recorded",
-        recordedBy,
-        notes: data.notes || null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const paymentReference = data.paymentReference.trim();
 
-    return { settlement, invoice };
+    // Verrou sur la facture : deux saisies simultanées passent l'une après
+    // l'autre, la seconde voit donc le règlement enregistré par la première.
+    return db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select()
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.id, invoiceId))
+        .limit(1)
+        .for("update");
+
+      if (!invoice) {
+        throw new AppError(404, "Cette facture n'existe plus.");
+      }
+
+      if (!["approved", "paid"].includes(String(invoice.status))) {
+        throw new AppError(409, "La facture doit être approuvée avant enregistrement du règlement.");
+      }
+
+      const activeSettlements = await tx
+        .select()
+        .from(supplierInvoiceSettlements)
+        .where(
+          and(
+            eq(supplierInvoiceSettlements.supplierInvoiceId, invoiceId),
+            ne(supplierInvoiceSettlements.status, "rejected")
+          )
+        );
+
+      // Même référence et même montant : c'est la même saisie rejouée (double
+      // clic, retry réseau). On rend le règlement existant, sans doublon.
+      const sameReference = activeSettlements.find((s) => s.paymentReference.trim() === paymentReference);
+      if (sameReference) {
+        if (Math.abs(this.num(sameReference.amount) - amount) < 0.005) {
+          return { settlement: sameReference, invoice, replayed: true };
+        }
+        throw new AppError(409, `La référence ${paymentReference} est déjà utilisée pour un autre règlement de cette facture.`);
+      }
+
+      // Le solde de la facture ne baisse qu'au rapprochement bancaire : les
+      // règlements saisis en attente de rapprochement sont déduits ici.
+      const totalInvoice = this.num(invoice.totalTTC || invoice.totalAmount);
+      const currentBalance = Math.max(this.num(invoice.balance || totalInvoice), 0);
+      const awaitingReconciliation = activeSettlements
+        .filter((s) => s.status === "recorded")
+        .reduce((sum, s) => sum + this.num(s.amount), 0);
+      const remaining = Math.max(currentBalance - awaitingReconciliation, 0);
+
+      if (amount - remaining > 0.00001) {
+        throw new AppError(
+          409,
+          awaitingReconciliation > 0
+            ? `Montant supérieur au reste à régler (${remaining.toFixed(2)} FCFA, règlements en attente de rapprochement déduits).`
+            : `Montant supérieur au solde restant (${remaining.toFixed(2)} FCFA).`
+        );
+      }
+
+      const [settlement] = await tx
+        .insert(supplierInvoiceSettlements)
+        .values({
+          supplierInvoiceId: invoiceId,
+          amount: String(amount),
+          paymentMethod: data.paymentMethod as any,
+          paymentReference,
+          paymentDate: data.paymentDate,
+          valueDate: data.valueDate || null,
+          treasuryAccount: data.treasuryAccount || null,
+          proofReference: normalizedProofReference,
+          status: "recorded",
+          recordedBy,
+          notes: data.notes || null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      return { settlement, invoice, replayed: false };
+    });
   }
 
   async reconcileInvoiceSettlement(
@@ -732,13 +776,16 @@ export class ThreeWayMatchingService {
       .limit(1);
 
     if (!settlement) {
-      throw new Error("Règlement introuvable");
+      throw new AppError(404, "Ce règlement n'existe plus.");
     }
 
-    if (settlement.status !== "recorded") {
-      throw new Error("Seuls les règlements saisis peuvent être rapprochés");
+    if (settlement.status === "rejected") {
+      throw new AppError(409, "Un règlement rejeté ne peut pas être rapproché.");
     }
 
+    // Compare-and-set : seul le passage recorded -> reconciled écrit. Un second
+    // rapprochement (double clic) trouve le règlement déjà rapproché et rend
+    // l'état courant au lieu d'une erreur.
     const [updatedSettlement] = await db
       .update(supplierInvoiceSettlements)
       .set({
@@ -748,13 +795,35 @@ export class ThreeWayMatchingService {
         reconciliationNote: reconciliationNote || null,
         updatedAt: new Date(),
       })
-      .where(eq(supplierInvoiceSettlements.id, settlementId))
+      .where(
+        and(
+          eq(supplierInvoiceSettlements.id, settlementId),
+          eq(supplierInvoiceSettlements.status, "recorded")
+        )
+      )
       .returning();
 
-    const updatedInvoice = await this.syncInvoiceFromReconciledSettlements(invoiceId, reconciledBy);
+    let current = updatedSettlement;
+    if (!current) {
+      [current] = await db
+        .select()
+        .from(supplierInvoiceSettlements)
+        .where(eq(supplierInvoiceSettlements.id, settlementId))
+        .limit(1);
+      if (current?.status !== "reconciled") {
+        throw new AppError(409, "Ce règlement a été modifié entre-temps. Rechargez la page puis réessayez.");
+      }
+    }
+
+    // Recalcul idempotent du solde ; sur un rejeu, il répare aussi une
+    // synchronisation interrompue. L'auteur du paiement reste le premier.
+    const updatedInvoice = await this.syncInvoiceFromReconciledSettlements(
+      invoiceId,
+      current.reconciledBy ?? reconciledBy
+    );
 
     return {
-      settlement: updatedSettlement,
+      settlement: current,
       invoice: updatedInvoice,
     };
   }

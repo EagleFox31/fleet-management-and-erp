@@ -496,3 +496,30 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Un `catch` ne renvoie jamais `error.message` : une erreur métier connue devient une `AppError` avec son statut.
+
+## 2026-10-29 - Règlement fournisseur : facture payable deux fois
+
+### Constat
+- `POST /api/supplier-invoices/:id/settlements` acceptait deux règlements du montant total sur la même facture : double clic, retry réseau ou deux onglets.
+- Un règlement saisi mais pas encore rapproché n'était pas déduit : 100 000 saisis sur 119 250, un second de 20 000 passait.
+- Un second rapprochement du même règlement renvoyait 500 avec le texte de l'erreur ; toute erreur du service sortait en 500 avec `details: error.message`.
+
+### Cause racine
+- Le contrôle « montant <= solde » lisait `invoice.balance`, qui ne baisse qu'au rapprochement bancaire.
+- Lecture puis insertion sans verrou ni transaction : deux saisies simultanées voyaient le même solde.
+- Aucune clé d'idempotence : la référence de paiement n'était pas comparée aux règlements existants.
+- Classification : course critique (T7) + règle métier sur un état incomplet + fuite de détail technique.
+
+### Résolution
+- `recordInvoiceSettlement` : transaction, verrou `FOR UPDATE` sur la facture ; même référence et même montant -> règlement existant rendu (`replayed`) ; même référence, autre montant -> 409 ; reste à régler = solde - règlements saisis non rapprochés.
+- `reconcileInvoiceSettlement` : compare-and-set `recorded -> reconciled` ; un rejeu rend l'état courant et resynchronise le solde (idempotent).
+- `markInvoiceAsPaid` (route legacy) : retour immédiat si la facture est déjà payée.
+- Route : rejeu -> 200 « Ce règlement était déjà enregistré. », sans diffusion WebSocket, justificatif téléversé supprimé ; erreurs -> `next(error)` (`AppError` 400/404/409).
+
+### Prévention (vérifiable)
+- `tests/integration/supplier-settlement-idempotence.test.ts` : rejeu, saisies simultanées (même référence et références différentes), règlement en attente déduit, référence réutilisée, double rapprochement, facture non approuvée (7 cas, 6 rouges avant correctif).
+- `tests/contract/supplier-settlement-idempotence.contract.test.ts` : 201 puis 200 même id, un seul justificatif sur disque, 409 lisible au contrat, double rapprochement 200/200 (2 rouges sur 3 avant correctif).
+
+### Règle Projet (obligatoire)
+- Un contrôle de plafond (montant, quantité) compte aussi les opérations en attente, et se fait sous verrou dans la même transaction que l'écriture.
+- Une saisie financière a une clé d'idempotence métier (ici la référence de paiement) : le rejeu rend l'existant, il n'écrit pas.
