@@ -1,8 +1,17 @@
-import { db } from "../db";
+import { db, type DbExecutor, type DbTransaction } from "../db";
 import { partRequirements, parts, vehicles, users, partsStockMovements, purchaseOrderLines, purchaseOrders } from "@shared/schema";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import type { PartRequirement, InsertPartRequirement } from "@shared/schema";
 import { PartRequirementWorkflow, type PartRequirementStatus } from "./part-requirements-workflow";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("part-requirements");
+
+
+export const STALE_STATUS_ERROR = "La demande a déjà changé de statut. Rechargez la page.";
+
+/** Annule la transaction quand une autre requête a déjà fait passer la demande. */
+class StaleStatusError extends Error {}
 
 export class PartRequirementsService {
   private appendAuditNote(existing: string | null | undefined, note: string): string {
@@ -104,7 +113,7 @@ export class PartRequirementsService {
       const [enrichedRequirement] = await this.attachPurchaseOrderContext([requirement]);
       return enrichedRequirement as (PartRequirement & { requesterRole?: string | null }) | undefined;
     } catch (error) {
-      console.error('Error getting part requirement:', error);
+      log.error({ err: error }, 'Error getting part requirement');
       return undefined;
     }
   }
@@ -159,10 +168,10 @@ export class PartRequirementsService {
 
       const enrichedRequirements = await this.attachPurchaseOrderContext(requirements as any[]);
 
-      console.log(`Found ${enrichedRequirements.length} part requirements`);
+      log.debug(`Found ${enrichedRequirements.length} part requirements`);
       return enrichedRequirements as any;
     } catch (error) {
-      console.error('Error getting part requirements:', error);
+      log.error({ err: error }, 'Error getting part requirements');
       return [];
     }
   }
@@ -182,7 +191,7 @@ export class PartRequirementsService {
         if (part && part.unitPrice) {
           const unitPrice = parseFloat(part.unitPrice);
           estimatedCost = (unitPrice * requirement.quantityNeeded).toString();
-          console.log(`Auto-calculated estimated cost: ${unitPrice} x ${requirement.quantityNeeded} = ${estimatedCost} XAF`);
+          log.debug(`Auto-calculated estimated cost: ${unitPrice} x ${requirement.quantityNeeded} = ${estimatedCost} XAF`);
         }
       }
 
@@ -195,7 +204,7 @@ export class PartRequirementsService {
         .returning();
       return newRequirement;
     } catch (error) {
-      console.error('Error creating part requirement:', error);
+      log.error({ err: error }, 'Error creating part requirement');
       throw new Error('Erreur lors de la création de la demande');
     }
   }
@@ -209,6 +218,12 @@ export class PartRequirementsService {
       emergencyOverrideReason?: string;
       /** Motif de sortie exceptionnelle (chef d'atelier, magasin fermé). */
       overrideIssueReason?: string;
+      /**
+       * Effet métier de la transition (ex. sortie de stock vers l'OT), exécuté
+       * dans la même transaction : il ne tourne qu'une fois, et son échec
+       * annule le changement de statut.
+       */
+      onTransition?: (tx: DbTransaction, updated: PartRequirement) => Promise<void>;
     }
   ): Promise<{
     success: boolean;
@@ -321,69 +336,92 @@ export class PartRequirementsService {
           if (part && part.unitPrice) {
             const unitPrice = parseFloat(part.unitPrice);
             updateData.estimatedCost = (unitPrice * quantityNeeded).toString();
-            console.log(`Auto-recalculated estimated cost: ${unitPrice} x ${quantityNeeded} = ${updateData.estimatedCost} XAF`);
+            log.debug(`Auto-recalculated estimated cost: ${unitPrice} x ${quantityNeeded} = ${updateData.estimatedCost} XAF`);
           }
         }
       }
 
-      // Si le statut change vers "received", mettre à jour le stock
-      if (requirement.status === 'received' && current.status !== 'received') {
-        if (!updateData.actualDeliveryDate) {
-          updateData.actualDeliveryDate = this.getTodayLocalDate();
-        }
-        await this.handlePartDelivery(current);
-      }
-      
-      // Gestion de la réception partielle
-      if (requirement.status === 'partially_received' && current.status !== 'partially_received') {
-        await this.handlePartialDelivery(current, requirement.quantityNeeded);
+      const statusChanges = Boolean(requirement.status && requirement.status !== current.status);
+
+      if (requirement.status === 'received' && statusChanges && !updateData.actualDeliveryDate) {
+        updateData.actualDeliveryDate = this.getTodayLocalDate();
       }
 
-      const [updatedRequirement] = await db
-        .update(partRequirements)
-        .set({
-          ...updateData,
-          updatedAt: new Date()
-        })
-        .where(eq(partRequirements.id, id))
-        .returning();
-      
+      if (!statusChanges) {
+        const [updatedRequirement] = await db
+          .update(partRequirements)
+          .set({ ...updateData, updatedAt: new Date() })
+          .where(eq(partRequirements.id, id))
+          .returning();
+        return { success: true, data: updatedRequirement, overrideApplied };
+      }
+
+      // Compare-and-set : la transition ne s'applique que si le statut lu est
+      // toujours celui en base. Deux requêtes simultanées ne peuvent donc pas
+      // appliquer deux fois l'effet de stock.
+      const updatedRequirement = await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(partRequirements)
+          .set({ ...updateData, updatedAt: new Date() })
+          .where(and(eq(partRequirements.id, id), eq(partRequirements.status, current.status)))
+          .returning();
+        if (!updated) throw new StaleStatusError();
+
+        const actorId = currentUserId ?? current.requestedBy;
+        if (requirement.status === 'received') {
+          await this.handlePartDelivery(tx, current, actorId);
+        }
+        if (requirement.status === 'partially_received') {
+          await this.handlePartialDelivery(tx, current, actorId, requirement.quantityNeeded);
+        }
+        if (options?.onTransition) {
+          await options.onTransition(tx, updated);
+        }
+        return updated;
+      });
+
       return { success: true, data: updatedRequirement, overrideApplied };
     } catch (error) {
-      console.error('Error updating part requirement:', error);
-      return { success: false, error: 'Erreur lors de la mise à jour de la demande' };
+      if (error instanceof StaleStatusError) {
+        log.info({ requirementId: id, targetStatus: requirement.status, userId: currentUserId }, 'transition ignorée : statut déjà modifié par une autre requête');
+        return { success: false, error: STALE_STATUS_ERROR };
+      }
+      // Le détail technique reste dans les logs ; l'écran reçoit une phrase.
+      log.error({ err: error, requirementId: id, targetStatus: requirement.status, userId: currentUserId }, 'mise à jour de la demande de pièce en échec');
+      return { success: false, error: "La demande n'a pas pu être mise à jour. Réessayez dans un instant." };
     }
   }
 
-  private async handlePartDelivery(requirement: PartRequirement): Promise<void> {
+  /** Incrémente le stock et retourne [avant, après], lus atomiquement. */
+  private async incrementStock(executor: DbExecutor, partId: number, quantity: number): Promise<[number, number]> {
+    const [row] = await executor
+      .update(parts)
+      .set({ quantity: sql`${parts.quantity} + ${quantity}`, updatedAt: new Date() })
+      .where(eq(parts.id, partId))
+      .returning({ quantity: parts.quantity });
+    const newStock = row?.quantity ?? quantity;
+    return [newStock - quantity, newStock];
+  }
+
+  private async handlePartDelivery(
+    executor: DbExecutor,
+    requirement: PartRequirement,
+    actorId: number | null,
+  ): Promise<void> {
     try {
       if (!requirement.partId || !requirement.quantityNeeded) {
-        console.error('Missing partId or quantityNeeded for delivery handling');
+        log.warn({ requirementId: requirement.id }, 'Missing partId or quantityNeeded for delivery handling');
         return;
       }
 
-      console.log(`Handling delivery for part ${requirement.partId}, quantity: ${requirement.quantityNeeded}`);
-
-      // Récupérer le stock actuel avant mise à jour
-      const [currentPart] = await db
-        .select({ quantity: parts.quantity })
-        .from(parts)
-        .where(eq(parts.id, requirement.partId));
-      
-      const previousStock = currentPart?.quantity || 0;
-
-      // Mettre à jour le stock de la pièce
-      await db
-        .update(parts)
-        .set({
-          quantity: sql`quantity + ${requirement.quantityNeeded}`
-        })
-        .where(eq(parts.id, requirement.partId));
-
-      const newStock = previousStock + requirement.quantityNeeded;
+      const [previousStock, newStock] = await this.incrementStock(
+        executor,
+        requirement.partId,
+        requirement.quantityNeeded,
+      );
 
       // Créer un mouvement de stock pour tracer l'entrée
-      await db.insert(partsStockMovements).values({
+      await executor.insert(partsStockMovements).values({
         partId: requirement.partId,
         movementType: 'in',
         quantity: requirement.quantityNeeded,
@@ -391,48 +429,36 @@ export class PartRequirementsService {
         newStock,
         reason: `Réception demande #${requirement.id}`,
         notes: `Réception complète pour la demande de pièce #${requirement.id}`,
-        createdBy: requirement.requestedBy
+        // L'acteur qui réceptionne, pas le demandeur (AGENTS.md §9).
+        createdBy: actorId
       });
-
-      console.log(`✅ Stock updated for part ${requirement.partId}: +${requirement.quantityNeeded} units`);
-
+      log.info(
+        { requirementId: requirement.id, partId: requirement.partId, quantity: requirement.quantityNeeded, previousStock, newStock, actorId },
+        'entrée en stock',
+      );
     } catch (error) {
-      console.error('Error handling part delivery:', error);
+      log.error({ err: error }, 'Error handling part delivery');
       throw error;
     }
   }
 
-  private async handlePartialDelivery(requirement: PartRequirement, receivedQuantity?: number): Promise<void> {
+  private async handlePartialDelivery(
+    executor: DbExecutor,
+    requirement: PartRequirement,
+    actorId: number | null,
+    receivedQuantity?: number,
+  ): Promise<void> {
     try {
       if (!requirement.partId) {
-        console.error('Missing partId for partial delivery handling');
+        log.warn({ requirementId: requirement.id }, 'Missing partId for partial delivery handling');
         return;
       }
 
       const quantity = receivedQuantity || Math.floor((requirement.quantityNeeded || 0) / 2);
-      
-      console.log(`Handling partial delivery for part ${requirement.partId}, quantity: ${quantity}`);
-
-      // Récupérer le stock actuel avant mise à jour
-      const [currentPart] = await db
-        .select({ quantity: parts.quantity })
-        .from(parts)
-        .where(eq(parts.id, requirement.partId));
-      
-      const previousStock = currentPart?.quantity || 0;
-
-      // Mettre à jour le stock de la pièce
-      await db
-        .update(parts)
-        .set({
-          quantity: sql`quantity + ${quantity}`
-        })
-        .where(eq(parts.id, requirement.partId));
-
-      const newStock = previousStock + quantity;
+      const [previousStock, newStock] = await this.incrementStock(executor, requirement.partId, quantity);
 
       // Créer un mouvement de stock pour tracer l'entrée partielle
-      await db.insert(partsStockMovements).values({
+      await executor.insert(partsStockMovements).values({
         partId: requirement.partId,
         movementType: 'in',
         quantity: quantity,
@@ -440,13 +466,14 @@ export class PartRequirementsService {
         newStock,
         reason: `Réception partielle demande #${requirement.id}`,
         notes: `Réception partielle: ${quantity} sur ${requirement.quantityNeeded} demandées`,
-        createdBy: requirement.requestedBy
+        createdBy: actorId
       });
-
-      console.log(`✅ Partial stock updated for part ${requirement.partId}: +${quantity} units`);
-
+      log.info(
+        { requirementId: requirement.id, partId: requirement.partId, quantity, previousStock, newStock, actorId },
+        'entrée en stock partielle',
+      );
     } catch (error) {
-      console.error('Error handling partial delivery:', error);
+      log.error({ err: error }, 'Error handling partial delivery');
       throw error;
     }
   }
@@ -456,7 +483,7 @@ export class PartRequirementsService {
       await db.delete(partRequirements).where(eq(partRequirements.id, id));
       return true;
     } catch (error) {
-      console.error('Error deleting part requirement:', error);
+      log.error({ err: error }, 'Error deleting part requirement');
       return false;
     }
   }
@@ -507,7 +534,7 @@ export class PartRequirementsService {
 
       return (await this.attachPurchaseOrderContext(requirements as any[])) as any;
     } catch (error) {
-      console.error('Error getting requirements by part:', error);
+      log.error({ err: error }, 'Error getting requirements by part');
       return [];
     }
   }
@@ -554,7 +581,7 @@ export class PartRequirementsService {
       
       return partRequestMap;
     } catch (error) {
-      console.error('Error getting active requirements by part:', error);
+      log.error({ err: error }, 'Error getting active requirements by part');
       return new Map();
     }
   }

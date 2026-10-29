@@ -1,6 +1,8 @@
 import { eq, and, or, desc, asc, sql, like, gte, lte, isNull, ilike, count, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { db } from "./db";
+import { db, type DbExecutor } from "./db";
+import { AppError, isAppError } from "./lib/app-error";
+import { moduleLogger } from "./lib/logger";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
 import {
@@ -21,6 +23,15 @@ import {
 import { describeStatusChange } from "@shared/constants/vehicle-status";
 
 type StockMovementType = "in" | "out" | "adjustment" | "initial";
+
+const storageLog = moduleLogger("storage");
+
+export type StockWriteOptions = {
+  /** Transaction en cours : le mouvement est annulé avec elle. */
+  executor?: DbExecutor;
+  /** Refuser une sortie qui rendrait le stock négatif (contrôle atomique). */
+  requireAvailable?: boolean;
+};
 type FleetStatsSnapshot = {
   operational: number;
   maintenance: number;
@@ -208,7 +219,7 @@ export interface IStorage {
   // Parts used methods
   getAllPartsUsed(): Promise<PartUsed[]>;
   getPartsUsedForWorkOrder(workOrderId: number): Promise<PartUsed[]>;
-  addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number): Promise<PartUsed>;
+  addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number, options?: StockWriteOptions): Promise<PartUsed>;
   updatePartUsed(id: number, partUsed: Partial<InsertPartUsed>): Promise<PartUsed | undefined>;
   removePartFromWorkOrder(id: number, actorUserId?: number): Promise<boolean>;
   
@@ -216,8 +227,8 @@ export interface IStorage {
   getPartStockHistory(partId: number): Promise<PartStockHistoryItem[]>;
   getPartWorkOrders(partId: number): Promise<PartWorkOrderItem[]>;
   getPartUsageHistory(partId: number): Promise<PartUsageHistoryItem[]>;
-  recordStockMovement(partId: number, movementType: StockMovementType, quantity: number, workOrderId?: number, reason?: string, createdBy?: number): Promise<void>;
-  
+  recordStockMovement(partId: number, movementType: StockMovementType, quantity: number, workOrderId?: number, reason?: string, createdBy?: number, options?: StockWriteOptions): Promise<void>;
+
   // Fuel records methods
   getFuelRecord(id: number): Promise<FuelRecord | undefined>;
   getFuelRecordsByVehicleId(vehicleId: number): Promise<FuelRecord[]>;
@@ -1671,10 +1682,11 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number): Promise<PartUsed> {
+  async addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number, options: StockWriteOptions = {}): Promise<PartUsed> {
+    const executor = options.executor ?? db;
     try {
-      const [newPartUsed] = await db.insert(partsUsed).values(partUsed).returning();
-      
+      const [newPartUsed] = await executor.insert(partsUsed).values(partUsed).returning();
+
       const quantity = partUsed.quantity ?? 1;
 
       // Enregistrer le mouvement de stock sortant
@@ -1684,12 +1696,14 @@ export class DatabaseStorage implements IStorage {
         quantity,
         partUsed.workOrderId,
         'Utilisé dans ordre de travail',
-        actorUserId
+        actorUserId,
+        options
       );
-      
+
       return newPartUsed;
     } catch (error) {
-      console.error('Error adding part to work order:', error);
+      if (isAppError(error)) throw error;
+      storageLog.error({ err: error, workOrderId: partUsed.workOrderId, partId: partUsed.partId }, "ajout de pièce à l'OT en échec");
       throw new Error('Erreur lors de l\'ajout de la pièce à l\'ordre de travail');
     }
   }
@@ -1853,35 +1867,43 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async recordStockMovement(partId: number, movementType: StockMovementType, quantity: number, workOrderId?: number, reason?: string, createdBy?: number): Promise<void> {
+  async recordStockMovement(partId: number, movementType: StockMovementType, quantity: number, workOrderId?: number, reason?: string, createdBy?: number, options: StockWriteOptions = {}): Promise<void> {
+    const executor = options.executor ?? db;
     try {
       // Récupérer le stock actuel de la pièce
-      const [currentPart] = await db.select().from(parts).where(eq(parts.id, partId));
+      const [currentPart] = await executor.select().from(parts).where(eq(parts.id, partId));
       if (!currentPart) {
-        throw new Error('Pièce non trouvée');
+        throw new AppError(404, 'Pièce introuvable dans le stock');
       }
 
-      const previousStock = currentPart.quantity;
+      let previousStock = currentPart.quantity;
       let newStock = previousStock;
 
-      // Calculer le nouveau stock selon le type de mouvement
-      switch (movementType) {
-        case 'in':
-          newStock = previousStock + quantity;
-          break;
-        case 'out':
-          newStock = previousStock - quantity;
-          break;
-        case 'adjustment':
-          newStock = quantity; // Ajustement direct au stock
-          break;
-        case 'initial':
-          newStock = quantity; // Stock initial
-          break;
+      if (movementType === 'in' || movementType === 'out') {
+        // Écriture relative et atomique : une lecture puis une écriture absolue
+        // perdait l'une de deux mises à jour simultanées sur la même pièce.
+        const delta = movementType === 'in' ? quantity : -quantity;
+        const guard = movementType === 'out' && options.requireAvailable
+          ? and(eq(parts.id, partId), gte(parts.quantity, quantity))
+          : eq(parts.id, partId);
+        const [row] = await executor
+          .update(parts)
+          .set({ quantity: sql`${parts.quantity} + ${delta}`, updatedAt: new Date() })
+          .where(guard)
+          .returning({ quantity: parts.quantity });
+        if (!row) {
+          throw new AppError(409, 'Stock insuffisant : la pièce vient d\'être sortie par une autre opération. Rechargez la page.');
+        }
+        newStock = row.quantity;
+        previousStock = newStock - delta;
+      } else {
+        // 'adjustment' et 'initial' fixent la valeur absolue, par définition.
+        newStock = quantity;
+        await executor.update(parts).set({ quantity: newStock, updatedAt: new Date() }).where(eq(parts.id, partId));
       }
 
       // Enregistrer le mouvement de stock
-      await db.insert(partsStockMovements).values({
+      await executor.insert(partsStockMovements).values({
         partId,
         movementType,
         quantity: movementType === 'adjustment' || movementType === 'initial' ? newStock - previousStock : quantity,
@@ -1892,15 +1914,11 @@ export class DatabaseStorage implements IStorage {
         createdBy
       });
 
-      // Mettre à jour le stock de la pièce
-      await db.update(parts).set({ 
-        quantity: newStock 
-      }).where(eq(parts.id, partId));
-
       // Vérifier et créer les alertes de stock automatiquement
       await this.checkAndCreateStockAlerts(partId, currentPart, newStock, previousStock);
     } catch (error) {
-      console.error('Error recording stock movement:', error);
+      if (isAppError(error)) throw error;
+      storageLog.error({ err: error, partId, movementType, quantity, workOrderId }, 'mouvement de stock en échec');
       throw new Error('Erreur lors de l\'enregistrement du mouvement de stock');
     }
   }

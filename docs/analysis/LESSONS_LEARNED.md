@@ -369,3 +369,46 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Un montant (prix, coût) imputé côté serveur se lit en base, jamais dans le corps de la requête.
+
+## 2026-10-29 - Sortie de stock vers l'OT : double sortie possible
+
+### Constat
+- `POST /api/work-orders/:id/part-requirements/:rid/issue` décrémentait le stock **avant** la transition `received -> issued`. Deux clics simultanés sortaient la pièce deux fois ; une transition refusée laissait le stock déjà décrémenté.
+- `recordStockMovement` lisait la quantité, la recalculait en JS puis l'écrivait : deux sorties concurrentes sur la même pièce perdaient une mise à jour.
+- Le mouvement de réception était attribué au demandeur, pas au magasinier (dette AGENTS §9).
+
+### Cause racine
+- Effet de bord exécuté hors de la transaction qui porte le changement de statut ; pas de garde de concurrence sur le statut ni sur la quantité.
+- Classification : condition de course + ordre des opérations.
+
+### Résolution
+- `updatePartRequirement` : compare-and-set `WHERE status = statut lu` en transaction ; hook `onTransition(tx)` pour l'effet métier, annulé avec la transition.
+- Stock : `quantity = quantity ± n RETURNING`, sortie gardée par `quantity >= n` (`requireAvailable`) ; mouvement attribué à l'acteur.
+
+### Prévention (vérifiable)
+- `tests/integration/part-requirements-idempotence.test.ts` (réceptions et sorties concurrentes, rejeu, hook en échec).
+- `tests/contract/error-contract-and-issue-idempotence.contract.test.ts` (double POST → un 200, un refus, stock décrémenté une fois ; stock insuffisant → demande reste `received`).
+
+### Règle Projet (obligatoire)
+- Toute transition qui déplace du stock ou de l'argent passe par `onTransition` dans la transaction du statut, jamais avant.
+
+## 2026-10-29 - Erreurs techniques affichées, logs supprimés
+
+### Constat
+- Des routes renvoyaient `error.message` (SQL, stack, messages Zod anglais) ; l'UI l'affichait tel quel, parfois en JSON.
+- Lors d'un correctif, des `console.log` ont été supprimés au lieu d'être migrés : les devs perdaient la trace.
+
+### Cause racine
+- Pas de contrat d'erreur partagé ni de logger : chaque route improvisait son format et son journal.
+- Classification : absence de contrat transverse.
+
+### Résolution
+- Contrat `ApiErrorBody` (`shared/errors.ts`) ; `server/middleware/error-handler.ts` (requestId, journal d'accès, garde de sortie qui normalise toute réponse ≥ 400, 5xx = message générique + référence) ; `AppError` pour les erreurs métier.
+- Logger pino `server/lib/logger.ts` (`moduleLogger`), secrets masqués ; `client/src/lib/logger.ts` côté navigateur ; `userMessageOf` pour tout affichage.
+
+### Prévention (vérifiable)
+- `tests/unit/server/error-handler.test.ts`, `tests/unit/client/api-error.test.ts`, contrat d'erreur dans `tests/contract/error-contract-and-issue-idempotence.contract.test.ts`.
+
+### Règle Projet (obligatoire)
+- Jamais `error.message` dans une réponse ou un toast ; le détail va au logger avec le `requestId`.
+- Un log ne se supprime pas : il se migre vers `moduleLogger` / `clientLogger`.

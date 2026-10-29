@@ -297,7 +297,29 @@ Notes :
   ajouter : créer un routeur dans `server/api/` et le monter dans `server/api/index.ts`.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
-- Traçabilité stock ouverte : `server/services/part-requirements-service.ts`
-  attribue l'entrée en stock à `requirement.requestedBy` (le demandeur) au lieu
-  du magasinier qui réceptionne. Correction attendue : champ `receivedBy`.
+- Traçabilité stock partielle : le mouvement d'entrée en stock est attribué au
+  magasinier qui réceptionne (corrigé le 29 octobre 2026), mais la demande
+  elle-même ne porte pas encore de champ `receivedBy`.
   Voir `docs/analysis/MATRICE_ROLES_GAP.md`.
+- Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
+  quand on touche un fichier, ne jamais les supprimer (§10).
+
+---
+
+## 10. Erreurs et logs
+
+Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, errors? }`).
+
+- **Serveur** : lever `AppError(status, messageUtilisateur, { cause })`
+  (`server/lib/app-error.ts`) ; le gestionnaire central
+  (`server/middleware/error-handler.ts`) fait le reste. Toute réponse ≥ 400 est
+  normalisée, une 5xx devient « message générique + Référence : <requestId> ».
+- **Jamais** `error.message`, SQL, stack ni JSON dans une réponse ou un toast.
+- **Logs** : `moduleLogger("<module>")` (`server/lib/logger.ts`, pino) avec
+  `{ err, requestId: req.requestId, ... }` ; `clientLogger` côté navigateur.
+  Pas de `console.*` dans du code neuf. Un log ne se supprime pas, il se migre.
+- **Client** : afficher `userMessageOf(error, repli)` (`client/src/lib/api-error.ts`).
+- Retrouver une erreur signalée par un utilisateur : chercher sa référence
+  (`requestId`) dans les logs.
+- Transition qui déplace du stock : effet dans `onTransition(tx)` de
+  `updatePartRequirement`, jamais avant la transition.

@@ -119,7 +119,15 @@ router.post("/", isPartRequester, async (req, res) => {
 router.patch("/:id", isInventoryManager, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { emergencyOverrideReason, ...requirementPayload } = req.body ?? {};
+    // Champs tenus par le serveur : jamais repris du corps (T4).
+    const {
+      emergencyOverrideReason,
+      id: _id,
+      requestedBy: _requestedBy,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      ...requirementPayload
+    } = req.body ?? {};
 
     if (isNaN(id)) {
       return res.status(400).json({ message: "ID de demande invalide" });

@@ -7,7 +7,11 @@ import {
   getPartRequirementProgressLabel,
 } from "@shared/constants/part-requirements";
 import { storage } from "../storage";
-import { partRequirementsService } from "../services/part-requirements-service";
+import { partRequirementsService, STALE_STATUS_ERROR } from "../services/part-requirements-service";
+import { isAppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("work-order-parts");
 import { partRequirements, parts, users } from "@shared/schema";
 import { alertService } from "../services/alert-service";
 
@@ -93,7 +97,7 @@ router.get("/:workOrderId/pending-part-requirements", authenticate, async (req, 
 
     return res.status(200).json(response);
   } catch (error) {
-    console.error("Get pending part requirements for work order error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get pending part requirements for work order error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -123,7 +127,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
     const requestedPartId = Number(req.body?.partId);
     const requestedQty = Number(req.body?.quantityNeeded ?? req.body?.quantity);
     const hasPartPayload = Number.isFinite(requestedPartId) && requestedPartId > 0;
-    console.log(
+    log.info(
       `[AWAITING_PARTS] OT #${workOrderId} - actor=${user?.username ?? "unknown"} role=${user?.role ?? "unknown"} partId=${hasPartPayload ? requestedPartId : "none"} qty=${Number.isFinite(requestedQty) ? requestedQty : "n/a"}`
     );
 
@@ -155,7 +159,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
       if (existingForWorkOrder) {
         linkedRequirement = await storage.getPartRequirement(existingForWorkOrder.id);
         usedExistingRequirement = true;
-        console.log(`[AWAITING_PARTS] Demande existante réutilisée #${existingForWorkOrder.id} pour OT #${workOrderId}`);
+        log.info(`[AWAITING_PARTS] Demande existante réutilisée #${existingForWorkOrder.id} pour OT #${workOrderId}`);
       } else {
         const urgencyFromBody = typeof req.body?.urgency === "string" ? req.body.urgency : null;
         const urgency =
@@ -188,7 +192,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
             `(besoin: ${quantityNeeded}, stock actuel: ${Number(part.quantity || 0)}).`,
         });
         linkedRequirement = await storage.getPartRequirement(createdRequirement.id);
-        console.log(`[AWAITING_PARTS] Nouvelle demande créée #${createdRequirement.id} pour OT #${workOrderId}`);
+        log.info(`[AWAITING_PARTS] Nouvelle demande créée #${createdRequirement.id} pour OT #${workOrderId}`);
       }
     }
 
@@ -248,7 +252,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
           : "OT en attente de pièces.",
     });
   } catch (error) {
-    console.error("Mark work order as awaiting parts error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Mark work order as awaiting parts error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -326,15 +330,8 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
     }
 
     const unitPrice = part.unitPrice ? String(part.unitPrice) : "0";
-    const partUsed = await storage.addPartToWorkOrder(
-      {
-        workOrderId,
-        partId: requirement.partId,
-        quantity: quantityNeeded,
-        unitPrice,
-      },
-      user?.id
-    );
+    const partId = requirement.partId;
+    let partUsed: Awaited<ReturnType<typeof storage.addPartToWorkOrder>> | null = null;
 
     const nowIso = new Date().toISOString();
     const auditLine = `[${nowIso}] Affectation OT #${workOrderId}: pièce sortie et ajoutée définitivement (${quantityNeeded} unité(s)).`;
@@ -348,16 +345,40 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
     const overrideIssueReason =
       typeof req.body?.overrideReason === "string" ? req.body.overrideReason : undefined;
 
+    //
+    // La sortie de stock est l'effet de la transition, dans la même
+    // transaction : elle ne s'exécute que si la demande passe réellement de
+    // `received` à `issued` (un double clic n'en fait qu'une), et un stock
+    // devenu insuffisant entre-temps annule la transition.
+    let stockError: unknown = null;
     const issueResult = await partRequirementsService.updatePartRequirement(
       requirementId,
       { status: "issued", notes: nextNotes },
       String(user?.role || ""),
       user?.id,
-      { overrideIssueReason },
+      {
+        overrideIssueReason,
+        onTransition: async (tx) => {
+          try {
+            partUsed = await storage.addPartToWorkOrder(
+              { workOrderId, partId, quantity: quantityNeeded, unitPrice },
+              user?.id,
+              { executor: tx, requireAvailable: true },
+            );
+          } catch (error) {
+            stockError = error;
+            throw error;
+          }
+        },
+      },
     );
 
     if (!issueResult.success) {
-      return res.status(400).json({ message: issueResult.error });
+      if (isAppError(stockError)) {
+        return res.status(stockError.status).json({ message: stockError.message });
+      }
+      const status = issueResult.error === STALE_STATUS_ERROR ? 409 : 400;
+      return res.status(status).json({ message: issueResult.error });
     }
 
     const updatedRequirement = issueResult.data;
@@ -377,7 +398,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
           issuedByName: (user as any)?.name ?? null,
         })
         .catch((error) => {
-          console.error("Alerte sortie exceptionnelle non envoyée:", error);
+          log.error({ err: error, requirementId, workOrderId }, "alerte de sortie exceptionnelle non envoyée");
         });
     }
 
@@ -432,7 +453,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         : "Pièce ajoutée définitivement à l'OT.",
     });
   } catch (error) {
-    console.error("Issue part requirement to work order error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Issue part requirement to work order error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

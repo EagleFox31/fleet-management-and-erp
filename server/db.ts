@@ -31,3 +31,7 @@ const listenerConnectionString =
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const listenerPool = new Pool({ connectionString: listenerConnectionString });
 export const db = drizzle(pool, { schema });
+
+/** Transaction Drizzle, et « base ou transaction » pour les écritures composables. */
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type DbExecutor = typeof db | DbTransaction;
