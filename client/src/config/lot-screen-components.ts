@@ -10,7 +10,7 @@ import type { LotScreen } from "@/config/lot-screens";
 import LockedUsersPage from "@/pages/admin/locked-users";
 import AuditLogsPage from "@/pages/admin/audit-logs";
 import VehicleDocumentTypesPage from "@/pages/admin/vehicle-document-types";
-import {
+import {
   BackupsScreen,
   IncidentDeclareScreen,
   IncidentsListScreen,
@@ -29,4 +29,9 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "admin-audit-logs": AuditLogsPage,
   "admin-vehicle-document-types": VehicleDocumentTypesPage,
   "admin-backups": BackupsScreen,
+  "incident-declare": IncidentDeclareScreen,
+  "incidents-list": IncidentsListScreen,
+  "tire-movements": TireMovementsScreen,
+  "time-tracking": TimeTrackingScreen,
+  "pending-invoices": PendingInvoicesScreen,
 };

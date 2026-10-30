@@ -7,7 +7,9 @@ import { IncidentList } from "@/components/incidents/incident-list";
 import { TireMovementsTable } from "@/components/inventory/tire-movements-table";
 import { TimeGrid } from "@/components/time-tracking/time-grid";
 import { Input } from "@/components/ui/input";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useAuth } from "@/hooks/useAuth";
+import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -40,13 +42,26 @@ export function TimeTrackingScreen() {
   );
 }
 
-type VehicleOption = { id: number; registrationNumber?: string; registration?: string };
-
 export function IncidentDeclareScreen() {
-  const vehicles = useQuery<VehicleOption[]>({ queryKey: ["/api/vehicles"] });
+  const { user } = useAuth();
+  const isDriver = user?.role === "driver";
+  // Chauffeur : ses véhicules via ses missions ; administrateur : la flotte.
+  const me = useQuery<unknown>({ queryKey: ["/api/drivers/me"], enabled: isDriver });
+  const fleet = useQuery<unknown>({ queryKey: ["/api/vehicles"], enabled: !isDriver });
+  const source = isDriver ? me : fleet;
+  const list = isDriver
+    ? driverVehicleOptions(me.data as Parameters<typeof driverVehicleOptions>[0])
+    : fleetVehicleOptions(fleet.data);
   const [chosen, setChosen] = useState<number | null>(null);
-  const list = Array.isArray(vehicles.data) ? vehicles.data : [];
-  const vehicleId = chosen ?? list[0]?.id;
+  const vehicleId = list.some((v) => v.id === chosen) ? chosen : list[0]?.id;
+
+  if (source.isLoading || source.isError) {
+    return (
+      <div className="mx-auto max-w-xl p-4">
+        <LoadingError isLoading={source.isLoading} error={source.error} onRetry={() => source.refetch()} />
+      </div>
+    );
+  }
   return (
     <div className="mx-auto max-w-xl space-y-4 p-4">
       {list.length > 1 && (
@@ -55,10 +70,11 @@ export function IncidentDeclareScreen() {
           value={vehicleId ?? ""}
           onChange={(e) => setChosen(Number(e.target.value))}
           aria-label="Véhicule"
+          data-testid="select-incident-vehicle"
         >
           {list.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.registrationNumber ?? v.registration ?? `Véhicule ${v.id}`}
+              {v.label}
             </option>
           ))}
         </select>
@@ -66,7 +82,7 @@ export function IncidentDeclareScreen() {
       {vehicleId ? (
         <IncidentForm vehicleId={vehicleId} />
       ) : (
-        <p className="text-sm text-muted-foreground">Aucun véhicule affecté.</p>
+        <p className="text-sm text-muted-foreground" data-testid="incident-no-vehicle">Aucun véhicule affecté.</p>
       )}
     </div>
   );

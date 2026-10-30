@@ -1,6 +1,7 @@
 import { TriangleAlert } from "lucide-react";
 import { HeaderCard, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { INCIDENT_SEVERITY_LABELS, INCIDENT_STATUS_LABELS } from "@/components/incidents/incident-labels";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { formatDate } from "@/lib/utils";
 import { INCIDENTS_PATH, incidentsResponseSchema, type Incident } from "@shared/contracts/incidents";
@@ -36,14 +37,18 @@ export function IncidentList({ onRowClick }: { onRowClick?: (incident: Incident)
   return (
     <div className="space-y-4" data-testid="incident-list">
       <HeaderCard moduleLabel="Atelier" title="Pannes déclarées" icon={<TriangleAlert className="h-5 w-5" />} />
-      <PremiumDataTable
-        columns={columns}
-        rows={incidents.data ?? []}
-        rowKey={(i) => i.id}
-        onRowClick={onRowClick}
-        rowClassName={(i) => (i.severity === "high" && i.status === "open" ? "border-l-2 border-l-red-400 bg-red-50/30" : "")}
-        emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune panne déclarée.</p>}
-      />
+      {incidents.isLoading || incidents.isError ? (
+        <LoadingError isLoading={incidents.isLoading} error={incidents.error} onRetry={() => incidents.refetch()} />
+      ) : (
+        <PremiumDataTable
+          columns={columns}
+          rows={incidents.data ?? []}
+          rowKey={(i) => i.id}
+          onRowClick={onRowClick}
+          rowClassName={(i) => (i.severity === "high" && i.status === "open" ? "border-l-2 border-l-red-400 bg-red-50/30" : "")}
+          emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune panne déclarée.</p>}
+        />
+      )}
     </div>
   );
 }

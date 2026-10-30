@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CircleDot } from "lucide-react";
 import { HeaderCard, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { Input } from "@/components/ui/input";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { formatDate } from "@/lib/utils";
 import {
@@ -40,20 +41,24 @@ export function TireMovementsTable() {
   return (
     <div className="space-y-4" data-testid="tire-movements">
       <HeaderCard moduleLabel="Stock" title="Mouvements de pneus" icon={<CircleDot className="h-5 w-5" />} />
-      <PremiumDataTable
-        columns={columns}
-        rows={movements.data ?? []}
-        rowKey={(m, index) => `${m.tireId}-${m.at}-${m.kind}-${index}`}
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-            <label className="text-xs text-muted-foreground" htmlFor="tire-mv-from">Du</label>
-            <Input id="tire-mv-from" type="date" className="h-8 w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
-            <label className="text-xs text-muted-foreground" htmlFor="tire-mv-to">Au</label>
-            <Input id="tire-mv-to" type="date" className="h-8 w-40" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-        }
-        emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucun mouvement sur la période.</p>}
-      />
+      {movements.isError ? (
+        <LoadingError isLoading={false} error={movements.error} onRetry={() => movements.refetch()} />
+      ) : (
+        <PremiumDataTable
+          columns={columns}
+          rows={movements.data ?? []}
+          rowKey={(m, index) => `${m.tireId}-${m.at}-${m.kind}-${index}`}
+          toolbar={
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+              <label className="text-xs text-muted-foreground" htmlFor="tire-mv-from">Du</label>
+              <Input id="tire-mv-from" type="date" className="h-8 w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
+              <label className="text-xs text-muted-foreground" htmlFor="tire-mv-to">Au</label>
+              <Input id="tire-mv-to" type="date" className="h-8 w-40" value={to} onChange={(e) => setTo(e.target.value)} />
+            </div>
+          }
+          emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucun mouvement sur la période.</p>}
+        />
+      )}
     </div>
   );
 }

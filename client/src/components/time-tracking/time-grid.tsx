@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { HeaderCard, StatusMetricStrip } from "@/components/design-system";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
@@ -76,6 +77,9 @@ export function TimeGrid({ year, month, readOnly = false }: { year: number; mont
     if (changes.length > 0) submit(changes);
   };
 
+  const loadError = stats.error ?? entries.error;
+  const loading = stats.isLoading || entries.isLoading;
+
   const totals = TIME_CODES.map((code) => ({
     code,
     total: (stats.data ?? []).reduce((sum, person) => sum + (person.counts[code] ?? 0), 0),
@@ -88,7 +92,7 @@ export function TimeGrid({ year, month, readOnly = false }: { year: number; mont
         title={`Pointage ${pad(month)}/${year}`}
         icon={<CalendarCheck className="h-5 w-5" />}
         actions={
-          readOnly ? null : (
+          readOnly || loadError ? null : (
             <Button onClick={save} disabled={mutation.isPending || Object.keys(edits).length === 0} data-testid="button-save-time">
               <Save className="mr-2 h-4 w-4" />
               Enregistrer
@@ -96,64 +100,77 @@ export function TimeGrid({ year, month, readOnly = false }: { year: number; mont
           )
         }
       />
-      <StatusMetricStrip
-        items={totals.map((t) => ({ id: t.code, icon: <Clock className="h-4 w-4" />, label: `${t.code} · ${TIME_CODE_LABELS[t.code]}`, value: t.total }))}
-      />
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="min-w-full text-xs">
-          <thead>
-            <tr className="bg-muted/50">
-              <th className="sticky left-0 bg-muted/50 px-3 py-2 text-left">Chauffeur</th>
-              {days.map((d) => (
-                <th key={d} className="px-1 py-2 text-center font-medium">
-                  {d.slice(8)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(stats.data ?? []).map((person) => (
-              <tr key={person.userId} className="border-t">
-                <td className="sticky left-0 bg-background px-3 py-1.5 font-medium">{person.userName}</td>
-                {days.map((date) => {
-                  const key = cellKey(person.userId, date);
-                  const value = edits[key] ?? saved.get(key) ?? "";
-                  return (
-                    <td key={date} className="px-0.5 py-1 text-center">
-                      {readOnly ? (
-                        <span>{value || "—"}</span>
-                      ) : (
-                        <select
-                          className={`h-7 w-11 rounded border bg-background text-center ${edits[key] ? "border-primary" : ""}`}
-                          value={value}
-                          aria-label={`${person.userName}, jour ${date.slice(8)}`}
-                          onChange={(e) => {
-                            const next = e.target.value as TimeCode | "";
-                            setEdits((old) => {
-                              const copy = { ...old };
-                              if (next && next !== saved.get(key)) copy[key] = next;
-                              else delete copy[key];
-                              return copy;
-                            });
-                          }}
-                          data-testid={`cell-${person.userId}-${date}`}
-                        >
-                          <option value="">—</option>
-                          {TIME_CODES.map((code) => (
-                            <option key={code} value={code} title={TIME_CODE_LABELS[code]}>
-                              {code}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                  );
-                })}
+      {loading || loadError ? (
+        <LoadingError
+          isLoading={loading && !loadError}
+          error={loadError}
+          onRetry={() => {
+            void stats.refetch();
+            void entries.refetch();
+          }}
+        />
+      ) : (
+      <>
+        <StatusMetricStrip
+          items={totals.map((t) => ({ id: t.code, icon: <Clock className="h-4 w-4" />, label: `${t.code} · ${TIME_CODE_LABELS[t.code]}`, value: t.total }))}
+        />
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="sticky left-0 bg-muted/50 px-3 py-2 text-left">Chauffeur</th>
+                {days.map((d) => (
+                  <th key={d} className="px-1 py-2 text-center font-medium">
+                    {d.slice(8)}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {(stats.data ?? []).map((person) => (
+                <tr key={person.userId} className="border-t">
+                  <td className="sticky left-0 bg-background px-3 py-1.5 font-medium">{person.userName}</td>
+                  {days.map((date) => {
+                    const key = cellKey(person.userId, date);
+                    const value = edits[key] ?? saved.get(key) ?? "";
+                    return (
+                      <td key={date} className="px-0.5 py-1 text-center">
+                        {readOnly ? (
+                          <span>{value || "—"}</span>
+                        ) : (
+                          <select
+                            className={`h-7 w-11 rounded border bg-background text-center ${edits[key] ? "border-primary" : ""}`}
+                            value={value}
+                            aria-label={`${person.userName}, jour ${date.slice(8)}`}
+                            onChange={(e) => {
+                              const next = e.target.value as TimeCode | "";
+                              setEdits((old) => {
+                                const copy = { ...old };
+                                if (next && next !== saved.get(key)) copy[key] = next;
+                                else delete copy[key];
+                                return copy;
+                              });
+                            }}
+                            data-testid={`cell-${person.userId}-${date}`}
+                          >
+                            <option value="">—</option>
+                            {TIME_CODES.map((code) => (
+                              <option key={code} value={code} title={TIME_CODE_LABELS[code]}>
+                                {code}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+      )}
     </div>
   );
 }

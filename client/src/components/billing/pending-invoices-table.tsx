@@ -1,5 +1,6 @@
 import { Receipt } from "lucide-react";
 import { HeaderCard, PremiumDataTable, UrgencyBadge, type PremiumDataTableColumn } from "@/components/design-system";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { formatDate, formatPrice } from "@/lib/utils";
 import {
@@ -60,12 +61,16 @@ export function PendingInvoicesTable({ now }: { now?: Date }) {
   return (
     <div className="space-y-4" data-testid="pending-invoices">
       <HeaderCard moduleLabel="Facturation" title="Factures en attente" icon={<Receipt className="h-5 w-5" />} />
-      <PremiumDataTable
-        columns={columns}
-        rows={sortByAgeDesc(invoices.data ?? [])}
-        rowKey={(r) => r.clientId}
-        emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune facture en attente.</p>}
-      />
+      {invoices.isLoading || invoices.isError ? (
+        <LoadingError isLoading={invoices.isLoading} error={invoices.error} onRetry={() => invoices.refetch()} />
+      ) : (
+        <PremiumDataTable
+          columns={columns}
+          rows={sortByAgeDesc(invoices.data ?? [])}
+          rowKey={(r) => r.clientId}
+          emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune facture en attente.</p>}
+        />
+      )}
     </div>
   );
 }
