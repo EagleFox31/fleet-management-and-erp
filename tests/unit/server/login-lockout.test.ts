@@ -1,6 +1,7 @@
 import express from "express";
 import http from "node:http";
 import { describe, expect, it } from "vitest";
+import { errorHandler, errorResponseGuard } from "../../../server/middleware/error-handler";
 import { loginLockoutGuard } from "../../../server/middleware/login-lockout-guard";
 import {
   EMPTY_LOCK_STATE,
@@ -61,7 +62,9 @@ describe("loginLockoutGuard", () => {
     const store = new MemoryLockoutStore();
     const app = express();
     app.use(express.json());
+    app.use(errorResponseGuard);
     app.post("/login", loginLockoutGuard({ store }), (req, res) => res.status(req.body.password === "ok" ? 200 : 401).json({}));
+    app.use(errorHandler);
     const server = app.listen(0);
     const port = (server.address() as any).port;
     const settle = () => new Promise((r) => setTimeout(r, 25));
