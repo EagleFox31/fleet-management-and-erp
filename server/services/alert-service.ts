@@ -1,3 +1,5 @@
+import type { NotificationTopic } from "@shared/contracts/notification-settings";
+import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
 import { db } from "../db";
@@ -624,6 +626,8 @@ export class AlertService {
     /** Utilisateur à ne pas notifier: l'auteur du geste qui déclenche l'alerte. */
     excludeUserId?: number | null;
     targetUserIds?: Array<number | null | undefined>;
+    /** Thème de notification (P-12) ; par défaut le type de l'alerte, qui est aussi un thème. */
+    topic?: NotificationTopic;
   }): Promise<void> {
     try {
       const tousLesDestinataires = await this.resolveRecipientUserIds(
@@ -635,9 +639,12 @@ export class AlertService {
 
       // Retirer l'auteur du geste: personne n'a besoin qu'on lui annonce ce
       // qu'il vient de faire, et une alerte non lue de plus dilue les vraies.
-      const recipientUserIds = alertData.excludeUserId
+      const sansAuteur = alertData.excludeUserId
         ? tousLesDestinataires.filter((userId) => userId !== alertData.excludeUserId)
         : tousLesDestinataires;
+      // Préférences (P-12): chacun peut couper un thème pour lui seul.
+      const topic: NotificationTopic = alertData.topic ?? alertData.type;
+      const recipientUserIds = await filterUsersByTopic(sansAuteur, topic);
 
       if (recipientUserIds.length === 0) {
         return;
@@ -675,6 +682,7 @@ export class AlertService {
           type: alertData.type,
           priority: alertData.priority,
           link: resolvedLink || undefined,
+          topic,
         });
 
         // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
