@@ -29,6 +29,16 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **RAIDER** : R/A règles et sink injectés ; I n/a ; D rien d'existant modifié ; E secrets masqués, panne d'audit journalisée sans casser la requête. 3 couches n/a.
 - **Reste / risques** : sink base, liste gelée des 8 motifs MUST, montage `apiRouter.use(auditWrites(AUDIT_CONFIG))` dans `server/api/index.ts` (à sol), test d'intégration.
 
+## 2026-10-30T14:10:00+01:00 — T-12 — Verrouillage de compte (logique pure et intercepteur)
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-12-verrouillage` (empilée sur T-14) · **Commit** : voir `git log`
+- **Statut** : en cours (magasin base et montage en attente de db-1 et sol)
+- **Quoi** : `nextLockState`, `isLocked`, `lockoutConfigFromEnv` (`LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_MINUTES`, défauts `LOCKOUT_DEFAULTS`), interface `LockoutStore` (+ `MemoryLockoutStore`), intercepteur `loginLockoutGuard` : 429 `RATE_LIMITED` avec `lockedUntil` avant la route, 401 incrémente et 2xx remet à zéro après la réponse. Compteur par nom normalisé, nom inconnu inclus.
+- **Comment** : `server/services/login-lockout-service.ts`, `server/middleware/login-lockout-guard.ts`. Build (rate-limiter-flexible écarté, plan §3). Sans `AppError.details` (T-08 absent) le corps 429 est écrit directement au format `lockedResponseSchema`.
+- **Pourquoi** : P-03, PR-06.
+- **Comment tester (QA)** : preuve automatisée `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/login-lockout.test.ts` → `4 passed` ; tsc 0 `error TS`. Manuel après montage : 5 mauvais mots de passe puis 6e essai → 429 avec `lockedUntil`.
+- **RAIDER** : R/A seuils par environnement, magasin injecté ; I un succès remet à zéro, verrou expiré repart de zéro ; D rien d'existant modifié ; E aucune fuite d'existence du compte. 3 couches n/a (pas de transition métier).
+- **Reste / risques** : `DbLockoutStore` (UPDATE ... RETURNING atomique, table de db-1, miroir `users.failed_login_count/locked_until`), `recordAudit` blocage/déblocage, montage, test d'intégration de concurrence, `express-rate-limit`.
 ## 2026-10-30T15:00:00+01:00 — T-14 — Sink base et liste gelée des motifs audités
 
 - **Agent** : be-1 · **Branche** : `lot/be/T-14-audit` (fusion de `origin/lot/db/T-07-schema`) · **Commit** : voir `git log`
@@ -39,3 +49,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : après montage, modifier un OT puis lire `activity_logs` : une ligne avec auteur, méthode, chemin. Preuve : `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/audit-config.test.ts` → 3 passed.
 - **RAIDER** : R/A configuration déclarative ; D rien d'existant modifié ; E panne d'écriture sans effet sur la requête.
 - **Reste / risques** : montage et `setAuditSink(dbAuditSink)` au démarrage (sol). Test d'intégration ajouté avec T-12 (même fichier de base).
+## 2026-10-30T16:10:00+01:00 — T-12/T-14 — Magasin en base, 429 via AppError, sink branché au démarrage
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-12-verrouillage` · **Commit** : voir `git log`
+- **Statut** : fait, hors montage du garde (sol)
+- **Quoi** : `DbLockoutStore` (INSERT ... ON CONFLICT atomique, miroir `users`, blocage audité une seule fois) ; le garde lève `AppError(429, details.lockedUntil)` ; `setAuditSink(dbAuditSink)` au démarrage dans `server/index.ts` ; correction de l'échappement `\d` dans `audit-config.ts`.
+- **Comment** : `server/services/login-lockout-db-store.ts`, `server/middleware/login-lockout-guard.ts`, `server/lib/audit-config.ts`, `server/index.ts`.
+- **Pourquoi** : P-03, PR-06, P-04, PR-07.
+- **Comment tester (QA)** : `tests/integration/login-lockout-db-store.test.ts` sous db-lock → 2 passed (10 échecs simultanés, expiration/reset) ; unitaires 7 passed ; tsc 0 error TS.
+- **RAIDER** : I upsert atomique, reset idempotent ; D contrat 429 inchangé ; E aucune fuite d'existence du compte.
+- **Reste / risques** : montage du garde par sol.

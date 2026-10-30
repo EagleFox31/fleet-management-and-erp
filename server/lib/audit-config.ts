@@ -3,7 +3,7 @@ import type { AuditConfig, AuditRule } from "../middleware/audit-writes";
 /** Regle pour une ressource : collection (creation) et element (+ sous-chemins) avec id numerique. */
 const resource = (segment: string, entityType: string): AuditRule[] => [
   { pattern: new RegExp(`^/${segment}$`), entityType },
-  { pattern: new RegExp(`^/${segment}/(\d+)(?:/.*)?$`), entityType },
+  { pattern: new RegExp(`^/${segment}/(\\d+)(?:/.*)?$`), entityType },
 ];
 
 /**
