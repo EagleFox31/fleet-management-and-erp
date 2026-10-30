@@ -26,3 +26,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - Pourquoi : consulter qui a fait quoi (P-04) sans acces base.
 - Preuve : `tests/contract/audit-logs.contract.test.ts` (3 verts : 401/403, filtres, masque, plage, pagination) ; tsc global a zero.
 - Reste : l'intercepteur `auditWrites` n'est pas monte ici (sol) ; le test insere ses lignes directement.
+
+## 2026-10-30T20:00:00+01:00 - T-16b - Upload des documents vehicule deplace dans server/api, type valide
+
+- **Agent** : api-3 (journal api-1) · **Branche** : `lot/api/T-16b-upload` · **Commit** : voir `git log` de la branche
+- **Statut** : fait, preuve de contrat partielle (voir Preuve)
+- **Quoi** : `POST /api/vehicles/:vehicleId/documents` deplace de `server/routes.ts` vers `server/api/vehicle-documents.routes.ts` ; le `type` doit etre un code actif de `vehicle_document_types`, sinon 400 « Type de document inconnu ou inactif. » et fichier supprime.
+- **Comment** : meme chemin, meme garde `isWorkshopManager`, meme multer (`uploadVehicleDocument`), memes champs, meme reponse 201 ; `console.*` remplace par `moduleLogger`, erreurs par `AppError` (les erreurs multer deviennent des messages francais). Handler supprime de `routes.ts` (suppression seule, accord de l'utilisateur) ; aucune autre declaration de la route.
+- **Pourquoi** : T-16 reste (validation a l'upload), sans aggraver la dette de `routes.ts` (AGENTS §9). Les anciens documents au type hors liste restent lisibles.
+- **Comment tester (QA)** : en responsable atelier, televerser un PDF avec `type=carte_grise` (201), puis avec `type=nimporte` (400 lisible, rien sur disque) ; en technicien, 403.
+- **Preuve** : `tsc` global a zero ; unitaires 541 verts ; premier passage des contrats `vehicle-documents-upload` (4) et `vehicle-documents-client-scope` (16) : 20 tests verts. Les suites echouent ensuite au teardown/setup sur la base partagee : des lignes `activity_logs` d'utilisateurs TEST laissees par mes premiers passages (l'intercepteur d'audit journalise l'upload) bloquent `cleanupOrphanTestRows`. Le test supprime desormais ces lignes ; le menage des restes anterieurs reste a faire.
