@@ -21,7 +21,8 @@ import { uniqueTestToken } from "../support/ids";
  * Niveau C — pneus, RBAC aligné sur la feuille PNEUMATIQUE (AGENTS.md §5) :
  * - TIR1 : fiche pneu en stock par `warehouse` / `admin`, suppression par `admin` ;
  * - TIR2 : suppression douce, la fiche reste en base mais sort du stock ;
- * - TIR3 : montage, rotation, démontage par `workshop_manager` ;
+ * - TIR3 : montage, rotation, démontage par `workshop_manager` ; au démontage, destination
+ *   obligatoire (`stock` : +1 sur la fiche ; `scrap` : motif, stock inchangé) ;
  * - TIR4 : inspection ouverte au `technician`.
  */
 
@@ -238,17 +239,62 @@ describe("TIR3 : montage, rotation, démontage par le chef d'atelier", { timeout
     expect((await tireRow(tireId)).stockQuantity).toBe(1);
   });
 
-  it("démontage : le chef d'atelier démonte, le magasinier est refusé ; un montage inconnu répond 404", async () => {
-    const { vehicleTireId } = await seedMountedTire();
-    expectForbidden(await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "warehouse", body: { removalMileage: 2000 } }));
+  it("démontage vers le stock : le pneu revient au magasin (+1, une seule fois), le magasinier est refusé", async () => {
+    const { tireId, vehicleTireId } = await seedMountedTire();
+    const toStock = { destination: "stock", removalMileage: 2000, removalReason: "Véhicule immobilisé" };
+    expectForbidden(await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "warehouse", body: toStock }));
+    expect((await tireRow(tireId)).stockQuantity).toBe(1);
 
-    const removed = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "workshopManager", body: { removalMileage: 2000 } });
+    const removed = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "workshopManager", body: toStock });
     expect(removed.status).toBe(200);
     const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
-    expect(row).toMatchObject({ status: "removed", removalMileage: 2000 });
+    expect(row).toMatchObject({ status: "removed", removalMileage: 2000, removalReason: "Véhicule immobilisé" });
+    expect(await tireRow(tireId)).toMatchObject({ stockQuantity: 2, updatedBy: userIds.get("workshopManager") });
 
-    const unknown = await call("PATCH", "/api/vehicle-tires/999999999/remove", { actor: "workshopManager", body: { removalMileage: 2000 } });
+    // Rejouer le démontage ne remet pas une seconde unité en stock.
+    const again = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "workshopManager", body: toStock });
+    expect(again.status).toBe(404);
+    expect((await tireRow(tireId)).stockQuantity).toBe(2);
+
+    const unknown = await call("PATCH", "/api/vehicle-tires/999999999/remove", { actor: "workshopManager", body: toStock });
     expect(unknown.status).toBe(404);
+  });
+
+  it("démontage au rebut : motif enregistré dans le statut, le stock ne bouge pas", async () => {
+    const { tireId, vehicleTireId } = await seedMountedTire();
+    const res = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, {
+      actor: "workshopManager",
+      body: { destination: "scrap", scrapReason: "worn", removalMileage: 90000 },
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
+    expect(row).toMatchObject({ status: "worn", removalMileage: 90000 });
+    expect((await tireRow(tireId)).stockQuantity).toBe(1);
+  });
+
+  it("démontage sans destination, ou rebut sans motif : 400, le pneu reste monté", async () => {
+    const { tireId, vehicleTireId } = await seedMountedTire();
+    for (const body of [{ removalMileage: 2000 }, { destination: "scrap", removalMileage: 2000 }, { destination: "garage" }]) {
+      const res = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "workshopManager", body });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("VALIDATION");
+    }
+    const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
+    expect(row.status).toBe("active");
+    expect((await tireRow(tireId)).stockQuantity).toBe(1);
+  });
+
+  it("PATCH générique d'un montage : le cycle de vie est refusé (400), les mesures passent", async () => {
+    const { tireId, vehicleTireId } = await seedMountedTire();
+    const bypass = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}`, { actor: "workshopManager", body: { status: "removed" } });
+    expect(bypass.status).toBe(400);
+    expect(bypass.body.message).toMatch(/démontage/);
+
+    const measure = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}`, { actor: "workshopManager", body: { currentPressure: 8.5 } });
+    expect(measure.status).toBe(200);
+    const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
+    expect(row).toMatchObject({ status: "active", currentPressure: 8.5 });
+    expect((await tireRow(tireId)).stockQuantity).toBe(1);
   });
 
   it("rotation : le chef d'atelier la planifie (OT créé), le technicien est refusé", async () => {

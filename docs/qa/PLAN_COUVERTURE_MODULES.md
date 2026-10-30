@@ -238,16 +238,22 @@ stateDiagram-v2
   [*] --> en_stock : création fiche (warehouse / admin)
   en_stock --> monte : montage (workshop_manager)
   monte --> monte : rotation / inspection (technician)
-  monte --> en_stock : démontage
+  monte --> en_stock : démontage, destination « stock » (réutilisable, +1)
+  monte --> rebut : démontage, destination « rebut » + motif (stock inchangé)
+  rebut --> [*]
   en_stock --> supprime : soft delete
   supprime --> [*]
 ```
+
+Au démontage, la destination est obligatoire, comme dans RTA Fleet et Eptura : le pneu repart au
+stock ou au rebut (usé, endommagé, crevé). Le statut du montage la conserve : `removed` = remis en
+stock, sinon la cause du rebut. Le rechapage n'est pas modélisé.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
 | TIR1 | CRUD fiche pneu par `warehouse` / `admin` ; 403 pour `workshop_manager` | C | OK (`tires-rbac` C : auteur posé par le serveur, corps forgé ignoré ; fiche inexistante 404) |
 | TIR2 | Soft delete : non montable, absent du stock, historique conservé | C | OK (`tires-rbac` C : détail et liste 404 / absent, montage 409, modification et 2e suppression 404 ; pneu monté 409) |
-| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | C OK (`tires-rbac` : stock -1 au montage, démontage inconnu 404, rotation invalide 400 sans OT orphelin) ; E à faire |
+| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | C OK (`tires-rbac` : stock -1 au montage, démontage vers le stock +1 une seule fois, rebut avec motif sans effet stock, destination obligatoire 400, PATCH générique refuse le statut, rotation invalide 400 sans OT orphelin) ; E OK (`e2e/11` : double clic = 1 requête, trame `vehicle_tire_removed` reçue par le magasinier) |
 | TIR4 | Inspection par `technician` | C | OK (`tires-rbac` C : inspecteur = auteur de la requête ; corps invalide 400 `VALIDATION`) |
 | TIR5 | Brouillon du wizard : restauré, purgé après succès | E | À faire |
 | TIR6 | Tableau `PremiumDataTable` : stock bas surligné, corbeille masquée aux non-admin | E | À faire |

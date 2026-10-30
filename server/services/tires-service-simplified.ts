@@ -5,6 +5,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { activityLogger } from "./activity-logger";
 import type { Tire, InsertTire, VehicleTire, InsertVehicleTire } from "@shared/schema";
 import { computeTireWearScore } from "@shared/constants/tires";
+import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
@@ -454,26 +455,53 @@ export class TiresService {
     }
   }
 
-  /** `false` si le montage n'existe pas ou n'est plus actif (déjà démonté). */
-  async removeTireFromVehicle(vehicleTireId: number, mileageAtRemoval?: number): Promise<boolean> {
-    const [removed] = await db
-      .update(vehicleTires)
-      .set({
-        status: 'removed',
-        removalDate: new Date().toISOString().split('T')[0],
-        removalMileage: mileageAtRemoval,
-        updatedAt: new Date()
-      })
-      .where(and(eq(vehicleTires.id, vehicleTireId), eq(vehicleTires.status, 'active')))
-      .returning({ id: vehicleTires.id });
+  /**
+   * Démonte le pneu et applique sa destination (`TireRemoval`) dans la même transaction :
+   * remis en stock, la fiche gagne une unité ; mis au rebut, le stock ne bouge pas.
+   * `false` si le montage n'existe pas ou n'est plus actif (déjà démonté).
+   */
+  async removeTireFromVehicle(vehicleTireId: number, removal: TireRemoval, userId?: number): Promise<boolean> {
+    const removed = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(vehicleTires)
+        .set({
+          status: vehicleTireStatusAfterRemoval(removal),
+          removalDate: new Date().toISOString().split('T')[0],
+          removalMileage: removal.removalMileage,
+          removalReason: removal.removalReason || null,
+          updatedAt: new Date()
+        })
+        .where(and(eq(vehicleTires.id, vehicleTireId), eq(vehicleTires.status, 'active')))
+        .returning({ id: vehicleTires.id, vehicleId: vehicleTires.vehicleId, tireId: vehicleTires.tireId });
+
+      if (!row || removal.destination !== "stock") return row;
+
+      const [restocked] = await tx
+        .update(tires)
+        .set({
+          stockQuantity: sql`${tires.stockQuantity} + 1`,
+          updatedBy: userId ?? null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(tires.id, row.tireId), isNull(tires.deletedAt)))
+        .returning({ id: tires.id });
+
+      if (!restocked) {
+        throw new AppError(409, "La fiche de ce pneu a été supprimée : il ne peut pas revenir en stock. Choisissez la mise au rebut.");
+      }
+      return row;
+    });
 
     if (!removed) return false;
 
-    log.info({ vehicleTireId }, "pneu démonté du véhicule");
+    log.info({ vehicleTireId, destination: removal.destination, tireId: removed.tireId }, "pneu démonté du véhicule");
 
     broadcastTireUpdate("vehicle_tire_removed", vehicleTireId, {
       vehicleTireId,
-      mileageAtRemoval: mileageAtRemoval ?? null,
+      vehicleId: removed.vehicleId,
+      tireId: removed.tireId,
+      destination: removal.destination,
+      mileageAtRemoval: removal.removalMileage ?? null,
     });
 
     return true;
