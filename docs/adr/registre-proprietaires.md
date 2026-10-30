@@ -40,6 +40,7 @@ pages pré-déclarées.
 | `server/services/fuel-card-service.ts` | API (T-44) | Une ligne : prix 828 en dur remplacé par la lecture du prix daté. | Rebase en dernier dans sa fenêtre. |
 | `server/api/missions.routes.ts` | API (T-44) | Une ligne, même changement. | Idem. |
 | `server/lib/audit-log-row.ts`, `server/api/audit-logs.routes.ts`, `server/api/work-order-audit-trail.routes.ts` | API (T-39) | Mappage ligne de journal vers contrat extrait de T-15 et partagé avec l'historique d'OT. | Rebase sans effet de bord. |
+| `server/api/vehicle-documents.routes.ts` (nouveau) | API (T-16b) | Upload des documents véhicule, déplacé de `server/routes.ts` (suppression du seul handler, accord de l'utilisateur). | Rebase sans effet de bord. |
 | Préfixes `/warehouse`, `/fuel-card`, `/drivers`, `/missions`, `/clients`, `/operations`, `/part-requirements` dans `server/api/index.ts` | API (T-62), via l'architecte | Garde `isStaff` au montage. | Lot sécurité, samedi 14 h. |
 
 ## Agents et worktrees
