@@ -58,3 +58,17 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `tests/unit/client/document-due-date.test.ts` → 3 passed ; tsc global zéro erreur.
 - **RAIDER** : R hook et fonction réutilisables ; I enregistrer deux fois = même ligne ; D comportement historique conservé en repli ; scoped client.
 - **Reste / risques** : le serveur actuel de téléversement peut refuser un code absent de son énumération historique (à lever au branchement T-32b) ; la clé `/api/vehicle-documents` reste une hypothèse de satellite.
+
+## 2026-10-30T14:40:00+01:00 — T-34 — Détail OT : export Word et message de double affectation
+
+- **Agent** : fe-1 · **Branche** : `lot/fe/T-34-ot-export-conflits` (sur T-32a) · **Commit** : voir `git log`
+- **Statut** : fait (partie a ; la partie b attend les routes réelles)
+- **Quoi** : menu Exporter (OT, bon de sortie) en .docx sur le détail d'un OT ; au démarrage d'un OT, un 409 de double affectation liste les OT en conflit.
+- **Comment** : `work-order-export-button.tsx` (GET en blob sur `workOrderExportPath`, téléchargement, erreur par `userMessageOf`) ; `booking-conflict-alert.tsx` + `lib/booking-conflict.ts` (lit `conflicts` du contrat, une ligne par chevauchement) ; page OT : une ligne d'import-état, la mutation de démarrage garde le dialogue ouvert sur 409, bouton visible pour admin, chef d'atelier et magasinier. Reuse : Adapt.
+- **Pourquoi** : plan 06 T-34, contrats P-07 et P-08.
+- **Comment tester (QA)** :
+  - Prérequis : OT existant ; deux OT sur le même technicien aux dates qui se chevauchent.
+  - Étapes : 1. Détail OT, Exporter, Bon de sortie : un .docx se télécharge. 2. Démarrer l'OT avec un technicien déjà occupé : le dialogue reste ouvert et indique « Technicien déjà affecté à l'OT #N du … au … ».
+  - Preuve automatisée : `tests/unit/client/booking-conflict.test.ts` ; suite client 142 passed ; tsc global zéro erreur.
+- **RAIDER** : D flux de démarrage inchangé hors 409 ; I export sans écriture ; scoped client.
+- **Reste / risques** : rôles du bouton d'export à confirmer avec le garde serveur (le serveur reste maître, 403 affichée en clair) ; seul le démarrage affiche les conflits, l'assignation depuis la modification de l'OT sera couverte à T-34b si la route la porte.
