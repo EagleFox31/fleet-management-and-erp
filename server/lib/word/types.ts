@@ -46,4 +46,6 @@ export interface WorkOrderDocData {
 export interface DocHeaderConfig {
   companyName: string;
   tagline?: string;
+  /** Image PNG du papier a en-tete officiel. Absente : repli texte (nom et ligne de presentation). */
+  logo?: Buffer | null;
 }
