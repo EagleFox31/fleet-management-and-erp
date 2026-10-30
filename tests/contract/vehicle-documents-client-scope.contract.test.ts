@@ -33,7 +33,10 @@ const uploadsSubdir = uniqueTestToken("scope");
 const uploadsDir = join(process.cwd(), "uploads", uploadsSubdir);
 
 // Véhicule, document et workflow de chaque client.
-const fixture = {} as Record<"A" | "B", { vehicleId: number; documentId: number; sessionId: string; workflowDocumentId: number }>;
+const fixture = {} as Record<
+  "A" | "B",
+  { vehicleId: number; documentId: number; sessionId: string; workflowId: number; workflowDocumentId: number }
+>;
 
 async function call(method: string, path: string, options: { body?: unknown; actor?: Actor } = {}) {
   const response = await fetch(baseUrl + path, {
@@ -98,7 +101,28 @@ async function seedClient(key: "A" | "B", ownerId: number) {
     })
     .returning();
 
-  fixture[key] = { vehicleId: vehicle.id, documentId: document.id, sessionId, workflowDocumentId: workflowDocument.id };
+  fixture[key] = { vehicleId: vehicle.id, documentId: document.id, sessionId, workflowId: workflow.id, workflowDocumentId: workflowDocument.id };
+}
+
+/** Document de workflow à usage unique, avec son propre fichier : une suppression n'affecte pas les autres tests. */
+async function seedWorkflowDocument(key: "A" | "B", name: string) {
+  const filePath = join(uploadsDir, name);
+  writeFileSync(filePath, `TEST-${name}`);
+  const [document] = await db
+    .insert(workflowDocuments)
+    .values({
+      workflowId: fixture[key].workflowId,
+      sessionId: fixture[key].sessionId,
+      documentType: "autre",
+      originalName: name,
+      storedName: name,
+      filePath,
+      fileSize: 6,
+      mimeType: "application/pdf",
+      uploadedBy: userIds.get(`client${key}`)!,
+    })
+    .returning();
+  return { id: document.id, filePath };
 }
 
 beforeAll(async () => {
@@ -268,6 +292,27 @@ describe("documents de workflow : cloison entre clients", { timeout: 60000 }, ()
       const download = await call("GET", `/api/workflows/documents/${fixture.B.workflowDocumentId}`, { actor });
       expect(download.status).toBe(200);
       expect(download.body).toBe("TEST-B");
+    }
+  });
+});
+
+describe("suppression d'un document de workflow : cloison entre clients", { timeout: 60000 }, () => {
+  it("un client ne supprime pas le document de la session d'un autre client", async () => {
+    const document = await seedWorkflowDocument("B", "del-B.pdf");
+    expectForbidden(await call("DELETE", `/api/workflows/documents/${document.id}`, { actor: "clientA" }));
+    const [still] = await db.select().from(workflowDocuments).where(eq(workflowDocuments.id, document.id));
+    expect(still).toBeDefined();
+    expect(existsSync(document.filePath)).toBe(true);
+  });
+
+  it("l'auteur de la session et le personnel suppriment ; un document absent donne 404", async () => {
+    for (const actor of ["clientB", "admin"] as const) {
+      const document = await seedWorkflowDocument("B", `del-${actor}.pdf`);
+      const res = await call("DELETE", `/api/workflows/documents/${document.id}`, { actor });
+      expect(res.status).toBe(204);
+      expect(existsSync(document.filePath)).toBe(false);
+      const again = await call("DELETE", `/api/workflows/documents/${document.id}`, { actor });
+      expect(again.status).toBe(404);
     }
   });
 });

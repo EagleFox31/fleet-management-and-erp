@@ -5689,7 +5689,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/workflows/documents/:documentId", authenticate, async (req, res) => {
+  app.delete("/api/workflows/documents/:documentId", isAnyUser, async (req, res, next) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
       const documentId = parseInt(req.params.documentId);
@@ -5698,11 +5698,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de document invalide" });
       }
 
+      const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
+      if (!document) {
+        return res.status(404).json({ message: "Document non trouvé" });
+      }
+
+      // Même cloison qu'en lecture : l'auteur de la session et le personnel.
+      if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(document.workflowId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
+
       await WorkflowDocumentService.deleteWorkflowDocument(documentId);
       return res.status(204).send();
       
     } catch (error) {
-      console.error("Delete workflow document error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "suppression du document de workflow en échec");
       return res.status(500).json({ message: "Erreur lors de la suppression du document" });
     }
   });

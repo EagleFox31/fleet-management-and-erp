@@ -209,7 +209,7 @@ export class WorkflowDocumentService {
     try {
       const document = await this.getWorkflowDocument(documentId);
       if (!document) {
-        throw new Error('Document non trouvé');
+        throw new AppError(404, "Document non trouvé");
       }
       
       // Supprimer le fichier physique
