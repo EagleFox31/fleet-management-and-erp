@@ -98,3 +98,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Preuve** : `tests/unit/client/pending-invoices-kpi-roles.test.ts` ; captures `20-dashboard-admin.png` (12 requêtes `/api/kpi`), `20-dashboard-terry.png` (0 requête).
 - **RAIDER** : R liste de rôles dans la source unique ; D contrat et serveur inchangés.
 - **Reste / risques** : capture « À chiffrer » non faite sur l'API réelle (drapeau `pending-invoices` coupé, route T-40 non servie) ; couverte par test unitaire. Compte management non utilisé (mot de passe inconnu).
+
+## 2026-10-30T18:49:27+01:00 — Test des événements temps réel du lot (faux positif)
+
+- **Agent** : fe-3 · **Branche** : `lot/fe/T-3xb-api-reelle` · **Statut** : fait
+- **Quoi** : `tests/unit/shared/lot-recette-contracts.test.ts`, test « noms en snake_case… » : la collision n'est plus « l'événement apparaît dans useRealTimeSync.ts » mais « nom hors `REUSED_REALTIME_EVENTS` et au plus un `case` dans useRealTimeSync.ts ».
+- **Comment** : `existingEvents` devient un décompte par nom ; assertion `<= 1`. Contre-épreuve : un `case "incident_reported"` dupliqué rend le test rouge, retiré ensuite.
+- **Pourquoi** : T-50 ajoute les `case` du lot dans ce fichier, le test les prenait pour des événements préexistants (rouge sur la pile, vert sur main).
+- **Comment tester (QA)** : `node node_modules/vitest/vitest.mjs run tests/unit/shared/lot-recette-contracts.test.ts`.
+- **Reste / risques** : aucun.
