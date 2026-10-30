@@ -2,8 +2,10 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { uploadFile, deleteDocument } from "@/lib/api";
+import { uploadFile } from "@/lib/api";
+import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -151,6 +153,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   const [selectedRenewalDocument, setSelectedRenewalDocument] = useState<VehicleDocument | null>(null);
   const [centerSelection, setCenterSelection] = useState<string>("");
   const canRequestRenewal = ["admin", "workshop_manager", "secretary", "logistics"].includes(user?.role || "");
+  // Même garde que DELETE /api/documents/:id (isWorkshopManager).
+  const canDeleteDocument = ["admin", "workshop_manager"].includes(user?.role || "");
 
   const [renewalForm, setRenewalForm] = useState({
     comment: "",
@@ -240,10 +244,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   
   // Mutation pour supprimer un document
   const deleteMutation = useMutation({
-    mutationFn: async (documentId: number) => {
-      const url = `/api/documents/${documentId}`;
-      return deleteDocument(url);
-    },
+    mutationFn: (documentId: number) => apiRequest("DELETE", `/api/documents/${documentId}`),
     onSuccess: () => {
       toast({
         title: "Document supprimé",
@@ -254,10 +255,10 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
       // Invalider la requête pour recharger les documents
       queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${vehicleId}/documents`] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Erreur lors de la suppression",
-        description: error.message || "Une erreur s'est produite. Veuillez réessayer.",
+        description: userMessageOf(error, "Une erreur s'est produite. Veuillez réessayer."),
         variant: "destructive",
       });
     }
@@ -449,9 +450,10 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   };
   
   // Gérer la suppression d'un document
+  const submitDelete = useSingleFlightMutate(deleteMutation.mutate);
   const handleDelete = () => {
     if (selectedDocument) {
-      deleteMutation.mutate(selectedDocument.id);
+      submitDelete(selectedDocument.id);
     }
   };
   
@@ -674,15 +676,18 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
           >
             <Download className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openDeleteDialog(doc)}
-            title="Supprimer"
-            className="h-8 w-8"
-          >
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          {canDeleteDocument && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => openDeleteDialog(doc)}
+              title="Supprimer"
+              aria-label="Supprimer le document"
+              className="h-8 w-8"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
         </div>
       ),
     },

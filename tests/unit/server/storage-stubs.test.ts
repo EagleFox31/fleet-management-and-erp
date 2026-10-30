@@ -12,11 +12,12 @@ import { describe, expect, it } from "vitest";
  * Les bouchons encore appelés sont gelés ci-dessous : la liste ne peut que
  * rétrécir. Un nouveau bouchon appelé, ou un appel ajouté vers un bouchon,
  * fait échouer ce test.
+ *
+ * La détection couvre aussi les retours d'objet vide sur plusieurs lignes
+ * (`{ return { workOrders: [], total: 0 }; }`) : `getWorkOrdersByOwner` y
+ * échappait, et un client ne voyait aucun ordre de travail.
  */
-const KNOWN_CALLED_STUBS = [
-  "deleteVehicleDocument", // DELETE /api/documents/:id répond succès sans rien supprimer
-  "getWorkOrdersByTechnicianId", // liste des OT d'un technicien toujours vide
-];
+const KNOWN_CALLED_STUBS: string[] = [];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 
@@ -31,7 +32,10 @@ function serverSources(dir: string): string[] {
 
 describe("bouchons de server/storage.ts", () => {
   const storageSource = readFileSync(join(serverDir, "storage.ts"), "utf8");
-  const stubs = [...storageSource.matchAll(/async (\w+)\([^)]*\)[^{\n]*\{\s*return (?:undefined|null|false|\[\]);\s*\}/g)].map((m) => m[1]);
+  const emptyValue = String.raw`(?:undefined|null|false|0|\[\])`;
+  const emptyObject = String.raw`\{\s*(?:\w+:\s*${emptyValue},?\s*)*\}`;
+  const stubPattern = new RegExp(String.raw`async (\w+)\([^)]*\)[^{\n]*\{\s*return (?:${emptyValue}|${emptyObject});\s*\}`, "g");
+  const stubs = [...storageSource.matchAll(stubPattern)].map((m) => m[1]);
   const callers = serverSources(serverDir).map((path) => readFileSync(path, "utf8")).join("\n");
 
   it("la détection trouve bien des bouchons", () => {

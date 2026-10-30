@@ -712,3 +712,39 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une `mutationFn` ne lit pas un état React modifié dans le même gestionnaire : l'identifiant ciblé passe par les variables de `mutate`.
+
+## 2026-10-30 - Garde des bouchons aveugle aux objets vides
+
+### Constat
+- Near miss. `tests/unit/server/storage-stubs.test.ts` listait deux bouchons encore appelés. Le troisième, `getWorkOrdersByOwner`, n'y figurait pas : tout client voyait une liste d'OT vide, sans erreur.
+
+### Cause racine
+- La détection ne reconnaissait que `return undefined | null | false | 0 | []`. Ce bouchon renvoyait `{ workOrders: [], total: 0 }`.
+- Classification : garde-fou trop étroit (faux négatif silencieux).
+
+### Résolution
+- La détection reconnaît aussi un objet dont tous les champs sont vides ; `getWorkOrdersByOwner` est implémenté. Liste gelée désormais vide.
+
+### Prévention (vérifiable)
+- `storage-stubs` échoue sur tout bouchon appelé, objet vide compris (rouge sur la version précédente de `server/storage.ts`).
+
+### Règle Projet (obligatoire)
+- Un garde-fou par motif se valide sur au moins un cas réel de chaque forme qu'il prétend couvrir, pas seulement sur la forme qui l'a motivé.
+
+## 2026-10-30 - OR Drizzle non parenthésé dans and()
+
+### Constat
+- La liste d'OT d'un technicien filtrée par statut renvoyait aussi ses OT d'autres statuts.
+
+### Cause racine
+- `and()` entoure la liste de parenthèses mais pas chaque fragment `sql` imbriqué : `sql\`a = x OR a IS NULL\`` suivi d'un filtre de statut donnait `a = x OR a IS NULL AND statut = y`, et `AND` passe avant `OR`.
+- Classification : priorité d'opérateurs SQL dans un fragment brut.
+
+### Résolution
+- Parenthèses explicites dans le fragment (`getWorkOrdersForTechnician`).
+
+### Prévention (vérifiable)
+- `tests/integration/storage-former-stubs.test.ts` : un OT terminé du technicien n'apparaît pas dans sa liste filtrée sur « en attente ».
+
+### Règle Projet (obligatoire)
+- Un `OR` écrit dans un `sql` brut s'entoure de parenthèses ; préférer `or(...)` de Drizzle, qui les pose.

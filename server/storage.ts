@@ -1,8 +1,10 @@
+import { existsSync } from "fs";
 import { eq, and, or, desc, asc, sql, like, gte, lte, isNull, ilike, count, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
+import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
 import {
@@ -82,6 +84,31 @@ type WorkOrderListItem = {
 type WorkOrderListResult = {
   workOrders: WorkOrderListItem[];
   total: number;
+};
+
+// Colonnes d'une ligne de liste d'OT (véhicule et technicien joints).
+const workOrderListColumns = {
+  id: workOrders.id,
+  vehicleId: workOrders.vehicleId,
+  vehicleRegistration: vehicles.registrationNumber,
+  vehicleBrand: vehicles.brand,
+  vehicleModel: vehicles.model,
+  vehicleRegistrationNumber: vehicles.registrationNumber,
+  technicianId: workOrders.technicianId,
+  technicianName: users.name,
+  title: workOrders.title,
+  description: workOrders.description,
+  diagnosis: workOrders.diagnosis,
+  status: workOrders.status,
+  priority: workOrders.priority,
+  startDate: workOrders.startDate,
+  endDate: workOrders.endDate,
+  duration: workOrders.duration,
+  cost: workOrders.cost,
+  isPreventive: workOrders.isPreventive,
+  isFirstVisit: workOrders.isFirstVisit,
+  maintenanceScheduleId: workOrders.maintenanceScheduleId,
+  createdAt: workOrders.createdAt,
 };
 
 type PartStockHistoryItem = {
@@ -198,7 +225,7 @@ export interface IStorage {
   // Work order methods
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
   getWorkOrdersByVehicleId(vehicleId: number): Promise<WorkOrderListItem[]>;
-  getWorkOrdersByTechnicianId(technicianId: number): Promise<WorkOrder[]>;
+  getWorkOrdersByTechnicianId(technicianId: number): Promise<WorkOrderListItem[]>;
   getWorkOrders(status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
   getWorkOrdersByOwner(ownerId: number, status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
   getWorkOrdersForTechnician(technicianId: number, status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
@@ -1026,7 +1053,34 @@ export class DatabaseStorage implements IStorage {
       return undefined;
     }
   }
-  async deleteVehicleDocument(id: number): Promise<boolean> { return false; }
+  // Était un bouchon renvoyant false : DELETE /api/documents/:id répondait 204
+  // sans rien supprimer. La ligne part d'abord : un fichier orphelin vaut mieux
+  // qu'une ligne qui pointe vers un fichier effacé. Les documents recopiés depuis
+  // le workflow d'acquisition peuvent partager un chemin : le fichier reste tant
+  // qu'une autre ligne y renvoie.
+  async deleteVehicleDocument(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(vehicleDocuments).where(eq(vehicleDocuments.id, id)).returning();
+    if (!deleted) return false;
+
+    const [stillReferenced] = await db
+      .select({ id: vehicleDocuments.id })
+      .from(vehicleDocuments)
+      .where(eq(vehicleDocuments.filePath, deleted.filePath))
+      .limit(1);
+    if (stillReferenced) return true;
+
+    const filePath = uploadedFileCandidates(deleted.filePath).find((candidate) => existsSync(candidate));
+    if (!filePath) {
+      storageLog.warn({ documentId: id, filePath: deleted.filePath }, "fichier du document absent de uploads/, ligne supprimée seule");
+      return true;
+    }
+    try {
+      await deleteFile(filePath);
+    } catch (error) {
+      storageLog.warn({ err: error, documentId: id, filePath }, "fichier du document non supprimé");
+    }
+    return true;
+  }
   
   // Était un bouchon renvoyant undefined : PATCH et DELETE d'une planification
   // répondaient toujours 404.
@@ -1213,7 +1267,17 @@ export class DatabaseStorage implements IStorage {
       .where(eq(workOrders.vehicleId, vehicleId))
       .orderBy(desc(workOrders.createdAt));
   }
-  async getWorkOrdersByTechnicianId(technicianId: number): Promise<WorkOrder[]> { return []; }
+  // Était un bouchon renvoyant [] : GET /api/work-orders/technician/:id
+  // répondait toujours une liste vide.
+  async getWorkOrdersByTechnicianId(technicianId: number): Promise<WorkOrderListItem[]> {
+    return await db
+      .select(workOrderListColumns)
+      .from(workOrders)
+      .leftJoin(vehicles, eq(workOrders.vehicleId, vehicles.id))
+      .leftJoin(users, eq(workOrders.technicianId, users.id))
+      .where(eq(workOrders.technicianId, technicianId))
+      .orderBy(desc(workOrders.createdAt));
+  }
   async getWorkOrders(
     status?: string,
     priority?: string,
@@ -1316,8 +1380,33 @@ export class DatabaseStorage implements IStorage {
     priority?: string,
     limit?: number,
     offset?: number
-  ): Promise<WorkOrderListResult> { 
-    return { workOrders: [], total: 0 }; 
+  ): Promise<WorkOrderListResult> {
+    // Était un bouchon renvoyant une liste vide : un client ne voyait aucun OT.
+    const conditions: SQL<unknown>[] = [eq(vehicles.ownerId, ownerId)];
+    if (status) {
+      conditions.push(eq(workOrders.status, status as WorkOrder["status"]));
+    }
+    if (priority) {
+      conditions.push(eq(workOrders.priority, priority as WorkOrder["priority"]));
+    }
+
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(workOrders)
+      .innerJoin(vehicles, eq(workOrders.vehicleId, vehicles.id))
+      .where(and(...conditions));
+
+    const ownerWorkOrders = await db
+      .select(workOrderListColumns)
+      .from(workOrders)
+      .innerJoin(vehicles, eq(workOrders.vehicleId, vehicles.id))
+      .leftJoin(users, eq(workOrders.technicianId, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(workOrders.createdAt))
+      .limit(limit || 50)
+      .offset(offset || 0);
+
+    return { workOrders: ownerWorkOrders, total };
   }
   async getWorkOrdersForTechnician(
     technicianId: number,
@@ -1329,9 +1418,11 @@ export class DatabaseStorage implements IStorage {
     try {
       console.log(`getWorkOrdersForTechnician called for technician ID: ${technicianId}`);
       
-      // Construire les conditions une seule fois pour éviter les conflits de typage Drizzle
+      // Construire les conditions une seule fois pour éviter les conflits de typage Drizzle.
+      // Parenthèses obligatoires : `and()` n'en ajoute pas autour d'un fragment `sql`,
+      // et sans elles le filtre de statut ne s'appliquait qu'aux OT non assignés.
       const conditions: SQL<unknown>[] = [
-        sql`${workOrders.technicianId} = ${technicianId} OR ${workOrders.technicianId} IS NULL`
+        sql`(${workOrders.technicianId} = ${technicianId} OR ${workOrders.technicianId} IS NULL)`
       ];
 
       if (status) {

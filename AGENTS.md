@@ -297,11 +297,13 @@ Notes :
   ajouter : créer un routeur dans `server/api/` et le monter dans `server/api/index.ts`.
   Express sert la **première** déclaration : avant de corriger une route, chercher
   son double. Liste gelée dans `tests/unit/server/routes-hygiene.test.ts`.
-- `server/storage.ts` contient des méthodes bouchons (`{ return undefined; }`).
-  Deux sont encore appelées : `deleteVehicleDocument` (DELETE document répond
-  succès sans rien supprimer) et `getWorkOrdersByTechnicianId` (toujours vide).
-  Liste gelée dans `tests/unit/server/storage-stubs.test.ts` : implémenter une
-  méthode avant de l'appeler.
+- `server/storage.ts` contient des méthodes bouchons (`{ return undefined; }`,
+  `{ return { items: [], total: 0 }; }`). Aucune n'est appelée depuis le
+  30 octobre 2026 : la liste gelée de `tests/unit/server/storage-stubs.test.ts`
+  est vide. Implémenter une méthode avant de l'appeler.
+- Fichiers téléversés : supprimer par `uploadedFileCandidates`
+  (`server/lib/uploaded-file.ts`), qui refuse tout chemin hors de `uploads/`.
+  `GET /api/documents/:id/download` résout encore le chemin stocké sans cette garde.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock partielle : le mouvement d'entrée en stock est attribué au

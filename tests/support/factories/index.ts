@@ -30,6 +30,7 @@ export type TestUserRole =
   | "logistics"
   | "warehouse"
   | "driver"
+  | "client"
   | "user";
 
 export async function createTestUser(
@@ -94,6 +95,7 @@ export async function createTestVehicle(
       status: overrides.status ?? "operational",
       fuelType: overrides.fuelType ?? "diesel",
       createdBy: overrides.createdBy,
+      ownerId: overrides.ownerId,
     })
     .returning();
   return row;
