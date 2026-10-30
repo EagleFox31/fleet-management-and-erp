@@ -39,3 +39,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : preuve automatisée `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/login-lockout.test.ts` → `4 passed` ; tsc 0 `error TS`. Manuel après montage : 5 mauvais mots de passe puis 6e essai → 429 avec `lockedUntil`.
 - **RAIDER** : R/A seuils par environnement, magasin injecté ; I un succès remet à zéro, verrou expiré repart de zéro ; D rien d'existant modifié ; E aucune fuite d'existence du compte. 3 couches n/a (pas de transition métier).
 - **Reste / risques** : `DbLockoutStore` (UPDATE ... RETURNING atomique, table de db-1, miroir `users.failed_login_count/locked_until`), `recordAudit` blocage/déblocage, montage, test d'intégration de concurrence, `express-rate-limit`.
+## 2026-10-30T15:00:00+01:00 — T-14 — Sink base et liste gelée des motifs audités
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-14-audit` (fusion de `origin/lot/db/T-07-schema`) · **Commit** : voir `git log`
+- **Statut** : fait, hors montage (sol)
+- **Quoi** : `dbAuditSink` écrit dans `activity_logs` (id numérique vers `entity_id`, sinon `entity_ref` ; `method`, `path`, `requestId` dans `details`). `AUDIT_CONFIG` : 8 types audités (OT, pièces, pneus, véhicules, demandes de pièce, commandes, factures fournisseur, utilisateurs), chemins imbriqués rattachés à l'entité parente.
+- **Comment** : `server/lib/audit-db-sink.ts`, `server/lib/audit-config.ts`, test de liste gelée `tests/unit/server/audit-config.test.ts`. Les 8 motifs sont mon choix, à valider par PE.
+- **Pourquoi** : P-04, PR-07.
+- **Comment tester (QA)** : après montage, modifier un OT puis lire `activity_logs` : une ligne avec auteur, méthode, chemin. Preuve : `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/audit-config.test.ts` → 3 passed.
+- **RAIDER** : R/A configuration déclarative ; D rien d'existant modifié ; E panne d'écriture sans effet sur la requête.
+- **Reste / risques** : montage et `setAuditSink(dbAuditSink)` au démarrage (sol). Test d'intégration ajouté avec T-12 (même fichier de base).
