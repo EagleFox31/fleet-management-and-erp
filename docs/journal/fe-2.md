@@ -16,3 +16,16 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `node node_modules/vitest/vitest.mjs run tests/unit/client/mocks-contracts.test.ts` → 59 passed ; `vite build` : aucun code mock dans `dist`.
 - **RAIDER** : couvert R (table réutilisée par tests et navigateur), D (aucun contrat touché), I (store recréé à chaque démarrage). Exports binaires non simulés.
 - **Reste / risques** : `mockServiceWorker.js` est copié dans `dist` (inerte, jamais enregistré hors mode mock).
+
+## 2026-10-30T14:10:00+01:00 — T-33a/T-35/T-52/T-54a/T-54b — Composants d'écran sur les contrats
+- **Agent** : fe-2 · **Branche** : `lot/fe/T-54-ecrans` · **Commit** : voir PR
+- **Statut** : fait côté composants ; branchement dans les pages de fe-1 à faire
+- **Quoi** : sauvegardes admin, préférences de notification (sans e-mail), tuiles KPI (taux nul affiché "—"), déclaration et liste d'incidents, ligne de réception en stock, mouvements de pneus, grille de pointage, factures en attente, défi ALTCHA.
+- **Comment** : `useContractQuery` (réponse validée par le schéma du contrat, clé `[path, params]`), `PremiumDataTable`, `useSingleFlightMutate`, `userMessageOf`, brouillon d'incident via `useFormDraft`. Pointage : un PUT par cellule modifiée (le contrat est un upsert par entrée).
+- **Pourquoi** : écrans prêts sur les contrats et les mocks, sans toucher aux fichiers de fe-1.
+- **Comment tester (QA)** :
+  - Prérequis : `VITE_API_MOCKS=1`, composants montés dans les pages.
+  - Attendu : KPI sans donnée affiche "—" ; pointage n'envoie que les cellules changées.
+  - Preuve automatisée : `tsc` 0 erreur ; `tests/unit/client/screens-helpers.test.ts` 6 passed.
+- **RAIDER** : couvert R, D, I (second enregistrement sans cellule changée = aucune requête). Pas de test navigateur ici.
+- **Reste / risques** : preuve ALTCHA (événement `statechange`) non vérifiée contre le vrai serveur.
