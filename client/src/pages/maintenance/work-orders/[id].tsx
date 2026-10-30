@@ -5,6 +5,7 @@ import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -191,7 +192,6 @@ export default function WorkOrderDetails({
   const [reprendreAMonNom, setReprendreAMonNom] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<number | null>(null);
-  const [stockWarningAcknowledged, setStockWarningAcknowledged] = useState(false);
   const [issuingRequirementId, setIssuingRequirementId] = useState<number | null>(null);
 
   useHelpPagePrepare({
@@ -200,8 +200,7 @@ export default function WorkOrderDetails({
   });
   const { selectedVehicle } = useVehicle();
   const { user } = useAuth();
-  
-  const canOverrideStock = user?.role === 'warehouse' || user?.role === 'admin';
+
   const canEditWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager';
   const canProcessWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager' || user?.role === 'technician';
 
@@ -328,9 +327,10 @@ export default function WorkOrderDetails({
     enabled: !!workOrderId,
   });
 
-  // Fetch available parts for adding
+  // Tout le catalogue : `/api/parts` pagine à 10 par défaut, le sélecteur
+  // n'aurait proposé que les 10 premières références.
   const { data: availableParts = { parts: [], total: 0 } } = useQuery<{ parts: any[]; total: number }>({
-    queryKey: ["/api/parts"],
+    queryKey: ["/api/parts", { limit: 1000 }],
     enabled: isAddPartDialogOpen,
   });
   
@@ -352,9 +352,11 @@ export default function WorkOrderDetails({
     ['pending', 'approved', 'ordered', 'partially_received', 'received', 'partial', 'delivered'].includes(r.status)
   );
   
-  // Calculate if stock is sufficient
+  // Aperçu seulement : le serveur relit le stock au clic et décide.
   const stockAvailable = selectedPart?.quantity || 0;
   const isStockInsufficient = partQuantity > stockAvailable;
+  const previewIssued = Math.min(partQuantity, Math.max(0, stockAvailable));
+  const previewMissing = partQuantity - previewIssued;
   const stockStatus = stockAvailable <= 0 ? 'rupture' : 
     stockAvailable < (selectedPart?.minimumStock || 5) ? 'low' : 'ok';
 
@@ -376,51 +378,52 @@ export default function WorkOrderDetails({
     },
   });
 
-  const addPartMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedPartId) return;
-
-      const selectedPart = (availableParts.parts || []).find(
-        (p: any) => p.id === selectedPartId,
-      );
-
-      return apiRequest("POST", `/api/work-orders/${workOrderId}/parts`, {
-        partId: selectedPartId,
-        quantity: partQuantity,
-        unitPrice: selectedPart?.unitPrice || 0,
+  // « Demander la pièce » : le serveur décide au clic. Le stock disponible sort
+  // vers l'OT, le manquant part en demande et l'OT passe en attente de pièces.
+  const requestPartMutation = useMutation({
+    mutationFn: async ({ partId, quantity }: { partId: number; quantity: number }) => {
+      const response = await apiRequest("POST", `/api/work-orders/${workOrderId}/parts`, {
+        partId,
+        quantity,
       });
+      return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (payload: any, { partId }) => {
       toast({
-        title: "Pièce ajoutée",
-        description: "La pièce a été ajoutée avec succès à l'ordre de travail.",
+        title: payload?.missingQuantity > 0 ? "Pièce demandée" : "Pièce ajoutée",
+        description: payload?.message || "La pièce a été ajoutée à l'ordre de travail.",
       });
       refetchPartsUsed();
       refetchPendingPartRequirements();
-      // Invalider le cache des pièces pour mettre à jour les stocks
-      queryClient.invalidateQueries({ queryKey: ['/api/parts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/parts/statistics'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/parts/search'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/parts/stock-movements'] });
-      queryClient.invalidateQueries({ queryKey: [`/api/parts/${selectedPartId}/stock-history`] });
-      queryClient.invalidateQueries({ queryKey: ['/api/warehouse/statistics'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/warehouse/reorder-alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/warehouse/stock-value-history'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/warehouse/top-consumed-parts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/part-requirements'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders/awaiting-parts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/part-requirements"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/part-requirements/by-part/${partId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts/statistics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts/search"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts/stock-movements"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/parts/${partId}/stock-history`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/warehouse/statistics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/warehouse/reorder-alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/warehouse/stock-value-history"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/warehouse/top-consumed-parts"] });
       setIsAddPartDialogOpen(false);
       setSelectedPartId(null);
       setPartQuantity(1);
-      setStockWarningAcknowledged(false);
     },
     onError: (error) => {
       toast({
         variant: "destructive",
-        title: "Erreur",
-        description: `Erreur lors de l'ajout de la pièce: ${error.message}`,
+        title: "Demande impossible",
+        description: userMessageOf(error, "La pièce n'a pas pu être demandée."),
       });
     },
   });
+  // Sortie de stock : un seul envoi par clic, disabled={isPending} arrive au rendu suivant.
+  const submitRequestPart = useSingleFlightMutate(requestPartMutation.mutate);
 
   const issuePendingRequirementMutation = useMutation({
     mutationFn: async ({
@@ -551,59 +554,6 @@ export default function WorkOrderDetails({
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
       setShowCompleteConfirm(false);
       setLocation(`/maintenance/work-orders/${workOrderId}`);
-    },
-    onError: (error) => {
-      toast({
-        variant: "destructive",
-        title: "Erreur",
-        description: `Erreur: ${error.message}`,
-      });
-    },
-  });
-
-  // Mutation to mark work order as awaiting parts
-  const markAwaitingPartsMutation = useMutation({
-    mutationFn: async () => {
-      const selectedPart = selectedPartId
-        ? (availableParts.parts || []).find((p: any) => p.id === selectedPartId)
-        : null;
-      const workOrderLabel = workOrder?.title
-        ? `OT #${workOrderId} - ${workOrder.title}`
-        : `OT #${workOrderId}`;
-      const reason = selectedPart
-        ? `${workOrderLabel} • Besoin pièce: ${selectedPart.name} (${selectedPart.reference || "sans-référence"})`
-        : `${workOrderLabel} • Intervention bloquée en attente de pièces`;
-
-      const response = await apiRequest("POST", `/api/work-orders/${workOrderId}/awaiting-parts`, {
-        partId: selectedPartId || undefined,
-        quantityNeeded: partQuantity,
-        urgency: workOrder?.priority || "high",
-        reason,
-      });
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const raw = await response.text();
-        const preview = raw.slice(0, 120).replace(/\s+/g, " ").trim();
-        throw new Error(
-          `Réponse API invalide (non JSON). Vérifiez que le backend est redémarré et que la route /api/work-orders/:id/awaiting-parts est bien chargée. Aperçu: ${preview}`
-        );
-      }
-
-      return response.json();
-    },
-    onSuccess: (payload: any) => {
-      toast({
-        title: "OT en attente de pièces",
-        description: payload?.message || "L'ordre de travail a été marqué en attente de pièces. Le magasinier sera notifié.",
-      });
-      queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
-      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/work-orders/awaiting-parts'] });
-      queryClient.invalidateQueries({ queryKey: ["/api/part-requirements"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}/pending-part-requirements`] });
-      setIsAddPartDialogOpen(false);
-      setSelectedPartId(null);
-      setPartQuantity(1);
     },
     onError: (error) => {
       toast({
@@ -1528,14 +1478,14 @@ export default function WorkOrderDetails({
                 <DialogTrigger asChild>
                   <Button size="sm" data-help-target="wo-add-part">
                     <Plus className="h-4 w-4 mr-2" />
-                    Ajouter une pièce
+                    Demander une pièce
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>
-                    <DialogTitle>Ajouter une pièce</DialogTitle>
+                    <DialogTitle>Demander une pièce</DialogTitle>
                     <DialogDescription>
-                      Sélectionnez une pièce à ajouter à cet ordre de travail.
+                      Le stock disponible sort vers cet ordre de travail ; le manquant part en demande au magasin.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
@@ -1543,10 +1493,7 @@ export default function WorkOrderDetails({
                       <Label htmlFor="part-select">Pièce</Label>
                       <Select
                         value={selectedPartId?.toString() || ""}
-                        onValueChange={(value) => {
-                          setSelectedPartId(parseInt(value));
-                          setStockWarningAcknowledged(false);
-                        }}
+                        onValueChange={(value) => setSelectedPartId(parseInt(value))}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Sélectionner une pièce" />
@@ -1603,79 +1550,43 @@ export default function WorkOrderDetails({
                         type="number"
                         min="1"
                         value={partQuantity}
-                        onChange={(e) => {
-                          setPartQuantity(parseInt(e.target.value) || 1);
-                          setStockWarningAcknowledged(false);
-                        }}
+                        onChange={(e) => setPartQuantity(parseInt(e.target.value) || 1)}
                       />
                     </div>
-                    
-                    {/* Stock warning */}
+
+                    {/* Ce qui se passera au clic (le serveur relit le stock et tranche) */}
                     {isStockInsufficient && selectedPart && (
-                      <div className="p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950 dark:border-red-800">
+                      <div
+                        className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950 dark:border-amber-800"
+                        data-testid="part-request-preview"
+                      >
                         <div className="flex items-start gap-2">
-                          <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-2 flex-1">
-                            <p className="text-sm font-medium text-red-800 dark:text-red-200">
-                              Stock insuffisant !
+                          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-1 flex-1 text-sm text-amber-800 dark:text-amber-200">
+                            <p className="font-medium">
+                              Stock insuffisant : {stockAvailable} disponible(s) pour {partQuantity} demandée(s).
                             </p>
-                            <p className="text-sm text-red-600 dark:text-red-400">
-                              Vous demandez {partQuantity} unités mais seulement {stockAvailable} sont disponibles 
-                              (manque: {partQuantity - stockAvailable}).
-                            </p>
-                            
-                            {openRequest ? (
-                              <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 rounded border border-blue-200 dark:border-blue-800">
-                                <p className="text-sm text-blue-800 dark:text-blue-200">
-                                  <CheckCircle className="h-4 w-4 inline mr-1" />
-                                  Une demande de réapprovisionnement existe déjà (statut: {
-                                    openRequest.status === 'pending' ? 'En attente' :
-                                    openRequest.status === 'approved' ? 'Approuvée' : 'Commandée'
-                                  })
-                                </p>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground">
-                                {canOverrideStock 
-                                  ? "En tant que magasinier, vous pouvez forcer l'ajout. Une demande de réapprovisionnement sera créée automatiquement."
-                                  : "Veuillez demander au magasin de créer une commande de réapprovisionnement."}
-                              </p>
+                            {previewIssued > 0 && (
+                              <p>{previewIssued} unité(s) sortiront du stock pour cet OT.</p>
                             )}
-                            
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {canOverrideStock && !stockWarningAcknowledged && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  onClick={() => setStockWarningAcknowledged(true)}
-                                >
-                                  Je confirme vouloir dépasser le stock
-                                </Button>
-                              )}
-                              
-                              {!openRequest && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  className="bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-300"
-                                  onClick={() => markAwaitingPartsMutation.mutate()}
-                                  disabled={markAwaitingPartsMutation.isPending}
-                                  data-testid="btn-mark-awaiting-parts"
-                                >
-                                  <Package className="h-4 w-4 mr-1" />
-                                  {markAwaitingPartsMutation.isPending 
-                                    ? "En cours..." 
-                                    : workOrder?.status === "awaiting_parts"
-                                      ? "Créer la demande de pièce"
-                                      : "Marquer OT en attente de pièces"}
-                                </Button>
-                              )}
-                            </div>
+                            {openRequest ? (
+                              <p>
+                                <CheckCircle className="h-4 w-4 inline mr-1" />
+                                Une demande est déjà en cours pour cette pièce ({getPartRequirementStatusLabel(openRequest.status)}).
+                              </p>
+                            ) : (
+                              <p>Une demande sera créée pour {previewMissing} unité(s) manquante(s).</p>
+                            )}
+                            <p>
+                              {workOrder?.status === "awaiting_parts"
+                                ? "L'OT reste en attente de pièces."
+                                : "L'OT passera en attente de pièces."}
+                            </p>
                           </div>
                         </div>
                       </div>
                     )}
-                    
+
                     <div className="flex justify-end gap-2 pt-2">
                       <Button
                         variant="outline"
@@ -1683,22 +1594,18 @@ export default function WorkOrderDetails({
                           setIsAddPartDialogOpen(false);
                           setSelectedPartId(null);
                           setPartQuantity(1);
-                          setStockWarningAcknowledged(false);
                         }}
                       >
                         Annuler
                       </Button>
                       <Button
-                        onClick={() => addPartMutation.mutate()}
-                        disabled={
-                          !selectedPartId || 
-                          addPartMutation.isPending ||
-                          (isStockInsufficient && !canOverrideStock) ||
-                          (isStockInsufficient && canOverrideStock && !stockWarningAcknowledged)
-                        }
+                        onClick={() => {
+                          if (selectedPartId) submitRequestPart({ partId: selectedPartId, quantity: partQuantity });
+                        }}
+                        disabled={!selectedPartId || requestPartMutation.isPending}
                         data-testid="btn-add-part-confirm"
                       >
-                        {addPartMutation.isPending ? "Ajout en cours..." : "Ajouter"}
+                        {requestPartMutation.isPending ? "Demande en cours..." : "Demander la pièce"}
                       </Button>
                     </div>
                   </div>

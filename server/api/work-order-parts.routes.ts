@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { authenticate, isTechnician, isStockIssuer } from "../middleware/auth";
@@ -8,6 +8,11 @@ import {
 } from "@shared/constants/part-requirements";
 import { storage } from "../storage";
 import { partRequirementsService, STALE_STATUS_ERROR } from "../services/part-requirements-service";
+import {
+  OPEN_REQUIREMENT_STATUSES,
+  requestPartForWorkOrder,
+  type PartRequestResult,
+} from "../services/work-order-part-request";
 import { isAppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
@@ -17,9 +22,7 @@ import { alertService } from "../services/alert-service";
 
 const router = Router();
 
-const openRequirementStatuses: Array<
-  "pending" | "approved" | "ordered" | "partially_received" | "received" | "partial" | "delivered"
-> = ["pending", "approved", "ordered", "partially_received", "received", "partial", "delivered"];
+const openRequirementStatuses = OPEN_REQUIREMENT_STATUSES;
 
 router.get("/:workOrderId/pending-part-requirements", authenticate, async (req, res) => {
   try {
@@ -131,69 +134,19 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
       `[AWAITING_PARTS] OT #${workOrderId} - actor=${user?.username ?? "unknown"} role=${user?.role ?? "unknown"} partId=${hasPartPayload ? requestedPartId : "none"} qty=${Number.isFinite(requestedQty) ? requestedQty : "n/a"}`
     );
 
-    let linkedRequirement: Awaited<ReturnType<typeof storage.getPartRequirement>> | null = null;
-    let usedExistingRequirement = false;
-
+    // Avec une pièce, le serveur décide au clic comme pour « Demander la pièce » :
+    // le stock disponible sort vers l'OT, seul le manquant part en demande.
     if (hasPartPayload) {
-      const partId = requestedPartId;
-      const quantityNeeded = Number.isFinite(requestedQty) && requestedQty > 0 ? Math.floor(requestedQty) : 1;
-      const part = await storage.getPart(partId);
-
-      if (!part) {
-        return res.status(404).json({ message: "Pièce introuvable" });
-      }
-
-      const [existingForWorkOrder] = await db
-        .select({ id: partRequirements.id })
-        .from(partRequirements)
-        .where(
-          and(
-            eq(partRequirements.workOrderId, workOrderId),
-            eq(partRequirements.partId, partId),
-            inArray(partRequirements.status, openRequirementStatuses)
-          )
-        )
-        .orderBy(desc(partRequirements.updatedAt), desc(partRequirements.createdAt))
-        .limit(1);
-
-      if (existingForWorkOrder) {
-        linkedRequirement = await storage.getPartRequirement(existingForWorkOrder.id);
-        usedExistingRequirement = true;
-        log.info(`[AWAITING_PARTS] Demande existante réutilisée #${existingForWorkOrder.id} pour OT #${workOrderId}`);
-      } else {
-        const urgencyFromBody = typeof req.body?.urgency === "string" ? req.body.urgency : null;
-        const urgency =
-          urgencyFromBody === "low" ||
-          urgencyFromBody === "medium" ||
-          urgencyFromBody === "high" ||
-          urgencyFromBody === "critical"
-            ? urgencyFromBody
-            : "high";
-
-        const reasonFromBody = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
-        const workOrderLabel = workOrder.title
-          ? `OT #${workOrderId} - ${workOrder.title}`
-          : `OT #${workOrderId}`;
-        const reason =
-          reasonFromBody ||
-          `${workOrderLabel} • Besoin pièce: ${part.name} (${part.reference || "sans-référence"})`;
-
-        const createdRequirement = await partRequirementsService.createPartRequirement({
-          partId,
-          workOrderId,
-          vehicleId: workOrder.vehicleId ?? null,
-          quantityNeeded,
-          urgency,
-          reason,
-          status: "pending",
-          requestedBy: user?.id ?? 1,
-          notes:
-            `Créée automatiquement depuis l'OT #${workOrderId} lors du passage en attente de pièces ` +
-            `(besoin: ${quantityNeeded}, stock actuel: ${Number(part.quantity || 0)}).`,
-        });
-        linkedRequirement = await storage.getPartRequirement(createdRequirement.id);
-        log.info(`[AWAITING_PARTS] Nouvelle demande créée #${createdRequirement.id} pour OT #${workOrderId}`);
-      }
+      const result = await requestPartForWorkOrder({
+        workOrderId,
+        partId: requestedPartId,
+        quantity: Number.isFinite(requestedQty) && requestedQty > 0 ? Math.floor(requestedQty) : 1,
+        actor: { id: user!.id, role: String(user!.role) },
+        urgency: req.body?.urgency,
+        reason: req.body?.reason,
+      });
+      broadcastPartRequest(result, user);
+      return res.status(200).json({ ...result, statusWasChanged: result.workOrderStatusChanged });
     }
 
     const statusWasChanged = workOrder.status !== "awaiting_parts";
@@ -218,41 +171,91 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
             : null,
         });
       }
-
-      if (linkedRequirement?.id) {
-        (global as any).broadcastUpdate(
-          usedExistingRequirement ? "part_requirement_updated" : "part_requirement_created",
-          {
-          requirementId: linkedRequirement.id,
-          workOrderId,
-          partId: linkedRequirement.partId ?? null,
-          status: linkedRequirement.status,
-          requirement: linkedRequirement,
-          source: usedExistingRequirement ? "existing_requirement_reused" : "requirement_auto_created",
-          actor: user
-            ? {
-                userId: user.id,
-                role: user.role,
-                username: user.username,
-              }
-            : null,
-        });
-      }
     }
 
     return res.status(200).json({
       workOrder: updatedWorkOrder,
-      requirement: linkedRequirement,
-      usedExistingRequirement,
+      requirement: null,
+      usedExistingRequirement: false,
       statusWasChanged,
-      message: usedExistingRequirement
-        ? "OT en attente de pièces. Demande existante réutilisée."
-        : linkedRequirement
-          ? "OT en attente de pièces. Demande de pièce créée."
-          : "OT en attente de pièces.",
+      message: "OT en attente de pièces.",
     });
   } catch (error) {
+    if (isAppError(error)) {
+      return res.status(error.status).json({ message: error.message });
+    }
     log.error({ err: error, requestId: req.requestId }, "Mark work order as awaiting parts error");
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) {
+  const broadcast = (global as any).broadcastUpdate;
+  if (!broadcast) return;
+  const workOrderId = result.workOrder?.id ?? result.partUsed?.workOrderId ?? result.requirement?.workOrderId;
+  const actor = user ? { userId: user.id, role: user.role, username: user.username } : null;
+
+  if (result.partUsed) {
+    broadcast("part_used_added", {
+      workOrderId,
+      partId: result.part.id,
+      partUsed: result.partUsed,
+      source: "work_order_part_request",
+    });
+  }
+
+  if (result.requirement && !result.usedExistingRequirement) {
+    broadcast("part_requirement_created", {
+      requirementId: result.requirement.id,
+      workOrderId,
+      partId: result.part.id,
+      status: result.requirement.status,
+      requirement: result.requirement,
+      source: "work_order_part_request",
+      actor,
+    });
+  }
+
+  if (result.workOrderStatusChanged) {
+    broadcast("work_order_updated", {
+      workOrderId,
+      updates: { status: "awaiting_parts" },
+      workOrder: result.workOrder,
+      source: "parts_stock_shortage",
+      triggeredBy: user?.id ?? null,
+      actor,
+    });
+    broadcast("work_order_awaiting_parts", {
+      workOrderId,
+      partName: result.part.name,
+      partReference: result.part.reference,
+      shortage: result.missingQuantity,
+      requestId: result.requirement?.id,
+    });
+  }
+}
+
+// « Demander la pièce » : le serveur décide au clic (voir `requestPartForWorkOrder`).
+// 201 dès qu'une sortie ou une demande est créée ; 200 si seule une demande
+// déjà en cours est réutilisée.
+router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
+  try {
+    const result = await requestPartForWorkOrder({
+      workOrderId: parseInt(req.params.workOrderId),
+      partId: Number(req.body?.partId),
+      quantity: req.body?.quantity === undefined ? 1 : Number(req.body.quantity),
+      actor: { id: req.user!.id, role: String(req.user!.role) },
+      urgency: req.body?.urgency,
+      reason: req.body?.reason,
+    });
+    broadcastPartRequest(result, req.user);
+    const created = result.partUsed !== null || (result.requirement !== null && !result.usedExistingRequirement);
+    return res.status(created ? 201 : 200).json(result);
+  } catch (error) {
+    if (isAppError(error)) {
+      return res.status(error.status).json({ message: error.message });
+    }
+    log.error({ err: error, requestId: req.requestId }, "demande de pièce sur OT en échec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
