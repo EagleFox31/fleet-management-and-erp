@@ -9,6 +9,7 @@ import type { ComponentType } from "react";
 import type { LotScreen } from "@/config/lot-screens";
 import LockedUsersPage from "@/pages/admin/locked-users";
 import AuditLogsPage from "@/pages/admin/audit-logs";
+import VehicleDocumentTypesPage from "@/pages/admin/vehicle-document-types";
 
 export type LotScreenComponentProps = {
   screen: LotScreen;
@@ -18,4 +19,5 @@ export type LotScreenComponentProps = {
 export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScreenComponentProps>>> = {
   "admin-locked-users": LockedUsersPage,
   "admin-audit-logs": AuditLogsPage,
+  "admin-vehicle-document-types": VehicleDocumentTypesPage,
 };

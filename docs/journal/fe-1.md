@@ -44,3 +44,17 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `tests/unit/client/lockout-message.test.ts` + `use-feature.test.ts` → 10 passed ; tsc global zéro erreur.
 - **RAIDER** : R tables et contrats partagés ; I déverrouiller deux fois = no-op côté liste ; D login inchangé hors message ; scoped client.
 - **Reste / risques** : branchement réel (T-31b) ; `userId` du filtre saisi en numéro faute de sélecteur d'utilisateurs.
+
+## 2026-10-30T14:20:00+01:00 — T-32a — Référentiel des types de document et sélecteur avec échéance proposée
+
+- **Agent** : fe-1 · **Branche** : `lot/fe/T-32a-types-document` (sur T-31a) · **Commit** : voir `git log`
+- **Statut** : fait (partie a, contre les mocks msw ; la partie b attend les routes réelles)
+- **Quoi** : page Types de document (liste, création, modification, désactivation) ; le sélecteur de type du téléversement lit le référentiel et propose l'échéance (aujourd'hui plus la durée de validité).
+- **Comment** : `useVehicleDocumentTypes` (hook partagé, clé `/api/vehicle-document-types`) ; `lib/document-due-date.ts` (fin de mois ramenée) ; formulaire `react-hook-form` + `zodResolver` sur le schéma du contrat ; ligne mise à jour dans le cache puis invalidation des documents véhicule ; single-flight. La proposition ne remplace jamais une date saisie à la main. Repli sur la liste historique si le référentiel est vide ou indisponible. Reuse : Adapt.
+- **Pourquoi** : plan 06 T-32a, contrat P-05.
+- **Comment tester (QA)** :
+  - Prérequis : compte admin ; mocks actifs ou routes réelles.
+  - Étapes : 1. Administration, Types de document : créer `permis_transport` (12 mois), le désactiver. 2. Fiche véhicule, ajouter un document : choisir Assurance, l'échéance se remplit ; la modifier puis changer de type, elle reste ; le type désactivé a disparu de la liste.
+  - Preuve automatisée : `tests/unit/client/document-due-date.test.ts` → 3 passed ; tsc global zéro erreur.
+- **RAIDER** : R hook et fonction réutilisables ; I enregistrer deux fois = même ligne ; D comportement historique conservé en repli ; scoped client.
+- **Reste / risques** : le serveur actuel de téléversement peut refuser un code absent de son énumération historique (à lever au branchement T-32b) ; la clé `/api/vehicle-documents` reste une hypothèse de satellite.

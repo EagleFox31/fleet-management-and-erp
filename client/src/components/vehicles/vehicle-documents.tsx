@@ -39,6 +39,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
+import { useVehicleDocumentTypes } from "@/hooks/use-vehicle-document-types";
+import { proposeDueDate } from "@/lib/document-due-date";
 import { AlertCircle, Download, File, FilePlus, Loader2, RefreshCw, Trash2 } from "lucide-react";
 
 // Types
@@ -173,6 +175,9 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
     expiryDate: '',
     file: null as File | null
   });
+  // Referentiel des types (P-05) : repli sur la liste historique tant qu'il est vide ou indisponible.
+  const { data: documentTypes } = useVehicleDocumentTypes({ activeOnly: true });
+  const [proposedDate, setProposedDate] = useState<string | null>(null);
   
   // Récupérer les documents
   const { data: documents = [], isLoading, error } = useQuery<VehicleDocument[]>({
@@ -405,9 +410,15 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   
   // Gérer la sélection du type
   const handleTypeChange = (value: string) => {
+    // Echeance proposee seulement si le champ est vide ou porte encore une proposition precedente.
+    const months = documentTypes?.find((t) => t.code === value)?.validityMonths;
+    const proposal = proposeDueDate(new Date(), months);
+    const canReplace = !uploadForm.expiryDate || uploadForm.expiryDate === proposedDate;
+    if (canReplace) setProposedDate(proposal);
     setUploadForm({
       ...uploadForm,
-      type: value
+      type: value,
+      expiryDate: canReplace ? (proposal ?? "") : uploadForm.expiryDate,
     });
   };
   
@@ -746,11 +757,19 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
                       <SelectValue placeholder="Sélectionner un type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="carte_grise">Carte grise</SelectItem>
-                      <SelectItem value="assurance">Assurance</SelectItem>
-                      <SelectItem value="visite_technique">Visite technique</SelectItem>
-                      <SelectItem value="taxe">Taxe</SelectItem>
-                      <SelectItem value="autre">Autre</SelectItem>
+                      {documentTypes && documentTypes.length > 0 ? (
+                        documentTypes.map((t) => (
+                          <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>
+                        ))
+                      ) : (
+                        <>
+                          <SelectItem value="carte_grise">Carte grise</SelectItem>
+                          <SelectItem value="assurance">Assurance</SelectItem>
+                          <SelectItem value="visite_technique">Visite technique</SelectItem>
+                          <SelectItem value="taxe">Taxe</SelectItem>
+                          <SelectItem value="autre">Autre</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -780,6 +799,11 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
                     onChange={handleInputChange}
                     className="col-span-3"
                   />
+                  {proposedDate && uploadForm.expiryDate === proposedDate ? (
+                    <p className="col-span-3 col-start-2 text-xs text-muted-foreground">
+                      Échéance proposée d'après la durée de validité du type. Modifiable.
+                    </p>
+                  ) : null}
                 </div>
                 
                 <div className="grid grid-cols-4 items-center gap-4">
