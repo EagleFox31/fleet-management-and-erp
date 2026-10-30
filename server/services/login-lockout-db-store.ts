@@ -9,6 +9,20 @@ const toState = (r: { failed_count: number; locked_until: Date | null; last_fail
   lastFailedAt: r.last_failed_at,
 });
 
+/** Espaces de cles : un identifiant « 5 » (mot de passe) n'est pas l'utilisateur d'id 5 (PIN). */
+export const PASSWORD_KEY_PREFIX = "pwd:";
+export const PIN_KEY_PREFIX = "pin:";
+
+/** Cible du miroir `users` pour une cle : par id (pin:), sinon par nom d'utilisateur (pwd: ou cle brute). */
+function mirrorTarget(key: string): { where: string; param: string | number } {
+  if (key.startsWith(PIN_KEY_PREFIX)) {
+    const id = Number(key.slice(PIN_KEY_PREFIX.length));
+    return { where: "id = $1", param: Number.isInteger(id) ? id : -1 };
+  }
+  const name = key.startsWith(PASSWORD_KEY_PREFIX) ? key.slice(PASSWORD_KEY_PREFIX.length) : key;
+  return { where: "lower(btrim(username)) = $1", param: name };
+}
+
 /**
  * Compteur en base : un seul INSERT ... ON CONFLICT DO UPDATE ... RETURNING, donc
  * atomique face a des echecs simultanes. Miroir sur users si le compte existe.
@@ -39,10 +53,11 @@ export class DbLockoutStore implements LockoutStore {
       [username, now, until, cfg.maxAttempts],
     );
     const state = toState(rows[0]);
+    const target = mirrorTarget(username);
     const mirror = await pool.query(
       `UPDATE users SET failed_login_count = $2, locked_until = $3, last_failed_login_at = $4
-       WHERE lower(btrim(username)) = $1 RETURNING id`,
-      [username, state.failedCount, state.lockedUntil, state.lastFailedAt],
+       WHERE ${target.where} RETURNING id`,
+      [target.param, state.failedCount, state.lockedUntil, state.lastFailedAt],
     );
     // Blocage audite une seule fois : l'echec qui atteint exactement le seuil.
     if (state.lockedUntil && state.failedCount === cfg.maxAttempts) {
@@ -62,10 +77,11 @@ export class DbLockoutStore implements LockoutStore {
 
   async reset(username: string): Promise<void> {
     await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [username]);
+    const target = mirrorTarget(username);
     await pool.query(
       `UPDATE users SET failed_login_count = 0, locked_until = NULL
-       WHERE lower(btrim(username)) = $1 AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
-      [username],
+       WHERE ${target.where} AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
+      [target.param],
     );
   }
 
@@ -76,7 +92,9 @@ export class DbLockoutStore implements LockoutStore {
       [userId],
     );
     if (!rows[0]) return false;
-    await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [rows[0].u]);
+    await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [
+      [rows[0].u, PASSWORD_KEY_PREFIX + rows[0].u, PIN_KEY_PREFIX + userId],
+    ]);
     await recordAudit({
       userId: adminId,
       action: "unlock",
