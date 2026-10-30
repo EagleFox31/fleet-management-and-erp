@@ -13,6 +13,7 @@ import { LocalBackupStorage } from "../../../server/lib/backup/storage";
 import { parsePgDumpMajor, BackupDumpError } from "../../../server/lib/backup/dump";
 import {
   isBackupDue,
+  isBackupScheduleEnabled,
   retentionCutoff,
   runBackup,
   type BackupDeps,
@@ -25,6 +26,16 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("isBackupScheduleEnabled", () => {
+  it("active en production seulement, sauf interrupteur explicite", () => {
+    expect(isBackupScheduleEnabled({ NODE_ENV: "production" })).toBe(true);
+    expect(isBackupScheduleEnabled({ NODE_ENV: "development" })).toBe(false);
+    expect(isBackupScheduleEnabled({})).toBe(false);
+    expect(isBackupScheduleEnabled({ NODE_ENV: "development", BACKUP_ENABLED: "1" })).toBe(true);
+    expect(isBackupScheduleEnabled({ NODE_ENV: "production", BACKUP_ENABLED: "0" })).toBe(false);
+  });
 });
 
 describe("chiffrement AES-256-GCM", () => {

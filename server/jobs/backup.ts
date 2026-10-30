@@ -25,6 +25,17 @@ import { BackupDumpError, checkPgDump, runPgDump } from "../lib/backup/dump";
 const log = moduleLogger("backup");
 
 export const BACKUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Sauvegarde planifiée active ? `BACKUP_ENABLED=1|0` décide ; sinon seulement en production.
+ * Hors production, un serveur de dev ou d'e2e sur la base partagée ne doit ni lancer pg_dump
+ * ni écrire d'échec et d'alerte admin à chaque démarrage.
+ */
+export function isBackupScheduleEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.BACKUP_ENABLED === "1") return true;
+  if (env.BACKUP_ENABLED === "0") return false;
+  return env.NODE_ENV === "production";
+}
 export const BACKUP_RETENTION_MONTHS = 12;
 export const BACKUP_LOCK_KEY = "backup";
 
