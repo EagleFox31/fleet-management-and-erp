@@ -27,6 +27,16 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - Preuve : `tests/contract/audit-logs.contract.test.ts` (3 verts : 401/403, filtres, masque, plage, pagination) ; tsc global a zero.
 - Reste : l'intercepteur `auditWrites` n'est pas monte ici (sol) ; le test insere ses lignes directement.
 
+## 2026-10-30T19:00:00+01:00 - T-16 (restes) - Evenement temps reel des types de document
+
+- **Agent** : api-3 (journal api-1) · **Branche** : `lot/api/T-16-restes` · **Commit** : voir `git log` de la branche
+- **Statut** : (a) fait ; (b) validation a l'upload non implementee, bloquee par `server/routes.ts`
+- **Quoi** : `vehicle_document_type_changed` emis apres chaque creation et modification dans `server/api/vehicle-document-types.routes.ts`.
+- **Comment** : `broadcastUpdate(event, { entity, payload: { code }, scope })` via `global.broadcastUpdate` (convention des routeurs `server/api`), portee lue dans `REALTIME_EVENTS` (broadcast). Pas d'emission sur 409/404/400. Test avec espion sur la fonction globale.
+- **Pourquoi** : couche 2 de la regle des 3 couches ; les ecrans qui listent les types se resynchronisent sans polling.
+- **Comment tester (QA)** : deux sessions, l'admin cree puis desactive un type ; l'autre session voit la liste des types a jour sans recharger.
+- **Preuve** : contrats `vehicle-document-types` (5) et `vehicle-document-types-realtime` (1) verts ; unitaires verts ; `tsc` global a zero.
+- **Reste (b)** : la route d'upload est `POST /api/vehicles/:vehicleId/documents` dans `server/routes.ts` (l. 1334), multipart traite par multer dans la route ; aucun double dans `server/api/`.
 ## 2026-10-30T18:40:00+01:00 - T-39 - Historique d'un ordre de travail
 
 - **Agent** : api-3 (journal api-1) · **Branche** : `lot/api/T-39-audit-trail` · **Commit** : voir `git log` de la branche
