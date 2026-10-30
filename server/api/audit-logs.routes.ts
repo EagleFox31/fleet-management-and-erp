@@ -1,21 +1,16 @@
 import { Router } from "express";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { activityLogs, users } from "@shared/schema";
-import { AUDIT_ACTIONS, auditLogsQuerySchema, auditLogsResponseSchema, type AuditAction } from "@shared/contracts/audit-logs";
+import { auditLogsQuerySchema, auditLogsResponseSchema } from "@shared/contracts/audit-logs";
 import { db } from "../db";
 import { isAdmin } from "../middleware/auth";
-import { maskSecrets } from "../lib/audit";
+import { toAuditLogRow } from "../lib/audit-log-row";
 
 const router = Router();
 
 const DEFAULT_RANGE_DAYS = 31;
 const MAX_PAGE_SIZE = 100;
 const DAY_MS = 86_400_000;
-
-function toAction(raw: string): AuditAction {
-  const a = raw.toLowerCase();
-  return (AUDIT_ACTIONS as readonly string[]).includes(a) ? (a as AuditAction) : "update";
-}
 
 /** Journal d'audit (P-04), lecture admin. Plage par defaut 31 jours, 100 lignes par page au plus. */
 router.get("/audit-logs", isAdmin, async (req, res, next) => {
@@ -48,21 +43,7 @@ router.get("/audit-logs", isAdmin, async (req, res, next) => {
 
     res.json(
       auditLogsResponseSchema.parse({
-        items: rows.map(({ log, userName }) => ({
-          id: log.id,
-          at: log.createdAt.toISOString(),
-          userId: log.userId,
-          userName: userName ?? null,
-          action: toAction(log.action),
-          entityType: log.entityType,
-          entityId: log.entityId !== null ? String(log.entityId) : log.entityRef,
-          method: log.method,
-          path: log.path,
-          details:
-            log.details && typeof log.details === "object" && !Array.isArray(log.details)
-              ? (maskSecrets(log.details) as Record<string, unknown>)
-              : null,
-        })),
+        items: rows.map(toAuditLogRow),
         total: n,
         page: q.page,
         pageSize,
