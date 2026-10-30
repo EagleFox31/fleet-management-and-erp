@@ -177,6 +177,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   });
   // Referentiel des types (P-05) : repli sur la liste historique tant qu'il est vide ou indisponible.
   const { data: documentTypes } = useVehicleDocumentTypes({ activeOnly: true });
+  // Libelles de tous les types (y compris desactives) pour la colonne Type.
+  const { data: allDocumentTypes } = useVehicleDocumentTypes();
   const [proposedDate, setProposedDate] = useState<string | null>(null);
   
   // Récupérer les documents
@@ -616,7 +618,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
       widthClassName: "w-[145px]",
       cell: (doc) => (
         <Badge variant="outline" className={getColorForDocumentType(doc.type)}>
-          {getDocumentTypeLabel(doc.type)}
+          {allDocumentTypes?.find((t) => t.code === doc.type)?.label ?? getDocumentTypeLabel(doc.type)}
         </Badge>
       ),
     },

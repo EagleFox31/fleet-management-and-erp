@@ -25,7 +25,8 @@ export const NOTIFICATION_TOPIC_LABELS: Record<NotificationTopic, string> = {
 
 /**
  * Section « Notifications » du profil (T-33a). À insérer dans `pages/profile.tsx`.
- * Le canal e-mail n'est pas proposé : l'option est coupée du lot.
+ * Le canal e-mail est affiché grisé « non configuré » : l'option est coupée du lot
+ * (drapeau `email-notifications`), le serveur ignore `email`.
  */
 export function NotificationPreferences() {
   const { toast } = useToast();
@@ -56,17 +57,31 @@ export function NotificationPreferences() {
 
   return (
     <section className="space-y-3" data-testid="notification-preferences">
-      <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
+        <span className="text-xs text-muted-foreground" data-testid="notif-email-unavailable">
+          Canal e-mail : non configuré
+        </span>
+      </div>
       <ul className="divide-y rounded-xl border">
         {(settings.data ?? []).map((row) => (
           <li key={row.topic} className="flex items-center justify-between px-4 py-3">
             <span className="text-sm text-foreground">{NOTIFICATION_TOPIC_LABELS[row.topic]}</span>
-            <Switch
-              checked={row.inApp}
-              onCheckedChange={(inApp) => mutation.mutate({ topic: row.topic, inApp })}
-              aria-label={`Notifications dans l'application : ${NOTIFICATION_TOPIC_LABELS[row.topic]}`}
-              data-testid={`switch-notif-${row.topic}`}
-            />
+            <div className="flex items-center gap-4">
+              <Switch
+                checked={false}
+                disabled
+                aria-label={`E-mail non configuré : ${NOTIFICATION_TOPIC_LABELS[row.topic]}`}
+                data-testid={`switch-notif-email-${row.topic}`}
+                className="opacity-40"
+              />
+              <Switch
+                checked={row.inApp}
+                onCheckedChange={(inApp) => mutation.mutate({ topic: row.topic, inApp })}
+                aria-label={`Notifications dans l'application : ${NOTIFICATION_TOPIC_LABELS[row.topic]}`}
+                data-testid={`switch-notif-${row.topic}`}
+              />
+            </div>
           </li>
         ))}
       </ul>

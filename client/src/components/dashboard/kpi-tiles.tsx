@@ -1,3 +1,5 @@
+import { useAuth } from "@/hooks/useAuth";
+import { canViewKpi } from "@shared/constants/roles";
 import { KpiGrid, KpiTile } from "@/components/design-system";
 import { useContractQuery } from "@/lib/contract-query";
 import { formatPrice } from "@/lib/utils";
@@ -21,7 +23,14 @@ export function formatAverageCost(value: number | null): string {
 }
 
 /** Trois tuiles KPI (T-35). Aucun seuil de couleur inventé : tuiles neutres. Taux nul affiché « — ». */
-export function KpiTiles({ from, to }: { from?: string; to?: string }) {
+export function KpiTiles(props: { from?: string; to?: string }) {
+  const { user } = useAuth();
+  // Le serveur garde `/api/kpi/*` par `isManagementOrAdmin` : ne rien rendre (donc ne rien appeler) hors de ces rôles.
+  if (!canViewKpi(user?.role)) return null;
+  return <KpiTilesContent {...props} />;
+}
+
+function KpiTilesContent({ from, to }: { from?: string; to?: string }) {
   const range = { from, to };
   const incidents = useContractQuery(KPI_INCIDENTS_PER_MONTH_PATH, incidentsPerMonthResponseSchema, range);
   const compliance = useContractQuery(KPI_PREVENTIVE_COMPLIANCE_PATH, preventiveComplianceResponseSchema, range);

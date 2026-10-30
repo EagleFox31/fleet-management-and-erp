@@ -72,3 +72,29 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `tests/unit/client/booking-conflict.test.ts` ; suite client 142 passed ; tsc global zéro erreur.
 - **RAIDER** : D flux de démarrage inchangé hors 409 ; I export sans écriture ; scoped client.
 - **Reste / risques** : rôles du bouton d'export à confirmer avec le garde serveur (le serveur reste maître, 403 affichée en clair) ; seul le démarrage affiche les conflits, l'assignation depuis la modification de l'OT sera couverte à T-34b si la route la porte.
+
+## 2026-10-30T18:41:02+01:00 — T-31b/T-32b/T-33b (partiel) — Écrans sur l'API réelle (agent fe-3)
+
+- **Agent** : fe-3 (reprise de fe-1) · **Branche** : `lot/fe/T-3xb-api-reelle` (sur T-54c, fusionnée avec `main`) · **Commit** : voir `git log`
+- **Statut** : fait pour le journal d'audit, les types de document et les préférences de notification ; comptes verrouillés, 429 au login et sauvegardes restent sur mock (serveur non fusionné : PR #42, #39, #37/#28).
+- **Quoi** : vérification sur l'API réelle (serveur de dev, port 5091, comptes admin et chef d'atelier) de `GET /api/audit-logs`, `/api/vehicle-document-types`, `/api/notifications/settings` ; correction des écarts écran/réponse : la colonne Type des documents d'un véhicule affichait le code (`jaugeage_fe3`) au lieu du libellé du référentiel (types désactivés compris) ; canal e-mail affiché grisé « non configuré » dans les préférences.
+- **Comment** : les mocks ne s'activent que par `VITE_API_MOCKS=1` (absent ici) : aucun service worker msw, toutes les requêtes partent vers le serveur (journal réseau capturé). R-04 rejoué : type créé en UI (POST 201, doublon 409), proposition d'échéance 24 mois, document attaché, alerte « expire bientôt » à J+20 générée par `checkTypedDocumentExpiryAlerts` et visible côté admin et chef d'atelier. Les 9 types du seed correspondent à `VEHICLE_DOCUMENT_TYPE_SEED` (code, libellé, validité, alerte 30 j, ordre). Données de test (véhicule, document, type, alertes) supprimées ensuite.
+- **Pourquoi** : plan 06 T-31b, T-32b, T-33b ; attraper la dérive que les types ne voient pas.
+- **Comment tester (QA)** :
+  - Prérequis : serveur de dev, compte admin et compte chef d'atelier.
+  - Étapes : 1. Admin, Journal d'audit : lignes réelles, filtre Objet = user. 2. Types de document : 9 types seedés. 3. Mon profil (chef d'atelier) : désactiver « Documents de véhicule », puis profil admin : reste actif. 4. Fiche véhicule, onglet Documents : le type s'affiche en libellé.
+  - Preuve : captures hors dépôt (`scratchpad/fe-3/`) ; tsc global zéro erreur ; `tests/unit` vert hors un test d'événements temps réel déjà rouge avant ce lot de modifications.
+- **RAIDER** : D contrats inchangés, mocks conservés pour le non fusionné ; I données de test créées puis retirées ; A aucune donnée de recette touchée.
+- **Reste / risques** : écart serveur R-14 : la préférence est enregistrée et indépendante par profil, mais `/api/alerts` n'appelle pas `shouldNotify` (alerte documents toujours visible après désactivation) ; pagination du journal non éprouvée à l'écran (8 lignes, page de 50).
+
+## 2026-10-30T18:41:02+01:00 — Factures « À chiffrer » et garde de rôle des tuiles KPI
+
+- **Agent** : fe-3 · **Branche** : `lot/fe/T-3xb-api-reelle` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : factures en attente : montant 0 affiché « À chiffrer » (atténué) ; `KpiTiles` rendu seulement pour admin et management, et monté sur les tableaux de bord admin et direction (il n'était monté que sur le tableau générique, jamais atteint pour un rôle connu).
+- **Comment** : `isToQuote` pure ; `KPI_VIEWER_ROLES` / `canViewKpi` dans `shared/constants/roles.ts` (aligné sur `isManagementOrAdmin`), composant enveloppe avant les hooks de requête. Préférences de notification : section visible de tout connecté (vérifié avec le chef d'atelier).
+- **Pourquoi** : consigne de recette (T-40 renvoie `amount = 0`) et revue PR #25.
+- **Comment tester (QA)** : tableau de bord admin : trois tuiles ; chef d'atelier : aucune tuile, aucune requête `/api/kpi`.
+- **Preuve** : `tests/unit/client/pending-invoices-kpi-roles.test.ts` ; captures `20-dashboard-admin.png` (12 requêtes `/api/kpi`), `20-dashboard-terry.png` (0 requête).
+- **RAIDER** : R liste de rôles dans la source unique ; D contrat et serveur inchangés.
+- **Reste / risques** : capture « À chiffrer » non faite sur l'API réelle (drapeau `pending-invoices` coupé, route T-40 non servie) ; couverte par test unitaire. Compte management non utilisé (mot de passe inconnu).
