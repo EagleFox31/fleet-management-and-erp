@@ -1,16 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
-import { resolveFeatureFlags } from "../../shared/feature-flags";
+import { requireFeature } from "../lib/feature-flags";
 import { canExport } from "../../shared/contracts/exports";
 import { AppError } from "../lib/app-error";
 import { isAnyUser } from "./auth";
-
-/** Coupe-circuit `exports` : 404 quand le drapeau est coupe (a remplacer par requireFeature de T-08). */
-export function exportsFeatureGate(req: Request, _res: Response, next: NextFunction) {
-  if (!resolveFeatureFlags(process.env.FEATURE_FLAGS).exports) {
-    return next(new AppError(404, "Fonction indisponible."));
-  }
-  next();
-}
 
 /** Refus par defaut : chemin absent de EXPORT_ROLE_MATRIX ou role non liste = 403. */
 const matrixCheck = (req: Request, _res: Response, next: NextFunction) => {
@@ -21,4 +13,4 @@ const matrixCheck = (req: Request, _res: Response, next: NextFunction) => {
   next();
 };
 
-export const exportsGuard = [exportsFeatureGate, isAnyUser, matrixCheck];
+export const exportsGuard = [requireFeature("exports"), isAnyUser, matrixCheck];

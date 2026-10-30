@@ -78,7 +78,7 @@ describe("exports : matrice de roles (EXPORT_ROLE_MATRIX)", { timeout: 60000 }, 
         const res = await get(`${EXPORTS_BASE_PATH}/${path}?year=2026&month=10`, role);
         if (allowed) {
           expect(res.status).toBe(200);
-          expect(res.headers.get("content-type")).toMatch(/spreadsheetml\.sheet/);
+          expect(res.headers.get("content-type")).toMatch(/spreadsheetml\.sheet|application\/zip/);
         } else {
           expect(res.status).toBe(403);
           expect(JSON.parse(res.text())).toMatchObject({ code: "FORBIDDEN" });
@@ -114,4 +114,24 @@ describe("garde isStaff au montage (T-62)", { timeout: 60000 }, () => {
       });
     }
   }
+});
+
+describe("exports : validation et en-tetes (T-11a)", { timeout: 60000 }, () => {
+  it("annee ou mois invalides : 400 normalise, sans detail technique", async () => {
+    for (const q of ["year=abc&month=10", "year=2026&month=13", "month=10"]) {
+      const res = await get(`${EXPORTS_BASE_PATH}/monthly-report?${q}`, "admin");
+      expect(res.status).toBe(400);
+      const body = JSON.parse(res.text());
+      expect(body).toMatchObject({ code: expect.any(String), message: expect.any(String) });
+      expect(body.message).not.toMatch(/zod|invalid_type|stack/i);
+    }
+  });
+
+  it("clientName assaini dans Content-Disposition", async () => {
+    const res = await get(`${EXPORTS_BASE_PATH}/client-operations?clientName=${encodeURIComponent('A"B\r\nX-Evil: 1')}`, "admin");
+    expect(res.status).toBe(200);
+    const disposition = res.headers.get("content-disposition") ?? "";
+    expect(disposition).toMatch(/^attachment; filename="[A-Za-z0-9_.-]+"$/);
+    expect(res.headers.get("x-evil")).toBeNull();
+  });
 });

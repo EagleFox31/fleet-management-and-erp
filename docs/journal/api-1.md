@@ -17,3 +17,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisee : `node ../lot-tools/db-lock.mjs api-1 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.contract.config.ts tests/contract/lot-exports-roles.contract.test.ts` -> ROUGE avant (65 failed | 52 passed), VERT apres (117 passed). tsc global : 0 erreur.
 - **RAIDER** : R/A matrice et roles lus des contrats ; I sans ecriture ; D technician/driver non refuses sur les montages staff ; E AppError, refus par defaut. Failure memory : le test de garde de session ne prouve pas la garde de role.
 - **Reste / risques** : les `res.status(500).json({error: error.message})` et `console.*` de exports.routes.ts restent (T-11a, a faire) ; routes.ts sert /api/exports/{vehicles,work-orders,fuel,users,complete} avec `authenticate` seul : elles tombent maintenant sous la garde et recoivent 403 pour tous (y compris admin) ; pages/reports/index.tsx et exportsService (`/exports/fuel`) en dependent.
+
+## 2026-10-31T16:00:00+01:00 — T-11 — Exports : garde par drapeau, rôles par chemin, entrées validées
+
+- **Agent** : api-1 · **Branche** : `lot/api/T-11-exports-garde` · **Commit** : voir `git log` de la branche
+- **Statut** : fait
+- **Quoi** : la garde d'export passe par `requireFeature("exports")` ; les 5 exports de la page Rapports (vehicles, work-orders, fuel, users, complete) restent servis à l'admin ; année et mois validés ; erreurs normalisées.
+- **Comment** : `server/middleware/exports-guard.ts` délègue à T-08 ; `server/api/exports.routes.ts` utilise `AppError` et `moduleLogger`, nom de fichier assaini dans `Content-Disposition` ; `EXPORT_ROLE_MATRIX` étendue aux 5 chemins.
+- **Pourquoi** : la régression rendait un 403 à l'admin sur ces chemins ; le coupe-circuit local dupliquait le drapeau.
+- **Comment tester (QA)** : connecté admin, ouvrir Rapports et lancer les 5 exports ; hors admin, 403 ; année invalide, 400 lisible.
+- **Preuve** : contrat `lot-exports-roles` 174 verts ; `tsc` global sans erreur.
