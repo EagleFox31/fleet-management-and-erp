@@ -28,3 +28,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : preuve automatisée `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/audit.test.ts` → `8 passed` ; tsc 0 `error TS`.
 - **RAIDER** : R/A règles et sink injectés ; I n/a ; D rien d'existant modifié ; E secrets masqués, panne d'audit journalisée sans casser la requête. 3 couches n/a.
 - **Reste / risques** : sink base, liste gelée des 8 motifs MUST, montage `apiRouter.use(auditWrites(AUDIT_CONFIG))` dans `server/api/index.ts` (à sol), test d'intégration.
+
+## 2026-10-30T14:10:00+01:00 — T-12 — Verrouillage de compte (logique pure et intercepteur)
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-12-verrouillage` (empilée sur T-14) · **Commit** : voir `git log`
+- **Statut** : en cours (magasin base et montage en attente de db-1 et sol)
+- **Quoi** : `nextLockState`, `isLocked`, `lockoutConfigFromEnv` (`LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_MINUTES`, défauts `LOCKOUT_DEFAULTS`), interface `LockoutStore` (+ `MemoryLockoutStore`), intercepteur `loginLockoutGuard` : 429 `RATE_LIMITED` avec `lockedUntil` avant la route, 401 incrémente et 2xx remet à zéro après la réponse. Compteur par nom normalisé, nom inconnu inclus.
+- **Comment** : `server/services/login-lockout-service.ts`, `server/middleware/login-lockout-guard.ts`. Build (rate-limiter-flexible écarté, plan §3). Sans `AppError.details` (T-08 absent) le corps 429 est écrit directement au format `lockedResponseSchema`.
+- **Pourquoi** : P-03, PR-06.
+- **Comment tester (QA)** : preuve automatisée `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/login-lockout.test.ts` → `4 passed` ; tsc 0 `error TS`. Manuel après montage : 5 mauvais mots de passe puis 6e essai → 429 avec `lockedUntil`.
+- **RAIDER** : R/A seuils par environnement, magasin injecté ; I un succès remet à zéro, verrou expiré repart de zéro ; D rien d'existant modifié ; E aucune fuite d'existence du compte. 3 couches n/a (pas de transition métier).
+- **Reste / risques** : `DbLockoutStore` (UPDATE ... RETURNING atomique, table de db-1, miroir `users.failed_login_count/locked_until`), `recordAudit` blocage/déblocage, montage, test d'intégration de concurrence, `express-rate-limit`.
