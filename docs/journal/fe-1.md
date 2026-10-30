@@ -17,3 +17,16 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `node node_modules/vitest/vitest.mjs run tests/unit/client/use-feature.test.ts` → 6 passed ; tsc global zéro erreur.
 - **RAIDER** : R/A table et drapeaux découverts ; I rendu sans état ; D aucune route existante modifiée ; scoped : client seul.
 - **Reste / risques** : rôles des écrans SHOULD à ajuster par leur tâche (champ `roles` de la table).
+
+## 2026-10-30T13:57:44+01:00 — T-50 — Câblage temps réel des événements du lot
+
+- **Agent** : fe-1 · **Branche** : `lot/fe/T-50-temps-reel` (sur T-09) · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : les 7 événements de `REALTIME_EVENTS` invalident leurs clés ; `work_order_updated` réinterroge aussi `/api/kpi`, `part_requirement_updated` le stock et les demandes magasin.
+- **Comment** : `useRealTimeSync.ts` : un `case` par événement qui appelle `invalidateCatalogEvent(nom)`, lecture de `invalidates` du catalogue (une seule source) ; satellites ajoutés pour `vehicle_document_type_changed` (véhicules, documents) et `backup_failed` (alertes). Adapt de la structure existante.
+- **Pourquoi** : AGENTS §2 couche 2 et 3, plan 06 T-50.
+- **Comment tester (QA)** :
+  - Preuve automatisée : `node node_modules/vitest/vitest.mjs run tests/unit/client/realtime-catalog-wiring.test.ts` → 12 passed ; tsc global zéro erreur.
+  - Preuve de trame WebSocket : T-55 (deux comptes).
+- **RAIDER** : D cases existants inchangés ; I invalidations sans effet de bord ; scoped client.
+- **Reste / risques** : la clé `/api/vehicle-documents` est une hypothèse de satellite, à confirmer au branchement T-32b.
