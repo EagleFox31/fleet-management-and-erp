@@ -16,3 +16,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve : `node ../lot-tools/db-lock.mjs db-1 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/lot-recette-schema-idempotence.test.ts` ; unitaire : `node node_modules/vitest/vitest.mjs run tests/unit/server/lot-recette-schema-drift.test.ts`.
 - **RAIDER** : R/A/I/D/R couverts (additif, idempotent, existant intact) ; scoped execution : sans objet.
 - **Reste / risques** : T-26 (seed) à suivre ; fusion des tables compagnes plus tard.
+
+## 2026-10-30T14:25:00+01:00 — T-26a/T-26b — Seed et reset de recette
+
+- **Agent** : db-1 · **Branche** : `lot/db/T-26-seed-recette` (basée sur T-07) · **Commit** : voir `git log`
+- **Statut** : fait pour le périmètre minimal (comptes, véhicules, reset) ; données transactionnelles (OT, demandes, pleins, factures, pointage) restent à écrire
+- **Quoi** : `scripts/recette-seed.ts` (11 comptes `recette_*`, un par profil, deux techniciens et deux clients ; véhicules `RCT-001..012`, quatre au nom des clients) et `scripts/recette-reset.ts`.
+- **Comment** : garde commune `scripts/lib/recette-guard.ts` (APP_ENV=recette ET hôte dans RECETTE_DB_HOST_ALLOW). Mots de passe lus dans `RECETTE_PASSWORD_<ROLE>` ou `RECETTE_PASSWORD`, 12 caractères minimum, jamais dans le dépôt. Reset : supprime seulement `recette_%` et `RCT-%` puis relance le seed, sans TRUNCATE (la base de dev est partagée avec les tests). Non exécutés contre aucune base.
+- **Comment tester (QA)** : `node node_modules/vitest/vitest.mjs run tests/unit/server/recette-guard.test.ts` → refus hors recette, hôte hors liste.
+- **RAIDER** : idempotent (ON CONFLICT), retroactive (reset borné à ce que le seed possède).
+- **Reste / risques** : T-26b données transactionnelles ; mot de passe `driver` sans PIN.
