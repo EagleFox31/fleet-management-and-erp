@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { AltchaWidget, shouldShowCaptcha } from "@/components/auth/altcha-widget";
+import { useFeature } from "@/hooks/use-feature";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -60,6 +62,10 @@ export default function Login() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const captchaEnabled = useFeature("captcha");
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [captchaProof, setCaptchaProof] = useState<string | null>(null);
+  const showCaptcha = captchaEnabled && shouldShowCaptcha(failedAttempts);
   const [view, setView] = useState<'login' | 'forgot' | 'driver-select' | 'driver-pin'>('login');
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotUsername, setForgotUsername] = useState('');
@@ -82,7 +88,8 @@ export default function Login() {
   async function onSubmit(values: LoginFormValues) {
     setLoginError(null);
     try {
-      const success = await login({ ...values, rememberMe });
+      const success = await login({ ...values, rememberMe, ...(showCaptcha && captchaProof ? { captcha: captchaProof } : {}) });
+      if (!success) setFailedAttempts((n) => n + 1);
       if (!success) setLoginError("Identifiants incorrects. Veuillez réessayer.");
     } catch (error) {
       handleApiError(error);
@@ -392,8 +399,10 @@ export default function Login() {
                       </div>
                     )}
 
+                    {showCaptcha && <AltchaWidget onPayload={setCaptchaProof} />}
+
                     <div className="pt-1">
-                      <Button type="submit" disabled={isAuthenticating}
+                      <Button type="submit" disabled={isAuthenticating || (showCaptcha && !captchaProof)}
                         data-testid="button-submit-login"
                         className="w-full h-[52px] rounded-xl text-[14px] font-bold text-white shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2"
                         style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>

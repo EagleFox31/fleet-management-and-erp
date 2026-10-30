@@ -10,6 +10,14 @@ import type { LotScreen } from "@/config/lot-screens";
 import LockedUsersPage from "@/pages/admin/locked-users";
 import AuditLogsPage from "@/pages/admin/audit-logs";
 import VehicleDocumentTypesPage from "@/pages/admin/vehicle-document-types";
+import {
+  BackupsScreen,
+  IncidentDeclareScreen,
+  IncidentsListScreen,
+  PendingInvoicesScreen,
+  TimeTrackingScreen,
+  TireMovementsScreen,
+} from "@/pages/lot/screens";
 
 export type LotScreenComponentProps = {
   screen: LotScreen;
