@@ -10,6 +10,8 @@ export interface LockoutGuardOptions {
   now?: () => Date;
   /** Champ du corps portant l'identifiant (defaut "username"). */
   usernameField?: string;
+  /** Prefixe de la cle du compteur : separe les espaces (mot de passe, PIN). */
+  keyPrefix?: string;
 }
 
 /**
@@ -21,7 +23,8 @@ export function loginLockoutGuard(opts: LockoutGuardOptions): RequestHandler {
   const now = opts.now ?? (() => new Date());
   const field = opts.usernameField ?? "username";
   return async (req, res, next) => {
-    const username = normalizeUsername(req.body?.[field]);
+    const raw = normalizeUsername(req.body?.[field]);
+    const username = raw ? (opts.keyPrefix ?? "") + raw : raw;
     if (!username) return next();
     const requestId = (req as { requestId?: string }).requestId;
     try {

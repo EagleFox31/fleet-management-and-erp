@@ -1,11 +1,13 @@
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
+  activityLogs,
   alerts,
   clientInvoices,
   clients,
   fuelRecords,
   parts,
+  partsStockMovements,
   supplierInvoices,
   suppliers,
   users,
@@ -48,6 +50,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.id, ids.invoiceIds));
   }
   if (ids.partIds.length > 0) {
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
     await db.delete(parts).where(inArray(parts.id, ids.partIds));
   }
   if (ids.vehicleIds.length > 0) {
@@ -64,8 +67,10 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     // sans ce ménage, la clé étrangère bloque la suppression de l'utilisateur.
     // Certaines alertes partent sans attente (avancement d'OT) et peuvent
     // arriver après le ménage : on recommence quelques fois.
+    // Le journal d'audit (auditWrites) référence aussi l'utilisateur.
     for (let attempt = 1; ; attempt++) {
       await db.delete(alerts).where(inArray(alerts.userId, ids.userIds));
+      await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -83,10 +88,12 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, `${TEST_PREFIX}%`));
   await db.delete(clients).where(like(clients.name, `${TEST_PREFIX}%`));
   await db.delete(supplierInvoices).where(like(supplierInvoices.invoiceNumber, `${TEST_PREFIX}%`));
+  await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, db.select({ id: parts.id }).from(parts).where(like(parts.reference, `${TEST_PREFIX}%`))));
   await db.delete(parts).where(like(parts.reference, `${TEST_PREFIX}%`));
   await db.delete(vehicles).where(like(vehicles.registrationNumber, `${TEST_PREFIX}%`));
   await db.delete(suppliers).where(like(suppliers.name, `${TEST_PREFIX}%`));
   const testUsers = db.select({ id: users.id }).from(users).where(like(users.username, `${TEST_PREFIX}%`));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
+  await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
   await db.delete(users).where(like(users.username, `${TEST_PREFIX}%`));
 }
