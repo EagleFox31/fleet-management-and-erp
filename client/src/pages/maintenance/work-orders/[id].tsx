@@ -4,6 +4,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
+import { bookingConflictsOf } from "@/lib/booking-conflict";
+import type { BookingConflict } from "@shared/contracts/work-order-booking";
+import { BookingConflictAlert } from "@/components/work-orders/booking-conflict-alert";
+import { WorkOrderExportButton } from "@/components/work-orders/work-order-export-button";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { useVehicle } from "@/context/vehicle-context";
@@ -186,6 +190,7 @@ export default function WorkOrderDetails({
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
   const [partQuantity, setPartQuantity] = useState(1);
   const [showStartConfirm, setShowStartConfirm] = useState(false);
+  const [bookingConflicts, setBookingConflicts] = useState<BookingConflict[]>([]);
   // Reprise: quand celui qui démarre n'est pas le technicien assigné, on lui
   // demande s'il prend l'intervention à son nom. Deviner serait faux dans les
   // deux sens — le chef démarre souvent pour un technicien déjà sous le camion.
@@ -526,14 +531,21 @@ export default function WorkOrderDetails({
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
       setShowStartConfirm(false);
       setSelectedTechnicianId(null);
+      setBookingConflicts([]);
       // Clear URL params
       setLocation(`/maintenance/work-orders/${workOrderId}`);
     },
     onError: (error) => {
+      // Double affectation (409) : le dialogue reste ouvert et liste les OT en conflit.
+      const conflicts = bookingConflictsOf(error);
+      if (conflicts) {
+        setBookingConflicts(conflicts);
+        return;
+      }
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur: ${error.message}`,
+        description: userMessageOf(error, "Le travail n'a pas pu être commencé."),
       });
     },
   });
@@ -1147,6 +1159,7 @@ export default function WorkOrderDetails({
                 <Printer className="h-4 w-4 mr-2" />
                 Imprimer
               </Button>
+              {(canEditWorkOrder || user?.role === "warehouse") && <WorkOrderExportButton workOrderId={workOrder.id} />}
               {canEditWorkOrder && !["completed", "cancelled"].includes(workOrder.status) && (
                 <Dialog>
                   <DialogTrigger asChild>
@@ -1315,6 +1328,8 @@ export default function WorkOrderDetails({
               </Select>
             </div>
           )}
+
+          <BookingConflictAlert conflicts={bookingConflicts} />
 
           {demarreurEstAutre && (
             <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 cursor-pointer">
