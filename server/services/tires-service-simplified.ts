@@ -5,6 +5,11 @@ import { alias } from "drizzle-orm/pg-core";
 import { activityLogger } from "./activity-logger";
 import type { Tire, InsertTire, VehicleTire, InsertVehicleTire } from "@shared/schema";
 import { computeTireWearScore } from "@shared/constants/tires";
+import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("tires");
 
 const createdByUser = alias(users, "tires_created_by_user");
 const updatedByUser = alias(users, "tires_updated_by_user");
@@ -72,7 +77,7 @@ export class TiresService {
         .from(tires)
         .leftJoin(createdByUser, eq(tires.createdBy, createdByUser.id))
         .leftJoin(updatedByUser, eq(tires.updatedBy, updatedByUser.id))
-        .where(eq(tires.id, id));
+        .where(and(eq(tires.id, id), isNull(tires.deletedAt)));
 
       if (!result) {
         return undefined;
@@ -84,7 +89,7 @@ export class TiresService {
         updatedByName: result.updatedByName,
       } as Tire;
     } catch (error) {
-      console.error('Error getting tire:', error);
+      log.error({ err: error, tireId: id }, "lecture de la fiche pneu en échec");
       return undefined;
     }
   }
@@ -217,31 +222,26 @@ export class TiresService {
     tire: Partial<InsertTire>,
     updatedBy?: number,
   ): Promise<Tire | undefined> {
-    try {
-      const [updatedTire] = await db
-        .update(tires)
-        .set({
-          ...tire,
-          updatedBy: updatedBy ?? null,
-          updatedAt: new Date(),
-        })
-        .where(eq(tires.id, id))
-        .returning();
-      
-      console.log(`✅ Tire updated: ID ${id}`);
+    // Une fiche supprimée (douce) n'est plus modifiable : `undefined`, comme une fiche inexistante.
+    const [updatedTire] = await db
+      .update(tires)
+      .set({
+        ...tire,
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(tires.id, id), isNull(tires.deletedAt)))
+      .returning();
 
-      if (updatedTire) {
-        broadcastTireUpdate("tire_updated", updatedTire.id, {
-          tire: updatedTire,
-          tireId: updatedTire.id,
-        });
-      }
-
-      return updatedTire;
-    } catch (error) {
-      console.error('Error updating tire:', error);
-      return undefined;
+    if (updatedTire) {
+      log.info({ tireId: id }, "fiche pneu modifiée");
+      broadcastTireUpdate("tire_updated", updatedTire.id, {
+        tire: updatedTire,
+        tireId: updatedTire.id,
+      });
     }
+
+    return updatedTire;
   }
 
   async deleteTire(id: number, userId?: number): Promise<boolean> {
@@ -256,7 +256,7 @@ export class TiresService {
         ));
       
       if (!tireData) {
-        throw new Error('Pneu non trouvé ou déjà supprimé');
+        throw new AppError(404, "Ce pneu n'existe pas ou a déjà été supprimé.");
       }
       
       // Vérifier si le pneu est installé sur un véhicule
@@ -269,7 +269,7 @@ export class TiresService {
         ));
       
       if (vehicleTire) {
-        throw new Error('Impossible de supprimer un pneu installé sur un véhicule');
+        throw new AppError(409, "Ce pneu est monté sur un véhicule : démontez-le avant de le supprimer.");
       }
       
       // Soft delete : marquer comme supprimé
@@ -310,7 +310,7 @@ export class TiresService {
 
       return true;
     } catch (error) {
-      console.error('Error deleting tire:', error);
+      if (!(error instanceof AppError)) log.error({ err: error, tireId: id }, "suppression de pneu en échec");
       throw error;
     }
   }
@@ -455,30 +455,56 @@ export class TiresService {
     }
   }
 
-  async removeTireFromVehicle(vehicleTireId: number, mileageAtRemoval?: number): Promise<boolean> {
-    try {
-      await db
+  /**
+   * Démonte le pneu et applique sa destination (`TireRemoval`) dans la même transaction :
+   * remis en stock, la fiche gagne une unité ; mis au rebut, le stock ne bouge pas.
+   * `false` si le montage n'existe pas ou n'est plus actif (déjà démonté).
+   */
+  async removeTireFromVehicle(vehicleTireId: number, removal: TireRemoval, userId?: number): Promise<boolean> {
+    const removed = await db.transaction(async (tx) => {
+      const [row] = await tx
         .update(vehicleTires)
         .set({
-          status: 'removed',
+          status: vehicleTireStatusAfterRemoval(removal),
           removalDate: new Date().toISOString().split('T')[0],
-          removalMileage: mileageAtRemoval,
+          removalMileage: removal.removalMileage,
+          removalReason: removal.removalReason || null,
           updatedAt: new Date()
         })
-        .where(eq(vehicleTires.id, vehicleTireId));
-      
-      console.log(`✅ Tire removed from vehicle: ID ${vehicleTireId}`);
+        .where(and(eq(vehicleTires.id, vehicleTireId), eq(vehicleTires.status, 'active')))
+        .returning({ id: vehicleTires.id, vehicleId: vehicleTires.vehicleId, tireId: vehicleTires.tireId });
 
-      broadcastTireUpdate("vehicle_tire_removed", vehicleTireId, {
-        vehicleTireId,
-        mileageAtRemoval: mileageAtRemoval ?? null,
-      });
+      if (!row || removal.destination !== "stock") return row;
 
-      return true;
-    } catch (error) {
-      console.error('Error removing tire from vehicle:', error);
-      return false;
-    }
+      const [restocked] = await tx
+        .update(tires)
+        .set({
+          stockQuantity: sql`${tires.stockQuantity} + 1`,
+          updatedBy: userId ?? null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(tires.id, row.tireId), isNull(tires.deletedAt)))
+        .returning({ id: tires.id });
+
+      if (!restocked) {
+        throw new AppError(409, "La fiche de ce pneu a été supprimée : il ne peut pas revenir en stock. Choisissez la mise au rebut.");
+      }
+      return row;
+    });
+
+    if (!removed) return false;
+
+    log.info({ vehicleTireId, destination: removal.destination, tireId: removed.tireId }, "pneu démonté du véhicule");
+
+    broadcastTireUpdate("vehicle_tire_removed", vehicleTireId, {
+      vehicleTireId,
+      vehicleId: removed.vehicleId,
+      tireId: removed.tireId,
+      destination: removal.destination,
+      mileageAtRemoval: removal.removalMileage ?? null,
+    });
+
+    return true;
   }
 
   // Méthodes pour les inspections de pneus
@@ -635,11 +661,11 @@ export class TiresService {
         })
         .returning();
       
-      console.log(`✅ Tire inspection created for vehicleTireId ${inspectionData.vehicleTireId}`);
-      
+      log.info({ vehicleTireId: inspectionData.vehicleTireId }, "inspection de pneu créée");
+
       return newInspection;
     } catch (error) {
-      console.error('Error creating tire inspection:', error);
+      log.error({ err: error, vehicleTireId: inspectionData.vehicleTireId }, "création d'inspection de pneu en échec");
       throw new Error('Erreur lors de la création de l\'inspection');
     }
   }
@@ -690,7 +716,7 @@ export class TiresService {
         .where(eq(vehicles.id, data.vehicleId));
       
       if (!vehicle) {
-        throw new Error('Véhicule non trouvé');
+        throw new AppError(404, "Ce véhicule n'existe pas ou a été supprimé.");
       }
       
       // 2. Traduire le type de rotation pour le titre (aligné avec le frontend)
@@ -713,41 +739,43 @@ export class TiresService {
       const workOrderTitle = `Rotation de Pneus - ${rotationTypeLabel}`;
       const workOrderDescription = `${data.notes || 'Rotation planifiée'}. Kilométrage: ${data.rotationMileage?.toLocaleString()} km`;
       
-      const [workOrder] = await db
-        .insert(workOrders)
-        .values({
-          vehicleId: data.vehicleId,
-          technicianId: data.technicianId || null, // Optionnel - peut être assigné plus tard
-          title: workOrderTitle,
-          description: workOrderDescription,
-          status: 'pending',
-          priority: 'medium',
-          startDate: data.rotationDate ? new Date(data.rotationDate) : null,
-          isPreventive: true,
-          isFirstVisit: false
-        })
-        .returning();
-      
-      console.log(`📋 Ordre de travail créé automatiquement: #${workOrder.id} - ${workOrderTitle}`);
-      
-      // 4. Créer la rotation liée à l'ordre de travail
-      const [rotation] = await db
-        .insert(tireRotations)
-        .values({
-          vehicleId: data.vehicleId,
-          workOrderId: workOrder.id, // Liaison avec l'ordre de travail créé
-          rotationDate: data.rotationDate,
-          rotationMileage: data.rotationMileage,
-          rotationType: data.rotationType,
-          performedBy: data.performedBy,
-          cost: data.cost ? data.cost.toString() : null,
-          nextRotationMileage: data.nextRotationMileage,
-          notes: data.notes,
-          createdBy: data.createdBy || "Admin"
-        })
-        .returning();
-      
-      console.log(`✅ Rotation créée: ID ${rotation.id}, liée à l'OT #${workOrder.id}`);
+      // 4. OT et rotation ensemble : une rotation refusée ne laisse pas d'OT orphelin.
+      const { workOrder, rotation } = await db.transaction(async (tx) => {
+        const [workOrder] = await tx
+          .insert(workOrders)
+          .values({
+            vehicleId: data.vehicleId,
+            technicianId: data.technicianId || null, // Optionnel - peut être assigné plus tard
+            title: workOrderTitle,
+            description: workOrderDescription,
+            status: 'pending',
+            priority: 'medium',
+            startDate: data.rotationDate ? new Date(data.rotationDate) : null,
+            isPreventive: true,
+            isFirstVisit: false
+          })
+          .returning();
+
+        const [rotation] = await tx
+          .insert(tireRotations)
+          .values({
+            vehicleId: data.vehicleId,
+            workOrderId: workOrder.id, // Liaison avec l'ordre de travail créé
+            rotationDate: data.rotationDate,
+            rotationMileage: data.rotationMileage,
+            rotationType: data.rotationType,
+            performedBy: data.performedBy,
+            cost: data.cost ? data.cost.toString() : null,
+            nextRotationMileage: data.nextRotationMileage,
+            notes: data.notes,
+            createdBy: data.createdBy || "Admin"
+          })
+          .returning();
+
+        return { workOrder, rotation };
+      });
+
+      log.info({ rotationId: rotation.id, workOrderId: workOrder.id, title: workOrderTitle }, "rotation planifiée, OT créé");
       
       // 5. Logger l'activité
       await activityLogger.log({
@@ -776,7 +804,8 @@ export class TiresService {
         vehicleModel: vehicle.model
       };
     } catch (error) {
-      console.error('Error creating tire rotation:', error);
+      if (error instanceof AppError) throw error;
+      log.error({ err: error, vehicleId: data.vehicleId }, "planification de rotation en échec");
       throw new Error('Erreur lors de la création de la rotation');
     }
   }
