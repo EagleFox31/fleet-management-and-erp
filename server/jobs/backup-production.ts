@@ -15,6 +15,7 @@ import { moduleLogger } from "../lib/logger";
 import {
   BACKUP_LOCK_KEY,
   createCommandDeps,
+  isBackupScheduleEnabled,
   runDailyBackup,
   type BackupDeps,
   type BackupLock,
@@ -149,7 +150,7 @@ let cooldownUntil = 0;
 
 /** Appelée par le scheduler à chaque tick et au démarrage ; silencieuse tant que rien n'est dû. */
 export async function backupTick(now = Date.now(), deps: BackupDeps = createProductionBackupDeps()): Promise<BackupOutcome | null> {
-  if (process.env.BACKUP_ENABLED === "0" || now < cooldownUntil) return null;
+  if (!isBackupScheduleEnabled() || now < cooldownUntil) return null;
   const outcome = await runDailyBackup(deps);
   if (outcome.kind === "failed") cooldownUntil = now + BACKUP_RETRY_COOLDOWN_MS;
   if (outcome.kind !== "skipped_recent") log.info({ outcome: outcome.kind }, "tick de sauvegarde");
