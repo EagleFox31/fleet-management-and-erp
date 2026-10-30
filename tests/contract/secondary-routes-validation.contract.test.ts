@@ -192,7 +192,8 @@ describe("carburant : nombres saisis", { timeout: 60000 }, () => {
   });
 
   it("T3 : PATCH \"12abc\" refusé au lieu d'être tronqué en 12", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId() });
+    // Auteur du plein : seul lui (ou l'admin) peut le modifier.
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("workshop_manager") });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("workshop_manager"), body: { quantity: "12abc" } });
     expectFieldError(res, "quantity");
@@ -201,7 +202,8 @@ describe("carburant : nombres saisis", { timeout: 60000 }, () => {
   });
 
   it("non-régression : PATCH quantité en chaîne numérique enregistrée", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId() });
+    // Auteur du plein : seul lui (ou l'admin) peut le modifier.
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("workshop_manager") });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("workshop_manager"), body: { quantity: "25.5" } });
     expect(res.status).toBe(200);

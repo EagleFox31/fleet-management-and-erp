@@ -748,3 +748,27 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Un `OR` écrit dans un `sql` brut s'entoure de parenthèses ; préférer `or(...)` de Drizzle, qui les pose.
+
+## 2026-10-30 - Paramètre de requête utilisé comme segment de chemin disque
+
+### Constat
+- `POST /api/workflows/:sessionId/documents` écrivait le fichier sous `uploads/workflows/<sessionId>/<documentType>_...` : avec `sessionId = ..%2F..%2Fx` (Express décode `%2F`) ou `documentType = ../../x`, tout utilisateur connecté écrivait un fichier hors de `uploads/`.
+- Les deux téléchargements (`/api/documents/:id/download`, `/api/workflows/documents/:id`) servaient n'importe quel chemin stocké en base, `/package.json` compris.
+- Le nettoyage des workflows abandonnés faisait un `rmSync(recursive)` sur `uploads/workflows/<sessionId>` : un identifiant `..` visait le dossier du projet (méthode non appelée aujourd'hui).
+- Dans le même service, l'INSERT `vehicle_documents` du transfert était une chaîne interpolée : une apostrophe dans le nom du fichier cassait la requête ou injectait du SQL (méthode non appelée aujourd'hui).
+
+### Cause racine
+- Une valeur venue du client (paramètre d'URL, champ de formulaire, nom de fichier d'origine) était concaténée à un chemin ou à du SQL sans contrôle, et un chemin lu en base était traité comme sûr.
+- Classification : traversée de répertoire et injection SQL, entrée non validée.
+
+### Résolution
+- `isSafePathSegment` (`server/lib/uploaded-file.ts`) sur `sessionId` ; `documentType` contrôlé contre l'énumération du schéma ; extension réduite aux caractères alphanumériques ; `path.basename` sur le nom d'origine.
+- Lecture et suppression par `uploadedFileCandidates`, qui refuse tout chemin hors de `uploads/`.
+- `db.insert(vehicleDocuments)` à la place de la chaîne SQL.
+
+### Prévention (vérifiable)
+- Unitaire `tests/unit/server/uploaded-file.test.ts` (`isSafePathSegment`), intégration `tests/integration/workflow-document-transfer.test.ts`, contrat `tests/contract/fuel-records-and-document-paths.contract.test.ts` (400 sur les deux traversées, 404 sur un chemin stocké hors de `uploads/`, non-régression des formes stockées existantes).
+
+### Règle Projet (obligatoire)
+- Une valeur de requête ne devient un segment de chemin qu'après `isSafePathSegment` ; un chemin lu en base ne s'ouvre, ne se sert et ne se supprime que par `uploadedFileCandidates`.
+- Pas de SQL construit par interpolation de chaîne : `db.insert`/`db.update` ou le gabarit `sql\`\`` de Drizzle, qui paramètre.

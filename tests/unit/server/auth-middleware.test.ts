@@ -9,6 +9,7 @@ import {
   isAdmin,
   isDriverManager,
   isFuelCardManager,
+  isFuelRecordWriter,
   isInventoryManager,
   isManagementOrAdmin,
   isPartRequester,
@@ -49,6 +50,11 @@ const MATRIX: Record<string, { guard: Guard; allowed: string[] }> = {
   },
   isDriverManager: { guard: isDriverManager as Guard, allowed: ["admin", "logistics", "secretary"] },
   isFuelCardManager: { guard: isFuelCardManager as Guard, allowed: ["admin", "logistics", "secretary"] },
+  // Saisie d'un plein : profils qui ont un écran carburant (dont /technician/fuel).
+  isFuelRecordWriter: {
+    guard: isFuelRecordWriter as Guard,
+    allowed: ["admin", "workshop_manager", "technician", "secretary", "logistics"],
+  },
   isManagementOrAdmin: { guard: isManagementOrAdmin as Guard, allowed: ["admin", "management"] },
 };
 

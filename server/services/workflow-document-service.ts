@@ -1,13 +1,35 @@
 import { db } from "../db";
-import { workflowDocuments, vehicleAcquisitionWorkflows } from "../../shared/schema";
+import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
 import { eq, and } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
+
+const log = moduleLogger("workflow-documents");
+
+type WorkflowDocumentType = (typeof workflowDocuments.documentType.enumValues)[number];
+type VehicleDocumentType = (typeof vehicleDocuments.type.enumValues)[number];
+
+export function isWorkflowDocumentType(value: unknown): value is WorkflowDocumentType {
+  return (workflowDocuments.documentType.enumValues as readonly unknown[]).includes(value);
+}
+
+/** Type côté véhicule : la facture d'achat n'y a pas de catégorie propre. */
+function toVehicleDocumentType(type: WorkflowDocumentType): VehicleDocumentType {
+  return type === "factur_achat" ? "autre" : type;
+}
+
+/** Fichier existant sous `uploads/` pour un chemin stocké, sinon `undefined`. */
+function existingUploadedFile(storedPath: string | null | undefined): string | undefined {
+  return uploadedFileCandidates(storedPath).find((candidate) => fs.existsSync(candidate));
+}
 
 interface WorkflowDocumentData {
   workflowId: number;
   sessionId: string;
-  documentType: 'carte_grise' | 'assurance' | 'visite_technique' | 'factur_achat' | 'autre';
+  documentType: WorkflowDocumentType;
   originalName: string;
   fileBuffer: Buffer;
   mimeType: string;
@@ -15,15 +37,19 @@ interface WorkflowDocumentData {
 }
 
 export class WorkflowDocumentService {
-  
+
   /**
    * Sauvegarde un document uploadé pendant un workflow
    */
   static async saveWorkflowDocument(data: WorkflowDocumentData): Promise<any> {
+    // sessionId et documentType deviennent des segments de chemin disque.
+    if (!isSafePathSegment(data.sessionId) || !isWorkflowDocumentType(data.documentType)) {
+      throw new AppError(400, "Session ou type de document invalide.");
+    }
     try {
       // Générer un nom unique pour le fichier
       const timestamp = Date.now();
-      const extension = path.extname(data.originalName);
+      const extension = path.extname(data.originalName).replace(/[^.A-Za-z0-9]/g, "");
       const storedName = `${data.documentType}_${timestamp}_${Math.random().toString(36).substring(7)}${extension}`;
       
       // Créer le dossier de destination
@@ -52,11 +78,11 @@ export class WorkflowDocumentService {
         uploadedBy: data.uploadedBy,
       }).returning();
       
-      console.log(`📄 Document ${data.documentType} sauvegardé pour le workflow ${data.sessionId}`);
+      log.info({ documentType: data.documentType, sessionId: data.sessionId }, "document workflow sauvegardé");
       return document;
-      
+
     } catch (error) {
-      console.error('❌ Erreur lors de la sauvegarde du document workflow:', error);
+      log.error({ err: error, sessionId: data.sessionId }, "sauvegarde du document workflow en échec");
       throw error;
     }
   }
@@ -74,7 +100,7 @@ export class WorkflowDocumentService {
       
       return documents;
     } catch (error) {
-      console.error('❌ Erreur lors de la récupération des documents workflow:', error);
+      log.error({ err: error, sessionId }, "lecture des documents workflow en échec");
       throw error;
     }
   }
@@ -94,30 +120,27 @@ export class WorkflowDocumentService {
       }
       
       for (const doc of documents) {
-        const originalPath = path.join(process.cwd(), doc.filePath.substring(1)); // Retirer le "/" initial
-        const newFileName = `${doc.documentType}_${doc.originalName}`;
+        const originalPath = existingUploadedFile(doc.filePath);
+        // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
+        const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
-        
+
         // Copier le fichier
-        if (fs.existsSync(originalPath)) {
+        if (originalPath) {
           fs.copyFileSync(originalPath, newPath);
-          
-          // Créer l'entrée dans vehicle_documents
-          await db.execute(`
-            INSERT INTO vehicle_documents (
-              vehicle_id, name, type, description, filename, filesize, file_type, file_path, uploaded_by
-            ) VALUES (
-              ${vehicleId},
-              '${doc.originalName}',
-              '${doc.documentType}',
-              'Document transféré depuis le workflow d''acquisition',
-              '${newFileName}',
-              ${doc.fileSize},
-              '${doc.mimeType}',
-              '/uploads/documents/vehicle-${vehicleId}/${newFileName}',
-              ${doc.uploadedBy}
-            )
-          `);
+
+          // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
+          await db.insert(vehicleDocuments).values({
+            vehicleId,
+            name: doc.originalName,
+            type: toVehicleDocumentType(doc.documentType),
+            description: "Document transféré depuis le workflow d'acquisition",
+            filename: newFileName,
+            filesize: doc.fileSize,
+            fileType: doc.mimeType,
+            filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
+            uploadedBy: doc.uploadedBy,
+          });
         }
       }
       
@@ -130,10 +153,10 @@ export class WorkflowDocumentService {
         })
         .where(eq(workflowDocuments.sessionId, sessionId));
       
-      console.log(`📁 Documents transférés du workflow ${sessionId} vers le véhicule ${vehicleId}`);
-      
+      log.info({ sessionId, vehicleId }, "documents workflow transférés au véhicule");
+
     } catch (error) {
-      console.error('❌ Erreur lors du transfert des documents:', error);
+      log.error({ err: error, sessionId, vehicleId }, "transfert des documents workflow en échec");
       throw error;
     }
   }
@@ -150,7 +173,7 @@ export class WorkflowDocumentService {
       
       return document || null;
     } catch (error) {
-      console.error('❌ Erreur lors de la récupération du document:', error);
+      log.error({ err: error, documentId }, "lecture du document workflow en échec");
       throw error;
     }
   }
@@ -166,8 +189,8 @@ export class WorkflowDocumentService {
       }
       
       // Supprimer le fichier physique
-      const filePath = path.join(process.cwd(), document.filePath.substring(1));
-      if (fs.existsSync(filePath)) {
+      const filePath = existingUploadedFile(document.filePath);
+      if (filePath) {
         fs.unlinkSync(filePath);
       }
       
@@ -176,10 +199,10 @@ export class WorkflowDocumentService {
         .delete(workflowDocuments)
         .where(eq(workflowDocuments.id, documentId));
       
-      console.log(`🗑️ Document workflow ${documentId} supprimé`);
+      log.info({ documentId }, "document workflow supprimé");
       
     } catch (error) {
-      console.error('❌ Erreur lors de la suppression du document:', error);
+      log.error({ err: error, documentId }, "suppression du document workflow en échec");
       throw error;
     }
   }
@@ -211,17 +234,18 @@ export class WorkflowDocumentService {
           await this.deleteWorkflowDocument(doc.id);
         }
         
-        // Supprimer le dossier du workflow
+        // Supprimer le dossier du workflow (suppression récursive : jamais hors de uploads/workflows)
+        if (!isSafePathSegment(workflow.sessionId)) continue;
         const workflowDir = path.join(process.cwd(), 'uploads', 'workflows', workflow.sessionId);
         if (fs.existsSync(workflowDir)) {
           fs.rmSync(workflowDir, { recursive: true, force: true });
         }
       }
       
-      console.log(`🧹 Nettoyage des documents de ${abandonedWorkflows.length} workflows abandonnés`);
+      log.info({ count: abandonedWorkflows.length }, "documents des workflows abandonnés nettoyés");
       
     } catch (error) {
-      console.error('❌ Erreur lors du nettoyage des documents:', error);
+      log.error({ err: error }, "nettoyage des documents workflow en échec");
       throw error;
     }
   }

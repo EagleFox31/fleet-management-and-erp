@@ -301,9 +301,11 @@ Notes :
   `{ return { items: [], total: 0 }; }`). Aucune n'est appelée depuis le
   30 octobre 2026 : la liste gelée de `tests/unit/server/storage-stubs.test.ts`
   est vide. Implémenter une méthode avant de l'appeler.
-- Fichiers téléversés : supprimer par `uploadedFileCandidates`
+- Fichiers téléversés : ouvrir, servir ou supprimer par `uploadedFileCandidates`
   (`server/lib/uploaded-file.ts`), qui refuse tout chemin hors de `uploads/`.
-  `GET /api/documents/:id/download` résout encore le chemin stocké sans cette garde.
+  Une valeur de requête ne devient un segment de chemin qu'après `isSafePathSegment`.
+  Les autres routes qui lisent un chemin stocké (`server/routes.ts:6192`, rapports,
+  preuves de renouvellement) n'ont pas encore été revues.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock partielle : le mouvement d'entrée en stock est attribué au

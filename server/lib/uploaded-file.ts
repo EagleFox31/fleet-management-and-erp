@@ -17,3 +17,11 @@ export function uploadedFileCandidates(storedPath: string | null | undefined, ro
     return relative !== "" && !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
   });
 }
+
+/**
+ * Valeur venue de la requête et utilisée comme segment de chemin disque
+ * (identifiant de session, type de document) : ni séparateur ni `..`.
+ */
+export function isSafePathSegment(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}

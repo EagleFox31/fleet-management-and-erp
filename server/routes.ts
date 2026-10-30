@@ -13,7 +13,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -32,6 +32,7 @@ import { alertService } from "./services/alert-service";
 import { AppError } from "./lib/app-error";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
+import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 
 const log = moduleLogger("routes");
 
@@ -1386,16 +1387,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const fs = await import("fs");
-      const path = await import("path");
 
-      const candidatePaths = [
-        document.filePath,
-        // Fallback pour les anciens chemins stockés en "/uploads/..."
-        path.join(
-          process.cwd(),
-          String(document.filePath || "").replace(/^[/\\]+/, ""),
-        ),
-      ].filter(Boolean) as string[];
+      // Chemin stocké en base : on ne sert qu'un fichier situé sous uploads/.
+      const candidatePaths = uploadedFileCandidates(document.filePath);
 
       const existingPath = candidatePaths.find((candidatePath) =>
         fs.existsSync(candidatePath),
@@ -3588,7 +3582,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     notes: z.string().nullable().optional(),
   });
 
-  app.post("/api/fuel-records", authenticate, async (req, res, next) => {
+  app.post("/api/fuel-records", isFuelRecordWriter, async (req, res, next) => {
     try {
       const input = fuelRecordBodySchema.parse(req.body);
       // Convertir les données du formulaire au format InsertFuelRecord
@@ -3642,7 +3636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/fuel-records/:id", authenticate, async (req, res, next) => {
+  app.patch("/api/fuel-records/:id", isFuelRecordWriter, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -3654,6 +3648,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!fuelRecord) {
         return res.status(404).json({ message: "Enregistrement de carburant non trouvé" });
+      }
+
+      // Même règle que l'écran (canEditFuelRecord) : l'admin, ou l'auteur du plein.
+      if (req.user?.role !== "admin" && fuelRecord.createdBy !== req.session.userId) {
+        return next(new AppError(403, "Seul l'auteur du plein ou un administrateur peut le modifier."));
       }
       
       // Convertir les données du formulaire au bon format ; champ absent = inchangé
@@ -5444,12 +5443,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour les documents de workflow d'acquisition
-  app.post("/api/workflows/:sessionId/documents", authenticate, upload.single('document'), async (req, res) => {
+  app.post("/api/workflows/:sessionId/documents", authenticate, upload.single('document'), async (req, res, next) => {
     try {
-      const { WorkflowDocumentService } = await import('./services/workflow-document-service');
+      const { WorkflowDocumentService, isWorkflowDocumentType } = await import('./services/workflow-document-service');
       const sessionId = req.params.sessionId;
       const userId = req.session.userId;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Non authentifié" });
       }
@@ -5459,9 +5458,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { documentType, workflowId } = req.body;
-      
+
       if (!documentType || !workflowId) {
         return res.status(400).json({ message: "Type de document et ID workflow requis" });
+      }
+
+      // sessionId et documentType servent à construire le chemin disque.
+      if (!isSafePathSegment(sessionId)) {
+        return next(new AppError(400, "Session de workflow invalide."));
+      }
+      if (!isWorkflowDocumentType(documentType)) {
+        return next(new AppError(400, "Type de document inconnu."));
       }
 
       const documentData = {
@@ -5478,7 +5485,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(document);
       
     } catch (error) {
-      console.error("Upload workflow document error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "upload du document workflow en échec");
       return res.status(500).json({ message: "Erreur lors de l'upload du document" });
     }
   });
@@ -5513,11 +5521,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const fs = await import('fs');
-      const path = await import('path');
       
-      const filePath = path.join(process.cwd(), document.filePath.substring(1));
-      
-      if (!fs.existsSync(filePath)) {
+      // Chemin stocké en base : on ne sert qu'un fichier situé sous uploads/.
+      const filePath = uploadedFileCandidates(document.filePath).find((candidate) => fs.existsSync(candidate));
+
+      if (!filePath) {
         return res.status(404).json({ message: "Fichier non trouvé" });
       }
 

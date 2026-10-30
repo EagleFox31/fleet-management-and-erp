@@ -1,6 +1,6 @@
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
-import { uploadedFileCandidates } from "../../../server/lib/uploaded-file";
+import { isSafePathSegment, uploadedFileCandidates } from "../../../server/lib/uploaded-file";
 
 /**
  * Suppression d'un document de véhicule : le chemin vient de la base. On ne
@@ -38,5 +38,27 @@ describe("uploadedFileCandidates", () => {
 
   it.each([null, undefined, ""])("valeur vide (%s) : aucun candidat", (storedPath) => {
     expect(uploadedFileCandidates(storedPath, root)).toEqual([]);
+  });
+});
+
+/**
+ * Téléversement d'un document de workflow : l'identifiant de session et le type
+ * de document viennent de la requête et deviennent des segments de chemin.
+ */
+describe("isSafePathSegment", () => {
+  it.each(["acquisition-1730000000000-k3j9x2a1b", "carte_grise", "TEST-wf-abc"])("%s : accepté", (value) => {
+    expect(isSafePathSegment(value)).toBe(true);
+  });
+
+  it.each([
+    ["remontée", ".."],
+    ["remontée encodée décodée par Express", "../../server"],
+    ["séparateur Windows", "a\\b"],
+    ["séparateur", "a/b"],
+    ["vide", ""],
+    ["trop long", "a".repeat(129)],
+    ["non texte", 42],
+  ])("%s : refusé", (_label, value) => {
+    expect(isSafePathSegment(value)).toBe(false);
   });
 });

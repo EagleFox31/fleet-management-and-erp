@@ -178,4 +178,7 @@ export const isTireCatalogManager = authorize(['admin', 'warehouse']);
 export const isPartRequester = authorize(['admin', 'workshop_manager', 'technician', 'warehouse']);
 export const isDriverManager = authorize(['admin', 'logistics', 'secretary']);
 export const isFuelCardManager = authorize(['admin', 'logistics', 'secretary']);
+// Saisie d'un plein : les profils qui ont un écran carburant, technicien compris
+// (/technician/fuel). Client, magasin et direction n'en ont pas.
+export const isFuelRecordWriter = authorize(['admin', 'workshop_manager', 'technician', 'secretary', 'logistics']);
 export const isManagementOrAdmin = authorize(['admin', 'management']);
