@@ -107,3 +107,20 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : T-50 ajoute les `case` du lot dans ce fichier, le test les prenait pour des événements préexistants (rouge sur la pile, vert sur main).
 - **Comment tester (QA)** : `node node_modules/vitest/vitest.mjs run tests/unit/shared/lot-recette-contracts.test.ts`.
 - **Reste / risques** : aucun.
+
+## 2026-10-30T21:47:55+01:00 — T-31b/T-33b — Comptes verrouillés, 429 au login et sauvegardes sur l'API réelle (agent fe-4)
+
+- **Agent** : fe-4 · **Branche** : `lot/fe/T-3xc-securite-sauvegardes` (sur `lot/fe/T-3xb-api-reelle`, fusionnée avec `main` 1802222) · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** :
+  - Connexion : le refus est lu dans la réponse réelle (`loginFailureOf`) : 429 de `loginLockoutGuard` -> « Compte verrouillé jusqu'à HH:MM. » ; 400 de `captchaGuard` (drapeau `captcha` actif) -> message de vérification, widget affiché même si le compteur local ne l'attendait pas, défi régénéré après un échec (preuve ALTCHA à usage unique). Connexion par PIN : même lecture (verrouillage affiché à la place de « PIN incorrect »).
+  - Comptes verrouillés : rôle affiché en libellé, rafraîchissement 60 s, invalidation de la fiche utilisateur après déverrouillage.
+  - Sauvegardes : écran enfin monté (`admin-backups` manquait dans `lot-screen-components.ts`, la route affichait la page vide) ; double déclenchement (202 dans les deux cas) annoncé « Sauvegarde déjà en cours… aucune nouvelle sauvegarde n'a été créée » ; bouton « Sauvegarde en cours » pendant l'exécution ; historique rafraîchi toutes les 5 s tant qu'une exécution tourne (le succès n'émet aucun événement) ; colonne Détail avec libellé du code d'échec, jamais le code brut ; état de chargement/erreur.
+- **Comment** : fonctions pures `client/src/lib/lockout-message.ts` (`captchaRequiredOf`, `loginFailureOf`) et `client/src/lib/backup-run.ts` (issue du 202 comparée aux exécutions connues avant le clic, marge 30 s) ; envoi par `useSingleFlightMutate` avec les variables de la mutation. Aucun fichier serveur touché, handlers MSW conservés.
+- **Pourquoi** : routes T-13 (#42), T-57 (#39), T-19b/T-20 (#28, #37) fusionnées dans `main` ; le contrat 202 du double déclenchement est gelé, c'est l'écran qui doit le dire.
+- **Comment tester (QA)** :
+  - Prérequis : serveur de dev sans `VITE_API_MOCKS`, un compte admin, un compte non admin jetable.
+  - Étapes : 1. Six connexions avec un mauvais mot de passe sur le compte jetable : « Compte verrouillé jusqu'à HH:MM. », pas de widget captcha (drapeau coupé). 2. Admin, Comptes verrouillés : la ligne apparaît (rôle en clair), Déverrouiller : liste vide, le compte se reconnecte. 3. Non admin sur `/admin/backups` : pas de menu, pas de bouton, API 403. 4. Admin, Sauvegardes, Lancer maintenant : toast « Sauvegarde lancée », puis ligne « Échec — Outil d'export absent du serveur » en dev (pas de `pg_dump`) et bandeau d'alerte.
+  - Preuve automatisée : `tests/unit/client/login-failure.test.ts`, `tests/unit/client/backup-run.test.ts` ; suite unitaire 54 fichiers / 672 tests verts ; tsc global zéro erreur. Captures hors dépôt (`scratchpad/fe-4/01` à `07`).
+- **RAIDER** : R lecture du refus partagée mot de passe/PIN ; D contrats serveur et mocks inchangés ; I comptes et données de vérification créés puis supprimés (exécution #17, alertes, 2 comptes TEST) ; A aucune donnée de recette touchée.
+- **Reste / risques** : « déjà en cours » non reproductible en dev (le dump échoue en 0,2 s, pas de `pg_dump`) : couvert par test unitaire ; une exécution lancée par un autre admin moins de 30 s avant le clic et absente du cache est annoncée « lancée ». La vue PIN n'a pas de widget captcha : drapeau actif, elle affiche le message sans moyen d'y répondre. 429 du PIN non joué au navigateur (aucun chauffeur à PIN jetable). Autres écrans du lot importés mais non mappés dans `lot-screen-components.ts` (incidents, mouvements pneus, factures en attente, pointage) : hors périmètre, signalés.

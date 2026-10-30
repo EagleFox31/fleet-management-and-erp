@@ -28,4 +28,5 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "admin-locked-users": LockedUsersPage,
   "admin-audit-logs": AuditLogsPage,
   "admin-vehicle-document-types": VehicleDocumentTypesPage,
+  "admin-backups": BackupsScreen,
 };
