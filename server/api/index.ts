@@ -42,6 +42,7 @@ import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import authCaptchaRoutes from "./auth-captcha.routes";
+import { workOrderBookingGuard } from "../middleware/booking-guard";
 
 /**
  * Router API Factory - Phase 2 Sprint 3
@@ -80,6 +81,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/suppliers", gardeApprovisionnement, suppliersRoutes);
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
   apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
+  // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
+  apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
   apiRouter.use("/work-orders", workOrderItemsRoutes);
   // Lignes de travail: préfixes dédiés, donc garde au montage — toute route
