@@ -61,6 +61,12 @@ function expectForbidden(res: { status: number; body: any; headers: Headers }) {
   expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
 }
 
+/** Refus par le rôle : un client ne fait aucune saisie d'exploitation, même sur son véhicule. */
+function expectStaffOnly(res: { status: number; body: any }) {
+  expect(res.status).toBe(403);
+  expect(res.body).toMatchObject({ code: "FORBIDDEN" });
+}
+
 async function seedClient(key: "A" | "B", ownerId: number) {
   const vehicle = await createTestVehicle({ ownerId });
   ids.vehicleIds.push(vehicle.id);
@@ -197,9 +203,18 @@ describe("listes de documents : filtrées sur le propriétaire pour un client", 
 describe("écritures sur un véhicule : cloison entre clients", { timeout: 60000 }, () => {
   it("un client ne modifie ni le kilométrage ni la position du véhicule d'un autre client", async () => {
     const [before] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.B.vehicleId));
-    expectForbidden(await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/mileage`, { actor: "clientA", body: { kilometers: 999999 } }));
-    expectForbidden(await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/maintenance-position`, { actor: "clientA", body: { position: "TEST" } }));
+    expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/mileage`, { actor: "clientA", body: { kilometers: 999999 } }));
+    expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/maintenance-position`, { actor: "clientA", body: { position: "TEST" } }));
     const [after] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.B.vehicleId));
+    expect(after.mileage).toBe(before.mileage);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+  });
+
+  it("un client ne saisit pas le kilométrage ni la position de son propre véhicule", async () => {
+    const [before] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.A.vehicleId));
+    expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.A.vehicleId}/mileage`, { actor: "clientA", body: { kilometers: 999999 } }));
+    expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.A.vehicleId}/maintenance-position`, { actor: "clientA", body: { position: "TEST" } }));
+    const [after] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.A.vehicleId));
     expect(after.mileage).toBe(before.mileage);
     expect(after.updatedAt).toEqual(before.updatedAt);
   });
@@ -207,6 +222,21 @@ describe("écritures sur un véhicule : cloison entre clients", { timeout: 60000
   it("non-régression : le personnel met à jour le kilométrage de tout véhicule", async () => {
     const res = await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/mileage`, { actor: "admin", body: { kilometers: 100500 } });
     expect(res.status).toBe(200);
+  });
+
+  it("un kilométrage en baisse est refusé en 400 lisible", async () => {
+    const res = await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/mileage`, { actor: "admin", body: { kilometers: 100 } });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("inférieur au kilométrage actuel");
+  });
+
+  it("un véhicule qui n'existe pas donne 404, pas 500", async () => {
+    const missing = 2_000_000_000;
+    const mileage = await call("PUT", `/api/vehicles/${missing}/mileage`, { actor: "admin", body: { kilometers: 10 } });
+    expect(mileage.status).toBe(404);
+    expect(mileage.body.message).toBe("Véhicule introuvable.");
+    const position = await call("PUT", `/api/vehicles/${missing}/maintenance-position`, { actor: "admin", body: { position: "TEST" } });
+    expect(position.status).toBe(404);
   });
 });
 

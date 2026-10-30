@@ -354,6 +354,8 @@ sessions d'acquisition qu'il a créées.
 
 - Route ouverte à un client : `isAnyUser` (charge `req.user`), pas `authenticate`
   seul, qui ne connaît pas le rôle.
+- Saisie d'exploitation sur un véhicule (kilométrage, position) : `isStaff`. Un
+  client consulte son véhicule, il ne saisit rien dessus.
 - Objet isolé : `canAccessOwned(req.user, () => propriétaire)` → 403 hors périmètre.
 - Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).
 - Source : `server/lib/client-scope.ts`. Test de référence :

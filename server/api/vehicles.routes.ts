@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { authenticate, isAnyUser } from "../middleware/auth";
+import { authenticate, isAnyUser, isStaff } from "../middleware/auth";
 import { vehicleDocumentationService } from "../services/vehicle-documentation-service";
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
-import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
+import { ownerScopeOf } from "../lib/client-scope";
 import { moduleLogger } from "../lib/logger";
 
 const router = Router();
@@ -134,7 +134,7 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
  * PUT /api/vehicles/:id/mileage
  * Mise à jour kilométrage véhicule
  */
-router.put("/:id/mileage", isAnyUser, async (req, res, next) => {
+router.put("/:id/mileage", isStaff, async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.id);
     const { kilometers } = req.body;
@@ -147,10 +147,6 @@ router.put("/:id/mileage", isAnyUser, async (req, res, next) => {
       return res.status(400).json({ message: "Kilométrage invalide" });
     }
 
-    if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-      return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-    }
-    
     const vehicle = await vehicleDocumentationService.updateMileage(
       vehicleId,
       parseInt(kilometers)
@@ -182,7 +178,7 @@ router.put("/:id/mileage", isAnyUser, async (req, res, next) => {
  * PUT /api/vehicles/:id/maintenance-position
  * Mise à jour position maintenance véhicule
  */
-router.put("/:id/maintenance-position", isAnyUser, async (req, res, next) => {
+router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.id);
     const { position } = req.body;
@@ -195,10 +191,6 @@ router.put("/:id/maintenance-position", isAnyUser, async (req, res, next) => {
       return res.status(400).json({ message: "Position invalide" });
     }
 
-    if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-      return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-    }
-    
     const vehicle = await vehicleDocumentationService.updateMaintenancePosition(
       vehicleId,
       position

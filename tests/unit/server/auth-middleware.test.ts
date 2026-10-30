@@ -16,6 +16,7 @@ import {
   isPartRequester,
   isPartsCatalogManager,
   isSessionGuard,
+  isStaff,
   isStockIssuer,
   isTechnician,
   isTireCatalogManager,
@@ -58,6 +59,8 @@ const MATRIX: Record<string, { guard: Guard; allowed: string[] }> = {
   },
   isManagementOrAdmin: { guard: isManagementOrAdmin as Guard, allowed: ["admin", "management"] },
   isAnyUser: { guard: isAnyUser as Guard, allowed: [...ALL_APP_ROLES] },
+  // Saisies d'exploitation sur un véhicule (kilométrage, position) : un client consulte, il ne saisit pas.
+  isStaff: { guard: isStaff as Guard, allowed: ALL_APP_ROLES.filter((role) => role !== "client") },
 };
 
 function fakeRes() {

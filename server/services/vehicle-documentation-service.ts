@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("vehicle-documentation");
@@ -211,7 +212,7 @@ export class VehicleDocumentationService {
       .limit(1);
 
     if (!currentVehicle) {
-      throw new Error(`Véhicule ${vehicleId} non trouvé`);
+      throw new AppError(404, "Véhicule introuvable.");
     }
 
     const currentMileage = Math.max(
@@ -221,7 +222,8 @@ export class VehicleDocumentationService {
     );
 
     if (kilometers < currentMileage) {
-      throw new Error(
+      throw new AppError(
+        400,
         `Le kilométrage saisi (${kilometers} km) est inférieur au kilométrage actuel (${currentMileage} km)`
       );
     }
@@ -254,7 +256,7 @@ export class VehicleDocumentationService {
       .returning();
     
     if (!updated) {
-      throw new Error(`Véhicule ${vehicleId} non trouvé`);
+      throw new AppError(404, "Véhicule introuvable.");
     }
     
     log.debug({ vehicleId }, "position maintenance : mise à jour faite");
