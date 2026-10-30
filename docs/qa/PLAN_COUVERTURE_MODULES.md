@@ -245,10 +245,10 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| TIR1 | CRUD fiche pneu par `warehouse` / `admin` ; 403 pour `workshop_manager` | C | À faire |
-| TIR2 | Soft delete : non montable, absent du stock, historique conservé | C | À faire |
-| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | À faire |
-| TIR4 | Inspection par `technician` | C | À faire |
+| TIR1 | CRUD fiche pneu par `warehouse` / `admin` ; 403 pour `workshop_manager` | C | OK (`tires-rbac` C : auteur posé par le serveur, corps forgé ignoré ; fiche inexistante 404) |
+| TIR2 | Soft delete : non montable, absent du stock, historique conservé | C | OK (`tires-rbac` C : détail et liste 404 / absent, montage 409, modification et 2e suppression 404 ; pneu monté 409) |
+| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | C OK (`tires-rbac` : stock -1 au montage, démontage inconnu 404, rotation invalide 400 sans OT orphelin) ; E à faire |
+| TIR4 | Inspection par `technician` | C | OK (`tires-rbac` C : inspecteur = auteur de la requête ; corps invalide 400 `VALIDATION`) |
 | TIR5 | Brouillon du wizard : restauré, purgé après succès | E | À faire |
 | TIR6 | Tableau `PremiumDataTable` : stock bas surligné, corbeille masquée aux non-admin | E | À faire |
 
