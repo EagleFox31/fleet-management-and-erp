@@ -1,6 +1,7 @@
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
+  activityLogs,
   alerts,
   clientInvoices,
   clients,
@@ -66,8 +67,10 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     // sans ce ménage, la clé étrangère bloque la suppression de l'utilisateur.
     // Certaines alertes partent sans attente (avancement d'OT) et peuvent
     // arriver après le ménage : on recommence quelques fois.
+    // Le journal d'audit (auditWrites) référence aussi l'utilisateur.
     for (let attempt = 1; ; attempt++) {
       await db.delete(alerts).where(inArray(alerts.userId, ids.userIds));
+      await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -91,5 +94,6 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(suppliers).where(like(suppliers.name, `${TEST_PREFIX}%`));
   const testUsers = db.select({ id: users.id }).from(users).where(like(users.username, `${TEST_PREFIX}%`));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
+  await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
   await db.delete(users).where(like(users.username, `${TEST_PREFIX}%`));
 }
