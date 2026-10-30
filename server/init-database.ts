@@ -125,6 +125,9 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE vehicle_documents ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS hire_date date`);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
+    // Entrée en stock attribuée au réceptionnaire — doit rester ici ET dans
+    // server/db/migrations/20261030_part_requirements_received_by.sql (AGENTS.md §5).
+    await db.execute(sql`ALTER TABLE part_requirements ADD COLUMN IF NOT EXISTS received_by integer REFERENCES users(id)`);
 
     // --- Référentiel pièces: rattachement fournisseur par clé étrangère --------
     // `parts.supplier` (texte libre) reste en place pendant la transition: il sert

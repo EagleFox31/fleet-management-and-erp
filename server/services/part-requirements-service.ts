@@ -86,6 +86,7 @@ export class PartRequirementsService {
           urgency: partRequirements.urgency,
           status: partRequirements.status,
           requestedBy: partRequirements.requestedBy,
+          receivedBy: partRequirements.receivedBy,
           estimatedCost: partRequirements.estimatedCost,
           supplierNotes: partRequirements.supplierNotes,
           expectedDeliveryDate: partRequirements.expectedDeliveryDate,
@@ -131,6 +132,7 @@ export class PartRequirementsService {
         urgency: partRequirements.urgency,
         status: partRequirements.status,
         requestedBy: partRequirements.requestedBy,
+        receivedBy: partRequirements.receivedBy,
         estimatedCost: partRequirements.estimatedCost,
         supplierNotes: partRequirements.supplierNotes,
         expectedDeliveryDate: partRequirements.expectedDeliveryDate,
@@ -309,7 +311,7 @@ export class PartRequirementsService {
       }
 
       // Recalculer le coût estimé si la quantité ou la pièce change
-      let updateData = { ...requirement };
+      let updateData: Partial<InsertPartRequirement> & Pick<Partial<PartRequirement>, 'receivedBy'> = { ...requirement };
 
       // Règle métier: le flux standard passe par Procurement pour approved -> ordered.
       // Une commande directe depuis les demandes n'est autorisée qu'en mode urgence
@@ -355,6 +357,11 @@ export class PartRequirementsService {
 
       if (requirement.status === 'received' && statusChanges && !updateData.actualDeliveryDate) {
         updateData.actualDeliveryDate = this.getTodayLocalDate();
+      }
+
+      // L'entrée en stock est attribuée à qui la saisit, jamais au demandeur.
+      if (statusChanges && (requirement.status === 'received' || requirement.status === 'partially_received')) {
+        updateData.receivedBy = currentUserId ?? null;
       }
 
       if (!statusChanges) {
@@ -512,6 +519,7 @@ export class PartRequirementsService {
           urgency: partRequirements.urgency,
           status: partRequirements.status,
           requestedBy: partRequirements.requestedBy,
+          receivedBy: partRequirements.receivedBy,
           estimatedCost: partRequirements.estimatedCost,
           supplierNotes: partRequirements.supplierNotes,
           expectedDeliveryDate: partRequirements.expectedDeliveryDate,

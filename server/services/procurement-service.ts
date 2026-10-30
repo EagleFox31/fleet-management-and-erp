@@ -1084,6 +1084,7 @@ export class ProcurementService {
             .update(partRequirements)
             .set({
               status: 'partially_received',
+              receivedBy: userId ?? null,
               updatedAt: new Date(),
             })
             .where(
@@ -1097,6 +1098,7 @@ export class ProcurementService {
             .update(partRequirements)
             .set({
               status: 'received',
+              receivedBy: userId ?? null,
               updatedAt: new Date(),
             })
             .where(

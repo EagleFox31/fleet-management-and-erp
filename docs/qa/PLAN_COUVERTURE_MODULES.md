@@ -227,7 +227,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Partiel (`stock-alerts-service`) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
 | PRT5 | Libellés affichés = constantes partagées (aucune table locale) | U | À faire |
-| PRT6 | Entrée en stock attribuée au magasinier, pas au demandeur (`receivedBy`) | C | À faire (dette connue) |
+| PRT6 | Entrée en stock attribuée au magasinier, pas au demandeur (`receivedBy`) | C | OK (`part-requirements-chain` C : PATCH, corps forgé ignoré ; `part-requirement-received-by` I : commande fournisseur partielle puis complète) |
 
 ### 3.6 Magasin : pneus
 

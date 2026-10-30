@@ -145,10 +145,12 @@ describe("demande de pièce : chaîne complète (PRT4)", { timeout: 120000 }, ()
     expect(ordered.status).toBe(200);
     expect(ordered.body.notes).toContain("OVERRIDE URGENCE");
 
-    // 4. Entrée en stock par le magasinier : +2, mouvement attribué au magasinier.
-    const received = await patch(id, "warehouse", { status: "received" });
+    // 4. Entrée en stock par le magasinier : +2, demande et mouvement attribués au
+    //    magasinier (PRT6), même si le corps prétend un autre réceptionnaire.
+    const received = await patch(id, "warehouse", { status: "received", receivedBy: userIds.get("technician") });
     expect(received.status).toBe(200);
     expect(received.body.actualDeliveryDate).toBeTruthy();
+    expect(received.body.receivedBy).toBe(userIds.get("warehouse"));
     expect(await stockOf(part.id)).toBe(5);
     const movementsIn = await db.select().from(partsStockMovements).where(eq(partsStockMovements.partId, part.id));
     expect(movementsIn).toEqual([expect.objectContaining({ movementType: "in", quantity: 2, createdBy: userIds.get("warehouse") })]);
@@ -173,6 +175,13 @@ describe("demande de pièce : chaîne complète (PRT4)", { timeout: 120000 }, ()
     expect(res.body.message).toMatch(/ordre de travail/);
     expect(await statusOf(id)).toBe("received");
     expect(await stockOf(partId)).toBe(5);
+  });
+
+  it("le réceptionnaire n'est jamais repris du corps hors réception (PRT6)", async () => {
+    const { id } = await seedRequirement("received", 5);
+    const res = await patch(id, "warehouse", { notes: "TEST PRT6", receivedBy: userIds.get("technician") });
+    expect(res.status).toBe(200);
+    expect(res.body.receivedBy).toBeNull();
   });
 });
 

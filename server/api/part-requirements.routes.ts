@@ -133,6 +133,7 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
       emergencyOverrideReason,
       id: _id,
       requestedBy: _requestedBy,
+      receivedBy: _receivedBy,
       createdAt: _createdAt,
       updatedAt: _updatedAt,
       ...requirementPayload

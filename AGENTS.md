@@ -308,9 +308,10 @@ Notes :
   preuves de renouvellement) n'ont pas encore été revues.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
-- Traçabilité stock partielle : le mouvement d'entrée en stock est attribué au
-  magasinier qui réceptionne (corrigé le 29 octobre 2026), mais la demande
-  elle-même ne porte pas encore de champ `receivedBy`.
+- Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la
+  demande (`partRequirements.receivedBy`, 30 octobre 2026) sont attribués à qui
+  réceptionne, par le PATCH de la demande comme par la commande fournisseur. Les
+  demandes reçues avant cette date restent à `NULL`.
   Voir `docs/analysis/MATRICE_ROLES_GAP.md`.
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
   quand on touche un fichier, ne jamais les supprimer (§10).

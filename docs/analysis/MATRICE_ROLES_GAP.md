@@ -21,7 +21,7 @@
 | Validation demande | Admin + Chef atelier + Secrétaire (avec règle spéciale) | OK | Garder, clarifier UI |
 | Commande fournisseur (pièces atelier) | Admin + Magasinier + Secrétaire + Logisticien | Magasinier + Secrétaire (+ Admin backup) | Retirer Logisticien du flux standard pièces |
 | Réception fournisseur (pièces atelier) | Trop large selon écrans/routes | Magasinier (primaire), Secrétaire/Admin (backup) | Restreindre par type de commande |
-| Traçabilité entrée stock | `createdBy = demandeur` | `createdBy = demandeur` + `receivedBy = réceptionnaire réel` | Ajouter un champ dédié `receivedBy` (priorité haute) |
+| Traçabilité entrée stock | `requestedBy = demandeur` + `receivedBy = réceptionnaire réel` (30/10/2026) | `createdBy = demandeur` + `receivedBy = réceptionnaire réel` | **Fait** (PRT6) |
 | QA doc | Mélange flux pièces et flux achats/logistique | 2 flux séparés | Réécrire scénario QA |
 
 ## Pneus — feuille Excel PNEUMATIQUE vs STOCK
@@ -68,7 +68,7 @@ sort** vers un véhicule. Ne pas confondre avec le flux demandes de pièces.
 - **“L’admin débloque, il ne fait pas tout.”**
 
 ## Plan de correction (ordre)
-1. **Fix traçabilité stock**: garder `createdBy = demandeur` + ajouter `receivedBy`.
+1. **Fix traçabilité stock**: garder `createdBy = demandeur` + ajouter `receivedBy` — **fait** (PRT6, 30/10/2026).
 2. **RBAC pneus**: séparer catalogue stock (`isTireCatalogManager`) et flotte (`isWorkshopManager`) — **fait côté routes**.
 3. **RBAC conditionnel PO**: distinguer `commande pièces atelier` vs `commande non pièces`.
 4. **UI commandes/demandes**: masquer actions hors périmètre rôle + message métier simple.

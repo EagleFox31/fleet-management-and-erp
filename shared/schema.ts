@@ -528,6 +528,8 @@ export const partRequirements = pgTable("part_requirements", {
     ] 
   }).notNull().default("pending"),
   requestedBy: integer("requested_by").references(() => users.id),
+  // Magasinier (ou admin) qui a enregistré l'entrée en stock : posé par le serveur.
+  receivedBy: integer("received_by").references(() => users.id),
   estimatedCost: numeric("estimated_cost", { precision: 15, scale: 2 }),
   supplierNotes: text("supplier_notes"),
   expectedDeliveryDate: date("expected_delivery_date"),
@@ -539,6 +541,7 @@ export const partRequirements = pgTable("part_requirements", {
 
 export const insertPartRequirementSchema = createInsertSchema(partRequirements).omit({
   id: true,
+  receivedBy: true,
   createdAt: true,
   updatedAt: true,
 });
