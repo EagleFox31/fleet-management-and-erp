@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Bell, Settings, User, LogOut, ChevronDown, ChevronRight, Wrench, Package, ClipboardList, Fuel, AlertTriangle, Menu } from "lucide-react";
 import { ContextualHelpButton } from "@/components/help";
+import { LOT_SCREENS } from "@/config/lot-screens";
 
 interface TopnavProps {
   className?: string;
@@ -67,6 +68,11 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
     const prefixMatch = Object.entries(routes)
       .filter(([route]) => path.startsWith(route + "/"))
       .sort((a, b) => b[0].length - a[0].length)[0];
+
+    // Un écran du lot sous une section connue (ex: /inventory/tires/movements)
+    // porte son propre titre, pas « Détail ».
+    const lotScreen = LOT_SCREENS.find((screen) => screen.path === path);
+    if (lotScreen) return [...(prefixMatch?.[1] ?? []), lotScreen.title];
 
     if (prefixMatch) {
       // Une page de création n'est pas un détail: annoncer « Détail » sur
