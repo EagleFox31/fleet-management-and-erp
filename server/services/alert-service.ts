@@ -6,6 +6,9 @@ import { db } from "../db";
 import { missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { and, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("alert-service");
 
 type AlertRecipientRole =
   | "admin"
@@ -753,7 +756,7 @@ export class AlertService {
             ...(alertData.dedupeKey ? { dedupeKey: alertData.dedupeKey } : {}),
           });
         } catch (error) {
-          console.error(`Alerte non créée pour l'utilisateur ${userId}:`, error);
+          log.error({ err: error, userId, dedupeKey: alertData.dedupeKey }, "alerte non créée pour un destinataire");
           continue;
         }
 
