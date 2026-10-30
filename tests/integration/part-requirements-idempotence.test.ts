@@ -89,12 +89,22 @@ describe("PartRequirementsService : double soumission", { timeout: 120000 }, () 
     expect(stock.quantity).toBe(2);
   });
 
-  it("deux sorties simultanées : une seule passe", async () => {
+  it("une sortie sans effet de stock est refusée : le statut ne change pas", async () => {
     const { warehouse, requirement } = await setup("received", 5);
 
+    const result = await partRequirementsService.updatePartRequirement(requirement.id, { status: "issued" }, "warehouse", warehouse.id);
+    expect(result).toMatchObject({ success: false, error: expect.stringMatching(/ordre de travail/) });
+    const [row] = await db.select().from(partRequirements).where(eq(partRequirements.id, requirement.id));
+    expect(row.status).toBe("received");
+  });
+
+  it("deux sorties simultanées : une seule passe", async () => {
+    const { warehouse, requirement } = await setup("received", 5);
+    const onTransition = async () => {};
+
     const results = await Promise.all([
-      partRequirementsService.updatePartRequirement(requirement.id, { status: "issued" }, "warehouse", warehouse.id),
-      partRequirementsService.updatePartRequirement(requirement.id, { status: "issued" }, "warehouse", warehouse.id),
+      partRequirementsService.updatePartRequirement(requirement.id, { status: "issued" }, "warehouse", warehouse.id, { onTransition }),
+      partRequirementsService.updatePartRequirement(requirement.id, { status: "issued" }, "warehouse", warehouse.id, { onTransition }),
     ]);
 
     expect(results.filter((r) => r.success)).toHaveLength(1);

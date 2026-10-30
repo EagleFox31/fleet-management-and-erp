@@ -342,7 +342,8 @@ Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, e
 - Retrouver une erreur signalée par un utilisateur : chercher sa référence
   (`requestId`) dans les logs.
 - Transition qui déplace du stock : effet dans `onTransition(tx)` de
-  `updatePartRequirement`, jamais avant la transition.
+  `updatePartRequirement`, jamais avant la transition. Le service refuse `issued`
+  sans cet effet (la sortie passe par `POST /api/work-orders/:id/part-requirements/:id/issue`).
 
 ---
 

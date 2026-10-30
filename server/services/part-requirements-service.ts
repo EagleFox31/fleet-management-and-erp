@@ -242,6 +242,16 @@ export class PartRequirementsService {
 
       // Valider la transition de statut si elle est demandée
       if (requirement.status && requirement.status !== current.status) {
+        // `issued` = la pièce a quitté le stock : la transition n'existe qu'avec
+        // son effet (déduction + rattachement à l'OT), porté par `onTransition`.
+        // Sans lui, le PATCH générique affichait « Sortie du stock » sans rien déduire.
+        if (requirement.status === 'issued' && !options?.onTransition) {
+          return {
+            success: false,
+            error: "La sortie du stock se fait depuis l'ordre de travail, qui déduit la pièce du stock.",
+          };
+        }
+
         // Transitions sensibles nécessitant une vérification d'identité stricte
         // Inclut les décisions d'annulation (cancel_requested -> approved/cancelled)
         // Note: fulfilled retiré car issued est maintenant l'état final
