@@ -57,3 +57,12 @@
   - `npm install` à faire dans chaque worktree pour `docx`, `altcha`, `msw` (le `node_modules` du dépôt a été installé sous Linux) ;
   - T-08 : `AppError` avec `details` (pour `lockedUntil` et `conflicts`) ;
   - client : valider la durée de validité de l'ACF et de l'agrément PD.
+
+## 2026-10-30T15:40:00+01:00 — ADR §6, noms de drapeaux
+
+- **Quoi** : table des clés de l'ADR §6 alignée sur `shared/feature-flags.ts` (`work-order-audit-trail`, `vehicle-cost-summary`, `part-requirement-receive`, `oil-change-prefill`, `captcha`).
+- **Comment** : correction du seul tableau de l'ADR ; le contrat fait foi, il n'est pas modifié.
+- **Pourquoi** : écart relevé par pe (T-05) ; un agent qui lit l'ADR aurait appelé `requireFeature` avec une clé inexistante.
+- **Comment tester (QA)** : chaque clé du tableau §6 existe dans `FEATURE_REGISTRY` : `grep -oE '\`[a-z-]+\` \(P-' docs/adr/0001-lot-recette-2026-11-02.md` puis rechercher chaque clé dans `shared/feature-flags.ts`.
+- **RAIDER** : D (aucun contrat touché) ; les autres principes ne s'appliquent pas (documentation).
+- **Reste/risques** : aucun.
