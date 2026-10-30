@@ -3,8 +3,9 @@ import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
 import { db } from "../db";
-import { missions, assignments, suppliers } from "../../shared/schema";
-import { and, inArray, isNull, lt, eq } from "drizzle-orm";
+import { missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
+import { and, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
+import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
 
 type AlertRecipientRole =
   | "admin"
@@ -515,6 +516,63 @@ export class AlertService {
   }
 
   /**
+   * Documents véhicule typés (T-17a): échéance dans `alertDays` jours du type
+   * (30 par défaut) ou déjà échue. Seuls les types actifs qui portent une
+   * échéance (validity_months renseigné) sont concernés. Une alerte par
+   * document et par échéance, thème `documents`.
+   */
+  async checkTypedDocumentExpiryAlerts(now: Date = new Date()): Promise<number> {
+    const rows = await db
+      .select({
+        id: vehicleDocuments.id,
+        vehicleId: vehicleDocuments.vehicleId,
+        name: vehicleDocuments.name,
+        expiryDate: vehicleDocuments.expiryDate,
+        typeLabel: vehicleDocumentTypes.label,
+        alertDays: vehicleDocumentTypes.alertDays,
+        registrationNumber: vehicles.registrationNumber,
+      })
+      .from(vehicleDocuments)
+      .innerJoin(vehicleDocumentTypes, eq(vehicleDocumentTypes.code, vehicleDocuments.type))
+      .leftJoin(vehicles, eq(vehicles.id, vehicleDocuments.vehicleId))
+      .where(
+        and(
+          isNotNull(vehicleDocuments.expiryDate),
+          eq(vehicleDocumentTypes.active, true),
+          isNotNull(vehicleDocumentTypes.validityMonths),
+        ),
+      );
+
+    let emitted = 0;
+    for (const row of rows) {
+      const { status, days } = classifyDocumentExpiry(row.expiryDate, now, row.alertDays);
+      if (status === "none" || days === null || !row.expiryDate) continue;
+
+      const expiry = row.expiryDate.slice(0, 10);
+      const vehicleLabel = row.registrationNumber ?? `#${row.vehicleId}`;
+      const expired = status === "expired";
+      await this.createAlertIfNotExists({
+        vehicleId: row.vehicleId,
+        type: "maintenance",
+        topic: "documents",
+        title: expired
+          ? `${row.typeLabel} expiré (${vehicleLabel}, ${expiry})`
+          : `${row.typeLabel} expire bientôt (${vehicleLabel}, ${expiry})`,
+        message: expired
+          ? `Véhicule ${vehicleLabel} - ${row.name} expiré depuis ${Math.abs(days)} jour(s)`
+          : `Véhicule ${vehicleLabel} - ${row.name} expire dans ${days} jour(s)`,
+        priority: expired ? "critical" : days <= 7 ? "high" : "medium",
+        entityType: "vehicle_document",
+        entityId: row.id,
+        targetRoles: this.maintenanceRecipients,
+        dedupeKey: documentExpiryDedupeKey(row.id, expiry, status),
+      });
+      emitted++;
+    }
+    return emitted;
+  }
+
+  /**
    * Vérifie les alertes de kilométrage pour un véhicule
    */
   private async checkVehicleMileageAlerts(vehicle: Vehicle): Promise<void> {
@@ -628,6 +686,8 @@ export class AlertService {
     targetUserIds?: Array<number | null | undefined>;
     /** Thème de notification (P-12) ; par défaut le type de l'alerte, qui est aussi un thème. */
     topic?: NotificationTopic;
+    /** Clé stable: si fournie, une alerte déjà émise (lue ou non) avec cette clé n'est pas recréée. */
+    dedupeKey?: string;
   }): Promise<void> {
     try {
       const tousLesDestinataires = await this.resolveRecipientUserIds(
@@ -662,9 +722,12 @@ export class AlertService {
       }
 
       for (const userId of recipientUserIds) {
-        const unreadAlerts = await storage.getUnreadAlertsByUserId(userId);
+        const candidateAlerts = alertData.dedupeKey
+          ? await storage.getAlertsByUserId(userId)
+          : await storage.getUnreadAlertsByUserId(userId);
 
-        const existingAlert = unreadAlerts.find((alert) => {
+        const existingAlert = candidateAlerts.find((alert) => {
+          if (alertData.dedupeKey) return alert.dedupeKey === alertData.dedupeKey;
           const sameType = alert.type === alertData.type;
           const sameTitle = alert.title === alertData.title;
           const sameLink = resolvedLink ? alert.link === resolvedLink : true;
@@ -675,15 +738,24 @@ export class AlertService {
           continue;
         }
 
-        const created = await storage.createAlert({
-          userId,
-          title: alertData.title,
-          message: alertData.message,
-          type: alertData.type,
-          priority: alertData.priority,
-          link: resolvedLink || undefined,
-          topic,
-        });
+        // Un destinataire en échec (compte supprimé entre-temps) ne doit pas
+        // priver les autres de l'alerte.
+        let created: Awaited<ReturnType<typeof storage.createAlert>>;
+        try {
+          created = await storage.createAlert({
+            userId,
+            title: alertData.title,
+            message: alertData.message,
+            type: alertData.type,
+            priority: alertData.priority,
+            link: resolvedLink || undefined,
+            topic,
+            ...(alertData.dedupeKey ? { dedupeKey: alertData.dedupeKey } : {}),
+          });
+        } catch (error) {
+          console.error(`Alerte non créée pour l'utilisateur ${userId}:`, error);
+          continue;
+        }
 
         // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
         // n'apparaissait qu'au prochain rafraîchissement, sans rien signaler.
@@ -810,6 +882,7 @@ export class AlertService {
       await this.checkFuelConsumptionAlerts();
       await this.checkMissionAlerts();
       await this.checkIncompleteSupplierAlerts();
+      await this.checkTypedDocumentExpiryAlerts();
 
       console.log("✅ Vérification des alertes terminée");
     } catch (error) {
