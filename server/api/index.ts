@@ -22,6 +22,26 @@ import {
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
 import managementRoutes from "./management.routes";
+import featureFlagsRoutes from "./feature-flags.routes";
+import vehicleDocumentTypesRoutes from "./vehicle-document-types.routes";
+import authLockoutRoutes from "./auth-lockout.routes";
+import auditLogsRoutes from "./audit-logs.routes";
+import backupsRoutes from "./backups.routes";
+import workOrderExportRoutes from "./work-order-export.routes";
+import notificationSettingsRoutes from "./notification-settings.routes";
+import kpiRoutes from "./kpi.routes";
+import workOrderAuditTrailRoutes from "./work-order-audit-trail.routes";
+import vehicleCostSummaryRoutes from "./vehicle-cost-summary.routes";
+import tireMovementsRoutes from "./tire-movements.routes";
+import partRequirementReceiveRoutes from "./part-requirement-receive.routes";
+import fuelAnomaliesRoutes from "./fuel-anomalies.routes";
+import fuelVouchersRoutes from "./fuel-vouchers.routes";
+import fuelPricesRoutes from "./fuel-prices.routes";
+import timeTrackingRoutes from "./time-tracking.routes";
+import pendingInvoicesRoutes from "./pending-invoices.routes";
+import incidentsRoutes from "./incidents.routes";
+import qualityCheckRoutes from "./quality-check.routes";
+import authCaptchaRoutes from "./auth-captcha.routes";
 
 /**
  * Router API Factory - Phase 2 Sprint 3
@@ -70,6 +90,30 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/part-requirements", isStaff, partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
   apiRouter.use("/management", managementRoutes);
+
+  // Routeurs du lot recette (T-08). Chemins relatifs à /api, déclarés dans chaque fichier :
+  // squelettes 501 derrière leur drapeau, que chaque agent remplace sans toucher à ce fichier.
+  // Montés après les routeurs historiques : aucun chemin existant n'est masqué.
+  apiRouter.use(featureFlagsRoutes);
+  apiRouter.use(vehicleDocumentTypesRoutes);
+  apiRouter.use(authLockoutRoutes);
+  apiRouter.use(auditLogsRoutes);
+  apiRouter.use(backupsRoutes);
+  apiRouter.use(workOrderExportRoutes);
+  apiRouter.use(notificationSettingsRoutes);
+  apiRouter.use(kpiRoutes);
+  apiRouter.use(workOrderAuditTrailRoutes);
+  apiRouter.use(vehicleCostSummaryRoutes);
+  apiRouter.use(tireMovementsRoutes);
+  apiRouter.use(partRequirementReceiveRoutes);
+  apiRouter.use(fuelAnomaliesRoutes);
+  apiRouter.use(fuelVouchersRoutes);
+  apiRouter.use(fuelPricesRoutes);
+  apiRouter.use(timeTrackingRoutes);
+  apiRouter.use(pendingInvoicesRoutes);
+  apiRouter.use(incidentsRoutes);
+  apiRouter.use(qualityCheckRoutes);
+  apiRouter.use(authCaptchaRoutes);
 
   // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts
   // for backward compatibility. New billing features use /api/billing/*
