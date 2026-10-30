@@ -16,6 +16,19 @@ import { moduleLogger } from "../lib/logger";
 
 export { AppError } from "../lib/app-error";
 
+/** Clés du contrat `ApiErrorBody` : `AppError.details` ne peut pas les écraser. */
+export const RESERVED_ERROR_KEYS = ["message", "code", "requestId", "errors"] as const;
+
+/** Fusionne les `details` d'une `AppError` dans un corps normalisé, sans toucher aux clés réservées. */
+export function mergeErrorDetails<T extends object>(body: T, details: Record<string, unknown> | undefined): T {
+  if (!details) return body;
+  const extra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (!(RESERVED_ERROR_KEYS as readonly string[]).includes(key)) extra[key] = value;
+  }
+  return { ...extra, ...body };
+}
+
 const log = moduleLogger("http");
 
 declare global {
@@ -102,13 +115,21 @@ export function errorResponseGuard(req: Request, res: Response, next: NextFuncti
     if (res.statusCode >= 500) {
       log.error({ requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), body }, "erreur serveur renvoyée par la route");
     }
-    return originalJson(normalized);
+    const details = res.locals?.appErrorDetails as Record<string, unknown> | undefined;
+    return originalJson(res.statusCode < 500 ? mergeErrorDetails(normalized, details) : normalized);
   };
   next();
 }
 
-export function toHttpError(err: unknown): { status: number; message?: string; fieldErrors?: ApiFieldError[] } {
-  if (err instanceof AppError) return { status: err.status, message: err.message, fieldErrors: err.fieldErrors };
+export function toHttpError(err: unknown): {
+  status: number;
+  message?: string;
+  fieldErrors?: ApiFieldError[];
+  details?: Record<string, unknown>;
+} {
+  if (err instanceof AppError) {
+    return { status: err.status, message: err.message, fieldErrors: err.fieldErrors, details: err.details };
+  }
   if (err instanceof ZodError) return { status: 400, fieldErrors: toFieldErrors(err.issues) };
   const e = err as { status?: number; statusCode?: number; type?: string };
   // express.json() sur un corps mal formé
@@ -121,10 +142,12 @@ export function toHttpError(err: unknown): { status: number; message?: string; f
 /** Dernier middleware : erreurs levées (`throw`, `next(err)`) et non rattrapées. */
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
   if (res.headersSent) return next(err);
-  const { status, message, fieldErrors } = toHttpError(err);
+  const { status, message, fieldErrors, details } = toHttpError(err);
   const context = { requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), status, err };
   if (status >= 500) log.error(context, "erreur non gérée");
   else log.warn(context, "requête rejetée");
 
+  // Transmis à la garde de sortie, qui normalise le corps puis y fusionne les détails.
+  if (details && res.locals) res.locals.appErrorDetails = details;
   res.status(status).json({ message, errors: fieldErrors });
 }
