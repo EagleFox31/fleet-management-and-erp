@@ -9,7 +9,7 @@ import {
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { authorize, isAnyUser } from "../middleware/auth";
+import { authorize, isStaff } from "../middleware/auth";
 
 const log = moduleLogger("vehicle-document-types");
 const router = Router();
@@ -22,7 +22,7 @@ const adminOnly = authorize(["admin"]);
  */
 
 /** Liste ordonnée. Les types désactivés ne sont visibles que de l'administrateur (`?includeInactive=true`). */
-router.get("/vehicle-document-types", isAnyUser, async (req, res, next) => {
+router.get("/vehicle-document-types", isStaff, async (req, res, next) => {
   try {
     const includeInactive = req.query.includeInactive === "true";
     if (includeInactive && req.user?.role !== "admin") {

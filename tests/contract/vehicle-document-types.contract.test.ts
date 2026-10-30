@@ -49,6 +49,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
   await login("admin");
   await login("technician");
+  await login("client");
 }, 120000);
 
 afterAll(async () => {
@@ -60,6 +61,10 @@ afterAll(async () => {
 describe("/api/vehicle-document-types", { timeout: 120000 }, () => {
   it("refuse sans session", async () => {
     expect((await call("GET", VEHICLE_DOCUMENT_TYPES_PATH)).status).toBe(401);
+  });
+
+  it("refuse le client", async () => {
+    expect((await call("GET", VEHICLE_DOCUMENT_TYPES_PATH, "client")).status).toBe(403);
   });
 
   it("sert les 9 types inscrits au demarrage, ordonnes, a tout utilisateur connecte", async () => {
