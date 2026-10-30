@@ -1,11 +1,15 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth";
+import { authenticate, isAnyUser } from "../middleware/auth";
 import { vehicleDocumentationService } from "../services/vehicle-documentation-service";
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
+import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
+import { moduleLogger } from "../lib/logger";
 
 const router = Router();
+const log = moduleLogger("vehicles-routes");
 
 const broadcastVehicleUpdate = (
   eventType: string,
@@ -47,16 +51,15 @@ router.use(authenticate);
  * GET /api/vehicles/expiring-docs?days=30
  * Récupère les documents expirant bientôt
  */
-router.get("/expiring-docs", async (req, res) => {
+router.get("/expiring-docs", isAnyUser, async (req, res, next) => {
   try {
     const days = parseInt(req.query.days as string) || 30;
-    const docs = await vehicleDocumentationService.getExpiringDocuments(days);
+    const docs = await vehicleDocumentationService.getExpiringDocuments(days, ownerScopeOf(req.user));
     return res.status(200).json(docs);
   } catch (error) {
-    console.error("Get expiring documents error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des documents expirant bientôt en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -64,15 +67,14 @@ router.get("/expiring-docs", async (req, res) => {
  * GET /api/vehicles/expired-docs
  * Récupère les documents déjà expirés
  */
-router.get("/expired-docs", async (req, res) => {
+router.get("/expired-docs", isAnyUser, async (req, res, next) => {
   try {
-    const docs = await vehicleDocumentationService.getExpiredDocuments();
+    const docs = await vehicleDocumentationService.getExpiredDocuments(ownerScopeOf(req.user));
     return res.status(200).json(docs);
   } catch (error) {
-    console.error("Get expired documents error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des documents expirés en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -80,8 +82,9 @@ router.get("/expired-docs", async (req, res) => {
  * GET /api/vehicles/documents/all
  * Tous les documents de tous les véhicules avec statut calculé
  */
-router.get("/documents/all", async (req, res) => {
+router.get("/documents/all", isAnyUser, async (req, res, next) => {
   try {
+    const ownerId = ownerScopeOf(req.user);
     const rows = await db
       .select({
         id: vehicleDocuments.id,
@@ -101,6 +104,7 @@ router.get("/documents/all", async (req, res) => {
       })
       .from(vehicleDocuments)
       .leftJoin(vehicles, eq(vehicleDocuments.vehicleId, vehicles.id))
+      .where(ownerId === null ? undefined : eq(vehicles.ownerId, ownerId))
       .orderBy(vehicleDocuments.expiryDate);
 
     const now = new Date();
@@ -120,7 +124,8 @@ router.get("/documents/all", async (req, res) => {
 
     return res.status(200).json(docs);
   } catch (error) {
-    console.error("Get all documents error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture de tous les documents en échec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -129,7 +134,7 @@ router.get("/documents/all", async (req, res) => {
  * PUT /api/vehicles/:id/mileage
  * Mise à jour kilométrage véhicule
  */
-router.put("/:id/mileage", async (req, res) => {
+router.put("/:id/mileage", isAnyUser, async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.id);
     const { kilometers } = req.body;
@@ -140,6 +145,10 @@ router.put("/:id/mileage", async (req, res) => {
     
     if (!kilometers || isNaN(kilometers) || kilometers < 0) {
       return res.status(400).json({ message: "Kilométrage invalide" });
+    }
+
+    if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+      return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
     }
     
     const vehicle = await vehicleDocumentationService.updateMileage(
@@ -163,10 +172,9 @@ router.put("/:id/mileage", async (req, res) => {
     
     return res.status(200).json(vehicle);
   } catch (error) {
-    console.error("Update mileage error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "mise à jour du kilométrage en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -174,7 +182,7 @@ router.put("/:id/mileage", async (req, res) => {
  * PUT /api/vehicles/:id/maintenance-position
  * Mise à jour position maintenance véhicule
  */
-router.put("/:id/maintenance-position", async (req, res) => {
+router.put("/:id/maintenance-position", isAnyUser, async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.id);
     const { position } = req.body;
@@ -185,6 +193,10 @@ router.put("/:id/maintenance-position", async (req, res) => {
     
     if (!position || typeof position !== 'string') {
       return res.status(400).json({ message: "Position invalide" });
+    }
+
+    if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+      return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
     }
     
     const vehicle = await vehicleDocumentationService.updateMaintenancePosition(
@@ -208,10 +220,9 @@ router.put("/:id/maintenance-position", async (req, res) => {
     
     return res.status(200).json(vehicle);
   } catch (error) {
-    console.error("Update maintenance position error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "mise à jour de la position maintenance en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -219,15 +230,14 @@ router.put("/:id/maintenance-position", async (req, res) => {
  * GET /api/vehicles/document-stats
  * Statistiques documents par type
  */
-router.get("/document-stats", async (req, res) => {
+router.get("/document-stats", isAnyUser, async (req, res, next) => {
   try {
-    const stats = await vehicleDocumentationService.getDocumentStats();
+    const stats = await vehicleDocumentationService.getDocumentStats(ownerScopeOf(req.user));
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get document stats error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "statistiques documents en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -235,15 +245,14 @@ router.get("/document-stats", async (req, res) => {
  * GET /api/vehicles/all-with-status
  * Récupère tous les véhicules avec statut documents
  */
-router.get("/all-with-status", async (req, res) => {
+router.get("/all-with-status", isAnyUser, async (req, res, next) => {
   try {
-    const vehicles = await vehicleDocumentationService.getAllVehiclesWithDocStatus();
+    const vehicles = await vehicleDocumentationService.getAllVehiclesWithDocStatus(ownerScopeOf(req.user));
     return res.status(200).json(vehicles);
   } catch (error) {
-    console.error("Get vehicles with status error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des véhicules avec statut documents en échec");
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 

@@ -182,3 +182,6 @@ export const isFuelCardManager = authorize(['admin', 'logistics', 'secretary']);
 // chauffeur passe par sa mission (POST /api/missions/:id/fuel-records).
 export const isFuelRecordWriter = authorize(['admin', 'workshop_manager', 'secretary', 'logistics']);
 export const isManagementOrAdmin = authorize(['admin', 'management']);
+// Toute session valide, avec `req.user` chargé (rôle normalisé) : pour les routes
+// ouvertes à tous dont la réponse dépend du rôle (cloison client, server/lib/client-scope.ts).
+export const isAnyUser = authorize([...ALL_ROLES]);

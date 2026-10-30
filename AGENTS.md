@@ -343,3 +343,18 @@ Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, e
   (`requestId`) dans les logs.
 - Transition qui déplace du stock : effet dans `onTransition(tx)` de
   `updatePartRequirement`, jamais avant la transition.
+
+---
+
+## 11. Cloison entre clients
+
+Tout le personnel (tous rôles sauf `client`) voit tous les véhicules et leurs
+documents. Un client ne voit que ses véhicules (`vehicles.ownerId`) et les
+sessions d'acquisition qu'il a créées.
+
+- Route ouverte à un client : `isAnyUser` (charge `req.user`), pas `authenticate`
+  seul, qui ne connaît pas le rôle.
+- Objet isolé : `canAccessOwned(req.user, () => propriétaire)` → 403 hors périmètre.
+- Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).
+- Source : `server/lib/client-scope.ts`. Test de référence :
+  `tests/contract/vehicle-documents-client-scope.contract.test.ts`.

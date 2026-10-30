@@ -1,6 +1,9 @@
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("vehicle-documentation");
 
 type DateValue = string | Date | null | undefined;
 
@@ -50,9 +53,10 @@ const isDateExpiringSoon = (
  * - Suivi position maintenance
  */
 export class VehicleDocumentationService {
-  private async getVehiclesWithEffectiveDocumentDates() {
+  /** `ownerId` : ne garder que les véhicules de ce propriétaire (cloison client). */
+  private async getVehiclesWithEffectiveDocumentDates(ownerId: number | null = null) {
     const [allVehicles, docs] = await Promise.all([
-      db.select().from(vehicles),
+      db.select().from(vehicles).where(ownerId === null ? undefined : eq(vehicles.ownerId, ownerId)),
       db
         .select({
           vehicleId: vehicleDocuments.vehicleId,
@@ -104,10 +108,10 @@ export class VehicleDocumentationService {
    * Exploite: 22 véhicules avec dates documentaires
    * @param daysBeforeExpiry - Nombre de jours avant expiration (défaut: 30)
    */
-  async getExpiringDocuments(daysBeforeExpiry: number = 30) {
-    console.log(`Fetching documents expiring in ${daysBeforeExpiry} days...`);
+  async getExpiringDocuments(daysBeforeExpiry: number = 30, ownerId: number | null = null) {
+    log.debug({ daysBeforeExpiry, ownerId }, "documents expirant bientôt : lecture");
 
-    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates();
+    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     const nowStr = new Date().toISOString().slice(0, 10);
     const expiryDateStr = addDaysToDateOnly(nowStr, daysBeforeExpiry);
 
@@ -146,8 +150,9 @@ export class VehicleDocumentationService {
       totalMissing: nonRenseignes.reduce((somme, v) => somme + v.missingDocuments.length, 0),
     };
 
-    console.log(
-      `Found ${result.totalExpiring} documents expiring soon, ${result.totalMissing} non renseignés`,
+    log.debug(
+      { totalExpiring: result.totalExpiring, totalMissing: result.totalMissing },
+      "documents expirant bientôt : résultat",
     );
     return result;
   }
@@ -155,10 +160,10 @@ export class VehicleDocumentationService {
   /**
    * Récupère les documents déjà expirés
    */
-  async getExpiredDocuments() {
-    console.log("Fetching expired documents...");
+  async getExpiredDocuments(ownerId: number | null = null) {
+    log.debug({ ownerId }, "documents expirés : lecture");
 
-    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates();
+    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     const now = new Date();
     const nowStr = now.toISOString().slice(0, 10);
 
@@ -183,7 +188,7 @@ export class VehicleDocumentationService {
       ].filter(Boolean)
     }));
     
-    console.log(`Found ${result.length} vehicles with expired documents`);
+    log.debug({ count: result.length }, "documents expirés : résultat");
     return result;
   }
   
@@ -192,7 +197,7 @@ export class VehicleDocumentationService {
    * Exploite: currentKilometers (27 véhicules)
    */
   async updateMileage(vehicleId: number, kilometers: number) {
-    console.log(`Updating mileage for vehicle ${vehicleId} to ${kilometers} km`);
+    log.debug({ vehicleId, kilometers }, "kilométrage : mise à jour");
 
     const [currentVehicle] = await db
       .select({
@@ -231,7 +236,7 @@ export class VehicleDocumentationService {
       .where(eq(vehicles.id, vehicleId))
       .returning();
     
-    console.log(`Mileage updated successfully for vehicle ${vehicleId}`);
+    log.debug({ vehicleId }, "kilométrage : mis à jour");
     return updated;
   }
   
@@ -240,7 +245,7 @@ export class VehicleDocumentationService {
    * Exploite: maintenancePosition
    */
   async updateMaintenancePosition(vehicleId: number, position: string) {
-    console.log(`Updating maintenance position for vehicle ${vehicleId} to: ${position}`);
+    log.debug({ vehicleId, position }, "position maintenance : mise à jour");
     
     const [updated] = await db
       .update(vehicles)
@@ -252,17 +257,17 @@ export class VehicleDocumentationService {
       throw new Error(`Véhicule ${vehicleId} non trouvé`);
     }
     
-    console.log(`Maintenance position updated successfully for vehicle ${vehicleId}`);
+    log.debug({ vehicleId }, "position maintenance : mise à jour faite");
     return updated;
   }
   
   /**
    * Statistiques documents par type
    */
-  async getDocumentStats() {
-    console.log("Calculating document statistics...");
+  async getDocumentStats(ownerId: number | null = null) {
+    log.debug({ ownerId }, "statistiques documents : calcul");
 
-    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates();
+    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     
     const todayDateOnly = new Date().toISOString().slice(0, 10);
     const expiryDateOnly = addDaysToDateOnly(todayDateOnly, 30);
@@ -308,19 +313,19 @@ export class VehicleDocumentationService {
       validVisiteTechnique: withVisiteTechnique - expiringVisiteTechnique - expiredVisiteTechnique,
     };
     
-    console.log("Document statistics calculated:", stats);
+    log.debug({ stats }, "statistiques documents : résultat");
     return stats;
   }
   
   /**
    * Récupère tous les véhicules avec leurs informations documentaires
    */
-  async getAllVehiclesWithDocStatus() {
-    console.log("Fetching all vehicles with document status...");
+  async getAllVehiclesWithDocStatus(ownerId: number | null = null) {
+    log.debug({ ownerId }, "véhicules avec statut documents : lecture");
 
     const todayDateOnly = new Date().toISOString().slice(0, 10);
     const expiryDateOnly = addDaysToDateOnly(todayDateOnly, 30);
-    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates();
+    const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     
     return allVehicles.map(vehicle => {
       const carteGriseStatus = vehicle.licensePlateExpiry
@@ -362,6 +367,16 @@ export class VehicleDocumentationService {
         }
       };
     });
+  }
+
+  /** Propriétaire du véhicule (`undefined` si le véhicule n'existe pas). */
+  async getVehicleOwnerId(vehicleId: number): Promise<number | null | undefined> {
+    const [row] = await db
+      .select({ ownerId: vehicles.ownerId })
+      .from(vehicles)
+      .where(eq(vehicles.id, vehicleId))
+      .limit(1);
+    return row?.ownerId;
   }
 }
 

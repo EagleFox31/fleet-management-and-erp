@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, type SQL } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
@@ -88,14 +88,28 @@ export class WorkflowDocumentService {
   }
   
   /**
-   * Récupère tous les documents d'un workflow
+   * Récupère tous les documents d'un workflow. `ownerId` (cloison client) : ne
+   * garder que les documents des workflows créés par ce propriétaire. Le filtre
+   * porte sur le workflow, pas sur `sessionId`, qui n'est pas unique.
    */
-  static async getWorkflowDocuments(sessionId: string): Promise<any[]> {
+  static async getWorkflowDocuments(sessionId: string, ownerId: number | null = null): Promise<any[]> {
     try {
+      const conditions: SQL[] = [eq(workflowDocuments.sessionId, sessionId)];
+      if (ownerId !== null) {
+        conditions.push(
+          inArray(
+            workflowDocuments.workflowId,
+            db
+              .select({ id: vehicleAcquisitionWorkflows.id })
+              .from(vehicleAcquisitionWorkflows)
+              .where(eq(vehicleAcquisitionWorkflows.userId, ownerId)),
+          ),
+        );
+      }
       const documents = await db
         .select()
         .from(workflowDocuments)
-        .where(eq(workflowDocuments.sessionId, sessionId))
+        .where(and(...conditions))
         .orderBy(workflowDocuments.uploadedAt);
       
       return documents;
@@ -161,6 +175,16 @@ export class WorkflowDocumentService {
     }
   }
   
+  /** Auteur du workflow (`undefined` si le workflow n'existe pas). */
+  static async getWorkflowOwnerId(workflowId: number): Promise<number | undefined> {
+    const [row] = await db
+      .select({ userId: vehicleAcquisitionWorkflows.userId })
+      .from(vehicleAcquisitionWorkflows)
+      .where(eq(vehicleAcquisitionWorkflows.id, workflowId))
+      .limit(1);
+    return row?.userId;
+  }
+
   /**
    * Récupère un document workflow spécifique
    */

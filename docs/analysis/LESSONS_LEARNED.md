@@ -772,3 +772,23 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Une valeur de requête ne devient un segment de chemin qu'après `isSafePathSegment` ; un chemin lu en base ne s'ouvre, ne se sert et ne se supprime que par `uploadedFileCandidates`.
 - Pas de SQL construit par interpolation de chaîne : `db.insert`/`db.update` ou le gabarit `sql\`\`` de Drizzle, qui paramètre.
+
+## 2026-10-30 - Documents d'un client lisibles par un autre client
+
+### Constat
+- `GET /api/vehicles/:id/documents`, `.../documents/:type`, `GET /api/documents/:id/download`, `GET /api/vehicles/documents/all`, les listes d'expiration et de statistiques, et les deux lectures de documents de workflow n'exigeaient qu'une session : un client lisait et téléchargeait les documents (carte grise, assurance) de n'importe quel véhicule. Les ids sont séquentiels.
+- `PUT /api/vehicles/:id/mileage` et `.../maintenance-position` : un client modifiait le véhicule d'un autre client.
+
+### Cause racine
+- `authenticate` vérifie la session, pas le rôle ni le propriétaire, et ne charge pas `req.user` : la route ne pouvait pas savoir qu'elle servait un client. Chaque route faisait (ou oubliait) son propre `role === 'client' && ownerId !== id`.
+- Classification : contrôle d'accès horizontal manquant (IDOR).
+
+### Résolution
+- `isAnyUser` (`server/middleware/auth.ts`) : toute session valide, avec `req.user` et le rôle normalisé.
+- Garde unique `server/lib/client-scope.ts` : `canAccessOwned` (objet isolé, 403) et `ownerScopeOf` (liste filtrée). Le personnel n'est pas filtré et ne coûte aucune lecture. Documents de workflow : filtre sur l'auteur du workflow, pas sur `sessionId`, qui n'est pas unique.
+
+### Prévention (vérifiable)
+- Unitaire `tests/unit/server/client-scope.test.ts` ; contrat `tests/contract/vehicle-documents-client-scope.contract.test.ts` (client A refusé sur B, client autorisé sur les siens, personnel autorisé partout, `sessionId` réutilisé). Sans correctif : 8 rouges sur 11.
+
+### Règle Projet (obligatoire)
+- Une route qui lit ou modifie un véhicule, ou ce qui en dépend, ouverte à un client, passe par `isAnyUser` puis `canAccessOwned` / `ownerScopeOf`. Jamais `authenticate` seul.

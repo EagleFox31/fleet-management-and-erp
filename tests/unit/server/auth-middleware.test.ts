@@ -7,6 +7,7 @@ vi.mock("../../../server/storage", () => ({ storage: { getUser: (id: number) => 
 import {
   authenticate,
   isAdmin,
+  isAnyUser,
   isDriverManager,
   isFuelCardManager,
   isFuelRecordWriter,
@@ -56,6 +57,7 @@ const MATRIX: Record<string, { guard: Guard; allowed: string[] }> = {
     allowed: ["admin", "workshop_manager", "secretary", "logistics"],
   },
   isManagementOrAdmin: { guard: isManagementOrAdmin as Guard, allowed: ["admin", "management"] },
+  isAnyUser: { guard: isAnyUser as Guard, allowed: [...ALL_APP_ROLES] },
 };
 
 function fakeRes() {

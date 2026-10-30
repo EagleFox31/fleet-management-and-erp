@@ -13,7 +13,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -30,6 +30,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { AppError } from "./lib/app-error";
+import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
@@ -1282,24 +1284,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle Documents Routes
-  app.get("/api/vehicles/:vehicleId/documents", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:vehicleId/documents", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
+
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       
       const documents = await storage.getVehicleDocuments(vehicleId);
       
       return res.status(200).json(documents);
     } catch (error) {
-      console.error("Get vehicle documents error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des documents du véhicule en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/vehicles/:vehicleId/documents/:type", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:vehicleId/documents/:type", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       const type = req.params.type;
@@ -1311,12 +1317,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!['carte_grise', 'assurance', 'visite_technique', 'taxe', 'autre'].includes(type)) {
         return res.status(400).json({ message: "Type de document invalide" });
       }
+
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       
       const documents = await storage.getVehicleDocumentsByType(vehicleId, type);
       
       return res.status(200).json(documents);
     } catch (error) {
-      console.error("Get vehicle documents by type error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des documents du véhicule par type en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1372,7 +1382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  app.get("/api/documents/:id/download", authenticate, async (req, res) => {
+  app.get("/api/documents/:id/download", isAnyUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -1384,6 +1394,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!document) {
         return res.status(404).json({ message: "Document non trouvé" });
+      }
+
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(document.vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
 
       const fs = await import("fs");
@@ -1403,14 +1417,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.download(existingPath, document.filename, (err) => {
         if (err) {
-          console.error("Document download error:", err);
+          log.error({ err, requestId: req.requestId }, "envoi du document en échec");
           if (!res.headersSent) {
             return res.status(500).json({ message: "Erreur lors du téléchargement" });
           }
         }
       });
     } catch (error) {
-      console.error("Get vehicle document error:", error);
+      log.error({ err: error, requestId: req.requestId }, "téléchargement du document en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5491,21 +5505,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/workflows/:sessionId/documents", authenticate, async (req, res) => {
+  app.get("/api/workflows/:sessionId/documents", isAnyUser, async (req, res, next) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
       const sessionId = req.params.sessionId;
       
-      const documents = await WorkflowDocumentService.getWorkflowDocuments(sessionId);
+      const documents = await WorkflowDocumentService.getWorkflowDocuments(sessionId, ownerScopeOf(req.user));
       return res.status(200).json(documents);
       
     } catch (error) {
-      console.error("Get workflow documents error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des documents workflow en échec");
       return res.status(500).json({ message: "Erreur lors de la récupération des documents" });
     }
   });
 
-  app.get("/api/workflows/documents/:documentId", authenticate, async (req, res) => {
+  app.get("/api/workflows/documents/:documentId", isAnyUser, async (req, res) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
       const documentId = parseInt(req.params.documentId);
@@ -5518,6 +5533,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!document) {
         return res.status(404).json({ message: "Document non trouvé" });
+      }
+
+      if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(document.workflowId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
 
       const fs = await import('fs');
@@ -5536,7 +5555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       fileStream.pipe(res);
       
     } catch (error) {
-      console.error("Download workflow document error:", error);
+      log.error({ err: error, requestId: req.requestId }, "téléchargement du document workflow en échec");
       return res.status(500).json({ message: "Erreur lors du téléchargement du document" });
     }
   });
