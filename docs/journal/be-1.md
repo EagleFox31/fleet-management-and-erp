@@ -28,3 +28,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : preuve automatisée `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/audit.test.ts` → `8 passed` ; tsc 0 `error TS`.
 - **RAIDER** : R/A règles et sink injectés ; I n/a ; D rien d'existant modifié ; E secrets masqués, panne d'audit journalisée sans casser la requête. 3 couches n/a.
 - **Reste / risques** : sink base, liste gelée des 8 motifs MUST, montage `apiRouter.use(auditWrites(AUDIT_CONFIG))` dans `server/api/index.ts` (à sol), test d'intégration.
+
+## 2026-10-30T15:00:00+01:00 — T-14 — Sink base et liste gelée des motifs audités
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-14-audit` (fusion de `origin/lot/db/T-07-schema`) · **Commit** : voir `git log`
+- **Statut** : fait, hors montage (sol)
+- **Quoi** : `dbAuditSink` écrit dans `activity_logs` (id numérique vers `entity_id`, sinon `entity_ref` ; `method`, `path`, `requestId` dans `details`). `AUDIT_CONFIG` : 8 types audités (OT, pièces, pneus, véhicules, demandes de pièce, commandes, factures fournisseur, utilisateurs), chemins imbriqués rattachés à l'entité parente.
+- **Comment** : `server/lib/audit-db-sink.ts`, `server/lib/audit-config.ts`, test de liste gelée `tests/unit/server/audit-config.test.ts`. Les 8 motifs sont mon choix, à valider par PE.
+- **Pourquoi** : P-04, PR-07.
+- **Comment tester (QA)** : après montage, modifier un OT puis lire `activity_logs` : une ligne avec auteur, méthode, chemin. Preuve : `node node_modules/vitest/vitest.mjs run --reporter=dot tests/unit/server/audit-config.test.ts` → 3 passed.
+- **RAIDER** : R/A configuration déclarative ; D rien d'existant modifié ; E panne d'écriture sans effet sur la requête.
+- **Reste / risques** : montage et `setAuditSink(dbAuditSink)` au démarrage (sol). Test d'intégration ajouté avec T-12 (même fichier de base).
