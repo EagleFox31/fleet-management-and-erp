@@ -17,3 +17,18 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : sans objet (document d'analyse).
 - **RAIDER** : couvert : Idempotent (lecture seule, rejouable), Retroactive (aucune donnée touchée). Ne s'applique pas : tests de non-régression (aucun code).
 - **Reste / risques** : `DATABASE_URL_TEST` est identique à `DATABASE_URL` (même base) ; la règle « fin nulle = infini » de l'EXCLUDE entrerait en conflit avec les données réelles (voir §2, §3).
+
+## 2026-10-30T14:20:00+01:00 — T-25 — Service SQL des KPI direction
+
+- **Agent** : db-2 · **Branche** : `lot/db/T-25-kpi` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `kpiService` : incidents par mois, conformité préventive (`null` sans échéance), coût moyen par intervention (pièces agrégées à part).
+- **Comment** : `server/services/kpi-service.ts`, SQL agrégé en lecture seule, contrats `shared/contracts/kpi.ts` inchangés. Les incidents sont les OT correctifs non annulés (définition du plan 03 T-25) : aucune dépendance à la table `incidents` de db-1.
+- **Pourquoi** : P-09 / P-10, plan 03 T-25.
+- **Comment tester (QA)** :
+  - Prérequis : `DATABASE_URL_TEST`.
+  - Étapes : lancer le test ci-dessous (jeu connu de 2019 : 7 OT, 2 lignes de pièces).
+  - Attendu : mars 2019 = 2 incidents, avril = 1 ; 1 préventif à temps sur 3 ; coût moyen 12 667 (38 000 sur 3).
+  - Preuve automatisée : `node ../lot-tools/db-lock.mjs db-2 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/kpi-service.test.ts` → 4 passed.
+- **RAIDER** : couvert : Idempotent (lecture seule), Durable (aucune table ni contrat modifié), tests sous verrou. Ne s'applique pas : migration.
+- **Reste / risques** : « à temps » = fin au plus tard le jour prévu + durée ; définition à valider par le produit. Route HTTP non branchée (API).
