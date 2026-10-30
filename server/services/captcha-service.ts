@@ -31,3 +31,46 @@ export async function verifyCaptchaPayload(payload: unknown): Promise<boolean> {
     return false;
   }
 }
+
+/** Memoire des preuves deja acceptees (anti-rejeu). Une preuve ne sert qu'une fois. */
+export interface CaptchaReplayStore {
+  /** true si la cle est nouvelle (et la retient jusqu'a `expiresAt`), false si deja vue. */
+  claim(key: string, expiresAt: number): boolean;
+}
+
+export class MemoryCaptchaReplayStore implements CaptchaReplayStore {
+  private seen = new Map<string, number>();
+  constructor(private now: () => number = Date.now) {}
+  claim(key: string, expiresAt: number): boolean {
+    const t = this.now();
+    for (const [k, exp] of this.seen) if (exp <= t) this.seen.delete(k);
+    if (this.seen.has(key)) return false;
+    this.seen.set(key, expiresAt);
+    return true;
+  }
+}
+
+/** Retention : au moins la validite d'un defi, pour qu'une preuve ne puisse pas revenir avant son expiration. */
+export const CAPTCHA_REPLAY_RETENTION_MS = CHALLENGE_TTL_MS + 60_000;
+
+const defaultReplayStore = new MemoryCaptchaReplayStore();
+
+function proofKey(payload: string): string {
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as { signature?: unknown };
+    if (typeof decoded.signature === "string" && decoded.signature) return decoded.signature;
+  } catch {
+    /* repli sur la preuve entiere */
+  }
+  return payload;
+}
+
+/** Preuve valide ET jamais vue : consomme la preuve. */
+export async function consumeCaptchaProof(
+  payload: unknown,
+  store: CaptchaReplayStore = defaultReplayStore,
+  now: number = Date.now(),
+): Promise<boolean> {
+  if (!(await verifyCaptchaPayload(payload))) return false;
+  return store.claim(proofKey(payload as string), now + CAPTCHA_REPLAY_RETENTION_MS);
+}

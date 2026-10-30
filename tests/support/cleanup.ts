@@ -6,6 +6,7 @@ import {
   clients,
   fuelRecords,
   parts,
+  partsStockMovements,
   supplierInvoices,
   suppliers,
   users,
@@ -48,6 +49,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.id, ids.invoiceIds));
   }
   if (ids.partIds.length > 0) {
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
     await db.delete(parts).where(inArray(parts.id, ids.partIds));
   }
   if (ids.vehicleIds.length > 0) {
@@ -83,6 +85,7 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, `${TEST_PREFIX}%`));
   await db.delete(clients).where(like(clients.name, `${TEST_PREFIX}%`));
   await db.delete(supplierInvoices).where(like(supplierInvoices.invoiceNumber, `${TEST_PREFIX}%`));
+  await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, db.select({ id: parts.id }).from(parts).where(like(parts.reference, `${TEST_PREFIX}%`))));
   await db.delete(parts).where(like(parts.reference, `${TEST_PREFIX}%`));
   await db.delete(vehicles).where(like(vehicles.registrationNumber, `${TEST_PREFIX}%`));
   await db.delete(suppliers).where(like(suppliers.name, `${TEST_PREFIX}%`));

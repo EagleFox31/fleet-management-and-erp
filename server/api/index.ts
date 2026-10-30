@@ -42,6 +42,11 @@ import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import authCaptchaRoutes from "./auth-captcha.routes";
+import { loginLockoutGuard } from "../middleware/login-lockout-guard";
+import { captchaGuard } from "../middleware/captcha-guard";
+import { auditWrites } from "../middleware/audit-writes";
+import { AUDIT_CONFIG } from "../lib/audit-config";
+import { DbLockoutStore } from "../services/login-lockout-db-store";
 
 /**
  * Router API Factory - Phase 2 Sprint 3
@@ -58,6 +63,20 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
   apiRouter.use(sessionMiddleware);
+
+  // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
+  // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
+  // analyse en amont (express.json dans app.ts). Verrouillage d'abord, captcha ensuite.
+  const lockoutStore = new DbLockoutStore();
+  const failedCountOf = async (username: string) => (await lockoutStore.get(username)).failedCount;
+  apiRouter.post("/auth/login", loginLockoutGuard({ store: lockoutStore }), captchaGuard({ getFailedCount: failedCountOf }));
+  apiRouter.post(
+    "/auth/pin-login",
+    loginLockoutGuard({ store: lockoutStore, usernameField: "userId" }),
+    captchaGuard({ getFailedCount: failedCountOf, usernameField: "userId" }),
+  );
+  // Journal d'audit des ecritures, apres la session (req.user connu).
+  apiRouter.use(auditWrites(AUDIT_CONFIG));
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
