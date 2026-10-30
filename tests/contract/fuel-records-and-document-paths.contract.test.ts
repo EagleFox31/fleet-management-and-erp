@@ -13,14 +13,14 @@ import { uniqueTestToken } from "../support/ids";
 /**
  * Niveau C, deux gardes serveur :
  * - T1 carburant : POST/PATCH /api/fuel-records n'exigeaient qu'une session.
- *   Saisie réservée aux profils qui ont l'écran carburant ; modification à
+ *   Saisie réservée aux profils carburant (ni technicien, ni chauffeur) ; modification à
  *   l'auteur du plein ou à l'admin (même règle que `canEditFuelRecord`).
  * - Chemins disque : le téléversement d'un document de workflow construisait
  *   le chemin avec `sessionId` et `documentType` bruts (écriture hors de
  *   uploads/) ; les deux téléchargements servaient un chemin stocké quelconque.
  */
 
-const ROLES: TestUserRole[] = ["admin", "technician", "warehouse", "client"];
+const ROLES: TestUserRole[] = ["admin", "technician", "logistics", "warehouse", "client"];
 
 let server: Server;
 let baseUrl = "";
@@ -100,7 +100,7 @@ afterAll(async () => {
 describe("T1 carburant : saisie d'un plein", { timeout: 60000 }, () => {
   const body = (vehicleId: number) => ({ vehicleId, date: "2026-10-01", quantity: 40, cost: 30000, mileage: 1000, notes: uniqueTestToken("fuel") });
 
-  for (const role of ["client", "warehouse"] as const) {
+  for (const role of ["client", "warehouse", "technician"] as const) {
     it(`${role} : POST -> 403 au contrat, aucun plein créé`, async () => {
       const vehicleId = await newVehicleId();
       const res = await call("POST", "/api/fuel-records", { cookie: cookies.get(role), body: body(vehicleId) });
@@ -112,12 +112,12 @@ describe("T1 carburant : saisie d'un plein", { timeout: 60000 }, () => {
     });
   }
 
-  it("non-régression : le technicien saisit un plein (écran /technician/fuel), attribué à lui", async () => {
+  it("non-régression : le logisticien saisit un plein, attribué à lui", async () => {
     const vehicleId = await newVehicleId();
-    const res = await call("POST", "/api/fuel-records", { cookie: cookies.get("technician"), body: body(vehicleId) });
+    const res = await call("POST", "/api/fuel-records", { cookie: cookies.get("logistics"), body: body(vehicleId) });
     expect(res.status).toBe(201);
     ids.fuelRecordIds.push(res.body.id);
-    expect(res.body.createdBy).toBe(sessionUserIds.get("technician"));
+    expect(res.body.createdBy).toBe(sessionUserIds.get("logistics"));
   });
 });
 
@@ -125,7 +125,7 @@ describe("T1 carburant : modification d'un plein", { timeout: 60000 }, () => {
   it("un autre profil que l'auteur -> 403, plein inchangé", async () => {
     const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("admin") });
     ids.fuelRecordIds.push(record.id);
-    const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("technician"), body: { quantity: 1 } });
+    const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("logistics"), body: { quantity: 1 } });
     expect(res.status).toBe(403);
     expectErrorContract(res, "FORBIDDEN");
     const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
@@ -140,16 +140,16 @@ describe("T1 carburant : modification d'un plein", { timeout: 60000 }, () => {
   });
 
   it("non-régression : l'auteur modifie son plein", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("technician") });
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
     ids.fuelRecordIds.push(record.id);
-    const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("technician"), body: { quantity: 42 } });
+    const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("logistics"), body: { quantity: 42 } });
     expect(res.status).toBe(200);
     const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
     expect(row.quantity).toBe(42);
   });
 
   it("non-régression : l'admin modifie le plein d'un autre", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("technician") });
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("admin"), body: { quantity: 43 } });
     expect(res.status).toBe(200);

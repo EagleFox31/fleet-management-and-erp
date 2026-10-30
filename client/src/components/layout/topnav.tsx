@@ -57,7 +57,6 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       "/settings": ["Administration", "Paramètres"],
       "/technicians": ["Techniciens"],
       "/technician/my-work-orders": ["Mes interventions"],
-      "/technician/fuel": ["Carburant"],
       "/technician/profile": ["Mon profil"],
       "/profile": ["Mon profil"],
     };

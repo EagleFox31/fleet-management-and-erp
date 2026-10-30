@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   Wrench,
   Truck,
-  Fuel,
   User,
   WifiOff,
 } from "lucide-react";
@@ -25,7 +24,6 @@ const TECH_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Accueil", href: "/dashboard", icon: LayoutDashboard },
   { id: "work_orders", label: "Mes OT", href: "/technician/my-work-orders", icon: Wrench, showBadge: true },
   { id: "vehicles", label: "Véhicules", href: "/technician/vehicles", icon: Truck },
-  { id: "fuel", label: "Carburant", href: "/technician/fuel", icon: Fuel },
   { id: "profile", label: "Profil", href: "/technician/profile", icon: User },
 ];
 
@@ -59,8 +57,6 @@ export function TechnicianBottomNav() {
         return location.startsWith("/technician/my-work-orders");
       case "vehicles":
         return location.startsWith("/technician/vehicles") || location.startsWith("/technician/fleet-status");
-      case "fuel":
-        return location.startsWith("/technician/fuel");
       case "profile":
         return location.startsWith("/technician/profile");
       default:

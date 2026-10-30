@@ -81,7 +81,6 @@ Référence de couverture : **24 pages**, **~85 onglets**, tous avec icône via 
 | **Mes OT (technicien)** | `/technician/my-work-orders` | `technician` | pending | En attente | `Clock` | OK |
 | | | | in_progress | En cours | `PlayCircle` | OK |
 | | | | completed | Terminés | `CheckCircle2` | OK |
-| **Carburant technicien** | `/technician/fuel` | `technician` | all | Tous mes pleins | `Fuel` | OK |
 | | | | recent | Cette semaine | `Calendar` | OK |
 | **Profil technicien** | `/technician/profile` | `technician` | overview | Vue d'ensemble | `User` | OK |
 | | | | performance | Performance | `TrendingUp` | OK |
@@ -122,7 +121,6 @@ Référence de couverture : **24 pages**, **~85 onglets**, tous avec icône via 
 | `client/src/pages/maintenance/gmao-dashboard.tsx` | `/maintenance/gmao-dashboard` |
 | `client/src/pages/maintenance/interventions.tsx` | `/maintenance/interventions` |
 | `client/src/pages/technician/my-work-orders.tsx` | `/technician/my-work-orders` |
-| `client/src/pages/technician/fuel.tsx` | `/technician/fuel` |
 | `client/src/pages/technician/profile.tsx` | `/technician/profile` |
 | `client/src/pages/profile.tsx` | `/profile` |
 | `client/src/pages/admin/users.tsx` | `/admin/users` |

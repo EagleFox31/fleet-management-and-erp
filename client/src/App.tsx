@@ -83,7 +83,6 @@ import FleetStatusPage from "@/pages/technician/fleet-status";
 import TechnicianVehiclesPage from "@/pages/technician/vehicles";
 import MyWorkOrdersPage from "@/pages/technician/my-work-orders";
 import TechnicianProfilePage from "@/pages/technician/profile";
-import TechnicianFuelPage from "@/pages/technician/fuel";
 
 // Dev Pages
 import ProfilesDevPage from "@/pages/dev/profiles";
@@ -750,12 +749,6 @@ function App() {
               </AppLayout>
             </Route>
             
-            <Route path="/technician/fuel">
-              <AppLayout>
-                <PrivateRoute component={TechnicianFuelPage} />
-              </AppLayout>
-            </Route>
-
             <Route path="/admin/import-backup">
               <AppLayout>
                 <RoleRoute component={ImportBackup} allowedRoles={["admin"]} />
