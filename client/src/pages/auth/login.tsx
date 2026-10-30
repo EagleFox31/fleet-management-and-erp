@@ -55,7 +55,7 @@ const features = [
 
 
 export default function Login() {
-  const { login, isAuthenticating, isAuthenticated } = useAuth();
+  const { login, isAuthenticating, isAuthenticated, loginLockMessage } = useAuth();
   const [, setLocation] = useLocation();
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -385,10 +385,10 @@ export default function Login() {
                       </button>
                     </div>
 
-                    {loginError && (
+                    {(loginLockMessage ?? loginError) && (
                       <div className="flex items-center gap-2.5 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
                         <div className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                        <p className="text-red-600 text-[12px]">{loginError}</p>
+                        <p className="text-red-600 text-[12px]">{loginLockMessage ?? loginError}</p>
                       </div>
                     )}
 

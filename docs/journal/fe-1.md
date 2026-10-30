@@ -30,3 +30,17 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve de trame WebSocket : T-55 (deux comptes).
 - **RAIDER** : D cases existants inchangés ; I invalidations sans effet de bord ; scoped client.
 - **Reste / risques** : la clé `/api/vehicle-documents` est une hypothèse de satellite, à confirmer au branchement T-32b.
+
+## 2026-10-30T14:03:00+01:00 — T-31a — Écrans admin sécurité (comptes verrouillés, journal d'audit, message de verrouillage)
+
+- **Agent** : fe-1 · **Branche** : `lot/fe/T-31a-admin-securite` (sur T-50 et mocks T-09b) · **Commit** : voir `git log`
+- **Statut** : fait (partie a, contre les mocks msw ; la partie b attend les routes réelles)
+- **Quoi** : page Comptes verrouillés (liste, déverrouillage confirmé), page Journal d'audit (filtres utilisateur, objet, période, pagination), message « Compte verrouillé jusqu'à HH:MM » à la connexion.
+- **Comment** : pages enregistrées dans `config/lot-screen-components.ts` ; réponses validées par les schémas de `shared/contracts/auth-lockout` et `audit-logs` ; déverrouillage par `useSingleFlightMutate`, id passé par les variables, ligne retirée du cache, puis invalidation de `/api/users` et `/api/audit-logs` ; erreurs par `userMessageOf`. `useAuth` expose `loginLockMessage` (le 429 y était avalé). Reuse : Adapt de `PremiumDataTable`, `AlertModal`, `Pagination`.
+- **Pourquoi** : plan 06 T-31a, contrat P-03 et P-04.
+- **Comment tester (QA)** :
+  - Prérequis : compte admin ; mocks actifs ou routes réelles.
+  - Étapes : 1. Administration, Comptes verrouillés : déverrouiller une ligne, elle disparaît. 2. Journal d'audit : filtrer par objet puis par période inversée (message d'erreur, aucune requête). 3. Se tromper 5 fois de mot de passe : le message indique l'heure de fin.
+  - Preuve automatisée : `tests/unit/client/lockout-message.test.ts` + `use-feature.test.ts` → 10 passed ; tsc global zéro erreur.
+- **RAIDER** : R tables et contrats partagés ; I déverrouiller deux fois = no-op côté liste ; D login inchangé hors message ; scoped client.
+- **Reste / risques** : branchement réel (T-31b) ; `userId` du filtre saisi en numéro faute de sélecteur d'utilisateurs.
