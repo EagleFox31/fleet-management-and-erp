@@ -30,7 +30,8 @@ router.get("/audit-logs", isAdmin, async (req, res, next) => {
     if (q.entityType) conds.push(eq(activityLogs.entityType, q.entityType));
     if (q.entityId) {
       conds.push(
-        /^\d+$/.test(q.entityId) ? eq(activityLogs.entityId, Number(q.entityId)) : eq(activityLogs.entityRef, q.entityId),
+        // Borné à 9 chiffres : au-delà, Number() déborde la colonne integer et la requête échoue en 500.
+        /^\d{1,9}$/.test(q.entityId) ? eq(activityLogs.entityId, Number(q.entityId)) : eq(activityLogs.entityRef, q.entityId),
       );
     }
     const where = and(...conds);

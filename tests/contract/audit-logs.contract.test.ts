@@ -72,6 +72,10 @@ describe("GET /api/audit-logs", { timeout: 120000 }, () => {
     expect((await get(`entityType=${TYPE}&entityId=CLE-1`, "admin")).body.total).toBe(1);
     expect((await get(`entityType=${TYPE}&entityId=9`, "admin")).body.total).toBe(1);
     expect((await get(`entityType=${TYPE}&userId=${adminId}`, "admin")).body.total).toBe(2);
+    // Identifiant numérique hors plage integer : filtre vide, pas de 500.
+    const huge = await get(`entityType=${TYPE}&entityId=${"9".repeat(30)}`, "admin");
+    expect(huge.status).toBe(200);
+    expect(huge.body.total).toBe(0);
     const wide = await get(`entityType=${TYPE}&from=2000-01-01`, "admin");
     expect(wide.body.total).toBe(4);
   });
