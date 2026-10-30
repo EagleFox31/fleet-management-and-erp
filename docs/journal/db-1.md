@@ -26,3 +26,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : `node node_modules/vitest/vitest.mjs run tests/unit/server/recette-guard.test.ts` → refus hors recette, hôte hors liste.
 - **RAIDER** : idempotent (ON CONFLICT), retroactive (reset borné à ce que le seed possède).
 - **Reste / risques** : T-26b données transactionnelles ; mot de passe `driver` sans PIN.
+
+## 2026-10-30T16:00:00+01:00 — T-26b — Données transactionnelles de recette
+
+- **Agent** : db-1 · **Branche** : `lot/db/T-26-seed-recette`
+- **Statut** : fait
+- **Quoi** : `scripts/lib/recette-data.ts` (référentiel, OT, demandes de pièce, pleins, missions et factures, documents J+10/J+29/J+31, pointage, alertes), PIN chauffeur haché depuis `RECETTE_PIN`, reset borné.
+- **Comment** : tout est marqué `RCT-*` / `recette_*` ; suppression ciblée dans l'ordre des clés étrangères, sans TRUNCATE ; `seedRecette` et `resetRecette` acceptent `closePool: false` pour les tests.
+- **Comment tester (QA)** : `node ../lot-tools/db-lock.mjs db-1 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/recette-seed-reset.test.ts` : 1 test vert (comptages exacts, idempotence, véhicules hors RCT intacts, PIN bcrypt).
+- **RAIDER** : idempotent, retroactive (existant intact), tsc sans erreur.
+- **Reste / risques** : statut de facture `partial` déduit du schéma.

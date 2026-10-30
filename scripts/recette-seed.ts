@@ -5,6 +5,7 @@
  * jamais dans le dépôt. Idempotent : clés naturelles (username, immatriculation), ON CONFLICT DO NOTHING.
  */
 import { assertRecetteEnvironment } from "./lib/recette-guard";
+import { seedRecetteData } from "./lib/recette-data";
 
 /** Un compte par profil ; deux techniciens et deux clients pour tester la cloison. */
 export const RECETTE_ACCOUNTS: readonly { username: string; role: string; name: string }[] = [
@@ -30,7 +31,7 @@ export function passwordFor(role: string, env: NodeJS.ProcessEnv = process.env):
   return value;
 }
 
-export async function seedRecette(): Promise<void> {
+export async function seedRecette(options: { closePool?: boolean } = {}): Promise<void> {
   assertRecetteEnvironment();
   const [{ pool }, bcrypt] = await Promise.all([import("../server/db"), import("bcryptjs")]);
   const hashes = new Map<string, string>();
@@ -55,14 +56,17 @@ export async function seedRecette(): Promise<void> {
         [`RCT-${String(i).padStart(3, "0")}`, 10000 * i, owner],
       );
     }
+    const pin = process.env.RECETTE_PIN;
+    if (pin !== undefined && !/^\d{4}$/.test(pin)) throw new Error("RECETTE_PIN doit contenir exactement 4 chiffres.");
+    await seedRecetteData(client, { pinHash: pin ? await bcrypt.default.hash(pin, 10) : null });
     await client.query("COMMIT");
-    console.info("Seed de recette appliqué (comptes recette_* et véhicules RCT-001 à RCT-012).");
+    console.info("Seed de recette appliqué (comptes recette_*, véhicules RCT-001 à RCT-012, données RCT-*).");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
-    await pool.end();
+    if (options.closePool !== false) await pool.end();
   }
 }
 

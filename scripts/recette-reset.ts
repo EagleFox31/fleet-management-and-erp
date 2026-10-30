@@ -4,19 +4,17 @@
  * contenir des données qui ne sont pas au seed.
  */
 import { assertRecetteEnvironment } from "./lib/recette-guard";
+import { deleteRecetteData } from "./lib/recette-data";
 import { seedRecette } from "./recette-seed";
 
-export async function resetRecette(): Promise<void> {
+export async function resetRecette(options: { closePool?: boolean } = {}): Promise<void> {
   assertRecetteEnvironment();
   const started = Date.now();
   const { pool } = await import("../server/db");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM work_orders WHERE vehicle_id IN (SELECT id FROM vehicles WHERE registration_number LIKE 'RCT-%')`);
-    await client.query(`DELETE FROM vehicles WHERE registration_number LIKE 'RCT-%'`);
-    await client.query(`DELETE FROM notification_preferences WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'recette\\_%')`);
-    await client.query(`DELETE FROM users WHERE username LIKE 'recette\\_%'`);
+    await deleteRecetteData(client);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -24,7 +22,7 @@ export async function resetRecette(): Promise<void> {
   } finally {
     client.release();
   }
-  await seedRecette();
+  await seedRecette(options);
   console.info(`Reset de recette terminé en ${Date.now() - started} ms.`);
 }
 
