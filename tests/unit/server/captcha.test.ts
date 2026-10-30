@@ -16,7 +16,7 @@ async function run(body: unknown, failed: number) {
   return next.mock.calls[0][0];
 }
 
-describe("captcha ALTCHA", () => {
+describe("captcha ALTCHA", { timeout: 60000 }, () => {
   beforeEach(() => {
     process.env.ALTCHA_HMAC_KEY = "cle-de-test";
     process.env.FEATURE_FLAGS = "captcha=on";

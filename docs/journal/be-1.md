@@ -69,3 +69,11 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : 5 mauvais mots de passe puis 6e essai → 429 `RATE_LIMITED` avec `lockedUntil` (login et pin-login) ; avec `FEATURE_FLAGS=captcha=on`, dès 3 échecs la preuve est exigée et ne sert qu'une fois.
 - **RAIDER** : I verrou et reset idempotents ; D handlers de `routes.ts` intacts ; E 400/429 normalisés. 3 couches n/a.
 - **Reste / risques** : anti-rejeu en mémoire du processus (non partagé entre instances ni conservé au redémarrage ; une preuve reste de toute façon limitée à 5 min) ; `userId` du pin-login et `username` partagent l'espace de clés du compteur (un identifiant « 5 » et l'utilisateur id 5 se confondent) ; `setAuditSink` reste à `server/index.ts`, donc inactif dans les tests de contrat qui ne l'appellent pas.
+## 2026-10-30T17:30:00+01:00 — T-57 — Espaces de clés du verrouillage séparés
+
+- **Agent** : be-1 · **Branche** : `lot/be/T-57-montage-gardes` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : clés du compteur préfixées par route : `pwd:<username>` (login) et `pin:<userId>` (pin-login). Option `keyPrefix` du garde ; le miroir `users` cible le nom (pwd:) ou l'id (pin:) ; `unlockUser` supprime les deux clés et l'ancienne. Compteurs existants sans préfixe : ignorés (expirent avec le verrou).
+- **Pourquoi** : un identifiant « 5 » ne doit pas bloquer l'utilisateur d'id 5.
+- **Comment tester (QA)** : contrat `login-guards-mount` (5 cas) ; 5 échecs login avec « id » puis pin-login de cet id → 200, `failed_login_count` à 0.
+- **Reste / risques** : l'anti-rejeu du captcha reste en mémoire (mono-instance). Timeout des tests captcha porté à 60 s (preuve de travail lente en charge).

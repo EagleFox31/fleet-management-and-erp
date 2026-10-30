@@ -46,7 +46,7 @@ import { loginLockoutGuard } from "../middleware/login-lockout-guard";
 import { captchaGuard } from "../middleware/captcha-guard";
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG } from "../lib/audit-config";
-import { DbLockoutStore } from "../services/login-lockout-db-store";
+import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
 
 /**
  * Router API Factory - Phase 2 Sprint 3
@@ -68,12 +68,16 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
   // analyse en amont (express.json dans app.ts). Verrouillage d'abord, captcha ensuite.
   const lockoutStore = new DbLockoutStore();
-  const failedCountOf = async (username: string) => (await lockoutStore.get(username)).failedCount;
-  apiRouter.post("/auth/login", loginLockoutGuard({ store: lockoutStore }), captchaGuard({ getFailedCount: failedCountOf }));
+  const failedCountOf = (prefix: string) => async (username: string) => (await lockoutStore.get(prefix + username)).failedCount;
+  apiRouter.post(
+    "/auth/login",
+    loginLockoutGuard({ store: lockoutStore, keyPrefix: PASSWORD_KEY_PREFIX }),
+    captchaGuard({ getFailedCount: failedCountOf(PASSWORD_KEY_PREFIX) }),
+  );
   apiRouter.post(
     "/auth/pin-login",
-    loginLockoutGuard({ store: lockoutStore, usernameField: "userId" }),
-    captchaGuard({ getFailedCount: failedCountOf, usernameField: "userId" }),
+    loginLockoutGuard({ store: lockoutStore, usernameField: "userId", keyPrefix: PIN_KEY_PREFIX }),
+    captchaGuard({ getFailedCount: failedCountOf(PIN_KEY_PREFIX), usernameField: "userId" }),
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
   apiRouter.use(auditWrites(AUDIT_CONFIG));

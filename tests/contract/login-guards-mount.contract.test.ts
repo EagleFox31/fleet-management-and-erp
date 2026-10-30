@@ -51,8 +51,11 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.FEATURE_FLAGS;
   setAuditSink(null);
-  if (usernames.length) await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [usernames]);
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [ids.userIds.map(String)]);
+  const keys = [
+    ...usernames.map((u) => `pwd:${u}`),
+    ...ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`]),
+  ];
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
   if (ids.userIds.length) await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
   if (ids.partIds.length) await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   await cleanupCreated(ids);
@@ -86,6 +89,23 @@ describe("gardes de connexion montes", { timeout: 120000 }, () => {
     expect(locked.status).toBe(429);
     expect(locked.body).toMatchObject({ code: "RATE_LIMITED" });
     expect(Number.isNaN(Date.parse(locked.body.lockedUntil))).toBe(false);
+  });
+
+  it("espaces de cles separes : 5 echecs login avec l'identifiant « <id> » ne bloquent pas le pin-login de l'utilisateur d'id <id>", async () => {
+    const driver = await createTestUser({ role: "driver" });
+    ids.userIds.push(driver.id);
+    await db.update(users).set({ pin: await bcrypt.hash("1234", 4) }).where(eq(users.id, driver.id));
+    for (let i = 0; i < MAX; i++) {
+      expect((await post("/api/auth/login", { username: String(driver.id), password: "mauvais" })).status).toBe(401);
+      await settle();
+    }
+    expect((await post("/api/auth/login", { username: String(driver.id), password: "mauvais" })).status).toBe(429);
+    const pin = await post("/api/auth/pin-login", { userId: driver.id, pin: "1234" });
+    expect(pin.status).toBe(200);
+    await settle();
+    const [row] = await db.select().from(users).where(eq(users.id, driver.id));
+    expect(row.failedLoginCount).toBe(0);
+    expect(row.lockedUntil).toBeNull();
   });
 
   it("captcha : exige apres 3 echecs, preuve valide acceptee une fois, rejeu refuse", async () => {
