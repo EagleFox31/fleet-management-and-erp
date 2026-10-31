@@ -28,3 +28,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : relire le §7 et confirmer chaque point avec le titulaire du compte.
 - **RAIDER** : sans objet hors documentation.
 - **Reste / risques** : `APP_ENV` n'est lu par aucun code à ce jour.
+
+## 2026-10-31T15:00:00+01:00 — T-48 — Captcha ALTCHA (service, garde, défi)
+
+- **Agent** : sol · **Branche** : `lot/sol/T-48-captcha` (depuis `lot/sol/T-08-squelette`) · **Commit** : voir `git log`
+- **Statut** : en cours (garde non monté devant le login, en attente du compteur de T-12)
+- **Quoi** : `GET /api/auth/challenge` réel (drapeau `captcha`), service de défi et de vérification, garde `captchaGuard` : à partir de 3 échecs, 400 `VALIDATION` sur le champ `captcha` sans preuve valide.
+- **Comment** : `server/services/captcha-service.ts` (Adopt `altcha-lib/v1`, forme du contrat), `server/middleware/captcha-guard.ts` (compteur injecté), clé `ALTCHA_HMAC_KEY` ou à défaut `SESSION_SECRET`.
+- **Pourquoi** : P-26, contrat `shared/contracts/auth-captcha.ts`.
+- **Comment tester (QA)** : drapeau `FEATURE_FLAGS=captcha=on`, `GET /api/auth/challenge` renvoie un défi ; preuve unitaire : `node node_modules/vitest/vitest.mjs run tests/unit/server/captcha.test.ts` -> 6 passed.
+- **RAIDER** : couvert I/D (sans effet drapeau coupé), E (fail-closed sans clé) ; contrat HTTP et montage devant `/auth/login` et `/auth/pin-login` restent à faire.
+- **Reste / risques** : brancher `getFailedCount` sur le magasin de `lot/be/T-12-verrouillage` une fois la table fusionnée ; réutilisation d'une preuve (anti-rejeu) non traitée.

@@ -4,6 +4,9 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/useAuth";
+import { useFeatureFlags } from "@/hooks/use-feature";
+import type { FeatureKey } from "@shared/feature-flags";
+import { FEATURE_GATED_HREFS, LOT_SCREENS, canAccessLotScreen } from "@/config/lot-screens";
 import {
   BarChart3,
   Truck,
@@ -53,11 +56,33 @@ interface MenuItem {
   icon: any;
   submenu?: MenuItem[];
   menuKey?: string;
+  /** Drapeau qui masque l'entrée quand il est coupé (cosmétique, la garde est côté serveur). */
+  feature?: FeatureKey;
+}
+
+/** Ajoute les écrans du lot au menu du rôle, puis retire ce que les drapeaux masquent. */
+function withLotScreens(base: MenuItem[], role: string | undefined, flags: Record<FeatureKey, boolean>): MenuItem[] {
+  const menu: MenuItem[] = base.map((item) => ({ ...item, submenu: item.submenu ? [...item.submenu] : undefined }));
+  for (const screen of LOT_SCREENS) {
+    if (!screen.menu || !canAccessLotScreen(screen, role)) continue;
+    const entry: MenuItem = { label: screen.menu.label, href: screen.path, icon: screen.menu.icon, feature: screen.feature };
+    const group = screen.menu.group === "top" ? undefined : menu.find((item) => item.menuKey === screen.menu!.group);
+    if (group?.submenu) group.submenu.push(entry);
+    else menu.push(entry);
+  }
+  const visible = (item: MenuItem) => {
+    const gate = item.feature ?? (item.href ? FEATURE_GATED_HREFS[item.href] : undefined);
+    return !gate || flags[gate];
+  };
+  return menu
+    .map((item) => (item.submenu ? { ...item, submenu: item.submenu.filter(visible) } : item))
+    .filter((item) => visible(item) && (!item.submenu || item.submenu.length > 0));
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobileClose }) => {
   const [location] = useLocation();
   const { user } = useAuth();
+  const flags = useFeatureFlags();
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
     procurement: true,
     administration: false,
@@ -349,7 +374,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
     return mostSpecificMatch.href || null;
   };
 
-  const filteredMenuItems = useMemo(() => getRoleBasedMenu(), [user?.role]);
+  const filteredMenuItems = useMemo(() => withLotScreens(getRoleBasedMenu(), user?.role, flags), [user?.role, flags]);
 
   const activeGroupMenuKeys = useMemo(() => {
     return filteredMenuItems

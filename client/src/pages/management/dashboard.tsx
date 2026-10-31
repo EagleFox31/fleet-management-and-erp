@@ -18,6 +18,7 @@ import { ManagementIndicatorsTab } from "@/components/management/management-indi
 import { MoneyFlowPanel } from "@/components/management/money-flow-panel";
 import { useAuth } from "@/hooks/useAuth";
 import type { ManagementDashboardResponse, ManagementPeriod } from "@shared/constants/management-dashboard";
+import { KpiTiles } from "@/components/dashboard/kpi-tiles";
 import { ClientRevenueChart } from "@/components/dashboard/client-revenue-chart";
 import { ManagementFinancialOverview } from "@/components/management/management-financial-overview";
 import { ManagementProfitabilityBento } from "@/components/management/management-profitability-bento";
@@ -46,6 +47,7 @@ export default function ManagementDashboard() {
 
   return (
     <div className="space-y-6">
+      <KpiTiles />
       {/* 1. Header & Quatuor Bento Hero Exécutif */}
       {isLoading || !data ? (
         <div className="space-y-4">
