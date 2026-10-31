@@ -33,10 +33,12 @@ import { TireLoadIndexCombobox } from "@/components/inventory/tire-load-index-co
 import { TireSizeFields } from "@/components/inventory/tire-size-fields";
 import { TireSupplierCombobox } from "@/components/inventory/tire-supplier-combobox";
 import { useFormDraft } from "@/hooks/use-form-draft";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDraftSavedTime } from "@/lib/form-draft-storage";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
 import { tireWizardDraftStorage, type TireWizardDraftMeta } from "@/lib/tire-wizard-draft";
 import {
   TIRE_MANUFACTURING_WEEKS,
@@ -108,11 +110,12 @@ export function TireWizardForm({ onSuccess, onCancel }: TireWizardFormProps) {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible d'enregistrer le pneu. Vérifiez les champs obligatoires.",
+        description: userMessageOf(error, "Impossible d'enregistrer le pneu. Vérifiez les champs obligatoires."),
         variant: "destructive",
       });
     },
   });
+  const submitTire = useSingleFlightMutate(createTireMutation.mutate);
 
   const goToNextStep = async () => {
     const fields = TIRE_WIZARD_STEP_FIELDS[currentStep];
@@ -139,7 +142,7 @@ export function TireWizardForm({ onSuccess, onCancel }: TireWizardFormProps) {
   };
 
   const onSubmit = (data: TireFormData) => {
-    createTireMutation.mutate(data);
+    submitTire(data);
   };
 
   const summary = form.watch();
