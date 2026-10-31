@@ -638,7 +638,7 @@ soumission sans doublon.
   404 / 409, détail d'une fiche supprimée 200, démontage inconnu 200, rotation et inspection invalides 500).
 - `npm run check` 0 erreur ; unitaire 474/474 ; intégration 67/67 (13 fichiers) ; contrat 145/145 (16 fichiers).
 
-## (ce commit) - Pneus : le démontage dit où va le pneu (TIR3)
+## 3572b2e - Pneus : le démontage dit où va le pneu (TIR3)
 
 **Quoi**
 - Démonter un pneu exige une destination : **Remettre en stock** (la fiche regagne une unité,
@@ -677,3 +677,65 @@ soumission sans doublon.
   stock 0 → 1 en base.
 - `client-payment-idempotence` (intégration) instable sans lien : 8/8 puis 2 échecs sur le même code,
   8/8 sans les changements pneus.
+
+## caed509 - Pneus : brouillon du wizard et tableau stock (TIR5, TIR6) ; nettoyage de test cloisonné
+
+**Quoi**
+- Brouillon de formulaire : l'auto-enregistrement pendant la saisie ne s'exécutait jamais. Le brouillon
+  n'était écrit qu'au changement d'étape. Corrigé dans `useFormDraft`, ce qui vaut pour ses 14 formulaires.
+- Wizard pneu : `useSingleFlightMutate` sur la création (AGENTS.md §10) et message d'erreur par
+  `userMessageOf` au lieu de `error.message`.
+- Nettoyage des tests : `cleanupOrphanTestRows` ne supprime plus que les lignes `TEST-` vieilles de plus
+  de 2 h. Il effaçait, à la fin de chaque fichier, les utilisateurs et données des lancements concurrents.
+- e2e `12-tire-wizard-draft-and-table` : TIR5 et TIR6.
+
+**Comment**
+- `persistDraft` dépendait de `getMeta` / `isEmpty`, souvent passés en fonctions inline, donc recréés à
+  chaque rendu. L'effet `form.watch` se réabonnait à chaque frappe et son nettoyage annulait le minuteur
+  en attente. Le watch appelle maintenant `persistDraft` par une ref et ne dépend plus que de
+  `debounceMs`, `enabled` et `form`.
+- `cleanupOrphanTestRows` : filtre `created_at < now() - 2 hours` ajouté au filtre de préfixe, sur
+  chaque table balayée.
+
+**Pourquoi**
+- La base de test est partagée (`DATABASE_URL_TEST` = `DATABASE_URL`) par cette session, les e2e et les
+  worktrees du lot. Le balayage global expliquait les 401 en série des suites contrat et les échecs
+  intermittents de `client-payment-idempotence` (utilisateur ou lignes supprimés en plein test).
+
+**Preuve**
+- e2e 12 rouge sur l'ancien hook (brouillon jamais écrit pendant la saisie), vert après : 2/2.
+- La garde double clic n'est pas prouvée par l'e2e : sans elle, le double clic n'envoyait déjà qu'une
+  requête. Conservée par règle (§10).
+- Unitaire 781/781 ; `npm run check` 0 erreur ; contrat 398/398 (37 fichiers, plus aucun 401) ;
+  intégration 89/90 : seul échec `login-lockout-db-store`, table `login_attempts_by_username` absente
+  (migration du lot T-12 non appliquée), sans lien.
+- Constat hors périmètre : `getCurrentUser` (`client/src/lib/auth.ts`) abandonne `/api/auth/me` après
+  8 s et renvoie alors vers la connexion. Un serveur lent passe pour une déconnexion.
+
+## 163a20a - Session : un serveur lent ne déconnecte plus l'utilisateur
+
+**Quoi**
+- Au démarrage, seul un 401 de `/api/auth/me` vaut « pas de session ». Un délai dépassé, une coupure
+  réseau ou une 5xx gardent l'utilisateur en attente : nouvelle tentative automatique et panneau
+  « Le serveur met du temps à répondre » avec un bouton « Réessayer maintenant ».
+- e2e `01-auth-login` : nouveau cas « serveur lent ». Unitaire `session-check`.
+
+**Comment**
+- `client/src/lib/session-check.ts` : `checkSession` renvoie `authenticated` / `anonymous` /
+  `unreachable` (délai 10 s) ; `nextSessionRetryDelay` donne 1, 2, 4, 8 puis 10 s.
+- `useAuth` : boucle de tentatives à la place du chien de garde de 12 s qui forçait `user = null`.
+  `isLoading` reste vrai tant que le serveur ne répond pas, donc les routes protégées ne redirigent pas.
+  Connexion et déconnexion interrompent la boucle. `mountedRef` est remis à vrai au montage (double
+  montage du mode strict).
+- L'e2e bloque le service worker PWA (`serviceWorkers: "block"`), sinon `page.route` ne voit pas les
+  requêtes.
+
+**Pourquoi**
+- Le serveur de dev met jusqu'à ~35 s à servir une page. Le contrôle abandonnait à 8 s et renvoyait
+  vers la connexion un utilisateur dont la session était valide (constat de caed509).
+
+**Preuve**
+- e2e `01-auth-login` 3/3. Le cas « serveur lent » échoue sur l'ancien `useAuth`.
+- Unitaire 789/789 ; `npm run check` 0 erreur.
+- Lancement e2e sur `E2E_BASE_URL=http://127.0.0.1:5055` : le port 5000 était occupé par une autre
+  application, que Playwright réutilisait (`reuseExistingServer`).
