@@ -1,4 +1,9 @@
-import { apiRequest } from "./queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { activateOfflineUser, expireOfflineSession, purgeOfflineSession } from "@/lib/offline-storage";
+import { getActiveOfflineUserId } from "@/lib/offline-user-scope";
+import { clientLogger } from "@/lib/logger";
+import { pendingServerLogout } from "@/lib/pending-logout";
+import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 
 export interface LoginCredentials {
   username: string;
@@ -35,6 +40,13 @@ function createAuthTimeoutController(timeoutMs: number = AUTH_TIMEOUT_MS) {
   };
 }
 
+/** Désigne le magasin hors ligne de cet utilisateur (cloison par compte). */
+function rememberOfflineUser(user: User): void {
+  if (user && Number.isInteger(user.id) && user.id > 0) {
+    activateOfflineUser(queryClient, user.id);
+  }
+}
+
 export async function login(credentials: LoginCredentials): Promise<User> {
   const { signal, clear } = createAuthTimeoutController();
   try {
@@ -43,7 +55,11 @@ export async function login(credentials: LoginCredentials): Promise<User> {
       body: credentials,
       signal,
     });
-    return await response.json();
+    const user: User = await response.json();
+    // Nouvelle session : l'ancienne, restée à fermer côté serveur, est remplacée.
+    pendingServerLogout.clear();
+    rememberOfflineUser(user);
+    return user;
   } finally {
     clear();
   }
@@ -54,19 +70,47 @@ export async function register(data: RegistrationData): Promise<User> {
   return await response.json();
 }
 
+/**
+ * Déconnexion. Que le serveur réponde ou non (réseau coupé), le stockage hors
+ * ligne et le cache TanStack de ce compte sont purgés : le compte suivant sur
+ * le même appareil ne doit rien en relire. Si le serveur n'a pas pu être joint, un
+ * repère local garde la déconnexion à envoyer (démarrage suivant ou retour du
+ * réseau), sinon le cookie de session reconnecterait ce compte.
+ */
 export async function logout(): Promise<void> {
-  await apiRequest("POST", "/api/auth/logout");
+  pendingServerLogout.mark();
+  try {
+    await apiRequest("POST", "/api/auth/logout");
+    pendingServerLogout.clear();
+  } finally {
+    await purgeOfflineSession(queryClient);
+    purgeBrowserUserState();
+  }
 }
 
 export async function getCurrentUser(): Promise<User | null> {
+  // Une déconnexion faite hors ligne part avant tout : sinon /api/auth/me
+  // rouvrirait la session que l'utilisateur a fermée.
+  if ((await pendingServerLogout.flush()) === "pending") {
+    return null;
+  }
+
+  // Compte actif au départ de la requête : une réponse 401 tardive ne doit pas
+  // retirer un compte qui s'est connecté entre-temps.
+  const activeAtStart = getActiveOfflineUserId();
   const { signal, clear } = createAuthTimeoutController(8_000);
   try {
     const response = await fetch("/api/auth/me", {
       credentials: "include",
       signal,
     });
-    
+
     if (response.status === 401) {
+      // Session expirée : le cache TanStack et l'utilisateur actif sont vidés,
+      // la file d'écritures de ce compte reste pour sa prochaine connexion.
+      if (activeAtStart !== null) {
+        await expireOfflineSession(queryClient, activeAtStart);
+      }
       return null;
     }
     
@@ -75,13 +119,15 @@ export async function getCurrentUser(): Promise<User | null> {
       throw new Error(`${response.status}: ${text}`);
     }
     
-    return await response.json();
+    const user: User = await response.json();
+    rememberOfflineUser(user);
+    return user;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      console.warn("Auth check timeout: /api/auth/me");
+      clientLogger.warn("Auth check timeout: /api/auth/me");
       return null;
     }
-    console.error("Error getting current user:", error);
+    clientLogger.error("Error getting current user", { err: error });
     return null;
   } finally {
     clear();

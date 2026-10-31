@@ -74,6 +74,36 @@ export function createFormDraftStorage<TData, TMeta = undefined>(options: {
   };
 }
 
+/** Clé de brouillon : `fleetos-<formId>-v<version>-<userId|anonymous>` (voir `draftKey`). */
+const DRAFT_KEY_PATTERN = /^fleetos-.+-v\d+-(\d+|anonymous)$/;
+
+/** Clé globale (non liée à l'utilisateur) qui mémorise le dernier véhicule saisi dans un OT. */
+const GLOBAL_USER_KEYS = ["currentVehicleRegistration"] as const;
+
+/**
+ * Déconnexion : efface du stockage local les brouillons de formulaire (de tous les
+ * comptes) et les clés globales qui portent une saisie. Un second compte sur le même
+ * navigateur ne doit pas retrouver la saisie du premier. Ne lève jamais.
+ */
+export function purgeBrowserUserState(storage?: Pick<Storage, "length" | "key" | "removeItem"> | null): number {
+  let target: Pick<Storage, "length" | "key" | "removeItem"> | null | undefined = storage;
+  try {
+    if (target === undefined) target = typeof window === "undefined" ? null : window.localStorage;
+    if (!target) return 0;
+
+    const keys: string[] = [];
+    for (let i = 0; i < target.length; i++) {
+      const key = target.key(i);
+      if (key && DRAFT_KEY_PATTERN.test(key)) keys.push(key);
+    }
+    keys.push(...GLOBAL_USER_KEYS);
+    for (const key of keys) target.removeItem(key);
+    return keys.length - GLOBAL_USER_KEYS.length;
+  } catch {
+    return 0;
+  }
+}
+
 export function formatDraftSavedTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });

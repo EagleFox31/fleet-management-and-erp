@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext, useRef, type ReactNode 
 import { login as apiLogin, logout as apiLogout, getCurrentUser, User, LoginCredentials } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { loginFailureOf } from "@/lib/lockout-message";
+import { clientLogger } from "@/lib/logger";
 
 interface AuthContextValue {
   user: User | null;
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
           return;
         }
-        console.warn("Auth bootstrap watchdog triggered: forcing unauthenticated state");
+        clientLogger.warn("Auth bootstrap watchdog triggered: forcing unauthenticated state");
         setUser(null);
         setIsLoading(false);
       }, 12_000);
@@ -63,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser(userData);
       } catch (error) {
-        console.error("Error checking authentication:", error);
+        clientLogger.error("Error checking authentication", { err: error });
         if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
           return;
         }
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return true;
     } catch (error) {
-      console.error("Login error:", error);
+      clientLogger.error("Login error", { err: error });
       if (!mountedRef.current) {
         return false;
       }
@@ -132,12 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
     } catch (error) {
-      console.error("Logout error:", error);
+      clientLogger.error("Logout error", { err: error });
       if (mountedRef.current) {
         toast({
           variant: "destructive",
           title: "Déconnexion locale appliquée",
-          description: "Le serveur a renvoyé une erreur, mais votre session locale a été fermée.",
+          description: "Votre session locale est fermée. La déconnexion sera confirmée auprès du serveur dès que possible.",
         });
       }
     } finally {
