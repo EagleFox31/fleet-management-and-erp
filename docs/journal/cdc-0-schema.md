@@ -27,3 +27,26 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Contraintes à traduire par l'API (`AppError`)** : `import_batches_applied_file_uidx` (23505, « Ce fichier a déjà été importé ») ; `work_orders_external_ref_uidx` / `work_orders_import_fingerprint_uidx` (23505, ligne déjà importée) ; `vehicles_registration_key_uidx` (23505, « Immatriculation déjà utilisée », s'applique aussi à la création manuelle) ; `work_orders_due_mileage_check` (23514) ; `workshop_labor_rates_hourly_rate_ht_check` (23514), `workshop_labor_rates_effective_from_key` (23505) ; `idempotency_keys_user_id_key_key` (23505, course entre deux requêtes de même clé).
 - **RAIDER** : R (patron réutilisé), A (vérifie `deleted_at` avant de s'en servir), I (second passage = zéro écriture, prouvé), D (791 tests unitaires verts, tsc 0, triggers inchangés sans la variable), R (aucune donnée existante modifiée hors reprise `due_date` des OT préventifs, aucun DROP). Scoped execution : sans objet.
 - **Reste / risques** : intégration Vitest à jouer sur une base de test distincte ; doublons d'immatriculation sur la branche `recette` ou la production non vérifiés (repli prévu) ; correctif de `check_work_order_overdue()` à décider.
+
+## 2026-10-31T21:40+01:00 — reprise après relecture de la PR #57
+
+- **Quoi** : la reprise de `due_date` est bornée à un seul passage et ne notifie plus. L'index d'immatriculation devient non unique uniquement. La mesure d'idempotence se fait désormais sur une connexion dédiée.
+- **Comment** :
+  - `due_date` est créée dans un bloc DO. Ce bloc sort immédiatement si la colonne existe déjà, sinon il l'ajoute puis fait l'UPDATE de reprise. Pendant cet UPDATE, `trigger_work_orders_realtime_notify` est désactivé (seulement s'il est actif, `tgenabled = 'O'`), puis réactivé dans la même transaction. La garde `fleetos.suppress_side_effects` est posée en plus.
+  - Le bloc des immatriculations ne crée plus que `vehicles_registration_key_idx` (non unique). Il compte les doublons et les signale par un WARNING.
+  - Le test d'intégration mesure les écritures avec `pg_stat_get_xact_tuples_*`, dans la transaction de la connexion qui rejoue `CDC_SCHEMA_STATEMENTS`. Il prouve aussi qu'un OT préventif créé après le premier passage garde `due_date` à NULL.
+- **Pourquoi** :
+  - Sans borne, chaque démarrage réécrivait `due_date` sur tout OT préventif daté resté à NULL, y compris ceux créés après le premier passage.
+  - Au premier démarrage, `applyBootstrapSqlFiles` passe après `applyCdcSchema` : la fonction temps réel n'a donc pas encore la garde, et la reprise aurait émis un `work_order_updated` par OT.
+  - Un index unique sur l'immatriculation ferait échouer en 23505 `POST /api/vehicles` et l'activation. L'unicité reviendra au lot #9, par contrôle applicatif.
+  - `pg_stat_force_next_flush()` ne vide que la session appelante, d'où la mesure sur une connexion dédiée.
+- **Preuves** :
+  - tsc global : 0 `error TS`.
+  - Tests unitaires : 793 verts sur 66 fichiers, dont 12 tests de dérive.
+  - Preuve SQL sur Postgres 17.6 jetable, schéma du dev copié par `pg_dump --schema-only` (lecture seule), avec le trigger temps réel d'origine sans garde :
+    - premier passage : 0 notification, reprise faite, trigger de nouveau à `O` ;
+    - second passage : 0 écriture, 0 notification, catalogue identique ; l'OT créé entre les deux passages et le `due_date` remis à NULL restent à NULL ;
+    - un doublon d'immatriculation normalisée est accepté ;
+    - sur une base qui contient déjà des doublons : WARNING, index non unique, second passage sans écriture.
+  - Intégration Vitest non jouée, pour la même raison qu'avant : `DATABASE_URL_TEST` = `DATABASE_URL`.
+- **Correction de l'entrée précédente** : la contrainte `vehicles_registration_key_uidx` n'existe plus. L'API n'a aucun 23505 d'immatriculation à traduire dans ce lot.

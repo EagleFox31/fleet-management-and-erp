@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PoolClient } from "pg";
 import { pool } from "../../server/db";
-import { initializeDatabase } from "../../server/init-database";
+import { CDC_SCHEMA_STATEMENTS, initializeDatabase } from "../../server/init-database";
 
 // Schéma CDC (lot DB-1). Toute écriture de ce fichier a lieu dans une transaction annulée
 // ou sur une table temporaire : rien ne reste en base partagée.
@@ -10,13 +10,19 @@ const TABLES = [
   "workshop_labor_rates", "import_batches", "idempotency_keys", "work_orders", "vehicles", "parts", "users",
 ];
 
-async function counters() {
-  await pool.query("SELECT pg_stat_force_next_flush()").catch(() => undefined);
-  const { rows } = await pool.query(
-    `SELECT relname, n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables WHERE relname = ANY($1) ORDER BY relname`,
+const CDC_SQL = CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join("\n");
+
+// Écritures de la transaction courante, sur la connexion qui les fait : compteurs exacts,
+// sans dépendre du vidage asynchrone de pg_stat_user_tables (propre à chaque session).
+async function xactWrites(client: PoolClient) {
+  const { rows } = await client.query(
+    `SELECT c.relname, pg_stat_get_xact_tuples_inserted(c.oid) AS ins,
+            pg_stat_get_xact_tuples_updated(c.oid) AS upd, pg_stat_get_xact_tuples_deleted(c.oid) AS del
+     FROM pg_class c WHERE c.relkind = 'r' AND c.relnamespace = current_schema()::regnamespace
+       AND c.relname = ANY($1) ORDER BY c.relname`,
     [TABLES],
   );
-  return rows.map((r) => `${r.relname}:${r.n_tup_ins}/${r.n_tup_upd}/${r.n_tup_del}`);
+  return rows.map((r) => `${r.relname}:${r.ins}/${r.upd}/${r.del}`);
 }
 
 async function sqlState(client: PoolClient, statement: string, params: unknown[] = []) {
@@ -55,24 +61,47 @@ describe("schéma CDC : création et idempotence", { timeout: 120_000 }, () => {
     );
     expect(indexes.rows).toHaveLength(6);
     const registration = await pool.query(
-      `SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()
+      `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()
        AND indexname IN ('vehicles_registration_key_uidx', 'vehicles_registration_key_idx')`,
     );
-    expect(registration.rows.length).toBeGreaterThanOrEqual(1);
+    expect(registration.rows.map((r) => r.indexname)).toEqual(["vehicles_registration_key_idx"]);
+    expect(registration.rows[0].indexdef).not.toMatch(/UNIQUE/);
     const rates = await pool.query(`SELECT count(*)::int AS n FROM workshop_labor_rates`);
     expect(rates.rows[0].n).toBeGreaterThanOrEqual(0);
   });
 
-  it("un second démarrage n'écrit aucune ligne", async () => {
-    await initializeDatabase();
-    const before = await counters();
-    await initializeDatabase();
-    const after = await counters();
-    expect(after).toEqual(before);
-    const pending = await pool.query(
-      `SELECT count(*)::int AS n FROM work_orders WHERE is_preventive AND due_date IS NULL AND start_date IS NOT NULL`,
-    );
-    expect(pending.rows[0].n).toBe(0);
+  it("rejouer le schéma n'écrit aucune ligne (mesure sur une connexion dédiée)", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const before = await xactWrites(client);
+      await client.query(CDC_SQL);
+      expect(await xactWrites(client)).toEqual(before);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
+  });
+
+  it("la reprise de due_date ne s'exécute qu'au passage qui crée la colonne", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const v = await client.query(
+        `INSERT INTO vehicles (registration_number, brand, model, year) VALUES ('TEST-CDC-DUE-1', 'T', 'T', 2020) RETURNING id`,
+      );
+      const wo = await client.query(
+        `INSERT INTO work_orders (vehicle_id, title, is_preventive, start_date)
+         VALUES ($1, 'TEST-CDC préventif', true, now()) RETURNING id`,
+        [v.rows[0].id],
+      );
+      await client.query(CDC_SQL);
+      const row = await client.query(`SELECT due_date FROM work_orders WHERE id = $1`, [wo.rows[0].id]);
+      expect(row.rows[0].due_date).toBeNull();
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
   });
 });
 
@@ -129,18 +158,10 @@ describe("schéma CDC : invariants (cas accepté, cas refusé)", { timeout: 60_0
     expect((await sqlState(client, insert, [v.rows[0].id, null, null, null])).code).toBe("ok");
   });
 
-  it("vehicles : immatriculation unique après normalisation (si l'index unique est posé)", async () => {
-    const unique = await client.query(
-      `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'vehicles_registration_key_uidx'`,
-    );
+  it("vehicles : l'index d'immatriculation n'impose pas l'unicité (contrôle applicatif au lot #9)", async () => {
     const insert = `INSERT INTO vehicles (registration_number, brand, model, year) VALUES ($1, 'T', 'T', 2020)`;
     expect((await sqlState(client, insert, ["TEST-CDC 77 AB"])).code).toBe("ok");
-    const duplicate = await sqlState(client, insert, ["testcdc77ab"]);
-    if (unique.rows.length) {
-      expect(duplicate).toEqual({ code: "23505", constraint: "vehicles_registration_key_uidx" });
-    } else {
-      expect(duplicate.code).toBe("ok");
-    }
+    expect((await sqlState(client, insert, ["testcdc77ab"])).code).toBe("ok");
   });
 
   it("idempotency_keys : une clé par utilisateur, expiration par défaut à 7 jours", async () => {

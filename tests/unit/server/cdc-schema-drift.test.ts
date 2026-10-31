@@ -56,24 +56,67 @@ describe("schéma CDC : migration et init-database.ts identiques (AGENTS.md §5)
     }
   });
 
-  it("chaque colonne d'une table compagne est ajoutée par ALTER TABLE … ADD COLUMN IF NOT EXISTS", () => {
+  it("chaque colonne d'une table compagne est ajoutée en SQL (ADD COLUMN IF NOT EXISTS, ou dans un bloc DO gardé)", () => {
     for (const table of COMPANION_TABLES) {
       const { name, columns } = getTableConfig(table);
       for (const column of columns.filter((c) => c.name !== "id")) {
+        const direct = `ALTER TABLE ${name} ADD COLUMN IF NOT EXISTS ${column.name} `;
+        const guarded = `ALTER TABLE ${name} ADD COLUMN ${column.name} `;
         expect(
-          statements.some((s) => s.startsWith(`ALTER TABLE ${name} ADD COLUMN IF NOT EXISTS ${column.name} `)),
+          statements.some((s) => s.startsWith(direct) || (s.startsWith("DO $$") && s.includes(guarded))),
           `${name}.${column.name}`,
         ).toBe(true);
       }
     }
   });
 
+  it("reprise de due_date : un seul passage, dans le bloc qui crée la colonne, sans notification temps réel", () => {
+    const backfills = statements.filter((s) => /UPDATE work_orders SET due_date/.test(s));
+    expect(backfills).toHaveLength(1);
+    const block = backfills[0];
+    // Sortie anticipée si la colonne existe déjà : aucun démarrage suivant ne réécrit due_date.
+    const exit = block.indexOf("column_name = 'due_date'");
+    const returned = block.indexOf("RETURN;", exit);
+    const add = block.indexOf("ALTER TABLE work_orders ADD COLUMN due_date date");
+    const update = block.indexOf("UPDATE work_orders SET due_date");
+    expect(exit).toBeGreaterThan(-1);
+    expect(returned).toBeGreaterThan(exit);
+    expect(add).toBeGreaterThan(returned);
+    expect(update).toBeGreaterThan(add);
+    // La reprise ne filtre plus sur due_date IS NULL : elle ne sert qu'au passage de création.
+    expect(block).not.toMatch(/due_date IS NULL/);
+    // Trigger temps réel suspendu autour de l'UPDATE, puis rétabli dans la même transaction.
+    const disable = block.indexOf("DISABLE TRIGGER trigger_work_orders_realtime_notify");
+    const enable = block.indexOf("ENABLE TRIGGER trigger_work_orders_realtime_notify");
+    expect(disable).toBeGreaterThan(add);
+    expect(disable).toBeLessThan(update);
+    expect(enable).toBeGreaterThan(update);
+    expect(block).toMatch(/tgenabled = 'O'/);
+    // Aucun autre ordre n'ajoute due_date (sinon la colonne existerait avant le bloc).
+    expect(statements.filter((s) => /ADD COLUMN (IF NOT EXISTS )?due_date\b/.test(s))).toHaveLength(1);
+    expect(statements.indexOf(block)).toBeLessThan(
+      statements.findIndex((s) => s.includes("work_orders_preventive_due_idx")),
+    );
+  });
+
+  it("immatriculation : index NON unique seulement, doublons signalés par WARNING", () => {
+    const all = statements.join("\n");
+    expect(all).not.toMatch(/UNIQUE INDEX[^;]*vehicles_registration/i);
+    expect(all).not.toMatch(/vehicles_registration_key_uidx/);
+    const block = statements.find((s) => s.includes("vehicles_registration_key_idx"));
+    expect(block).toBeDefined();
+    expect(block).toMatch(/CREATE INDEX vehicles_registration_key_idx/);
+    expect(block).toMatch(/RAISE WARNING 'vehicles : % immatriculation/);
+  });
+
   it("reste additif : aucun DROP, aucun ALTER TYPE, aucune colonne ajoutée NOT NULL", () => {
     const all = statements.join("\n");
     expect(all).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT|TRIGGER)\b/i);
     expect(all).not.toMatch(/ALTER\s+TYPE|ALTER\s+COLUMN/i);
-    for (const s of statements.filter((x) => /ADD COLUMN/i.test(x))) {
-      expect(s, s).not.toMatch(/NOT NULL/i);
+    const addColumnLines = all.split("\n").filter((line) => /ADD COLUMN/i.test(line));
+    expect(addColumnLines.length).toBeGreaterThan(0);
+    for (const line of addColumnLines) {
+      expect(line, line).not.toMatch(/NOT NULL/i);
     }
   });
 

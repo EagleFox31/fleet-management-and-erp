@@ -8,21 +8,41 @@ SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 
 CREATE INDEX IF NOT EXISTS parts_reference_key_idx ON parts (upper(btrim(reference)));
 
-ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_date date;
+-- Reprise unique de due_date (CDC #7) : elle n'a lieu que dans la transaction qui crée la
+-- colonne. Aux démarrages suivants la colonne existe et le bloc ne fait rien : un OT préventif
+-- créé plus tard, ou un due_date remis à NULL volontairement, n'est jamais réécrit.
+-- Le trigger temps réel est suspendu le temps de la reprise (au premier démarrage, sa fonction
+-- n'a pas encore la garde fleetos.suppress_side_effects : applyBootstrapSqlFiles passe après) ;
+-- il est réactivé avant la fin de la même transaction, les autres sessions ne le voient jamais
+-- désactivé. La garde est aussi posée pour les fonctions qui l'ont déjà.
+DO $$
+DECLARE
+  realtime_on boolean;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'work_orders' AND column_name = 'due_date'
+  ) THEN
+    RETURN;
+  END IF;
+  ALTER TABLE work_orders ADD COLUMN due_date date;
+  SELECT tgenabled = 'O' INTO realtime_on FROM pg_trigger
+  WHERE tgrelid = 'work_orders'::regclass AND tgname = 'trigger_work_orders_realtime_notify';
+  IF realtime_on THEN
+    ALTER TABLE work_orders DISABLE TRIGGER trigger_work_orders_realtime_notify;
+  END IF;
+  PERFORM set_config('fleetos.suppress_side_effects', 'on', true);
+  UPDATE work_orders SET due_date = start_date::date
+  WHERE is_preventive AND start_date IS NOT NULL;
+  PERFORM set_config('fleetos.suppress_side_effects', '', true);
+  IF realtime_on THEN
+    ALTER TABLE work_orders ENABLE TRIGGER trigger_work_orders_realtime_notify;
+  END IF;
+END $$;
 
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_mileage integer CONSTRAINT work_orders_due_mileage_check CHECK (due_mileage IS NULL OR due_mileage >= 0);
 
 CREATE INDEX IF NOT EXISTS work_orders_preventive_due_idx ON work_orders (due_date) WHERE is_preventive;
-
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM work_orders WHERE is_preventive AND due_date IS NULL AND start_date IS NOT NULL) THEN
-    PERFORM set_config('fleetos.suppress_side_effects', 'on', true);
-    UPDATE work_orders SET due_date = start_date::date
-    WHERE is_preventive AND due_date IS NULL AND start_date IS NOT NULL;
-    PERFORM set_config('fleetos.suppress_side_effects', '', true);
-  END IF;
-END $$;
 
 CREATE TABLE IF NOT EXISTS workshop_labor_rates (
   id serial PRIMARY KEY,
@@ -63,34 +83,32 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS import_batch_id integer REFERENCES
 
 CREATE INDEX IF NOT EXISTS vehicles_import_batch_idx ON vehicles (import_batch_id) WHERE import_batch_id IS NOT NULL;
 
+-- Immatriculation normalisée (CDC #9) : index NON unique (recherche et rapprochement à l'import).
+-- L'unicité reste un contrôle applicatif (lot #9) : un index unique ferait échouer en 23505
+-- la création de véhicule existante. Les doublons existants sont signalés par un WARNING.
 DO $$
 DECLARE
   has_deleted_at boolean;
-  has_duplicates boolean;
   scope text;
+  duplicates integer;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'vehicles_registration_key_uidx') THEN
-    RETURN;
-  END IF;
   SELECT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = current_schema() AND table_name = 'vehicles' AND column_name = 'deleted_at'
   ) INTO has_deleted_at;
   scope := CASE WHEN has_deleted_at THEN ' WHERE deleted_at IS NULL' ELSE '' END;
-  IF NOT has_deleted_at THEN
-    RAISE WARNING 'vehicles.deleted_at absente : vehicles_registration_key_uidx couvre tous les véhicules';
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'vehicles_registration_key_idx') THEN
+    IF NOT has_deleted_at THEN
+      RAISE WARNING 'vehicles.deleted_at absente : vehicles_registration_key_idx couvre tous les véhicules';
+    END IF;
+    EXECUTE 'CREATE INDEX vehicles_registration_key_idx ON vehicles (upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')))' || scope;
   END IF;
-  EXECUTE 'SELECT EXISTS (SELECT 1 FROM vehicles' || scope
-    || ' GROUP BY upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')) HAVING count(*) > 1)'
-    INTO has_duplicates;
-  IF has_duplicates THEN
-    RAISE WARNING 'vehicles_registration_key_uidx non posé : immatriculations en double après normalisation ; index non unique vehicles_registration_key_idx à la place';
-    EXECUTE 'CREATE INDEX IF NOT EXISTS vehicles_registration_key_idx ON vehicles (upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')))' || scope;
-  ELSE
-    EXECUTE 'CREATE UNIQUE INDEX vehicles_registration_key_uidx ON vehicles (upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')))' || scope;
+  EXECUTE 'SELECT count(*) FROM (SELECT 1 FROM vehicles' || scope
+    || ' GROUP BY upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')) HAVING count(*) > 1) d'
+    INTO duplicates;
+  IF duplicates > 0 THEN
+    RAISE WARNING 'vehicles : % immatriculation(s) en double après normalisation', duplicates;
   END IF;
-EXCEPTION WHEN unique_violation THEN
-  RAISE WARNING 'vehicles_registration_key_uidx non posé : doublon apparu pendant la création';
 END $$;
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
