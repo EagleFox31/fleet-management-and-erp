@@ -37,7 +37,6 @@ describe("generateur docx de l'ordre de travail", () => {
   it("l'OT contient en-tete TAY, vehicule, travaux, pieces, signatures, accents", async () => {
     const xml = await xmlOf("ot");
     for (const t of [
-      "TAY",
       "Ordre de travail n° 62",
       "LT-123-AB",
       "Renault Master",
@@ -90,5 +89,28 @@ describe("generateur docx de l'ordre de travail", () => {
   it("nom de fichier", () => {
     expect(workOrderDocFilename("ot", 62)).toBe("ordre-travail-62.docx");
     expect(workOrderDocFilename("bon-sortie", 62)).toBe("bon-sortie-62.docx");
+  });
+});
+
+describe("en-tete officiel TAY", () => {
+  it("l'image est dans word/media et reliee depuis l'en-tete", async () => {
+    const files = unzipSync(new Uint8Array(await buildWorkOrderDocx("ot", base)));
+    expect(Object.keys(files).some((f) => f.startsWith("word/media/"))).toBe(true);
+    const headerName = Object.keys(files).find((f) => /^word\/header\d*\.xml$/.test(f))!;
+    expect(headerName).toBeDefined();
+    expect(strFromU8(files[headerName])).toContain("<w:drawing>");
+    const rels = strFromU8(files[headerName.replace("word/", "word/_rels/") + ".rels"]);
+    expect(rels).toMatch(/relationships\/image/);
+    expect(rels).toContain("media/");
+    // le texte de repli n'est pas duplique dans le corps
+    expect(strFromU8(files["word/document.xml"])).not.toContain("Gestion de flotte");
+  });
+
+  it("image absente : repli texte, sans entete image", async () => {
+    const files = unzipSync(new Uint8Array(await buildWorkOrderDocx("bon-sortie", base, { companyName: "TAY", tagline: "Gestion de flotte et maintenance", logo: null })));
+    expect(Object.keys(files).some((f) => f.startsWith("word/media/"))).toBe(false);
+    const xml = strFromU8(files["word/document.xml"]);
+    expect(xml).toContain("TAY");
+    expect(xml).toContain("Gestion de flotte et maintenance");
   });
 });

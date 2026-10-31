@@ -1,5 +1,5 @@
 import { Document, Paragraph, TextRun, type Table } from "docx";
-import { buildHeaderParagraphs } from "./header";
+import { buildHeaderParagraphs, sectionProperties } from "./header";
 import { formatDate, heading, para, signatureTable, table, txt } from "./common";
 import { vehicleLabel } from "./work-order-doc";
 import type { DocHeaderConfig, WorkOrderDocData } from "./types";
@@ -31,5 +31,5 @@ export function buildExitVoucherDocument(data: WorkOrderDocData, header?: DocHea
     );
 
   children.push(heading("Signatures"), signatureTable(["Magasinier", "Technicien (réception)"]));
-  return new Document({ creator: "FleetMaster", title: `Bon de sortie OT ${data.id}`, sections: [{ children }] });
+  return new Document({ creator: "FleetMaster", title: `Bon de sortie OT ${data.id}`, sections: [{ ...sectionProperties(header), children }] });
 }

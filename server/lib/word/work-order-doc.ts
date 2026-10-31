@@ -1,5 +1,5 @@
 import { Document, Paragraph, TextRun, type Table } from "docx";
-import { buildHeaderParagraphs } from "./header";
+import { buildHeaderParagraphs, sectionProperties } from "./header";
 import { formatDate, formatNumber, heading, para, signatureTable, table, txt } from "./common";
 import type { DocHeaderConfig, WorkOrderDocData } from "./types";
 
@@ -63,5 +63,5 @@ export function buildWorkOrderDocument(data: WorkOrderDocData, header?: DocHeade
     para(`Édité le ${formatDate(data.generatedAt)}${data.generatedByName ? ` par ${data.generatedByName}` : ""}`),
   );
 
-  return new Document({ creator: "FleetMaster", title: `Ordre de travail ${data.id}`, sections: [{ children }] });
+  return new Document({ creator: "FleetMaster", title: `Ordre de travail ${data.id}`, sections: [{ ...sectionProperties(header), children }] });
 }
