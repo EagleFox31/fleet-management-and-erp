@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { AlertTriangle, Clock, ChevronRight, FileWarning } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { canAccessProcurement } from "@shared/constants/roles";
 
 interface OverdueInvoice {
   id: number;
@@ -19,11 +21,19 @@ interface OverdueInvoice {
   status: string;
 }
 
+/**
+ * Factures fournisseur échues. L'API est derrière la garde approvisionnement
+ * (`PROCUREMENT_ROLES`) : hors de ces profils, le widget ne s'affiche pas et
+ * ne fait aucun appel (le chef d'atelier recevait un 403 sur son tableau de bord).
+ */
 export function OverdueInvoicesAlert() {
+  const { user } = useAuth();
+  const allowed = canAccessProcurement(user?.role);
   const [, setLocation] = useLocation();
 
   const { data: overdueInvoices = [], isLoading } = useQuery<OverdueInvoice[]>({
     queryKey: ["/api/supplier-invoices/overdue"],
+    enabled: allowed,
   });
 
   const totalOverdue = overdueInvoices.length;
@@ -48,6 +58,8 @@ export function OverdueInvoicesAlert() {
       return <Badge className="bg-amber-500 text-white text-xs">En retard</Badge>;
     }
   };
+
+  if (!allowed) return null;
 
   if (isLoading) {
     return (

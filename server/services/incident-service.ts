@@ -15,15 +15,16 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { assignments, drivers, incidents, users } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
+import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("incidents");
 
-export type IncidentActor = { id: number; role: string };
+/** Réexport : la liste vit dans `@shared/constants/assignments`, partagée avec l'écran de déclaration. */
+export { ACTIVE_ASSIGNMENT_STATUSES };
 
-/** Affectations qui rattachent encore un chauffeur à son véhicule. */
-export const ACTIVE_ASSIGNMENT_STATUSES = ["pending", "accepted", "in_progress"] as const;
+export type IncidentActor = { id: number; role: string };
 
 export const INCIDENT_OUT_OF_SCOPE_MESSAGE = "Vous ne pouvez déclarer une panne que sur le véhicule qui vous est affecté.";
 export const INCIDENT_FORBIDDEN_MESSAGE = "Votre profil ne permet pas de déclarer une panne.";

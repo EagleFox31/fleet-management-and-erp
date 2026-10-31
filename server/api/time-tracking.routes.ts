@@ -7,6 +7,7 @@ import {
   upsertTimeTrackingRequestSchema,
 } from "@shared/contracts/time-tracking";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
+import { TIME_TRACKING_READ_ROLES, TIME_TRACKING_WRITE_ROLES } from "@shared/constants/roles";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
@@ -17,10 +18,10 @@ import { timeTrackingService } from "../services/time-tracking-service";
 const log = moduleLogger("time-tracking");
 const router = Router();
 const feature = requireFeature("time-tracking");
-const readers = authorize(["admin", "secretary", "management"]);
-const writers = authorize(["admin", "secretary"]);
+const readers = authorize([...TIME_TRACKING_READ_ROLES]);
+const writers = authorize([...TIME_TRACKING_WRITE_ROLES]);
 
-/** Pointage du personnel (P-20). Lecture : administration, secrétariat, direction. Saisie : administration, secrétariat. */
+/** Pointage du personnel (P-20). Lecture : administration, logistique, secrétariat, direction. Saisie : administration, logistique. */
 router.get("/time-tracking", feature, readers, async (req, res, next) => {
   try {
     res.json(await timeTrackingService.list(timeTrackingQuerySchema.parse(req.query)));

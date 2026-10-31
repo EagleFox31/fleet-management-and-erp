@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
+import { canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -37,7 +38,7 @@ export function TimeTrackingScreen() {
   return (
     <div className="space-y-4">
       <Input type="month" className="w-44" value={period} onChange={(e) => e.target.value && setPeriod(e.target.value)} aria-label="Mois" />
-      <TimeGrid year={year} month={month} readOnly={user?.role === "driver"} />
+      <TimeGrid year={year} month={month} readOnly={!canWriteTimeTracking(user?.role)} />
     </div>
   );
 }

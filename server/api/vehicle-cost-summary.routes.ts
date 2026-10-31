@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { vehicles } from "@shared/schema";
+import { VEHICLE_COST_ROLES } from "@shared/constants/roles";
 import { vehicleCostSummaryParamsSchema, vehicleCostSummaryQuerySchema } from "@shared/contracts/vehicle-cost-summary";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
@@ -14,7 +15,7 @@ const router = Router();
 router.get(
   "/vehicles/:id/cost-summary",
   requireFeature("vehicle-cost-summary"),
-  authorize(["admin", "management", "workshop_manager", "logistics"]),
+  authorize([...VEHICLE_COST_ROLES]),
   async (req, res, next) => {
     try {
       const { id } = vehicleCostSummaryParamsSchema.parse(req.params);

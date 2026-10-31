@@ -792,3 +792,41 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une route qui lit ou modifie un véhicule, ou ce qui en dépend, ouverte à un client, passe par `isAnyUser` puis `canAccessOwned` / `ownerScopeOf`. Jamais `authenticate` seul.
+
+## 2026-10-31 - Écran ouvert à un rôle que son API refuse
+
+### Constat
+- Pointage : écran ouvert au secrétariat, à la direction et à la logistique ; l'API ne servait que l'administration et la direction en lecture. La logistique, qui saisit, voyait un 403.
+- Mouvements de pneus : écran ouvert à la logistique et au secrétariat (403), absent pour le technicien et la direction, que l'API autorisait.
+- Coût véhicule et factures en attente : même écart, dans les deux sens.
+
+### Cause racine
+- Les rôles d'un écran du lot sont déclarés dans `client/src/config/lot-screens.ts`, ceux de sa route dans `server/api/*.routes.ts`, en deux listes recopiées à la main sans contrat entre elles. Chaque correction d'un côté laissait l'autre diverger.
+- Classification : source de vérité dupliquée, absence de contrat client/serveur.
+
+### Résolution
+- Groupes de rôles nommés dans `shared/constants/roles.ts` (`TIME_TRACKING_READ_ROLES`, `TIME_TRACKING_WRITE_ROLES`, `TIRE_MOVEMENT_ROLES`, `PENDING_INVOICE_ROLES`, `VEHICLE_COST_ROLES`, `STAFF_ROLES`), importés par l'écran et par la route.
+
+### Prévention (vérifiable)
+- Unitaire `tests/unit/client/lot-screen-api-roles.test.ts` : pour chaque écran de `LOT_SCREENS`, lit dans la source les gardes de la route qu'il appelle (montage compris) et échoue si l'écran s'ouvre à un rôle refusé, ou si l'API sert un rôle sans écran hors exception écrite. Un écran non déclaré, ou une garde illisible, fait aussi échouer le test. Contrôlé par mutation : un rôle ajouté à l'écran seul fait échouer le test.
+
+### Règle Projet (obligatoire)
+- Un écran du lot et la route qu'il lit tirent leurs rôles du même groupe de `shared/constants/roles.ts`. Un nouvel écran se déclare dans le test garde-fou avec sa route ; un écart volontaire s'y écrit avec sa raison.
+
+## 2026-10-31 - Heure de fin de verrou décalée du fuseau du serveur
+
+### Constat
+- `/admin/users/locked` affichait la fin de verrou une heure trop tard à Douala (UTC+1) et gardait dans la liste un compte déjà déverrouillé pendant une heure. Le message de connexion, lui, était juste.
+
+### Cause racine
+- `users.locked_until` est un `timestamp` sans fuseau. `pg` y écrit une `Date` en heure locale ; Drizzle relit ce type comme de l'UTC. Écriture par un pilote, lecture par l'autre : deux conventions d'heure sur la même colonne. En UTC (CI) l'écart est nul, donc invisible.
+- Classification : convention de fuseau implicite, test aveugle à l'environnement.
+
+### Résolution
+- La liste lit par le store qui écrit (`DbLockoutStore.listLocked`, même pilote), plus par Drizzle.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/auth-lockout-timezone.contract.test.ts` : processus fixé à `Africa/Douala`, fin de verrou renvoyée à la seconde près, compte sorti de la liste à l'instant de fin.
+
+### Règle Projet (obligatoire)
+- Une colonne `timestamp` sans fuseau se lit avec le pilote qui l'écrit. Un test qui touche à l'heure fixe un fuseau non UTC, sinon il ne prouve rien.

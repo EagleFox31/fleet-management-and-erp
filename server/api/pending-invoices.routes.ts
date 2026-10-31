@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { PENDING_INVOICE_ROLES } from "@shared/constants/roles";
 import { requireFeature } from "../lib/feature-flags";
 import { authorize } from "../middleware/auth";
 import { aggregateReadsService } from "../services/aggregate-reads-service";
@@ -9,7 +10,7 @@ const router = Router();
 router.get(
   "/billing/pending-invoices",
   requireFeature("pending-invoices"),
-  authorize(["admin", "management", "secretary", "logistics"]),
+  authorize([...PENDING_INVOICE_ROLES]),
   async (_req, res, next) => {
     try {
       res.json(await aggregateReadsService.pendingInvoices());

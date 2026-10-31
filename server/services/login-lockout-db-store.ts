@@ -9,6 +9,16 @@ const toState = (r: { failed_count: number; locked_until: Date | null; last_fail
   lastFailedAt: r.last_failed_at,
 });
 
+export type LockedUserRow = {
+  id: number;
+  username: string;
+  name: string;
+  role: string;
+  failedLoginCount: number;
+  lockedUntil: Date;
+  lastFailedLoginAt: Date | null;
+};
+
 /** Espaces de cles : un identifiant « 5 » (mot de passe) n'est pas l'utilisateur d'id 5 (PIN). */
 export const PASSWORD_KEY_PREFIX = "pwd:";
 export const PIN_KEY_PREFIX = "pin:";
@@ -83,6 +93,30 @@ export class DbLockoutStore implements LockoutStore {
        WHERE ${target.where} AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
       [target.param],
     );
+  }
+
+  /**
+   * Comptes verrouilles a `now` (T-13). Lu par le meme pilote (`pg`) que celui qui ecrit
+   * `users.locked_until` : la colonne est un `timestamp` sans fuseau, rempli a partir d'une
+   * `Date` que `pg` envoie en heure locale. Drizzle relit ce type comme de l'UTC : la liste
+   * affichait l'heure de fin decalee du fuseau du serveur (+1 h a Douala) et gardait un
+   * compte deverrouille une heure de trop.
+   */
+  async listLocked(now: Date): Promise<LockedUserRow[]> {
+    const { rows } = await pool.query(
+      `SELECT id, username, name, role, failed_login_count, locked_until, last_failed_login_at
+       FROM users WHERE locked_until > $1 ORDER BY locked_until DESC`,
+      [now],
+    );
+    return rows.map((r) => ({
+      id: Number(r.id),
+      username: r.username,
+      name: r.name,
+      role: r.role,
+      failedLoginCount: Number(r.failed_login_count ?? 0),
+      lockedUntil: r.locked_until as Date,
+      lastFailedLoginAt: (r.last_failed_login_at as Date | null) ?? null,
+    }));
   }
 
   /** Deverrouillage admin (T-13). Renvoie false si l'utilisateur n'existe pas. */

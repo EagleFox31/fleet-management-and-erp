@@ -24,7 +24,14 @@ import {
   Ticket,
   Milestone,
 } from "lucide-react";
-import type { AppRole } from "@shared/constants/roles";
+import {
+  PENDING_INVOICE_ROLES,
+  STAFF_ROLES,
+  TIME_TRACKING_READ_ROLES,
+  TIRE_MOVEMENT_ROLES,
+  VEHICLE_COST_ROLES,
+  type AppRole,
+} from "@shared/constants/roles";
 import type { FeatureKey } from "@shared/feature-flags";
 
 export type MenuGroup = "administration" | "maintenance" | "inventory" | "resources" | "top";
@@ -48,8 +55,6 @@ export type LotScreen = {
 const ADMIN = ["admin"] as const satisfies readonly AppRole[];
 const WORKSHOP = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 const FUEL_STAFF = ["admin", "logistics", "secretary", "workshop_manager", "management"] as const satisfies readonly AppRole[];
-const BILLING = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
-const TIRE_STAFF = ["admin", "warehouse", "workshop_manager", "logistics", "secretary"] as const satisfies readonly AppRole[];
 
 export const LOT_SCREENS: readonly LotScreen[] = [
   // --- MUST : administration (T-31a, T-32a, T-33a)
@@ -93,7 +98,7 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   {
     id: "wo-history", path: "/maintenance/work-orders/:id/history", title: "Historique de l'ordre de travail", task: "T-51",
     feature: "work-order-audit-trail", description: "Chronologie des changements d'un ordre de travail.",
-    roles: "authenticated",
+    roles: STAFF_ROLES,
   },
   {
     id: "wo-quality-check", path: "/maintenance/work-orders/:id/quality-check", title: "Contrôle qualité", task: "T-51",
@@ -108,7 +113,7 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   {
     id: "tire-movements", path: "/inventory/tires/movements", title: "Mouvements de pneus", task: "T-52", feature: "tire-movements",
     description: "Journal des montages, démontages et rotations de pneus.",
-    roles: TIRE_STAFF, menu: { group: "inventory", label: "Mouvements de pneus", icon: CircleDot },
+    roles: TIRE_MOVEMENT_ROLES, menu: { group: "inventory", label: "Mouvements de pneus", icon: CircleDot },
   },
 
   // --- SHOULD : carburant et coût (T-53)
@@ -130,19 +135,19 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   {
     id: "vehicle-cost", path: "/vehicles/:id/cost", title: "Coût du véhicule", task: "T-53", feature: "vehicle-cost-summary",
     description: "Coût cumulé d'un véhicule : carburant, pièces, main-d'oeuvre.",
-    roles: ["admin", "workshop_manager", "logistics", "secretary", "management"],
+    roles: VEHICLE_COST_ROLES,
   },
 
   // --- SHOULD : exploitation (T-54a)
   {
     id: "time-tracking", path: "/drivers/time-tracking", title: "Pointage", task: "T-54a", feature: "time-tracking",
     description: "Pointage mensuel des chauffeurs.",
-    roles: ["admin", "logistics"], menu: { group: "resources", label: "Pointage", icon: Clock },
+    roles: TIME_TRACKING_READ_ROLES, menu: { group: "resources", label: "Pointage", icon: Clock },
   },
   {
     id: "pending-invoices", path: "/operations/pending-invoices", title: "Factures en attente", task: "T-54a", feature: "pending-invoices",
     description: "Factures clients en attente, triées par ancienneté.",
-    roles: BILLING, menu: { group: "top", label: "Factures en attente", icon: Receipt },
+    roles: PENDING_INVOICE_ROLES, menu: { group: "top", label: "Factures en attente", icon: Receipt },
   },
 ];
 
