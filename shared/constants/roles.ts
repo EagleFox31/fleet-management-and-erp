@@ -77,3 +77,58 @@ export const KPI_VIEWER_ROLES = ["admin", "management"] as const satisfies reado
 export function canViewKpi(role: string | null | undefined): boolean {
   return (KPI_VIEWER_ROLES as readonly string[]).includes(String(role ?? ""));
 }
+
+/**
+ * Pointage des chauffeurs (`/api/time-tracking`) : la logistique et
+ * l'administrateur saisissent, le secrétariat et la direction consultent.
+ * Lu par `server/api/time-tracking.routes.ts` et par l'écran `time-tracking`
+ * de `client/src/config/lot-screens.ts` : un seul endroit pour les deux.
+ */
+export const TIME_TRACKING_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+export const TIME_TRACKING_READ_ROLES = [...TIME_TRACKING_WRITE_ROLES, "secretary", "management"] as const satisfies readonly AppRole[];
+
+export function canWriteTimeTracking(role: string | null | undefined): boolean {
+  return (TIME_TRACKING_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Carburant : bons (P-17) et anomalies (P-18).
+ *
+ * Valider un bon ou traiter une anomalie revient à ceux qui gèrent la carte
+ * (`isFuelCardManager`, server/middleware/auth.ts, doit rester aligné). Le chef
+ * d'atelier et la direction les consultent sans agir (décision du 31 octobre 2026) :
+ * leurs écrans masquent Valider / Traiter au lieu d'afficher un bouton qui renvoie 403.
+ */
+export const FUEL_WRITE_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management"] as const satisfies readonly AppRole[];
+
+export function canWriteFuel(role: string | null | undefined): boolean {
+  return (FUEL_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Prix du litre (P-19) : 828 FCFA par défaut (ligne datée 2000-01-01). Seuls
+ * l'administrateur et la logistique le modifient (décision du 31 octobre 2026) ;
+ * le secrétariat gère la carte mais ne fixe pas le prix. Ailleurs, le prix
+ * proposé est celui du jour, en lecture seule.
+ */
+export const FUEL_PRICE_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+
+export function canWriteFuelPrice(role: string | null | undefined): boolean {
+  return (FUEL_PRICE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/** Mouvements de pneus (`GET /api/tires/movements`), lecture seule. */
+export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
+
+/** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
+export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+
+/** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
+export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
+
+/**
+ * Tout le personnel : tout rôle sauf `client` (cloison client, AGENTS.md §11).
+ * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
+ */
+export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");

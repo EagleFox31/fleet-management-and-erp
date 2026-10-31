@@ -1,14 +1,28 @@
 import { Router } from "express";
-import { fuelAnomalyParamsSchema, updateFuelAnomalyRequestSchema } from "@shared/contracts/fuel-anomalies";
+import {
+  fuelAnomaliesResponseSchema,
+  fuelAnomalyParamsSchema,
+  updateFuelAnomalyRequestSchema,
+} from "@shared/contracts/fuel-anomalies";
+import { FUEL_READ_ROLES } from "@shared/constants/roles";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
 import { moduleLogger } from "../lib/logger";
-import { isFuelCardManager } from "../middleware/auth";
+import { authenticate, authorize, isFuelCardManager } from "../middleware/auth";
 import { fuelAnomalyResolutionService } from "../services/fuel-anomaly-resolution-service";
 
 const log = moduleLogger("fuel-anomalies");
 const router = Router();
+
+/** Liste des anomalies calculées (P-18). Lecture ouverte au chef d'atelier et à la direction, sans action. */
+router.get("/fuel-card/anomalies", requireFeature("fuel-anomalies"), authenticate, authorize([...FUEL_READ_ROLES]), async (_req, res, next) => {
+  try {
+    res.json(fuelAnomaliesResponseSchema.parse(await fuelAnomalyResolutionService.list()));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * Traitement d'une anomalie carburant (P-18). La clé `<règle>:<id de plein>` est dérivée :

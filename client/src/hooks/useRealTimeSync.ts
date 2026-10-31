@@ -93,6 +93,8 @@ const CRITICAL_RESYNC_KEYS: string[] = [
   "/api/fuel-records",
   "/api/fuel-card/balance",
   "/api/fuel-card/history",
+  "/api/fuel-vouchers",
+  "/api/fuel-card/anomalies",
   // Pneus: écran partagé magasin/atelier, sans `refetchInterval` propre.
   // Sans ces clés, une coupure du WebSocket laissait la page figée jusqu'au
   // rechargement manuel.
@@ -1034,6 +1036,10 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           invalidateMissionDerivedQueries(missionId);
         } else {
           invalidateMissionDerivedQueries();
+        }
+        if (update.type === "mission_fuel_recorded") {
+          queryClient.invalidateQueries({ queryKey: ["/api/fuel-vouchers"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/anomalies"] });
         }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });

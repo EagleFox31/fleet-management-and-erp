@@ -12,6 +12,8 @@ import AuditLogsPage from "@/pages/admin/audit-logs";
 import VehicleDocumentTypesPage from "@/pages/admin/vehicle-document-types";
 import {
   BackupsScreen,
+  FuelAnomaliesScreen,
+  FuelVouchersScreen,
   IncidentDeclareScreen,
   IncidentsListScreen,
   PendingInvoicesScreen,
@@ -33,6 +35,8 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "incident-declare": IncidentDeclareScreen,
   "incidents-list": IncidentsListScreen,
   "tire-movements": TireMovementsScreen,
+  "fuel-vouchers": FuelVouchersScreen,
+  "fuel-anomalies": FuelAnomaliesScreen,
   "time-tracking": TimeTrackingScreen,
   "pending-invoices": PendingInvoicesScreen,
 };

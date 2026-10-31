@@ -5,10 +5,11 @@ import {
   fuelPricesResponseSchema,
 } from "@shared/contracts/fuel-prices";
 import { requireFeature } from "../lib/feature-flags";
-import { authenticate, isFuelCardManager, isStaff } from "../middleware/auth";
+import { FUEL_PRICE_WRITE_ROLES } from "@shared/constants/roles";
+import { authenticate, authorize, isStaff } from "../middleware/auth";
 import { listFuelPrices, setFuelPrice } from "../services/fuel-price-service";
 
-/** Prix du litre daté (P-19). Lecture pour le personnel, écriture pour ceux qui gèrent la carte. */
+/** Prix du litre daté (P-19). Lecture pour le personnel ; écriture : administrateur et logistique (FUEL_PRICE_WRITE_ROLES). */
 const getPrices: RequestHandler = async (_req, res, next) => {
   try {
     res.status(200).json(fuelPricesResponseSchema.parse(await listFuelPrices()));
@@ -28,6 +29,6 @@ const postPrice: RequestHandler = async (req, res, next) => {
 
 const router = Router();
 router.get("/fuel-prices", requireFeature("fuel-prices"), authenticate, isStaff, getPrices);
-router.post("/fuel-prices", requireFeature("fuel-prices"), authenticate, isFuelCardManager, postPrice);
+router.post("/fuel-prices", requireFeature("fuel-prices"), authenticate, authorize([...FUEL_PRICE_WRITE_ROLES]), postPrice);
 
 export default router;

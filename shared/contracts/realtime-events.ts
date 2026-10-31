@@ -9,7 +9,7 @@
  * Réutilisés sans redéclaration : `work_order_updated` (contrôle qualité),
  * `part_requirement_updated` (réception), `alert_created`.
  */
-import type { AppRole } from "../constants/roles";
+import { FUEL_READ_ROLES, type AppRole } from "../constants/roles";
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -26,7 +26,6 @@ type EventDefinition<TPayload> = {
 };
 
 const WORKSHOP_SUPERVISORS = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
-const FUEL_STAFF = ["admin", "logistics", "secretary", "workshop_manager", "management"] as const satisfies readonly AppRole[];
 
 export const REALTIME_EVENTS = {
   incident_reported: {
@@ -34,13 +33,14 @@ export const REALTIME_EVENTS = {
     invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts"],
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
-    scope: { type: "roles", roles: FUEL_STAFF },
-    invalidates: ["/api/fuel-records", "/api/fuel-card"],
+    scope: { type: "roles", roles: FUEL_READ_ROLES },
+    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers"],
   } as EventDefinition<{ id: number }>,
   fuel_anomaly_resolved: {
-    scope: { type: "roles", roles: FUEL_STAFF },
+    scope: { type: "roles", roles: FUEL_READ_ROLES },
     // Préfixe de `['/api/fuel-card/vehicle', vehicleId, 'anomalies']` (useFuelCard.ts).
-    invalidates: ["/api/fuel-card/vehicle"],
+    // `/api/fuel-card/anomalies` : liste de l'écran des anomalies.
+    invalidates: ["/api/fuel-card/vehicle", "/api/fuel-card/anomalies"],
   } as EventDefinition<{ anomalyKey: string; fuelRecordId: number }>,
   fuel_price_changed: {
     scope: { type: "broadcast" },

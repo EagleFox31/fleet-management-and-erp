@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { storage } from "../storage";
-import { ALL_APP_ROLES, type AppRole } from "@shared/constants/roles";
+import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -187,4 +187,4 @@ export const isManagementOrAdmin = authorize(['admin', 'management']);
 export const isAnyUser = authorize([...ALL_ROLES]);
 // Tout le personnel (tout rôle sauf `client`) : écritures faites par l'exploitation
 // sur un véhicule, qu'un client consulte sans les saisir (kilométrage, position).
-export const isStaff = authorize(ALL_ROLES.filter((role) => role !== 'client'));
+export const isStaff = authorize([...STAFF_ROLES]);

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BackupsPanel } from "@/components/admin/backups-panel";
 import { PendingInvoicesTable } from "@/components/billing/pending-invoices-table";
+import { FuelAnomaliesTable } from "@/components/fuel/fuel-anomalies-table";
+import { FuelVouchersTable } from "@/components/fuel/fuel-vouchers-table";
 import { IncidentForm } from "@/components/incidents/incident-form";
 import { IncidentList } from "@/components/incidents/incident-list";
 import { TireMovementsTable } from "@/components/inventory/tire-movements-table";
@@ -10,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
+import { canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -29,6 +32,18 @@ export function PendingInvoicesScreen() {
   return <PendingInvoicesTable />;
 }
 
+/** Chef d'atelier et direction consultent les bons sans les valider (hors FUEL_WRITE_ROLES). */
+export function FuelVouchersScreen() {
+  const { user } = useAuth();
+  return <FuelVouchersTable readOnly={!canWriteFuel(user?.role)} />;
+}
+
+/** Chef d'atelier et direction consultent les anomalies sans les traiter (hors FUEL_WRITE_ROLES). */
+export function FuelAnomaliesScreen() {
+  const { user } = useAuth();
+  return <FuelAnomaliesTable readOnly={!canWriteFuel(user?.role)} />;
+}
+
 export function TimeTrackingScreen() {
   const { user } = useAuth();
   const now = new Date();
@@ -37,7 +52,7 @@ export function TimeTrackingScreen() {
   return (
     <div className="space-y-4">
       <Input type="month" className="w-44" value={period} onChange={(e) => e.target.value && setPeriod(e.target.value)} aria-label="Mois" />
-      <TimeGrid year={year} month={month} readOnly={user?.role === "driver"} />
+      <TimeGrid year={year} month={month} readOnly={!canWriteTimeTracking(user?.role)} />
     </div>
   );
 }

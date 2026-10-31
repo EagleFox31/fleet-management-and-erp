@@ -34,6 +34,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
     const routes: Record<string, string[]> = {
       "/dashboard": ["Tableau de bord"],
       "/vehicles": ["Flotte", "Véhicules"],
+      "/drivers": ["Flotte", "Chauffeurs"],
       "/fuel": ["Flotte", "Carburant"],
       "/maintenance": ["Maintenance", "Tableau"],
       "/maintenance/work-orders": ["Maintenance", "Ordres de travail"],

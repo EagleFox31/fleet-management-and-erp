@@ -1,8 +1,5 @@
 import { Router } from "express";
-import { desc, gt } from "drizzle-orm";
-import { users } from "@shared/schema";
 import { lockedUsersResponseSchema, unlockUserParamsSchema } from "@shared/contracts/auth-lockout";
-import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { isAdmin } from "../middleware/auth";
 import { DbLockoutStore } from "../services/login-lockout-db-store";
@@ -10,27 +7,18 @@ import { DbLockoutStore } from "../services/login-lockout-db-store";
 const router = Router();
 const store = new DbLockoutStore();
 
-/** Comptes actuellement verrouillés (P-03). Jamais de mot de passe ni de jeton dans la réponse. */
+/**
+ * Comptes actuellement verrouillés (P-03). Jamais de mot de passe ni de jeton dans la réponse.
+ * Lecture par le store qui écrit le verrou (même convention d'heure), pas par Drizzle.
+ */
 router.get("/admin/users/locked", isAdmin, async (_req, res, next) => {
   try {
-    const rows = await db
-      .select({
-        id: users.id,
-        username: users.username,
-        name: users.name,
-        role: users.role,
-        failedLoginCount: users.failedLoginCount,
-        lockedUntil: users.lockedUntil,
-        lastFailedLoginAt: users.lastFailedLoginAt,
-      })
-      .from(users)
-      .where(gt(users.lockedUntil, new Date()))
-      .orderBy(desc(users.lockedUntil));
+    const rows = await store.listLocked(new Date());
     res.json(
       lockedUsersResponseSchema.parse(
         rows.map((r) => ({
           ...r,
-          lockedUntil: r.lockedUntil!.toISOString(),
+          lockedUntil: r.lockedUntil.toISOString(),
           lastFailedLoginAt: r.lastFailedLoginAt ? r.lastFailedLoginAt.toISOString() : null,
         })),
       ),

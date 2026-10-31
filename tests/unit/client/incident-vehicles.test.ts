@@ -1,20 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
+import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 
 describe("véhicules proposés à la déclaration de panne", () => {
-  it("chauffeur : ses véhicules de mission, mission active d'abord, sans doublon", () => {
+  it("chauffeur : véhicules des affectations actives seulement, mission en cours d'abord, sans doublon", () => {
     const options = driverVehicleOptions({
       missions: [
-        { status: "completed", vehicleId: 4, vehicleRegistration: "AB-004" },
-        { status: "in_progress", vehicleId: 9, vehicleRegistration: "AB-009" },
-        { status: "completed", vehicleId: 9, vehicleRegistration: "AB-009" },
-        { status: "assigned", vehicleId: null },
+        { status: "assigned", assignmentStatus: "pending", vehicleId: 4, vehicleRegistration: "AB-004" },
+        { status: "in_progress", assignmentStatus: "in_progress", vehicleId: 9, vehicleRegistration: "AB-009" },
+        { status: "completed", assignmentStatus: "completed", vehicleId: 9, vehicleRegistration: "AB-009" },
+        { status: "assigned", assignmentStatus: "accepted", vehicleId: null },
       ],
     });
     expect(options).toEqual([
       { id: 9, label: "AB-009" },
       { id: 4, label: "AB-004" },
     ]);
+  });
+
+  it("chauffeur : une affectation terminée, annulée ou sans statut ne propose pas son véhicule (le serveur la refuserait)", () => {
+    for (const assignmentStatus of ["completed", "cancelled", "rejected", null, undefined]) {
+      expect(driverVehicleOptions({ missions: [{ status: "completed", assignmentStatus, vehicleId: 4 }] })).toEqual([]);
+    }
+  });
+
+  it("chauffeur : chaque statut actif partagé avec le serveur propose le véhicule", () => {
+    for (const assignmentStatus of ACTIVE_ASSIGNMENT_STATUSES) {
+      expect(driverVehicleOptions({ missions: [{ assignmentStatus, vehicleId: 7 }] })).toEqual([{ id: 7, label: "Véhicule 7" }]);
+    }
   });
 
   it("chauffeur sans mission ou sans fiche : aucun véhicule", () => {

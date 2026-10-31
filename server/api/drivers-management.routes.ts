@@ -135,6 +135,8 @@ router.get("/me", async (req, res) => {
         deliveryDate: missions.deliveryDate,
         actualDeliveryDate: missions.completedAt,
         actualDepartureDate: assignments.startedAt,
+        // Statut de l'affectation (pas de la mission) : l'écran de panne ne propose que les actives.
+        assignmentStatus: assignments.status,
         estimatedDistance: missions.estimatedDistance,
         actualDistance: missions.actualDistance,
         clientName: clients.name,

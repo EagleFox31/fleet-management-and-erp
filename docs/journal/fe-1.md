@@ -147,3 +147,38 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `tests/unit/client/lot-screen-components.test.ts`, `tests/unit/client/incident-vehicles.test.ts` ; suite unitaire 56 fichiers / 680 tests ; tsc global zéro erreur. Captures hors dépôt (`scratchpad/fe-4/08` à `19`).
 - **RAIDER** : R table pilotée par `lot-screens.ts`, garde-fou générique ; A source véhicules selon le rôle, réponse paginée ou tableau acceptée ; D contrats serveur et mocks inchangés ; I comptes TEST créés puis supprimés avec leurs alertes et lignes `user_onboarding`, aucune panne/pointage/mouvement écrit (routes 501) ; données de recette intactes.
 - **Reste / risques** : données réelles dès fusion de T-43/T-40/T-45. Fil d'Ariane « Pneus > Détail » sur `/inventory/tires/movements` (segment lu comme un id). `LoadingError` affiche un emoji (composant partagé préexistant, non modifié). Rechargement complet lent du serveur de dev : le chien de garde d'auth (12 s) peut renvoyer au login, sans lien avec ces écrans.
+
+## 2026-10-31T14:32:25+01:00 — T-3xd — Rôles des écrans du lot alignés sur leurs routes (agent fe-4)
+
+- **Agent** : fe-4 · **Branche** : `lot/fe/T-3xd-roles-ecrans` (PR #51, depuis `main` f4e4616) · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** :
+  - Pointage : lecture et saisie pour admin et logistique, lecture seule pour secrétariat et direction (écran ajouté, saisie masquée) ; fil d'Ariane « Flotte › Chauffeurs › Pointage » ; totaux : chauffeurs actifs sans saisie du mois listés à zéro (compte non supprimé, fiche `drivers` non désactivée).
+  - Mouvements de pneus : écran = API (admin, direction, chef d'atelier, magasinier, technicien), retiré à la logistique et au secrétariat ; menu sous « Gestion de stock », groupe créé pour les rôles qui ne l'avaient pas.
+  - Panne chauffeur : seuls les véhicules des affectations actives (`ACTIVE_ASSIGNMENT_STATUSES` partagé, `assignmentStatus` exposé par `/api/drivers/me`).
+  - 403 : type d'erreur « permission » (« Accès refusé », bouclier), distinct de la session expirée.
+  - Comptes verrouillés : fin de verrou lue par le store pg qui l'écrit (une heure de décalage hors UTC avec Drizzle).
+  - Tableaux de bord : widget des factures fournisseurs en retard masqué hors approvisionnement ; tuiles KPI en erreur (dont 501) : « Indisponible », sans nouvel essai sur un 4xx ou un 501 ; « Aucune donnée » réservé à une réponse vide.
+  - Écarts corrigés au passage : coût véhicule sans secrétariat, factures en attente avec direction, historique d'OT pour tout le personnel (`isStaff` = `STAFF_ROLES`).
+- **Comment** : groupes de rôles nommés dans `shared/constants/roles.ts`, importés par l'écran et par le routeur ; `errorTypeOf` (`client/src/lib/error-type.ts`) ; `DbLockoutStore.listLocked` ; `kpiTileText` / `shouldRetryKpi` purs dans `kpi-tiles.tsx`.
+- **Pourquoi** : les rôles étaient déclarés deux fois sans contrat (écran ouvert à un rôle que l'API refuse : 403 ; rôle admis sans écran : pas de menu) ; colonne `timestamp` sans fuseau lue par un autre pilote que celui qui l'écrit ; « Aucune donnée » affiché sur une erreur 501 était faux.
+- **Comment tester (QA)** :
+  - Logistique `/drivers/time-tracking` : sélecteurs et Enregistrer ; secrétariat et direction : grille sans sélecteurs ni bouton.
+  - Technicien et direction `/inventory/tires/movements` : menu « Gestion de stock », liste ; logistique et secrétariat : pas de menu, page non trouvée.
+  - Chauffeur avec une mission terminée et une active : un seul véhicule proposé.
+  - Six mauvais mots de passe : heure du message de connexion = heure de la ligne « Comptes verrouillés ».
+  - Admin, tableau de bord : les trois tuiles KPI (routes 501) affichent « Indisponible ».
+  - Preuve automatisée : garde-fous `tests/unit/client/lot-screen-api-roles.test.ts` (rôles écran = route, identifiants résolus seulement par import réel) et `tests/unit/server/lockout-columns-read-path.test.ts` (colonnes de verrou lues par le seul store), tous deux contrôlés par mutation ; `tests/unit/client/kpi-tiles.test.ts` ; contrats `time-tracking`, `auth-lockout-timezone` (processus en UTC+1). Captures hors dépôt (`scratchpad/fe-4/36` à `47`).
+- **RAIDER** : R groupes de rôles partagés ; A aucun fuseau supposé (test en `Africa/Douala`) ; I aucune migration, lectures pures ; D contrat d'API inchangé hors `assignmentStatus` optionnel ; failure memory : deux entrées dans `LESSONS_LEARNED.md` ; données de recette intactes, comptes TEST supprimés.
+- **Reste / risques** : colonnes de verrou à passer en `timestamptz` (lot base de données) ; angles morts du garde-fou des rôles écrits en tête du test (`SCREEN_APIS` tenu à la main, `router.use`, contrôles dans les handlers) ; un chauffeur désactivé garde ses saisies déjà faites dans la grille du mois.
+
+## 2026-10-31 : carburant, lecture seule du chef d'atelier et de la direction (PR #51)
+
+- **Quoi** : bons et anomalies carburant consultables par `workshop_manager` et `management` (boutons Valider / Traiter masqués) ; écriture du prix du litre réservée à `admin` et `logistics` (le secrétariat n'y a plus accès) ; écrans carburant déclarés dans le garde-fou des rôles.
+- **Comment** : `FUEL_WRITE_ROLES`, `FUEL_READ_ROLES`, `FUEL_PRICE_WRITE_ROLES` dans `shared/constants/roles.ts`, importés par les routeurs et les écrans ; `GET /api/fuel-vouchers` ajoutée ; `POST /api/fuel-prices` passe de `isFuelCardManager` (inchangé, encore utilisé ailleurs) à `authorize(FUEL_PRICE_WRITE_ROLES)`.
+- **Pourquoi** : décision du 31 octobre 2026 ; l'écran ne doit pas proposer une action que l'API refuse.
+- **Comment tester (QA)** : chef d'atelier et direction sur `/fuel/vouchers` et `/fuel/anomalies` : listes sans bouton d'action ; secrétariat sur `/fuel/prices` : lecture seule ; logistique et admin : saisie possible.
+- **Preuve automatisée** : contrats `fuel-vouchers-prices`, `fuel-anomalies` (GET 200 chef d'atelier / direction, écritures 403, POST prix 403 secrétariat, 201 admin et logistique) ; garde-fou `lot-screen-api-roles`.
+- **RAIDER** : R groupes de rôles partagés ; D contrats d'API étendus sans rupture ; données de recette intactes, comptes TEST supprimés par le nettoyage des tests.
+- **Correctif relecture** : prix imposé (lecture seule, prix manuel retiré) seulement si le drapeau `fuel-prices` est actif (`isFuelPriceImposed`, `client/src/lib/fuel-price-policy.ts`) ; drapeau coupé, saisie libre comme avant. Date locale au lieu de la date UTC ; envoi désactivé pendant le chargement des prix ; `mission_fuel_recorded` invalide bons et anomalies (et resync à la reconnexion). Test : `tests/unit/client/fuel-price-policy.test.ts`.
+- **Limite connue** : le serveur ne contrôle pas le prix, `server/api/missions.routes.ts` (lignes ~871 et ~1031) accepte le `unitPrice` envoyé par le client ; l'imposition du prix est donc côté écran seulement.
