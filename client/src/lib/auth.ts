@@ -4,6 +4,8 @@ export interface LoginCredentials {
   username: string;
   password: string;
   rememberMe?: boolean;
+  /** Preuve ALTCHA (champ `captcha` du contrat), seulement quand le défi est affiché. */
+  captcha?: string;
 }
 
 export interface RegistrationData {
