@@ -95,9 +95,9 @@ describe.each(MOUNT_CASES)("montage $name", (mount) => {
     for (const role of denied) expect(await call(mount.method, mount.path, role), role).toBe(403);
   });
 
-  it("drapeaux allumés, rôle autorisé : 501 (squelette)", async () => {
+  it("drapeaux allumés, rôle autorisé : atteint la route (501 squelette, ou statut `reached`)", async () => {
     process.env.FEATURE_FLAGS = flagsOn(mount.flags);
-    for (const role of mount.allowed) expect(await call(mount.method, mount.path, role), role).toBe(501);
+    for (const role of mount.allowed) expect(await call(mount.method, mount.path, role), role).toBe(mount.reached ?? 501);
   });
 });
 
