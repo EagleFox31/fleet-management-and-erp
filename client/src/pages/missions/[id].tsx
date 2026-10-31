@@ -20,6 +20,8 @@ import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColu
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { isApiError } from "@/lib/api-error";
+import { useFuelPrice } from "@/hooks/use-fuel-price";
+import { canWriteFuelPrice } from "@shared/constants/roles";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -500,6 +502,12 @@ export default function MissionDetailsPage() {
     notes: "",
     isPreDeparture: false,
   });
+  // Prix du litre : saisi par l'administrateur et la logistique, imposé (prix du jour) aux autres.
+  const canEditFuelPrice = canWriteFuelPrice(user?.role);
+  const { priceAt: fuelPriceAtDate } = useFuelPrice();
+  const fuelFormUnitPrice = canEditFuelPrice
+    ? fuelForm.unitPrice
+    : String(fuelPriceAtDate(fuelForm.dateTime || new Date().toISOString()));
   const [errorModal, setErrorModal] = useState<{ title: string; description?: string; details?: string[] } | null>(null);
   const [launchBlockedDocumentTypes, setLaunchBlockedDocumentTypes] = useState<MissionDocumentType[]>([]);
   const [amount, setAmount] = useState("");
@@ -961,7 +969,7 @@ export default function MissionDetailsPage() {
       }
 
       const quantity = Number(String(fuelForm.quantity).replace(",", "."));
-      const unitPrice = Number(String(fuelForm.unitPrice).replace(",", "."));
+      const unitPrice = Number(String(fuelFormUnitPrice).replace(",", "."));
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new Error("La quantité doit être strictement positive.");
       }
@@ -3024,10 +3032,14 @@ export default function MissionDetailsPage() {
                   min="0"
                   step="0.01"
                   placeholder="Ex: 828"
-                  value={fuelForm.unitPrice}
-                  onChange={(e) => setFuelForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                  value={fuelFormUnitPrice}
+                  readOnly={!canEditFuelPrice}
+                  onChange={(e) => canEditFuelPrice && setFuelForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
                   data-testid="input-mission-fuel-unit-price"
                 />
+                {!canEditFuelPrice && (
+                  <p className="text-xs text-muted-foreground">Prix du jour, fixé par la logistique.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="mission-fuel-datetime">Date et heure du plein</Label>
@@ -3102,7 +3114,7 @@ export default function MissionDetailsPage() {
                 <p className="mt-1 text-lg font-bold text-gray-900">
                   {formatPrice(
                     toNumberOrZero(String(fuelForm.quantity).replace(",", ".")) *
-                    toNumberOrZero(String(fuelForm.unitPrice).replace(",", "."))
+                    toNumberOrZero(String(fuelFormUnitPrice).replace(",", "."))
                   )}
                 </p>
               </div>

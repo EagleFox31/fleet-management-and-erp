@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import { useFuelPrice } from "@/hooks/use-fuel-price";
+import { canWriteFuelPrice } from "@shared/constants/roles";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { useState } from "react";
 import { format, isThisMonth } from "date-fns";
@@ -324,8 +326,15 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
   const priceSourceLabel =
     fuelBalance?.priceSource === "real" ? "Prix réel récent" : "Prix de référence";
 
+  // Prix du litre : imposé (prix du jour) hors FUEL_PRICE_WRITE_ROLES, donc au chauffeur.
+  const { user } = useAuth();
+  const canEditFuelPrice = canWriteFuelPrice(user?.role);
+  const { priceAt } = useFuelPrice();
+  const effectiveUnitPrice = canEditFuelPrice ? unitPrice : String(priceAt(dateTime || new Date().toISOString()));
+  const displayedPrice = canEditFuelPrice ? suggestedPrice : Number(effectiveUnitPrice);
+
   const quantityValue = Number.parseFloat(quantity || "0");
-  const unitPriceValue = Number.parseFloat(unitPrice || "0");
+  const unitPriceValue = Number.parseFloat(effectiveUnitPrice || "0");
   const totalCost =
     Number.isFinite(quantityValue) && Number.isFinite(unitPriceValue)
       ? quantityValue * unitPriceValue
@@ -341,7 +350,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
       const payload = {
         vehicleId,
         quantity: Number.parseFloat(quantity),
-        unitPrice: Number.parseFloat(unitPrice),
+        unitPrice: Number.parseFloat(effectiveUnitPrice),
         stationName: stationName.trim() || undefined,
         date: new Date(dateTime).toISOString(),
         notes: notes.trim() || undefined,
@@ -406,16 +415,20 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
               <Fuel className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{priceSourceLabel}</p>
-              <p className="truncate text-base font-bold text-slate-950">{Math.round(suggestedPrice)} FCFA/L</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                {canEditFuelPrice ? priceSourceLabel : "Prix du jour"}
+              </p>
+              <p className="truncate text-base font-bold text-slate-950">{Math.round(displayedPrice)} FCFA/L</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setUnitPrice(String(Math.round(suggestedPrice)))}
-              className="ml-auto rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-            >
-              Utiliser
-            </button>
+            {canEditFuelPrice && (
+              <button
+                type="button"
+                onClick={() => setUnitPrice(String(Math.round(suggestedPrice)))}
+                className="ml-auto rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
+              >
+                Utiliser
+              </button>
+            )}
           </div>
         </div>
 
@@ -440,8 +453,9 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
                 min="1"
                 step="0.01"
                 inputMode="decimal"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
+                value={effectiveUnitPrice}
+                readOnly={!canEditFuelPrice}
+                onChange={(e) => canEditFuelPrice && setUnitPrice(e.target.value)}
                 className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               />
             </label>

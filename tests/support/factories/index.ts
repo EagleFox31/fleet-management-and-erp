@@ -25,6 +25,7 @@ export const TEST_USER_PASSWORD = "test-pass-123";
 export type TestUserRole =
   | "admin"
   | "workshop_manager"
+  | "management"
   | "technician"
   | "secretary"
   | "logistics"

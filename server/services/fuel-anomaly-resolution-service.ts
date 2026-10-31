@@ -9,7 +9,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
-import type { FuelAnomalyResolution, UpdateFuelAnomalyRequest } from "@shared/contracts/fuel-anomalies";
+import type { FuelAnomaly, FuelAnomalyResolution, UpdateFuelAnomalyRequest } from "@shared/contracts/fuel-anomalies";
 import { fuelAnomalyKeySchema } from "@shared/contracts/fuel-anomalies";
 
 type Row = {
@@ -63,6 +63,49 @@ export const fuelAnomalyResolutionService = {
       SELECT ${RETURNING} FROM fuel_anomaly_resolutions WHERE anomaly_key = ${anomalyKey}`);
     const row = rowsOf<Row>(res)[0];
     return row ? toResolution(row) : null;
+  },
+
+  /**
+   * Anomalies calculées (règle `consumption-gap`, voir le contrat), avec la dernière décision.
+   * Même critère que `fuelCardService.detectAnomalies`, sur toute la flotte. Lecture seule.
+   */
+  async list(): Promise<FuelAnomaly[]> {
+    const res = await db.execute(sql`
+      WITH base AS (
+        SELECT fr.id, fr.vehicle_id, fr.date, fr.quantity,
+               AVG(fr.quantity) OVER w AS avg_q, STDDEV_POP(fr.quantity) OVER w AS sd_q, COUNT(*) OVER w AS n
+          FROM fuel_records fr
+         WHERE fr.vehicle_id IS NOT NULL AND fr.debit_amount > 0
+        WINDOW w AS (PARTITION BY fr.vehicle_id)
+      )
+      SELECT b.id, b.vehicle_id, to_char(b.date, 'YYYY-MM-DD') AS day, b.quantity, b.avg_q,
+             b.avg_q + 2 * b.sd_q AS threshold, v.registration_number AS vehicle_label,
+             r.status, r.comment, to_char(r.resolved_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS iso
+        FROM base b
+        LEFT JOIN vehicles v ON v.id = b.vehicle_id
+        LEFT JOIN fuel_anomaly_resolutions r ON r.anomaly_key = 'consumption-gap:' || b.id
+       WHERE b.n >= 3 AND b.quantity > b.avg_q + 2 * b.sd_q
+       ORDER BY b.date DESC NULLS LAST, b.id DESC
+       LIMIT 500`);
+    type ListRow = {
+      id: number; vehicle_id: number; day: string | null; quantity: number; avg_q: string | number;
+      threshold: string | number; vehicle_label: string | null; status: FuelAnomaly["status"] | null;
+      comment: string | null; iso: string | null;
+    };
+    return rowsOf<ListRow>(res).map((r) => ({
+      anomalyKey: `consumption-gap:${r.id}`,
+      rule: "consumption-gap",
+      fuelRecordId: Number(r.id),
+      date: r.day,
+      vehicleId: Number(r.vehicle_id),
+      vehicleLabel: r.vehicle_label,
+      quantity: Number(r.quantity),
+      averageQuantity: Math.round(Number(r.avg_q)),
+      threshold: Math.round(Number(r.threshold)),
+      status: r.status ?? "open",
+      comment: r.comment,
+      resolvedAt: r.iso,
+    }));
   },
 
   /** Clés à retirer de la liste active : les anomalies justifiées. */

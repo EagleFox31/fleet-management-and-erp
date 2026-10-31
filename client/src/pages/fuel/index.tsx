@@ -28,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { Plus, Search, Fuel, Wallet, CarFront, CalendarDays, Edit, Trash2, Gauge, Info } from "lucide-react";
 import type { Vehicle, FuelRecord } from "@shared/schema";
+import { canWriteFuelPrice } from "@shared/constants/roles";
 import {
   computeVehicleConsumptionRows,
   formatConsumptionDisplay,
@@ -79,6 +80,8 @@ export default function FuelPage() {
     notes: "",
   });
   const canManageFuelCard = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
+  // Le prix manuel modifie le prix du litre : administrateur et logistique seulement.
+  const canEditFuelPrice = canWriteFuelPrice(user?.role);
   const canDeleteFuelRecord = user?.role === "admin" || user?.role === "workshop_manager";
 
   const scrollToHistoryTable = () => {
@@ -131,14 +134,14 @@ export default function FuelPage() {
   }, [isRechargeDialogOpen, realUnitPrice, fallbackUnitPrice]);
 
   const selectedUnitPrice = React.useMemo(() => {
-    if (rechargeForm.priceMode === "manual") {
+    if (rechargeForm.priceMode === "manual" && canEditFuelPrice) {
       return Number(rechargeForm.manualUnitPrice);
     }
     if (rechargeForm.priceMode === "real") {
       return realUnitPrice;
     }
     return fallbackUnitPrice;
-  }, [rechargeForm.priceMode, rechargeForm.manualUnitPrice, realUnitPrice, fallbackUnitPrice]);
+  }, [rechargeForm.priceMode, rechargeForm.manualUnitPrice, realUnitPrice, fallbackUnitPrice, canEditFuelPrice]);
 
   const computedQuantity = React.useMemo(() => {
     const amount = Number(rechargeForm.amount);
@@ -840,13 +843,13 @@ export default function FuelPage() {
                   <SelectContent>
                     {realUnitPrice > 0 && <SelectItem value="real">Prix réel ({realUnitPrice} FCFA/L)</SelectItem>}
                     <SelectItem value="fallback">Prix de référence ({fallbackUnitPrice} FCFA/L)</SelectItem>
-                    <SelectItem value="manual">Prix manuel</SelectItem>
+                    {canEditFuelPrice && <SelectItem value="manual">Prix manuel</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {rechargeForm.priceMode === "manual" && (
+            {canEditFuelPrice && rechargeForm.priceMode === "manual" && (
               <div>
                 <p className="text-xs font-medium text-gray-500 mb-1">Prix manuel (FCFA/L) *</p>
                 <Input

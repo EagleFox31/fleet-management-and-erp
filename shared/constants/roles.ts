@@ -91,6 +91,33 @@ export function canWriteTimeTracking(role: string | null | undefined): boolean {
   return (TIME_TRACKING_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
+/**
+ * Carburant : bons (P-17) et anomalies (P-18).
+ *
+ * Valider un bon ou traiter une anomalie revient à ceux qui gèrent la carte
+ * (`isFuelCardManager`, server/middleware/auth.ts, doit rester aligné). Le chef
+ * d'atelier et la direction les consultent sans agir (décision du 31 octobre 2026) :
+ * leurs écrans masquent Valider / Traiter au lieu d'afficher un bouton qui renvoie 403.
+ */
+export const FUEL_WRITE_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management"] as const satisfies readonly AppRole[];
+
+export function canWriteFuel(role: string | null | undefined): boolean {
+  return (FUEL_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Prix du litre (P-19) : 828 FCFA par défaut (ligne datée 2000-01-01). Seuls
+ * l'administrateur et la logistique le modifient (décision du 31 octobre 2026) ;
+ * le secrétariat gère la carte mais ne fixe pas le prix. Ailleurs, le prix
+ * proposé est celui du jour, en lecture seule.
+ */
+export const FUEL_PRICE_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+
+export function canWriteFuelPrice(role: string | null | undefined): boolean {
+  return (FUEL_PRICE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /** Mouvements de pneus (`GET /api/tires/movements`), lecture seule. */
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 

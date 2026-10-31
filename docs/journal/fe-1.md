@@ -171,3 +171,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : garde-fous `tests/unit/client/lot-screen-api-roles.test.ts` (rôles écran = route, identifiants résolus seulement par import réel) et `tests/unit/server/lockout-columns-read-path.test.ts` (colonnes de verrou lues par le seul store), tous deux contrôlés par mutation ; `tests/unit/client/kpi-tiles.test.ts` ; contrats `time-tracking`, `auth-lockout-timezone` (processus en UTC+1). Captures hors dépôt (`scratchpad/fe-4/36` à `47`).
 - **RAIDER** : R groupes de rôles partagés ; A aucun fuseau supposé (test en `Africa/Douala`) ; I aucune migration, lectures pures ; D contrat d'API inchangé hors `assignmentStatus` optionnel ; failure memory : deux entrées dans `LESSONS_LEARNED.md` ; données de recette intactes, comptes TEST supprimés.
 - **Reste / risques** : colonnes de verrou à passer en `timestamptz` (lot base de données) ; angles morts du garde-fou des rôles écrits en tête du test (`SCREEN_APIS` tenu à la main, `router.use`, contrôles dans les handlers) ; un chauffeur désactivé garde ses saisies déjà faites dans la grille du mois.
+
+## 2026-10-31 : carburant, lecture seule du chef d'atelier et de la direction (PR #51)
+
+- **Quoi** : bons et anomalies carburant consultables par `workshop_manager` et `management` (boutons Valider / Traiter masqués) ; écriture du prix du litre réservée à `admin` et `logistics` (le secrétariat n'y a plus accès) ; écrans carburant déclarés dans le garde-fou des rôles.
+- **Comment** : `FUEL_WRITE_ROLES`, `FUEL_READ_ROLES`, `FUEL_PRICE_WRITE_ROLES` dans `shared/constants/roles.ts`, importés par les routeurs et les écrans ; `GET /api/fuel-vouchers` ajoutée ; `POST /api/fuel-prices` passe de `isFuelCardManager` (inchangé, encore utilisé ailleurs) à `authorize(FUEL_PRICE_WRITE_ROLES)`.
+- **Pourquoi** : décision du 31 octobre 2026 ; l'écran ne doit pas proposer une action que l'API refuse.
+- **Comment tester (QA)** : chef d'atelier et direction sur `/fuel/vouchers` et `/fuel/anomalies` : listes sans bouton d'action ; secrétariat sur `/fuel/prices` : lecture seule ; logistique et admin : saisie possible.
+- **Preuve automatisée** : contrats `fuel-vouchers-prices`, `fuel-anomalies` (GET 200 chef d'atelier / direction, écritures 403, POST prix 403 secrétariat, 201 admin et logistique) ; garde-fou `lot-screen-api-roles`.
+- **RAIDER** : R groupes de rôles partagés ; D contrats d'API étendus sans rupture ; données de recette intactes, comptes TEST supprimés par le nettoyage des tests.

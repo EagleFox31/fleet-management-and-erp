@@ -32,10 +32,17 @@ import * as sharedRoles from "@shared/constants/roles";
  */
 
 type Api = { file: string; method?: "get" | "post" | "patch"; path: string };
+/**
+ * Action d'écriture d'un écran ouvert en lecture à plus de rôles qu'il n'en écrit.
+ * `roles` : constante partagée attendue sur la route ; `gate` : fonction de
+ * `@shared/constants/roles` qui montre ou masque l'action ; `component` : composant de
+ * `client/src/pages/lot/screens.tsx` qui doit passer `readOnly={!gate(...)}` (absent
+ * tant que l'écran n'est pas livré).
+ */
+type Write = { api: Api; roles: keyof typeof sharedRoles; gate: keyof typeof sharedRoles; component?: string };
 type Declaration =
   | { apis: Api[]; /** L'API sert plus de rôles que l'écran : raison écrite obligatoire. */ apiWider?: string;
-      /** Écart connu qui attend une décision métier : test en `it.todo`, écart écrit en clair. */
-      pending?: string }
+      writes?: Write[] }
   | { stub: string; reason: string }
   | { none: string };
 
@@ -60,23 +67,35 @@ const SCREEN_APIS: Record<string, Declaration> = {
   "wo-quality-check": { apis: [{ file: "quality-check.routes.ts", method: "post", path: "/work-orders/:id/quality-check" }] },
   "oil-change-intervals": { none: "écran d'attente, pas encore d'API" },
   "tire-movements": { apis: [{ file: "tire-movements.routes.ts", path: "/tires/movements" }] },
-  // Aucune route de lecture pour les bons et les anomalies : l'écran n'a que l'action d'écriture.
+  // Décision du 31 octobre 2026 : lecture FUEL_READ_ROLES, écriture FUEL_WRITE_ROLES ;
+  // atelier et direction voient bons et anomalies sans les boutons Valider / Traiter.
   "fuel-vouchers": {
-    apis: [{ file: "fuel-vouchers.routes.ts", method: "post", path: "/fuel-vouchers/:id/validate" }],
-    pending:
-      "écran admin, logistics, secretary, workshop_manager, management ; API admin, logistics, secretary (isFuelCardManager). " +
-      "workshop_manager et management reçoivent les événements carburant (realtime-events) mais aucune route ne leur sert les bons : " +
-      "retirer ces rôles de l'écran, ou ajouter une lecture qui les admet ?",
+    apis: [{ file: "fuel-vouchers.routes.ts", path: "/fuel-vouchers" }],
+    writes: [
+      {
+        api: { file: "fuel-vouchers.routes.ts", method: "post", path: "/fuel-vouchers/:id/validate" },
+        roles: "FUEL_WRITE_ROLES",
+        gate: "canWriteFuel",
+        component: "FuelVouchersScreen",
+      },
+    ],
   },
   "fuel-anomalies": {
-    apis: [{ file: "fuel-anomalies.routes.ts", method: "patch", path: "/fuel-card/anomalies/:id" }],
-    pending:
-      "écran admin, logistics, secretary, workshop_manager, management ; API admin, logistics, secretary (isFuelCardManager). " +
-      "Même question que les bons : retirer workshop_manager et management de l'écran, ou leur ouvrir une lecture des anomalies ?",
+    apis: [{ file: "fuel-anomalies.routes.ts", path: "/fuel-card/anomalies" }],
+    writes: [
+      {
+        api: { file: "fuel-anomalies.routes.ts", method: "patch", path: "/fuel-card/anomalies/:id" },
+        roles: "FUEL_WRITE_ROLES",
+        gate: "canWriteFuel",
+        component: "FuelAnomaliesScreen",
+      },
+    ],
   },
   "fuel-prices": {
     apis: [{ file: "fuel-prices.routes.ts", path: "/fuel-prices" }],
-    apiWider: "prix lus par tout le personnel (isStaff) ; l'écran est celui de leur gestion. Saisie (POST) : isFuelCardManager",
+    apiWider: "prix lus par tout le personnel (isStaff) ; l'écran est celui de leur gestion",
+    // Saisie réservée à admin et logistics (décision du 31 octobre 2026). Écran pas encore livré.
+    writes: [{ api: { file: "fuel-prices.routes.ts", method: "post", path: "/fuel-prices" }, roles: "FUEL_PRICE_WRITE_ROLES", gate: "canWriteFuelPrice" }],
   },
   "vehicle-cost": { apis: [{ file: "vehicle-cost-summary.routes.ts", path: "/vehicles/:id/cost-summary" }] },
   "time-tracking": {
@@ -261,11 +280,29 @@ describe("rôles des écrans du lot = rôles des routes qu'ils lisent", () => {
       continue;
     }
 
+    for (const write of decl.writes ?? []) {
+      const { api } = write;
+      it(`${screen.id} : écriture ${(api.method ?? "get").toUpperCase()} ${api.path} = ${write.roles}, action visible = ${write.gate}`, () => {
+        const allowed = apiRoles(api);
+        const expected = new Set<string>(sharedRoles[write.roles] as readonly string[]);
+        expect(sorted(allowed), `rôles de ${api.path}`).toEqual(sorted(expected));
+        // L'écriture est un sous-ensemble de l'écran : pas d'écrivain sans écran.
+        expect(sorted([...expected].filter((r) => !screenRoles.has(r))), "écrivains sans écran").toEqual([]);
+        // Action montrée exactement aux rôles que l'API accepte : ni bouton puis 403, ni droit caché.
+        const gate = sharedRoles[write.gate] as (role: string | null | undefined) => boolean;
+        for (const role of ALL) expect(gate(role), `${write.gate}(${role})`).toBe(expected.has(role));
+        expect(gate(undefined)).toBe(false);
+        if (write.component) {
+          const src = read("client/src/pages/lot/screens.tsx");
+          const at = src.indexOf(`export function ${write.component}(`);
+          expect(at, `${write.component} introuvable`).toBeGreaterThan(-1);
+          const body = src.slice(at, src.indexOf("\n}\n", at));
+          expect(body).toContain(`readOnly={!${write.gate}(`);
+        }
+      });
+    }
+
     for (const api of decl.apis) {
-      if (decl.pending) {
-        it.todo(`${screen.id} : ${(api.method ?? "get").toUpperCase()} ${api.path} : ÉCART À TRANCHER : ${decl.pending}`);
-        continue;
-      }
       it(`${screen.id} : ${(api.method ?? "get").toUpperCase()} ${api.path}`, () => {
         const allowed = apiRoles(api);
         // L'écran ne s'ouvre à aucun rôle que l'API refuse (sinon : un 403 à l'écran).

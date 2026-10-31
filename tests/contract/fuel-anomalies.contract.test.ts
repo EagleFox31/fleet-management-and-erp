@@ -45,7 +45,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const a = server.address();
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
-  for (const role of ["logistics", "technician", "client"] as const) await login(role);
+  for (const role of ["logistics", "technician", "client", "workshop_manager", "management"] as const) await login(role);
   const v = await createTestVehicle();
   ids.vehicleIds.push(v.id);
   const fr = await createTestFuelRecord({ vehicleId: v.id });
@@ -58,6 +58,26 @@ afterAll(async () => {
   await cleanupCreated(ids);
   delete (global as any).broadcastUpdate;
   await new Promise<void>((r) => server.close(() => r()));
+});
+
+describe("GET /api/fuel-card/anomalies (lecture seule du chef d'atelier et de la direction)", { timeout: 120000 }, () => {
+  async function get(role?: string) {
+    const res = await fetch(`${baseUrl}/api/fuel-card/anomalies`, { headers: role ? { Cookie: cookies.get(role)! } : {} });
+    return res.status;
+  }
+
+  it("200 pour logistique, chef d'atelier et direction ; 401 anonyme ; 403 technicien", async () => {
+    expect(await get("logistics")).toBe(200);
+    expect(await get("workshop_manager")).toBe(200);
+    expect(await get("management")).toBe(200);
+    expect(await get()).toBe(401);
+    expect(await get("technician")).toBe(403);
+  });
+
+  it("chef d'atelier et direction ne traitent pas : PATCH 403", async () => {
+    expect((await patch(fuelAnomalyPath(key), { status: "justified" }, "workshop_manager")).status).toBe(403);
+    expect((await patch(fuelAnomalyPath(key), { status: "justified" }, "management")).status).toBe(403);
+  });
 });
 
 describe("PATCH /api/fuel-card/anomalies/:id", { timeout: 120000 }, () => {

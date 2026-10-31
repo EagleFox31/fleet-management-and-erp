@@ -25,6 +25,7 @@ import {
   Milestone,
 } from "lucide-react";
 import {
+  FUEL_READ_ROLES,
   PENDING_INVOICE_ROLES,
   STAFF_ROLES,
   TIME_TRACKING_READ_ROLES,
@@ -54,7 +55,6 @@ export type LotScreen = {
 
 const ADMIN = ["admin"] as const satisfies readonly AppRole[];
 const WORKSHOP = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
-const FUEL_STAFF = ["admin", "logistics", "secretary", "workshop_manager", "management"] as const satisfies readonly AppRole[];
 
 export const LOT_SCREENS: readonly LotScreen[] = [
   // --- MUST : administration (T-31a, T-32a, T-33a)
@@ -120,17 +120,17 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   {
     id: "fuel-vouchers", path: "/fuel/vouchers", title: "Bons de carburant", task: "T-53", feature: "fuel-vouchers",
     description: "Validation des bons de carburant.",
-    roles: FUEL_STAFF, menu: { group: "resources", label: "Bons de carburant", icon: Ticket },
+    roles: FUEL_READ_ROLES, menu: { group: "resources", label: "Bons de carburant", icon: Ticket },
   },
   {
     id: "fuel-anomalies", path: "/fuel/anomalies", title: "Anomalies carburant", task: "T-53", feature: "fuel-anomalies",
     description: "Traitement des anomalies de consommation.",
-    roles: FUEL_STAFF, menu: { group: "resources", label: "Anomalies carburant", icon: Fuel },
+    roles: FUEL_READ_ROLES, menu: { group: "resources", label: "Anomalies carburant", icon: Fuel },
   },
   {
     id: "fuel-prices", path: "/fuel/prices", title: "Prix du carburant", task: "T-53", feature: "fuel-prices",
     description: "Prix du carburant datés.",
-    roles: FUEL_STAFF, menu: { group: "resources", label: "Prix du carburant", icon: Tag },
+    roles: FUEL_READ_ROLES, menu: { group: "resources", label: "Prix du carburant", icon: Tag },
   },
   {
     id: "vehicle-cost", path: "/vehicles/:id/cost", title: "Coût du véhicule", task: "T-53", feature: "vehicle-cost-summary",
