@@ -8,6 +8,8 @@ import type { PoolClient } from "@neondatabase/serverless";
 import { WebSocketServer, WebSocket } from 'ws';
 import { sessionMiddleware } from "./middleware/session";
 import { createApp } from "./app";
+import { setAuditSink } from "./lib/audit";
+import { dbAuditSink } from "./lib/audit-db-sink";
 
 (async () => {
   const { app, server } = await createApp();
@@ -612,6 +614,8 @@ import { createApp } from "./app";
 
   // Port 5000 par défaut (API et client sur le même port); PORT permet de
   // lancer l'app à côté d'un autre service qui occupe déjà 5000.
+  setAuditSink(dbAuditSink);
+
   const port = Number(process.env.PORT) || 5000;
   server.listen(port, "0.0.0.0", () => {
     const networkInterfaces = os.networkInterfaces();

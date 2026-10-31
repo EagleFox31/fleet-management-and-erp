@@ -39,6 +39,8 @@ pages pré-déclarées.
 |---|---|---|---|
 | `server/services/fuel-card-service.ts` | API (T-44) | Une ligne : prix 828 en dur remplacé par la lecture du prix daté. | Rebase en dernier dans sa fenêtre. |
 | `server/api/missions.routes.ts` | API (T-44) | Une ligne, même changement. | Idem. |
+| `server/lib/audit-log-row.ts`, `server/api/audit-logs.routes.ts`, `server/api/work-order-audit-trail.routes.ts` | API (T-39) | Mappage ligne de journal vers contrat extrait de T-15 et partagé avec l'historique d'OT. | Rebase sans effet de bord. |
+| `server/api/vehicle-documents.routes.ts` (nouveau) | API (T-16b) | Upload des documents véhicule, déplacé de `server/routes.ts` (suppression du seul handler, accord de l'utilisateur). | Rebase sans effet de bord. |
 | Préfixes `/warehouse`, `/fuel-card`, `/drivers`, `/missions`, `/clients`, `/operations`, `/part-requirements` dans `server/api/index.ts` | API (T-62), via l'architecte | Garde `isStaff` au montage. | Lot sécurité, samedi 14 h. |
 
 ## Agents et worktrees
@@ -59,3 +61,10 @@ Vendredi 23 h 30 ; samedi 10 h, 14 h, 18 h, 22 h ; dimanche 10 h, 14 h, 18 h ; g
 
 Ordre dans une fenêtre : PR de la session de tests d'abord, puis celles du lot dans l'ordre du
 graphe (contrats, schéma, serveur, écrans, e2e).
+
+## Fichiers touchés par fe-3 (branche `lot/fe/T-3xb-api-reelle`)
+
+`client/src/components/profile/notification-preferences.tsx`, `client/src/components/vehicles/vehicle-documents.tsx`,
+`client/src/components/billing/pending-invoices-table.tsx`, `client/src/components/dashboard/kpi-tiles.tsx`,
+`client/src/pages/admin/dashboard.tsx`, `client/src/pages/management/dashboard.tsx` (une ligne : `KpiTiles`),
+`shared/constants/roles.ts` (ajout : `KPI_VIEWER_ROLES`, `canViewKpi`), `tests/unit/client/pending-invoices-kpi-roles.test.ts` (nouveau), `docs/journal/fe-1.md`.
