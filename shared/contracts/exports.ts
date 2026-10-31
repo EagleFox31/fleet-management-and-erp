@@ -22,6 +22,12 @@ export const EXPORT_PATHS = [
   "client-missions",
   "client-invoices",
   "monthly-report",
+  // Exports historiques servis par server/routes.ts (page Rapports) : memes regles de refus par defaut.
+  "vehicles",
+  "work-orders",
+  "fuel",
+  "users",
+  "complete",
 ] as const;
 
 export type ExportPath = (typeof EXPORT_PATHS)[number];
@@ -38,6 +44,12 @@ export const EXPORT_ROLE_MATRIX: Record<ExportPath, readonly AppRole[]> = {
   "client-missions": BILLING_READERS,
   "client-invoices": BILLING_READERS,
   "monthly-report": ["admin", "management", "secretary"],
+  vehicles: ["admin", "management", "secretary", "logistics", "workshop_manager"],
+  "work-orders": ["admin", "management", "secretary", "workshop_manager"],
+  fuel: FUEL_READERS,
+  // Comptes utilisateurs et sauvegarde complete de la base : administrateur seul.
+  users: ["admin"],
+  complete: ["admin"],
 };
 
 export function isExportPath(value: string): value is ExportPath {

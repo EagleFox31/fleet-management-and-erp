@@ -3,6 +3,12 @@
 Worktree : `../fm-api-2`. Modèle d'entrée et règles : `README.md`.
 Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 
+## 2026-10-30T14:18:37+01:00 — T-47 contrôle qualité d'un OT
+- **Statut** : fait
+- **Quoi** : `POST /api/work-orders/:id/quality-check` (drapeau `quality-check`, chef d'atelier et admin). Validation : l'OT reste terminé ; rejet : retour en cours avec motif obligatoire (jamais `pending`, D-17). L'auteur et l'heure viennent de la session.
+- **Comment** : `server/api/quality-check.routes.ts` remplace le squelette ; colonnes `qc_*` via `workOrderQuality` ; transaction ; événement `work_order_updated` avec `scope` par rôles (admin, chef d'atelier, technicien) ; violation d'exclusion 23P01 convertie en 409. Build (pas de service existant à adopter, machine d'états hors périmètre).
+- **Pourquoi** : P-25, contrat `shared/contracts/quality-check.ts`.
+- **Comment tester (QA)** : activer `FEATURE_FLAGS=quality-check=on`, terminer un OT, POST `{"result":"failed","reason":"..."}` en chef d'atelier : statut `in_progress`. Technicien : 403 ; OT non terminé : 409 ; rejet sans motif : 400. Preuve : `node ../lot-tools/db-lock.mjs api-2 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.contract.config.ts tests/contract/work-order-quality-check.contract.test.ts` (7 passés).
 ## 2026-10-30T15:53:27+01:00 — T-24 — Export Word d'un OT
 
 - **Agent** : api-2 · **Branche** : `lot/api/T-24-work-order-export` · **Commit** : voir `git log`
@@ -74,6 +80,19 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **RAIDER** : couvert idempotence (upsert), non-régression (contrat figé), moindre privilège ; sans objet : migration.
 - **Reste / risques** : `shouldNotify(topic)` branché par T-17 (BE).
 
+## 2026-10-30T16:38:52+01:00 — T-44
+- **Agent** : api-2 · **Branche** : `lot/api/T-44-fuel` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `POST /api/fuel-vouchers/:id/validate`, `GET/POST /api/fuel-prices`, et lecture centralisée du prix du litre (`getFuelPriceAt`) à la place des 828 en dur de `missions.routes.ts` et `fuel-card-service.ts`.
+- **Comment** : `fuel-voucher-service.ts` (mise à jour conditionnée à `pending` : idempotent, auteur et date non réécrits), `fuel-price-service.ts` (upsert sur la date d'effet ; repli sur 828 du contrat si lecture impossible). Gardes : écriture et validation `isFuelCardManager` (technicien 403), lecture des prix `isStaff`. Build : Adapt.
+- **Pourquoi** : P-17, P-19, PR-16 (constante figée remplacée).
+- **Comment tester (QA)** :
+  - Prérequis : drapeaux `fuel-vouchers` et `fuel-prices` actifs ; compte logistique.
+  - Étapes : 1. Poser 843 au 1er novembre. 2. Interroger le prix au 30 octobre et au 2 novembre. 3. Valider un bon deux fois.
+  - Attendu : 828 puis 843 ; bon validé avec l'auteur, second appel sans changement.
+  - Preuve automatisée : contrat `fuel-vouchers-prices` 7 passed ; `tsc --noEmit` 0 erreur.
+- **RAIDER** : couvert idempotence, repli sûr, non-régression (défaut 828 inchangé) ; sans objet : migration (table existante).
+- **Reste / risques** : le solde carburant utilise maintenant le prix du jour au lieu de 828 fixe quand aucun prix réel moyen n'existe.
 ## 2026-10-30T16:33:12+01:00 — T-17b
 - **Agent** : api-2 · **Branche** : `lot/api/T-17b-should-notify` · **Commit** : voir `git log`
 - **Statut** : fait

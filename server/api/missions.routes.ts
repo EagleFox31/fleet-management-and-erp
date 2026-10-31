@@ -1,3 +1,4 @@
+import { getFuelPriceAt } from "../services/fuel-price-service";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
@@ -148,7 +149,6 @@ const DOCUMENT_ALERT_TITLES: Record<VehicleDocumentRequirementType, string> = {
 };
 
 const OPEN_RENEWAL_STATUSES = ["pending", "in_progress"] as const;
-const MISSION_FUEL_FALLBACK_PRICE_PER_LITER = 828;
 const MISSION_FUEL_ALLOWED_STATUSES = ["planned", "assigned", "in_progress", "delivered"] as const;
 const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
@@ -1389,16 +1389,17 @@ router.get("/:id/launch-readiness", async (req, res) => {
 
     let fuelBalanceValue = 0;
     let fuelBalanceUnavailable = false;
-    let fuelUnitPriceUsed = MISSION_FUEL_FALLBACK_PRICE_PER_LITER;
+    const missionFuelFallbackPrice = await getFuelPriceAt();
+    let fuelUnitPriceUsed = missionFuelFallbackPrice;
     let fuelUnitPriceReal: number | null = null;
-    let fuelUnitPriceFallback = MISSION_FUEL_FALLBACK_PRICE_PER_LITER;
+    let fuelUnitPriceFallback = missionFuelFallbackPrice;
     let fuelUnitPriceSource: "real" | "fallback" = "fallback";
     try {
       const fuelBalance = await fuelCardService.getCurrentBalance();
       fuelBalanceValue = Number(fuelBalance?.balance || 0);
 
       const fallbackUnitPrice = Number(
-        (fuelBalance as any)?.averagePricePerLiterFallback || MISSION_FUEL_FALLBACK_PRICE_PER_LITER,
+        (fuelBalance as any)?.averagePricePerLiterFallback || missionFuelFallbackPrice,
       );
       if (Number.isFinite(fallbackUnitPrice) && fallbackUnitPrice > 0) {
         fuelUnitPriceFallback = Math.round(fallbackUnitPrice);

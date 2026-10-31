@@ -1,259 +1,98 @@
-import { Router, Request, Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
 import { excelExportService } from "../services/excel-export-service";
-import { authenticate } from "../middleware/auth";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 
+/**
+ * Exports Excel. Les gardes (session, role par EXPORT_ROLE_MATRIX, drapeau
+ * `exports`) sont posees au montage dans server/api/index.ts (exportsGuard) :
+ * une route ajoutee ici est donc refusee tant qu'elle n'est pas dans la matrice.
+ */
 const router = Router();
+const log = moduleLogger("exports");
 
-/**
- * Routes API Exports Excel
- * 
- * Endpoints:
- * - GET /api/exports/supplier-invoices - Export factures fournisseurs (96 factures)
- * - GET /api/exports/inventory - Export inventaire stock (58 pièces, 94.4M FCFA)
- * - GET /api/exports/fuel-consumption - Export consommation carburant
- * - GET /api/exports/client-operations - Export missions clients
- * - GET /api/exports/client-invoices - Export factures clients
- * - GET /api/exports/monthly-report - Rapport comptable mensuel complet
- */
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-/**
- * GET /api/exports/supplier-invoices
- * Export Excel: Factures fournisseurs (96 factures)
- */
-router.get("/supplier-invoices", authenticate, async (req: Request, res: Response) => {
-  try {
-    const buffer = await excelExportService.exportSupplierInvoices();
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename=factures_fournisseurs_${new Date().toISOString().split('T')[0]}.xlsx`
-    );
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting supplier invoices:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+const today = () => new Date().toISOString().split("T")[0];
 
-/**
- * GET /api/exports/inventory
- * Export Excel: Inventaire stock (58 pièces, 94.4M FCFA)
- */
-router.get("/inventory", authenticate, async (req: Request, res: Response) => {
-  try {
-    const buffer = await excelExportService.exportInventory();
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename=inventaire_stock_${new Date().toISOString().split('T')[0]}.xlsx`
-    );
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting inventory:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+/** Nom de fichier sur : lettres, chiffres, tiret et souligne ; rien qui puisse casser l'en-tete. */
+function safeName(value: string): string {
+  const cleaned = value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned.slice(0, 60) || "export";
+}
 
-/**
- * GET /api/exports/fuel-consumption
- * Export Excel: Consommation carburant (24 enregistrements août 2025)
- * Query params: year (required), month (optional)
- */
-router.get("/fuel-consumption", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { year, month } = req.query;
+const yearSchema = z.coerce.number().int().min(2000).max(2100);
+const monthSchema = z.coerce.number().int().min(1).max(12);
+const optionalText = z.string().trim().max(120).optional();
 
-    if (!year) {
-      return res.status(400).json({ error: "year est requis" });
+function parse<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new AppError(400, message, { cause: result.error });
+  return result.data;
+}
+
+function sendXlsx(res: Response, buffer: Buffer | ArrayBuffer | Uint8Array, filename: string) {
+  res.setHeader("Content-Type", XLSX_MIME);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}.xlsx"`);
+  res.send(buffer);
+}
+
+type Handler = (req: Request, res: Response) => Promise<void>;
+
+function route(path: string, label: string, handler: Handler) {
+  router.get(path, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await handler(req, res);
+    } catch (error) {
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId, path }, `Echec de l'export ${label}`);
+      next(new AppError(500, `Impossible de generer l'export ${label}.`, { cause: error }));
     }
+  });
+}
 
-    const buffer = await excelExportService.exportFuelConsumption(
-      parseInt(year as string),
-      month ? parseInt(month as string) : undefined
-    );
-    
-    const filename = month
-      ? `carburant_${month}_${year}.xlsx`
-      : `carburant_${year}.xlsx`;
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting fuel consumption:", error);
-    res.status(500).json({ error: error.message });
-  }
+route("/supplier-invoices", "des factures fournisseurs", async (_req, res) => {
+  sendXlsx(res, await excelExportService.exportSupplierInvoices(), `factures_fournisseurs_${today()}`);
 });
 
-/**
- * GET /api/exports/client-operations
- * Export Excel: Missions et opérations clients
- * Query params: clientName (optional)
- */
-router.get("/client-operations", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { clientName } = req.query;
-
-    const buffer = await excelExportService.exportClientOperations(
-      clientName as string | undefined
-    );
-    
-    const filename = clientName
-      ? `operations_${clientName}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `operations_${new Date().toISOString().split('T')[0]}.xlsx`;
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting client operations:", error);
-    res.status(500).json({ error: error.message });
-  }
+route("/inventory", "de l'inventaire", async (_req, res) => {
+  sendXlsx(res, await excelExportService.exportInventory(), `inventaire_stock_${today()}`);
 });
 
-/**
- * GET /api/exports/client-invoices
- * Export Excel: Factures clients
- * Query params: clientName (optional)
- */
-router.get("/client-invoices", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { clientName } = req.query;
+async function fuelExport(req: Request, res: Response, prefix: string) {
+  const year = parse(yearSchema, req.query.year, "L'annee est requise (ex. 2026).");
+  const month = req.query.month === undefined ? undefined : parse(monthSchema, req.query.month, "Le mois doit etre compris entre 1 et 12.");
+  const buffer = await excelExportService.exportFuelConsumption(year, month);
+  sendXlsx(res, buffer, month ? `${prefix}_${month}_${year}` : `${prefix}_${year}`);
+}
 
-    const buffer = await excelExportService.exportClientInvoices(
-      clientName as string | undefined
-    );
-    
-    const filename = clientName
-      ? `factures_${clientName}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `factures_clients_${new Date().toISOString().split('T')[0]}.xlsx`;
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting client invoices:", error);
-    res.status(500).json({ error: error.message });
-  }
+route("/fuel-consumption", "de la consommation carburant", (req, res) => fuelExport(req, res, "carburant"));
+route("/fuel-statistics", "des statistiques carburant", (req, res) => fuelExport(req, res, "stats_carburant"));
+
+route("/client-operations", "des operations clients", async (req, res) => {
+  const clientName = parse(optionalText, req.query.clientName, "Nom de client invalide.");
+  const name = clientName ? `operations_${safeName(clientName)}_${today()}` : `operations_${today()}`;
+  sendXlsx(res, await excelExportService.exportClientOperations(clientName), name);
 });
 
-/**
- * GET /api/exports/monthly-report
- * Export Excel: Rapport comptable mensuel complet
- * Query params: year (required), month (required)
- */
-router.get("/monthly-report", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { year, month } = req.query;
-
-    if (!year || !month) {
-      return res.status(400).json({ error: "year et month sont requis" });
-    }
-
-    const buffer = await excelExportService.exportMonthlyAccountingReport(
-      parseInt(year as string),
-      parseInt(month as string)
-    );
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename=rapport_mensuel_${month}_${year}.xlsx`
-    );
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting monthly report:", error);
-    res.status(500).json({ error: error.message });
-  }
+// Alias de client-operations (parametre historique `client`).
+route("/client-missions", "des missions clients", async (req, res) => {
+  const client = parse(optionalText, req.query.client, "Nom de client invalide.");
+  const name = client ? `missions_${safeName(client)}_${today()}` : `missions_tous_clients_${today()}`;
+  sendXlsx(res, await excelExportService.exportClientOperations(client), name);
 });
 
-/**
- * GET /api/exports/fuel-statistics
- * Alias vers /api/exports/fuel-consumption
- */
-router.get("/fuel-statistics", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { year, month } = req.query;
-
-    if (!year) {
-      return res.status(400).json({ error: "year est requis" });
-    }
-
-    const buffer = await excelExportService.exportFuelConsumption(
-      parseInt(year as string),
-      month ? parseInt(month as string) : undefined
-    );
-    
-    const filename = month
-      ? `stats_carburant_${month}_${year}.xlsx`
-      : `stats_carburant_${year}.xlsx`;
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting fuel statistics:", error);
-    res.status(500).json({ error: error.message });
-  }
+route("/client-invoices", "des factures clients", async (req, res) => {
+  const clientName = parse(optionalText, req.query.clientName, "Nom de client invalide.");
+  const name = clientName ? `factures_${safeName(clientName)}_${today()}` : `factures_clients_${today()}`;
+  sendXlsx(res, await excelExportService.exportClientInvoices(clientName), name);
 });
 
-/**
- * GET /api/exports/client-missions
- * Alias vers /api/exports/client-operations
- */
-router.get("/client-missions", authenticate, async (req: Request, res: Response) => {
-  try {
-    const { client } = req.query;
-
-    const buffer = await excelExportService.exportClientOperations(
-      client as string | undefined
-    );
-    
-    const filename = client
-      ? `missions_${client}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `missions_tous_clients_${new Date().toISOString().split('T')[0]}.xlsx`;
-    
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    
-    res.send(buffer);
-  } catch (error: any) {
-    console.error("Error exporting client missions:", error);
-    res.status(500).json({ error: error.message });
-  }
+route("/monthly-report", "du rapport mensuel", async (req, res) => {
+  const year = parse(yearSchema, req.query.year, "L'annee est requise (ex. 2026).");
+  const month = parse(monthSchema, req.query.month, "Le mois est requis (1 a 12).");
+  sendXlsx(res, await excelExportService.exportMonthlyAccountingReport(year, month), `rapport_mensuel_${month}_${year}`);
 });
 
 export default router;
