@@ -3,7 +3,11 @@ import { moduleLogger } from "./logger";
 
 const log = moduleLogger("audit");
 
-const SENSITIVE_KEY = /^(password|pin|token|authorization|cookie)$|secret|password|passwd/i;
+/**
+ * Cle sensible : sous-chaine, pas seulement egalite exacte (`deviceToken`, `accessToken`,
+ * `apiKey`, `x-api-key`). Masquer trop vaut mieux que fuiter dans le journal.
+ */
+const SENSITIVE_KEY = /^(authorization|cookie)$|token|secret|password|passwd|pin|api[-_]?key/i;
 export const AUDIT_MAX_BODY_BYTES = 4096;
 const MAX_DEPTH = 8;
 

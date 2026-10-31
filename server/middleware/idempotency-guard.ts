@@ -4,7 +4,15 @@ import { IDEMPOTENCY_ROUTES, type IdempotencyRoute } from "../lib/idempotency-co
 
 /** Vrai si l'écriture `method path` figure dans la liste des routes rejouables. */
 export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): boolean {
-  const clean = path.split("?")[0].replace(/\/+$/, "") || "/";
+  // Meme normalisation qu'Express et que le journal d'audit : sans casse, chemin decode.
+  const rawPath = path.split("?")[0];
+  let decoded = rawPath;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    // Encodage invalide : on garde le chemin brut.
+  }
+  const clean = decoded.toLowerCase().replace(/\/+$/, "") || "/";
   return routes.some((route) => route.method === method.toUpperCase() && route.pattern.test(clean));
 }
 

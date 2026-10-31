@@ -100,10 +100,12 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // `technician-offline` et liste vide (lot #10b).
   apiRouter.use(idempotencyGuard());
 
-  // EXCEPTION AUX GARDES DE SESSION (CDC #6) : `/telemetry` recoit les positions des boitiers GPS,
-  // qui n'ont pas de compte et s'authentifieront par jeton d'appareil (lot #6). Monte ici, avant
-  // tout routeur garde, pour qu'aucune garde de session ajoutee plus bas ne le capture. Derriere
-  // le drapeau `gps` (404 coupe). Le squelette repond 501 sans rien lire ni ecrire.
+  // `/telemetry` recevra les positions des boitiers GPS, qui n'ont pas de compte et
+  // s'authentifieront par jeton d'appareil (lot #6). Tant que cette garde n'existe pas, le
+  // squelette reste derriere `isAdmin` (garde de session marquee, posee en tete du routeur) : le garde-fou
+  // tests/contract/api-auth-guard.contract.test.ts interdit toute route /api sans session.
+  // Le lot #6 remplacera `isAdmin` par une garde jeton marquee (`isSessionGuard`) et ajoutera
+  // l'exception justifiee a PUBLIC_ROUTES de ce test. Derriere le drapeau `gps` (404 coupe).
   apiRouter.use("/telemetry", requireFeature("gps"), telemetryRoutes);
 
   // Monter les routes de chaque service

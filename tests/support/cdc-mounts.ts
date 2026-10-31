@@ -34,12 +34,11 @@ export const MOUNT_CASES: readonly MountCase[] = [
   { name: "part-sales (écriture)", method: "POST", path: "/api/part-sales", flags: ["part-sales"], allowed: PART_SALE_ROLES },
   { name: "vehicle-positions", method: "GET", path: "/api/vehicle-positions", flags: ["gps"], allowed: GPS_VIEW_ROLES },
   { name: "admin/telemetry-devices", method: "GET", path: "/api/admin/telemetry-devices", flags: ["gps"], allowed: ["admin"] },
+  // Provisoire jusqu'au lot #6 (jeton d'appareil) : administrateur seulement, jamais sans session.
+  { name: "telemetry", method: "POST", path: "/api/telemetry/positions", flags: ["gps"], allowed: ["admin"] },
   { name: "workshop-labor-rates", method: "GET", path: "/api/workshop-labor-rates", flags: ["maintenance-report"], allowed: ["admin"] },
   // `exports` est allumé par défaut : les tests le coupent explicitement.
   { name: "maintenance-reports", method: "GET", path: "/api/maintenance-reports", flags: ["exports", "maintenance-report"], allowed: MAINTENANCE_REPORT_ROLES },
   { name: "imports (interventions)", method: "POST", path: "/api/imports/interventions", flags: ["excel-import"], allowed: IMPORT_INTERVENTION_ROLES },
   { name: "imports (autres types)", method: "POST", path: "/api/imports/parts", flags: ["excel-import"], allowed: IMPORT_ROLES },
 ];
-
-/** `/telemetry` : drapeau `gps`, aucune session (auth par jeton d'appareil, lot #6). */
-export const TELEMETRY_CASE = { method: "POST", path: "/api/telemetry/positions", flags: ["gps"] as readonly FeatureKey[] };

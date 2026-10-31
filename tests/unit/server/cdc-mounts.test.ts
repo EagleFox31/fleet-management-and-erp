@@ -21,7 +21,7 @@ import { createApiRouter } from "../../../server/api";
 import { errorHandler, requestContext } from "../../../server/middleware/error-handler";
 import { ALL_APP_ROLES, type AppRole } from "../../../shared/constants/roles";
 import { FEATURE_FLAGS, type FeatureKey } from "../../../shared/feature-flags";
-import { MOUNT_CASES, TELEMETRY_CASE } from "../../support/cdc-mounts";
+import { MOUNT_CASES } from "../../support/cdc-mounts";
 
 /**
  * Montages CDC-0a de server/api/index.ts, sans base : 404 drapeau coupé, 401 sans session,
@@ -98,16 +98,6 @@ describe.each(MOUNT_CASES)("montage $name", (mount) => {
   it("drapeaux allumés, rôle autorisé : 501 (squelette)", async () => {
     process.env.FEATURE_FLAGS = flagsOn(mount.flags);
     for (const role of mount.allowed) expect(await call(mount.method, mount.path, role), role).toBe(501);
-  });
-});
-
-describe("montage /telemetry (sans session)", () => {
-  it("drapeau gps coupé : 404", async () => {
-    expect(await call(TELEMETRY_CASE.method, TELEMETRY_CASE.path)).toBe(404);
-  });
-  it("drapeau gps allumé : le squelette répond 501 sans session", async () => {
-    process.env.FEATURE_FLAGS = flagsOn(TELEMETRY_CASE.flags);
-    expect(await call(TELEMETRY_CASE.method, TELEMETRY_CASE.path)).toBe(501);
   });
 });
 

@@ -31,3 +31,22 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Contrat non joué ici : `DATABASE_URL_TEST` est identique à `DATABASE_URL` (même Neon que le développement), pas une base de test distincte.
   - `tests/contract/api-auth-guard.contract.test.ts` signalera `POST /api/telemetry/positions` (route sans garde de session, voulue) : ajouter l'entrée dans `PUBLIC_ROUTES` avec la justification « auth par jeton d'appareil, lot #6 ». Fichier existant, non modifié.
   - `tests/unit/server/audit-config.test.ts` gèle `AUDIT_CONFIG` à 8 entités : d'où `CDC_AUDIT_CONFIG` séparée. Fusionner les deux demande de mettre ce test à jour.
+
+## 2026-10-31T20:10:00+01:00 — CDC-0a — Reprise après relecture (garde /telemetry, audit, masquage)
+
+- **Agent** : api (lot CDC-0a) · **Branche** : `lot/api/CDC-0-socle` · **Commit** : voir `git log`
+- **Statut** : fait ; contrat HTTP non joué, base de test non isolée
+- **Quoi** : corrige l'entrée précédente (CDC-0a) : `/telemetry` n'est plus sans session ; le journal d'audit ne peut plus être contourné par la casse ou le pourcentage ; le masquage couvre les jetons composés.
+- **Comment** :
+  - `server/api/telemetry.routes.ts` : `router.use(isAdmin)` en tête (garde de session marquée), commentaire renvoyant au lot #6 qui la remplacera par une garde jeton marquée. Le garde-fou gelé `api-auth-guard.contract.test.ts` n'a donc plus d'exception à recevoir : l'avertissement « ajouter à `PUBLIC_ROUTES` » de l'entrée précédente est caduc. Vérifié avec la même fonction de parcours que ce test, sur la pile réelle de `createApiRouter` : les 20 routes des nouveaux montages sont gardées.
+  - `server/middleware/audit-writes.ts` (`matchAuditRule`) et `server/middleware/idempotency-guard.ts` (`isIdempotentRoute`) : comparaison sur le chemin décodé (`decodeURIComponent`, repli sur le brut si invalide) et en minuscules, comme Express. Les motifs doivent donc rester en minuscules.
+  - `server/lib/audit.ts` : `SENSITIVE_KEY` devient `/^(authorization|cookie)$|token|secret|password|passwd|pin|api[-_]?key/i` (aucune clé déjà masquée n'est perdue). Effet de bord assumé : `pin` en sous-chaîne masque aussi des clés comme `shipping`.
+  - Tests : `tests/unit/server/cdc-review-fixes.test.ts` (nouveau) ; la table `tests/support/cdc-mounts.ts` classe maintenant `/telemetry` en « admin seulement » (401 sans session), les blocs « sans session » de `cdc-mounts.test.ts` et du contrat sont retirés.
+- **Pourquoi** : relecture de la PR #55 (blocant : route /api sans session ; moyens : contournement de l'audit par la casse et l'encodage, fuite de `deviceToken`/`apiKey` dans le journal).
+- **Comment tester (QA)** :
+  - Étapes : 1. `FEATURE_FLAGS=gps=on`, POST `/api/telemetry/positions` sans session, puis en technicien, puis en admin. 2. `FEATURE_FLAGS=part-sales=on`, POST `/api/PART-SALES` en magasinier : la ligne `activity_logs` n'est écrite que sur réponse < 400 (ici 501 : aucune ; la preuve se fait en unitaire sur `matchAuditRule`).
+  - Attendu : 401, 403, 501.
+  - Preuve automatisée : `node node_modules/vitest/vitest.mjs run --reporter=dot` → 69 fichiers, 863 tests verts.
+- **RAIDER** : couvert D (aucun test existant modifié, ceux de masquage et d'audit restent verts), E (moindre privilège, masquage élargi), failure memory (classe « Routes API ouvertes sans session » : prévention = test de pile du routeur). Sans objet : migration.
+- **Correction de l'entrée précédente** : elle affirmait « drapeaux coupés = 404, suites existantes vertes » dans sa ligne RAIDER. Exact pour les suites unitaires seulement. Les suites de contrat existantes (dont `api-auth-guard`) n'ont pas été jouées : contrat non joué, base de test non isolée (`DATABASE_URL_TEST` identique à `DATABASE_URL`).
+- **Reste / risques** : `tests/unit/server/audit-config.test.ts` (liste gelée à 8 entités) n'est pas bloquant ; `CDC_AUDIT_CONFIG` reste séparée. Le lot #6 doit remplacer `isAdmin` par une garde jeton marquée `isSessionGuard`, sinon `api-auth-guard` redeviendra rouge.

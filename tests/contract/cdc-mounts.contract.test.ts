@@ -4,7 +4,7 @@ import { ALL_APP_ROLES, type AppRole } from "../../shared/constants/roles";
 import type { FeatureKey } from "../../shared/feature-flags";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
-import { MOUNT_CASES, TELEMETRY_CASE } from "../support/cdc-mounts";
+import { MOUNT_CASES } from "../support/cdc-mounts";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 
 /**
@@ -80,13 +80,3 @@ describe.each(MOUNT_CASES)("montage $name", { timeout: 120000 }, (mount) => {
   });
 });
 
-describe("montage /telemetry (sans session)", { timeout: 60000 }, () => {
-  it("drapeau gps coupé : 404", async () => {
-    delete process.env.FEATURE_FLAGS;
-    expect(await call(TELEMETRY_CASE.method, TELEMETRY_CASE.path)).toBe(404);
-  });
-  it("drapeau gps allumé : 501 sans session", async () => {
-    process.env.FEATURE_FLAGS = flagsOn(TELEMETRY_CASE.flags);
-    expect(await call(TELEMETRY_CASE.method, TELEMETRY_CASE.path)).toBe(501);
-  });
-});
