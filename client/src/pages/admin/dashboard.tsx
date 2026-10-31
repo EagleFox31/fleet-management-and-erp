@@ -8,6 +8,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { Link } from "wouter";
+import { KpiTiles } from "@/components/dashboard/kpi-tiles";
 import { OverdueInvoicesAlert } from "@/components/dashboard/overdue-invoices-alert";
 import { VehicleStatusPieChart } from "@/components/dashboard/vehicle-status-pie-chart";
 import { TopPartsChart } from "@/components/dashboard/top-parts-chart";
@@ -152,6 +153,7 @@ export default function AdminDashboard() {
           )}
         </KpiGrid>
       </HeaderCard>
+      <KpiTiles />
 
       {/* Real-time KPIs */}
       <KpiGrid columns={3} withTopBorder={false}>

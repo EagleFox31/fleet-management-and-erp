@@ -1,3 +1,4 @@
+import { getFuelPriceAt } from "./fuel-price-service";
 import { db } from "../db";
 import { fuelRecords, users, vehicles, type FuelRecord } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
@@ -72,7 +73,7 @@ export class FuelCardService {
       .limit(1);
     
     // Calculer solde en litres avec distinction explicite entre prix réel et fallback
-    const fallbackPricePerLiter = 828;
+    const fallbackPricePerLiter = await getFuelPriceAt();
     const realAvgPricePerLiter = totalLiters > 0 ? debits / totalLiters : null;
     const usedAvgPricePerLiter = realAvgPricePerLiter ?? fallbackPricePerLiter;
     const fuelBalance = usedAvgPricePerLiter > 0 ? balance / usedAvgPricePerLiter : 0;

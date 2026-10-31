@@ -4,9 +4,7 @@ Document pour le client : langage métier. Pour chaque question, nous avons appl
 provisoire pour que la recette puisse avoir lieu. Si vous ne répondez pas, cette valeur reste.
 Vous pouvez la changer sans attendre une nouvelle livraison : tout est réglable.
 
-Note de rédaction (à retirer avant envoi) : la demande évoquait 13 questions ouvertes ; le plan produit
-en contient 19 (D-01 à D-19). Elles sont toutes reprises ci-dessous, plus la durée de validité de l'ACF et
-de l'agrément PD (ADR 0001, écarts au plan). Le numéro du plan est indiqué entre parenthèses.
+Le numéro entre parenthèses sert de référence pour nos échanges.
 
 ## Priorité haute : à confirmer avant lundi
 

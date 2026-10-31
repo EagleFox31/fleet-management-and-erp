@@ -12,17 +12,29 @@ export class AppError extends Error {
   readonly status: number;
   readonly code: ApiErrorCode;
   readonly fieldErrors?: ApiFieldError[];
+  /**
+   * Champs supplémentaires fusionnés dans le corps de la réponse (`lockedUntil` du 429,
+   * `conflicts` du 409). Les clés du contrat commun (`message`, `code`, `requestId`, `errors`)
+   * ne sont jamais écrasées.
+   */
+  readonly details?: Record<string, unknown>;
 
   constructor(
     status: number,
     message: string,
-    options: { code?: ApiErrorCode; fieldErrors?: ApiFieldError[]; cause?: unknown } = {},
+    options: {
+      code?: ApiErrorCode;
+      fieldErrors?: ApiFieldError[];
+      details?: Record<string, unknown>;
+      cause?: unknown;
+    } = {},
   ) {
     super(message, { cause: options.cause });
     this.name = "AppError";
     this.status = status;
     this.code = options.code ?? codeForStatus(status);
     this.fieldErrors = options.fieldErrors;
+    this.details = options.details;
   }
 }
 
