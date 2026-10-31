@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useFeatureFlags } from "@/hooks/use-feature";
 import type { FeatureKey } from "@shared/feature-flags";
 import { FEATURE_GATED_HREFS, LOT_SCREENS, canAccessLotScreen } from "@/config/lot-screens";
+import { CDC_SCREENS } from "@/config/cdc-screens";
 import {
   BarChart3,
   Truck,
@@ -75,7 +76,7 @@ const LOT_MENU_GROUPS: Partial<Record<string, { label: string; icon: any }>> = {
 /** Ajoute les écrans du lot au menu du rôle, puis retire ce que les drapeaux masquent. */
 function withLotScreens(base: MenuItem[], role: string | undefined, flags: Record<FeatureKey, boolean>): MenuItem[] {
   const menu: MenuItem[] = base.map((item) => ({ ...item, submenu: item.submenu ? [...item.submenu] : undefined }));
-  for (const screen of LOT_SCREENS) {
+  for (const screen of [...LOT_SCREENS, ...CDC_SCREENS]) {
     if (!screen.menu || !canAccessLotScreen(screen, role)) continue;
     const entry: MenuItem = { label: screen.menu.label, href: screen.path, icon: screen.menu.icon, feature: screen.feature };
     const key = screen.menu.group;

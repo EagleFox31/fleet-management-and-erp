@@ -745,6 +745,8 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/technician-stats"] });
       // Satellites du lot : tuiles KPI, historique et contrôle qualité de l'OT.
       queryClient.invalidateQueries({ queryKey: ["/api/kpi"] });
+      // Avis de maintenance rattachés aux missions (CDC) : l'état de l'OT les fait évoluer.
+      queryClient.invalidateQueries({ queryKey: ["/api/mission-advisories"] });
       if (currentUserId) {
         queryClient.invalidateQueries({
           queryKey: ["/api/technician/work-orders", currentUserId],
@@ -928,6 +930,24 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "backup_failed":
       invalidateCatalogEvent("backup_failed");
       invalidateAlertQueries();
+      break;
+
+    // Écarts du cahier des charges (CDC-0b) : couche 3 seulement, l'émetteur vient du lot fonctionnel.
+    case "part_sale_validated":
+      invalidateCatalogEvent("part_sale_validated");
+      break;
+    case "part_sale_cancelled":
+      invalidateCatalogEvent("part_sale_cancelled");
+      break;
+    case "part_sale_invoiced":
+      invalidateCatalogEvent("part_sale_invoiced");
+      break;
+    case "vehicle_position_updated":
+      invalidateCatalogEvent("vehicle_position_updated");
+      break;
+    case "import_batch_applied":
+      // Aucun toast : un import touche des centaines de lignes.
+      invalidateCatalogEvent("import_batch_applied");
       break;
 
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des

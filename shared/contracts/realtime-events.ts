@@ -9,7 +9,13 @@
  * Réutilisés sans redéclaration : `work_order_updated` (contrôle qualité),
  * `part_requirement_updated` (réception), `alert_created`.
  */
-import { FUEL_READ_ROLES, type AppRole } from "../constants/roles";
+import {
+  FUEL_READ_ROLES,
+  GPS_VIEW_ROLES,
+  IMPORT_INTERVENTION_ROLES,
+  PART_SALE_READ_ROLES,
+  type AppRole,
+} from "../constants/roles";
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -30,7 +36,7 @@ const WORKSHOP_SUPERVISORS = ["admin", "workshop_manager"] as const satisfies re
 export const REALTIME_EVENTS = {
   incident_reported: {
     scope: { type: "roles", roles: WORKSHOP_SUPERVISORS },
-    invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts"],
+    invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts", "/api/mission-advisories"],
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
@@ -58,6 +64,31 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],
   } as EventDefinition<{ id: number }>,
+
+  // Écarts du cahier des charges (chantier CDC, lot CDC-0b). Déclarés ici ; l'émetteur
+  // est livré par le lot fonctionnel concerné.
+  // Vente de pièces : le stock, l'entrepôt et les tuiles KPI changent avec la vente.
+  part_sale_validated: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: ["/api/part-sales", "/api/parts", "/api/warehouse", "/api/kpi"],
+  } as EventDefinition<{ id: number }>,
+  part_sale_cancelled: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: ["/api/part-sales", "/api/parts", "/api/warehouse", "/api/kpi"],
+  } as EventDefinition<{ id: number }>,
+  part_sale_invoiced: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: ["/api/part-sales", "/api/parts", "/api/warehouse", "/api/kpi"],
+  } as EventDefinition<{ id: number; invoiceId: number }>,
+  vehicle_position_updated: {
+    scope: { type: "roles", roles: GPS_VIEW_ROLES },
+    invalidates: ["/api/vehicle-positions"],
+  } as EventDefinition<{ vehicleId: number }>,
+  // Import Excel appliqué : véhicules, ordres de travail et KPI changent. Sans toast.
+  import_batch_applied: {
+    scope: { type: "roles", roles: IMPORT_INTERVENTION_ROLES },
+    invalidates: ["/api/vehicles", "/api/work-orders", "/api/kpi"],
+  } as EventDefinition<{ batchId: number; kind: string }>,
 } as const;
 
 export type RealtimeEventName = keyof typeof REALTIME_EVENTS;
