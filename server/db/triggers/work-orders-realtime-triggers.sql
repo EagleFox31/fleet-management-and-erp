@@ -10,6 +10,11 @@ DECLARE
   entity_id INTEGER;
   work_order_payload JSONB;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
   operation_type := TG_OP;
 
   IF TG_OP = 'INSERT' THEN

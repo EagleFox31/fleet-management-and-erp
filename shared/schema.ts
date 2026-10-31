@@ -1,5 +1,5 @@
 import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
@@ -1750,3 +1750,88 @@ export const partRequirementReceipts = pgTable("part_requirements", {
   receivedBy: integer("received_by").references(() => users.id),
   receivedAt: timestamp("received_at"), // P-16 : posé dans onTransition(tx)
 });
+
+// --- Chantier CDC (écarts du cahier des charges) ------------------------------------------
+// SQL : server/db/migrations/20261101_cdc_ecarts.sql et CDC_SCHEMA_STATEMENTS
+// (server/init-database.ts). Index partiels et uniques posés en SQL seulement.
+
+// Taux horaire atelier daté (CDC #7). Aucune valeur semée : le taux en vigueur à une date est
+// la ligne au plus grand `effective_from` inférieur ou égal à cette date.
+export const workshopLaborRates = pgTable("workshop_labor_rates", {
+  id: serial("id").primaryKey(),
+  effectiveFrom: date("effective_from").notNull().unique(),
+  hourlyRateHt: numeric("hourly_rate_ht", { precision: 15, scale: 2 }).notNull(), // CHECK >= 0
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertWorkshopLaborRateSchema = createInsertSchema(workshopLaborRates).omit({
+  id: true,
+  createdBy: true,
+  createdAt: true,
+});
+
+export const IMPORT_BATCH_KINDS = ["vehicles", "interventions"] as const;
+export const IMPORT_BATCH_STATUSES = ["applied", "failed"] as const;
+
+// Lot d'import (CDC #9). Index unique partiel import_batches_applied_file_uidx :
+// un même fichier (kind, file_sha256) n'est appliqué qu'une fois.
+export const importBatches = pgTable("import_batches", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: IMPORT_BATCH_KINDS }).notNull(),
+  fileName: text("file_name"),
+  fileSha256: text("file_sha256").notNull(),
+  status: text("status", { enum: IMPORT_BATCH_STATUSES }).notNull().default("applied"),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const IDEMPOTENCY_KEY_STATES = ["in_progress", "completed"] as const;
+
+// Clés d'idempotence des écritures (CDC #10), écrites par le serveur seulement.
+// Unicité (user_id, key) ; purge sur `expires_at` (index idempotency_keys_expires_at_idx).
+export const idempotencyKeys = pgTable("idempotency_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+  requestHash: text("request_hash").notNull(),
+  state: text("state", { enum: IDEMPOTENCY_KEY_STATES }).notNull().default("in_progress"),
+  responseStatus: integer("response_status"),
+  responseBody: jsonb("response_body"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`(now() + interval '7 days')`),
+});
+
+// Colonnes CDC ajoutées à work_orders et vehicles, déclarées à part comme `workOrderQuality` :
+// `WorkOrder` est construit à la main dans server/storage.ts, et ces colonnes ne doivent pas
+// entrer dans `insertWorkOrderSchema` / `insertVehicleSchema` (écrites par le serveur).
+// `origin` : NULL = saisie dans l'application, 'history_import' = reprise d'historique.
+export const WORK_ORDER_ORIGINS = ["history_import"] as const;
+
+export const workOrderPlanning = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  dueDate: date("due_date"), // CDC #7, index partiel work_orders_preventive_due_idx
+  dueMileage: integer("due_mileage"), // CHECK work_orders_due_mileage_check (>= 0)
+  origin: text("origin", { enum: WORK_ORDER_ORIGINS }),
+  externalRef: text("external_ref"), // unique si non nul (work_orders_external_ref_uidx)
+  importFingerprint: text("import_fingerprint"), // unique si non nul (work_orders_import_fingerprint_uidx)
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export const vehicleImports = pgTable("vehicles", {
+  id: serial("id").primaryKey(),
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export type WorkshopLaborRateRow = typeof workshopLaborRates.$inferSelect;
+export type InsertWorkshopLaborRate = z.infer<typeof insertWorkshopLaborRateSchema>;
+export type ImportBatchRow = typeof importBatches.$inferSelect;
+export type NewImportBatch = typeof importBatches.$inferInsert;
+export type ImportBatchKind = (typeof IMPORT_BATCH_KINDS)[number];
+export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
+export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
+export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
+export type VehicleImportRow = typeof vehicleImports.$inferSelect;
