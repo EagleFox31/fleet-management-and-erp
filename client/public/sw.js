@@ -1,5 +1,16 @@
 // Yaro FleetOS - Service Worker PWA (Atelier & Technicien)
-const CACHE_NAME = 'fleetos-tech-v1.0.0';
+//
+// Ce worker ne met en cache que les ressources statiques de l'application.
+// Aucune réponse /api/* n'est jamais écrite dans Cache Storage : ce cache est
+// partagé par tous les comptes du navigateur et ne connaît pas l'utilisateur,
+// donc un second compte sur le même téléphone relirait les données du premier.
+// Les données métier hors ligne passent par IndexedDB, cloisonné par utilisateur
+// (client/src/lib/offline-storage.ts).
+//
+// Changer CACHE_NAME à chaque modification de cette règle : l'activation supprime
+// tout cache portant un autre nom, y compris les réponses API déjà stockées par
+// les versions précédentes sur les appareils installés.
+const CACHE_NAME = 'fleetos-static-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -7,6 +18,10 @@ const STATIC_ASSETS = [
   '/favicon.jpg',
   '/logo.jpg',
 ];
+
+function isApiRequest(url) {
+  return url.pathname.startsWith('/api/');
+}
 
 // 1. Installation du Service Worker et mise en cache des assets statiques
 self.addEventListener('install', (event) => {
@@ -17,7 +32,8 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// 2. Activation et nettoyage des anciens caches
+// 2. Activation : suppression de tout cache d'une version précédente, puis de
+//    toute entrée /api/* qui aurait pu entrer dans le cache courant.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -28,11 +44,17 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    }).then(() => caches.open(CACHE_NAME)).then((cache) => {
+      return cache.keys().then((requests) => Promise.all(
+        requests
+          .filter((request) => isApiRequest(new URL(request.url)))
+          .map((request) => cache.delete(request))
+      ));
     }).then(() => self.clients.claim())
   );
 });
 
-// 3. Stratégie de mise en cache intelligente (Network-first avec Stale-While-Revalidate fallback)
+// 3. Assets statiques et navigation : Cache First avec Network Fallback
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -41,34 +63,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Requêtes d'API : Network First avec fallback cache
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const responseToCache = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cachedResponse = await caches.match(event.request);
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          return new Response(
-            JSON.stringify({ error: 'Mode hors-ligne : données non disponibles en cache.' }),
-            { headers: { 'Content-Type': 'application/json' }, status: 503 }
-          );
-        })
-    );
+  // API : jamais interceptée, jamais mise en cache. Le navigateur la traite
+  // directement ; hors ligne, la requête échoue et l'application lit sa copie
+  // IndexedDB de l'utilisateur connecté.
+  if (isApiRequest(url)) {
     return;
   }
 
-  // Assets statiques et navigation : Cache First avec Network Fallback
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {

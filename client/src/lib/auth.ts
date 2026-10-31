@@ -1,4 +1,5 @@
-import { apiRequest } from "./queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { activateOfflineUser, purgeOfflineSession } from "@/lib/offline-storage";
 
 export interface LoginCredentials {
   username: string;
@@ -35,6 +36,13 @@ function createAuthTimeoutController(timeoutMs: number = AUTH_TIMEOUT_MS) {
   };
 }
 
+/** Désigne le magasin hors ligne de cet utilisateur (cloison par compte). */
+function rememberOfflineUser(user: User): void {
+  if (user && Number.isInteger(user.id) && user.id > 0) {
+    activateOfflineUser(queryClient, user.id);
+  }
+}
+
 export async function login(credentials: LoginCredentials): Promise<User> {
   const { signal, clear } = createAuthTimeoutController();
   try {
@@ -43,7 +51,9 @@ export async function login(credentials: LoginCredentials): Promise<User> {
       body: credentials,
       signal,
     });
-    return await response.json();
+    const user: User = await response.json();
+    rememberOfflineUser(user);
+    return user;
   } finally {
     clear();
   }
@@ -54,8 +64,17 @@ export async function register(data: RegistrationData): Promise<User> {
   return await response.json();
 }
 
+/**
+ * Déconnexion. Que le serveur réponde ou non (réseau coupé), le stockage hors
+ * ligne et le cache TanStack de ce compte sont purgés : le compte suivant sur
+ * le même appareil ne doit rien en relire.
+ */
 export async function logout(): Promise<void> {
-  await apiRequest("POST", "/api/auth/logout");
+  try {
+    await apiRequest("POST", "/api/auth/logout");
+  } finally {
+    await purgeOfflineSession(queryClient);
+  }
 }
 
 export async function getCurrentUser(): Promise<User | null> {
@@ -75,7 +94,9 @@ export async function getCurrentUser(): Promise<User | null> {
       throw new Error(`${response.status}: ${text}`);
     }
     
-    return await response.json();
+    const user: User = await response.json();
+    rememberOfflineUser(user);
+    return user;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       console.warn("Auth check timeout: /api/auth/me");
