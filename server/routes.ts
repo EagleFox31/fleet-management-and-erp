@@ -1331,57 +1331,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/vehicles/:vehicleId/documents", isWorkshopManager, (req, res) => {
-    const vehicleId = parseInt(req.params.vehicleId);
-      
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
-    
-    uploadVehicleDocument(req, res, async (err) => {
-      if (err) {
-        return res.status(400).json({ message: err.message });
-      }
-      
-      if (!req.file) {
-        return res.status(400).json({ message: "Aucun fichier n'a été téléchargé" });
-      }
-      
-      try {
-        const { name, type, description, expiryDate } = req.body;
-        
-        if (!name || !type) {
-          // Supprimer le fichier si les données sont invalides
-          await deleteFile(req.file.path);
-          return res.status(400).json({ message: "Nom et type de document requis" });
-        }
-        
-        const documentData = {
-          vehicleId: vehicleId,
-          name: name,
-          type: type,
-          description: description || null,
-          expiryDate: expiryDate || null,
-          filename: req.file.originalname,
-          filesize: req.file.size,
-          fileType: req.file.mimetype,
-          filePath: req.file.path,
-          uploadedBy: req.user?.id || null
-        };
-        
-        const document = await storage.createVehicleDocument(documentData);
-        
-        return res.status(201).json(document);
-      } catch (error) {
-        // Supprimer le fichier en cas d'erreur
-        await deleteFile(req.file.path);
-        
-        console.error("Create vehicle document error:", error);
-        return res.status(500).json({ message: "Erreur serveur" });
-      }
-    });
-  });
-
   app.get("/api/documents/:id/download", isAnyUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -5159,6 +5108,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertTireSchema.partial().parse(req.body),
         req.user?.id,
       );
+      if (!tire) return next(new AppError(404, "Ce pneu n'existe pas ou a été supprimé."));
       return res.status(200).json(tire);
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
@@ -5167,7 +5117,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tires/:id", isAdmin, async (req, res) => {
+  app.delete("/api/tires/:id", isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       const userId = req.user?.id;
@@ -5184,9 +5134,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete tire error:", error);
-      const errorMessage = error instanceof Error ? error.message : "Erreur serveur";
-      return res.status(400).json({ message: errorMessage });
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Delete tire error");
+      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
@@ -5623,6 +5573,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de pneu véhicule invalide" });
       }
 
+      // Le cycle de vie (montage, démontage, destination) déplace du stock : routes dédiées seulement.
+      const { VEHICLE_TIRE_LIFECYCLE_FIELDS } = await import("@shared/constants/tire-removal");
+      const lifecycleFields = VEHICLE_TIRE_LIFECYCLE_FIELDS.filter((field) => field in (req.body ?? {}));
+      if (lifecycleFields.length > 0) {
+        return next(new AppError(400, "Le montage et le démontage d'un pneu passent par leurs actions dédiées.", {
+          fieldErrors: lifecycleFields.map((field) => ({ field, message: "Non modifiable ici." })),
+        }));
+      }
+
       const { data, errors } = prepareColumnUpdate(vehicleTires, req.body ?? {});
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations du pneu monté sont invalides.", { fieldErrors: errors }));
@@ -5636,28 +5595,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/vehicle-tires/:id/remove", isWorkshopManager, async (req, res) => {
+  app.patch("/api/vehicle-tires/:id/remove", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
-      
+
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pneu véhicule invalide" });
       }
-      
-      const removalData = {
-        removalDate: req.body.removalDate,
-        removalMileage: req.body.removalMileage,
-        removalReason: req.body.removalReason
-      };
-      
-      const success = await tiresService.removeTireFromVehicle(id, removalData.removalMileage);
+
+      const { tireRemovalSchema } = await import("@shared/constants/tire-removal");
+      const removal = tireRemovalSchema.parse(req.body);
+
+      const success = await tiresService.removeTireFromVehicle(id, removal, req.user?.id);
       if (success) {
         return res.status(200).json({ message: "Pneu retiré avec succès" });
       } else {
         return res.status(404).json({ message: "Pneu de véhicule non trouvé" });
       }
     } catch (error) {
-      console.error("Remove tire from vehicle error:", error);
+      if (error instanceof z.ZodError || error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Remove tire from vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5690,19 +5647,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tire-inspections", isTechnician, async (req, res) => {
+  app.post("/api/tire-inspections", isTechnician, async (req, res, next) => {
     try {
-      const userId = req.user?.id;
-      
-      const inspectionData = {
-        ...req.body,
-        inspectedBy: userId
-      };
-      
+      const { insertTireInspectionSchema } = await import("@shared/schema");
+      // L'inspecteur est toujours l'auteur de la requête, jamais une valeur du corps.
+      const inspectionData = insertTireInspectionSchema.parse({ ...req.body, inspectedBy: req.user?.id });
+
       const inspection = await tiresService.createTireInspection(inspectionData);
       return res.status(201).json(inspection);
     } catch (error) {
-      console.error("Create tire inspection error:", error);
+      if (error instanceof z.ZodError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Create tire inspection error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5760,19 +5715,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tire-rotations", isWorkshopManager, async (req, res) => {
+  app.post("/api/tire-rotations", isWorkshopManager, async (req, res, next) => {
     try {
-      const userId = req.user?.id;
-      
+      const { insertTireRotationSchema } = await import("@shared/schema");
+      // OT et auteur sont posés par le serveur ; le formulaire envoie le coût en nombre.
+      const rotationInput = insertTireRotationSchema
+        .omit({ workOrderId: true, performedBy: true, createdBy: true })
+        .extend({
+          cost: z.coerce.number().nonnegative().nullish(),
+          technicianId: z.number().int().positive().nullish(),
+        });
+
       const rotationData = {
-        ...req.body.rotation,
-        performedBy: userId
+        ...rotationInput.parse(req.body?.rotation ?? {}),
+        performedBy: req.user?.id,
       };
-      
+
       const result = await tiresService.createTireRotation(rotationData);
       return res.status(201).json(result);
     } catch (error) {
-      console.error("Create tire rotation error:", error);
+      if (error instanceof z.ZodError || error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Create tire rotation error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
