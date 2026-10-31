@@ -18,6 +18,7 @@ const PUBLIC_ROUTES = new Set<string>([
   "POST /api/auth/login", // ouvre la session
   "POST /api/auth/pin-login", // ouvre la session chauffeur
   "GET /api/auth/drivers-list", // écran de connexion PIN: id et nom des chauffeurs seulement
+  "GET /api/auth/challenge", // defi captcha, appele avant la connexion (derriere le drapeau captcha)
   "POST /api/auth/logout", // ferme la session, sans effet hors session
 ]);
 

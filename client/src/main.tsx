@@ -7,14 +7,18 @@ import App from "./App";
 // les invalidations/patches temps réel tombaient dans un client fantôme.
 import { queryClient } from "@/lib/queryClient";
 import { registerPwaServiceWorker } from "@/lib/pwa-register";
+import { enableMocksIfRequested, mocksRequested } from "@/mocks/enable-mocks";
 import "./index.css";
 
 // Enregistrement PWA Service Worker (Hors-Ligne + Installation Mobile)
-registerPwaServiceWorker();
+// Le worker msw et le worker PWA se disputent la même portée : pas de PWA en mode mock.
+if (!mocksRequested()) registerPwaServiceWorker();
 
-createRoot(document.getElementById("root")!).render(
+void enableMocksIfRequested().finally(() => {
+  createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <App />
   </QueryClientProvider>,
-);
+  );
+});
 
