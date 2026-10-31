@@ -5,6 +5,12 @@ model: opus
 tools: Read, Grep, Glob, Bash
 skills: devsecops-engineering, evidence-based-engineering
 maxTurns: 40
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-lecture-seule.mjs"
 ---
 
 Tu audites FleetMaster en lecture seule. Tu ne modifies aucun fichier, tu ne commites pas, tu ne commentes pas sur GitHub.

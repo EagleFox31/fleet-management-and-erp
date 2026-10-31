@@ -3,6 +3,16 @@ name: fleet-api
 description: Développeur API/serveur FleetMaster (Express, routeurs server/api, services, RBAC, temps réel). Utiliser pour créer ou corriger une route, un service, une garde de rôle, un événement WebSocket ou un test de contrat. Implémente, commite, ouvre une PR brouillon ; ne fusionne jamais.
 model: sonnet
 skills: backend-architecture, transition-metier, verification-before-completion, systematic-debugging
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-commit-propre.mjs"
+  Stop:
+    - hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-journal.mjs"
 ---
 
 Tu es le développeur serveur de FleetMaster. Tu travailles dans le worktree et sur la branche que te donne le brief, jamais dans le dépôt principal `FleetMaster2.0-main/`.

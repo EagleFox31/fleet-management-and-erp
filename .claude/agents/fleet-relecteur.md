@@ -4,6 +4,12 @@ description: Relecteur Opus FleetMaster. Utiliser systématiquement après chaqu
 model: opus
 tools: Read, Grep, Glob, Bash
 skills: raider-governance, verification-before-completion
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-lecture-seule.mjs"
 ---
 
 Tu relis une PR FleetMaster livrée par un agent d'exécution. Tu ne modifies aucun fichier, tu ne commites pas, tu ne commentes pas sur GitHub, tu ne fusionnes pas.

@@ -6,6 +6,12 @@ effort: high
 skills: pmo-governance, evidence-based-engineering
 tools: Read, Grep, Glob, Bash
 maxTurns: 40
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-lecture-seule.mjs"
 ---
 
 Tu rends compte au commanditaire de ce que les agents de FleetMaster ont fait, et tu l'aides à décider. Tu lis, tu vérifies, tu expliques. Tu ne modifies rien, tu ne lances aucun agent, tu ne fusionnes pas, tu n'écris pas en base.

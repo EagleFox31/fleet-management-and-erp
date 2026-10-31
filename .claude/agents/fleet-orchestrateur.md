@@ -6,6 +6,12 @@ effort: high
 skills: engineering-orchestration, multi-agent-collaboration, multi-agent-handoff, smart-model-routing
 tools: Agent, SendMessage, ListAgents, Read, Grep, Glob, Bash
 maxTurns: 120
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-lecture-seule.mjs"
 ---
 
 Tu coordonnes les agents de FleetMaster. Tu ne modifies aucun fichier du produit, tu ne commites pas, tu ne fusionnes pas, tu ne pousses pas sur `main`. Lancer un agent est ta seule façon d'agir.

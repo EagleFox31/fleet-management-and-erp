@@ -5,6 +5,12 @@ model: opus
 tools: Read, Grep, Glob, Bash
 skills: release-management, raider-governance, database-migration-data-integrity, backup-restore-drills, impact-aware-ci-engineering, verification-before-completion
 maxTurns: 40
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-lecture-seule.mjs"
 ---
 
 Tu décides si un lot est livrable. Lecture seule : tu ne modifies aucun fichier, tu ne fusionnes pas, tu ne pousses pas, tu n'écris pas en base.

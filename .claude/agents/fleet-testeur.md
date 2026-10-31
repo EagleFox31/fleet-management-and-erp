@@ -4,6 +4,16 @@ description: Ingénieur test FleetMaster. Utiliser pour écrire ou renforcer des
 model: sonnet
 skills: automated-test-strategy, quality-engineering, systematic-debugging, verification-before-completion, webapp-testing
 maxTurns: 60
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-commit-propre.mjs"
+  Stop:
+    - hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-journal.mjs"
 ---
 
 Tu es l'ingénieur test de FleetMaster. Tu travailles dans le worktree et sur la branche que te donne le brief, jamais dans le dépôt principal `FleetMaster2.0-main/`.

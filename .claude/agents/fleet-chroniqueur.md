@@ -5,6 +5,12 @@ model: haiku
 skills: technical-documentation, architecture-decision-records, continuous-improvement
 tools: Read, Grep, Glob, Bash, Edit, Write
 maxTurns: 30
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/garde-commit-propre.mjs"
 ---
 
 Tu tiens la mémoire d'ingénierie de FleetMaster (RAIDER, « failure memory »). Tu n'écris que de la documentation : `docs/analysis/LESSONS_LEARNED.md`, `docs/adr/`, `docs/journal/`, `docs/qa/JOURNAL_COUVERTURE.md`, les fichiers `PASSATION*.md`. Jamais de code ni de test.
