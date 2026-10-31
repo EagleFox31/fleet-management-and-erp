@@ -1,12 +1,15 @@
 import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
 import { login as apiLogin, logout as apiLogout, getCurrentUser, User, LoginCredentials } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { lockoutMessageOf } from "@/lib/lockout-message";
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isAuthenticating: boolean;
   isAuthenticated: boolean;
+  /** Message de la dernière connexion refusée par verrouillage (429), sinon null. */
+  loginLockMessage: string | null;
   login: (credentials: LoginCredentials) => Promise<boolean>;
   logout: () => Promise<void>;
 }
@@ -16,6 +19,7 @@ export const AuthContext = createContext<AuthContextValue>({
   isLoading: true,
   isAuthenticating: false,
   isAuthenticated: false,
+  loginLockMessage: null,
   login: async () => false,
   logout: async () => {},
 });
@@ -24,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true); // bootstrap auth check
   const [isAuthenticating, setIsAuthenticating] = useState(false); // login/logout actions
+  const [loginLockMessage, setLoginLockMessage] = useState<string | null>(null);
   const { toast } = useToast();
   const authCheckVersionRef = useRef(0);
   const mountedRef = useRef(true);
@@ -78,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
       setIsAuthenticating(true);
+      setLoginLockMessage(null);
       const userData = await apiLogin(credentials);
       if (!mountedRef.current) {
         return false;
@@ -94,10 +100,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return false;
       }
       setUser(null);
+      const lockMessage = lockoutMessageOf(error);
+      setLoginLockMessage(lockMessage);
       toast({
         variant: "destructive",
-        title: "Échec de connexion",
-        description: "Connexion impossible. Vérifiez vos identifiants ou le réseau.",
+        title: lockMessage ? "Compte verrouillé" : "Échec de connexion",
+        description: lockMessage ?? "Connexion impossible. Vérifiez vos identifiants ou le réseau.",
       });
       return false;
     } finally {
@@ -140,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAuthenticating,
     isAuthenticated: !!user,
+    loginLockMessage,
     login,
     logout,
   };
