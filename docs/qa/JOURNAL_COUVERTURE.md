@@ -712,7 +712,7 @@ soumission sans doublon.
 - Constat hors périmètre : `getCurrentUser` (`client/src/lib/auth.ts`) abandonne `/api/auth/me` après
   8 s et renvoie alors vers la connexion. Un serveur lent passe pour une déconnexion.
 
-## (ce commit) - Session : un serveur lent ne déconnecte plus l'utilisateur
+## 163a20a - Session : un serveur lent ne déconnecte plus l'utilisateur
 
 **Quoi**
 - Au démarrage, seul un 401 de `/api/auth/me` vaut « pas de session ». Un délai dépassé, une coupure
