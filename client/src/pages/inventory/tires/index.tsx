@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, AlertTriangle, Package, TrendingUp, Truck, Activity, Timer, DollarSign, RotateCcw, Gauge, Eye, Edit, ShoppingCart, Save, Calendar, MapPin, Car, Clock, FileText, CircleDot } from "lucide-react";
+import { Plus, AlertTriangle, Package, TrendingUp, Truck, Activity, Timer, DollarSign, RotateCcw, Gauge, Eye, Edit, ShoppingCart, Save, Calendar, MapPin, Car, Clock, FileText, CircleDot, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,8 +24,10 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { TireWizardForm } from "@/components/inventory/tire-wizard-form";
 import { TireTable, type TireTableRow } from "@/components/inventory/tire-table";
 import { VehicleTireMountDialog } from "@/components/vehicles/vehicle-tire-mount-dialog";
+import { VehicleTireRemoveDialog, type MountedTireToRemove } from "@/components/vehicles/vehicle-tire-remove-dialog";
 import { canMountTiresFromStock } from "@/lib/auth";
 import { formatTireUsageLabel, computeTireWearScore } from "@shared/constants/tires";
+import { getVehicleTireStatusLabel } from "@shared/constants/tire-removal";
 import { cn } from "@/lib/utils";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
@@ -452,6 +454,7 @@ export default function TiresInventoryPage() {
   const [selectedInspection, setSelectedInspection] = useState<TireInspection | null>(null);
   const [showMountDialog, setShowMountDialog] = useState(false);
   const [mountPreselectedTireId, setMountPreselectedTireId] = useState<number | undefined>();
+  const [tireToRemove, setTireToRemove] = useState<MountedTireToRemove | null>(null);
 
   // Formulaire planification rotation
   const rotationForm = useForm<RotationFormData>({
@@ -1260,8 +1263,19 @@ export default function TiresInventoryPage() {
                         </div>
                       </div>
                       <Badge className={getConditionBadge(vt.status)}>
-                        {vt.status}
+                        {getVehicleTireStatusLabel(vt.status)}
                       </Badge>
+                      {canMountFromStock && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setTireToRemove(vt)}
+                          data-testid={`button-remove-tire-${vt.id}`}
+                        >
+                          <PackageOpen className="h-4 w-4 mr-2" />
+                          Démonter
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -2357,6 +2371,15 @@ export default function TiresInventoryPage() {
             if (!open) setMountPreselectedTireId(undefined);
           }}
           preselectedTireId={mountPreselectedTireId}
+        />
+      )}
+
+      {canMountFromStock && (
+        <VehicleTireRemoveDialog
+          mountedTire={tireToRemove}
+          onOpenChange={(open) => {
+            if (!open) setTireToRemove(null);
+          }}
         />
       )}
     </div>
