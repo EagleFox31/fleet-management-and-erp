@@ -28,3 +28,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - `part-labels` : aucune route d'étiquette n'est montée ; le test borne l'écran à `PART_LABEL_ROLES` (sous-ensemble de `PART_SCAN_ROLES`). Le lot #3 doit garder sa route par ce groupe.
   - `kpi-reports` : rôles `KPI_VIEWER_ROLES`, comparés à la garde `isManagementOrAdmin` de `server/middleware/auth.ts` ; le lot #7 (ajout du chef d'atelier) changera les deux ensemble.
   - `excel-import` : l'écran s'ouvre à `IMPORT_INTERVENTION_ROLES` (montage) ; les autres types d'import restent `IMPORT_ROLES` (administrateur), le lot #9 masque ces choix au chef d'atelier.
+
+## 2026-10-31T23:23:18+01:00 — CDC-0b — Rebase de la base d'intégration sur la branche distante retenue
+
+- **Agent** : fe (lot CDC-0b) · **Branche** : `lot/fe/CDC-0-socle-ui` · **Commit** : fusion b6818d4 puis ce commit
+- **Statut** : fait
+- **Quoi** : la branche distante `lot/int/CDC-0-base` (e7aa8f2 = schéma 53c8b89 + socle 73bf623 + `main` 76ff0f3) est la base retenue ; elle est fusionnée dans cette branche (`--no-ff`), sans conflit. Mon intégration locale (4820561) n'est plus utilisée.
+- **Comment** : `git fetch origin` puis `git merge --no-ff origin/lot/int/CDC-0-base`. Aucun fichier du lot modifié.
+- **Pourquoi** : le diff de la PR ne doit montrer que les fichiers du lot.
+- **Comment tester (QA)** : `git diff --name-only origin/lot/int/CDC-0-base...HEAD` ne liste que les fichiers de l'entrée précédente ; `tsc --noEmit -p .` : 0 erreur ; `vitest run` : 72 fichiers, 922 tests verts.
+- **RAIDER** : D (suites vertes après fusion) ; sans objet : les autres principes, aucun code changé.
+- **Reste / risques** : aucun.
