@@ -127,3 +127,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Preuve** : contrat `fleet-read-scope` 12 verts ; `tsc` global 0 erreur ; unitaires 781 verts.
 - **RAIDER** : couvert non-regression (personnel inchange), moindre privilege, erreurs lisibles ; sans objet : migration.
 - **Reste / risques** : `GET /api/drivers/:id`, `/:id/cpc-status`, `/:id/missions` et `POST /:id/update-cpc` restent ouverts a tout le personnel, chauffeur compris ; la reponse CPC expose CNI, permis et date de naissance a tout le personnel (voir PR).
+## 2026-10-31T20:30:00+01:00 - R-13 (suite) - Routes chauffeur par identifiant fermees, fiche allegee
+
+- **Agent** : api-1 · **Branche** : `lot/api/R-03-cloison-vehicules-chauffeurs` · **Commit** : voir `git log` de la branche
+- **Statut** : fait
+- **Quoi** : un chauffeur n'accede plus (403) a `GET /api/drivers/:id`, `/:id/cpc-status`, `/:id/missions` d'un autre chauffeur, ni a `GET /api/missions/:id` d'une mission non affectee ; `POST /api/drivers/:id/update-cpc` lui est refuse (il passait, la route n'est gardee que par `isStaff`). CNI, n° de permis et date de naissance ne sortent plus que pour admin, logistics, secretary (et le chauffeur sur sa propre fiche) sur `/api/drivers`, `/cpc-status`, `/expiring-cpc`, `/:id`, `/:id/cpc-status`.
+- **Comment** : `server/lib/driver-scope.ts` (`assertOwnDriverRecord`, `assertOwnMission`, `refuseDriver`, `redactDriverPersonalData`), appeles avant le `try` des handlers pour que l'`AppError` 403 ne soit pas avalee par leur catch. Autres roles inchanges.
+- **Pourquoi** : suite du bloquant R-13 ; minimisation des donnees personnelles decidee par l'utilisateur.
+- **Ecrans verifies** : dashboards chef d'atelier et secretaire ne lisent aucun de ces champs ; `/drivers` et `/drivers/:id` sont reserves aux gestionnaires. A signaler : `missions/new.tsx:540` affiche `licenseNumber` du chauffeur choisi (ecran ouvert a tout compte connecte) : un non-gestionnaire verra « N/A ».
+- **Preuve** : voir PR #53.

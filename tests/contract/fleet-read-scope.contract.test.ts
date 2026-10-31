@@ -192,3 +192,61 @@ describe("chauffeurs et missions : cloison chauffeur (R-13)", { timeout: 60000 }
     expect((await get("/api/missions", "clientA")).status).toBe(403);
   });
 });
+
+describe("chauffeurs et missions : routes par identifiant et DTO réduit (R-13)", { timeout: 60000 }, () => {
+  it.each([
+    (id: number) => `/api/drivers/${id}`,
+    (id: number) => `/api/drivers/${id}/cpc-status`,
+    (id: number) => `/api/drivers/${id}/missions`,
+  ])("fiche d'un autre chauffeur : 403 ; la sienne : 200", async (path) => {
+    expect((await get(path(driverRows.B), "driverA")).status).toBe(403);
+    expect((await get(path(driverRows.A), "driverA")).status).toBe(200);
+    expect((await get(path(driverRows.B), "workshop")).status).toBe(200);
+  });
+
+  it("mission : 403 si non affectée, 200 si affectée, personnel inchangé", async () => {
+    expect((await get(`/api/missions/${missionRows.B}`, "driverA")).status).toBe(403);
+    expect((await get(`/api/missions/${missionRows.A}`, "driverA")).status).toBe(200);
+    expect((await get(`/api/missions/${missionRows.B}`, "admin")).status).toBe(200);
+    expect((await get(`/api/missions/${missionRows.B}`, "workshop")).status).toBe(200);
+  });
+
+  it("update-cpc : un chauffeur est refusé en 403, même sur sa fiche", async () => {
+    for (const key of ["A", "B"] as const) {
+      const res = await fetch(`${baseUrl}/api/drivers/${driverRows[key]}/update-cpc`, {
+        method: "POST",
+        headers: { Cookie: cookies.get("driverA")!, "Content-Type": "application/json" },
+        body: JSON.stringify({ cpcDate: "2026-01-01" }),
+      });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("gestionnaire (admin) : CNI présente sur liste, cpc-status et détail", async () => {
+    const list = await get("/api/drivers", "admin");
+    expect(list.body.find((row: { id: number }) => row.id === driverRows.A).cniNumber).toBe("CNI-A");
+    const status = await get(`/api/drivers/${driverRows.A}/cpc-status`, "admin");
+    expect(status.body.cniNumber).toBe("CNI-A");
+    const detail = await get(`/api/drivers/${driverRows.A}`, "admin");
+    expect(detail.body.cniNumber).toBe("CNI-A");
+  });
+
+  it("workshop_manager : fiche sans CNI, permis ni date de naissance", async () => {
+    const forbidden = ["cniNumber", "licenseNumber", "birthDate"];
+    const bodies = [
+      (await get("/api/drivers", "workshop")).body.find((row: { id: number }) => row.id === driverRows.A),
+      (await get("/api/drivers/cpc-status", "workshop")).body.find((row: { id: number }) => row.id === driverRows.A),
+      (await get(`/api/drivers/${driverRows.A}/cpc-status`, "workshop")).body,
+      (await get(`/api/drivers/${driverRows.A}`, "workshop")).body,
+    ];
+    for (const body of bodies) {
+      expect(body.id).toBe(driverRows.A);
+      for (const field of forbidden) expect(body).not.toHaveProperty(field);
+    }
+  });
+
+  it("chauffeur : garde les champs de sa propre fiche", async () => {
+    const res = await get("/api/drivers/cpc-status", "driverA");
+    expect(res.body[0].cniNumber).toBe("CNI-A");
+  });
+});

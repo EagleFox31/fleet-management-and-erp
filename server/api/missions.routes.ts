@@ -1,5 +1,6 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
 import { Router } from "express";
+import { assertOwnMission } from "../lib/driver-scope";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
 import { eq, and, desc, inArray, ne, or, ilike } from "drizzle-orm";
@@ -706,7 +707,12 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/missions/:id - Détails d'une mission
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
+  try {
+    await assertOwnMission(req.user, Number.parseInt(req.params.id, 10));
+  } catch (error) {
+    return next(error);
+  }
   try {
     const missionId = parseInt(req.params.id);
 

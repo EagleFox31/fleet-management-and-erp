@@ -3,6 +3,7 @@ import { authenticate } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { assertOwnDriverRecord, redactDriverList, redactDriverPersonalData, refuseDriver } from "../lib/driver-scope";
 
 const log = moduleLogger("drivers-routes");
 
@@ -60,7 +61,7 @@ router.use(authenticate);
 router.get("/", async (req, res, next) => {
   try {
     const rows = await cpcTrainingService.getAllDriversStatus();
-    return res.status(200).json(scopeToDriver(rows, req.user));
+    return res.status(200).json(redactDriverList(scopeToDriver(rows, req.user), req.user));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Liste des chauffeurs en echec");
     next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
@@ -74,7 +75,7 @@ router.get("/", async (req, res, next) => {
 router.get("/cpc-status", async (req, res, next) => {
   try {
     const rows = await cpcTrainingService.getAllDriversStatus();
-    return res.status(200).json(scopeToDriver(rows, req.user));
+    return res.status(200).json(redactDriverList(scopeToDriver(rows, req.user), req.user));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Statut CPC des chauffeurs en echec");
     next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
@@ -88,7 +89,7 @@ router.get("/cpc-status", async (req, res, next) => {
 router.get("/expiring-cpc", async (req, res, next) => {
   try {
     const rows = await cpcTrainingService.getExpiringCPCAlerts();
-    return res.status(200).json(scopeToDriver(rows, req.user));
+    return res.status(200).json(redactDriverList(scopeToDriver(rows, req.user), req.user));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Alertes CPC en echec");
     next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
@@ -99,7 +100,12 @@ router.get("/expiring-cpc", async (req, res, next) => {
  * POST /api/drivers/:id/update-cpc
  * Mise à jour certification CPC chauffeur
  */
-router.post("/:id/update-cpc", async (req, res) => {
+router.post("/:id/update-cpc", async (req, res, next) => {
+  try {
+    refuseDriver(req.user);
+  } catch (error) {
+    return next(error);
+  }
   try {
     const driverId = parseInt(req.params.id);
     const { cpcDate } = req.body;
@@ -160,7 +166,12 @@ router.get("/cpc-statistics", async (req, res) => {
  * GET /api/drivers/:id/cpc-status
  * Récupère statut CPC d'un chauffeur spécifique
  */
-router.get("/:id/cpc-status", async (req, res) => {
+router.get("/:id/cpc-status", async (req, res, next) => {
+  try {
+    await assertOwnDriverRecord(req.user, Number.parseInt(req.params.id, 10));
+  } catch (error) {
+    return next(error);
+  }
   try {
     const driverId = parseInt(req.params.id);
     
@@ -169,7 +180,7 @@ router.get("/:id/cpc-status", async (req, res) => {
     }
     
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
-    return res.status(200).json(driver);
+    return res.status(200).json(driver ? redactDriverPersonalData(driver, req.user) : driver);
   } catch (error) {
     console.error("Get driver CPC status error:", error);
     return res.status(500).json({ 

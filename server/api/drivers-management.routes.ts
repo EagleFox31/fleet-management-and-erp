@@ -5,6 +5,7 @@ import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
+import { assertOwnDriverRecord, redactDriverPersonalData } from "../lib/driver-scope";
 
 const router = Router();
 router.use(authenticate);
@@ -161,7 +162,12 @@ router.get("/me", async (req, res) => {
   }
 });
 
-router.get("/:id/missions", async (req, res) => {
+router.get("/:id/missions", async (req, res, next) => {
+  try {
+    await assertOwnDriverRecord(req.user, Number.parseInt(req.params.id, 10));
+  } catch (error) {
+    return next(error);
+  }
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) return res.status(400).json({ message: "ID de chauffeur invalide" });
@@ -193,14 +199,19 @@ router.get("/:id/missions", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
+  try {
+    await assertOwnDriverRecord(req.user, Number.parseInt(req.params.id, 10));
+  } catch (error) {
+    return next(error);
+  }
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) {
       return res.status(400).json({ message: "ID de chauffeur invalide" });
     }
 
-    const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
+    const driver = redactDriverPersonalData(await cpcTrainingService.getDriverWithCPCStatus(driverId), req.user);
     return res.status(200).json(driver);
   } catch (error) {
     console.error("Get driver details error:", error);
