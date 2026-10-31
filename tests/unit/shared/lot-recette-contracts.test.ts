@@ -136,13 +136,18 @@ describe("règles de validation", () => {
 describe("événements temps réel du lot", () => {
   const existingEvents = (() => {
     const source = readFileSync(join(process.cwd(), "client/src/hooks/useRealTimeSync.ts"), "utf8");
-    return new Set([...source.matchAll(/case ["']([a-z_]+)["']/g)].map((m) => m[1]));
+    const counts = new Map<string, number>();
+    for (const m of source.matchAll(/case ["']([a-z_]+)["']/g)) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+    return counts;
   })();
 
-  it("noms en snake_case, sans collision avec les événements existants", () => {
+  it("noms en snake_case, non réutilisés, au plus un case par événement côté client", () => {
+    const reused = new Set<string>(REUSED_REALTIME_EVENTS);
     for (const name of REALTIME_EVENT_NAMES) {
       expect(name).toMatch(/^[a-z]+(_[a-z]+)+$/);
-      expect(existingEvents.has(name)).toBe(false);
+      expect(reused.has(name)).toBe(false);
+      // un doublon de case = vraie collision ; un seul case (ajouté par le lot) est attendu
+      expect(existingEvents.get(name) ?? 0).toBeLessThanOrEqual(1);
     }
   });
 

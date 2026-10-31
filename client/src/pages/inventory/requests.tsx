@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { PartReceptionLine } from "@/components/inventory/part-reception-line";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +69,8 @@ import { formatCurrency } from "@/lib/utils";
 
 interface PartRequirement {
   id: number;
+  receivedByName?: string | null;
+  receivedAt?: string | null;
   partId: number;
   partName: string;
   partReference: string;
@@ -793,6 +796,9 @@ export default function PartRequestsIndex() {
                           )}
                           <p className="font-medium text-gray-800 inline">{request.partName}</p>
                           <p className="text-[11px] font-mono text-gray-400 mt-0.5">{request.partReference}</p>
+                          {request.status === "received" || request.status === "issued" ? (
+                            <PartReceptionLine reception={{ receivedBy: null, receivedByName: request.receivedByName ?? null, receivedAt: request.receivedAt ?? null }} />
+                          ) : null}
                         </div>
                       </td>
                       {/* Demandeur */}
