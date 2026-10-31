@@ -9,6 +9,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
+import { AppError } from "../lib/app-error";
 
 const router = Router();
 const log = moduleLogger("supplier-invoices");
@@ -292,7 +293,7 @@ router.get("/", checkReadPermission, async (req: Request, res: Response) => {
  * POST /api/supplier-invoices
  * Créer une nouvelle facture fournisseur avec contrôle 3 voies automatique
  */
-router.post("/", checkCreatePermission, async (req: Request, res: Response) => {
+router.post("/", checkCreatePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const validatedData = insertSupplierInvoiceSchema.parse(req.body);
     
@@ -317,8 +318,6 @@ router.post("/", checkCreatePermission, async (req: Request, res: Response) => {
         : "Facture créée avec succès"
     });
   } catch (error) {
-    console.error("Erreur lors de la création de la facture:", error);
-    
     if (error instanceof z.ZodError) {
       return res.status(400).json({ 
         error: "Données invalides", 
@@ -326,10 +325,12 @@ router.post("/", checkCreatePermission, async (req: Request, res: Response) => {
       });
     }
 
-    res.status(500).json({ 
-      error: "Erreur lors de la création de la facture",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    if (error instanceof AppError) {
+      return next(error);
+    }
+
+    log.error({ err: error, requestId: req.requestId }, "Création de la facture fournisseur en échec");
+    next(new AppError(500, "Impossible de créer la facture pour le moment.", { cause: error }));
   }
 });
 

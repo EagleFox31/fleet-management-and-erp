@@ -116,3 +116,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : T-16 reste (validation a l'upload), sans aggraver la dette de `routes.ts` (AGENTS §9). Les anciens documents au type hors liste restent lisibles.
 - **Comment tester (QA)** : en responsable atelier, televerser un PDF avec `type=carte_grise` (201), puis avec `type=nimporte` (400 lisible, rien sur disque) ; en technicien, 403.
 - **Preuve** : `tsc` global a zero ; unitaires 541 verts ; premier passage des contrats `vehicle-documents-upload` (4) et `vehicle-documents-client-scope` (16) : 20 tests verts. Les suites echouent ensuite au teardown/setup sur la base partagee : des lignes `activity_logs` d'utilisateurs TEST laissees par mes premiers passages (l'intercepteur d'audit journalise l'upload) bloquent `cleanupOrphanTestRows`. Le test supprime desormais ces lignes ; le menage des restes anterieurs reste a faire.
+## 2026-10-31T19:30:00+01:00 - R-09 - Solde initial des factures fournisseur
+
+- **Agent** : api-1 · **Branche** : `lot/api/R-09-solde-facture-fournisseur` · **Commit** : voir `git log` de la branche
+- **Statut** : fait (donnees existantes non corrigees, SQL propose dans la PR)
+- **Quoi** : une facture fournisseur creee par l'ecran naissait avec `balance = "0.00"`, donc tout reglement repondait 409 « Montant superieur au solde restant (0.00 FCFA) ». Le solde naît maintenant egal au TTC ; un numero en doublon repond 409 au lieu de 500.
+- **Comment** : `createSupplierInvoice` impose `balance = totalAmount` apres `...data` (le client ne peut pas l'ecrire) ; `balanceOf` remplace `invoice.balance || total` (une chaine "0.00" est vraie en JS) dans les reglements, le marquage paye et les factures echues ; violation 23505 sur `invoice_number` traduite en `AppError(409)` ; la route POST transmet les `AppError` et migre son `console.error` vers `moduleLogger`.
+- **Pourquoi** : bloquant de recette R-09. Cause racine : defaut de colonne `0` plus `||` sur une chaine decimale.
+- **Comment tester (QA)** : creer une facture depuis l'ecran, l'approuver, regler en deux fois (le solde baisse au rapprochement, statut `paid` a 0), tenter un trop-percu (409), recreer le meme numero (409).
+- **Preuve** : `tsc` global a zero ; unitaires 781 verts ; contrat `supplier-invoice-balance` 5 verts + `supplier-settlement-idempotence` 3 verts (non-regression).

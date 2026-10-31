@@ -38,6 +38,30 @@ export class ThreeWayMatchingService {
     return Number.parseFloat(String(v ?? 0));
   }
 
+  /**
+   * Solde restant d'une facture. `numeric` revient en chaine ("0.00" est vraie) : on ne
+   * peut pas écrire `balance || total`. Seule une valeur absente retombe sur le total ;
+   * un solde "0.00" est un vrai zéro.
+   */
+  private balanceOf(balance: unknown, total: number): number {
+    if (balance === null || balance === undefined || String(balance).trim() === "") {
+      return total;
+    }
+    const value = this.num(balance);
+    return Number.isFinite(value) ? value : total;
+  }
+
+  /** Violation de l'unicité du numéro de facture (PostgreSQL 23505), erreur Drizzle ou pg. */
+  private isDuplicateInvoiceNumber(error: unknown): boolean {
+    const candidates = [error, (error as { cause?: unknown } | null)?.cause];
+    return candidates.some((candidate) => {
+      const e = candidate as { code?: string; constraint?: string; constraint_name?: string } | null;
+      if (!e || e.code !== "23505") return false;
+      const name = String(e.constraint ?? e.constraint_name ?? "");
+      return name === "" || name.includes("invoice_number");
+    });
+  }
+
   private appendOrderTrace(existingNotes: string | null | undefined, traceLine: string): string {
     const base = (existingNotes || "").trim();
     return base ? `${base}\n${traceLine}` : traceLine;
@@ -514,21 +538,31 @@ export class ThreeWayMatchingService {
     }
 
     // Créer la facture
-    const [invoice] = await db
-      .insert(supplierInvoices)
-      .values({
-        ...data,
-        amountHT: String(amountHT),
-        subtotal: String(amountHT),
-        vatAmount: String(vatAmount),
-        taxAmount: String(vatAmount),
-        totalAmount: String(totalAmount),
-        totalTTC: String(totalAmount),
-        status: 'received',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    let invoice: SupplierInvoice;
+    try {
+      [invoice] = await db
+        .insert(supplierInvoices)
+        .values({
+          ...data,
+          amountHT: String(amountHT),
+          subtotal: String(amountHT),
+          vatAmount: String(vatAmount),
+          taxAmount: String(vatAmount),
+          totalAmount: String(totalAmount),
+          totalTTC: String(totalAmount),
+          // Le solde naît égal au total TTC et ne baisse qu'au rapprochement ; jamais repris du client.
+          balance: totalAmount.toFixed(2),
+          status: 'received',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+    } catch (error) {
+      if (this.isDuplicateInvoiceNumber(error)) {
+        throw new AppError(409, `Une facture fournisseur porte déjà le numéro ${data.invoiceNumber}.`, { cause: error });
+      }
+      throw error;
+    }
 
     // Valider contre la commande si liée
     let validation: any = null;
@@ -621,7 +655,7 @@ export class ThreeWayMatchingService {
     }
 
     const totalInvoice = this.num(invoice.totalTTC || invoice.totalAmount);
-    const currentBalance = Math.max(this.num(invoice.balance || totalInvoice), 0);
+    const currentBalance = Math.max(this.balanceOf(invoice.balance, totalInvoice), 0);
     const amount = currentBalance > 0 ? currentBalance : totalInvoice;
 
     const { settlement } = await this.recordInvoiceSettlement(invoiceId, paidBy, {
@@ -720,7 +754,7 @@ export class ThreeWayMatchingService {
       // Le solde de la facture ne baisse qu'au rapprochement bancaire : les
       // règlements saisis en attente de rapprochement sont déduits ici.
       const totalInvoice = this.num(invoice.totalTTC || invoice.totalAmount);
-      const currentBalance = Math.max(this.num(invoice.balance || totalInvoice), 0);
+      const currentBalance = Math.max(this.balanceOf(invoice.balance, totalInvoice), 0);
       const awaitingReconciliation = activeSettlements
         .filter((s) => s.status === "recorded")
         .reduce((sum, s) => sum + this.num(s.amount), 0);
@@ -1111,7 +1145,7 @@ export class ThreeWayMatchingService {
       const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
       
       const totalAmount = this.num(inv.totalTTC || inv.totalAmount || inv.amountHT);
-      const balance = this.num(inv.balance || totalAmount);
+      const balance = this.balanceOf(inv.balance, totalAmount);
 
       return {
         id: inv.id,
