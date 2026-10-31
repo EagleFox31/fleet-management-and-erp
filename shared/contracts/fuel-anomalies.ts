@@ -6,7 +6,7 @@
  * remplace le précédent.
  */
 import { z } from "zod";
-import { isoDateTimeSchema } from "./common";
+import { isoDateSchema, isoDateTimeSchema } from "./common";
 
 export const fuelAnomalyPath = (anomalyKey: string) => `/api/fuel-card/anomalies/${encodeURIComponent(anomalyKey)}`;
 
@@ -33,3 +33,31 @@ export const fuelAnomalyResolutionSchema = z.object({
 export type UpdateFuelAnomalyRequest = z.infer<typeof updateFuelAnomalyRequestSchema>;
 export type FuelAnomalyResolution = z.infer<typeof fuelAnomalyResolutionSchema>;
 
+
+/**
+ * Liste des anomalies (lecture : FUEL_READ_ROLES). Règle `consumption-gap` : un plein
+ * dont la quantité dépasse la moyenne du véhicule de plus de deux écarts-types
+ * (au moins trois pleins débités), comme `fuelCardService.detectAnomalies`.
+ * Le statut est celui de la dernière décision, `open` sans décision.
+ */
+export const FUEL_ANOMALIES_PATH = "/api/fuel-card/anomalies";
+export const FUEL_ANOMALY_RULES = ["consumption-gap"] as const;
+
+export const fuelAnomalySchema = z.object({
+  anomalyKey: fuelAnomalyKeySchema,
+  rule: z.enum(FUEL_ANOMALY_RULES),
+  fuelRecordId: z.number().int(),
+  date: isoDateSchema.nullable(),
+  vehicleId: z.number().int(),
+  vehicleLabel: z.string().nullable(),
+  quantity: z.number(),
+  averageQuantity: z.number(),
+  threshold: z.number(),
+  status: z.enum(FUEL_ANOMALY_STATUSES),
+  comment: z.string().nullable(),
+  resolvedAt: isoDateTimeSchema.nullable(),
+});
+
+export const fuelAnomaliesResponseSchema = z.array(fuelAnomalySchema);
+
+export type FuelAnomaly = z.infer<typeof fuelAnomalySchema>;

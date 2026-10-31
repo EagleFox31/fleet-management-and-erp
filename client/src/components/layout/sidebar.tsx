@@ -60,13 +60,31 @@ interface MenuItem {
   feature?: FeatureKey;
 }
 
+/**
+ * Groupes créés quand le menu du rôle ne les a pas (technicien, direction) : un
+ * écran de stock reste sous « Gestion de stock » au lieu de tomber en tête de
+ * menu. `administration` n'y est pas : hors administrateur, « Périmètre » reste
+ * une entrée isolée plutôt qu'un groupe « Administration » trompeur.
+ */
+const LOT_MENU_GROUPS: Partial<Record<string, { label: string; icon: any }>> = {
+  inventory: { label: "Gestion de stock", icon: Package },
+  resources: { label: "Ressources Véhicules", icon: Car },
+  maintenance: { label: "Maintenance", icon: Wrench },
+};
+
 /** Ajoute les écrans du lot au menu du rôle, puis retire ce que les drapeaux masquent. */
 function withLotScreens(base: MenuItem[], role: string | undefined, flags: Record<FeatureKey, boolean>): MenuItem[] {
   const menu: MenuItem[] = base.map((item) => ({ ...item, submenu: item.submenu ? [...item.submenu] : undefined }));
   for (const screen of LOT_SCREENS) {
     if (!screen.menu || !canAccessLotScreen(screen, role)) continue;
     const entry: MenuItem = { label: screen.menu.label, href: screen.path, icon: screen.menu.icon, feature: screen.feature };
-    const group = screen.menu.group === "top" ? undefined : menu.find((item) => item.menuKey === screen.menu!.group);
+    const key = screen.menu.group;
+    let group = key === "top" ? undefined : menu.find((item) => item.menuKey === key);
+    const fallback = LOT_MENU_GROUPS[key];
+    if (!group && fallback) {
+      group = { ...fallback, menuKey: key, submenu: [] };
+      menu.push(group);
+    }
     if (group?.submenu) group.submenu.push(entry);
     else menu.push(entry);
   }

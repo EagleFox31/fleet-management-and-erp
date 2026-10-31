@@ -50,13 +50,23 @@ export const timeTrackingService = {
     }));
   },
 
+  /**
+   * Une ligne par personne pointée dans le mois, plus chaque compte chauffeur actif
+   * sans saisie (compteurs à zéro) : la grille sert aussi à saisir le premier jour,
+   * elle ne peut pas partir des seules personnes déjà pointées.
+   * Actif = compte non supprimé et fiche `drivers` non désactivée (`is_active = false`).
+   * Les saisies déjà faites restent affichées, même pour un chauffeur désactivé depuis.
+   */
   async monthlyStats(q: { month: number; year: number }): Promise<TimeTrackingMonthlyStatsResponse> {
     const res = await db.execute(sql`
-      SELECT t.user_id, u.name, t.status, count(*)::int AS n
-      FROM time_tracking t JOIN users u ON u.id = t.user_id
-      WHERE t.month = ${q.month} AND t.year = ${q.year}
-      GROUP BY t.user_id, u.name, t.status
-      ORDER BY t.user_id`);
+      SELECT u.id AS user_id, u.name, t.status, count(t.status)::int AS n
+      FROM users u
+      LEFT JOIN time_tracking t ON t.user_id = u.id AND t.month = ${q.month} AND t.year = ${q.year}
+      WHERE t.user_id IS NOT NULL
+         OR (u.role = 'driver' AND u.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM drivers d WHERE d.user_id = u.id AND d.is_active = false))
+      GROUP BY u.id, u.name, t.status
+      ORDER BY u.id`);
     const byUser = new Map<number, TimeTrackingMonthlyStatsResponse[number]>();
     for (const r of rowsOf<{ user_id: number; name: string; status: string; n: number }>(res)) {
       const id = Number(r.user_id);

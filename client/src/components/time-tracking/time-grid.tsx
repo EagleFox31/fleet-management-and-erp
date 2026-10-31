@@ -33,7 +33,7 @@ export function daysOfMonth(year: number, month: number): string[] {
  * Grille mensuelle de pointage (T-54a), chauffeurs en lignes, jours en colonnes.
  * Les modifications restent locales jusqu'à « Enregistrer » ; seules les cellules
  * changées partent (une requête de contrat par cellule modifiée).
- * `readOnly` pour le chauffeur. Page à créer par fe-1 (menu Chauffeurs).
+ * `readOnly` pour qui consulte sans saisir (secrétariat, direction : `canWriteTimeTracking`).
  */
 export function TimeGrid({ year, month, readOnly = false }: { year: number; month: number; readOnly?: boolean }) {
   const { toast } = useToast();

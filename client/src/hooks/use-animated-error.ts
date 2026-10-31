@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
 import { userMessageOf } from "@/lib/api-error";
 
-export type ErrorType = "network" | "auth" | "validation" | "server" | "timeout" | "general";
+import type { ErrorType } from "@/lib/error-type";
+
+export type { ErrorType };
 
 interface ErrorState {
   isVisible: boolean;
@@ -51,7 +53,7 @@ export function useAnimatedError() {
           showError("Veuillez vous reconnecter à votre compte", "auth", error);
           break;
         case 403:
-          showError("Vous n'avez pas les permissions nécessaires", "auth", error);
+          showError("Votre profil n'a pas accès à cette ressource", "permission", error);
           break;
         case 404:
           showError("La ressource demandée n'a pas été trouvée", "general", error);

@@ -40,7 +40,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
-  for (const [label, role] of [["logistics", "logistics"], ["tech", "technician"]] as [string, TestUserRole][]) {
+  for (const [label, role] of [["logistics", "logistics"], ["tech", "technician"], ["admin", "admin"], ["secretary", "secretary"], ["wm", "workshop_manager"], ["mgmt", "management"]] as [string, TestUserRole][]) {
     const user = await createTestUser({ role });
     ids.userIds.push(user.id);
     userIds[label] = user.id;
@@ -86,7 +86,32 @@ describe("POST /api/fuel-vouchers/:id/validate", () => {
   });
 });
 
+describe("GET /api/fuel-vouchers (lecture seule du chef d'atelier et de la direction)", () => {
+  it("200 pour logistique, chef d'atelier et direction ; 401 anonyme ; 403 technicien", async () => {
+    for (const label of ["logistics", "wm", "mgmt"]) {
+      expect((await call("GET", "/api/fuel-vouchers", { cookie: cookies[label] })).status).toBe(200);
+    }
+    expect((await call("GET", "/api/fuel-vouchers")).status).toBe(401);
+    expect((await call("GET", "/api/fuel-vouchers", { cookie: cookies.tech })).status).toBe(403);
+  });
+
+  it("la validation reste refusée au chef d'atelier et à la direction (403)", async () => {
+    for (const label of ["wm", "mgmt"]) {
+      expect((await call("POST", `/api/fuel-vouchers/${recordId}/validate`, { cookie: cookies[label] })).status).toBe(403);
+    }
+  });
+});
+
 describe("/api/fuel-prices", () => {
+  it("écriture : 403 pour le secrétariat, le chef d'atelier et la direction ; admin et logistique autorisés", async () => {
+    const body = { effectiveFrom: PRICE_DATES[0], pricePerLiter: 843 };
+    for (const label of ["secretary", "wm", "mgmt"]) {
+      expect((await call("POST", "/api/fuel-prices", { cookie: cookies[label], body })).status).toBe(403);
+    }
+    expect((await call("POST", "/api/fuel-prices", { cookie: cookies.admin, body })).status).toBe(201);
+    expect((await call("POST", "/api/fuel-prices", { cookie: cookies.logistics, body })).status).toBe(201);
+  });
+
   it("401 anonyme, écriture refusée au technicien (403)", async () => {
     expect((await call("GET", "/api/fuel-prices")).status).toBe(401);
     const res = await call("POST", "/api/fuel-prices", { cookie: cookies.tech, body: { effectiveFrom: PRICE_DATES[0], pricePerLiter: 843 } });

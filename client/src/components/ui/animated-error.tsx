@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Wifi, Database, Key, Clock, RefreshCw, Lightbulb } from "lucide-react";
+import { AlertCircle, Wifi, Database, Key, Clock, RefreshCw, Lightbulb, ShieldAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import type { ErrorType } from "@/lib/error-type";
 
 interface AnimatedErrorProps {
-  type: "network" | "auth" | "validation" | "server" | "timeout" | "general";
+  type: ErrorType;
   message: string;
   onRetry?: () => void;
   className?: string;
 }
 
-const errorConfig = {
+export const errorConfig: Record<ErrorType, { icon: typeof AlertCircle; color: string; bgColor: string; borderColor: string; title: string; suggestions: string[] }> = {
   network: {
     icon: Wifi,
     color: "text-orange-500",
@@ -34,6 +35,18 @@ const errorConfig = {
       "Votre session a peut-être expiré",
       "Reconnectez-vous à votre compte",
       "Vérifiez vos identifiants"
+    ]
+  },
+  // 403 : la session est valide, le profil n'a pas le droit. Se reconnecter n'y change rien.
+  permission: {
+    icon: ShieldAlert,
+    color: "text-amber-600",
+    bgColor: "bg-amber-50 dark:bg-amber-950/20",
+    borderColor: "border-amber-200 dark:border-amber-800",
+    title: "Accès refusé",
+    suggestions: [
+      "Votre profil n'a pas accès à cette ressource",
+      "Si vous en avez besoin, demandez l'accès à un administrateur"
     ]
   },
   validation: {

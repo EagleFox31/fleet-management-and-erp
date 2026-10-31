@@ -4,6 +4,7 @@ import { Loader2, AlertTriangle } from "lucide-react";
 import { AnimatedError } from "./animated-error";
 import { useAnimatedError } from "@/hooks/use-animated-error";
 import { userMessageOf } from "@/lib/api-error";
+import { errorTypeOf } from "@/lib/error-type";
 
 interface LoadingErrorProps {
   isLoading?: boolean;
@@ -50,22 +51,13 @@ export function LoadingError({
   }
 
   if (error) {
-    const getErrorType = (error: any) => {
-      if (error?.status === 401 || error?.status === 403) return "auth";
-      if (error?.status === 400 || error?.status === 422) return "validation";
-      if (error?.status >= 500) return "server";
-      if (error?.name === "NetworkError") return "network";
-      if (error?.name === "TimeoutError") return "timeout";
-      return "general";
-    };
-
     const getErrorMessage = (error: any) => {
       return userMessageOf(error, "Le chargement a échoué. Réessayez dans un instant.");
     };
 
     return (
       <AnimatedError
-        type={getErrorType(error)}
+        type={errorTypeOf(error)}
         message={getErrorMessage(error)}
         onRetry={onRetry}
         className={className}

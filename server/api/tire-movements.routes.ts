@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { TIRE_MOVEMENT_ROLES } from "@shared/constants/roles";
 import { tireMovementsQuerySchema } from "@shared/contracts/tire-movements";
 import { requireFeature } from "../lib/feature-flags";
 import { authorize } from "../middleware/auth";
@@ -10,7 +11,7 @@ const router = Router();
 router.get(
   "/tires/movements",
   requireFeature("tire-movements"),
-  authorize(["admin", "management", "workshop_manager", "warehouse", "technician"]),
+  authorize([...TIRE_MOVEMENT_ROLES]),
   async (req, res, next) => {
     try {
       res.json(await aggregateReadsService.tireMovements(tireMovementsQuerySchema.parse(req.query)));
