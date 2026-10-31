@@ -1,15 +1,21 @@
 import { alertService } from "./services/alert-service";
+import { moduleLogger } from "./lib/logger";
+import { backupTick } from "./jobs/backup-production";
+
+const log = moduleLogger("scheduler");
 
 /**
  * Ordonnanceur des tâches de fond.
  *
  * Volontairement minimal: `setInterval` en mémoire du processus. Suffisant tant
- * que l'application tourne en instance unique et que la seule tâche est le cycle
- * d'alertes.
+ * que l'application tourne en instance unique et que les tâches sont le cycle
+ * d'alertes et la sauvegarde quotidienne.
  *
  * Limites assumées:
- * - en multi-instance, chaque instance exécuterait le cycle (doublons);
- * - un cycle prévu pendant un arrêt du processus est simplement sauté.
+ * - en multi-instance, chaque instance exécuterait le cycle d'alertes (doublons) ;
+ *   la sauvegarde, elle, est protégée par un verrou consultatif Postgres ;
+ * - un cycle prévu pendant un arrêt du processus est simplement sauté ; la
+ *   sauvegarde se rattrape (lancée si la dernière réussite a plus de 24 h).
  *
  * Le jour où il faut des reprises sur échec, un historique auditable ou du
  * multi-instance, basculer sur un ordonnanceur adossé à Postgres (pg-boss,
@@ -25,6 +31,7 @@ const SLOW_CYCLE_THRESHOLD_MS = ALERT_CHECK_INTERVAL_MS * 0.5;
 let schedulerStarted = false;
 let alertCycleRunning = false;
 let alertCycleSkipped = 0;
+let backupTickRunning = false;
 
 /**
  * Exécute un cycle d'alertes en interdisant le chevauchement.
@@ -36,10 +43,7 @@ let alertCycleSkipped = 0;
 async function runAlertCycle(reason: string): Promise<void> {
   if (alertCycleRunning) {
     alertCycleSkipped += 1;
-    console.warn(
-      `[SCHEDULER] Cycle d'alertes ignoré (${reason}): le précédent tourne encore ` +
-        `(${alertCycleSkipped} ignoré(s) au total).`,
-    );
+    log.warn({ reason, skipped: alertCycleSkipped }, "cycle d'alertes ignoré: le précédent tourne encore");
     return;
   }
 
@@ -48,20 +52,33 @@ async function runAlertCycle(reason: string): Promise<void> {
 
   try {
     await alertService.runAllAlertChecks();
-  } catch (error) {
-    console.error(`[SCHEDULER] Cycle d'alertes en échec (${reason}):`, error);
+  } catch (err) {
+    log.error({ err, reason }, "cycle d'alertes en échec");
   } finally {
     const durationMs = Date.now() - startedAt;
     alertCycleRunning = false;
 
     if (durationMs >= SLOW_CYCLE_THRESHOLD_MS) {
-      console.warn(
-        `[SCHEDULER] Cycle d'alertes lent: ${durationMs} ms ` +
-          `(intervalle ${ALERT_CHECK_INTERVAL_MS} ms). Surveiller les requêtes N+1.`,
+      log.warn(
+        { durationMs, intervalMs: ALERT_CHECK_INTERVAL_MS },
+        "cycle d'alertes lent: surveiller les requêtes N+1",
       );
     } else {
-      console.log(`[SCHEDULER] Cycle d'alertes terminé en ${durationMs} ms (${reason})`);
+      log.info({ durationMs, reason }, "cycle d'alertes terminé");
     }
+  }
+}
+
+/** Sauvegarde quotidienne: ne fait rien tant que la dernière réussite a moins de 24 h. */
+async function runBackupTick(reason: string): Promise<void> {
+  if (backupTickRunning) return;
+  backupTickRunning = true;
+  try {
+    await backupTick();
+  } catch (err) {
+    log.error({ err, reason }, "tick de sauvegarde en échec");
+  } finally {
+    backupTickRunning = false;
   }
 }
 
@@ -74,13 +91,13 @@ export function startBackgroundJobs(): void {
 
   setTimeout(() => {
     void runAlertCycle("démarrage");
+    void runBackupTick("démarrage");
   }, INITIAL_DELAY_MS);
 
   setInterval(() => {
     void runAlertCycle("périodique");
+    void runBackupTick("périodique");
   }, ALERT_CHECK_INTERVAL_MS);
 
-  console.log(
-    `[SCHEDULER] Cycle d'alertes planifié toutes les ${ALERT_CHECK_INTERVAL_MS / 1000} s`,
-  );
+  log.info({ intervalSeconds: ALERT_CHECK_INTERVAL_MS / 1000 }, "cycle d'alertes et sauvegarde planifiés");
 }

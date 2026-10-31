@@ -1,4 +1,5 @@
 import { useAuth } from "@/hooks/useAuth";
+import { NotificationPreferences } from "@/components/profile/notification-preferences";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -223,6 +224,7 @@ export default function ProfilePage() {
               </ul>
             </div>
           </div>
+          <NotificationPreferences />
         </TabsContent>
 
         {/* Onglet Sécurité */}

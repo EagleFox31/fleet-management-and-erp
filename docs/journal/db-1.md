@@ -2,3 +2,17 @@
 
 Worktree : `../fm-db-1`. Modèle d'entrée et règles : `README.md`.
 Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
+
+## 2026-10-30T14:06:00+01:00 — T-07a/T-07b/T-23c — Schéma unique du lot recette
+
+- **Agent** : db-1 · **Branche** : `lot/db/T-07-schema` · **Commit** : voir `git log` (même commit)
+- **Statut** : en cours (tsc à zéro, tests unitaires verts, intégration en cours)
+- **Quoi** : toutes les tables et colonnes MUST et SHOULD du lot, additives et idempotentes.
+- **Comment** : `shared/schema.ts`, `server/db/migrations/20261031_lot_recette.sql`, et la même liste d'ordres dans `LOT_RECETTE_SCHEMA_STATEMENTS` (`server/init-database.ts`, appliquée avant les index de performance). Verrou `pg_advisory_xact_lock` en tête. Test de dérive entre les deux listes. Reuse-first : patron `ALTER … IF NOT EXISTS` existant (Adapt).
+- **Choix EXCLUDE (T-23c)** : constat db-2 (T-63) : des OT actifs sans `end_date` se chevauchent déjà (technicien 43/44/58, véhicule 44/54/58). Les deux contraintes `btree_gist` sont donc restreintes aux OT à `end_date` NON NULLE ; aucun OT modifié. Les OT ouverts sans fin restent couverts par le seul garde applicatif. Si `btree_gist` est refusée : avertissement, pas d'échec, contrôle applicatif seul.
+- **Écarts** : `qc_*` (work_orders) et `received_at` (part_requirements) sont déclarés dans des tables Drizzle compagnes (`workOrderQuality`, `partRequirementReceipts`) en fin de `schema.ts`, car les ajouter à `workOrders`/`partRequirements` casse `server/storage.ts` et `part-requirements-service.ts` (types écrits à la main, fichiers interdits). `activity_logs` gagne `method`, `path`, `entity_ref` (contrat audit-logs). Types de document : `taxe` et `autre` ajoutés en plus des 9 pour l'ancien enum.
+- **Comment tester (QA)** :
+  - Prérequis : `DATABASE_URL_TEST`. Étapes : démarrer deux fois le serveur ; le second démarrage n'écrit rien.
+  - Preuve : `node ../lot-tools/db-lock.mjs db-1 -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/lot-recette-schema-idempotence.test.ts` ; unitaire : `node node_modules/vitest/vitest.mjs run tests/unit/server/lot-recette-schema-drift.test.ts`.
+- **RAIDER** : R/A/I/D/R couverts (additif, idempotent, existant intact) ; scoped execution : sans objet.
+- **Reste / risques** : T-26 (seed) à suivre ; fusion des tables compagnes plus tard.
