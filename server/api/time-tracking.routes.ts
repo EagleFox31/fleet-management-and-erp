@@ -1,8 +1,64 @@
-import { createStubRouter } from "./stub";
+import { Router } from "express";
+import { eq } from "drizzle-orm";
+import { users } from "@shared/schema";
+import {
+  timeTrackingMonthlyStatsQuerySchema,
+  timeTrackingQuerySchema,
+  upsertTimeTrackingRequestSchema,
+} from "@shared/contracts/time-tracking";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
+import { db } from "../db";
+import { AppError } from "../lib/app-error";
+import { requireFeature } from "../lib/feature-flags";
+import { moduleLogger } from "../lib/logger";
+import { authorize } from "../middleware/auth";
+import { timeTrackingService } from "../services/time-tracking-service";
 
-/** Pointage (contrat time-tracking). Squelette T-08 : à remplacer par l'implémentation. */
-export default createStubRouter([
-  { method: "get", path: "/time-tracking", feature: "time-tracking" },
-  { method: "put", path: "/time-tracking", feature: "time-tracking" },
-  { method: "get", path: "/time-tracking/monthly-stats", feature: "time-tracking" },
-]);
+const log = moduleLogger("time-tracking");
+const router = Router();
+const feature = requireFeature("time-tracking");
+const readers = authorize(["admin", "secretary", "management"]);
+const writers = authorize(["admin", "secretary"]);
+
+/** Pointage du personnel (P-20). Lecture : administration, secrétariat, direction. Saisie : administration, secrétariat. */
+router.get("/time-tracking", feature, readers, async (req, res, next) => {
+  try {
+    res.json(await timeTrackingService.list(timeTrackingQuerySchema.parse(req.query)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/time-tracking/monthly-stats", feature, readers, async (req, res, next) => {
+  try {
+    res.json(await timeTrackingService.monthlyStats(timeTrackingMonthlyStatsQuerySchema.parse(req.query)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Une saisie par personne et par jour : rejouable, la dernière l'emporte. */
+router.put("/time-tracking", feature, writers, async (req, res, next) => {
+  try {
+    const body = upsertTimeTrackingRequestSchema.parse(req.body);
+    const [person] = await db.select({ id: users.id }).from(users).where(eq(users.id, body.userId)).limit(1);
+    if (!person) throw new AppError(404, "Personne introuvable.");
+    const entry = await timeTrackingService.upsert(body);
+
+    const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
+    if (broadcast) {
+      broadcast("time_tracking_updated", {
+        userId: entry.userId,
+        date: entry.date,
+        scope: REALTIME_EVENTS.time_tracking_updated.scope,
+      });
+    } else {
+      log.warn({ requestId: req.requestId }, "diffusion temps réel indisponible");
+    }
+    res.json(entry);
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

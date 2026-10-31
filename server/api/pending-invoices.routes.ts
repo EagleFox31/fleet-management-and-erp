@@ -1,6 +1,22 @@
-import { createStubRouter } from "./stub";
+import { Router } from "express";
+import { requireFeature } from "../lib/feature-flags";
+import { authorize } from "../middleware/auth";
+import { aggregateReadsService } from "../services/aggregate-reads-service";
 
-/** Factures en attente (contrat pending-invoices). Squelette T-08 : à remplacer par l'implémentation. */
-export default createStubRouter([
-  { method: "get", path: "/billing/pending-invoices", feature: "pending-invoices" },
-]);
+const router = Router();
+
+/** Opérations clients à facturer, regroupées par client. */
+router.get(
+  "/billing/pending-invoices",
+  requireFeature("pending-invoices"),
+  authorize(["admin", "management", "secretary", "logistics"]),
+  async (_req, res, next) => {
+    try {
+      res.json(await aggregateReadsService.pendingInvoices());
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+export default router;
