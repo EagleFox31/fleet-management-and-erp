@@ -2,6 +2,7 @@ import { Router, RequestHandler } from "express";
 import warehouseRoutes from "./warehouse.routes";
 import fuelCardRoutes from "./fuel-card.routes";
 import vehiclesRoutes from "./vehicles.routes";
+import vehiclesClientScopeRoutes from "./vehicles-client-scope.routes";
 import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
@@ -88,6 +89,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Session is now properly propagated to all these routes
   apiRouter.use("/warehouse", isStaff, warehouseRoutes);
   apiRouter.use("/fuel-card", isStaff, fuelCardRoutes);
+  // Cloison client (R-03) : avant tout /vehicles et avant server/routes.ts.
+  apiRouter.use(vehiclesClientScopeRoutes);
   apiRouter.use("/vehicles", vehiclesRoutes);
   apiRouter.use("/drivers", isStaff, driversRoutes);
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);

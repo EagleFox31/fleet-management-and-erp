@@ -116,3 +116,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : T-16 reste (validation a l'upload), sans aggraver la dette de `routes.ts` (AGENTS §9). Les anciens documents au type hors liste restent lisibles.
 - **Comment tester (QA)** : en responsable atelier, televerser un PDF avec `type=carte_grise` (201), puis avec `type=nimporte` (400 lisible, rien sur disque) ; en technicien, 403.
 - **Preuve** : `tsc` global a zero ; unitaires 541 verts ; premier passage des contrats `vehicle-documents-upload` (4) et `vehicle-documents-client-scope` (16) : 20 tests verts. Les suites echouent ensuite au teardown/setup sur la base partagee : des lignes `activity_logs` d'utilisateurs TEST laissees par mes premiers passages (l'intercepteur d'audit journalise l'upload) bloquent `cleanupOrphanTestRows`. Le test supprime desormais ces lignes ; le menage des restes anterieurs reste a faire.
+## 2026-10-31T19:30:00+01:00 - R-03 / R-13 - Cloison client sur le parc, cloison chauffeur sur CPC et missions
+
+- **Agent** : api-1 · **Branche** : `lot/api/R-03-cloison-vehicules-chauffeurs` · **Commit** : voir `git log` de la branche
+- **Statut** : fait
+- **Quoi** : un client ne voit plus que ses vehicules sur `GET /api/vehicles` et `/api/vehicles/all`, et `/api/vehicles/check/:immat` ne revele plus un vehicule hors perimetre ; un chauffeur ne voit que sa fiche sur `GET /api/drivers`, `/cpc-status`, `/expiring-cpc` et que ses missions sur `GET /api/missions`.
+- **Comment** : routeur `vehicles-client-scope.routes.ts` monte avant `/vehicles` (et donc avant `routes.ts`, `/api` etant servi en premier) ; le personnel passe par `next()` vers le handler historique, inchange. Client : `vehicle-scope-service.ts` (Drizzle, meme forme `{ vehicles, total }` que `storage.getVehicles`, filtre `ownerScopeOf`). Chauffeur : filtre `drivers.userId` dans `drivers.routes.ts`, sous-requete `assignments -> drivers.userId` dans `missions.routes.ts`. Logs et erreurs des handlers touches migres (`moduleLogger`, `AppError`).
+- **Pourquoi** : R-03 et R-13 de la repetition generale de recette ; AGENTS §11.
+- **Comment tester (QA)** : connecte en client, `GET /api/vehicles` ne liste que ses vehicules ; `check/` d'une plaque d'autrui renvoie `{ exists: false }`. Connecte en chauffeur, `GET /api/drivers/cpc-status` renvoie une seule fiche, `GET /api/missions` ses missions. Admin et chef d'atelier : vue complete.
+- **Preuve** : contrat `fleet-read-scope` 12 verts ; `tsc` global 0 erreur ; unitaires 781 verts.
+- **RAIDER** : couvert non-regression (personnel inchange), moindre privilege, erreurs lisibles ; sans objet : migration.
+- **Reste / risques** : `GET /api/drivers/:id`, `/:id/cpc-status`, `/:id/missions` et `POST /:id/update-cpc` restent ouverts a tout le personnel, chauffeur compris ; la reponse CPC expose CNI, permis et date de naissance a tout le personnel (voir PR).

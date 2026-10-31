@@ -585,6 +585,22 @@ function broadcastDocumentRenewalCreatedFromMission(
   });
 }
 
+/**
+ * Cloison chauffeur (R-13) : un chauffeur ne voit que les missions qui lui sont affectées
+ * (assignments.driverId -> drivers.userId). Le reste du personnel garde la liste complète.
+ */
+function driverMissionScope(user: { id: number; role: string } | undefined) {
+  if (user?.role !== "driver") return undefined;
+  return inArray(
+    missions.id,
+    db
+      .select({ id: assignments.missionId })
+      .from(assignments)
+      .innerJoin(drivers, eq(assignments.driverId, drivers.id))
+      .where(eq(drivers.userId, user.id)),
+  );
+}
+
 // GET /api/missions - Liste toutes les missions
 router.get("/", async (req, res) => {
   try {
@@ -628,6 +644,7 @@ router.get("/", async (req, res) => {
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
+      .where(driverMissionScope(req.user))
       .orderBy(desc(missions.createdAt));
 
     // Get assignments for each mission

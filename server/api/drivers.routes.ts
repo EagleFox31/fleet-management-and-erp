@@ -1,6 +1,18 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("drivers-routes");
+
+/**
+ * Cloison chauffeur (R-13) : un chauffeur ne voit que sa propre fiche (drivers.userId).
+ * Le reste du personnel garde la liste complete.
+ */
+function scopeToDriver<T extends { userId: number | null }>(rows: T[], user: { id: number; role: string } | undefined): T[] {
+  return user?.role === "driver" ? rows.filter((row) => row.userId === user.id) : rows;
+}
 
 const router = Router();
 
@@ -45,15 +57,13 @@ router.use(authenticate);
  * Récupère tous les chauffeurs avec statut CPC
  * Route principale pour l'affichage des chauffeurs
  */
-router.get("/", async (req, res) => {
+router.get("/", async (req, res, next) => {
   try {
-    const drivers = await cpcTrainingService.getAllDriversStatus();
-    return res.status(200).json(drivers);
+    const rows = await cpcTrainingService.getAllDriversStatus();
+    return res.status(200).json(scopeToDriver(rows, req.user));
   } catch (error) {
-    console.error("Get drivers error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Liste des chauffeurs en echec");
+    next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
   }
 });
 
@@ -61,15 +71,13 @@ router.get("/", async (req, res) => {
  * GET /api/drivers/cpc-status
  * Récupère tous les chauffeurs avec statut CPC (alias de GET /api/drivers)
  */
-router.get("/cpc-status", async (req, res) => {
+router.get("/cpc-status", async (req, res, next) => {
   try {
-    const statuses = await cpcTrainingService.getAllDriversStatus();
-    return res.status(200).json(statuses);
+    const rows = await cpcTrainingService.getAllDriversStatus();
+    return res.status(200).json(scopeToDriver(rows, req.user));
   } catch (error) {
-    console.error("Get CPC status error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Statut CPC des chauffeurs en echec");
+    next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
   }
 });
 
@@ -77,15 +85,13 @@ router.get("/cpc-status", async (req, res) => {
  * GET /api/drivers/expiring-cpc
  * Récupère les chauffeurs nécessitant formation CPC
  */
-router.get("/expiring-cpc", async (req, res) => {
+router.get("/expiring-cpc", async (req, res, next) => {
   try {
-    const alerts = await cpcTrainingService.getExpiringCPCAlerts();
-    return res.status(200).json(alerts);
+    const rows = await cpcTrainingService.getExpiringCPCAlerts();
+    return res.status(200).json(scopeToDriver(rows, req.user));
   } catch (error) {
-    console.error("Get expiring CPC error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Alertes CPC en echec");
+    next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
   }
 });
 
