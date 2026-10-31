@@ -42,6 +42,7 @@ import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import authCaptchaRoutes from "./auth-captcha.routes";
+import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
 import { captchaGuard } from "../middleware/captcha-guard";
 import { auditWrites } from "../middleware/audit-writes";
@@ -137,6 +138,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(incidentsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(authCaptchaRoutes);
+  apiRouter.use(vehicleDocumentsRoutes);
 
   // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts
   // for backward compatibility. New billing features use /api/billing/*

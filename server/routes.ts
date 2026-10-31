@@ -1331,57 +1331,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/vehicles/:vehicleId/documents", isWorkshopManager, (req, res) => {
-    const vehicleId = parseInt(req.params.vehicleId);
-      
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
-    
-    uploadVehicleDocument(req, res, async (err) => {
-      if (err) {
-        return res.status(400).json({ message: err.message });
-      }
-      
-      if (!req.file) {
-        return res.status(400).json({ message: "Aucun fichier n'a été téléchargé" });
-      }
-      
-      try {
-        const { name, type, description, expiryDate } = req.body;
-        
-        if (!name || !type) {
-          // Supprimer le fichier si les données sont invalides
-          await deleteFile(req.file.path);
-          return res.status(400).json({ message: "Nom et type de document requis" });
-        }
-        
-        const documentData = {
-          vehicleId: vehicleId,
-          name: name,
-          type: type,
-          description: description || null,
-          expiryDate: expiryDate || null,
-          filename: req.file.originalname,
-          filesize: req.file.size,
-          fileType: req.file.mimetype,
-          filePath: req.file.path,
-          uploadedBy: req.user?.id || null
-        };
-        
-        const document = await storage.createVehicleDocument(documentData);
-        
-        return res.status(201).json(document);
-      } catch (error) {
-        // Supprimer le fichier en cas d'erreur
-        await deleteFile(req.file.path);
-        
-        console.error("Create vehicle document error:", error);
-        return res.status(500).json({ message: "Erreur serveur" });
-      }
-    });
-  });
-
   app.get("/api/documents/:id/download", isAnyUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);

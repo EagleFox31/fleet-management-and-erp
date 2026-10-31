@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asc, eq } from "drizzle-orm";
 import { vehicleDocumentTypes } from "@shared/schema";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import {
   createVehicleDocumentTypeRequestSchema,
   updateVehicleDocumentTypeRequestSchema,
@@ -14,6 +15,17 @@ import { authorize, isStaff } from "../middleware/auth";
 const log = moduleLogger("vehicle-document-types");
 const router = Router();
 const adminOnly = authorize(["admin"]);
+
+/** Couche 2 : prévient les clients connectés ; le client ré-interroge `/api/vehicle-document-types`. */
+function broadcastTypeChanged(code: string): void {
+  const broadcastUpdate = (global as any).broadcastUpdate;
+  if (typeof broadcastUpdate !== "function") return;
+  broadcastUpdate("vehicle_document_type_changed", {
+    entity: "vehicle_document_type",
+    payload: { code },
+    scope: REALTIME_EVENTS.vehicle_document_type_changed.scope,
+  });
+}
 
 /**
  * Référentiel des types de document véhicule (P-05).
@@ -45,6 +57,7 @@ router.post("/vehicle-document-types", adminOnly, async (req, res, next) => {
     const [created] = await db.insert(vehicleDocumentTypes).values(body).onConflictDoNothing().returning();
     if (!created) throw new AppError(409, "Ce code de type de document existe déjà.");
     log.info({ code: created.code, requestId: req.requestId }, "type de document créé");
+    broadcastTypeChanged(created.code);
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -63,6 +76,7 @@ router.patch("/vehicle-document-types/:code", adminOnly, async (req, res, next) 
       .returning();
     if (!updated) throw new AppError(404, "Type de document introuvable.");
     log.info({ code: updated.code, requestId: req.requestId }, "type de document modifié");
+    broadcastTypeChanged(updated.code);
     res.json(updated);
   } catch (err) {
     next(err);
