@@ -15,7 +15,20 @@ import * as sharedRoles from "@shared/constants/roles";
  *
  * Les gardes sont lues dans la source (un test unitaire ne peut pas monter les
  * routeurs : `server/db.ts` exige une base). Une garde que ce test ne sait pas lire
- * le fait échouer : on l'apprend ici plutôt que de la laisser passer.
+ * le fait échouer : on l'apprend ici plutôt que de la laisser passer. Un identifiant
+ * (dont `...IDENT`) n'est résolu que par une constante locale ou un import réel de
+ * `@shared/constants/roles` ; un simple homonyme fait échouer le test.
+ *
+ * Angles morts (ce test ne les voit pas) :
+ * - `SCREEN_APIS` est tenu à la main : un écran qui appelle une route de plus, ou une
+ *   autre route que celle déclarée, n'est contrôlé que si on l'ajoute ici.
+ * - Les gardes posées par `router.use(...)` dans le fichier du routeur ne sont pas
+ *   lues : seules comptent celles de la déclaration de route et du montage dans
+ *   `server/api/index.ts` (préfixe de chemin refusé).
+ * - Les contrôles faits dans le handler ou le service (`req.user.role === ...`,
+ *   `canAccessOwned`, filtres par rôle) ne sont pas vus : d'où `apiWider`.
+ * - Seuls les `server/api/*.routes.ts` sont lus ; une route encore servie par
+ *   `server/routes.ts` n'est pas couverte.
  */
 
 type Api = { file: string; method?: "get" | "post"; path: string };
@@ -115,10 +128,24 @@ function localConst(name: string, src: string): string | undefined {
   throw new Error(`constante ${name} illisible`);
 }
 
+/**
+ * Nom exporté par `@shared/constants/roles` sous lequel `local` est réellement importé
+ * dans `src` (`import { A, B as local } from "@shared/constants/roles"`), sinon undefined.
+ * Un identifiant qui porte seulement le même nom qu'une constante partagée ne compte pas.
+ */
+function sharedImportOf(local: string, src: string): string | undefined {
+  const re = /import\s*\{([^}]*)\}\s*from\s*["'](?:@shared|(?:\.\.\/)+shared)\/constants\/roles["']/g;
+  for (const m of src.matchAll(re)) {
+    for (const spec of m[1].split(",")) {
+      const parts = spec.trim().replace(/^type\s+/, "").split(/\s+as\s+/);
+      if ((parts[1] ?? parts[0]) === local && !/^type\s/.test(spec.trim())) return parts[0];
+    }
+  }
+  return undefined;
+}
+
 function roleArray(expr: string, src: string): Set<string> {
   const e = expr.trim();
-  const fromShared = (sharedRoles as Record<string, unknown>)[e];
-  if (Array.isArray(fromShared)) return new Set(fromShared as string[]);
   if (e.startsWith("[") && e.endsWith("]")) {
     const roles = new Set<string>();
     for (const item of splitArgs(e.slice(1, -1))) {
@@ -136,8 +163,16 @@ function roleArray(expr: string, src: string): Set<string> {
     return base;
   }
   if (/^\w+$/.test(e)) {
-    const def = localConst(e, src) ?? localConst(e, AUTH_SRC);
-    if (def) return roleArray(def.replace(/\s+as\s+const$/, ""), src === AUTH_SRC || !localConst(e, src) ? AUTH_SRC : src);
+    // Une constante locale masque un import du même nom : elle passe en premier.
+    const def = localConst(e, src);
+    if (def) return roleArray(def.replace(/\s+as\s+const$/, ""), src);
+    const shared = sharedImportOf(e, src);
+    if (shared) {
+      const value = (sharedRoles as Record<string, unknown>)[shared];
+      if (Array.isArray(value)) return new Set(value as string[]);
+      throw new Error(`${shared} n'est pas une liste de rôles de @shared/constants/roles`);
+    }
+    throw new Error(`${e} n'est ni une constante locale ni un import de @shared/constants/roles`);
   }
   throw new Error(`liste de rôles illisible : ${e}`);
 }
@@ -228,5 +263,22 @@ describe("rôles des écrans du lot = rôles des routes qu'ils lisent", () => {
     expect(sorted((guardOf("isStaff", "") as { roles: Set<string> }).roles)).toEqual(sorted(sharedRoles.STAFF_ROLES));
     expect(sorted((guardOf("isAnyUser", "") as { roles: Set<string> }).roles)).toEqual(sorted(sharedRoles.ALL_APP_ROLES));
     expect(sorted((guardOf('authorize(["admin", "secretary"])', "") as { roles: Set<string> }).roles)).toEqual(["admin", "secretary"]);
+  });
+
+  it("un `...IDENT` ou un identifiant n'est lu dans les constantes partagées que s'il en est importé", () => {
+    const roles = (src: string) => sorted((guardOf("authorize([...TIRE_MOVEMENT_ROLES])", src) as { roles: Set<string> }).roles);
+    // Même nom, jamais importé : refusé, au lieu d'être lu en silence dans les constantes partagées.
+    expect(() => roles("")).toThrow(/ni une constante locale ni un import/);
+    expect(() => roles('import type { TIRE_MOVEMENT_ROLES } from "@shared/constants/roles";')).toThrow(/ni une constante locale/);
+    expect(() => roles('import { TIRE_MOVEMENT_ROLES } from "@shared/constants/other";')).toThrow(/ni une constante locale/);
+    // Réellement importé (alias compris) : valeur partagée.
+    expect(roles('import { TIRE_MOVEMENT_ROLES } from "@shared/constants/roles";')).toEqual(sorted(sharedRoles.TIRE_MOVEMENT_ROLES));
+    expect(roles('import { STAFF_ROLES as TIRE_MOVEMENT_ROLES } from "../../shared/constants/roles";')).toEqual(
+      sorted(sharedRoles.STAFF_ROLES),
+    );
+    // Une constante locale du même nom masque la constante partagée.
+    expect(
+      roles('import { TIRE_MOVEMENT_ROLES as X } from "@shared/constants/roles";\nconst TIRE_MOVEMENT_ROLES = ["admin"];'),
+    ).toEqual(["admin"]);
   });
 });

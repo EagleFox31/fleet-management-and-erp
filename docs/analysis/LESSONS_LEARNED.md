@@ -827,6 +827,10 @@ Chaque étape déclenche désormais:
 
 ### Prévention (vérifiable)
 - Contrat `tests/contract/auth-lockout-timezone.contract.test.ts` : processus fixé à `Africa/Douala`, fin de verrou renvoyée à la seconde près, compte sorti de la liste à l'instant de fin.
+- Unitaire `tests/unit/server/lockout-columns-read-path.test.ts` : échoue si un fichier de `server/` ou `shared/` hors liste nomme `locked_until` / `last_failed_login_at`, ou si une lecture Drizzle `users.lockedUntil` / `users.lastFailedLoginAt` apparaît hors du schéma. Angle mort écrit dans le test : une ligne `users` entière renvoyée sans nommer ces champs.
+
+### Correction de fond prévue
+- Passer `users.locked_until` et `users.last_failed_login_at` en `timestamptz` (migration idempotente et `init-database.ts`, lot base de données). Volontairement hors de ce correctif : changer le type sans reprendre les valeurs déjà écrites en heure locale les décalerait. Le garde-fou ci-dessus se retire avec cette migration.
 
 ### Règle Projet (obligatoire)
 - Une colonne `timestamp` sans fuseau se lit avec le pilote qui l'écrit. Un test qui touche à l'heure fixe un fuseau non UTC, sinon il ne prouve rien.
