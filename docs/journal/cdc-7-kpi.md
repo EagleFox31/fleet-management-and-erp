@@ -46,3 +46,18 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **RAIDER** : couvert R (export générique par colonnes déclarées, règles séparées du SQL), A (fuseau lu en Africa/Douala, jamais celui du serveur), I (second `stampPreventiveDue` rejouable, un taux par date), D (contrats : champs optionnels ajoutés seulement, ancien test de contrat des 3 KPI inchangé), failure memory (cloisonnement du temps réel signalé ci-dessus), E (erreurs `AppError`, logs `moduleLogger`, moindre privilège), R rétroactif (OT existants sans `due_date` retombent sur la date de début, aucune reprise de données). Sans objet : migration (colonnes déjà posées par CDC-0 schéma).
 - **Pour fleet-db** : (1) un déclencheur qui pose `due_date` à l'insertion d'un OT préventif, ou une vue des occurrences préventives (échéance, jour de clôture, état à temps / en retard) ; (2) une vue ou fonction pour les pannes dédoublonnées et pour le coût par OT (heures, pièces, taux en vigueur) afin de retirer cette agrégation du TypeScript ; (3) un générateur de récurrence des planifications.
 - **Reste / risques** : tolérance globale par variable d'environnement (pas par type de véhicule) ; un taux horaire de test inséré dans une base partagée modifie brièvement le coût des OT postérieurs.
+
+## 2026-10-31T23:30:00+01:00 — CDC-7 — Tests du chantier alignés sur la route des taux horaires
+
+- **Agent** : api · **Branche** : `lot/api/CDC-7-kpi` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : les tests du chantier CDC redevenus rouges sont amendés ; il reste un rouge attendu, gelé (session de tests).
+- **Comment** :
+  - `tests/unit/server/cdc-flags.test.ts:68` : `KPI_VIEWER_ROLES` = `["admin","management","workshop_manager"]`.
+  - `tests/support/cdc-mounts.ts` : le cas `workshop-labor-rates` quitte `MOUNT_CASES` (ce n'est plus un squelette 501). Le jumeau `tests/contract/cdc-mounts.contract.test.ts` lit la même table : aligné sans autre modification.
+  - `tests/unit/server/cdc-mounts.test.ts` : bloc dédié (service des taux simulé, sans base) : drapeau coupé 404, sans session 401, tout rôle hors admin 403, admin 200. Le contrat avec base (201, 409, 400, `created_by`) est dans `tests/contract/kpi-cdc.contract.test.ts` (non joué, base non isolée).
+- **Rouges attendus restants, à confier à la session de tests** (fichiers gelés ou non joués) :
+  - `tests/unit/client/pending-invoices-kpi-roles.test.ts:18` : attendre `["admin","management","workshop_manager"]` ; ligne 20, `canViewKpi` vaut vrai aussi pour `workshop_manager`.
+  - `tests/integration/kpi-service.test.ts` (~61, ~82, ~87-91) : série à zéros, champs optionnels, coût sur `end_date`.
+  - `tests/contract/lot-exports-roles.contract.test.ts:70-86` : `kpi-report` répond 404 tant que `kpi-reports` est coupé ; ajouter le drapeau ou exclure le chemin.
+- **Hors périmètre** : le défaut d'invalidation temps réel des KPI (clé `["/api/kpi"]`, événements de création et suppression d'OT) va à l'écran #7 ; `useRealTimeSync.ts` n'est pas touché.

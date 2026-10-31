@@ -64,7 +64,7 @@ describe("groupes de rôles CDC", () => {
     for (const group of groups) for (const role of group) expect(ALL_APP_ROLES).toContain(role);
   });
 
-  it("KPI_VIEWER_ROLES est inchangé (lot #7)", () => {
-    expect([...KPI_VIEWER_ROLES]).toEqual(["admin", "management"]);
+  it("KPI_VIEWER_ROLES : admin, direction et chef d'atelier (lot #7)", () => {
+    expect([...KPI_VIEWER_ROLES]).toEqual(["admin", "management", "workshop_manager"]);
   });
 });
