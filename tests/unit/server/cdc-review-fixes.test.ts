@@ -57,6 +57,14 @@ describe("maskSecrets : clés sensibles par sous-chaîne", () => {
     }
     expect(out.plate).toBe("AB-123");
   });
+  it("masque pin en mot entier (pin, newPin, pinCode, pin_code)", () => {
+    const out = maskSecrets({ pin: "1", newPin: "2", pinCode: "3", pin_code: "4", PIN: "5", "x-pin": "6" }) as Record<string, unknown>;
+    for (const key of Object.keys(out)) expect(out[key], key).toBe(AUDIT_MASK);
+  });
+  it("ne masque pas les clés qui contiennent seulement les lettres pin", () => {
+    const out = maskSecrets({ shipping: "a", shippingAddress: "b", pinned: "c", spinner: "d", mapping: "e", pinpoint: "f" }) as Record<string, unknown>;
+    for (const key of Object.keys(out)) expect(out[key], key).not.toBe(AUDIT_MASK);
+  });
   it("masque en profondeur", () => {
     const out = maskSecrets({ device: { deviceToken: "a", name: "boîtier" } }) as { device: Record<string, unknown> };
     expect(out.device.deviceToken).toBe(AUDIT_MASK);

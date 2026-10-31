@@ -50,3 +50,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **RAIDER** : couvert D (aucun test existant modifié, ceux de masquage et d'audit restent verts), E (moindre privilège, masquage élargi), failure memory (classe « Routes API ouvertes sans session » : prévention = test de pile du routeur). Sans objet : migration.
 - **Correction de l'entrée précédente** : elle affirmait « drapeaux coupés = 404, suites existantes vertes » dans sa ligne RAIDER. Exact pour les suites unitaires seulement. Les suites de contrat existantes (dont `api-auth-guard`) n'ont pas été jouées : contrat non joué, base de test non isolée (`DATABASE_URL_TEST` identique à `DATABASE_URL`).
 - **Reste / risques** : `tests/unit/server/audit-config.test.ts` (liste gelée à 8 entités) n'est pas bloquant ; `CDC_AUDIT_CONFIG` reste séparée. Le lot #6 doit remplacer `isAdmin` par une garde jeton marquée `isSessionGuard`, sinon `api-auth-guard` redeviendra rouge.
+
+## 2026-10-31T20:40:00+01:00 — CDC-0a — Masquage de `pin` en mot entier
+
+- **Agent** : api (lot CDC-0a) · **Branche** : `lot/api/CDC-0-socle` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `pin` n'est plus masqué en sous-chaîne ; il l'est en mot entier (`pin`, `PIN`, `newPin`, `pinCode`, `pin_code`, `x-pin`).
+- **Comment** : `server/lib/audit.ts` : `pin` retiré de `SENSITIVE_KEY`, remplacé par `isPinKey` (découpe camelCase et séparateurs, compare au mot `pin`). Tests ajoutés dans `tests/unit/server/cdc-review-fixes.test.ts` : positifs (`pin`, `newPin`, `pinCode`, `pin_code`), négatifs (`shipping`, `shippingAddress`, `pinned`, `spinner`).
+- **Pourquoi** : relecture de la PR #55 : l'entrée précédente avait assumé le masquage de `shipping`, ce qui dégrade le journal d'audit (non-régression).
+- **RAIDER** : couvert D (plus de clé ordinaire masquée à tort, aucune clé sensible perdue : `pin` en mot entier reste masqué), E. Sans objet : migration, contrat HTTP.
+- **Reste / risques** : une clé collée sans séparateur ni majuscule (`pincode`) n'est plus masquée.
+

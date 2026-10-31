@@ -7,7 +7,23 @@ const log = moduleLogger("audit");
  * Cle sensible : sous-chaine, pas seulement egalite exacte (`deviceToken`, `accessToken`,
  * `apiKey`, `x-api-key`). Masquer trop vaut mieux que fuiter dans le journal.
  */
-const SENSITIVE_KEY = /^(authorization|cookie)$|token|secret|password|passwd|pin|api[-_]?key/i;
+const SENSITIVE_KEY = /^(authorization|cookie)$|token|secret|password|passwd|api[-_]?key/i;
+
+/**
+ * `pin` ne se masque qu'en mot entier (`pin`, `newPin`, `pinCode`, `pin_code`, `x-pin`) :
+ * en sous-chaine il masquerait `shipping`, `pinned` ou `spinner` et degraderait le journal.
+ */
+function isPinKey(key: string): boolean {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .includes("pin");
+}
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key) || isPinKey(key);
+}
 export const AUDIT_MAX_BODY_BYTES = 4096;
 const MAX_DEPTH = 8;
 
@@ -18,7 +34,7 @@ export function maskSecrets(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return value.map((v) => maskSecrets(v, depth + 1));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = SENSITIVE_KEY.test(k) ? AUDIT_MASK : maskSecrets(v, depth + 1);
+    out[k] = isSensitiveKey(k) ? AUDIT_MASK : maskSecrets(v, depth + 1);
   }
   return out;
 }
