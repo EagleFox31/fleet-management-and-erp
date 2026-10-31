@@ -42,12 +42,23 @@ import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import authCaptchaRoutes from "./auth-captcha.routes";
+import missionAdvisoriesRoutes from "./mission-advisories.routes";
+import partScansRoutes from "./part-scans.routes";
+import partSalesRoutes from "./part-sales.routes";
+import telemetryRoutes from "./telemetry.routes";
+import vehiclePositionsRoutes from "./vehicle-positions.routes";
+import telemetryDevicesRoutes from "./telemetry-devices.routes";
+import workshopLaborRatesRoutes from "./workshop-labor-rates.routes";
+import maintenanceReportsRoutes from "./maintenance-reports.routes";
+import importsRoutes from "./imports.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
 import { captchaGuard } from "../middleware/captcha-guard";
 import { auditWrites } from "../middleware/audit-writes";
-import { AUDIT_CONFIG } from "../lib/audit-config";
+import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
+import { idempotencyGuard } from "../middleware/idempotency-guard";
+import { requireFeature } from "../lib/feature-flags";
 import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
 
 /**
@@ -83,6 +94,17 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
   apiRouter.use(auditWrites(AUDIT_CONFIG));
+  // Ressources du chantier CDC : liste d'audit separee (AUDIT_CONFIG est gelee par un test).
+  apiRouter.use(auditWrites(CDC_AUDIT_CONFIG));
+  // Idempotence des ecritures rejouables (CDC #10) : squelette sans effet, drapeau
+  // `technician-offline` et liste vide (lot #10b).
+  apiRouter.use(idempotencyGuard());
+
+  // EXCEPTION AUX GARDES DE SESSION (CDC #6) : `/telemetry` recoit les positions des boitiers GPS,
+  // qui n'ont pas de compte et s'authentifieront par jeton d'appareil (lot #6). Monte ici, avant
+  // tout routeur garde, pour qu'aucune garde de session ajoutee plus bas ne le capture. Derriere
+  // le drapeau `gps` (404 coupe). Le squelette repond 501 sans rien lire ni ecrire.
+  apiRouter.use("/telemetry", requireFeature("gps"), telemetryRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
@@ -117,6 +139,40 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/part-requirements", isStaff, partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
   apiRouter.use("/management", managementRoutes);
+
+  // Ressources du chantier CDC (lot CDC-0a). Squelettes 501 que chaque lot remplace dans son
+  // propre fichier. Ordre des gardes au montage : drapeau (404), session et role (401, 403).
+  // Aucun de ces chemins n'existe dans server/routes.ts ni dans un autre routeur (verifie).
+  apiRouter.use(
+    "/mission-advisories",
+    requireFeature("mission-maintenance-advisory"),
+    authorize([...MISSION_ADVISORY_ROLES]),
+    missionAdvisoriesRoutes,
+  );
+  apiRouter.use("/part-scans", requireFeature("part-qr"), authorize([...PART_SCAN_ROLES]), partScansRoutes);
+  // Vente de pieces (provisoire, decision utilisateur #4) : la direction lit, seuls
+  // PART_SALE_ROLES ecrivent.
+  const partSaleWriteGuard = authorize([...PART_SALE_ROLES]);
+  apiRouter.use(
+    "/part-sales",
+    requireFeature("part-sales"),
+    authorize([...PART_SALE_READ_ROLES]),
+    (req, res, next) => (req.method === "GET" || req.method === "HEAD" ? next() : partSaleWriteGuard(req, res, next)),
+    partSalesRoutes,
+  );
+  apiRouter.use("/vehicle-positions", requireFeature("gps"), authorize([...GPS_VIEW_ROLES]), vehiclePositionsRoutes);
+  apiRouter.use("/admin/telemetry-devices", requireFeature("gps"), isAdmin, telemetryDevicesRoutes);
+  apiRouter.use("/workshop-labor-rates", requireFeature("maintenance-report"), isAdmin, workshopLaborRatesRoutes);
+  apiRouter.use(
+    "/maintenance-reports",
+    requireFeature("exports"),
+    requireFeature("maintenance-report"),
+    authorize([...MAINTENANCE_REPORT_ROLES]),
+    maintenanceReportsRoutes,
+  );
+  // Le chef d'atelier n'importe que des interventions : les autres imports sont reserves a
+  // l'administrateur par la garde de leur route (IMPORT_ROLES).
+  apiRouter.use("/imports", requireFeature("excel-import"), authorize([...IMPORT_INTERVENTION_ROLES]), importsRoutes);
 
   // Routeurs du lot recette (T-08). Chemins relatifs à /api, déclarés dans chaque fichier :
   // squelettes 501 derrière leur drapeau, que chaque agent remplace sans toucher à ce fichier.
@@ -175,7 +231,16 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
-import { authenticate, authorize, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
+import { authenticate, authorize, isAdmin, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
-import { PROCUREMENT_ROLES } from "@shared/constants/roles";
+import {
+  GPS_VIEW_ROLES,
+  IMPORT_INTERVENTION_ROLES,
+  MAINTENANCE_REPORT_ROLES,
+  MISSION_ADVISORY_ROLES,
+  PART_SALE_READ_ROLES,
+  PART_SALE_ROLES,
+  PART_SCAN_ROLES,
+  PROCUREMENT_ROLES,
+} from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);
