@@ -8,6 +8,8 @@ import { computeTireWearScore } from "@shared/constants/tires";
 import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { preventiveDueDay } from "../lib/kpi-rules";
+import { stampPreventiveDue } from "../lib/preventive-due";
 
 const log = moduleLogger("tires");
 
@@ -755,6 +757,10 @@ export class TiresService {
             isFirstVisit: false
           })
           .returning();
+
+        // Échéance figée pour le taux de préventif (CDC #7) ; le kilométrage seulement s'il est valide.
+        const dueMileage = Number.isInteger(data.rotationMileage) && data.rotationMileage >= 0 ? data.rotationMileage : null;
+        await stampPreventiveDue(tx, workOrder.id, { dueDate: preventiveDueDay(data.rotationDate), dueMileage });
 
         const [rotation] = await tx
           .insert(tireRotations)

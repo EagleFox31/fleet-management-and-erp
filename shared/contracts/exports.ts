@@ -9,7 +9,9 @@
  * n'obtient pas « ses propres lignes » : aucun lien utilisateur → fiche client
  * n'existe encore (lot suivant). Drapeau coupé (`exports`) : 404.
  */
-import type { AppRole } from "../constants/roles";
+import { z } from "zod";
+import { KPI_VIEWER_ROLES, type AppRole } from "../constants/roles";
+import { isoDateSchema } from "./common";
 
 export const EXPORTS_BASE_PATH = "/api/exports";
 
@@ -22,6 +24,8 @@ export const EXPORT_PATHS = [
   "client-missions",
   "client-invoices",
   "monthly-report",
+  // Rapport des indicateurs de pilotage (CDC #7), derrière le drapeau `kpi-reports`.
+  "kpi-report",
   // Exports historiques servis par server/routes.ts (page Rapports) : memes regles de refus par defaut.
   "vehicles",
   "work-orders",
@@ -44,6 +48,7 @@ export const EXPORT_ROLE_MATRIX: Record<ExportPath, readonly AppRole[]> = {
   "client-missions": BILLING_READERS,
   "client-invoices": BILLING_READERS,
   "monthly-report": ["admin", "management", "secretary"],
+  "kpi-report": KPI_VIEWER_ROLES,
   vehicles: ["admin", "management", "secretary", "logistics", "workshop_manager"],
   "work-orders": ["admin", "management", "secretary", "workshop_manager"],
   fuel: FUEL_READERS,
@@ -60,3 +65,21 @@ export function canExport(role: string | null | undefined, path: string): boolea
   if (!role || !isExportPath(path)) return false;
   return (EXPORT_ROLE_MATRIX[path] as readonly string[]).includes(role);
 }
+
+/** Rapport des indicateurs (`GET /api/exports/kpi-report`) : mensuel ou trimestriel, Excel par défaut. */
+export const KPI_REPORT_PERIODS = ["month", "quarter"] as const;
+export const KPI_REPORT_FORMATS = ["xlsx", "pdf"] as const;
+
+export const kpiReportQuerySchema = z
+  .object({
+    period: z.enum(KPI_REPORT_PERIODS).default("month"),
+    from: isoDateSchema.optional(),
+    to: isoDateSchema.optional(),
+    format: z.enum(KPI_REPORT_FORMATS).default("xlsx"),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, {
+    message: "La date de début doit précéder la date de fin.",
+    path: ["from"],
+  });
+
+export type KpiReportQuery = z.infer<typeof kpiReportQuerySchema>;

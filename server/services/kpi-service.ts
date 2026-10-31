@@ -1,105 +1,239 @@
 /**
- * KPI de la direction (P-10, T-25). Lecture seule, SQL agrégé.
+ * KPI de pilotage (P-10, T-25, chantier CDC #7). Lecture seule.
  *
- * Définitions (documentées par tests/integration/kpi-service.test.ts) :
- * - incident : OT non préventif et non annulé, daté de la panne
- *   (`COALESCE(start_date, created_at)`) ;
- * - préventif échu : OT préventif non annulé dont `start_date` (date prévue)
- *   tombe dans la période ; réalisé à temps : clos et `end_date` au plus tard
- *   le jour prévu + `duration` minutes ;
- * - coût d'une intervention : OT clos, `work_orders.cost` (main-d'oeuvre) +
- *   pièces. Les pièces sont agrégées à part (`parts_used` par OT) : jamais de
- *   somme jointe, sinon double comptage (cf. shared/schema.ts, work_orders).
+ * Le SQL ramène des lignes, `server/lib/kpi-rules.ts` décide (testé sans base). Définitions :
+ * - panne : déclaration (`incidents`) ou OT correctif non annulé qu'aucune déclaration ne
+ *   référence (`incidents.work_order_id`) : un même événement n'est jamais compté deux fois.
+ *   Série mensuelle complète (mois à zéro compris), moyenne = total / nombre de mois ;
+ * - préventif : occurrence échue = OT préventif d'échéance `COALESCE(due_date, start_date::date)`
+ *   dans [from, min(to, hier)] (Africa/Douala), plus les planifications actives échues qui n'ont
+ *   aucun OT préventif. Réalisé à temps : `completed` et clos au plus tard à l'échéance plus la
+ *   tolérance (`KPI_PREVENTIVE_TOLERANCE_DAYS`, 0 par défaut). Annulé = non réalisé ;
+ * - coût d'une intervention : OT `completed` dont `end_date` tombe dans la période, main-d'oeuvre
+ *   (heures réelles x taux en vigueur, sinon `work_orders.cost`) + pièces (`parts_used`). Les
+ *   pneus ne sont pas comptés. Montants en FCFA entiers, hors taxes.
+ *
+ * Pièces et heures sont agrégées par OT dans des sous-requêtes : jamais de somme jointe
+ * (double comptage, cf. shared/schema.ts, work_orders).
  */
 import { sql } from "drizzle-orm";
 import { db } from "../db";
+import { workOrderPlanning } from "@shared/schema";
 import type {
   AvgCostPerInterventionResponse,
+  FailuresResponse,
   IncidentsPerMonthResponse,
   KpiQuery,
+  MaintenanceCostsQuery,
+  MaintenanceCostsResponse,
   PreventiveComplianceResponse,
 } from "@shared/contracts/kpi";
+import {
+  type CostRow,
+  type LaborRate,
+  averageCost,
+  fillMonthSeries,
+  groupCosts,
+  isoDateInZone,
+  laborRateAt,
+  monthKeysBetween,
+  monthlyAverage,
+  parseToleranceDays,
+  preventiveWindowEnd,
+  resolveKpiWindow,
+  summarizePreventive,
+  workOrderCost,
+} from "../lib/kpi-rules";
 
-type Bounds = { from: string; toExclusive: string };
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Sans période : les 12 derniers mois. Bornes incluses, `to` exclu après +1 jour. */
-export function resolveKpiBounds(query: KpiQuery, now: Date = new Date()): Bounds {
-  const today = now.toISOString().slice(0, 10);
-  const to = query.to ?? today;
-  const from = query.from ?? addDays(to, -365);
-  return { from, toExclusive: addDays(to, 1) };
-}
-
-function rowsOf<T>(result: unknown): T[] {
+export function rowsOf<T>(result: unknown): T[] {
   return ((result as { rows?: T[] }).rows ?? (result as T[])) as T[];
 }
 
-export const kpiService = {
-  async incidentsPerMonth(query: KpiQuery): Promise<IncidentsPerMonthResponse> {
-    const { from, toExclusive } = resolveKpiBounds(query);
-    const res = await db.execute(sql`
-      SELECT to_char(date_trunc('month', COALESCE(start_date, created_at)), 'YYYY-MM') AS month,
-             count(*)::int AS count
-      FROM work_orders
-      WHERE is_preventive IS NOT TRUE
-        AND status <> 'cancelled'
-        AND COALESCE(start_date, created_at) >= ${from}::timestamp
-        AND COALESCE(start_date, created_at) < ${toExclusive}::timestamp
-      GROUP BY 1
-      ORDER BY 1`);
-    return rowsOf<{ month: string; count: number }>(res).map((r) => ({
-      month: r.month,
-      count: Number(r.count),
-    }));
-  },
+type FailureRow = { month: string; vehicle_id: number; registration_number: string; count: number };
 
-  async preventiveCompliance(query: KpiQuery): Promise<PreventiveComplianceResponse> {
-    const { from, toExclusive } = resolveKpiBounds(query);
-    const res = await db.execute(sql`
-      SELECT count(*)::int AS planned,
-             (count(*) FILTER (
-               WHERE status = 'completed'
-                 AND end_date IS NOT NULL
-                 AND end_date::date <= (start_date + make_interval(mins => COALESCE(duration, 0)))::date
-             ))::int AS done_on_time
-      FROM work_orders
-      WHERE is_preventive IS TRUE
-        AND status <> 'cancelled'
-        AND start_date >= ${from}::timestamp
-        AND start_date < ${toExclusive}::timestamp`);
-    const row = rowsOf<{ planned: number; done_on_time: number }>(res)[0];
-    const planned = Number(row?.planned ?? 0);
-    const doneOnTime = Number(row?.done_on_time ?? 0);
-    return { planned, doneOnTime, rate: planned === 0 ? null : doneOnTime / planned };
-  },
-
-  async avgCostPerIntervention(query: KpiQuery): Promise<AvgCostPerInterventionResponse> {
-    const { from, toExclusive } = resolveKpiBounds(query);
-    const res = await db.execute(sql`
-      SELECT count(*)::int AS interventions,
-             (COALESCE(SUM(w.cost), 0) + COALESCE(SUM(p.total), 0))::float8 AS total_cost
+async function loadFailures(from: string, toExclusive: string): Promise<FailureRow[]> {
+  const res = await db.execute(sql`
+    WITH events AS (
+      SELECT i.vehicle_id, i.created_at AS at
+      FROM incidents i
+      WHERE i.created_at >= ${from}::timestamp AND i.created_at < ${toExclusive}::timestamp
+      UNION ALL
+      SELECT w.vehicle_id, COALESCE(w.start_date, w.created_at) AS at
       FROM work_orders w
-      LEFT JOIN (
-        SELECT work_order_id, SUM(quantity * unit_price) AS total
-        FROM parts_used
-        GROUP BY work_order_id
-      ) p ON p.work_order_id = w.id
+      WHERE w.is_preventive IS NOT TRUE
+        AND w.status <> 'cancelled'
+        AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.work_order_id = w.id)
+        AND COALESCE(w.start_date, w.created_at) >= ${from}::timestamp
+        AND COALESCE(w.start_date, w.created_at) < ${toExclusive}::timestamp
+    )
+    SELECT to_char(e.at, 'YYYY-MM') AS month, e.vehicle_id, v.registration_number, count(*)::int AS count
+    FROM events e
+    JOIN vehicles v ON v.id = e.vehicle_id
+    GROUP BY 1, 2, 3`);
+  return rowsOf<FailureRow>(res).map((r) => ({ ...r, vehicle_id: Number(r.vehicle_id), count: Number(r.count) }));
+}
+
+type CostSource = {
+  id: number;
+  vehicle_id: number;
+  registration_number: string;
+  is_preventive: boolean | null;
+  cost: string | number | null;
+  hours: string | number | null;
+  parts: string | number | null;
+  done_on: string;
+};
+
+async function loadCostRows(from: string, toExclusive: string): Promise<{ rows: CostRow[]; laborValued: boolean }> {
+  const [rateRes, costRes] = await Promise.all([
+    db.execute(sql`
+      SELECT to_char(effective_from, 'YYYY-MM-DD') AS effective_from, hourly_rate_ht::float8 AS hourly_rate_ht
+      FROM workshop_labor_rates`),
+    db.execute(sql`
+      SELECT w.id, w.vehicle_id, v.registration_number, w.is_preventive, w.cost,
+             to_char(w.end_date, 'YYYY-MM-DD') AS done_on,
+             (SELECT COALESCE(SUM(i.actual_hours), 0) FROM work_order_items i
+               WHERE i.work_order_id = w.id AND i.status <> 'cancelled') AS hours,
+             (SELECT COALESCE(SUM(pu.quantity * pu.unit_price), 0) FROM parts_used pu
+               WHERE pu.work_order_id = w.id) AS parts
+      FROM work_orders w
+      JOIN vehicles v ON v.id = w.vehicle_id
       WHERE w.status = 'completed'
-        AND COALESCE(w.end_date, w.start_date, w.created_at) >= ${from}::timestamp
-        AND COALESCE(w.end_date, w.start_date, w.created_at) < ${toExclusive}::timestamp`);
-    const row = rowsOf<{ interventions: number; total_cost: number }>(res)[0];
-    const interventions = Number(row?.interventions ?? 0);
-    const totalCost = Math.round(Number(row?.total_cost ?? 0));
+        AND w.end_date >= ${from}::timestamp
+        AND w.end_date < ${toExclusive}::timestamp`),
+  ]);
+  const rates: LaborRate[] = rowsOf<{ effective_from: string; hourly_rate_ht: number }>(rateRes).map((r) => ({
+    effectiveFrom: r.effective_from,
+    hourlyRateHt: Number(r.hourly_rate_ht),
+  }));
+  const rows = rowsOf<CostSource>(costRes).map((r): CostRow => {
+    const cost = workOrderCost({
+      cost: Number(r.cost ?? 0),
+      hours: Number(r.hours ?? 0),
+      rate: laborRateAt(rates, r.done_on),
+      parts: Number(r.parts ?? 0),
+    });
+    return { ...cost, key: String(r.vehicle_id), label: r.registration_number, isPreventive: r.is_preventive === true };
+  });
+  return { rows, laborValued: rates.length > 0 };
+}
+
+function sum(rows: readonly CostRow[], pick: (r: CostRow) => number): number {
+  return rows.reduce((acc, r) => acc + pick(r), 0);
+}
+
+export const kpiService = {
+  /** Pannes par mois (déclarations + OT correctifs sans déclaration), mois à zéro compris. */
+  async incidentsPerMonth(query: KpiQuery, now: Date = new Date()): Promise<IncidentsPerMonthResponse> {
+    const { from, to, toExclusive } = resolveKpiWindow(query, now);
+    const rows = await loadFailures(from, toExclusive);
+    const perMonth = new Map<string, number>();
+    for (const r of rows) perMonth.set(r.month, (perMonth.get(r.month) ?? 0) + r.count);
+    return fillMonthSeries([...perMonth].map(([month, count]) => ({ month, count })), from, to);
+  },
+
+  async failures(query: KpiQuery, now: Date = new Date()): Promise<FailuresResponse> {
+    const { from, to, toExclusive } = resolveKpiWindow(query, now);
+    const rows = await loadFailures(from, toExclusive);
+    const perMonth = new Map<string, number>();
+    const perVehicle = new Map<number, { vehicleId: number; registrationNumber: string; count: number }>();
+    for (const r of rows) {
+      perMonth.set(r.month, (perMonth.get(r.month) ?? 0) + r.count);
+      const v = perVehicle.get(r.vehicle_id) ?? { vehicleId: r.vehicle_id, registrationNumber: r.registration_number, count: 0 };
+      v.count += r.count;
+      perVehicle.set(r.vehicle_id, v);
+    }
+    const series = fillMonthSeries([...perMonth].map(([month, count]) => ({ month, count })), from, to);
+    const total = series.reduce((acc, m) => acc + m.count, 0);
+    const months = Math.max(1, monthKeysBetween(from, to).length);
     return {
-      interventions,
+      from,
+      to,
+      months,
+      total,
+      monthlyAverage: monthlyAverage(total, months),
+      series,
+      byVehicle: [...perVehicle.values()].sort(
+        (a, b) => b.count - a.count || a.registrationNumber.localeCompare(b.registrationNumber),
+      ),
+    };
+  },
+
+  async preventiveCompliance(query: KpiQuery, now: Date = new Date()): Promise<PreventiveComplianceResponse> {
+    const { from, to } = resolveKpiWindow(query, now);
+    const toleranceDays = parseToleranceDays(process.env.KPI_PREVENTIVE_TOLERANCE_DAYS);
+    const periodEnd = preventiveWindowEnd(to, isoDateInZone(now));
+    const due = sql`COALESCE(${workOrderPlanning.dueDate}, work_orders.start_date::date)`;
+
+    const [occRes, uncoveredRes] = await Promise.all([
+      db.execute(sql`
+        SELECT status, (${due})::text AS due, to_char(end_date, 'YYYY-MM-DD') AS done_on
+        FROM work_orders
+        WHERE is_preventive IS TRUE
+          AND ${due} >= ${from}::date
+          AND ${due} <= ${periodEnd}::date`),
+      db.execute(sql`
+        SELECT count(*)::int AS n
+        FROM maintenance_schedules ms
+        WHERE ms.is_active IS TRUE
+          AND ms.scheduled_date >= ${from}::date
+          AND ms.scheduled_date <= ${periodEnd}::date
+          AND NOT EXISTS (
+            SELECT 1 FROM work_orders w WHERE w.maintenance_schedule_id = ms.id AND w.is_preventive IS TRUE
+          )`),
+    ]);
+    const occurrences = rowsOf<{ status: string; due: string; done_on: string | null }>(occRes).map((r) => ({
+      status: r.status,
+      due: r.due,
+      doneOn: r.done_on,
+    }));
+    const uncovered = Number(rowsOf<{ n: number }>(uncoveredRes)[0]?.n ?? 0);
+    const s = summarizePreventive(occurrences, uncovered, toleranceDays);
+    return { ...s, toleranceDays, periodEnd };
+  },
+
+  async avgCostPerIntervention(query: KpiQuery, now: Date = new Date()): Promise<AvgCostPerInterventionResponse> {
+    const { from, toExclusive } = resolveKpiWindow(query, now);
+    const { rows, laborValued } = await loadCostRows(from, toExclusive);
+    const totalCost = sum(rows, (r) => r.total);
+    return {
+      interventions: rows.length,
       totalCost,
-      averageCost: interventions === 0 ? null : Math.round(totalCost / interventions),
+      averageCost: averageCost(totalCost, rows.length),
+      laborValued,
+      laborTotal: sum(rows, (r) => r.labor),
+      partsTotal: sum(rows, (r) => r.parts),
+      missingCostCount: rows.filter((r) => r.laborMissing).length,
+    };
+  },
+
+  async maintenanceCosts(query: MaintenanceCostsQuery, now: Date = new Date()): Promise<MaintenanceCostsResponse> {
+    const { from, toExclusive } = resolveKpiWindow(query, now);
+    const { rows, laborValued } = await loadCostRows(from, toExclusive);
+    const totalCost = sum(rows, (r) => r.total);
+
+    let groups = groupCosts(rows, (r) =>
+      query.groupBy === "type"
+        ? r.isPreventive
+          ? { key: "preventive", label: "Préventif" }
+          : { key: "corrective", label: "Correctif" }
+        : { key: r.key, label: r.label },
+    );
+    if (query.groupBy === "type") {
+      const byKey = new Map(groups.map((g) => [g.key, g]));
+      groups = [
+        byKey.get("preventive") ?? { key: "preventive", label: "Préventif", interventions: 0, totalCost: 0, averageCost: null },
+        byKey.get("corrective") ?? { key: "corrective", label: "Correctif", interventions: 0, totalCost: 0, averageCost: null },
+      ];
+    } else {
+      groups.sort((a, b) => b.totalCost - a.totalCost || a.label.localeCompare(b.label));
+    }
+    return {
+      groupBy: query.groupBy,
+      laborValued,
+      missingCostCount: rows.filter((r) => r.laborMissing).length,
+      total: { interventions: rows.length, totalCost, averageCost: averageCost(totalCost, rows.length) },
+      groups,
     };
   },
 };
