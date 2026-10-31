@@ -53,9 +53,20 @@ export type CdcScreenApi = {
 export type CdcScreen = LotScreen & {
   feature: FeatureKey;
   roles: readonly AppRole[];
-  /** Appels d'API de l'écran ; le premier, en lecture, décide des rôles (voir le test). */
+  /** Drapeaux exigés en plus de `feature` (le montage serveur les exige tous). */
+  alsoRequires?: readonly FeatureKey[];
+  /**
+   * Appels d'API de l'écran, à titre de documentation. Les rôles de l'écran sont ceux du montage
+   * serveur qui garde son accès, quelle que soit la méthode : le test les compare.
+   */
   apis: readonly CdcScreenApi[];
 };
+
+/** Tous les drapeaux dont dépend un écran ; l'un d'eux éteint, l'écran disparaît. */
+export function screenFeatures(screen: LotScreen): FeatureKey[] {
+  const extra = "alsoRequires" in screen ? ((screen as CdcScreen).alsoRequires ?? []) : [];
+  return [...(screen.feature ? [screen.feature] : []), ...extra];
+}
 
 export const CDC_SCREENS: readonly CdcScreen[] = [
   // --- Lot #3 : QR des pièces
@@ -108,7 +119,8 @@ export const CDC_SCREENS: readonly CdcScreen[] = [
   {
     id: "maintenance-report", path: "/maintenance/report", title: "Rapport de maintenance", task: "CDC-8",
     description: "Rapport de maintenance d'un véhicule ou d'une période, à télécharger.",
-    feature: "maintenance-report", roles: MAINTENANCE_REPORT_ROLES,
+    // Le montage serveur exige aussi `exports` (rapport remis au format Word).
+    feature: "maintenance-report", alsoRequires: ["exports"], roles: MAINTENANCE_REPORT_ROLES,
     apis: [{ method: "GET", path: "/api/maintenance-reports" }],
     menu: { group: "maintenance", label: "Rapport de maintenance", icon: FileBarChart },
   },

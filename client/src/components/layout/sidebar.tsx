@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useFeatureFlags } from "@/hooks/use-feature";
 import type { FeatureKey } from "@shared/feature-flags";
 import { FEATURE_GATED_HREFS, LOT_SCREENS, canAccessLotScreen } from "@/config/lot-screens";
-import { CDC_SCREENS } from "@/config/cdc-screens";
+import { CDC_SCREENS, screenFeatures } from "@/config/cdc-screens";
 import {
   BarChart3,
   Truck,
@@ -59,6 +59,8 @@ interface MenuItem {
   menuKey?: string;
   /** Drapeau qui masque l'entrée quand il est coupé (cosmétique, la garde est côté serveur). */
   feature?: FeatureKey;
+  /** Drapeaux exigés en plus de `feature`. */
+  alsoRequires?: readonly FeatureKey[];
 }
 
 /**
@@ -78,7 +80,8 @@ function withLotScreens(base: MenuItem[], role: string | undefined, flags: Recor
   const menu: MenuItem[] = base.map((item) => ({ ...item, submenu: item.submenu ? [...item.submenu] : undefined }));
   for (const screen of [...LOT_SCREENS, ...CDC_SCREENS]) {
     if (!screen.menu || !canAccessLotScreen(screen, role)) continue;
-    const entry: MenuItem = { label: screen.menu.label, href: screen.path, icon: screen.menu.icon, feature: screen.feature };
+    const [feature, ...alsoRequires] = screenFeatures(screen);
+    const entry: MenuItem = { label: screen.menu.label, href: screen.path, icon: screen.menu.icon, feature, alsoRequires };
     const key = screen.menu.group;
     let group = key === "top" ? undefined : menu.find((item) => item.menuKey === key);
     const fallback = LOT_MENU_GROUPS[key];
@@ -91,7 +94,7 @@ function withLotScreens(base: MenuItem[], role: string | undefined, flags: Recor
   }
   const visible = (item: MenuItem) => {
     const gate = item.feature ?? (item.href ? FEATURE_GATED_HREFS[item.href] : undefined);
-    return !gate || flags[gate];
+    return (!gate || flags[gate]) && (item.alsoRequires ?? []).every((flag) => flags[flag]);
   };
   return menu
     .map((item) => (item.submenu ? { ...item, submenu: item.submenu.filter(visible) } : item))

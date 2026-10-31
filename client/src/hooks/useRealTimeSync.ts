@@ -3,7 +3,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
-import { REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
+import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
 
 /** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 function invalidateCatalogEvent(name: RealtimeEventName): void {
@@ -745,6 +745,8 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/technician-stats"] });
       // Satellites du lot : tuiles KPI, historique et contrôle qualité de l'OT.
       queryClient.invalidateQueries({ queryKey: ["/api/kpi"] });
+      // `["/api/kpi"]` ne couvre que la clé exacte ; chaque tuile porte sa propre clé.
+      for (const key of KPI_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: [key] });
       // Avis de maintenance rattachés aux missions (CDC) : l'état de l'OT les fait évoluer.
       queryClient.invalidateQueries({ queryKey: ["/api/mission-advisories"] });
       if (currentUserId) {

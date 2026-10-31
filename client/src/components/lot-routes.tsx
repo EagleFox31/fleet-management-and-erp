@@ -3,7 +3,7 @@ import AppLayout from "@/components/layout/app-layout";
 import { FeatureGate } from "@/components/feature-gate";
 import { LOT_SCREENS, type LotScreen } from "@/config/lot-screens";
 import { LOT_SCREEN_COMPONENTS } from "@/config/lot-screen-components";
-import { CDC_SCREENS } from "@/config/cdc-screens";
+import { CDC_SCREENS, screenFeatures } from "@/config/cdc-screens";
 import { CDC_SCREEN_COMPONENTS } from "@/config/cdc-screen-components";
 import ScreenPlaceholder from "@/pages/lot/screen-placeholder";
 import { useAuth } from "@/hooks/useAuth";
@@ -42,7 +42,11 @@ function ScreenBody({ screen, params }: { screen: LotScreen; params: Record<stri
   ) : (
     <ScreenPlaceholder screen={screen} />
   );
-  return screen.feature ? <FeatureGate feature={screen.feature}>{body}</FeatureGate> : <>{body}</>;
+  // Un FeatureGate par drapeau : tous doivent être allumés.
+  return screenFeatures(screen).reduceRight<ReactNode>(
+    (inner, feature) => <FeatureGate feature={feature}>{inner}</FeatureGate>,
+    body,
+  );
 }
 
 /** Routes des écrans du lot et du chantier CDC (`config/lot-screens.ts`, `config/cdc-screens.ts`). À poser avant les routes à `:id`. */

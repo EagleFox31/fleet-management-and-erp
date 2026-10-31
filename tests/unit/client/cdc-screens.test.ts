@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CDC_SCREENS, type CdcScreen } from "@/config/cdc-screens";
+import { CDC_SCREENS, screenFeatures, type CdcScreen } from "@/config/cdc-screens";
 import { LOT_SCREENS } from "@/config/lot-screens";
 import { KPI_VIEWER_ROLES, PART_LABEL_ROLES, type AppRole } from "@shared/constants/roles";
 import { FEATURE_FLAGS } from "@shared/feature-flags";
@@ -104,8 +104,15 @@ describe("registre des écrans CDC", () => {
     expect(Object.keys(FEATURE_FLAGS)).toContain(screen.feature);
     expect(FEATURE_FLAGS[screen.feature].defaultEnabled).toBe(false);
     const access = SERVER_ACCESS[screen.id];
-    const mount = "mount" in access ? mountByName(access.mount) : "narrowerThan" in access ? mountByName(access.narrowerThan) : undefined;
-    if (mount) expect(mount.flags).toContain(screen.feature);
+    // Montage propre à l'écran : l'écran exige exactement les drapeaux du montage, ni plus (écran
+    // caché pour rien) ni moins (écran ouvert, API en 404).
+    if ("mount" in access) expect([...screenFeatures(screen)].sort()).toEqual([...mountByName(access.mount).flags].sort());
+    else if ("narrowerThan" in access) expect(mountByName(access.narrowerThan).flags).toContain(screen.feature);
+  });
+
+  it("le rapport de maintenance exige aussi le drapeau d'export, comme son montage serveur", () => {
+    const report = CDC_SCREENS.find((s) => s.id === "maintenance-report");
+    expect(screenFeatures(report as CdcScreen)).toEqual(["maintenance-report", "exports"]);
   });
 
   it.each(CDC_SCREENS.map((s) => [s.id, s] as const))("%s : appels d'API déclarés et menu complet", (_id, screen) => {
