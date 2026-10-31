@@ -67,3 +67,13 @@ export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
 }
+
+/**
+ * Indicateurs de pilotage (`/api/kpi/*`) : direction et administrateur.
+ * Doit rester aligné sur `isManagementOrAdmin` (server/middleware/auth.ts).
+ */
+export const KPI_VIEWER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+
+export function canViewKpi(role: string | null | undefined): boolean {
+  return (KPI_VIEWER_ROLES as readonly string[]).includes(String(role ?? ""));
+}
