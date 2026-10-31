@@ -18,7 +18,16 @@ const ACTION_BY_METHOD: Record<string, AuditAction> = { POST: "create", PUT: "up
 export function matchAuditRule(config: AuditConfig, method: string, path: string) {
   const action = ACTION_BY_METHOD[method.toUpperCase()];
   if (!action) return null;
-  const clean = path.split("?")[0].replace(/\/+$/, "");
+  // Express route sans casse et decode le chemin : comparer de meme, sinon `/PART-SALES` ou
+  // `/work-orders/%35` s'executent sans journal.
+  const rawPath = path.split("?")[0];
+  let decoded = rawPath;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    // Encodage invalide : Express repond 400, on garde le chemin brut.
+  }
+  const clean = decoded.toLowerCase().replace(/\/+$/, "");
   for (const rule of config.rules) {
     const m = rule.pattern.exec(clean);
     if (m) return { action, entityType: rule.entityType, entityId: m[rule.idGroup ?? 1] ?? null };
