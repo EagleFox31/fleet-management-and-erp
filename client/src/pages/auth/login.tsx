@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { AltchaWidget, shouldShowCaptcha } from "@/components/auth/altcha-widget";
 import { useFeature } from "@/hooks/use-feature";
+import { CAPTCHA_REQUIRED_MESSAGE, loginFailureOf } from "@/lib/lockout-message";
+import { toApiError } from "@/lib/api-error";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -57,7 +59,7 @@ const features = [
 
 
 export default function Login() {
-  const { login, isAuthenticating, isAuthenticated, loginLockMessage } = useAuth();
+  const { login, isAuthenticating, isAuthenticated, loginLockMessage, loginCaptchaRequired } = useAuth();
   const [, setLocation] = useLocation();
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -65,7 +67,12 @@ export default function Login() {
   const captchaEnabled = useFeature("captcha");
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [captchaProof, setCaptchaProof] = useState<string | null>(null);
-  const showCaptcha = captchaEnabled && shouldShowCaptcha(failedAttempts);
+  // Une preuve ALTCHA ne sert qu'une fois (anti-rejeu serveur) : nouvelle clé = nouveau défi.
+  const [captchaKey, setCaptchaKey] = useState(0);
+  // Le serveur fait foi : s'il exige la preuve (400 sur `captcha`), le défi s'affiche même
+  // après un rechargement qui a remis le compteur local à zéro.
+  const showCaptcha = loginCaptchaRequired || (captchaEnabled && shouldShowCaptcha(failedAttempts));
+  const loginMessage = loginLockMessage ?? (loginCaptchaRequired ? CAPTCHA_REQUIRED_MESSAGE : loginError);
   const [view, setView] = useState<'login' | 'forgot' | 'driver-select' | 'driver-pin'>('login');
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotUsername, setForgotUsername] = useState('');
@@ -74,6 +81,8 @@ export default function Login() {
   const [driversList, setDriversList] = useState<{ id: number; name: string }[]>([]);
   const [pinDigits, setPinDigits] = useState<string[]>([]);
   const [pinError, setPinError] = useState(false);
+  /** Refus du PIN lu dans la réponse (verrouillage 429), affiché tant que l'utilisateur n'a pas réessayé. */
+  const [pinMessage, setPinMessage] = useState<string | null>(null);
   const [driversLoading, setDriversLoading] = useState(false);
 
   useEffect(() => {
@@ -88,9 +97,14 @@ export default function Login() {
   async function onSubmit(values: LoginFormValues) {
     setLoginError(null);
     try {
-      const success = await login({ ...values, rememberMe, ...(showCaptcha && captchaProof ? { captcha: captchaProof } : {}) });
+      const sentProof = showCaptcha && captchaProof ? captchaProof : null;
+      const success = await login({ ...values, rememberMe, ...(sentProof ? { captcha: sentProof } : {}) });
       if (!success) setFailedAttempts((n) => n + 1);
       if (!success) setLoginError("Identifiants incorrects. Veuillez réessayer.");
+      if (!success && sentProof) {
+        setCaptchaProof(null);
+        setCaptchaKey((k) => k + 1);
+      }
     } catch (error) {
       handleApiError(error);
       setLoginError("Erreur de connexion. Veuillez réessayer.");
@@ -115,6 +129,7 @@ export default function Login() {
   async function handlePinSubmit(digits: string[]) {
     const pin = digits.join('');
     if (!selectedDriver) return;
+    setPinMessage(null);
     try {
       const res = await fetch('/api/auth/pin-login', {
         method: 'POST',
@@ -123,6 +138,7 @@ export default function Login() {
         body: JSON.stringify({ userId: selectedDriver.id, pin }),
       });
       if (!res.ok) {
+        setPinMessage(loginFailureOf(await toApiError(res)).message);
         setPinError(true);
         setPinDigits([]);
         setTimeout(() => setPinError(false), 600);
@@ -392,14 +408,14 @@ export default function Login() {
                       </button>
                     </div>
 
-                    {(loginLockMessage ?? loginError) && (
-                      <div className="flex items-center gap-2.5 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+                    {loginMessage && (
+                      <div className="flex items-center gap-2.5 rounded-xl bg-red-50 border border-red-100 px-4 py-3" data-testid="login-error">
                         <div className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                        <p className="text-red-600 text-[12px]">{loginLockMessage ?? loginError}</p>
+                        <p className="text-red-600 text-[12px]">{loginMessage}</p>
                       </div>
                     )}
 
-                    {showCaptcha && <AltchaWidget onPayload={setCaptchaProof} />}
+                    {showCaptcha && <AltchaWidget key={captchaKey} onPayload={setCaptchaProof} />}
 
                     <div className="pt-1">
                       <Button type="submit" disabled={isAuthenticating || (showCaptcha && !captchaProof)}
@@ -549,7 +565,7 @@ export default function Login() {
                       <button
                         key={driver.id}
                         type="button"
-                        onClick={() => { setSelectedDriver(driver); setPinDigits([]); setPinError(false); setView('driver-pin'); }}
+                        onClick={() => { setSelectedDriver(driver); setPinDigits([]); setPinError(false); setPinMessage(null); setView('driver-pin'); }}
                         className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-gray-100 hover:border-green-200 hover:bg-green-50/50 transition-all text-left group"
                       >
                         <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
@@ -625,8 +641,10 @@ export default function Login() {
                   ))}
                 </div>
 
-                {pinError && (
-                  <p className="text-center text-[12px] text-red-500 font-medium mb-4">PIN incorrect. Réessayez.</p>
+                {(pinError || pinMessage) && (
+                  <p className="text-center text-[12px] text-red-500 font-medium mb-4" data-testid="pin-error">
+                    {pinMessage ?? "PIN incorrect. Réessayez."}
+                  </p>
                 )}
 
                 {/* Numpad */}

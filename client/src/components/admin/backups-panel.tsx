@@ -1,6 +1,7 @@
-import { DatabaseBackup, Play } from "lucide-react";
+import { DatabaseBackup, Loader2, Play } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { LoadingError } from "@/components/ui/loading-error";
 import {
   AlertBannerCard,
   HeaderCard,
@@ -14,7 +15,14 @@ import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useContractQuery } from "@/lib/contract-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
-import { formatDate } from "@/lib/utils";
+import {
+  RUNNING_REFRESH_MS,
+  backupErrorLabel,
+  backupRunOutcome,
+  backupRunToast,
+  formatBackupStart,
+  hasRunningBackup,
+} from "@/lib/backup-run";
 import {
   BACKUP_ALERTS_PATH,
   BACKUPS_PATH,
@@ -47,16 +55,31 @@ export function formatBackupDuration(ms: number | null): string {
   return seconds >= 60 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${seconds} s`;
 }
 
-/** Page admin des sauvegardes (T-33a). À brancher sur la route admin des sauvegardes (fe-1). */
+type RunVariables = { requestedAt: number; knownRunIds: number[] };
+
+/**
+ * Page admin des sauvegardes (T-33a, T-33b), sur `/api/admin/backups*` (routes `backups.routes.ts`).
+ * Temps réel : `backup_failed` invalide l'historique et les alertes (`REALTIME_EVENTS`) ; une
+ * réussite n'émet rien, d'où le rafraîchissement tant qu'une exécution tourne.
+ */
 export function BackupsPanel() {
   const { toast } = useToast();
-  const runs = useContractQuery(BACKUPS_PATH, backupRunsResponseSchema);
-  const alerts = useContractQuery(BACKUP_ALERTS_PATH, backupAlertsResponseSchema);
+  const runs = useContractQuery(BACKUPS_PATH, backupRunsResponseSchema, undefined, {
+    refetchInterval: (query) => (hasRunningBackup(query.state.data) ? RUNNING_REFRESH_MS : false),
+  });
+  const running = hasRunningBackup(runs.data);
+  const alerts = useContractQuery(BACKUP_ALERTS_PATH, backupAlertsResponseSchema, undefined, {
+    refetchInterval: running ? RUNNING_REFRESH_MS : false,
+  });
 
   const runMutation = useMutation({
-    mutationFn: async (_: void) => backupRunSchema.parse(await (await apiRequest("POST", RUN_BACKUP_PATH)).json()),
-    onSuccess: (run) => {
-      // Couche 1 : la nouvelle exécution apparaît tout de suite. Couche 3 : alertes et cloche.
+    mutationFn: async (_vars: RunVariables) =>
+      backupRunSchema.parse(await (await apiRequest("POST", RUN_BACKUP_PATH)).json()),
+    onSuccess: (run, { requestedAt, knownRunIds }) => {
+      // 202 dans les deux cas (contrat figé) : nouvelle exécution ou exécution déjà en cours.
+      const outcome = backupRunOutcome(run, knownRunIds, requestedAt);
+      toast(backupRunToast(outcome, run));
+      // Couche 1 : l'exécution apparaît tout de suite, sans doublon. Couche 3 : alertes et cloche.
       queryClient.setQueryData<BackupRun[]>([BACKUPS_PATH], (old = []) => [run, ...old.filter((r) => r.id !== run.id)]);
       void queryClient.invalidateQueries({ queryKey: [BACKUPS_PATH] });
       void queryClient.invalidateQueries({ queryKey: [BACKUP_ALERTS_PATH] });
@@ -71,7 +94,7 @@ export function BackupsPanel() {
   const last = rows[0];
 
   const columns: PremiumDataTableColumn<BackupRun>[] = [
-    { id: "startedAt", header: "Début", cell: (r) => formatDate(r.startedAt) },
+    { id: "startedAt", header: "Début", cell: (r) => formatBackupStart(r.startedAt) },
     {
       id: "status",
       header: "Statut",
@@ -83,6 +106,11 @@ export function BackupsPanel() {
     },
     { id: "size", header: "Taille", align: "right", cell: (r) => formatBackupSize(r.sizeBytes) },
     { id: "duration", header: "Durée", align: "right", cell: (r) => formatBackupDuration(r.durationMs) },
+    {
+      id: "detail",
+      header: "Détail",
+      cell: (r) => <span className="text-muted-foreground">{backupErrorLabel(r.errorCode) ?? ""}</span>,
+    },
   ];
 
   return (
@@ -93,9 +121,17 @@ export function BackupsPanel() {
         subtitle="Sauvegarde automatique de la base de données"
         icon={<DatabaseBackup className="h-5 w-5" />}
         actions={
-          <Button onClick={() => submitRun()} disabled={runMutation.isPending} data-testid="button-run-backup">
-            <Play className="mr-2 h-4 w-4" />
-            Lancer maintenant
+          <Button
+            onClick={() => submitRun({ requestedAt: Date.now(), knownRunIds: rows.map((r) => r.id) })}
+            disabled={runMutation.isPending}
+            data-testid="button-run-backup"
+          >
+            {running ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" aria-hidden="true" />
+            )}
+            {running ? "Sauvegarde en cours" : "Lancer maintenant"}
           </Button>
         }
       />
@@ -107,21 +143,27 @@ export function BackupsPanel() {
           variant="danger"
         />
       ))}
-      <KpiGrid columns={3}>
-        <KpiTile
-          label="Dernière sauvegarde"
-          value={last ? formatDate(last.startedAt) : "—"}
-          subValue={last ? STATUS_LABEL[last.status] : "Aucune"}
-        />
-        <KpiTile label="Taille" value={formatBackupSize(last?.sizeBytes ?? null)} />
-        <KpiTile label="Durée" value={formatBackupDuration(last?.durationMs ?? null)} />
-      </KpiGrid>
-      <PremiumDataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune sauvegarde enregistrée.</p>}
-      />
+      {runs.isLoading || runs.error ? (
+        <LoadingError isLoading={runs.isLoading} error={runs.error} onRetry={() => runs.refetch()} />
+      ) : (
+        <>
+          <KpiGrid columns={3}>
+            <KpiTile
+              label="Dernière sauvegarde"
+              value={last ? formatBackupStart(last.startedAt) : "—"}
+              subValue={last ? STATUS_LABEL[last.status] : "Aucune"}
+            />
+            <KpiTile label="Taille" value={formatBackupSize(last?.sizeBytes ?? null)} />
+            <KpiTile label="Durée" value={formatBackupDuration(last?.durationMs ?? null)} />
+          </KpiGrid>
+          <PremiumDataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.id}
+            emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucune sauvegarde enregistrée.</p>}
+          />
+        </>
+      )}
     </div>
   );
 }

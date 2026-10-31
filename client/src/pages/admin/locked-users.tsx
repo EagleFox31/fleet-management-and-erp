@@ -19,6 +19,10 @@ import { userMessageOf } from "@/lib/api-error";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { formatLockTime } from "@/lib/lockout-message";
+import { getRoleLabel, normalizeRole } from "@/lib/contextual-help/roles";
+
+/** Un verrou expire seul (15 min par défaut) : la liste se resynchronise sans action. */
+const LOCKED_USERS_REFRESH_MS = 60_000;
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "-";
@@ -33,6 +37,7 @@ export default function LockedUsersPage() {
   const query = useQuery({
     queryKey: [LOCKED_USERS_PATH],
     select: (data) => lockedUsersResponseSchema.parse(data),
+    refetchInterval: LOCKED_USERS_REFRESH_MS,
   });
 
   const unlock = useMutation({
@@ -48,6 +53,7 @@ export default function LockedUsersPage() {
       // Couche 3 : liste des comptes et journal d'audit (l'action y est tracee).
       queryClient.invalidateQueries({ queryKey: [LOCKED_USERS_PATH] });
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/audit-logs"] });
       appToast({ title: "Compte déverrouillé", description: "L'utilisateur peut se reconnecter.", variant: "success" });
       setTarget(null);
@@ -73,7 +79,7 @@ export default function LockedUsersPage() {
         </div>
       ),
     },
-    { id: "role", header: "Rôle", cell: (u) => <span className="text-foreground">{u.role}</span> },
+    { id: "role", header: "Rôle", cell: (u) => <span className="text-foreground">{getRoleLabel(normalizeRole(u.role))}</span> },
     { id: "failures", header: "Échecs", align: "right", cell: (u) => u.failedLoginCount },
     { id: "last", header: "Dernier échec", cell: (u) => formatDateTime(u.lastFailedLoginAt) },
     { id: "until", header: "Verrouillé jusqu'à", cell: (u) => formatLockTime(u.lockedUntil) ?? "-" },
