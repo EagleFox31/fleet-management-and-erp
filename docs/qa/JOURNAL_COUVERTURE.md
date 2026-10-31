@@ -577,7 +577,7 @@ soumission sans doublon.
 - Hors périmètre, à trancher : `PATCH /api/technician/work-orders/:id/status` ajoute encore des pièces sans
   garde de stock et avale les erreurs ; une demande réutilisée n'augmente pas sa quantité.
 
-## (ce commit) - Demande de pièce : l'entrée en stock porte son réceptionnaire (PRT6)
+## c06fa45 - Demande de pièce : l'entrée en stock porte son réceptionnaire (PRT6)
 
 **Quoi**
 - Nouvelle colonne `part_requirements.received_by` : l'utilisateur qui enregistre l'entrée en stock,
@@ -603,3 +603,77 @@ soumission sans doublon.
 - `npm run check` 0 erreur ; unitaire 474/474 ; intégration 67/67 (13 fichiers) ; contrat 138 verts sur
   les 15 fichiers existants. Les 7 rouges du même run sont ceux du prochain chantier (pneus, TIR1–TIR4),
   dont le test est écrit et pas encore commité.
+
+## 0d015a2 - Pneus : RBAC magasin / atelier et suppression douce (TIR1–TIR4)
+
+**Quoi**
+- Fiche pneu supprimée (douce) : invisible au détail (`GET /api/tires/:id` 404), non modifiable
+  (`PATCH` 404), non resupprimable (`DELETE` 404). Fiche inexistante : 404 au lieu de 200 vide.
+- `DELETE /api/tires/:id` : pneu monté → 409 avec un message lisible ; plus de `error.message` brut en 400.
+- `PATCH /api/vehicle-tires/:id/remove` : montage inconnu ou déjà démonté → 404 (le service rendait
+  toujours `true`).
+- `POST /api/tire-rotations` : corps validé (400 `VALIDATION`) ; OT et rotation créés dans une même
+  transaction, une rotation refusée ne laisse plus d'OT orphelin. Véhicule inconnu → 404.
+- `POST /api/tire-inspections` : corps validé (400 `VALIDATION`, plus de 500) ; l'inspecteur reste
+  l'auteur de la requête.
+
+**Comment**
+- `server/services/tires-service-simplified.ts` : filtre `deletedAt IS NULL` sur `getTire` / `updateTire`,
+  `updateTire` ne masque plus les erreurs, `removeTireFromVehicle` filtre `status = 'active'` et lit le
+  `returning`, `AppError` 404 / 409 dans `deleteTire`, `db.transaction` pour OT + rotation. Les `console.*`
+  touchés passent par `moduleLogger("tires")`.
+- `server/routes.ts` (correction en place, aucune route ajoutée) : `insertTireInspectionSchema` et
+  `insertTireRotationSchema` (sans `workOrderId`, `performedBy`, `createdBy` ; coût accepté en nombre,
+  comme l'envoie le formulaire) ; `AppError` et `ZodError` confiés au gestionnaire central.
+- Contrat `tests/contract/tires-rbac.contract.test.ts` : quatre rôles réels (admin, magasinier, chef
+  d'atelier, technicien), 15 cas.
+
+**Pourquoi**
+- Feuille PNEUMATIQUE (AGENTS.md §5) : le magasin tient la fiche, l'atelier monte, tourne et démonte,
+  le technicien inspecte. Le RBAC tenait déjà ; les cas d'erreur, eux, répondaient 200, 400 brut ou 500.
+- Une fiche supprimée qui reste modifiable ou consultable contredit la suppression douce (TIR2).
+
+**Preuve**
+- Premier passage sur l'ancien code : 7 rouges sur 15 (PATCH inexistant 200, DELETE 400 au lieu de
+  404 / 409, détail d'une fiche supprimée 200, démontage inconnu 200, rotation et inspection invalides 500).
+- `npm run check` 0 erreur ; unitaire 474/474 ; intégration 67/67 (13 fichiers) ; contrat 145/145 (16 fichiers).
+
+## (ce commit) - Pneus : le démontage dit où va le pneu (TIR3)
+
+**Quoi**
+- Démonter un pneu exige une destination : **Remettre en stock** (la fiche regagne une unité,
+  `updated_by` = qui démonte) ou **Mettre au rebut** avec un motif obligatoire (usé, endommagé,
+  crevé non réparable ; stock inchangé). Avant, le démontage ne touchait jamais le stock.
+- `PATCH /api/vehicle-tires/:id` (édition générique) refuse les champs de cycle de vie
+  (`status`, `tireId`, `vehicleId`, dates et kilométrage de démontage) : 400 lisible. On pouvait
+  passer un montage à `removed` sans effet stock.
+- Écran « Pneus montés » : bouton « Démonter » (chef d'atelier, admin), dialogue avec destination,
+  motif, kilométrage (au moins celui du montage) et observation ; badge de statut lisible.
+
+**Comment**
+- `shared/constants/tire-removal.ts` : destinations, motifs, libellés, `tireRemovalSchema` (Zod),
+  `vehicleTireStatusAfterRemoval`. Le statut existant `vehicle_tires.status` porte la destination
+  (`removed` = remis en stock, `worn` / `damaged` / `punctured` = rebut) : aucune colonne ajoutée.
+- `removeTireFromVehicle` : démontage et retour en stock dans une même transaction ; fiche supprimée
+  → 409 « choisissez la mise au rebut ». Trame `vehicle_tire_removed` avec `destination`.
+- `server/routes.ts` : corrections en place des deux PATCH existants, aucune route ajoutée.
+- Client : `vehicle-tire-remove-dialog.tsx`, `useSingleFlightMutate`, invalidation fiches,
+  statistiques, stock bas et pneus du véhicule (AGENTS.md §2).
+
+**Pourquoi**
+- Les logiciels de flotte imposent ce choix au démontage : RTA Fleet (retour stock, rechapage, hors
+  service, rebut avec code motif obligatoire), Eptura (retour inventaire ou mise au rebut), OxMaint
+  (kilométrage et motif relevés au démontage). Un pneu démonté qui disparaît du stock fausse
+  l'inventaire du magasin.
+- Limites assumées : le stock reste agrégé par référence (un pneu usagé remis en stock se mélange au
+  neuf) ; le rechapage n'est pas modélisé ; les démontages antérieurs ne sont pas rattrapés.
+
+**Preuve**
+- Contrat `tires-rbac` 18/18 ; sur l'ancien code serveur, 4 rouges (stock non incrémenté, destination
+  non exigée, PATCH générique accepté).
+- Unitaire `tests/unit/shared/tire-removal.test.ts` (schéma, correspondance avec l'énumération) ;
+  unitaire 478/478 ; `npm run check` 0 erreur.
+- e2e `11-tire-removal-to-stock` vert : double clic = 1 requête, trame reçue par le magasinier,
+  stock 0 → 1 en base.
+- `client-payment-idempotence` (intégration) instable sans lien : 8/8 puis 2 échecs sur le même code,
+  8/8 sans les changements pneus.

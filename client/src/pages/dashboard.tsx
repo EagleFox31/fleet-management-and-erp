@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { KpiTiles } from "@/components/dashboard/kpi-tiles";
 import { FleetStatusChart } from "@/components/dashboard/fleet-status-chart";
 import { VehicleTable } from "@/components/vehicles/vehicle-table";
 import { useQuery } from "@tanstack/react-query";
@@ -152,6 +153,7 @@ export default function Dashboard() {
           />
         </KpiGrid>
       </HeaderCard>
+      <KpiTiles />
 
       {/* Real-time KPIs */}
       <KpiGrid columns={3} withTopBorder={false}>
