@@ -21,7 +21,7 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
-import { canWriteFuelPrice } from "@shared/constants/roles";
+import { localDateKey } from "@/lib/fuel-price-policy";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -503,11 +503,10 @@ export default function MissionDetailsPage() {
     isPreDeparture: false,
   });
   // Prix du litre : saisi par l'administrateur et la logistique, imposé (prix du jour) aux autres.
-  const canEditFuelPrice = canWriteFuelPrice(user?.role);
-  const { priceAt: fuelPriceAtDate } = useFuelPrice();
+  const { canEdit: canEditFuelPrice, priceAt: fuelPriceAtDate, isLoading: fuelPriceLoading } = useFuelPrice(user?.role);
   const fuelFormUnitPrice = canEditFuelPrice
     ? fuelForm.unitPrice
-    : String(fuelPriceAtDate(fuelForm.dateTime || new Date().toISOString()));
+    : String(fuelPriceAtDate(fuelForm.dateTime || localDateKey()));
   const [errorModal, setErrorModal] = useState<{ title: string; description?: string; details?: string[] } | null>(null);
   const [launchBlockedDocumentTypes, setLaunchBlockedDocumentTypes] = useState<MissionDocumentType[]>([]);
   const [amount, setAmount] = useState("");
@@ -3135,7 +3134,7 @@ export default function MissionDetailsPage() {
             </Button>
             <Button
               onClick={() => addMissionFuelMutation.mutate()}
-              disabled={addMissionFuelMutation.isPending}
+              disabled={addMissionFuelMutation.isPending || fuelPriceLoading}
               className="bg-green-600 hover:bg-green-700 text-white"
               data-testid="button-save-mission-fuel"
             >

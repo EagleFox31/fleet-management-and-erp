@@ -28,7 +28,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { Plus, Search, Fuel, Wallet, CarFront, CalendarDays, Edit, Trash2, Gauge, Info } from "lucide-react";
 import type { Vehicle, FuelRecord } from "@shared/schema";
-import { canWriteFuelPrice } from "@shared/constants/roles";
+import { useFeature } from "@/hooks/use-feature";
+import { isFuelPriceImposed } from "@/lib/fuel-price-policy";
 import {
   computeVehicleConsumptionRows,
   formatConsumptionDisplay,
@@ -80,8 +81,9 @@ export default function FuelPage() {
     notes: "",
   });
   const canManageFuelCard = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
-  // Le prix manuel modifie le prix du litre : administrateur et logistique seulement.
-  const canEditFuelPrice = canWriteFuelPrice(user?.role);
+  // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
+  const fuelPricesEnabled = useFeature("fuel-prices");
+  const canEditFuelPrice = !isFuelPriceImposed(user?.role, fuelPricesEnabled);
   const canDeleteFuelRecord = user?.role === "admin" || user?.role === "workshop_manager";
 
   const scrollToHistoryTable = () => {

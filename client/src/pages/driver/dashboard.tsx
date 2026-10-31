@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
-import { canWriteFuelPrice } from "@shared/constants/roles";
+import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { useState } from "react";
 import { format, isThisMonth } from "date-fns";
@@ -328,9 +328,8 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
 
   // Prix du litre : imposé (prix du jour) hors FUEL_PRICE_WRITE_ROLES, donc au chauffeur.
   const { user } = useAuth();
-  const canEditFuelPrice = canWriteFuelPrice(user?.role);
-  const { priceAt } = useFuelPrice();
-  const effectiveUnitPrice = canEditFuelPrice ? unitPrice : String(priceAt(dateTime || new Date().toISOString()));
+  const { canEdit: canEditFuelPrice, priceAt, isLoading: fuelPriceLoading } = useFuelPrice(user?.role);
+  const effectiveUnitPrice = canEditFuelPrice ? unitPrice : String(priceAt(dateTime || localDateKey()));
   const displayedPrice = canEditFuelPrice ? suggestedPrice : Number(effectiveUnitPrice);
 
   const quantityValue = Number.parseFloat(quantity || "0");
@@ -386,6 +385,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
     quantityValue <= 0 ||
     !Number.isFinite(unitPriceValue) ||
     unitPriceValue <= 0 ||
+    fuelPriceLoading ||
     !dateTime;
 
   return (
