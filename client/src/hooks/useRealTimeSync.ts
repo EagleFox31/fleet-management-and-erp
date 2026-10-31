@@ -3,6 +3,14 @@ import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
+import { REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
+
+/** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
+function invalidateCatalogEvent(name: RealtimeEventName): void {
+  for (const key of REALTIME_EVENTS[name].invalidates) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -733,6 +741,8 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] });
       queryClient.invalidateQueries({ queryKey: ["/api/technician/my-work-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/technician-stats"] });
+      // Satellites du lot : tuiles KPI, historique et contrôle qualité de l'OT.
+      queryClient.invalidateQueries({ queryKey: ["/api/kpi"] });
       if (currentUserId) {
         queryClient.invalidateQueries({
           queryKey: ["/api/technician/work-orders", currentUserId],
@@ -886,6 +896,36 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders/awaiting-parts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/parts/low-on-stock"] });
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/reorder-alerts"] });
+      // Réception : stock et demandes du magasin.
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory-requests"] });
+      break;
+
+    // Événements du lot recette (shared/contracts/realtime-events.ts).
+    case "incident_reported":
+      invalidateCatalogEvent("incident_reported");
+      break;
+    case "fuel_record_validated":
+      invalidateCatalogEvent("fuel_record_validated");
+      break;
+    case "fuel_anomaly_resolved":
+      invalidateCatalogEvent("fuel_anomaly_resolved");
+      break;
+    case "fuel_price_changed":
+      invalidateCatalogEvent("fuel_price_changed");
+      break;
+    case "time_tracking_updated":
+      invalidateCatalogEvent("time_tracking_updated");
+      break;
+    case "vehicle_document_type_changed":
+      invalidateCatalogEvent("vehicle_document_type_changed");
+      // Satellites : documents d'un véhicule et panneau d'échéances.
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicle-documents"] });
+      break;
+    case "backup_failed":
+      invalidateCatalogEvent("backup_failed");
+      invalidateAlertQueries();
       break;
 
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
