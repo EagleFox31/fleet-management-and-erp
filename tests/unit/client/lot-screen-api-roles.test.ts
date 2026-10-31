@@ -31,9 +31,11 @@ import * as sharedRoles from "@shared/constants/roles";
  *   `server/routes.ts` n'est pas couverte.
  */
 
-type Api = { file: string; method?: "get" | "post"; path: string };
+type Api = { file: string; method?: "get" | "post" | "patch"; path: string };
 type Declaration =
-  | { apis: Api[]; /** L'API sert plus de rôles que l'écran : raison écrite obligatoire. */ apiWider?: string }
+  | { apis: Api[]; /** L'API sert plus de rôles que l'écran : raison écrite obligatoire. */ apiWider?: string;
+      /** Écart connu qui attend une décision métier : test en `it.todo`, écart écrit en clair. */
+      pending?: string }
   | { stub: string; reason: string }
   | { none: string };
 
@@ -55,12 +57,27 @@ const SCREEN_APIS: Record<string, Declaration> = {
     apiWider: "le service filtre la liste selon le rôle de l'appelant",
   },
   "wo-history": { apis: [{ file: "work-order-audit-trail.routes.ts", path: "/work-orders/:id/audit-trail" }] },
-  "wo-quality-check": { stub: "quality-check.routes.ts", reason: "squelette 501, garde réelle à écrire" },
+  "wo-quality-check": { apis: [{ file: "quality-check.routes.ts", method: "post", path: "/work-orders/:id/quality-check" }] },
   "oil-change-intervals": { none: "écran d'attente, pas encore d'API" },
   "tire-movements": { apis: [{ file: "tire-movements.routes.ts", path: "/tires/movements" }] },
-  "fuel-vouchers": { stub: "fuel-vouchers.routes.ts", reason: "squelette 501, garde réelle à écrire" },
-  "fuel-anomalies": { stub: "fuel-anomalies.routes.ts", reason: "squelette 501, garde réelle à écrire" },
-  "fuel-prices": { stub: "fuel-prices.routes.ts", reason: "squelette 501, garde réelle à écrire" },
+  // Aucune route de lecture pour les bons et les anomalies : l'écran n'a que l'action d'écriture.
+  "fuel-vouchers": {
+    apis: [{ file: "fuel-vouchers.routes.ts", method: "post", path: "/fuel-vouchers/:id/validate" }],
+    pending:
+      "écran admin, logistics, secretary, workshop_manager, management ; API admin, logistics, secretary (isFuelCardManager). " +
+      "workshop_manager et management reçoivent les événements carburant (realtime-events) mais aucune route ne leur sert les bons : " +
+      "retirer ces rôles de l'écran, ou ajouter une lecture qui les admet ?",
+  },
+  "fuel-anomalies": {
+    apis: [{ file: "fuel-anomalies.routes.ts", method: "patch", path: "/fuel-card/anomalies/:id" }],
+    pending:
+      "écran admin, logistics, secretary, workshop_manager, management ; API admin, logistics, secretary (isFuelCardManager). " +
+      "Même question que les bons : retirer workshop_manager et management de l'écran, ou leur ouvrir une lecture des anomalies ?",
+  },
+  "fuel-prices": {
+    apis: [{ file: "fuel-prices.routes.ts", path: "/fuel-prices" }],
+    apiWider: "prix lus par tout le personnel (isStaff) ; l'écran est celui de leur gestion. Saisie (POST) : isFuelCardManager",
+  },
   "vehicle-cost": { apis: [{ file: "vehicle-cost-summary.routes.ts", path: "/vehicles/:id/cost-summary" }] },
   "time-tracking": {
     apis: [
@@ -245,6 +262,10 @@ describe("rôles des écrans du lot = rôles des routes qu'ils lisent", () => {
     }
 
     for (const api of decl.apis) {
+      if (decl.pending) {
+        it.todo(`${screen.id} : ${(api.method ?? "get").toUpperCase()} ${api.path} : ÉCART À TRANCHER : ${decl.pending}`);
+        continue;
+      }
       it(`${screen.id} : ${(api.method ?? "get").toUpperCase()} ${api.path}`, () => {
         const allowed = apiRoles(api);
         // L'écran ne s'ouvre à aucun rôle que l'API refuse (sinon : un 403 à l'écran).
