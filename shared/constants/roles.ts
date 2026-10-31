@@ -132,3 +132,41 @@ export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "l
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+
+/**
+ * Écarts du cahier des charges (chantier CDC, lot CDC-0a). Groupes lus par le montage
+ * de `server/api/index.ts` et, plus tard, par les écrans : ne pas les recopier.
+ */
+
+/** Impression des étiquettes QR des pièces. */
+export const PART_LABEL_ROLES = ["admin", "warehouse"] as const satisfies readonly AppRole[];
+
+/** Scan d'une pièce (`/api/part-scans`) : magasin et atelier. */
+export const PART_SCAN_ROLES = ["admin", "warehouse", "workshop_manager", "technician"] as const satisfies readonly AppRole[];
+
+/**
+ * Vente de pièces, écriture. Provisoire, décision utilisateur #4 : le groupe
+ * définitif n'est pas arrêté.
+ */
+export const PART_SALE_ROLES = ["admin", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+
+/**
+ * Vente de pièces, lecture : les rôles d'écriture, plus la direction (lecture seule).
+ * Provisoire, décision utilisateur #4.
+ */
+export const PART_SALE_READ_ROLES = [...PART_SALE_ROLES, "management"] as const satisfies readonly AppRole[];
+
+/** Positions GPS des véhicules (`/api/vehicle-positions`). Pas de vue client prévue à ce stade. */
+export const GPS_VIEW_ROLES = ["admin", "logistics", "management", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Import Excel, tous types sauf les interventions. */
+export const IMPORT_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+/** Import Excel des interventions : le chef d'atelier s'ajoute à l'administrateur. */
+export const IMPORT_INTERVENTION_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Rapport de maintenance (`/api/maintenance-reports`). */
+export const MAINTENANCE_REPORT_ROLES = ["admin", "workshop_manager", "management"] as const satisfies readonly AppRole[];
+
+/** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
+export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
