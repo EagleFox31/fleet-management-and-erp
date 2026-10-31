@@ -118,6 +118,11 @@ export function useFormDraft<TData extends FieldValues, TMeta = undefined>({
     userId,
   ]);
 
+  // `persistDraft` change à chaque rendu (getMeta / isEmpty sont souvent inline) :
+  // en dépendre réabonnait le watch à chaque frappe et annulait le minuteur en attente.
+  const persistDraftRef = useRef(persistDraft);
+  persistDraftRef.current = persistDraft;
+
   useEffect(() => {
     if (!enabled) {
       return;
@@ -129,7 +134,7 @@ export function useFormDraft<TData extends FieldValues, TMeta = undefined>({
         window.clearTimeout(timer);
       }
       timer = window.setTimeout(() => {
-        persistDraft(values as TData);
+        persistDraftRef.current(values as TData);
       }, debounceMs);
     });
 
@@ -139,7 +144,7 @@ export function useFormDraft<TData extends FieldValues, TMeta = undefined>({
         window.clearTimeout(timer);
       }
     };
-  }, [debounceMs, enabled, form, persistDraft]);
+  }, [debounceMs, enabled, form]);
 
   return {
     draftSavedAt,
