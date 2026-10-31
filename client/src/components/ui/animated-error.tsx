@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Wifi, Database, Key, Clock, RefreshCw } from "lucide-react";
+import { AlertCircle, Wifi, Database, Key, Clock, RefreshCw, Lightbulb } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -140,8 +140,9 @@ export function AnimatedError({ type, message, onRetry, className = "" }: Animat
                       transition={{ duration: 0.3 }}
                       className="space-y-1"
                     >
-                      <p className="text-xs font-medium text-muted-foreground mb-2">
-                        💡 Suggestions :
+                      <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground mb-2">
+                        <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />
+                        Suggestions :
                       </p>
                       {config.suggestions.map((suggestion, index) => (
                         <motion.div

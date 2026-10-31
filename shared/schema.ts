@@ -1,4 +1,4 @@
-import { pgTable, text, serial, date, integer, timestamp, boolean, foreignKey, real, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -29,6 +29,12 @@ export const users = pgTable("users", {
   pin: text("pin"), // Hashed 4-digit PIN for driver mobile login
   loginCount: integer("login_count").notNull().default(0),
   lastLoginAt: timestamp("last_login_at"),
+  // Verrouillage après échecs de connexion (P-03). Écrits uniquement par la requête de
+  // comptage atomique et par le déverrouillage admin ; la source du compteur est
+  // `login_attempts_by_username`.
+  failedLoginCount: integer("failed_login_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  lastFailedLoginAt: timestamp("last_failed_login_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
 });
@@ -275,6 +281,10 @@ export const workOrders = pgTable("work_orders", {
   updatedBy: integer("updated_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  // Contrôle qualité : colonnes qc_* dans `workOrderQuality` (fin de fichier).
+  // Double affectation (P-08) : deux contraintes EXCLUDE (btree_gist) existent en SQL seulement,
+  // work_orders_no_technician_overlap et work_orders_no_vehicle_overlap. Drizzle ne sait pas les
+  // exprimer ; voir server/db/migrations/20261031_lot_recette.sql. Violation = SQLSTATE 23P01.
 });
 
 export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({
@@ -449,12 +459,18 @@ export const fuelRecords = pgTable("fuel_records", {
   debitAmount: numeric("debit_amount", { precision: 15, scale: 2 }), // Debit Excel - montant débit
   balance: numeric("balance", { precision: 15, scale: 2 }), // Solde Excel - solde comptable
   fuelBalance: numeric("fuel_balance", { precision: 15, scale: 2 }), // Solde Gasoil Excel - solde en litres
+  // Validation des bons (P-17). Défaut SQL 'pending' ; les pleins antérieurs au lot sont 'validated'.
+  validationStatus: text("validation_status", { enum: ["pending", "validated"] }).notNull().default("pending"),
+  validatedBy: integer("validated_by").references(() => users.id),
+  validatedAt: timestamp("validated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const insertFuelRecordSchema = createInsertSchema(fuelRecords).omit({
   id: true,
+  validatedBy: true,
+  validatedAt: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -472,6 +488,11 @@ export const alerts = pgTable("alerts", {
   priority: text("priority", { enum: ["low", "medium", "high", "critical"] }).notNull().default("medium"),
   isRead: boolean("is_read").notNull().default(false),
   link: text("link"),
+  // Thème de notification (P-12), nul pour les alertes antérieures. Le filtre lit
+  // `notification_preferences` : l'absence de ligne vaut « actif ».
+  topic: text("topic"),
+  // Déduplication des alertes générées (P-05) : index unique partiel (user_id, dedupe_key).
+  dedupeKey: text("dedupe_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -722,6 +743,9 @@ export const activityLogs = pgTable("activity_logs", {
   details: jsonb("details"), // Détails de l'action en JSON
   ipAddress: text("ip_address"), // Adresse IP de l'utilisateur
   userAgent: text("user_agent"), // User agent du navigateur
+  method: text("method"), // Méthode HTTP de la requête auditée (P-04)
+  path: text("path"), // Chemin de la requête auditée (P-04)
+  entityRef: text("entity_ref"), // Identifiant non numérique de l'entité (clé d'anomalie, code...)
   createdAt: timestamp("created_at").defaultNow().notNull()
 });
 
@@ -1615,3 +1639,114 @@ export type InsertPurchaseOrder = z.infer<typeof insertPurchaseOrderSchema>;
 
 export type PurchaseOrderLine = typeof purchaseOrderLines.$inferSelect;
 export type InsertPurchaseOrderLine = z.infer<typeof insertPurchaseOrderLineSchema>;
+
+// === Lot recette du 2 novembre 2026 (T-07a, T-07b) ===
+// Chaque table est aussi créée de façon idempotente dans server/init-database.ts et dans
+// server/db/migrations/20261031_lot_recette.sql (AGENTS.md §5). Contrats : shared/contracts/*.
+
+// Référentiel des types de document véhicule (P-05). `vehicle_documents.type` reste du texte
+// libre : aucune clé étrangère, le service valide contre ce référentiel.
+export const vehicleDocumentTypes = pgTable("vehicle_document_types", {
+  code: text("code").primaryKey(),
+  label: text("label").notNull(),
+  validityMonths: integer("validity_months"),
+  alertDays: integer("alert_days").notNull().default(30),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+// Compteur d'échecs par nom saisi, même inconnu (P-03) : ne révèle pas l'existence du compte.
+export const loginAttemptsByUsername = pgTable("login_attempts_by_username", {
+  usernameNormalized: text("username_normalized").primaryKey(),
+  failedCount: integer("failed_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  lastFailedAt: timestamp("last_failed_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Préférences de notification (P-12). Absence de ligne = in-app actif, e-mail coupé.
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    topic: text("topic").notNull(),
+    inApp: boolean("in_app").notNull().default(true),
+    email: boolean("email").notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.topic] })],
+);
+
+// Exécutions de sauvegarde (P-19). Un index unique partiel garantit une seule ligne `running`.
+export const backupRuns = pgTable("backup_runs", {
+  id: serial("id").primaryKey(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+  status: text("status", { enum: ["running", "success", "failed"] }).notNull().default("running"),
+  sizeBytes: bigint("size_bytes", { mode: "number" }),
+  checksum: text("checksum"),
+  location: text("location"),
+  errorCode: text("error_code"),
+});
+
+// Résolution des anomalies carburant (P-18). Les anomalies sont calculées : la clé
+// `<règle>:<fuel_record_id>` est stable, un nouveau statut remplace l'ancien.
+export const fuelAnomalyResolutions = pgTable("fuel_anomaly_resolutions", {
+  id: serial("id").primaryKey(),
+  anomalyKey: text("anomaly_key").notNull().unique(),
+  fuelRecordId: integer("fuel_record_id").references(() => fuelRecords.id, { onDelete: "set null" }),
+  status: text("status", { enum: ["open", "justified", "confirmed"] }).notNull(),
+  comment: text("comment"),
+  resolvedBy: integer("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at").defaultNow().notNull(),
+});
+
+// Prix du litre daté (P-19). Ligne 828 au 2000-01-01 : toute date retrouve un prix.
+export const fuelPrices = pgTable("fuel_prices", {
+  id: serial("id").primaryKey(),
+  effectiveFrom: date("effective_from").notNull().unique(),
+  pricePerLiter: numeric("price_per_liter", { precision: 15, scale: 2 }).notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Déclaration de panne (P-22).
+export const incidents = pgTable("incidents", {
+  id: serial("id").primaryKey(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id),
+  reportedBy: integer("reported_by").notNull().references(() => users.id),
+  description: text("description").notNull(),
+  severity: text("severity", { enum: ["low", "medium", "high"] }).notNull().default("medium"),
+  status: text("status", { enum: ["open", "in_progress", "resolved"] }).notNull().default("open"),
+  workOrderId: integer("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type VehicleDocumentTypeRow = typeof vehicleDocumentTypes.$inferSelect;
+export type LoginAttemptByUsername = typeof loginAttemptsByUsername.$inferSelect;
+export type NotificationPreferenceRow = typeof notificationPreferences.$inferSelect;
+export type BackupRunRow = typeof backupRuns.$inferSelect;
+export type FuelAnomalyResolutionRow = typeof fuelAnomalyResolutions.$inferSelect;
+export type FuelPriceRow = typeof fuelPrices.$inferSelect;
+export type IncidentRow = typeof incidents.$inferSelect;
+
+// Colonnes ajoutées au-dessus de tables existantes, déclarées dans une seconde table Drizzle
+// pour ne pas élargir `WorkOrder` / `PartRequirement` (types construits à la main dans
+// server/storage.ts et part-requirements-service.ts, hors périmètre du lot). À fusionner dans
+// `workOrders` / `partRequirements` quand ces fichiers listeront les nouveaux champs.
+// Lecture et écriture : `db.select().from(workOrderQuality)`, `db.update(workOrderQuality)`.
+export const workOrderQuality = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  qcStatus: text("qc_status", { enum: ["passed", "failed"] }), // P-25, posé par le serveur
+  qcBy: integer("qc_by").references(() => users.id),
+  qcAt: timestamp("qc_at"),
+  qcReason: text("qc_reason"),
+});
+
+export const partRequirementReceipts = pgTable("part_requirements", {
+  id: serial("id").primaryKey(),
+  receivedBy: integer("received_by").references(() => users.id),
+  receivedAt: timestamp("received_at"), // P-16 : posé dans onTransition(tx)
+});

@@ -20,6 +20,7 @@ import {
 // Components
 import NotFound from "@/pages/not-found";
 import AppLayout from "@/components/layout/app-layout";
+import { renderLotRoutes } from "@/components/lot-routes";
 
 // Pages
 import Login from "@/pages/auth/login";
@@ -303,6 +304,9 @@ function App() {
               <Route path="/dev/profiles" component={ProfilesDevPage} />
             )}
             
+            {/* Écrans du lot recette (config/lot-screens.ts), avant les routes à :id */}
+            {renderLotRoutes()}
+
             {/* Smart root routing (APK -> Login/Dashboard, Web -> Landing/Dashboard) */}
             <Route path="/" component={RootRoute} />
             
