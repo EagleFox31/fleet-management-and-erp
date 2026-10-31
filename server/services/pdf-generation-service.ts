@@ -1,8 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { type ClientInvoice, type ClientPayment } from '@shared/schema';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { readTayHeaderImage } from '../lib/tay-header-asset';
 
 /**
  * Service de génération PDF
@@ -342,19 +341,10 @@ export class PDFGenerationService {
     if (this.headerImageLoaded) return this.headerImageDataUrl;
     this.headerImageLoaded = true;
 
-    const candidates = [
-      path.resolve(process.cwd(), 'attached_assets', 'TAY-header-final.png'),
-      path.resolve(process.cwd(), 'attached_assets', 'TAY-header.png'),
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        const file = await fs.readFile(candidate);
-        this.headerImageDataUrl = `data:image/png;base64,${file.toString('base64')}`;
-        return this.headerImageDataUrl;
-      } catch {
-        // try next candidate
-      }
+    const file = await readTayHeaderImage();
+    if (file) {
+      this.headerImageDataUrl = `data:image/png;base64,${file.toString('base64')}`;
+      return this.headerImageDataUrl;
     }
 
     this.headerImageDataUrl = null;
