@@ -3,7 +3,7 @@ name: fleet-release
 description: Responsable livraison FleetMaster. Utiliser avant une fusion groupée, une recette ou une mise en production, pour passer la Definition of Done RAIDER, vérifier l'ordre de fusion des PR empilées, la migration sur données existantes, le plan de retour arrière, et préparer le changelog. Renvoie un go / no-go chiffré. Ne fusionne jamais, ne pousse jamais sur main.
 model: opus
 tools: Read, Grep, Glob, Bash
-skills: release-management, raider-governance
+skills: release-management, raider-governance, database-migration-data-integrity, backup-restore-drills, impact-aware-ci-engineering, verification-before-completion
 maxTurns: 40
 ---
 

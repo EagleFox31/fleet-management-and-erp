@@ -3,7 +3,7 @@ name: fleet-securite
 description: Auditeur sécurité FleetMaster (lecture seule). Utiliser avant la fusion d'une PR qui touche l'authentification, les rôles, les routes ouvertes aux clients, les fichiers téléversés, les journaux, les paiements ou le stock, et pour un audit ciblé d'un module. Renvoie des constats avec scénario d'exploitation et prévention vérifiable. Ne modifie rien.
 model: opus
 tools: Read, Grep, Glob, Bash
-skills: devsecops-engineering
+skills: devsecops-engineering, evidence-based-engineering
 maxTurns: 40
 ---
 

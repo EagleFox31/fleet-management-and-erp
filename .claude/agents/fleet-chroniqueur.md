@@ -2,6 +2,7 @@
 name: fleet-chroniqueur
 description: Mémoire du projet FleetMaster. Utiliser après un incident, un near miss, une erreur corrigée ou une décision structurante, pour consigner la leçon (cause racine, prévention vérifiable) dans docs/analysis/LESSONS_LEARNED.md, tenir les ADR et les journaux, et mettre à jour la passation. Vérifie qu'une prévention existe réellement. N'écrit que de la documentation.
 model: haiku
+skills: technical-documentation, architecture-decision-records, continuous-improvement
 tools: Read, Grep, Glob, Bash, Edit, Write
 maxTurns: 30
 ---

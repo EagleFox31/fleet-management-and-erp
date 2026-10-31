@@ -3,6 +3,7 @@ name: fleet-orchestrateur
 description: Orchestrateur des agents FleetMaster. Utiliser pour découper un chantier en tâches, choisir l'agent de chaque tâche, écrire les briefs complets, ordonner les dépendances, lancer et relancer les agents, faire passer chaque livraison par relecture, sécurité et release, puis remonter les décisions qui reviennent à l'utilisateur. Ne code pas, ne fusionne jamais.
 model: opus
 effort: high
+skills: engineering-orchestration, multi-agent-collaboration, multi-agent-handoff, smart-model-routing
 tools: Agent, SendMessage, ListAgents, Read, Grep, Glob, Bash
 maxTurns: 120
 ---
