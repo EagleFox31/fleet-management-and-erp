@@ -193,7 +193,7 @@ stateDiagram-v2
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | À faire |
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (POST : 400 lisible, `createdBy` de la session, `validatedBy` ignoré ; cycle de vie à faire) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders`) |
-| WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | À faire |
+| WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | Partiel (route technicien : `technician-work-order-status`, unitaire `technician-work-order-transitions` ; reste `PATCH /api/work-orders/:id`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | Partiel (`tests/unit/shared/work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, stock décrémenté, 400 si épuisé | C | OK (`work-order-parts`) |
 | WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | À faire |

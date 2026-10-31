@@ -41,6 +41,7 @@ import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
+import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import authCaptchaRoutes from "./auth-captcha.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
@@ -140,6 +141,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(qualityCheckRoutes);
+  apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(authCaptchaRoutes);
   apiRouter.use(vehicleDocumentsRoutes);
 
