@@ -61,3 +61,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **RAIDER** : couvert D (plus de clé ordinaire masquée à tort, aucune clé sensible perdue : `pin` en mot entier reste masqué), E. Sans objet : migration, contrat HTTP.
 - **Reste / risques** : une clé collée sans séparateur ni majuscule (`pincode`) n'est plus masquée.
 
+## 2026-10-31T21:10:00+01:00 — CDC-0a — Masquage de `pincode` et `passcode`
+
+- **Agent** : api (lot CDC-0a) · **Branche** : `lot/api/CDC-0-socle` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : corrige l'entrée précédente (masquage de `pin` en mot entier), dont le « Reste / risques » signalait que `pincode` n'était plus masqué. `pincode` et `passcode` le sont de nouveau, toute casse.
+- **Comment** : `server/lib/audit.ts` : `pincode|passcode` ajoutés à `SENSITIVE_KEY` (sous-chaîne, insensible à la casse). `pin` reste en mot entier. Test ajouté dans `tests/unit/server/cdc-review-fixes.test.ts` : `pincode`, `PINCODE`, `PinCode`, `passcode`, `PassCode`, `newPasscode` masqués ; `shipping` et `pinned` non masqués.
+- **Pourquoi** : réserve de la re-relecture de la PR #55 : un code d'accès collé ne doit pas fuiter dans le journal d'audit.
+- **RAIDER** : couvert D (aucune clé masquée jusque-là n'est perdue, les clés ordinaires restent lisibles), E (moindre fuite). Sans objet : migration, contrat HTTP.
+- **Reste / risques** : aucun connu sur ce point.
