@@ -740,7 +740,7 @@ soumission sans doublon.
 - Lancement e2e sur `E2E_BASE_URL=http://127.0.0.1:5055` : le port 5000 était occupé par une autre
   application, que Playwright réutilisait (`reuseExistingServer`).
 
-## (hash à reporter) - OT technicien : plus de sortie de stock, plus de retour en arrière (WO2)
+## f81714f - OT technicien : plus de sortie de stock, plus de retour en arrière (WO2)
 
 **Quoi**
 - `PATCH /api/technician/work-orders/:id/status` n'accepte plus de pièces : 400 avec un message qui
