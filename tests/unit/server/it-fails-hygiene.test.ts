@@ -75,7 +75,7 @@ function stripComments(src: string): string {
 function extractItFails(rawSource: string): ItFailsCase[] {
   const src = stripComments(rawSource);
   const cases: ItFailsCase[] = [];
-  const opener = /\b(?:it\.fails|test\.fail)\(\s*(["'`])/g;
+  const opener = /\b(?:it|test)(?:\.concurrent)?\.fails?(?:\.each\s*\((?:[^()]|\([^()]*\))*\))?\(\s*(["'`])/g;
   for (let m = opener.exec(src); m; m = opener.exec(src)) {
     const titleStart = m.index + m[0].length - 1;
     const titleEnd = skipString(src, titleStart);
@@ -96,16 +96,18 @@ function extractItFails(rawSource: string): ItFailsCase[] {
   return cases;
 }
 
-const FACTORY = /\b(?:(?:create|seed|make|insert|open|new|setup)\w*|db\.insert|\w+\.save)\s*\(/g;
+const FACTORY = /\b(?:(?:create|seed|make|insert|open|new(?!Page\b|Context\b)|setup)\w*|db\.insert|\w+\.save)\s*\(/g;
 const HTTP = /\b(?:call|request|fetch)\s*\(|\.(?:get|post|put|patch|delete)\s*\(/g;
 
 /** Raisons pour lesquelles le corps contient de la mise en place ; vide = propre. */
 function setupReasonsIn(body: string): string[] {
   const reasons: string[] = [];
-  for (const m of body.matchAll(FACTORY)) {
+  const factories = [...body.matchAll(FACTORY)];
+  const httpTotal = [...body.matchAll(HTTP)].length;
+  for (const m of factories) {
     const before = body.slice(0, m.index);
     const bound = /(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?$/.exec(before);
-    const asserted = bound && new RegExp(String.raw`expect\(\s*\(?\s*${bound[1]}\.status\b`).test(body);
+    const asserted = factories.length === 1 && httpTotal === 0 && bound && new RegExp(String.raw`expect\(\s*\(?\s*${bound[1]}\.status\b`).test(body);
     if (!asserted) reasons.push(`mise en place : ${m[0].replace(/\s*\($/, "()")}`);
   }
   const httpCalls = [...body.matchAll(HTTP)].length;
@@ -182,6 +184,28 @@ describe("it.fails : pas de mise en place dans le corps", () => {
     for (const c of cases) expect(setupReasonsIn(c.body)).toEqual([]);
   });
 
+  it("une fabrique assertionnée suivie d'une requête n'échappe pas", () => {
+    const bypass = `
+      it.fails("contournement", async () => {
+        const c = await createPart();
+        expect(c.status).toBe(201);
+        const r = await call("PATCH", "/api/parts/1", { body: {} });
+        expect(r.status).toBe(400);
+      });`;
+    expect(setupReasonsIn(extractItFails(bypass)[0].body).length).toBeGreaterThan(0);
+  });
+
+  it("les variantes test.fails, .each et concurrent sont extraites ; newPage ne compte pas", () => {
+    const src = `
+      test.fails("a", async () => { expect(1).toBe(2); });
+      it.fails.each([[1, 2]])("b %s", async () => { expect(1).toBe(2); });
+      test.fails.each([[1]])("c %s", async () => { expect(1).toBe(2); });
+      it.concurrent.fails("d", async () => { const p = await newPage(); expect(p).toBe(1); });`;
+    const cases = extractItFails(src);
+    expect(cases.map((c) => c.title)).toEqual(["a", "b %s", "c %s", "d"]);
+    expect(setupReasonsIn(cases[3].body)).toEqual([]);
+  });
+
   it("aucun nouvel it.fails ne porte sa mise en place", () => {
     const fresh = offendersOnDisk().filter((k) => !KNOWN_SETUP_IN_IT_FAILS.includes(k));
     expect(
@@ -194,6 +218,10 @@ describe("it.fails : pas de mise en place dans le corps", () => {
 
   it("la liste gelée ne contient que des occurrences encore présentes", () => {
     const present = offendersOnDisk();
-    expect(KNOWN_SETUP_IN_IT_FAILS.filter((k) => !present.includes(k))).toEqual([]);
+    const stale = KNOWN_SETUP_IN_IT_FAILS.filter((k) => !present.includes(k));
+    expect(
+      stale,
+      "Entrée gelée sans occurrence (it.fails corrigé, passé en it ou renommé) : la retirer de KNOWN_SETUP_IN_IT_FAILS.",
+    ).toEqual([]);
   });
 });
