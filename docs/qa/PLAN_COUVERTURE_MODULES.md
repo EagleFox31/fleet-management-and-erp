@@ -280,7 +280,7 @@ stateDiagram-v2
 | SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | À faire |
 | SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | À faire |
 | PO1 | Commande : création, validation, réception partielle puis totale | E | Fait en C (`purchase-order-lifecycle.contract`) en plus de `04` |
-| PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Fait en C (`purchase-order-three-way.contract`) ; 2 défauts ouverts |
+| PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Fait en C (`purchase-order-three-way.contract`) ; défauts 5 % et commande inconnue corrigés |
 | SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | OK (`supplier-settlement-reject` : rejet avec motif et auteur, libère le reste à régler, rejeu idempotent, motif vide 400, rapproché 409, rejeté non rapprochable 409, autre facture 404, magasinier 403 ; U `supplier-settlement-reject-schema`) |
 | SINV2 | Double règlement d'une même facture refusé | C | OK (déjà couvert par T7 : `supplier-settlement-idempotence` C et I, rejeu même référence, dépassement du total 409, saisies simultanées) |
 
