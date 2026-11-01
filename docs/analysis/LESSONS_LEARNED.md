@@ -853,3 +853,46 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une écriture sur une ligne nominative (alerte, préférence, brouillon) filtre sur l'utilisateur de session dans la requête SQL elle-même, jamais par un contrôle après lecture.
+
+## 2026-11-01 - Compte supprimé toujours connecté
+
+### Constat
+- Après `DELETE /api/users/:id` (soft delete), le compte se reconnectait par `POST /api/auth/login`, et une session ouverte avant la suppression restait valide (gardes de rôle, `GET /api/auth/me`, routes gardées par `authenticate` seul).
+
+### Cause racine
+- `storage.getUser` / `getUserByUsername` rendent aussi les lignes `deleted_at` non nulles ; la connexion et les gardes ne lisaient pas `deletedAt`. La suppression n'effaçait pas les sessions (table `session`), seule la désactivation fermait les WebSocket.
+- Classification : contrôle d'authentification manquant sur un état métier (cycle de vie du compte). `pin-login` et `userService.authenticateUser` le faisaient déjà : contrôle présent sur un chemin, absent sur l'autre.
+
+### Résolution
+- Refus de `deletedAt` dans `POST /api/auth/login`, `authorize`, `isAdmin`, `GET /api/auth/me`.
+- `revokeUserAccess` (`server/lib/user-sessions.ts`) : efface les sessions du compte et ferme ses connexions temps réel, appelée par la suppression et par la désactivation.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/users-admin-soft-delete.contract.test.ts` : connexion refusée, session révoquée (route `authenticate` seule), désactivation révoquée, et seconde ligne de défense (`deletedAt` écrit hors route : gardes et profil refusent). Sans correctif : 3 rouges.
+- Limite connue : cette seconde ligne ne couvre que `authorize`, `isAdmin` et `/api/auth/me`. Les routes gardées par `authenticate` seul et le WebSocket ne relisent pas le compte : si l'effacement des sessions échoue (deux essais, journalisés en erreur), le cookie y reste valide jusqu'à son expiration. Correctif durable : faire relire le compte par `authenticate`.
+
+### Règle Projet (obligatoire)
+- Un changement d'état qui retire un droit (suppression, désactivation, rôle) coupe aussi les sessions déjà ouvertes, pas seulement les connexions futures.
+
+## 2026-11-01 - Fichier de contrat en échec alors que tous ses tests passent
+
+### Constat
+- Plusieurs fichiers de contrat (PR #65, #66, #67) sortaient « 1 failed » avec tous leurs tests verts. Le `afterAll` global (`cleanupOrphanTestRows`, `tests/support/setup-contract.ts`) levait une erreur de clé étrangère.
+
+### Cause racine
+- Le ménage supprime les comptes TEST, mais des tables pointant vers `users` n'étaient pas vidées avant : `document_renewal_centers.created_by` (renouvellement rapide), après `fuel_prices.created_by` plus tôt.
+- Course : le job d'alertes en tâche de fond écrit des alertes pour les comptes de test entre la suppression des alertes et celle des comptes (`alerts_user_id_users_id_fk`).
+- Le même job écrit des échéances d'autres documents de la base pour toute secrétaire : une assertion « alertes restantes du compte » sans filtre sur ses propres documents devient instable.
+- Classification : ménage de test incomplet, répété (troisième FK). Contrôle renforcé ci-dessous.
+
+### Résolution
+- `tests/support/cleanup.ts` : centres et demandes de renouvellement des comptes TEST supprimés ; alertes resupprimées juste avant les comptes ; trois essais, puis seule la course `alerts_user_id` est tolérée (avertissement stderr). Toute autre erreur fait échouer.
+- `tests/contract/document-quick-renew-alerts.contract.test.ts` : assertion restreinte aux préfixes de ses deux documents (`documentExpiryDedupeKeyPrefixes`).
+
+### Prévention (vérifiable)
+- Une nouvelle FK vers `users` oubliée dans le ménage fait échouer le hook global (erreur relevée, pas avalée) : elle se voit au premier fichier de contrat.
+- Preuve : DOC3 rouge avant (FK `alerts_user_id`, puis alerte d'un autre document), vert après.
+
+### Règle Projet (obligatoire)
+- Toute table qui référence `users` et peut être écrite par un compte de test se vide dans `cleanupOrphanTestRows` avant la suppression des comptes.
+- Une assertion sur les alertes d'un compte filtre sur les objets créés par le test : le job en tâche de fond écrit pour tous les comptes.
