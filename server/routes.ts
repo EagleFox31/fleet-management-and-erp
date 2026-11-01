@@ -35,6 +35,7 @@ import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
+import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 
@@ -144,7 +145,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUserByUsername(username);
       console.log("User found:", user ? `Yes (${user.username})` : "No");
       
-      if (!user) {
+      // Compte supprimé ou désactivé : même réponse qu'un identifiant inconnu.
+      if (!user || user.deletedAt) {
         return res.status(401).json({ message: "Identifiants invalides" });
       }
       
@@ -346,6 +348,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!user) {
         return res.status(404).json({ message: "Utilisateur non trouvé" });
+      }
+      // Session d'un compte supprimé ou désactivé : plus authentifiée.
+      if (user.deletedAt) {
+        return res.status(401).json({ message: "Utilisateur non authentifié" });
       }
       
       return res.status(200).json({
@@ -680,6 +686,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!success) {
         return res.status(404).json({ message: "Utilisateur non trouvé ou déjà supprimé" });
       }
+
+      await revokeUserAccess(id, "deleted_by_admin");
       
       return res.status(204).send();
     } catch (error) {
@@ -806,11 +814,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(users.id, id))
         .returning();
 
-      if (!isActive && typeof (global as any).closeUserConnections === "function") {
-        ((global as any).closeUserConnections as (targetUserId: number, reason?: string) => void)(
-          id,
-          "deactivated_by_admin",
-        );
+      if (!isActive) {
+        await revokeUserAccess(id, "deactivated_by_admin");
       }
 
       return res.status(200).json({ 
