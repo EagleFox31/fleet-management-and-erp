@@ -5,6 +5,8 @@ import {
   alerts,
   clientInvoices,
   clients,
+  documentRenewalCenters,
+  documentRenewalRequests,
   fuelPrices,
   fuelRecords,
   partRequirements,
@@ -104,8 +106,43 @@ async function deleteSupplierInvoicesOf(supplierIdsQuery: SQLWrapper): Promise<v
   await db.delete(supplierInvoices).where(inArray(supplierInvoices.supplierId, supplierIdsQuery));
 }
 
-/** Filet si un test a crashé avant d'enregistrer un id : ne touche que les lignes anciennes. */
+/**
+ * Filet si un test a crashé avant d'enregistrer un id : ménage des restes de test (préfixe TEST,
+ * plus d'une heure). Il tourne dans le
+ * hook global de chaque fichier : un échec ici ferait échouer un fichier dont tous les tests
+ * passent. L'application écrit des alertes en tâche de fond pour les comptes de test, ce qui peut
+ * précéder la suppression des comptes (FK alerts_user_id). On rejoue deux fois ; si seule cette
+ * course persiste, on prévient sans faire échouer (les restes partiront au passage suivant).
+ * Toute autre erreur, par exemple une nouvelle FK vers users oubliée ici, fait échouer.
+ */
 export async function cleanupOrphanTestRows(): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await deleteOrphanTestRows();
+      return;
+    } catch (err) {
+      if (attempt === 3) {
+        if (!isBackgroundAlertRace(err)) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[cleanupOrphanTestRows] restes de test non supprimés : ${message}
+`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+}
+
+/** Course connue : une alerte écrite en tâche de fond entre la suppression des alertes et celle du compte. */
+function isBackgroundAlertRace(err: unknown): boolean {
+  const pg = (err as { cause?: unknown })?.cause ?? err;
+  const { code, constraint } = (pg ?? {}) as { code?: string; constraint?: string };
+  if (code === "23503" && constraint === "alerts_user_id_users_id_fk") return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("alerts_user_id_users_id_fk");
+}
+
+async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(fuelRecords).where(orphan(fuelRecords.notes, fuelRecords.createdAt));
   await db.delete(clientInvoices).where(orphan(clientInvoices.invoiceNumber, clientInvoices.createdAt));
   await db.delete(clients).where(orphan(clients.name, clients.createdAt));
@@ -131,7 +168,17 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   const testUsers = db.select({ id: users.id }).from(users).where(orphan(users.username, users.createdAt));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
+  // Centre de renouvellement créé par un compte de test (renouvellement rapide) : bloquait la
+  // suppression du compte (FK document_renewal_centers_created_by_fkey) et faisait échouer le
+  // hook global de tous les fichiers de contrat.
+  const testCenters = db.select({ id: documentRenewalCenters.id }).from(documentRenewalCenters).where(inArray(documentRenewalCenters.createdBy, testUsers));
+  await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.centerId, testCenters));
+  await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.requestedBy, testUsers));
+  await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.completedBy, testUsers));
+  await db.delete(documentRenewalCenters).where(inArray(documentRenewalCenters.createdBy, testUsers));
   // Prix carburant saisi par un compte de test : bloquait la suppression du compte (FK).
   await db.delete(fuelPrices).where(inArray(fuelPrices.createdBy, testUsers));
+  // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
+  await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));
 }
