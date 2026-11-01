@@ -1225,3 +1225,23 @@ soumission sans doublon.
 **Preuve**
 - Intégration `alert-generation-dedupe` 8/8 (J+1 non lue : aucune création ; J+1 lue : rappel),
   unitaire 848/848, `tsc` 0 erreur. Garde-fou rouge sur main (4 appels par id seul).
+
+## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
+
+**Quoi**
+- `driver-pin-login` (ADM5, 7 cas) : bon PIN ouvre une session, mauvais PIN, compte supprimé, rôle
+  autre que chauffeur, PIN absent et corps incomplet refusés sans cookie ; la liste PIN n'expose que
+  `id` et `name`.
+- `audit-sensitive-actions` (ADM6, 3 cas) : création, changement de rôle et suppression de compte
+  écrivent une ligne `activity_logs` attribuée à l'admin, mot de passe masqué ; un 403 n'en écrit aucune.
+- `drivers-crud-deactivation` (DRV1, 5 cas) : CRUD logistique, magasin refusé, désactivation réservée
+  à l'admin ; deux `it.fails`.
+
+**Pourquoi**
+- Défauts constatés : un chauffeur désactivé reste affectable par `PATCH /api/missions/:id` (seul le CPC
+  est vérifié, le refus n'arrive qu'au lancement) ; il reste sur l'écran PIN et s'y connecte, car
+  `drivers-list` et `pin-login` lisent `users` seul. Correction à arbitrer, non faite ici.
+
+**Preuve**
+- Contrat 15/15 (dont les 2 `it.fails`) ; les deux cas rejoués en `it` échouent sur l'assertion finale
+  (affectation 200 au lieu de 400, compte encore listé).
