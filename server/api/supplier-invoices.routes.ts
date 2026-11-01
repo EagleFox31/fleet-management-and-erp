@@ -1,7 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { threeWayMatchingService } from "../services/three-way-matching-service";
-import { insertSupplierInvoiceSchema } from "../../shared/schema";
+import { insertSupplierInvoiceSchema, purchaseOrders } from "../../shared/schema";
+import { inArray } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "../db";
+import { AppError } from "../lib/app-error";
 import { storage } from "../storage";
 import { supplierManagementService } from "../services/supplier-management-service";
 import multer from "multer";
@@ -884,31 +887,79 @@ const uploadExcel = multer({
 
 /**
  * POST /api/supplier-invoices/import
- * Importer des factures depuis un fichier Excel
+ * Importer des factures depuis un fichier Excel (modèle de `import-excel-dialog.tsx`).
+ * Chaque ligne passe par la même saisie que `POST /` ; une ligne refusée porte un
+ * message lisible et n'empêche pas les autres.
  */
-router.post("/import", checkCreatePermission, (req: Request, res: Response) => {
+const IMPORT_MAX_AMOUNT = 1_000_000_000_000;
+
+/** Erreur d'une ligne d'import : son message est rédigé pour l'utilisateur. */
+class ImportRowError extends Error {}
+
+function formatIsoDate(year: number, month: number, day: number): string | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    !Number.isInteger(year) || year < 1900 || year > 2200 ||
+    date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseImportDate(value: unknown, label: string): string {
+  let iso: string | null = null;
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    iso = parsed ? formatIsoDate(parsed.y, parsed.m, parsed.d) : null;
+  } else if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    iso = formatIsoDate(value.getFullYear(), value.getMonth() + 1, value.getDate());
+  } else {
+    const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(value ?? "").trim());
+    iso = match ? formatIsoDate(Number(match[3]), Number(match[2]), Number(match[1])) : null;
+  }
+  if (!iso) {
+    throw new ImportRowError(`${label} invalide : date attendue au format JJ/MM/AAAA.`);
+  }
+  return iso;
+}
+
+function parseImportAmount(value: unknown, label: string): number {
+  const amount = typeof value === "number"
+    ? value
+    : Number(String(value ?? "").replace(/\s/g, "").replace(",", "."));
+  if (!Number.isFinite(amount) || amount < 0 || amount > IMPORT_MAX_AMOUNT) {
+    throw new ImportRowError(`${label} invalide : nombre positif attendu.`);
+  }
+  return amount;
+}
+
+function isBlankCell(value: unknown): boolean {
+  return value === undefined || value === null || String(value).trim() === "";
+}
+
+router.post("/import", checkCreatePermission, (req: Request, res: Response, next: NextFunction) => {
   uploadExcel(req, res, async (err) => {
     if (err) {
-      return res.status(400).json({ 
-        error: "Erreur lors de l'upload du fichier",
-        message: err.message 
-      });
+      const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+        ? "Fichier trop volumineux : 5 Mo maximum."
+        : "Seuls les fichiers Excel (.xlsx) sont acceptés.";
+      return next(new AppError(400, message, { cause: err }));
     }
 
     if (!req.file) {
-      return res.status(400).json({ error: "Aucun fichier fourni" });
-    }
-
-    if (!req.user) {
-      return res.status(401).json({ error: "Utilisateur non authentifié" });
+      return next(new AppError(400, "Aucun fichier fourni."));
     }
 
     try {
-      // Parser le fichier Excel
-      const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
+      let data: Record<string, unknown>[];
+      try {
+        const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        data = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+      } catch (parseError) {
+        throw new AppError(400, "Fichier Excel illisible.", { cause: parseError });
+      }
 
       const results = {
         success: 0,
@@ -917,164 +968,131 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response) => {
         errors: [] as Array<{ row: number; message: string }>
       };
 
-      // Récupérer les fournisseurs et factures existantes UNE SEULE FOIS (optimisation)
+      // Fournisseurs, factures et commandes lus une seule fois.
       const suppliers = await supplierManagementService.getSuppliers();
       const supplierMap = new Map<string, (typeof suppliers)[number]>(
         suppliers.map(s => [s.name.toLowerCase().trim(), s])
       );
-      
+
       const existingInvoices = await threeWayMatchingService.getSupplierInvoices({});
       const existingInvoiceNumbers = new Set(
         existingInvoices.map(inv => inv.invoiceNumber.toLowerCase().trim())
       );
 
-      // Fonction pour parser les dates - gère à la fois strings et dates Excel
-      const parseDate = (dateValue: unknown): string => {
-        // Si c'est un nombre (date Excel en format serial)
-        if (typeof dateValue === 'number') {
-          const excelDate = XLSX.SSF.parse_date_code(dateValue);
-          const year = excelDate.y;
-          const month = String(excelDate.m).padStart(2, '0');
-          const day = String(excelDate.d).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-        
-        // Si c'est déjà un objet Date
-        if (dateValue instanceof Date) {
-          const year = dateValue.getFullYear();
-          const month = String(dateValue.getMonth() + 1).padStart(2, '0');
-          const day = String(dateValue.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-        
-        // Si c'est une string au format JJ/MM/AAAA
-        const dateStr = String(dateValue ?? "").trim();
-        const parts = dateStr.split('/');
-        if (parts.length !== 3) {
-          throw new Error(`Format de date invalide: ${dateStr}. Attendu: JJ/MM/AAAA`);
-        }
-        const [day, month, year] = parts;
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      };
+      const orderNumbers = Array.from(new Set(
+        data.map(r => r['N° Commande']).filter(v => !isBlankCell(v)).map(v => String(v).trim())
+      ));
+      const orderMap = new Map<string, { id: number; supplierId: number | null }>();
+      if (orderNumbers.length > 0) {
+        const orders = await db
+          .select({ id: purchaseOrders.id, orderNumber: purchaseOrders.orderNumber, supplierId: purchaseOrders.supplierId })
+          .from(purchaseOrders)
+          .where(inArray(purchaseOrders.orderNumber, orderNumbers));
+        for (const order of orders) orderMap.set(order.orderNumber, order);
+      }
 
-      // Fonction pour valider et parser un nombre
-      const parseNumber = (value: unknown, fieldName: string): number => {
-        const num = typeof value === 'number'
-          ? value
-          : Number.parseFloat(String(value ?? "").replace(/\s/g, ''));
-        if (isNaN(num) || num < 0) {
-          throw new Error(`${fieldName} invalide: ${value}`);
-        }
-        return num;
-      };
-
-      // Traiter chaque ligne
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
-        const rowNumber = i + 2; // +2 car la ligne 1 est l'en-tête et on commence à 0
+        const rowNumber = i + 2; // ligne 1 = en-tête
 
         try {
-          // Validation des champs obligatoires
-          if (!row['Numéro Facture']) {
-            throw new Error("Numéro de facture manquant");
-          }
-          if (!row['Fournisseur']) {
-            throw new Error("Fournisseur manquant");
-          }
-          if (!row['Date Facture']) {
-            throw new Error("Date de facture manquante");
-          }
-          if (!row['Date Échéance']) {
-            throw new Error("Date d'échéance manquante");
-          }
-          if (!row['Montant HT']) {
-            throw new Error("Montant HT manquant");
-          }
-          if (!row['Montant TTC']) {
-            throw new Error("Montant TTC manquant");
+          const required: Array<[string, string]> = [
+            ['Numéro Facture', "Numéro de facture manquant."],
+            ['Fournisseur', "Fournisseur manquant."],
+            ['Date Facture', "Date de facture manquante."],
+            ['Date Échéance', "Date d'échéance manquante."],
+            ['Montant HT', "Montant HT manquant."],
+            ['Montant TTC', "Montant TTC manquant."],
+          ];
+          for (const [column, message] of required) {
+            if (isBlankCell(row[column])) throw new ImportRowError(message);
           }
 
           const invoiceNumber = String(row['Numéro Facture']).trim();
-          
-          // Vérifier les doublons
           if (existingInvoiceNumbers.has(invoiceNumber.toLowerCase())) {
-            throw new Error(`Facture "${invoiceNumber}" existe déjà dans le système`);
+            throw new ImportRowError(`La facture « ${invoiceNumber} » existe déjà.`);
           }
 
-          // Chercher le fournisseur dans le map (optimisé)
-          const supplierName = String(row['Fournisseur']).toLowerCase().trim();
-          const supplier = supplierMap.get(supplierName);
-
+          const supplier = supplierMap.get(String(row['Fournisseur']).toLowerCase().trim());
           if (!supplier) {
-            throw new Error(`Fournisseur "${String(row['Fournisseur'])}" non trouvé dans le système`);
+            throw new ImportRowError(`Fournisseur « ${String(row['Fournisseur']).trim()} » introuvable.`);
           }
 
-          // Parser les dates
-          const invoiceDate = parseDate(row['Date Facture']);
-          const dueDate = parseDate(row['Date Échéance']);
+          const invoiceDate = parseImportDate(row['Date Facture'], "Date de facture");
+          const dueDate = parseImportDate(row['Date Échéance'], "Date d'échéance");
 
-          // Parser et valider les montants
-          const totalHT = parseNumber(row['Montant HT'], 'Montant HT');
-          const totalTTC = parseNumber(row['Montant TTC'], 'Montant TTC');
-          
-          // Validation cohérence: TTC doit être >= HT
+          const totalHT = parseImportAmount(row['Montant HT'], "Montant HT");
+          const totalTTC = parseImportAmount(row['Montant TTC'], "Montant TTC");
+          if (totalHT <= 0) {
+            throw new ImportRowError("Montant HT invalide : nombre positif attendu.");
+          }
           if (totalTTC < totalHT) {
-            throw new Error(`Montant TTC (${totalTTC}) ne peut pas être inférieur au montant HT (${totalHT})`);
+            throw new ImportRowError("Le montant TTC ne peut pas être inférieur au montant HT.");
           }
+          const vatAmount = Math.round((totalTTC - totalHT) * 100) / 100;
 
-          const vatAmount = totalTTC - totalHT;
-
-          // Valider le taux de TVA si fourni
-          if (row['TVA (%)']) {
-            const expectedVatRate = parseNumber(row['TVA (%)'], 'TVA (%)');
-            const calculatedVatRate = totalHT > 0 ? (vatAmount / totalHT) * 100 : 0;
-            const variance = Math.abs(calculatedVatRate - expectedVatRate);
-            
-            if (variance > 0.5) { // Tolérance de 0.5%
-              throw new Error(
-                `Incohérence TVA: taux indiqué ${expectedVatRate.toFixed(2)}% mais calculé ${calculatedVatRate.toFixed(2)}%`
+          if (!isBlankCell(row['TVA (%)'])) {
+            const expectedVatRate = parseImportAmount(row['TVA (%)'], "TVA (%)");
+            const calculatedVatRate = (vatAmount / totalHT) * 100;
+            if (Math.abs(calculatedVatRate - expectedVatRate) > 0.5) {
+              throw new ImportRowError(
+                `TVA incohérente : taux indiqué ${expectedVatRate.toFixed(2)} %, calculé ${calculatedVatRate.toFixed(2)} %.`
               );
             }
           }
 
-          // Créer la facture avec validation Zod
-          const invoiceData = insertSupplierInvoiceSchema.parse({
+          let purchaseOrderId: number | undefined;
+          if (!isBlankCell(row['N° Commande'])) {
+            const orderNumber = String(row['N° Commande']).trim();
+            const order = orderMap.get(orderNumber);
+            if (!order) {
+              throw new ImportRowError(`Commande « ${orderNumber} » introuvable.`);
+            }
+            if (order.supplierId !== null && order.supplierId !== supplier.id) {
+              throw new ImportRowError(`La commande « ${orderNumber} » appartient à un autre fournisseur.`);
+            }
+            purchaseOrderId = order.id;
+          }
+
+          // Même saisie que POST / : les champs du workflow ne sont jamais fournis par l'import.
+          const invoiceData = createSupplierInvoiceSchema.parse({
             invoiceNumber,
             supplierId: supplier.id,
+            purchaseOrderId,
             invoiceDate,
             dueDate,
-            totalAmountHT: totalHT.toFixed(2),
-            totalAmountTTC: totalTTC.toFixed(2),
+            amountHT: totalHT.toFixed(2),
             vatAmount: vatAmount.toFixed(2),
-            purchaseOrderNumber: row['N° Commande'] ? String(row['N° Commande']).trim() : undefined,
-            status: 'received',
-            hasDiscrepancy: false,
-            createdBy: req.user!.id
+            totalTTC: totalTTC.toFixed(2),
           });
 
-          // Créer la facture via le service (déclenche le three-way matching)
-          await threeWayMatchingService.createSupplierInvoice(invoiceData, req.user!.id);
-          
-          // Ajouter au set pour détecter les doublons dans le fichier lui-même
+          const result = await threeWayMatchingService.createSupplierInvoice(invoiceData, req.user!.id);
           existingInvoiceNumbers.add(invoiceNumber.toLowerCase());
-          
           results.success++;
+
+          broadcastSupplierInvoiceUpdate("supplier_invoice_created", {
+            invoiceId: result.invoice.id,
+            purchaseOrderId: result.invoice.purchaseOrderId ?? null,
+            invoice: result.invoice,
+            action: "imported",
+            triggeredBy: req.user!.id,
+          });
         } catch (error) {
           results.failed++;
-          results.errors.push({
-            row: rowNumber,
-            message: error instanceof Error ? error.message : 'Erreur inconnue'
-          });
+          let message: string;
+          if (error instanceof ImportRowError || error instanceof AppError) {
+            message = error.message;
+          } else {
+            log.error({ err: error, requestId: req.requestId, row: rowNumber }, "Ligne d'import de facture fournisseur en échec");
+            message = `Ligne non importée. Référence : ${req.requestId ?? "inconnue"}`;
+          }
+          results.errors.push({ row: rowNumber, message });
         }
       }
 
       res.json(results);
     } catch (error) {
-      console.error("Erreur lors de l'import Excel:", error);
-      res.status(500).json({ 
-        error: "Erreur lors de l'import",
-        message: error instanceof Error ? error.message : 'Erreur inconnue'
-      });
+      next(error);
     }
   });
 });
