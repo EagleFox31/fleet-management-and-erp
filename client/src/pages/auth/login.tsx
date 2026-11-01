@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { AltchaWidget, shouldShowCaptcha } from "@/components/auth/altcha-widget";
-import { useFeature } from "@/hooks/use-feature";
-import { CAPTCHA_REQUIRED_MESSAGE, loginFailureOf } from "@/lib/lockout-message";
+import { loginFailureOf } from "@/lib/lockout-message";
 import { toApiError } from "@/lib/api-error";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -59,20 +57,12 @@ const features = [
 
 
 export default function Login() {
-  const { login, isAuthenticating, isAuthenticated, loginLockMessage, loginCaptchaRequired } = useAuth();
+  const { login, isAuthenticating, isAuthenticated, loginLockMessage } = useAuth();
   const [, setLocation] = useLocation();
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const captchaEnabled = useFeature("captcha");
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [captchaProof, setCaptchaProof] = useState<string | null>(null);
-  // Une preuve ALTCHA ne sert qu'une fois (anti-rejeu serveur) : nouvelle clé = nouveau défi.
-  const [captchaKey, setCaptchaKey] = useState(0);
-  // Le serveur fait foi : s'il exige la preuve (400 sur `captcha`), le défi s'affiche même
-  // après un rechargement qui a remis le compteur local à zéro.
-  const showCaptcha = loginCaptchaRequired || (captchaEnabled && shouldShowCaptcha(failedAttempts));
-  const loginMessage = loginLockMessage ?? (loginCaptchaRequired ? CAPTCHA_REQUIRED_MESSAGE : loginError);
+  const loginMessage = loginLockMessage ?? loginError;
   const [view, setView] = useState<'login' | 'forgot' | 'driver-select' | 'driver-pin'>('login');
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotUsername, setForgotUsername] = useState('');
@@ -97,14 +87,8 @@ export default function Login() {
   async function onSubmit(values: LoginFormValues) {
     setLoginError(null);
     try {
-      const sentProof = showCaptcha && captchaProof ? captchaProof : null;
-      const success = await login({ ...values, rememberMe, ...(sentProof ? { captcha: sentProof } : {}) });
-      if (!success) setFailedAttempts((n) => n + 1);
+      const success = await login({ ...values, rememberMe });
       if (!success) setLoginError("Identifiants incorrects. Veuillez réessayer.");
-      if (!success && sentProof) {
-        setCaptchaProof(null);
-        setCaptchaKey((k) => k + 1);
-      }
     } catch (error) {
       handleApiError(error);
       setLoginError("Erreur de connexion. Veuillez réessayer.");
@@ -415,10 +399,8 @@ export default function Login() {
                       </div>
                     )}
 
-                    {showCaptcha && <AltchaWidget key={captchaKey} onPayload={setCaptchaProof} />}
-
                     <div className="pt-1">
-                      <Button type="submit" disabled={isAuthenticating || (showCaptcha && !captchaProof)}
+                      <Button type="submit" disabled={isAuthenticating}
                         data-testid="button-submit-login"
                         className="w-full h-[52px] rounded-xl text-[14px] font-bold text-white shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2"
                         style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>

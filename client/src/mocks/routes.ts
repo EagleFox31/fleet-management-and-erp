@@ -10,7 +10,6 @@
 import type { ZodTypeAny } from "zod";
 import type { ApiErrorBody } from "@shared/errors";
 import { AUDIT_LOGS_PATH, auditLogsQuerySchema, auditLogsResponseSchema } from "@shared/contracts/audit-logs";
-import { AUTH_CHALLENGE_PATH, authChallengeResponseSchema } from "@shared/contracts/auth-captcha";
 import {
   LOCKED_USERS_PATH,
   lockedUsersResponseSchema,
@@ -346,7 +345,7 @@ export const MOCK_ROUTES: MockRoute[] = [
     response: pendingInvoicesResponseSchema,
     handle: ({ store, scenario }) => ({ body: scenario === "empty" ? [] : store.pendingInvoices }),
   },
-  // ---- Verrouillage, captcha, journal d'audit ----
+  // ---- Verrouillage, journal d'audit ----
   {
     id: "lockout.list",
     method: "get",
@@ -367,22 +366,6 @@ export const MOCK_ROUTES: MockRoute[] = [
       store.lockedUsers.splice(index, 1);
       return { body: { id, unlocked: true } };
     },
-  },
-  {
-    id: "auth.challenge",
-    method: "get",
-    path: AUTH_CHALLENGE_PATH,
-    response: authChallengeResponseSchema,
-    // Défi factice : sans signature réelle, la preuve ne sera pas validée par le serveur.
-    handle: () => ({
-      body: {
-        algorithm: "SHA-256",
-        challenge: "0".repeat(64),
-        salt: "mock-salt?expires=4102444800",
-        signature: "0".repeat(64),
-        maxnumber: 1000,
-      },
-    }),
   },
   {
     id: "audit-logs.list",
