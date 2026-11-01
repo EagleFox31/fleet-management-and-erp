@@ -113,6 +113,13 @@ afterAll(async () => {
 });
 
 describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
+  // Mise en place des cas `it.fails` : hors du `it.fails`, une erreur de
+  // préparation (500, coupure de base) fait échouer le hook, jamais passer le cas.
+  let seededDeleted: Awaited<ReturnType<typeof seedDeletedVehicle>>;
+  beforeAll(async () => {
+    seededDeleted = await seedDeletedVehicle();
+  }, 60000);
+
   it("est masqué de la liste et de la recherche, pas un véhicule actif", async () => {
     const active = await createTestVehicle();
     ids.vehicleIds.push(active.id);
@@ -158,7 +165,7 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
   // véhicule sans filtrer `deletedAt` : un véhicule supprimé reçoit une mission
   // (201). Le témoin ci-dessus prouve que seul `deletedAt` change.
   it.fails("un véhicule supprimé n'est pas assignable à une mission (400)", async () => {
-    const { vehicle, driverId } = await seedDeletedVehicle();
+    const { vehicle, driverId } = seededDeleted;
     const orderKo = uniqueTestToken("ord");
     const res = await call("POST", "/api/missions", { body: missionBody(vehicle.id, driverId, orderKo) });
     if (res.status === 201) missionIds.push(res.body.id);
@@ -171,7 +178,7 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
   // l'existence du véhicule, pas `deletedAt` : l'OT est créé (201) sur un
   // véhicule supprimé.
   it.fails("ne reçoit pas de nouvel OT (4xx)", async () => {
-    const { vehicle } = await seedDeletedVehicle();
+    const { vehicle } = seededDeleted;
     const res = await call("POST", "/api/work-orders", {
       body: { vehicleId: vehicle.id, title: "TEST OT sur véhicule supprimé" },
     });
@@ -182,6 +189,20 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
 });
 
 describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
+  let historyVehicleId = 0;
+  let historyWorkOrderId = 0;
+  beforeAll(async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    historyVehicleId = vehicle.id;
+    const [wo] = await db
+      .insert(workOrders)
+      .values({ vehicleId: vehicle.id, title: "TEST OT historique", status: "completed" })
+      .returning();
+    workOrderIds.push(wo.id);
+    historyWorkOrderId = wo.id;
+  }, 60000);
+
   it("refuse un rôle non admin (403) sans toucher au véhicule", async () => {
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
@@ -211,19 +232,11 @@ describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
   // `deletedAt`. Un véhicule qui porte un OT viole la clé étrangère
   // work_orders.vehicle_id : 500, et l'historique n'est jamais conservé.
   it.fails("supprime un véhicule qui porte un OT en conservant l'OT consultable", async () => {
-    const vehicle = await createTestVehicle();
-    ids.vehicleIds.push(vehicle.id);
-    const [wo] = await db
-      .insert(workOrders)
-      .values({ vehicleId: vehicle.id, title: "TEST OT historique", status: "completed" })
-      .returning();
-    workOrderIds.push(wo.id);
-
-    const res = await call("DELETE", `/api/vehicles/${vehicle.id}`);
+    const res = await call("DELETE", `/api/vehicles/${historyVehicleId}`);
     expect(res.status).toBe(200);
-    const after = await call("GET", `/api/work-orders/${wo.id}`);
+    const after = await call("GET", `/api/work-orders/${historyWorkOrderId}`);
     expect(after.status).toBe(200);
-    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicle.id));
+    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
     expect(row?.deletedAt).not.toBeNull();
   });
 });

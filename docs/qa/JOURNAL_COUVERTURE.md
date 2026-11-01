@@ -1342,6 +1342,11 @@ soumission sans doublon.
      au lieu de 200 avec `deletedAt` posé (server/routes.ts:1222, vehicle-deletion-service-trigger.ts:43).
   2. `POST /api/work-orders` sur un véhicule supprimé : 201 (server/routes.ts:2130 ne contrôle que l'existence).
   3. `POST /api/missions` avec un véhicule supprimé : 201 (server/api/missions.routes.ts:1736 sans filtre `deletedAt`).
+- Relecture : les `it.fails` ne contiennent plus que l'appel visé et l'assertion métier ; la mise en place
+  (véhicule supprimé, OT historique) est dans un `beforeAll` : une erreur de préparation fait échouer le hook
+  au lieu de rendre le cas vert. Rouge rejoué sans `.fails`, erreurs exactes : `expected 201 to be 400`
+  (mission), `expected 201 to be greater than or equal to 400` (OT), `expected 500 to be 200` (DELETE).
+  Contrat 9/9 verts.
 - `tsc` 0 erreur, unitaire 838/838, contrat 9/9 cas verts.
 
 **Limites**
