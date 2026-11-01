@@ -87,9 +87,24 @@ describe("SUP1 : création et lecture", { timeout: 180000 }, () => {
     expect(saved.qualityRating ?? 0).not.toBe(5);
   });
 
-  it.each(["technician", "workshopManager"] as const)("%s : tout /api/suppliers est refusé (403)", async (actor) => {
-    expect((await call("POST", "/api/suppliers", { actor, body: { name: uniqueTestToken("supplier-no") } })).status).toBe(403);
-    expect((await call("GET", "/api/suppliers", { actor })).status).toBe(403);
+  it("technician : tout /api/suppliers est refusé (403)", async () => {
+    expect((await call("POST", "/api/suppliers", { actor: "technician", body: { name: uniqueTestToken("supplier-no") } })).status).toBe(403);
+    expect((await call("GET", "/api/suppliers", { actor: "technician" })).status).toBe(403);
+  });
+
+  // Décision : le chef d'atelier consulte les fournisseurs (lecture seule), il n'écrit rien.
+  it("workshopManager : lecture seule, GET 200 ; création, modification, notation, désactivation 403", async () => {
+    const s = await seed("Pièces");
+    expect((await call("GET", "/api/suppliers", { actor: "workshopManager" })).status).toBe(200);
+    expect((await call("GET", `/api/suppliers/${s.id}`, { actor: "workshopManager" })).status).toBe(200);
+    expect((await call("POST", "/api/suppliers", { actor: "workshopManager", body: { name: uniqueTestToken("supplier-no") } })).status).toBe(403);
+    expect((await call("PATCH", `/api/suppliers/${s.id}`, { actor: "workshopManager", body: { phone: "0" } })).status).toBe(403);
+    expect((await call("PATCH", `/api/suppliers/${s.id}/rating`, { actor: "workshopManager", body: { qualityRating: 4 } })).status).toBe(403);
+    expect((await call("DELETE", `/api/suppliers/${s.id}`, { actor: "workshopManager" })).status).toBe(403);
+    const saved = await row(s.id);
+    expect(saved.isActive).toBe(true);
+    expect(saved.phone).not.toBe("0");
+    expect(Number(saved.qualityRating ?? 0)).not.toBe(4);
   });
 
   it("corps vide ou mal typé : 400, jamais 500", async () => {
@@ -99,7 +114,7 @@ describe("SUP1 : création et lecture", { timeout: 180000 }, () => {
     expect(wrong.status).toBe(400);
   });
 
-  it.fails("nom déjà pris : 409 lisible, pas une 500", async () => {
+  it("nom déjà pris : 409 lisible, pas une 500", async () => {
     const existing = await seed();
     const res = await call("POST", "/api/suppliers", { actor: "admin", body: { name: existing.name, category: "Pièces" } });
     expect(res.status).toBe(409);
@@ -157,7 +172,7 @@ describe("SUP1 : modification et désactivation", { timeout: 180000 }, () => {
     expect((await row(s.id)).isActive).toBe(true);
   });
 
-  it.fails("une nouvelle commande ne peut pas viser un fournisseur désactivé", async () => {
+  it("une nouvelle commande ne peut pas viser un fournisseur désactivé", async () => {
     const s = await seed(undefined, { isActive: false });
     const res = await call("POST", "/api/purchase-orders", {
       actor: "admin",
@@ -218,9 +233,10 @@ describe("SUP2 : évaluation selon le rôle et la catégorie", { timeout: 180000
     expect(res.status).toBe(expected);
   });
 
-  it.fails("le chef d'atelier évalue une catégorie pièces (200)", async () => {
+  it("le chef d'atelier n'évalue pas, même une catégorie pièces (403, lecture seule)", async () => {
     const s = await seed("Pièces détachées");
-    expect((await rate("workshopManager", s.id, { qualityRating: 4 })).status).toBe(200);
+    expect((await rate("workshopManager", s.id, { qualityRating: 4 })).status).toBe(403);
+    expect(Number((await row(s.id)).qualityRating ?? 0)).not.toBe(4);
   });
 
   it("le technicien ne peut rien évaluer (403)", async () => {

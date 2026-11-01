@@ -68,3 +68,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : POST avec status=completed et currentStep=5 : brouillon créé en in_progress, aucun véhicule activé.
 - **Preuve** : tsc 0 erreur ; test de contrat à écrire par le testeur (VEH3 de #72 reste à lui).
 - **Reste / risques** : aucun test de contrat dans ce commit : à couvrir par fleet-testeur.
+
+## 2026-11-01T23:13:33+01:00 — Tests : it.fails corrigés passés en it, contrat du workflow d'acquisition
+
+- **Agent** : fix-defauts (testeur) · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : 13 `it.fails` corrigés deviennent des `it` (chauffeurs 3, fournisseurs 3, pièces 5, pannes 3, hors VEH3 et statut véhicule) ; chef d'atelier fournisseurs en lecture seule (GET 200, POST/PATCH/notation/désactivation 403) ; nouveau contrat workflow-vehicle-acquisition (POST et PATCH).
+- **Comment** : retrait des 7 entrées converties de KNOWN_SETUP_IN_IT_FAILS ; le contrat WFL1 vérifie en base statut, propriétaire, completedAt et le nombre de véhicules, avec deux comptes.
+- **Pourquoi** : un it.fails corrigé qui reste en it.fails est rouge ; le défaut de liste blanche du workflow n'avait aucun test.
+- **Comment tester (QA)** : lancer les contrats drivers-crud-deactivation, suppliers-crud-ratings, parts-catalog-crud, fault-catalog-lifecycle, workflow-vehicle-acquisition sous db-lock.
+- **Preuve** : 7/7, 26/26, 22/22, 12/12, 16/16 ; WFL1 rouge sur l'ancien service et sans le routeur (12 échecs), vert avec ; tsc 0 erreur ; unitaires 854/854 ; hygiène 7/7.
+- **Reste / risques** : api-auth-guard rouge (garde de lecture fournisseurs dans server/api/index.ts non reconnue comme garde de session) ; supplier-settlement-idempotence instable une fois sur deux (vert au rejeu).

@@ -28,13 +28,6 @@ import { describe, expect, it } from "vitest";
  * la liste ne peut que rétrécir. Une nouvelle occurrence fait échouer ce test.
  */
 const KNOWN_SETUP_IN_IT_FAILS: string[] = [
-  "tests/contract/fault-catalog-lifecycle.contract.test.ts::le valideur ne se forge pas par le corps",
-  "tests/contract/fault-catalog-lifecycle.contract.test.ts::valider une panne enregistre qui l'a validée",
-  "tests/contract/parts-catalog-crud.contract.test.ts::pièce déjà supprimée : pas de 500 au second appel",
-  "tests/contract/parts-catalog-crud.contract.test.ts::référence déjà prise : 409 lisible, sans texte d'exception",
-  "tests/contract/suppliers-crud-ratings.contract.test.ts::le chef d'atelier évalue une catégorie pièces (200)",
-  "tests/contract/suppliers-crud-ratings.contract.test.ts::nom déjà pris : 409 lisible, pas une 500",
-  "tests/contract/suppliers-crud-ratings.contract.test.ts::une nouvelle commande ne peut pas viser un fournisseur désactivé",
   "tests/integration/vehicle-status-sync.test.ts::annuler le dernier OT ouvert remet le véhicule en service",
 ];
 
