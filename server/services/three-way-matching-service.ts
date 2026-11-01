@@ -289,7 +289,8 @@ export class ThreeWayMatchingService {
     let recommendation: 'auto_approve' | 'manual_review' | 'escalate';
     if (variancePercentage === 0 && quantityVariance === 0) {
       recommendation = 'auto_approve'; // Match parfait
-    } else if (variancePercentage <= this.VARIANCE_THRESHOLD) {
+    } else if (!hasDiscrepancy) {
+      // Même borne que hasDiscrepancy : à 5 % pile l'écart est signalé, donc escaladé.
       recommendation = 'manual_review'; // Écart acceptable
     } else {
       recommendation = 'escalate'; // Écart significatif
