@@ -80,7 +80,9 @@ export class ExcelExportService {
       "Stock Réel": part.realStock || 0,
       "Seuil Min": part.minQuantity,
       "Unité": part.unit,
-      "Alerte CDE": part.reorderAlert ? "OUI" : "NON",
+      // Même règle que la liste de réappro (stock-alerts-service) : la colonne
+      // reorder_alert n'est pas tenue à jour par tous les mouvements de stock.
+      "Alerte CDE": part.quantity <= part.minQuantity ? "OUI" : "NON",
       "Prix Unitaire": parseFloat(part.unitPrice || "0"),
       "Valeur Stock": (part.realStock || 0) * parseFloat(part.unitPrice || "0"),
       "Fournisseur": part.supplier || "N/A",
