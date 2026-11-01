@@ -514,6 +514,20 @@ export class ThreeWayMatchingService {
       }
     }
 
+    // Commande liée inconnue : refus lisible plutôt qu'une violation de clé étrangère (500).
+    if (data.purchaseOrderId != null) {
+      const [linkedOrder] = await db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, data.purchaseOrderId))
+        .limit(1);
+      if (!linkedOrder) {
+        throw new AppError(404, "Commande fournisseur introuvable.", {
+          cause: new Error(`purchaseOrderId ${data.purchaseOrderId} inexistant`),
+        });
+      }
+    }
+
     // Calculer les montants si non fournis
     const rawAmountHT = this.num(data.amountHT || data.subtotal);
     const rawVatAmount = this.num(data.vatAmount || data.taxAmount);

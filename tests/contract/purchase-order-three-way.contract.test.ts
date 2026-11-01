@@ -185,9 +185,8 @@ describe("PO2 rapprochement commande / facture", { timeout: 120000 }, () => {
     expect(verdict.isValid).toBe(false);
   });
 
-  // DÉFAUT PRODUIT (à corriger par fleet-api) : POST /api/supplier-invoices avec un
-  // purchaseOrderId inexistant renvoie 500 au lieu d'un 4xx lisible.
-  it.fails("commande inconnue : refus lisible, aucune facture, jamais 500", async () => {
+  // Régression : un purchaseOrderId inexistant donnait une violation de clé étrangère (500).
+  it("commande inconnue : refus lisible, aucune facture, jamais 500", async () => {
     const number = uniqueTestToken("sinv");
     const res = await call("secretary", "POST", "/api/supplier-invoices", {
       supplierId,
