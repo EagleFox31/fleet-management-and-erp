@@ -5,7 +5,7 @@ import { and, eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { alerts, documentRenewalCenters, documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
-import { documentExpiryDedupeKey } from "../../server/services/document-expiry-rule";
+import { documentExpiryDedupeKey, documentExpiryDedupeKeyPrefixes } from "../../server/services/document-expiry-rule";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
@@ -130,11 +130,12 @@ describe("DOC3 : renouvellement rapide d'un document", { timeout: 180000 }, () =
       .select({ dedupeKey: alerts.dedupeKey })
       .from(alerts)
       .where(and(eq(alerts.userId, secretary.id), like(alerts.dedupeKey, "doc_expiry:%")));
-    // Le job d'alertes en tâche de fond écrit aussi des échéances d'autres documents de la base
-    // pour toute secrétaire, compte de test compris : ne regarder que les deux documents du test.
+    // Le job d'alertes en tÃ¢che de fond Ã©crit aussi des Ã©chÃ©ances d'autres documents de la base
+    // pour toute secrÃ©taire, compte de test compris : ne regarder que les deux documents du test.
+    const ownPrefixes = [renewed.id, other.id].flatMap(documentExpiryDedupeKeyPrefixes);
     const ownKeys = remaining
       .map((row) => row.dedupeKey)
-      .filter((key) => [renewed.id, other.id].some((id) => key?.includes(`:${id}:`)));
+      .filter((key) => ownPrefixes.some((prefix) => key?.startsWith(prefix)));
     expect(ownKeys).toEqual([documentExpiryDedupeKey(other.id, oldExpiry, "due")]);
   });
 

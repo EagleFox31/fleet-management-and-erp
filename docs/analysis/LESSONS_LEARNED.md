@@ -853,3 +853,26 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une écriture sur une ligne nominative (alerte, préférence, brouillon) filtre sur l'utilisateur de session dans la requête SQL elle-même, jamais par un contrôle après lecture.
+
+## 2026-11-01 - Fichier de contrat en échec alors que tous ses tests passent
+
+### Constat
+- Plusieurs fichiers de contrat (PR #65, #66, #67) sortaient « 1 failed » avec tous leurs tests verts. Le `afterAll` global (`cleanupOrphanTestRows`, `tests/support/setup-contract.ts`) levait une erreur de clé étrangère.
+
+### Cause racine
+- Le ménage supprime les comptes TEST, mais des tables pointant vers `users` n'étaient pas vidées avant : `document_renewal_centers.created_by` (renouvellement rapide), après `fuel_prices.created_by` plus tôt.
+- Course : le job d'alertes en tâche de fond écrit des alertes pour les comptes de test entre la suppression des alertes et celle des comptes (`alerts_user_id_users_id_fk`).
+- Le même job écrit des échéances d'autres documents de la base pour toute secrétaire : une assertion « alertes restantes du compte » sans filtre sur ses propres documents devient instable.
+- Classification : ménage de test incomplet, répété (troisième FK). Contrôle renforcé ci-dessous.
+
+### Résolution
+- `tests/support/cleanup.ts` : centres et demandes de renouvellement des comptes TEST supprimés ; alertes resupprimées juste avant les comptes ; trois essais, puis seule la course `alerts_user_id` est tolérée (avertissement stderr). Toute autre erreur fait échouer.
+- `tests/contract/document-quick-renew-alerts.contract.test.ts` : assertion restreinte aux préfixes de ses deux documents (`documentExpiryDedupeKeyPrefixes`).
+
+### Prévention (vérifiable)
+- Une nouvelle FK vers `users` oubliée dans le ménage fait échouer le hook global (erreur relevée, pas avalée) : elle se voit au premier fichier de contrat.
+- Preuve : DOC3 rouge avant (FK `alerts_user_id`, puis alerte d'un autre document), vert après.
+
+### Règle Projet (obligatoire)
+- Toute table qui référence `users` et peut être écrite par un compte de test se vide dans `cleanupOrphanTestRows` avant la suppression des comptes.
+- Une assertion sur les alertes d'un compte filtre sur les objets créés par le test : le job en tâche de fond écrit pour tous les comptes.
