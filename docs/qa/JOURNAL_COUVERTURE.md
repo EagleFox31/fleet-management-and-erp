@@ -1319,7 +1319,7 @@ soumission sans doublon.
 - Ces fichiers étaient écrits mais jamais exécutés : leur couverture n'était pas prouvée.
 
 **Preuve**
-- Rouge en `it` avant `it.fails` : 2 lignes d'historique au lieu d'1, `year`/`mileage` 500, `createdBy` et `userId` réécrits, immatriculation en double 500, motif absent. Vert ensuite : vehicles-crud 22/22, acquisition + mission 29/29 (run4, hors cas VEH1). `tsc` 0 erreur, unitaire 845/845.
+- Rouge en `it` avant `it.fails` : 2 lignes d'historique au lieu d'1, `year`/`mileage` 500, `createdBy` et `userId` réécrits, immatriculation en double 500, motif absent. Vert ensuite : vehicles-crud 22/22, acquisition + mission 34/34 (run4). `tsc` 0 erreur, unitaire 845/845.
 
 **Limites**
 - Le 400 du lancement de mission ne prouve pas le conflit seul (la mission de test n'a pas de budget) : le conflit est prouvé par `launch-readiness`.
