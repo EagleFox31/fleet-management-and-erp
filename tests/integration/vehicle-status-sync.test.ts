@@ -1,5 +1,5 @@
 import { asc, eq, inArray } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
 import { statusHistory, vehicles, workOrders } from "../../shared/schema";
@@ -11,7 +11,8 @@ import { createTestVehicle } from "../support/factories";
  * et chaque changement est tracé dans `status_history`.
  * - ouvrir un OT immobilise le véhicule ; en clôturer un alors qu'un autre reste ouvert ne le libère pas ;
  * - la clôture du dernier OT le remet en service ; la rejouer n'ajoute aucune ligne d'historique ;
- * - un OT annulé ne laisse pas le véhicule immobilisé.
+ * - un OT annulé ne laisse pas le véhicule immobilisé (trigger en base, quel que soit l'appelant) ;
+ * - un véhicule hors service ne repasse jamais en service par ce biais.
  */
 
 const ids = createIdBag();
@@ -96,11 +97,45 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     expect(await historyOf(vehicleId)).toEqual([]);
   });
 
-  it.fails("annuler le dernier OT ouvert remet le véhicule en service", async () => {
+  describe("annulation (trigger trg_work_orders_release_vehicle)", () => {
+    let vehicleId: number;
+    let woId: number;
+    beforeAll(async () => {
+      vehicleId = await newVehicle();
+      woId = await openWorkOrder(vehicleId);
+    });
+
+    it("annuler le dernier OT ouvert remet le véhicule en service", async () => {
+      await storage.updateWorkOrder(woId, { status: "cancelled" });
+      expect(await statusOf(vehicleId)).toBe("operational");
+      expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
+    });
+  });
+
+  it("annuler un OT alors qu'un autre reste ouvert garde le véhicule en maintenance", async () => {
+    const vehicleId = await newVehicle();
+    const first = await openWorkOrder(vehicleId);
+    await openWorkOrder(vehicleId, "in_progress");
+    await storage.updateWorkOrder(first, { status: "cancelled" });
+    expect(await statusOf(vehicleId)).toBe("maintenance");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
+  });
+
+  it("clôture hors storage (UPDATE direct, comme le service technicien) : le véhicule est libéré quand même", async () => {
+    const vehicleId = await newVehicle();
+    const woId = await openWorkOrder(vehicleId, "in_progress");
+    await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.id, woId));
+    expect(await statusOf(vehicleId)).toBe("operational");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
+  });
+
+  it("un véhicule passé hors service n'est pas remis en service par l'annulation", async () => {
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
+    await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicleId));
     await storage.updateWorkOrder(woId, { status: "cancelled" });
-    expect(await statusOf(vehicleId)).toBe("operational");
+    expect(await statusOf(vehicleId)).toBe("out_of_service");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });
 
   it("supprimer le dernier OT ouvert remet le véhicule en service", async () => {
