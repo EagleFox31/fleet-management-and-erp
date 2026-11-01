@@ -1345,6 +1345,13 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
 
         // Quand missionId n'est pas fourni (quick renew), on invalide toutes les clés dérivées mission.
         invalidateMissionDerivedQueries(missionId);
+
+        // DOC3 : le renouvellement rapide lève les alertes d'échéance du document.
+        if (update.type === "document_renewal_quick_completed") {
+          queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/alerts/active"] });
+        }
       }
       queryClient.invalidateQueries({
         predicate: (query) => {

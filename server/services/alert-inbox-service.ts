@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 import { alerts, type Alert } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { documentExpiryDedupeKeyPrefixes } from "./document-expiry-rule";
 
 /**
  * Boîte d'alertes de l'utilisateur connecté (ALR2).
@@ -37,5 +38,17 @@ export const alertInboxService = {
       .where(and(eq(alerts.id, alertId), eq(alerts.userId, userId)))
       .returning({ id: alerts.id });
     if (rows.length === 0) throw new AppError(404, "Alerte introuvable.");
+  },
+
+  /**
+   * DOC3 : levée système, pour tous les destinataires, des alertes d'échéance
+   * d'un document renouvelé (toutes échéances confondues). Renvoie le nombre supprimé.
+   */
+  async clearDocumentExpiryAlerts(documentId: number): Promise<number> {
+    const rows = await db
+      .delete(alerts)
+      .where(or(...documentExpiryDedupeKeyPrefixes(documentId).map((prefix) => like(alerts.dedupeKey, `${prefix}%`))))
+      .returning({ id: alerts.id });
+    return rows.length;
   },
 };
