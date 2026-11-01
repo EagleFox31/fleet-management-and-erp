@@ -24,6 +24,7 @@ import {
   faultCatalog, vehicleTires, insertFaultCatalogSchema
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
+import { checkWorkOrderTransition } from "@shared/constants/work-order-transitions";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
@@ -2212,7 +2213,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations de l'ordre de travail sont invalides.", { fieldErrors: errors }));
       }
-      
+
+      // Transitions de statut (shared/constants/work-order-transitions.ts) :
+      // vérifiées avant toute écriture.
+      if (typeof updatedData.status === "string") {
+        const transition = checkWorkOrderTransition(workOrder.status, updatedData.status, req.user?.role);
+        if (!transition.allowed) {
+          return next(
+            new AppError(transition.status, transition.message, {
+              cause: `OT ${id} : ${workOrder.status} -> ${updatedData.status} (${req.user?.role ?? "?"})`,
+            }),
+          );
+        }
+      }
+
       // Convert date strings to Date objects for Drizzle ORM
       if (updatedData.startDate && typeof updatedData.startDate === 'string') {
         updatedData.startDate = new Date(updatedData.startDate);
