@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { UserForm } from "./user-form";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -107,24 +108,6 @@ export function UserTable({ users, isLoading }: UserTableProps) {
     }
   };
 
-  const getRoleLabel = (role: string | undefined) => {
-    if (!role) return "Utilisateur";
-    
-    switch (role) {
-      case "admin":
-        return "Administrateur";
-      case "workshop_manager":
-        return "Gestionnaire atelier";
-      case "technician":
-        return "Technicien";
-      case "client":
-        return "Client";
-      case "user":
-      default:
-        return "Utilisateur";
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex justify-center py-10">
@@ -183,7 +166,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                                user.role === "client" ? "destructive" : "secondary"}
                         className="font-normal"
                       >
-                        {getRoleLabel(user.role)}
+                        {roleLabelOf(user.role)}
                       </Badge>
                       {user.role === "workshop_manager" && (
                         <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
