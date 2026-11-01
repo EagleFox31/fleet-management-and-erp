@@ -142,6 +142,49 @@ describe("PATCH planification de maintenance", { timeout: 60000 }, () => {
   });
 });
 
+describe("POST planification de maintenance et génération d'OT", { timeout: 60000 }, () => {
+  const validSchedule = { title: "TEST plan POST", frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-12-01", isActive: false };
+
+  it("T3 : véhicule inexistant -> 404 lisible (était un 500), rien d'écrit", async () => {
+    const res = await call("POST", "/api/maintenance-schedules", {
+      cookie: cookies.get("workshop_manager"),
+      body: { ...validSchedule, vehicleId: 999999999 },
+    });
+    expect(res.status).toBe(404);
+    expectErrorContract(res, "NOT_FOUND");
+    const rows = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.vehicleId, 999999999));
+    expect(rows).toEqual([]);
+  });
+
+  it("T3 : date illisible -> 400 nommé (était un 500), rien d'écrit", async () => {
+    const vehicleId = await newVehicleId();
+    const res = await call("POST", "/api/maintenance-schedules", {
+      cookie: cookies.get("workshop_manager"),
+      body: { ...validSchedule, vehicleId, scheduledDate: "demain" },
+    });
+    expectFieldError(res, "scheduledDate");
+    const rows = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.vehicleId, vehicleId));
+    expect(rows).toEqual([]);
+  });
+
+  it("non-régression : une planification inactive valide est créée (201)", async () => {
+    const vehicleId = await newVehicleId();
+    const res = await call("POST", "/api/maintenance-schedules", {
+      cookie: cookies.get("workshop_manager"),
+      body: { ...validSchedule, vehicleId },
+    });
+    expect(res.status).toBe(201);
+    scheduleIds.push(res.body.id);
+    expect(res.body).toMatchObject({ vehicleId, scheduledDate: "2026-12-01", isActive: false });
+  });
+
+  it("T3 : générer un OT depuis un identifiant illisible -> 400 (était un 500)", async () => {
+    const res = await call("POST", "/api/maintenance-schedules/abc/generate-work-order", { cookie: cookies.get("workshop_manager") });
+    expect(res.status).toBe(400);
+    expectErrorContract(res, "VALIDATION");
+  });
+});
+
 describe("PATCH document de véhicule", { timeout: 60000 }, () => {
   async function createDocument() {
     const [row] = await db

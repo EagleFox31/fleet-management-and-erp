@@ -1626,21 +1626,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/maintenance-schedules", isWorkshopManager, async (req, res) => {
+  app.post("/api/maintenance-schedules", isWorkshopManager, async (req, res, next) => {
     try {
       // Valider les données d'entrée
       const validationSchema = z.object({
-        vehicleId: z.number(),
+        vehicleId: z.number().int().positive(),
         title: z.string().min(1),
         description: z.string().optional(),
         frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'mileage']),
         frequencyValue: z.number().min(1),
-        scheduledDate: z.string(),
+        scheduledDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}/, "Date invalide (AAAA-MM-JJ)")
+          .refine((value) => !Number.isNaN(Date.parse(value)), "Date invalide (AAAA-MM-JJ)"),
         scheduledMileage: z.number().optional(),
         isActive: z.boolean().default(true)
       });
 
       const scheduleData = validationSchema.parse(req.body);
+      if (!(await storage.getVehicle(scheduleData.vehicleId))) {
+        return next(new AppError(404, "Véhicule introuvable : la planification n'a pas été créée."));
+      }
       
       // Utiliser le service pour créer la planification et générer automatiquement l'OT
       const schedule = await preventiveMaintenanceService.createMaintenanceSchedule(scheduleData);
@@ -1710,15 +1716,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Générer un ordre de travail depuis une planification
-  app.post("/api/maintenance-schedules/:id/generate-work-order", isWorkshopManager, async (req, res) => {
+  app.post("/api/maintenance-schedules/:id/generate-work-order", isWorkshopManager, async (req, res, next) => {
     try {
-      const { id } = req.params;
-      
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return next(new AppError(400, "Identifiant de planification invalide."));
+      }
+
       // Récupérer la planification
       const [schedule] = await db
         .select()
         .from(maintenanceSchedules)
-        .where(eq(maintenanceSchedules.id, parseInt(id)));
+        .where(eq(maintenanceSchedules.id, id));
       
       if (!schedule) {
         return res.status(404).json({ message: "Planification non trouvée" });
