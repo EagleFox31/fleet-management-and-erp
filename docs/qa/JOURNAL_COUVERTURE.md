@@ -1303,6 +1303,55 @@ soumission sans doublon.
 - Variante, spécification, catégories de pièce et pièces associées d'un défaut : aucune route, non couvrables.
 - VEH1, VEH3, MIS2 écrits mais jamais exécutés (consigne d'arrêt) : non livrés. MIS1, P2, ADM2, DRV2, WO1, WO7, T6, P5, P6 non commencés.
 
+## 2026-11-01 - FUEL2, DIR2, DIR3 : statistiques carburant et export par période
+
+**Quoi**
+- `tests/contract/fuel-vehicle-stats.contract.test.ts` : `GET /api/fuel-card/vehicle/:id/stats` (totaux, prix au litre, station la plus fréquente, enregistrements sans débit ignorés, autres véhicules ignorés, zéros, 401/403/400).
+- `tests/contract/fuel-export-period.contract.test.ts` : export XLSX carburant filtré par mois et par année, contenu des cellules relu avec `xlsx`, 403 client, 400 année absente ou mois 13.
+- `tests/support/contract-session.ts` : ajout de `raw()` pour lire un fichier binaire.
+
+**Pourquoi**
+- Plan : FUEL2, DIR2, DIR3 étaient « à faire ».
+
+**Défauts figés (`it.fails`)**
+- Statistiques d'un véhicule inconnu : 500 avec message brut au lieu de 404 (`fuel-card-service.ts:457`, route `fuel-card.routes.ts`).
+- Un plein saisi par `POST /api/fuel-records` n'apparaît pas dans l'export de son mois : l'export filtre sur `fuelRecords.year/month` (`excel-export-service.ts:125`), que seul l'import Excel renseigne.
+
+**Preuve**
+- Rejeu sans `.fails` : rouge sur `expected [] to have a length of 1` (export) et sur 500 attendu 404 (statistiques).
+- Relecture : le plein de l'export (véhicule, POST et son 201) est créé dans un `beforeAll`, le `it.fails` ne garde que le téléchargement et l'assertion. La date est fixe (2026-06-15) : le mois filtré est celui de la date envoyée, sans dépendre du fuseau ni du jour. Rouge rejoué sans `.fails` : `expected [] to have a length of 1 but got +0`. Contrat 4/4 verts.
+
+**Limites**
+- Rapports inventaire et performance technicien, historique de consommation : non couverts. FUEL1 et DIR1 non repris.
+
+**Reste**
+- FUEL1, DIR1, puis lot A5.
+
+## Piste B, lot B2 : VEH1, VEH3, MIS2 (contrat)
+
+**Quoi**
+- Trois fichiers de contrat exécutés pour la première fois : `vehicles-crud` (VEH1), `vehicle-acquisition-workflow` (VEH3), `mission-planning-conflict` (MIS2). Corrigés : délais de describe à 180 s, `notes` à la place d'une colonne `color` inexistante, `GET /api/vehicles/abc` attendu en 404 (valeur cherchée comme immatriculation).
+- Défauts produit figés en `it.fails`, sans toucher au code produit :
+  - statut initial consigné deux fois (`server/storage.ts:871` et `server/routes.ts:1090`) ;
+  - `year` / `mileage` non numériques : 500 au lieu de 400 (`shared/schema.ts:154-155`) ;
+  - `PATCH /api/vehicles/:id` : `createdBy` du corps réécrit l'auteur (`server/routes.ts:1195`) ;
+  - `PATCH /api/vehicles/:id` : immatriculation déjà prise, 500 (`server/storage.ts:910`, `server/routes.ts:1204`) ;
+  - `PATCH /api/workflows/vehicle-acquisition/:id` : `userId` du corps réaffecte le brouillon (`server/services/workflow-service.ts:88`) ;
+  - lancement de mission refusé : motifs réduits à « Ce champ n'est pas valide. » (`server/api/missions.routes.ts:2366`).
+
+**Pourquoi**
+- Ces fichiers étaient écrits mais jamais exécutés : leur couverture n'était pas prouvée.
+
+**Preuve**
+- Rouge en `it` avant `it.fails` : 2 lignes d'historique au lieu d'1, `year`/`mileage` 500, `createdBy` et `userId` réécrits, immatriculation en double 500, motif absent. Vert ensuite : vehicles-crud 22/22, acquisition + mission 34/34 (run4). `tsc` 0 erreur, unitaire 845/845.
+
+**Limites**
+- Le 400 du lancement de mission ne prouve pas le conflit seul (la mission de test n'a pas de budget) : le conflit est prouvé par `launch-readiness`.
+- Un e2e VEH3 (parcours écran) reste à faire.
+
+**Reste**
+- MIS1 et P2 (rejouer `e2e/05`), lots B3 et B4 non commencés.
+
 ## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
 
 **Quoi**
@@ -1324,6 +1373,40 @@ soumission sans doublon.
 - Contrat 17/17 (dont les 3 `it.fails`) ; les cas rejoués en `it` échouent sur l'assertion finale
   (affectation 200 au lieu de 400, compte encore listé).
 
+## VEH2 - véhicule supprimé : masqué, historique consultable, non assignable
+
+**Quoi**
+- Contrat `vehicle-soft-delete` (9 cas) : un véhicule supprimé (`deletedAt`) est masqué de la liste et de la
+  recherche, ses OT et missions passés restent consultables ; `DELETE /api/vehicles/:id` refusé aux non-admin
+  (403), id invalide 400, inconnu 404, véhicule sans historique supprimé et masqué.
+- Témoin : un véhicule actif avec un chauffeur formé s'assigne à une mission (201).
+
+**Pourquoi**
+- Le plan donnait VEH2 « À faire ». La colonne `vehicles.deletedAt` existe et les listes la filtrent, mais
+  aucune route ne la pose : la suppression est physique.
+
+**Preuve**
+- Trois défauts en `it.fails`, chacun rejoué en `it` pour vérifier le rouge (cf. PR) :
+  1. `DELETE` d'un véhicule portant un OT : 500 (clé étrangère `work_orders_vehicle_id_vehicles_id_fk`),
+     au lieu de 200 avec `deletedAt` posé (server/routes.ts:1222, vehicle-deletion-service-trigger.ts:43).
+  2. `POST /api/work-orders` sur un véhicule supprimé : 201 (server/routes.ts:2130 ne contrôle que l'existence).
+  3. `POST /api/missions` avec un véhicule supprimé : 201 (server/api/missions.routes.ts:1736 sans filtre `deletedAt`).
+- Relecture : les `it.fails` ne contiennent plus que l'appel visé et l'assertion métier ; la mise en place
+  (véhicule supprimé, OT historique) est dans un `beforeAll` : une erreur de préparation fait échouer le hook
+  au lieu de rendre le cas vert. Rouge rejoué sans `.fails`, erreurs exactes : `expected 201 to be 400`
+  (mission), `expected 201 to be greater than or equal to 400` (OT), `expected 500 to be 200` (DELETE).
+  Contrat 9/9 verts.
+- Garde-fou d'hygiène (`it-fails-hygiene`) : le DELETE de la route est joué dans le `beforeAll` (il
+  faisait deux requêtes dans le `it.fails`), le cas assert son statut puis la lecture de l'OT. Rouge rejoué :
+  `expected 500 to be 200`. Hygiène 7/7.
+- `tsc` 0 erreur, unitaire 838/838, contrat 9/9 cas verts.
+
+**Limites**
+- `GET /api/vehicles/:id` renvoie encore un véhicule supprimé (`storage.getVehicle`, server/storage.ts:699) : non figé.
+
+**Reste**
+- Correctif produit (fleet-api / fleet-db) : suppression logique, puis passer les trois `it.fails` en `it`.
+
 ## Garde-fou d'hygiène : it.fails sans mise en place
 
 **Quoi**
@@ -1337,3 +1420,193 @@ soumission sans doublon.
 
 **Preuve**
 - `it.fails` fautif fabriqué : rouge ; propre : vert. Fichier fautif déposé sur disque : 1 failed, retiré : 5/5.
+
+## MNT1, MNT2, CAT1, WO6, P3 - maintenance préventive et catalogue main-d'oeuvre
+
+**Quoi**
+- Contrat `maintenance-schedules` (MNT1) : droits (401, 403), corps invalides 400, véhicule inconnu 404, création active
+  qui génère l'OT préventif lié, plan inactif sans OT, PATCH, désactivation et réactivation, DELETE, cloison client.
+- Contrat `labor-catalog` (CAT1) : lecture sur session, écriture réservée au chef d'atelier, code en majuscules, auteur
+  tracé, doublon refusé, deux créations simultanées (201 + 400), poste inactif masqué et refusé sur un OT.
+- Intégration `preventive-maintenance-triggers` (MNT2) : échéance véhicule dans la fenêtre de 30 jours (J+30 oui,
+  J+31 non), OT unique au rejeu et véhicule en maintenance, seuil kilométrique, plan inactif, plans à venir.
+- Support `tests/support/contract-session.ts` : serveur in-process et un compte connecté par rôle.
+- WO6 : déjà couvert par `time-tracking` (contrat 5, intégration 3), passé OK au plan sans nouveau test.
+
+**Pourquoi**
+- Le plan donnait ces lignes « À faire ». Les défauts sont figés en `it.fails` plutôt que corrigés.
+
+**Preuve**
+- Quatre `it.fails`, rejoués en `it`, rouges sur l'assertion visée :
+  1. MNT1 : `DELETE /api/maintenance-schedules/:id` d'un plan avec OT répond 204, le plan existe encore
+     (server/routes.ts:1811, server/storage.ts:1192 avale l'erreur de clé étrangère).
+  2. MNT2 : l'échéance `scheduledDate` d'un plan actif ne déclenche aucun OT, seules les dates du véhicule le font
+     (server/services/preventive-maintenance-service.ts:112).
+  3. MNT2 : un second passage à 20000 km crée un second OT en attente pour le même plan (le premier est joué en
+     mise en place et laisse un seul OT), la garde compare au titre du plan
+     alors que l'OT s'intitule « Maintenance préventive: <titre> » (preventive-maintenance-service.ts:310, :359).
+  4. CAT1 : `PATCH /api/labor-catalog/:id` répond 404, aucune route de modification ni de désactivation
+     (server/api/work-order-items.routes.ts).
+- Relecture : chaque `it.fails` ne contient plus que l'appel visé et l'assertion métier, la mise en place (véhicule,
+  plan, entrée de catalogue) est dans un `beforeAll` qui contrôle le 201. Rouge rejoué sans `.fails`, erreurs exactes :
+  `expected [ { id } ] to have a length of +0 but got 1` (MNT1), `expected [] to have a length of 1 but got +0`
+  (échéance de plan), `expected [ ... ] to have a length of 1 but got 2` (deux OT), `expected 404 to be 200` (CAT1).
+- Contrat 16/16 cas verts, intégration 11/11, unitaire 838/838, `tsc` 0 erreur.
+
+**Limites**
+- `calculateNextDueDate` lève pour les fréquences quotidienne et hebdomadaire acceptées par le POST : non figé.
+- Bord de mois et fuseau du pointage non testés : WO6 repassé de « OK » à « Partiel » au plan.
+- Alerte, clôture de l'OT préventif et recalcul de l'échéance par date non couverts (P3).
+
+**Reste**
+- Correctifs produit (fleet-api) puis passage des quatre `it.fails` en `it`.
+
+## 2026-11-01 - FUEL1 et DIR1 : carte carburant et KPI Direction
+
+**Quoi**
+- `tests/contract/fuel-card-routes.contract.test.ts` : recharge (401, 403 par rôle, 201 par rôle autorisé, solde + montant, prix déduit, 400 sur six corps invalides), consommation (201, solde - coût, 400 par champ manquant), historique filtré (type, véhicule, année/mois, liste vide), statistiques mensuelles, par client, anomalies, liste des pleins par véhicule, suppression (403, 400, 404, 204, second appel 404).
+- `tests/contract/management-dashboard-kpis.contract.test.ts` : le tableau de bord Direction est lu avant et après une transition réelle par l'API (OT en cours puis terminé, OT annulé, véhicule opérationnel, maintenance, hors service, plein saisi puis supprimé, facture fournisseur) ; seules les différences sont vérifiées.
+
+**Pourquoi**
+- Plan : FUEL1 et DIR1 étaient « partiel ». Le solde de la carte est global : valeurs absolues impossibles sur base partagée.
+
+**Défauts figés (`it.fails`, assertion métier seule, requêtes jouées dans `beforeAll` puis lignes supprimées)**
+- `POST /api/fuel-card/recharge` avec une date illisible : 500 (année NaN), `server/api/fuel-card.routes.ts:56`.
+- `POST /api/fuel-card/consumption` : quantité `"abc"` acceptée en 201 et débit NaN écrit ; quantité négative acceptée en 201 (`fuel-card.routes.ts`, `fuel-card-service.ts:217`). Un débit NaN rend `balance` null pour toute la carte et désactive le contrôle `cost > balance` (comparaison avec NaN toujours fausse) : constaté en premier run, base nettoyée ensuite.
+- Véhicule inconnu : 500 au lieu de 404 (`fuel-card-service.ts:218`) ; solde insuffisant : 500 au lieu de 409 (`fuel-card-service.ts:226`, la route renvoie 500 pour toute erreur) et message brut renvoyé.
+- `GET /api/fuel-records/vehicle/:id` ouvert à un client pour un véhicule qui n'est pas le sien (`server/routes.ts:3290`, `authenticate` seul).
+
+**Preuve**
+- Contrat 48/48 (fuel-card-routes + management-dashboard-kpis, 6 `it.fails`).
+- Rejeu du bloc de défauts sans `.fails` : 6 rouges (`expected 500 to be 400`, `expected 201 to be 400` x2, `expected 500 to be 404`, `expected 500 to be 409`, `expected 200 to be 403`).
+
+**Limites**
+- T5 : `tests/integration/stock-audit-columns.test.ts` écrit mais jamais exécuté, non livré (retiré de la PR). T8, T1, T3, T4 non commencés.
+- Double soumission d'une recharge : aucune règle d'idempotence définie, non testée.
+- Facture fournisseur : seule la saisie est couverte, pas validation/approbation/paiement.
+
+**Reste**
+- T5 (fichier écrit à exécuter), T8, puis T1, T3, T4.
+
+## 2026-11-01 - T5 : audit created_by / updated_by des pièces et pneus
+
+**Quoi**
+- `tests/integration/stock-audit-columns.test.ts` (9 tests) : création (created_by = updated_by = auteur), modification par un autre utilisateur (updated_by et updated_at changent, created_by et created_at non), ajustement de stock par un troisième (updated_by, mouvement d'entrée initial du créateur puis mouvement de l'ajustement), suppression logique d'un pneu, noms joints en lecture, pneu supprimé non modifiable.
+
+**Pourquoi**
+- AGENTS.md §5 : quatre champs d'audit obligatoires. Aucun test ne distinguait les auteurs.
+
+**Preuve**
+- Premier run : 1 rouge, erreur de mon attendu (le service écrit aussi un mouvement initial à la création : `[4200, 4202]`), attendu corrigé. Puis 9/9 deux fois de suite (idempotence). Pas de défaut produit trouvé, donc pas d'`it.fails` ni de rouge à prouver.
+
+**Limites**
+- Niveau service seulement : le contrat HTTP (corps client ignorant created_by) n'est pas couvert.
+
+**Reste**
+- T8 (pagination, filtres, recherche), T1, T3, T4.
+
+## 2026-11-01 - FUEL1 : filet de ménage des sondes (réserves de relecture #74)
+
+**Quoi** : `probe()` enregistre l'id avant la suppression ; `afterAll` balaie `fuel_records` daté de 2031.
+**Pourquoi** : un débit NaN resté en base fausse le solde global de la carte pour tous les fichiers (voir LESSONS_LEARNED).
+**Preuve** : fichier rejoué, 40/40 verts sur la base `tests-piste-a`.
+**Reste** : T8.
+
+## Piste B, lot B2 : reprise de relecture (PR #72)
+
+**Quoi**
+- Mise en place sortie de chaque `it.fails` : `beforeAll` (ou `describe` dédié avec un it témoin) dans `vehicles-crud`, `vehicle-acquisition-workflow` et `mission-planning-conflict`. Un `it.fails` ne contient plus que l'appel visé et l'assertion métier ; l'assertion redondante `status === "assigned"` du lancement est retirée.
+- Corrections de titres : détail `/api/vehicles/abc` (404, cherché comme immatriculation, `server/routes.ts:1052-1060`), PATCH qui modifie `notes`, « lancement refusé, statut inchangé ». Un doublon d'immatriculation qui passerait en 201 est ajouté à `ids.vehicleIds` pour le ménage.
+- Correction du décompte des défauts produit : VEH1 4 (5 `it.fails`), VEH3 **5** (et non 1), MIS2 1, soit 10 (la mention « six défauts » du journal du lot B2 est à lire ainsi). Les quatre défauts VEH3 non documentés le sont désormais (commentaire DEFAUT PRODUIT, cause, fichier:ligne) :
+  - `POST` sans validation (`server/routes.ts:5654`) : corps vide et `currentStep: "abc"` donnent 500 (`server/services/workflow-service.ts:36-42`) ;
+  - `PATCH` d'une session inconnue : 200 et corps `null` (`workflow-service.ts:100`, `routes.ts:5710-5711`) ;
+  - `PATCH` : `status` du corps étalé dans le `set` (`workflow-service.ts:88`), comme `userId`.
+
+**Pourquoi**
+- Un `it.fails` qui crée sa donnée passe au vert si la création échoue : il ne prouve plus le défaut. Garde-fou de la PR #73 (`it-fails-hygiene`).
+
+**Preuve**
+- Rouge sans `.fails` (log `b2r-rouge.log`, copies temporaires supprimées) : 11 échecs, tous sur l'assertion métier : 2 lignes d'historique au lieu d'1 ; 500 au lieu de 400 (année, kilométrage, corps vide, étape) ; PATCH immatriculation prise 500 ; `createdBy` et `userId` réécrits (id différent) ; PATCH inconnu 200 au lieu de 404 ; statut `completed` au lieu de `in_progress` ; motif « Conflit planning » absent.
+- Vert avec `.fails` : trois fichiers ensemble, 58/58 (`b2r-vert.log`). `tsc` (tsconfig temporaire incluant les trois tests) : 0 erreur. `it-fails-hygiene` : 7/7, liste gelée inchangée.
+
+**Reste**
+- Défauts produit à corriger par fleet-api / fleet-db. e2e VEH3 non fait.
+
+## Piste B, lot B2 : correctifs de contre-relecture (PR #72)
+
+**Quoi**
+- `vehicles-crud` : le premier POST du doublon d'immatriculation est vérifié (201) avant le second ; les POST de création refusée, sans session et de corps invalide passent par un helper qui enregistre tout 201 inattendu dans `ids.vehicleIds`, pour le ménage.
+- Références produit recalées dans les commentaires DEFAUT PRODUIT (elles corrigent l'entrée précédente) : `server/routes.ts:1090` devient 1092-1093, `:1195` devient 1193, `:1204` devient 1201.
+
+**Preuve**
+- `vehicles-crud` rejoué sous verrou et test d'hygiène `it-fails-hygiene` : résultats dans le compte rendu de la PR.
+
+## Lot MIS1 + P2 - Mission, facture, paiement au navigateur
+
+**Quoi**
+- `e2e/13-mission-invoice-payment.spec.ts` : la logistique crée une mission (API), la facture depuis
+  l'écran mission (HT 100 000, TTC 119 250), la secrétaire encaisse en deux fois ; facture soldée, bouton
+  de paiement absent, bouton désactivé pour la logistique. Vérité lue en base ; mission, facture, comptes
+  et client supprimés en fin de spec.
+
+**Comment**
+- Comptes créés par `createE2EUser`, serveur et runner sur `DATABASE_URL_TEST` (branche tests-piste-b),
+  sous verrou, Edge (`E2E_CHANNEL=msedge`).
+
+**Pourquoi**
+- `05-mission-billing-payment` lisait la première facture trouvée et skippait sur base vide.
+
+**Preuve**
+- Spec 13 : 1/1 vert (2,5 min). Pas de défaut produit visé : pas de rouge avant, le test est une
+  couverture de parcours.
+
+**Limites**
+- Mission posée à « livrée » en base : affectation, étapes et lancement non rejoués (documents du
+  véhicule et CPC requis).
+
+## Lot B3 - Temps réel OT entre chef d'atelier et technicien (WO1, WO7, T6)
+
+**Quoi**
+- `e2e/14-realtime-work-order-roles.spec.ts` : trois comptes créés par la spec (chef d'atelier, deux
+  techniciens). Le chef crée un OT affecté au technicien : trame `work_order_created` reçue par le
+  technicien et alerte d'affectation lisible par `/api/alerts`. Un autre technicien est refusé (403) ;
+  le technicien affecté démarre l'OT : trame `work_order_updated` reçue par le chef, statut en base.
+  OT, véhicule et comptes supprimés en fin de spec.
+
+**Comment**
+- Trames lues sur `/ws` de chaque session (`page.on("websocket")`) après `auth_success`, jamais l'écran :
+  le polling de 7 s ne peut pas produire une trame.
+
+**Pourquoi**
+- La spec 06 dépend de comptes déjà en base et ne couvre que la création, dans un seul sens.
+
+**Preuve**
+- Vert 1/1 (2,9 min). Rouge : diffusion du démarrage renommée (`technician-work-orders.routes.ts`,
+  `work_order_updated` -> `wo_changed`, code rétabli) : échec « trame work_order_updated non reçue par le
+  chef d'atelier », 1 failed.
+
+**Limites**
+- ADM2 (changement de rôle), DRV2 (déclaration de panne du chauffeur) et l'invalidation des KPI à
+  l'écran ne sont pas couverts : budget de tours épuisé. Aucun défaut produit constaté.
+
+
+## T8 : pagination, filtres et recherche des listes principales
+
+**Quoi**
+- `tests/contract/lists-pagination-filters.contract.test.ts` (55 cas, 17 `it.fails`) : véhicules, ordres de travail, pièces, fournisseurs. Pages de 2 sans doublon ni trou avec total cohérent, tri explicite ascendant puis descendant, filtres statut / priorité / `isActive` / catégorie, véhicule supprimé exclu, liste vide, bornes (`limit` et `offset` non numériques, négatifs, démesurés), apostrophe littérale, injection classique, ordres de travail d'un client limités à ses véhicules.
+
+**Comment**
+- Lignes créées par le test et repérées par un jeton unique dans le champ cherché ; nettoyage par id en `afterAll` (`finally`), ordres de travail supprimés avant les véhicules. Les `it.fails` ne contiennent que l'appel visé et l'assertion métier, la mise en place est en `beforeAll`.
+- Missions (`GET /api/missions`) et documents (liste par véhicule) n'ont ni pagination ni filtre côté serveur : rien à tester au contrat.
+
+**Pourquoi**
+- Défauts constatés, non corrigés ici :
+  - `%` et `_` agissent comme jokers dans le `ILIKE` (véhicules `storage.ts:753`, ordres de travail `storage.ts:1333`, pièces `parts-service.ts:27`, fournisseurs `supplier-management-service.ts:36` et `:42`).
+  - Véhicules : `offset` négatif ou `limit` démesuré font échouer le SQL, `getVehicles` avale l'erreur (`storage.ts:844`) et la route répond 200 `{ vehicles: [], total: 0 }` (`routes.ts:963`).
+  - Pièces : `offset` négatif ou `limit` démesuré répondent 500 (`routes.ts:2604`, page non bornée) ; un octet nul dans la recherche répond 500, comme sur les fournisseurs.
+  - Fournisseurs : `isActive=maybe` est lu comme `false` (`suppliers.routes.ts:173`).
+  - `GET /api/vehicles` ne filtre pas sur `ownerScopeOf` : un client voit les véhicules des autres (`routes.ts:958`, AGENTS.md §11).
+  - Observé sans test figé : véhicules, `limit` non numérique ou négatif renvoie tous les véhicules, sans plafond.
+
+**Preuve**
+- Contrat 55/55 (17 `it.fails`) ; les 17 rejoués en `it` : 17 rouges, 38 verts. Hygiène `it-fails-hygiene` 7/7, liste gelée inchangée. `tsc --noEmit` global : 0 erreur ; fichier de test vérifié par un tsconfig temporaire : 0 erreur.
