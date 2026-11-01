@@ -13,3 +13,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : désactiver un chauffeur (admin), puis vérifier qu'il n'apparaît plus sur l'écran PIN, que son PIN est refusé et qu'une affectation à une mission est refusée.
 - **Preuve** : contrat drivers-crud-deactivation : les 3 it.fails passent désormais (Expect test to fail), à convertir en it par le testeur.
 - **Reste / risques** : les handlers d'origine de routes.ts restent en code mort derrière le routeur (fichier gelé) ; test de non-régression sur les autres contrats du domaine à faire par le testeur.
+
+## 2026-11-01T22:26:19+01:00 — Fournisseurs : lecture seule du chef d'atelier, 409, commande vers fournisseur désactivé
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le chef d'atelier consulte les fournisseurs (200) mais ne crée, modifie, note ni désactive (403) ; un nom déjà pris donne un 409 lisible ; une commande vers un fournisseur désactivé ou inconnu est refusée.
+- **Comment** : index.ts monte /suppliers avec une garde selon la méthode (SUPPLIER_READ_ROLES en GET/HEAD, PROCUREMENT_ROLES sinon) ; supplier-categories.ts retire la branche workshop_manager ; pg-errors.ts (isUniqueViolation) ; createPurchaseOrder vérifie le fournisseur.
+- **Pourquoi** : décision de l'utilisateur : le chef d'atelier ne fait que consulter ; défauts SUP1 figés en it.fails.
+- **Comment tester (QA)** : connecté en chef d'atelier : liste fournisseurs visible, création/notation en 403 ; créer deux fois le même nom : 409.
+- **Preuve** : contrat suppliers-crud-ratings : 23/26, les 2 it.fails passent (Expect test to fail) et le test « workshopManager : 403 » attend désormais 200 en GET ; conversion par le testeur.
+- **Reste / risques** : écrans client à aligner par fleet-fe : App.tsx (RoleRoute fournisseurs avec PROCUREMENT_ROLES) et procurement/suppliers/[id].tsx (canCreateOrder inclut workshop_manager).

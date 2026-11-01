@@ -64,6 +64,13 @@ export const PROCUREMENT_ROLES = ["admin", "secretary", "logistics", "warehouse"
 
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 
+/**
+ * Consultation des fournisseurs : les profils d'approvisionnement, plus le chef
+ * d'atelier qui lit les fiches sans rien écrire (création, modification,
+ * évaluation et désactivation restent à PROCUREMENT_ROLES).
+ */
+export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
 }

@@ -103,7 +103,14 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // et le technicien demandent des pièces, ils ne passent pas les commandes —
   // c'est déjà ce que dit le menu, ce n'était pas ce qu'appliquait l'API.
   const gardeApprovisionnement = authorize([...PROCUREMENT_ROLES]);
-  apiRouter.use("/suppliers", gardeApprovisionnement, suppliersRoutes);
+  // Fournisseurs : le chef d'atelier consulte (GET), il n'écrit ni n'évalue.
+  const gardeLectureFournisseurs = authorize([...SUPPLIER_READ_ROLES]);
+  apiRouter.use(
+    "/suppliers",
+    (req, res, next) =>
+      (req.method === "GET" || req.method === "HEAD" ? gardeLectureFournisseurs : gardeApprovisionnement)(req, res, next),
+    suppliersRoutes,
+  );
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
   apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
@@ -180,5 +187,5 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 import { sessionMiddleware } from "../middleware/session";
 import { authenticate, authorize, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
-import { PROCUREMENT_ROLES } from "@shared/constants/roles";
+import { PROCUREMENT_ROLES, SUPPLIER_READ_ROLES } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);
