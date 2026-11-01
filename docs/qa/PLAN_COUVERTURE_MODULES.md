@@ -188,16 +188,16 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | À faire |
-| MNT2 | Déclenchement par date et par kilométrage | I | À faire |
-| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | À faire |
+| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | Partiel : CRUD, droits, 400/404, cloison client, désactivation OK ; 1 défaut en `it.fails` (DELETE répond 204 sans supprimer) |
+| MNT2 | Déclenchement par date et par kilométrage | I | Partiel : fenêtre 30 jours, seuil km, plan inactif OK ; 2 défauts en `it.fails` (échéance du plan ignorée, doublon km) |
+| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | Partiel : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT OK ; 1 manque en `it.fails` (aucune route de désactivation) |
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, rien ne sort à la demande (rayon « à sortir » chez le magasinier, manquant en demande), rayon réservé | C | OK (`work-order-parts`, `stock-issue-permission`) |
 | WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | OK (formule unique `shared/work-order-cost.ts` pour écran et PDF ; U `work-order-cost` : NaN impossible, arrondi au centime ; I `work-order-cost` : service technicien = formule ; I `kpi-service` : coût moyen inclut les rotations, sans produit cartésien) |
-| WO6 | Temps technicien : pointage, agrégation mensuelle | I | À faire |
+| WO6 | Temps technicien : pointage, agrégation mensuelle | I | Partiel (`time-tracking` contrat 5 cas, intégration 3 cas : saisie rejouable, totaux mensuels, chauffeur inactif ; limite : bord de mois et fuseau non testés) |
 | WO7 | Notification chef ↔ technicien dans les deux sens | E | À faire |
 
 ### 3.5 Magasin : pièces
@@ -386,7 +386,7 @@ flowchart LR
 
 ### P3 — Maintenance préventive
 
-État : **À faire**.
+État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance couvert (MNT1, MNT2) ; alerte, clôture de l'OT → véhicule opérationnel et recalcul de la prochaine échéance par date non couverts.
 
 ```mermaid
 flowchart LR
