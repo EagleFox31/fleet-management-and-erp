@@ -36,14 +36,6 @@ router.post("/auth/pin-login", async (req, res, next) => {
     if (user.role !== "driver") {
       throw new AppError(403, "Accès réservé aux chauffeurs");
     }
-    const [desactive] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.id, user.id), ficheChauffeurDesactivee))
-      .limit(1);
-    if (desactive) {
-      throw new AppError(401, "Ce compte chauffeur est désactivé");
-    }
     if (!user.pin) {
       throw new AppError(401, "Aucun PIN configuré");
     }
@@ -51,6 +43,16 @@ router.post("/auth/pin-login", async (req, res, next) => {
     const pinMatch = await bcrypt.compare(String(pin), user.pin);
     if (!pinMatch) {
       throw new AppError(401, "PIN incorrect");
+    }
+    // Après la vérification du PIN seulement : sinon la réponse dirait quels
+    // chauffeurs sont désactivés à quiconque devine un identifiant.
+    const [desactive] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, user.id), ficheChauffeurDesactivee))
+      .limit(1);
+    if (desactive) {
+      throw new AppError(401, "Ce compte chauffeur est désactivé");
     }
 
     req.session.userId = user.id;

@@ -68,6 +68,6 @@ describe("cloison client sur les listes de véhicules", { timeout: 60000 }, () =
   });
 
   it.each(LISTS)("$path : sans session, refusé (401)", async ({ path }) => {
-    expect((await session.call("GET", path, { actor: null })).status).toBe(401);
+    expect((await session.call("GET", path, {})).status).toBe(401);
   });
 });

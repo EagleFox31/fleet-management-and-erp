@@ -77,7 +77,7 @@ export const authenticate = sessionGuard(async (req: Request, res: Response, nex
     const user = await storage.getUser(req.session.userId);
     if (!user || user.deletedAt) {
       if (debugAuth) {
-        console.log(`❌ [AUTH] Accès refusé - Compte supprimé ou inconnu: ${req.session.userId}`);
+        moduleLogger("auth").info({ userId: req.session.userId, requestId: req.requestId }, "Accès refusé : compte supprimé ou inconnu");
       }
       return res.status(401).json({ message: 'Non authentifié' });
     }

@@ -112,3 +112,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : `grep -n "Récidive (2026-11-01)" docs/analysis/LESSONS_LEARNED.md` ; vérifier que les chemins cités existent (`tests/contract/vehicles-lists-client-scope.contract.test.ts`, `tests/contract/api-auth-guard.contract.test.ts`, `server/app.ts` lignes 108-109).
 - **Preuve** : lecture de `server/app.ts`, `server/routes.ts` (déclarations listées), `server/api/vehicles.routes.ts` ; aucun test exécuté pour cette entrée.
 - **Reste / risques** : sept déclarations `/api/vehicles` sous `authenticate` seul non qualifiées (liste dans la leçon) ; contrôle automatique absent.
+
+## 2026-11-02T00:15:00+01:00 — Réserves de relecture #76
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `escapeLike` produisait le texte `${c}` au lieu d'un antislash (template literal) : « 50% » devenait « 50${c} ». Corrigé, antislash échappé aussi. `console.log` neuf de `authenticate` migré vers `moduleLogger`. pin-login : le message « compte chauffeur désactivé » n'est donné qu'après un PIN correct (sinon même 401 « PIN incorrect »). Erreur TS2322 du test de cloison corrigée. `canCreateOrder` du détail fournisseur sans workshop_manager (le serveur répond 403).
+- **Comment** : tests/unit/server/sql-like.test.ts ; contrat positif tests/contract/vehicles-search-wildcards.contract.test.ts (immatriculation contenant `%`, `_`, `\` trouvée, sans effet joker) ; le test de joker à liste vide ne prouvait rien seul.
+- **Pourquoi** : réserves de la relecture de #76.
+- **Comment tester (QA)** : rechercher « 50% » sur la liste des véhicules : seul le véhicule contenant ce texte ressort.
+- **Preuve** : tsc 0 erreur ; unitaires 858/858 (hygiène incluse) ; contrats lists-pagination-filters, vehicles-lists-client-scope, vehicles-search-wildcards, drivers-crud-deactivation : 75/75.
+- **Reste / risques** : dette liée à storage.ts (gelé) : `storage.getUser` avale les erreurs de base, donc une coupure donne un 401 dans `authenticate` au lieu d'un 500.

@@ -4,5 +4,5 @@
  * l'octet nul, que PostgreSQL refuse dans une chaîne.
  */
 export function escapeLike(input: string): string {
-  return input.replace(/\u0000/g, "").replace(/[\%_]/g, (c) => `\${c}`);
+  return input.replace(/\u0000/g, "").replace(/[\\%_]/g, (c) => "\\" + c);
 }
