@@ -13,6 +13,7 @@ import {
   documentRenewalTransitionRefusal,
   isDocumentRenewalRequestStatus,
 } from "@shared/constants/document-renewal-statuses";
+import { alertInboxService } from "../services/alert-inbox-service";
 import {
   documentRenewalCenters,
   documentRenewalRequests,
@@ -1040,6 +1041,9 @@ router.post("/quick-renew", (req: Request, res: Response) => {
         String(documentRow.documentType || ""),
         payload.newExpiryDate,
       );
+
+      // DOC3 : l'échéance renouvelée lève les alertes d'échéance de ce document.
+      await alertInboxService.clearDocumentExpiryAlerts(payload.vehicleDocumentId);
 
       let finalizedRequest: typeof documentRenewalRequests.$inferSelect | undefined;
 

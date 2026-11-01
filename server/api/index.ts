@@ -44,11 +44,9 @@ import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
-import authCaptchaRoutes from "./auth-captcha.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
-import { captchaGuard } from "../middleware/captcha-guard";
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG } from "../lib/audit-config";
 import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
@@ -71,18 +69,15 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
-  // analyse en amont (express.json dans app.ts). Verrouillage d'abord, captcha ensuite.
+  // analyse en amont (express.json dans app.ts).
   const lockoutStore = new DbLockoutStore();
-  const failedCountOf = (prefix: string) => async (username: string) => (await lockoutStore.get(prefix + username)).failedCount;
   apiRouter.post(
     "/auth/login",
     loginLockoutGuard({ store: lockoutStore, keyPrefix: PASSWORD_KEY_PREFIX }),
-    captchaGuard({ getFailedCount: failedCountOf(PASSWORD_KEY_PREFIX) }),
   );
   apiRouter.post(
     "/auth/pin-login",
     loginLockoutGuard({ store: lockoutStore, usernameField: "userId", keyPrefix: PIN_KEY_PREFIX }),
-    captchaGuard({ getFailedCount: failedCountOf(PIN_KEY_PREFIX), usernameField: "userId" }),
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
   apiRouter.use(auditWrites(AUDIT_CONFIG));
@@ -146,7 +141,6 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(userStockPermissionRoutes);
-  apiRouter.use(authCaptchaRoutes);
   apiRouter.use(vehicleDocumentsRoutes);
 
   // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts

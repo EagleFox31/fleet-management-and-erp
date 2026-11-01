@@ -1226,6 +1226,54 @@ soumission sans doublon.
 - Intégration `alert-generation-dedupe` 8/8 (J+1 non lue : aucune création ; J+1 lue : rappel),
   unitaire 848/848, `tsc` 0 erreur. Garde-fou rouge sur main (4 appels par id seul).
 
+## DOC3 et P4 - renouvellement rapide : alerte d'échéance levée
+
+**Quoi**
+- `POST /api/document-renewals/quick-renew` lève désormais les alertes `doc_expiry` (due et expired)
+  du document renouvelé, pour tous les destinataires, via `alertInboxService.clearDocumentExpiryAlerts`.
+- Le client invalide les queries d'alertes sur `document_renewal_quick_completed`.
+
+**Pourquoi**
+- Test DOC3 rouge sur main : après renouvellement, l'échéance était à jour mais l'alerte restait,
+  le tableau de bord annonçait encore un document renouvelé.
+- La suppression passe par le service d'alertes, seul autorisé par le garde-fou `alerts-write-hygiene`.
+
+**Preuve**
+- Contrat `document-quick-renew-alerts` 2/2 (DOC3, P4) et `document-renewal-status` 1/1,
+  unitaire 848/848, `tsc` 0 erreur.
+
+**Reste**
+- DOC1 (différé) ; FUEL3 à cadrer.
+
+## Relecture PR #64 - délimitation des préfixes, invalidation en double
+
+**Quoi**
+- Unitaire `document-expiry-rule` : les préfixes de levée du document 1 ne couvrent pas les clés des documents 10 et 12.
+- `useRealTimeSync.ts` : bloc d'invalidation DOC3 retiré, le même `case` invalide déjà les quatre clés d'alertes.
+
+**Pourquoi**
+- Relecture : aucun test ne cassait si le `:` final du préfixe disparaissait (le contrat utilise des ids consécutifs).
+
+**Preuve**
+- Unitaire 10/10 sur le fichier, `tsc` 0 erreur.
+
+## ADM1, ADM3 - comptes : écriture réservée à l'admin, suppression qui coupe l'accès
+
+**Quoi**
+- Contrat `users-admin-soft-delete` (9 cas) : 403 non-admin et 401 anonyme sur POST/PATCH/DELETE
+  `/api/users`, auto-suppression refusée, 204 puis 404, ligne conservée, absent de `GET /api/users`.
+- Correctif : la connexion refuse un compte `deletedAt` ; `authorize`, `isAdmin` et `GET /api/auth/me`
+  aussi ; `DELETE /api/users/:id` et `PATCH /api/admin/users/:id/toggle` (désactivation) effacent les
+  sessions du compte et ferment ses connexions temps réel (`server/lib/user-sessions.ts`).
+
+**Pourquoi**
+- Trois cas rouges sur main (écrits d'abord en `it.fails`) : un compte supprimé se reconnectait, et
+  une session ouverte avant la suppression restait valide sur toutes les routes.
+
+**Preuve**
+- Contrat 16/16 (`users-admin-soft-delete`, `api-auth-sessions`, `auth-lockout-admin`), unitaire
+  848/848, `tsc` 0 erreur.
+
 ## Piste B, lots B1 et B3 (partiel) - référentiels, statut véhicule, libellés de demande
 
 **Quoi**

@@ -1345,6 +1345,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
 
         // Quand missionId n'est pas fourni (quick renew), on invalide toutes les clés dérivées mission.
         invalidateMissionDerivedQueries(missionId);
+
       }
       queryClient.invalidateQueries({
         predicate: (query) => {

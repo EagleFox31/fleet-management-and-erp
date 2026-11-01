@@ -106,9 +106,9 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | Partiel (PATCH : 400 par champ, 409 doublon, champs serveur conservés, `secondary-routes-validation` ; 403 à faire) |
+| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | OK (`users-admin-soft-delete` : 403 non-admin sur POST/PATCH/DELETE, 401 anonyme, auto-suppression 400 ; PATCH : `secondary-routes-validation`) |
 | ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
-| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | À faire |
+| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
 | ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | À faire |
 | ADM6 | Journal d'activité alimenté sur les actions sensibles | I | À faire |
@@ -160,7 +160,7 @@ stateDiagram-v2
 |---|---|---|---|
 | DOC1 | CRUD centre de renouvellement, désactivation (absent des choix) | C | À faire |
 | DOC2 | Demande : transitions valides, transitions interdites refusées | C | OK (`document-renewal-status` : terminée/rejetée 409, en attente → terminée 409, date illisible 400 ; unitaire `document-renewal-statuses`) |
-| DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | À faire |
+| DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | OK (`document-quick-renew-alerts` : échéance mise à jour, alertes due/expired du document levées, celles d'un autre document gardées ; défaut corrigé : alertes laissées en place) |
 
 ### 3.4 Maintenance et atelier
 
@@ -397,7 +397,7 @@ flowchart LR
 
 ### P4 — Renouvellement documentaire
 
-État : **À faire**.
+État : **OK** (`document-quick-renew-alerts` : alerte → demande → en cours → renouvelé ; une seule demande, close ; document à jour ; alerte levée).
 
 ```mermaid
 flowchart LR
