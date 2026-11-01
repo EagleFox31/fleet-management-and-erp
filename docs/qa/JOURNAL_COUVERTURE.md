@@ -1327,3 +1327,38 @@ soumission sans doublon.
 
 **Reste**
 - MIS1 et P2 (rejouer `e2e/05`), lots B3 et B4 non commencés.
+
+## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
+
+**Quoi**
+- `driver-pin-login` (ADM5, 7 cas) : bon PIN ouvre une session, mauvais PIN, compte supprimé, rôle
+  autre que chauffeur, PIN absent et corps incomplet refusés sans cookie ; la liste PIN n'expose que
+  `id` et `name`.
+- `audit-sensitive-actions` (ADM6, 3 cas) : création, changement de rôle et suppression de compte
+  écrivent une ligne `activity_logs` attribuée à l'admin, mot de passe masqué ; un 403 n'en écrit aucune.
+- `drivers-crud-deactivation` (DRV1, 7 cas) : CRUD logistique, magasin refusé, désactivation réservée
+  à l'admin ; un témoin (chauffeur actif affecté : 200) et trois `it.fails` (affectation, liste PIN,
+  connexion PIN), mise en place en `beforeAll` pour qu'un échec de préparation ne passe pas pour le défaut.
+
+**Pourquoi**
+- Défauts constatés : un chauffeur désactivé reste affectable par `PATCH /api/missions/:id` (seul le CPC
+  est vérifié, le refus n'arrive qu'au lancement) ; il reste sur l'écran PIN et s'y connecte, car
+  `drivers-list` et `pin-login` lisent `users` seul. Correction à arbitrer, non faite ici.
+
+**Preuve**
+- Contrat 17/17 (dont les 3 `it.fails`) ; les cas rejoués en `it` échouent sur l'assertion finale
+  (affectation 200 au lieu de 400, compte encore listé).
+
+## Garde-fou d'hygiène : it.fails sans mise en place
+
+**Quoi**
+- `tests/unit/server/it-fails-hygiene.test.ts` (5 cas) : extrait les `it.fails` / `test.fail` de `tests/` et `e2e/`, signale ceux dont le corps crée des données ou fait plusieurs requêtes. Huit occurrences héritées de main sont gelées.
+
+**Comment**
+- Analyse de texte (commentaires retirés, chaînes respectées), sans base. Une fabrique dont le résultat est assertionné sur `.status` est l'appel visé et n'est pas signalée, pour éviter les faux positifs.
+
+**Pourquoi**
+- `it.fails` passe sur n'importe quel échec : cinq PR ont dû être recalées (#67, #68, #70, #71, #72).
+
+**Preuve**
+- `it.fails` fautif fabriqué : rouge ; propre : vert. Fichier fautif déposé sur disque : 1 failed, retiré : 5/5.
