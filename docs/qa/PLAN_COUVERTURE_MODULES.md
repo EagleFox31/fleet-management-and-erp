@@ -224,7 +224,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 |---|---|---|---|
 | PRT1 | CRUD pièce, catégorie, variante, spécification | C | À faire |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
-| PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Partiel (`stock-alerts-service`) |
+| PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » figé : défaut ouvert |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
 | PRT5 | Libellés affichés = constantes partagées (aucune table locale) | U | À faire |
 | PRT6 | Entrée en stock attribuée au magasinier, pas au demandeur (`receivedBy`) | C | OK (`part-requirements-chain` C : PATCH, corps forgé ignoré ; `part-requirement-received-by` I : commande fournisseur partielle puis complète) |
@@ -279,8 +279,8 @@ stateDiagram-v2
 |---|---|---|---|
 | SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | À faire |
 | SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | À faire |
-| PO1 | Commande : création, validation, réception partielle puis totale | E | Partiel (`04-procurement-three-way`) |
-| PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Partiel (`04-procurement-three-way`) |
+| PO1 | Commande : création, validation, réception partielle puis totale | E | Fait en C (`purchase-order-lifecycle.contract`) en plus de `04` |
+| PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Fait en C (`purchase-order-three-way.contract`) ; 2 défauts ouverts |
 | SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | OK (`supplier-settlement-reject` : rejet avec motif et auteur, libère le reste à régler, rejeu idempotent, motif vide 400, rapproché 409, rejeté non rapprochable 409, autre facture 404, magasinier 403 ; U `supplier-settlement-reject-schema`) |
 | SINV2 | Double règlement d'une même facture refusé | C | OK (déjà couvert par T7 : `supplier-settlement-idempotence` C et I, rejeu même référence, dépassement du total 409, saisies simultanées) |
 
@@ -324,7 +324,7 @@ stateDiagram-v2
 | CLI1 | CRUD client, désactivation | C | À faire |
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | À rejouer (`05-mission-billing-payment`) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | À faire |
-| CINV1 | Facture : TVA, paiements partiels, solde | I / E | Partiel (`vat-billing-service`, `05`) |
+| CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
 
 ### 3.11 Alertes et notifications
