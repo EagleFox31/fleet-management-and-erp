@@ -985,3 +985,35 @@ soumission sans doublon.
 
 **Reste**
 - Sécurité : chemins stockés relus (`server/routes.ts` ~6090, rapports, preuves) ; `getRoleLabel`.
+
+## d6b2afe - Justificatif de règlement fournisseur : servi seulement sous uploads/ (sécurité)
+
+**Quoi**
+- `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` ne sert plus un fichier hors de
+  `uploads/` ; 400/404 au contrat d'erreur commun, plus de `details: error.message` en 500.
+
+**Comment**
+- `uploadedFileCandidates` (`server/lib/uploaded-file.ts`) remplace `startsWith(<cwd>/uploads)` ;
+  `next(error)` vers le gestionnaire central (qui journalise le `console.error` retiré).
+
+**Pourquoi**
+- `proofReference` est libre via `POST /:id/payment` (legacy) ; le préfixe acceptait un dossier
+  voisin (`uploads-old/secret.txt` servi en 200).
+
+**Preuve**
+- Contrat `supplier-settlement-proof-path` 3/3 (2 rouges sur l'ancien code) ;
+  `supplier-settlement-idempotence` vert ; unitaire 822/822 ; `npm run check` 0 erreur.
+
+## 1fd9250 - Initialisation base : trigger créé en une instruction (fiabilité des suites)
+
+**Quoi / Pourquoi**
+- `DROP TRIGGER` puis `CREATE TRIGGER trg_sync_document_updated_by` : une initialisation concurrente
+  échouait (« already exists »). Cas vécu : remplacer un fichier serveur pour jouer le rouge relance
+  `tsx watch` (dev sur 5055) pendant le setup du contrat ; la suite s'arrête sans aucun test.
+
+**Comment**
+- `CREATE OR REPLACE TRIGGER` (PostgreSQL ≥ 14, Neon 17). Garde-fou `init-database-concurrency`
+  (2 rouges sur l'ancien code) : aucun `CREATE TRIGGER` ni `DROP TRIGGER` nu dans l'init.
+
+**Reste**
+- Sécurité : `getRoleLabel` (5 rôles) ; T3 sur `server/routes.ts`.
