@@ -292,9 +292,27 @@ router.get("/", checkReadPermission, async (req: Request, res: Response) => {
  * POST /api/supplier-invoices
  * Créer une nouvelle facture fournisseur avec contrôle 3 voies automatique
  */
-router.post("/", checkCreatePermission, async (req: Request, res: Response) => {
+// Champs tenus par le workflow : retirés de la saisie (ignorés, pas refusés).
+const createSupplierInvoiceSchema = insertSupplierInvoiceSchema.omit({
+  status: true,
+  validatedBy: true,
+  validatedAt: true,
+  approvedBy: true,
+  approvedAt: true,
+  paidBy: true,
+  paidDate: true,
+  paymentDate: true,
+  isPaymentComplete: true,
+  balance: true,
+  priceVariance: true,
+  quantityVariance: true,
+  variancePercentage: true,
+  hasDiscrepancy: true,
+});
+
+router.post("/", checkCreatePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const validatedData = insertSupplierInvoiceSchema.parse(req.body);
+    const validatedData = createSupplierInvoiceSchema.parse(req.body);
     
     const result = await threeWayMatchingService.createSupplierInvoice(
       validatedData,
@@ -317,19 +335,9 @@ router.post("/", checkCreatePermission, async (req: Request, res: Response) => {
         : "Facture créée avec succès"
     });
   } catch (error) {
-    console.error("Erreur lors de la création de la facture:", error);
-    
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ 
-        error: "Données invalides", 
-        details: error.errors 
-      });
-    }
-
-    res.status(500).json({ 
-      error: "Erreur lors de la création de la facture",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    // Le gestionnaire central journalise : ZodError -> 400 par champ,
+    // AppError -> son statut, le reste -> 500 générique avec référence.
+    next(error);
   }
 });
 
