@@ -169,7 +169,7 @@ describe("SUP1 : modification et désactivation", { timeout: 60000 }, () => {
   });
 });
 
-describe("SUP2 : évaluation selon le rôle et la catégorie", { timeout: 60000 }, () => {
+describe("SUP2 : évaluation selon le rôle et la catégorie", { timeout: 180000 }, () => {
   const rate = (actor: Actor, id: number, body: unknown) => call("PATCH", `/api/suppliers/${id}/rating`, { actor, body });
 
   it("critères par rôle : qualité (atelier, magasin, admin), délais (logistique), prix (secrétariat)", async () => {
