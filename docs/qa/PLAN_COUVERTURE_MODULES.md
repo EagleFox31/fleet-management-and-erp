@@ -94,7 +94,7 @@ flowchart LR
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | Fait en I (`stock-audit-columns` : created_by/updated_by/dates des pièces et pneus par le service, trois utilisateurs distincts, suppression logique, noms joints) ; routes HTTP non couvertes |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders` ; `14-realtime-work-order-roles` : trames `work_order_created` chez le technicien et `work_order_updated` chez le chef d'atelier ; invalidation KPI non vérifiée) |
 | T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
-| T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | À faire |
+| T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | Partiel (`lists-pagination-filters`, 55 cas : véhicules, ordres de travail, pièces, fournisseurs ; pages sans doublon ni trou, total, tri, filtres, supprimé exclu, liste vide, bornes, apostrophe et injection ; 17 `it.fails` : jokers `%` et `_` non échappés, `offset` négatif ou `limit` démesuré (liste vide silencieuse, 500 sur les pièces), octet nul 500, `isActive` invalide, véhicules non cloisonnés pour un client. Missions et documents : pas de pagination côté serveur) |
 
 ---
 
