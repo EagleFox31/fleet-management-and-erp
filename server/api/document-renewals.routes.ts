@@ -7,6 +7,12 @@ import path from "path";
 import { db } from "../db";
 import { authenticate } from "../middleware/auth";
 import { storage } from "../storage";
+import { isIsoCalendarDate } from "@shared/constants/calendar-date";
+import {
+  DOCUMENT_RENEWAL_REQUEST_STATUSES,
+  documentRenewalTransitionRefusal,
+  isDocumentRenewalRequestStatus,
+} from "@shared/constants/document-renewal-statuses";
 import {
   documentRenewalCenters,
   documentRenewalRequests,
@@ -25,7 +31,7 @@ const REQUESTABLE_DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_techniqu
 
 const ASSIGNED_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const;
 const ESCORT_ROLES = ["driver", "technician"] as const;
-const REQUEST_STATUSES = ["pending", "in_progress", "completed", "rejected"] as const;
+const REQUEST_STATUSES = DOCUMENT_RENEWAL_REQUEST_STATUSES;
 
 const DOCUMENT_LABELS: Record<(typeof REQUESTABLE_DOCUMENT_TYPES)[number], string> = {
   carte_grise: "Carte grise",
@@ -789,9 +795,24 @@ router.patch("/requests/:id/status", async (req, res) => {
       return res.status(400).json({ message: "ID invalide" });
     }
 
-    const { status, comment, newExpiryDate } = req.body;
-    if (!(REQUEST_STATUSES as readonly string[]).includes(status)) {
+    const { status, comment, newExpiryDate } = req.body ?? {};
+    if (!isDocumentRenewalRequestStatus(status)) {
       return res.status(400).json({ message: "Statut invalide" });
+    }
+    if (newExpiryDate && !isIsoCalendarDate(newExpiryDate)) {
+      return res.status(400).json({ message: "Nouvelle date d'échéance illisible (format attendu : AAAA-MM-JJ)." });
+    }
+
+    const [current] = await db
+      .select({ status: documentRenewalRequests.status })
+      .from(documentRenewalRequests)
+      .where(eq(documentRenewalRequests.id, id));
+    if (!current) {
+      return res.status(404).json({ message: "Demande introuvable" });
+    }
+    const refusal = documentRenewalTransitionRefusal(current.status, status);
+    if (refusal) {
+      return res.status(409).json({ message: refusal });
     }
 
     const updateData: Record<string, any> = {
@@ -800,7 +821,8 @@ router.patch("/requests/:id/status", async (req, res) => {
     };
     if (comment) updateData.comment = comment;
     if (newExpiryDate) updateData.newExpiryDate = newExpiryDate;
-    if (status === "completed") {
+    // Rejouer « terminée » ne réécrit pas qui l'a terminée ni quand.
+    if (status === "completed" && current.status !== "completed") {
       updateData.completedBy = req.session?.userId ?? null;
       updateData.completedAt = new Date();
     }
@@ -808,11 +830,12 @@ router.patch("/requests/:id/status", async (req, res) => {
     const [updated] = await db
       .update(documentRenewalRequests)
       .set(updateData)
-      .where(eq(documentRenewalRequests.id, id))
+      // Écriture conditionnelle : un changement concurrent ne se fait pas écraser.
+      .where(and(eq(documentRenewalRequests.id, id), eq(documentRenewalRequests.status, current.status)))
       .returning();
 
     if (!updated) {
-      return res.status(404).json({ message: "Demande introuvable" });
+      return res.status(409).json({ message: "Cette demande vient d'être modifiée. Rechargez la page." });
     }
 
     broadcastDocumentRenewalEvent(
