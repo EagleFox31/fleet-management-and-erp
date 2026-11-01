@@ -391,9 +391,13 @@ export const insertPartSchema = createInsertSchema(parts).omit({
     (value) => (typeof value === "string" ? value.trim() : value),
     z.enum(PART_UNITS),
   ).optional().default("pièce"),
-  unitPrice: z.string().optional().default("0"),
-  quantity: z.number().int().optional().default(0),
-  minQuantity: z.number().int().optional().default(5),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "Le prix unitaire doit être un nombre positif.")
+    .optional()
+    .default("0"),
+  quantity: z.number().int().min(0, "Le stock ne peut pas être négatif.").optional().default(0),
+  minQuantity: z.number().int().min(0, "Le seuil minimum ne peut pas être négatif.").optional().default(5),
   description: z.string().optional(),
   location: z.string().optional(),
   supplier: z.string().optional(),

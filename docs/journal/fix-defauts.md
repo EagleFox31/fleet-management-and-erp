@@ -24,3 +24,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : connecté en chef d'atelier : liste fournisseurs visible, création/notation en 403 ; créer deux fois le même nom : 409.
 - **Preuve** : contrat suppliers-crud-ratings : 23/26, les 2 it.fails passent (Expect test to fail) et le test « workshopManager : 403 » attend désormais 200 en GET ; conversion par le testeur.
 - **Reste / risques** : écrans client à aligner par fleet-fe : App.tsx (RoleRoute fournisseurs avec PROCUREMENT_ROLES) et procurement/suppliers/[id].tsx (canCreateOrder inclut workshop_manager).
+
+## 2026-11-01T22:26:19+01:00 — Pièces : validation, 409, 404
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : création de pièce : prix non numérique et stock négatif en 400, référence déjà prise en 409 ; suppression d'une pièce inconnue ou déjà supprimée en 404, jamais 500.
+- **Comment** : insertPartSchema (price, quantity, minQuantity) ; parts-service : AppError ; routeur parts-catalog.routes.ts, id contraint par [0-9]+.
+- **Pourquoi** : PRT1 figés en it.fails.
+- **Comment tester (QA)** : créer une pièce avec prix « abc » : 400 ; même référence : 409 ; supprimer deux fois : 204 puis 404.
+- **Preuve** : contrat parts-catalog-crud : 17/22, les 5 it.fails passent (Expect test to fail).
+- **Reste / risques** : les anciens handlers de routes.ts restent en code mort ; console.log de deletePart conservés (à migrer).

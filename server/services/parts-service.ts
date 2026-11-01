@@ -132,7 +132,7 @@ export class PartsService {
       .limit(1);
 
     if (existingPart.length > 0) {
-      throw new Error("Une pièce avec cette référence existe déjà");
+      throw new AppError(409, "Une pièce avec cette référence existe déjà");
     }
 
     const normalizedQuantity = insertPart.quantity ?? 0;
@@ -226,7 +226,7 @@ export class PartsService {
     // Vérifier que la pièce existe
     const existingPart = await this.getPartById(id);
     if (!existingPart) {
-      throw new Error("Pièce non trouvée");
+      throw new AppError(404, "Pièce non trouvée");
     }
 
     // Supprimer les mouvements de stock associés
