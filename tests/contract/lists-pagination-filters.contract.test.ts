@@ -112,12 +112,14 @@ function searchCases(getDomain: () => Domain, quoteRowId: () => number, options:
   it.fails("joker % : traité comme texte, aucune ligne ne contient un pourcent", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}-%` })}`);
+    expect(res.status).toBe(200);
     expect(idsOf(d, res)).toEqual([]);
   });
 
   it.fails("joker _ : traité comme texte, aucune ligne ne contient un souligné", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}_0` })}`);
+    expect(res.status).toBe(200);
     expect(idsOf(d, res)).toEqual([]);
   });
 }
@@ -168,7 +170,7 @@ describe("T8 : véhicules", { timeout: 120000 }, () => {
     expect(byStatus.body.total).toBe(1);
     const byBrand = await get(`/api/vehicles?${q({ search: "lvmarquea", limit: 500 })}`);
     const mine = byBrand.body.vehicles.filter((v: any) => String(v.registrationNumber).startsWith(token));
-    expect(mine.map((v: any) => v.id).sort()).toEqual([vehicleIds[0], vehicleIds[2], vehicleIds[4]].sort());
+    expect(mine.map((v: any) => v.id).sort((a: number, b: number) => a - b)).toEqual([vehicleIds[0], vehicleIds[2], vehicleIds[4]].sort((a, b) => a - b));
     expect(byBrand.body.vehicles.every((v: any) => /lvmarquea/i.test(v.brand))).toBe(true);
   });
 

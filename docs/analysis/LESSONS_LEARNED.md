@@ -916,3 +916,23 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Un `it.fails` ne contient que l'appel visé et l'assertion métier ; la mise en place va dans `beforeAll` ou un `it` témoin.
+
+## 2026-11-01 - Sonde de test : débits NaN écrits, solde global de la carte empoisonné
+
+### Constat
+- Premier passage de `fuel-card-routes.contract.test.ts` (FUEL1) : 8 échecs, `balance` à `null`, un débit « solde insuffisant » accepté en 201. La suite avait elle-même écrit des débits dont la quantité valait NaN.
+
+### Cause racine
+- Produit : `POST /api/fuel-card/consumption` ne valide ni quantité ni prix (`fuel-card-service.ts` ~215-231) : NaN accepté, SUM devient NaN pour toute la carte, et `cost > balance` (comparaison avec NaN toujours fausse) désactive le garde de solde.
+- Test : les sondes de défauts étaient jouées au milieu du fichier, sur une carte au solde global, et leur ligne n'était supprimée qu'en fin de fichier. Classification : sonde destructive sur état partagé, sans ménage immédiat ni filet.
+
+### Résolution
+- Sondes déplacées en fin de fichier, jouées une seule fois en `beforeAll`, ligne supprimée aussitôt (`probe()`), id enregistré avant la suppression.
+- Filet : `afterAll` balaie tout `fuel_records` daté de 2031 (année réservée à ce fichier). Base vérifiée : 0 ligne NaN après le premier passage.
+
+### Prévention (vérifiable)
+- Rejeu du fichier : solde fini à la fin, second passage identique (idempotence). Le balayage 2031 retire toute ligne laissée par une suppression en échec.
+- Limite : un crash du processus avant `afterAll` laisse la ligne jusqu'au passage suivant, qui la balaie.
+
+### Règle Projet (obligatoire)
+- Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
