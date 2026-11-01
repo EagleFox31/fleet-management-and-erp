@@ -12,6 +12,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
+import { uploadedFileCandidates } from "../lib/uploaded-file";
 
 const router = Router();
 const log = moduleLogger("supplier-invoices");
@@ -612,38 +613,25 @@ router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Re
  * GET /api/supplier-invoices/:id/settlements/:settlementId/proof
  * Ouvrir le justificatif uploadé d'un règlement
  */
-router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const invoiceId = parseInt(req.params.id);
     const settlementId = parseInt(req.params.settlementId);
     if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      return res.status(400).json({ error: "ID invalide" });
+      throw new AppError(400, "Identifiant de facture ou de règlement invalide.");
     }
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     const settlement = settlements.find((item) => item.id === settlementId);
-    if (!settlement || !settlement.proofReference) {
-      return res.status(404).json({ error: "Justificatif introuvable" });
+    // Chemin stocké (libre via l'endpoint legacy /payment) : servi seulement s'il est sous uploads/.
+    const proofPath = uploadedFileCandidates(settlement?.proofReference).find((candidate) => fs.existsSync(candidate));
+    if (!proofPath) {
+      throw new AppError(404, "Justificatif introuvable");
     }
 
-    const relativeProofPath = String(settlement.proofReference).replace(/^\/+/, "");
-    const absoluteProofPath = path.resolve(process.cwd(), relativeProofPath);
-    const uploadsRoot = path.resolve(process.cwd(), "uploads");
-    if (!absoluteProofPath.startsWith(uploadsRoot)) {
-      return res.status(400).json({ error: "Chemin de justificatif invalide" });
-    }
-
-    if (!fs.existsSync(absoluteProofPath)) {
-      return res.status(404).json({ error: "Fichier justificatif non trouvé" });
-    }
-
-    return res.sendFile(absoluteProofPath);
+    return res.sendFile(proofPath);
   } catch (error) {
-    console.error("Erreur lors de la lecture du justificatif:", error);
-    return res.status(500).json({
-      error: "Erreur lors de la lecture du justificatif",
-      details: error instanceof Error ? error.message : "Erreur inconnue",
-    });
+    next(error);
   }
 });
 
