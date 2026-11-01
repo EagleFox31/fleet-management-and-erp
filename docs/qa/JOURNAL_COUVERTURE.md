@@ -807,7 +807,7 @@ soumission sans doublon.
 - Intégration `work-order-part-request` 8/8, dont concurrence 5 OT sur un stock de 3.
 - Unitaire 803/803 ; `npm run check` 0 erreur ; e2e `10-work-order-part-request` vert.
 
-## (hash à reporter) - OT : transitions de statut contrôlées sur la modification générique (WO2)
+## 5592621 - OT : transitions de statut contrôlées sur la modification générique (WO2)
 
 **Quoi**
 - `PATCH /api/work-orders/:id` refuse un OT terminé qu'on voudrait remettre en cours, en attente ou
