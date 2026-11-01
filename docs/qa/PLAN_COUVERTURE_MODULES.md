@@ -106,9 +106,9 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | Partiel (PATCH : 400 par champ, 409 doublon, champs serveur conservés, `secondary-routes-validation` ; 403 à faire) |
+| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | OK (`users-admin-soft-delete` : 403 non-admin sur POST/PATCH/DELETE, 401 anonyme, auto-suppression 400 ; PATCH : `secondary-routes-validation`) |
 | ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
-| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | À faire |
+| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
 | ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | À faire |
 | ADM6 | Journal d'activité alimenté sur les actions sensibles | I | À faire |
@@ -140,7 +140,7 @@ stateDiagram-v2
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`) |
 | VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
 | VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | À faire |
-| VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | À faire |
+| VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
 ### 3.3 Documents et renouvellements
 
@@ -191,7 +191,7 @@ stateDiagram-v2
 | MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | À faire |
 | MNT2 | Déclenchement par date et par kilométrage | I | À faire |
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | À faire |
-| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (POST : 400 lisible, `createdBy` de la session, `validatedBy` ignoré ; cycle de vie à faire) |
+| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
@@ -222,7 +222,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| PRT1 | CRUD pièce, catégorie, variante, spécification | C | À faire |
+| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence, prix non numérique, stock négatif, suppression inconnue en 500/201 : `it.fails` ; variante et spécification sans route) |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » suit le stock (défaut corrigé) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
@@ -277,8 +277,8 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | À faire |
-| SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | À faire |
+| SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | Partiel (contrat `suppliers-crud-ratings` ; nom en doublon en 500, commande vers fournisseur désactivé acceptée : `it.fails`) |
+| SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | Partiel (matrice rôle x critère x catégorie au contrat ; le chef d'atelier est refusé par le montage de `/suppliers` : `it.fails`) |
 | PO1 | Commande : création, validation, réception partielle puis totale | E | Fait en C (`purchase-order-lifecycle.contract`) en plus de `04` |
 | PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Fait en C (`purchase-order-three-way.contract`) ; défauts 5 % et commande inconnue corrigés |
 | SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | OK (`supplier-settlement-reject` : rejet avec motif et auteur, libère le reste à régler, rejeu idempotent, motif vide 400, rapproché 409, rejeté non rapprochable 409, autre facture 404, magasinier 403 ; U `supplier-settlement-reject-schema`) |
@@ -321,7 +321,7 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| CLI1 | CRUD client, désactivation | C | À faire |
+| CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | À rejouer (`05-mission-billing-payment`) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | À faire |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |

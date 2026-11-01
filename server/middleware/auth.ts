@@ -86,7 +86,8 @@ export const authorize = (roles: string[]) => {
     try {
       const user = await storage.getUser(req.session.userId);
       
-      if (!user) {
+      // Un compte supprimé ou désactivé n'a plus de session valide.
+      if (!user || user.deletedAt) {
         return res.status(401).json({ message: 'Utilisateur non trouvé' });
       }
 
@@ -132,7 +133,8 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
   try {
     const user = await storage.getUser(req.session.userId);
     
-    if (!user) {
+    // Un compte supprimé ou désactivé n'a plus de session valide.
+    if (!user || user.deletedAt) {
       return res.status(401).json({ message: 'Utilisateur non trouvé' });
     }
     
