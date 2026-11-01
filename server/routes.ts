@@ -36,6 +36,7 @@ import { vehicleDocumentationService } from "./services/vehicle-documentation-se
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
+import { contentDisposition } from "./lib/content-disposition";
 
 const log = moduleLogger("routes");
 
@@ -5269,7 +5270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.setHeader('Content-Type', document.mimeType);
-      res.setHeader('Content-Disposition', `inline; filename="${document.originalName}"`);
+      res.setHeader('Content-Disposition', contentDisposition('inline', document.originalName));
       
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
