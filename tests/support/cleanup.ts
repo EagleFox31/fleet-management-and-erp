@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, sql, type AnyColumn } from "drizzle-orm";
+import { and, eq, inArray, like, sql, type AnyColumn, type SQLWrapper } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
   activityLogs,
@@ -62,6 +62,8 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
+    // Factures créées sans id connu du test (import Excel) : bloquaient la suppression (FK).
+    await deleteSupplierInvoicesOf(db.select({ id: suppliers.id }).from(suppliers).where(inArray(suppliers.id, ids.supplierIds)));
     await db.delete(suppliers).where(inArray(suppliers.id, ids.supplierIds));
   }
   if (ids.clientIds.length > 0) {
@@ -97,6 +99,11 @@ export const ORPHAN_MIN_AGE = "2 hours";
 const orphan = (prefixColumn: AnyColumn, createdAt: AnyColumn) =>
   and(like(prefixColumn, `${TEST_PREFIX}%`), sql`${createdAt} < now() - ${ORPHAN_MIN_AGE}::interval`);
 
+/** Factures des fournisseurs de test sélectionnés, quel que soit leur numéro (règlements en cascade). */
+async function deleteSupplierInvoicesOf(supplierIdsQuery: SQLWrapper): Promise<void> {
+  await db.delete(supplierInvoices).where(inArray(supplierInvoices.supplierId, supplierIdsQuery));
+}
+
 /** Filet si un test a crashé avant d'enregistrer un id : ne touche que les lignes anciennes. */
 export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(fuelRecords).where(orphan(fuelRecords.notes, fuelRecords.createdAt));
@@ -119,6 +126,7 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, orphanParts));
   await db.delete(parts).where(orphan(parts.reference, parts.createdAt));
   await db.delete(vehicles).where(orphan(vehicles.registrationNumber, vehicles.createdAt));
+  await deleteSupplierInvoicesOf(db.select({ id: suppliers.id }).from(suppliers).where(orphan(suppliers.name, suppliers.createdAt)));
   await db.delete(suppliers).where(orphan(suppliers.name, suppliers.createdAt));
   const testUsers = db.select({ id: users.id }).from(users).where(orphan(users.username, users.createdAt));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
