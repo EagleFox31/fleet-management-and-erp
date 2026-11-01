@@ -113,37 +113,76 @@ describe("DRV1 : fiche chauffeur", { timeout: 60000 }, () => {
     const [row] = await db.select().from(drivers).where(eq(drivers.id, created.body.id));
     expect(row.isActive).toBe(false);
   });
+});
+
+/**
+ * Chauffeur désactivé. La mise en place vit hors des `it.fails` : un
+ * `it.fails` passe sur n'importe quel échec, il ne doit contenir que
+ * l'assertion métier.
+ */
+describe("DRV1 : chauffeur désactivé, affectation", { timeout: 60000 }, () => {
+  let inactiveDriverId = 0;
+  const vehicleIds: number[] = [];
+  const missionFor: Record<"control" | "inactive", number> = { control: 0, inactive: 0 };
+
+  beforeAll(async () => {
+    const inactive = await createDriver(adminCookie);
+    expect(inactive.status).toBe(201);
+    inactiveDriverId = inactive.body.id;
+    expect((await call("DELETE", `/api/drivers/${inactiveDriverId}`, { cookie: adminCookie })).status).toBe(200);
+    for (let i = 0; i < 2; i++) {
+      const vehicle = await createTestVehicle();
+      ids.vehicleIds.push(vehicle.id);
+      vehicleIds.push(vehicle.id);
+    }
+    missionFor.control = await newMission(adminCookie);
+    missionFor.inactive = await newMission(adminCookie);
+  });
+
+  const assign = (missionId: number, vehicleId: number, driverId: number) =>
+    call("PATCH", `/api/missions/${missionId}`, {
+      cookie: adminCookie,
+      body: { assignment: { vehicleId, driverId } },
+    });
+
+  // Témoin : sans lui, un 400 dû au CPC, au véhicule ou au corps passerait
+  // pour la correction du défaut ci-dessous.
+  it("témoin : la même affectation avec un chauffeur actif est acceptée", async () => {
+    const active = await createDriver(adminCookie);
+    expect(active.status).toBe(201);
+    expect((await assign(missionFor.control, vehicleIds[0], active.body.id)).status).toBe(200);
+  });
 
   // Défaut : PATCH /api/missions/:id (server/api/missions.routes.ts) vérifie
   // le CPC du chauffeur affecté, pas `drivers.isActive` ; le refus n'arrive
   // qu'au lancement de la mission.
   it.fails("un chauffeur désactivé n'est pas affectable à une mission", async () => {
-    const created = await createDriver(adminCookie);
-    expect((await call("DELETE", `/api/drivers/${created.body.id}`, { cookie: adminCookie })).status).toBe(200);
-    const vehicle = await createTestVehicle();
-    ids.vehicleIds.push(vehicle.id);
-    const missionId = await newMission(adminCookie);
-
-    const res = await call("PATCH", `/api/missions/${missionId}`, {
-      cookie: adminCookie,
-      body: { assignment: { vehicleId: vehicle.id, driverId: created.body.id } },
-    });
-    expect(res.status).toBe(400);
+    expect((await assign(missionFor.inactive, vehicleIds[1], inactiveDriverId)).status).toBe(400);
   });
+});
 
-  // Défaut : `/api/auth/drivers-list` et `pin-login` lisent `users` seul ;
-  // la désactivation de la fiche `drivers` ne touche pas au compte lié.
-  it.fails("un chauffeur désactivé sort de l'écran PIN et ne s'y connecte plus", async () => {
+// Défaut : `/api/auth/drivers-list` et `pin-login` lisent `users` seul ;
+// la désactivation de la fiche `drivers` ne touche pas au compte lié.
+describe("DRV1 : chauffeur désactivé, écran PIN", { timeout: 60000 }, () => {
+  let accountId = 0;
+
+  beforeAll(async () => {
     const account = await createTestUser({ role: "driver" });
     ids.userIds.push(account.id);
+    accountId = account.id;
     await db.update(users).set({ pin: await bcrypt.hash(PIN, 4) }).where(eq(users.id, account.id));
     const created = await createDriver(adminCookie, { userId: account.id });
     expect(created.status).toBe(201);
     expect((await call("DELETE", `/api/drivers/${created.body.id}`, { cookie: adminCookie })).status).toBe(200);
+  });
 
+  it.fails("un chauffeur désactivé sort de la liste de l'écran PIN", async () => {
     const list = await call("GET", "/api/auth/drivers-list");
-    expect((list.body as Array<{ id: number }>).map((d) => d.id)).not.toContain(account.id);
-    const login = await call("POST", "/api/auth/pin-login", { body: { userId: account.id, pin: PIN } });
+    expect((list.body as Array<{ id: number }>).map((d) => d.id)).not.toContain(accountId);
+  });
+
+  it.fails("un chauffeur désactivé ne se connecte plus par PIN", async () => {
+    const login = await call("POST", "/api/auth/pin-login", { body: { userId: accountId, pin: PIN } });
     expect(login.status).toBe(401);
   });
 });

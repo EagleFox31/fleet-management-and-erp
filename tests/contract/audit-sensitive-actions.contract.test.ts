@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { setAuditSink } from "../../server/lib/audit";
@@ -45,20 +45,21 @@ async function loginAs(role: "admin" | "warehouse") {
   return { id: user.id, cookie: res.headers.get("set-cookie")!.split(";")[0] };
 }
 
-/** L'audit s'écrit après la réponse : on attend la ligne au plus ~3 s. */
-async function auditRowsFor(entityId: number, expected: number) {
-  let rows: (typeof activityLogs.$inferSelect)[] = [];
+type AuditRow = typeof activityLogs.$inferSelect;
+
+/** L'audit s'écrit après la réponse : on attend les lignes au plus ~3 s. */
+async function pollAudit(where: ReturnType<typeof and>, expected: number): Promise<AuditRow[]> {
+  let rows: AuditRow[] = [];
   for (let i = 0; i < 20; i++) {
-    rows = await db
-      .select()
-      .from(activityLogs)
-      .where(and(eq(activityLogs.entityType, "user"), eq(activityLogs.entityId, String(entityId))))
-      .orderBy(desc(activityLogs.id));
+    rows = await db.select().from(activityLogs).where(where).orderBy(desc(activityLogs.id));
     if (rows.length >= expected) break;
     await new Promise((r) => setTimeout(r, 150));
   }
   return rows;
 }
+
+const auditRowsFor = (entityId: number, expected: number) =>
+  pollAudit(and(eq(activityLogs.entityType, "user"), eq(activityLogs.entityId, String(entityId))), expected);
 
 beforeAll(async () => {
   setAuditSink(dbAuditSink);
@@ -91,14 +92,20 @@ describe("ADM6 : journal d'activité des actions sur les comptes", { timeout: 60
     });
     expect(res.status).toBe(201);
     ids.userIds.push(res.body.id);
-    await new Promise((r) => setTimeout(r, 600));
 
-    const [row] = await db
-      .select()
-      .from(activityLogs)
-      .where(and(eq(activityLogs.entityType, "user"), eq(activityLogs.userId, admin.id), eq(activityLogs.action, "create")))
-      .orderBy(desc(activityLogs.id))
-      .limit(1);
+    // Création : pas d'id dans le chemin, donc pas d'entityId ; on cible la
+    // ligne par le nom d'utilisateur unique du compte créé.
+    const rows = await pollAudit(
+      and(
+        eq(activityLogs.entityType, "user"),
+        eq(activityLogs.action, "create"),
+        sql`${activityLogs.details}->>'username' = ${token}`,
+      ),
+      1,
+    );
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(row.userId).toBe(admin.id);
     expect(row).toMatchObject({ method: "POST", path: "/api/users" });
     const details = row.details as Record<string, unknown>;
     expect(details.username).toBe(token);
