@@ -91,7 +91,7 @@ flowchart LR
 | T2 | Sessions : création, expiration, révocation, logout | C | OK (`api-auth-sessions`) |
 | T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; PATCH document, planification, utilisateur, POST/PATCH plein carburant, POST catalogue de pannes dans `secondary-routes-validation` ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate`) |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields` ; commande fournisseur : totaux recalculés, remise bornée 0..100, quantités reçues bornées et jamais en baisse, `purchase-order-amounts` ; facture client : montant borné, TVA/TTC recalculés, `client-invoice-generate` ; facture fournisseur : champs du workflow ignorés, solde initial = TTC, `supplier-invoice-create`) |
-| T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | À faire |
+| T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | Fait en I (`stock-audit-columns` : created_by/updated_by/dates des pièces et pneus par le service, trois utilisateurs distincts, suppression logique, noms joints) ; routes HTTP non couvertes |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders`) |
 | T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
 | T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | À faire |
@@ -299,7 +299,7 @@ Tables : `fuelRecords`, cartes carburant.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service` ; POST/PATCH plein : nombre illisible refusé au lieu d'être tronqué, `secondary-routes-validation`) |
+| FUEL1 | CRUD plein et carte carburant | C | Fait en C, 6 défauts figés (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; `it.fails` : date de recharge illisible 500, quantité illisible ou négative acceptées en 201, véhicule inconnu 500, solde insuffisant 500, client lit les pleins d'un véhicule tiers) ; `fuel-card-service`, `secondary-routes-validation` |
 | FUEL2 | Consommation par véhicule | I | Partiel (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; `it.fails` : véhicule inconnu, 500 au lieu de 404) |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 
@@ -343,7 +343,7 @@ Tables : `fleetKpiCache`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DIR1 | KPI recalculés après chaque transition métier | I | Partiel (`management-dashboard-service`) |
+| DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
 | DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
 | DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes ; droits déjà dans `lot-exports-roles` ; `it.fails` : un plein saisi par l'application absent de l'export) |
 
