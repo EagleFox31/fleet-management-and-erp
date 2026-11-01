@@ -66,7 +66,7 @@ async function walkPages(d: Domain, pageSize: number) {
 const idsOf = (d: Domain, res: { body: any }): number[] => d.rows(res.body).map((r: any) => r.id);
 
 /** Cas communs à toutes les listes recherchables. */
-function searchCases(getDomain: () => Domain, quoteRowId: () => number, options: { nulByteRejected?: boolean } = {}) {
+function searchCases(getDomain: () => Domain, quoteRowId: () => number, options: { nulByteRejected?: boolean; jokersEscaped?: boolean } = {}) {
   it("liste vide : jeton inconnu", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: uniqueTestToken("absent") })}`);
@@ -108,15 +108,16 @@ function searchCases(getDomain: () => Domain, quoteRowId: () => number, options:
     });
   }
 
-  // Défaut figé : `%` et `_` ne sont pas échappés avant le ILIKE, ils agissent comme jokers.
-  it.fails("joker % : traité comme texte, aucune ligne ne contient un pourcent", async () => {
+  // Défaut figé (sauf jokersEscaped) : `%` et `_` ne sont pas échappés avant le ILIKE, ils agissent comme jokers.
+  const jokerIt = options.jokersEscaped ? it : it.fails;
+  jokerIt("joker % : traité comme texte, aucune ligne ne contient un pourcent", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}-%` })}`);
     expect(res.status).toBe(200);
     expect(idsOf(d, res)).toEqual([]);
   });
 
-  it.fails("joker _ : traité comme texte, aucune ligne ne contient un souligné", async () => {
+  jokerIt("joker _ : traité comme texte, aucune ligne ne contient un souligné", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}_0` })}`);
     expect(res.status).toBe(200);
@@ -174,7 +175,7 @@ describe("T8 : véhicules", { timeout: 120000 }, () => {
     expect(byBrand.body.vehicles.every((v: any) => /lvmarquea/i.test(v.brand))).toBe(true);
   });
 
-  searchCases(paginationSet, () => quoteId);
+  searchCases(paginationSet, () => quoteId, { jokersEscaped: true });
 
   it.each([["limit", "abc"], ["limit", "-1"], ["limit", "0"], ["offset", "abc"]])("borne %s=%s : 200, jamais 500", async (name, value) => {
     const res = await get(`/api/vehicles?${q({ search: token, [name]: value })}`);
@@ -182,21 +183,17 @@ describe("T8 : véhicules", { timeout: 120000 }, () => {
     noLeak(res);
   });
 
-  // Défaut figé : l'erreur SQL est avalée par le stockage (storage.ts, catch de getVehicles) et la liste
-  // revient vide avec total 0 alors que des lignes existent : un écran croit qu'il n'y a aucun véhicule.
-  it.fails("offset négatif : 400 ou repli, pas une liste vide avec total 0", async () => {
+  it("offset négatif : 400 ou repli, pas une liste vide avec total 0", async () => {
     const res = await get(`/api/vehicles?${q({ search: token, offset: -1 })}`);
     expect(res.status === 400 || res.body.total > 0).toBe(true);
   });
 
-  it.fails("limit hors entier sûr : 400 ou repli, pas une liste vide avec total 0", async () => {
+  it("limit hors entier sûr : 400 ou repli, pas une liste vide avec total 0", async () => {
     const res = await get(`/api/vehicles?${q({ search: token, limit: "99999999999999999999" })}`);
     expect(res.status === 400 || res.body.total > 0).toBe(true);
   });
 
-  // Défaut figé : GET /api/vehicles ne filtre pas sur ownerScopeOf (routes.ts, « tous les utilisateurs voient
-  // tous les véhicules ») alors qu'AGENTS.md §11 réserve au client ses seuls véhicules.
-  it.fails("client : ne voit pas les véhicules des autres", async () => {
+  it("client : ne voit pas les véhicules des autres", async () => {
     const res = await get(`/api/vehicles?${q({ search: token, limit: 50 })}`, "client");
     expect(idsOf(domain, res)).toEqual([clientVehicleId]);
   });

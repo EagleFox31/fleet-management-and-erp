@@ -90,3 +90,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : compte client : liste limitée à ses véhicules, total cohérent ; personnel : tout.
 - **Preuve** : contrats vehicles-lists-client-scope (nouveau) et vehicles-crud verts ; lists-pagination-filters : les 5 it.fails véhicules passent (Expect test to fail), à convertir ; api-auth-guard 2/2 ; unitaires 854/854 ; tsc 0.
 - **Reste / risques** : jokers `%` `_` encore actifs sur ordres de travail et fournisseurs (searchCases partagé) ; GET /api/vehicles/:id/mileage, /mileage/history et /check/:registrationNumber restent sous `authenticate` seul (lecture par id sans cloison) ; routes.ts:958 et :1005 restent en code mort.
+
+## 2026-11-01T23:59:00+01:00 — Contrats véhicules : les 5 it.fails corrigés deviennent des it
+
+- **Agent** : fix-defauts (testeur) · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : dans lists-pagination-filters, la suite véhicules passe en `it` pour les jokers `%` et `_`, l'offset négatif, la limite hors entier sûr et la cloison client.
+- **Comment** : option `jokersEscaped` de `searchCases`, activée pour les seuls véhicules ; ordres de travail et fournisseurs gardent leurs `it.fails` de jokers, comme pièces (offset, limit) et fournisseurs (isActive, catégorie). Aucune entrée de KNOWN_SETUP_IN_IT_FAILS n'était concernée.
+- **Pourquoi** : un it.fails dont le défaut est corrigé passe pour « attendu rouge » et masquerait une régression.
+- **Comment tester (QA)** : contrats lists-pagination-filters, vehicles-lists-client-scope, vehicles-crud, vehicle-documents-client-scope sous db-lock.
+- **Preuve** : 106/106 sur 4 fichiers ; tsc 0 erreur ; unitaires 854/854 (hygiène incluse).
+- **Reste / risques** : jokers encore défectueux sur ordres de travail et fournisseurs.
