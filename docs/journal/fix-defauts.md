@@ -101,3 +101,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : contrats lists-pagination-filters, vehicles-lists-client-scope, vehicles-crud, vehicle-documents-client-scope sous db-lock.
 - **Preuve** : 106/106 sur 4 fichiers ; tsc 0 erreur ; unitaires 854/854 (hygiène incluse).
 - **Reste / risques** : jokers encore défectueux sur ordres de travail et fournisseurs.
+
+## 2026-11-01T23:52:21+01:00 — Leçon : récidive de la cloison sur GET /api/vehicles
+
+- **Agent** : fix-defauts (documentation) · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait (préventions manquantes à confier à fleet-testeur)
+- **Quoi** : mise à jour de l'entrée LESSONS_LEARNED du 2026-10-30 par une section « Récidive (2026-11-01) » : GET /api/vehicles sous `authenticate` seul, corrigé par 854ce30.
+- **Comment** : docs/analysis/LESSONS_LEARNED.md, ajout en fin d'entrée 2026-10-30 ; aucune ligne existante réécrite.
+- **Pourquoi** : même classe de défaut, route non listée par la prévention précédente. La prévention du contrat vehicles-lists-client-scope est manuelle et n'était pas rouge avant correctif (ajoutée dans le même commit).
+- **Comment tester (QA)** : `grep -n "Récidive (2026-11-01)" docs/analysis/LESSONS_LEARNED.md` ; vérifier que les chemins cités existent (`tests/contract/vehicles-lists-client-scope.contract.test.ts`, `tests/contract/api-auth-guard.contract.test.ts`, `server/app.ts` lignes 108-109).
+- **Preuve** : lecture de `server/app.ts`, `server/routes.ts` (déclarations listées), `server/api/vehicles.routes.ts` ; aucun test exécuté pour cette entrée.
+- **Reste / risques** : sept déclarations `/api/vehicles` sous `authenticate` seul non qualifiées (liste dans la leçon) ; contrôle automatique absent.
