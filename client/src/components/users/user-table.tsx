@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { AlertTriangle, Pencil, Trash2 } from "lucide-react";
 import { UserForm } from "./user-form";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { userMessageOf } from "@/lib/api-error";
 
 interface User {
   id: number;
@@ -23,6 +25,8 @@ interface User {
   role: "admin" | "workshop_manager" | "technician" | "client" | "user" | string;
   createdAt?: string;
   lastLoginAt?: string | null;
+  /** Droit de sortie de stock en dérogation (chef d'atelier seulement). */
+  canIssueStock?: boolean;
 }
 
 interface UserTableProps {
@@ -55,6 +59,31 @@ export function UserTable({ users, isLoading }: UserTableProps) {
         variant: "destructive",
         title: "Erreur",
         description: `Erreur lors de la suppression de l'utilisateur: ${error.message}`,
+      });
+    },
+  });
+
+  // Droit de sortie de stock du chef d'atelier : accordé par défaut, retirable par l'admin.
+  // La cible passe par les variables de la mutation, jamais par un état local.
+  const stockIssueMutation = useMutation({
+    mutationFn: async ({ userId, canIssueStock }: { userId: number; canIssueStock: boolean }) => {
+      const response = await apiRequest("PATCH", `/api/users/${userId}/stock-issue-permission`, { canIssueStock });
+      return response.json();
+    },
+    onSuccess: (_payload, { canIssueStock }) => {
+      toast({
+        title: canIssueStock ? "Droit de sortie rendu" : "Droit de sortie retiré",
+        description: canIssueStock
+          ? "Ce chef d'atelier peut de nouveau sortir une pièce quand le magasin est fermé."
+          : "Ce chef d'atelier ne sort plus de pièce : le magasinier s'en charge.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    },
+    onError: (error: unknown) => {
+      toast({
+        variant: "destructive",
+        title: "Erreur",
+        description: userMessageOf(error, "Le droit de sortie n'a pas pu être modifié."),
       });
     },
   });
@@ -156,6 +185,19 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                       >
                         {getRoleLabel(user.role)}
                       </Badge>
+                      {user.role === "workshop_manager" && (
+                        <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Switch
+                            checked={user.canIssueStock !== false}
+                            disabled={stockIssueMutation.isPending}
+                            onCheckedChange={(checked) =>
+                              stockIssueMutation.mutate({ userId: user.id, canIssueStock: checked })
+                            }
+                            aria-label={`Droit de sortie de stock de ${user.name}`}
+                          />
+                          Sortie de stock (magasin fermé)
+                        </label>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-sm text-muted-foreground">
                       {user.lastLoginAt ? formatCreatedDate(user.lastLoginAt) : "Jamais connecté"}

@@ -62,39 +62,47 @@ async function stateOf(workOrderId: number, partId: number) {
 }
 
 describe("requestPartForWorkOrder", { timeout: 120000 }, () => {
-  it("stock suffisant : sortie directe au prix catalogue, ni demande ni attente", async () => {
-    const { part, workOrder, actor } = await setup(5);
+  it("pièce en rayon : rien ne sort, une demande « à sortir » attend le magasinier, sans attente d'OT", async () => {
+    const { technician, part, workOrder, actor } = await setup(5);
 
     const result = await requestPartForWorkOrder({ workOrderId: workOrder.id, partId: part.id, quantity: 3, actor });
 
-    expect(result).toMatchObject({ issuedQuantity: 3, missingQuantity: 0, requirement: null, workOrderStatusChanged: false });
+    expect(result).toMatchObject({
+      issuedQuantity: 0,
+      toIssueQuantity: 3,
+      missingQuantity: 0,
+      partUsed: null,
+      requirement: null,
+      workOrderStatusChanged: false,
+    });
     const state = await stateOf(workOrder.id, part.id);
-    expect(state.stock).toBe(2);
-    expect(state.lines).toHaveLength(1);
-    expect(state.lines[0].quantity).toBe(3);
-    expect(Number(state.lines[0].unitPrice)).toBe(2500);
-    expect(state.requirements).toHaveLength(0);
+    expect(state.stock).toBe(5);
+    expect(state.lines).toHaveLength(0);
+    expect(state.requirements).toHaveLength(1);
+    expect(state.requirements[0]).toMatchObject({
+      status: "received",
+      quantityNeeded: 3,
+      requestedBy: technician.id,
+      vehicleId: workOrder.vehicleId,
+    });
+    expect(Number(state.requirements[0].estimatedCost)).toBe(7500);
     expect(state.status).toBe("in_progress");
   });
 
-  it("stock partiel : le disponible sort, le manquant est demandé, l'OT attend", async () => {
+  it("stock partiel : le rayon attend le magasinier, le manquant est demandé, l'OT attend", async () => {
     const { technician, part, workOrder, actor } = await setup(2);
 
     const result = await requestPartForWorkOrder({ workOrderId: workOrder.id, partId: part.id, quantity: 5, actor });
 
-    expect(result).toMatchObject({ issuedQuantity: 2, missingQuantity: 3, usedExistingRequirement: false, workOrderStatusChanged: true });
+    expect(result).toMatchObject({ issuedQuantity: 0, toIssueQuantity: 2, missingQuantity: 3, usedExistingRequirement: false, workOrderStatusChanged: true });
     expect(result.workOrder?.status).toBe("awaiting_parts");
     const state = await stateOf(workOrder.id, part.id);
-    expect(state.stock).toBe(0);
-    expect(state.lines.map((l) => l.quantity)).toEqual([2]);
-    expect(state.requirements).toHaveLength(1);
-    expect(state.requirements[0]).toMatchObject({
-      status: "pending",
-      quantityNeeded: 3,
-      partId: part.id,
-      requestedBy: technician.id,
-      vehicleId: workOrder.vehicleId,
-    });
+    expect(state.stock).toBe(2);
+    expect(state.lines).toHaveLength(0);
+    const byStatus = Object.fromEntries(state.requirements.map((r) => [r.status, r]));
+    expect(state.requirements).toHaveLength(2);
+    expect(byStatus.received).toMatchObject({ quantityNeeded: 2, requestedBy: technician.id });
+    expect(byStatus.pending).toMatchObject({ quantityNeeded: 3, partId: part.id, requestedBy: technician.id });
     expect(state.status).toBe("awaiting_parts");
   });
 
@@ -103,7 +111,7 @@ describe("requestPartForWorkOrder", { timeout: 120000 }, () => {
 
     const result = await requestPartForWorkOrder({ workOrderId: workOrder.id, partId: part.id, quantity: 2, actor });
 
-    expect(result).toMatchObject({ issuedQuantity: 0, missingQuantity: 2, partUsed: null });
+    expect(result).toMatchObject({ issuedQuantity: 0, toIssueQuantity: 0, missingQuantity: 2, partUsed: null, stockRequirement: null });
     const state = await stateOf(workOrder.id, part.id);
     expect(state.stock).toBe(0);
     expect(state.lines).toHaveLength(0);
@@ -125,7 +133,7 @@ describe("requestPartForWorkOrder", { timeout: 120000 }, () => {
     expect(state.requirements).toHaveLength(1);
   });
 
-  it("des demandes simultanées ne sortent pas deux fois la même unité ni ne doublent la demande", async () => {
+  it("des demandes simultanées sur un même OT ne créent qu'une demande, rien ne sort", async () => {
     const { part, workOrder, actor } = await setup(3);
 
     // Cinq appels plutôt que deux : la course dépend du timing réseau.
@@ -135,12 +143,36 @@ describe("requestPartForWorkOrder", { timeout: 120000 }, () => {
       ),
     );
 
-    expect(results.reduce((sum, r) => sum + r.issuedQuantity, 0)).toBe(3);
+    expect(results.filter((r) => !r.usedExistingRequirement)).toHaveLength(1);
     const state = await stateOf(workOrder.id, part.id);
-    expect(state.stock).toBe(0);
-    expect(state.lines.reduce((sum, l) => sum + l.quantity, 0)).toBe(3);
-    expect(state.requirements).toHaveLength(1);
-    expect(state.status).toBe("awaiting_parts");
+    expect(state.stock).toBe(3);
+    expect(state.lines).toHaveLength(0);
+    expect(state.requirements.map((r) => [r.status, r.quantityNeeded])).toEqual([["received", 1]]);
+  });
+
+  it("des OT concurrents ne se promettent pas deux fois la même unité en rayon", async () => {
+    const { part, actor } = await setup(3);
+    const vehicleIdOf = await setup(0);
+    const others = await db
+      .insert(workOrders)
+      .values(
+        Array.from({ length: 5 }, (_, i) => ({
+          vehicleId: vehicleIdOf.workOrder.vehicleId,
+          title: `TEST concurrence rayon ${i}`,
+          status: "in_progress" as const,
+        })),
+      )
+      .returning();
+    workOrderIds.push(...others.map((w) => w.id));
+
+    const results = await Promise.all(
+      others.map((w) => requestPartForWorkOrder({ workOrderId: w.id, partId: part.id, quantity: 1, actor: { ...actor, role: "workshop_manager" } })),
+    );
+
+    expect(results.reduce((sum, r) => sum + r.toIssueQuantity, 0)).toBe(3);
+    expect(results.reduce((sum, r) => sum + r.missingQuantity, 0)).toBe(2);
+    const [stored] = await db.select().from(parts).where(eq(parts.id, part.id));
+    expect(stored.quantity).toBe(3);
   });
 
   it("refuse un technicien sur l'OT d'un autre (403), sans toucher au stock", async () => {

@@ -5,13 +5,18 @@ import {
   alerts,
   clientInvoices,
   clients,
+  fuelPrices,
   fuelRecords,
+  partRequirements,
   parts,
   partsStockMovements,
+  partsUsed,
   supplierInvoices,
   suppliers,
+  tireRotations,
   users,
   vehicles,
+  workOrders,
 } from "../../shared/schema";
 import { TEST_PREFIX } from "./ids";
 
@@ -98,6 +103,18 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   await db.delete(clientInvoices).where(orphan(clientInvoices.invoiceNumber, clientInvoices.createdAt));
   await db.delete(clients).where(orphan(clients.name, clients.createdAt));
   await db.delete(supplierInvoices).where(orphan(supplierInvoices.invoiceNumber, supplierInvoices.createdAt));
+  // Les OT d'un véhicule orphelin bloquaient sa suppression (FK) et faisaient
+  // échouer le nettoyage global de toutes les suites suivantes.
+  const orphanVehicles = db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(orphan(vehicles.registrationNumber, vehicles.createdAt));
+  const orphanWorkOrders = db.select({ id: workOrders.id }).from(workOrders).where(inArray(workOrders.vehicleId, orphanVehicles));
+  await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
+  await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
+  await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, orphanWorkOrders));
+  await db.delete(tireRotations).where(inArray(tireRotations.workOrderId, orphanWorkOrders));
+  await db.delete(workOrders).where(inArray(workOrders.vehicleId, orphanVehicles));
   const orphanParts = db.select({ id: parts.id }).from(parts).where(orphan(parts.reference, parts.createdAt));
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, orphanParts));
   await db.delete(parts).where(orphan(parts.reference, parts.createdAt));
@@ -106,5 +123,7 @@ export async function cleanupOrphanTestRows(): Promise<void> {
   const testUsers = db.select({ id: users.id }).from(users).where(orphan(users.username, users.createdAt));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
+  // Prix carburant saisi par un compte de test : bloquait la suppression du compte (FK).
+  await db.delete(fuelPrices).where(inArray(fuelPrices.createdBy, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));
 }

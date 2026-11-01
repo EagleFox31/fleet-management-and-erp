@@ -291,6 +291,8 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count integer NOT NULL DEFAULT 0`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamp`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin text`);
+    // Droit de sortie de stock du chef d'atelier, retirable par l'admin (20261031_users_can_issue_stock.sql).
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_issue_stock boolean NOT NULL DEFAULT true`);
     await db.execute(sql`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS created_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE parts ADD COLUMN IF NOT EXISTS created_by integer REFERENCES users(id)`);
     // Traçabilité stock parts + tires — doit rester ici ET dans server/db/migrations/

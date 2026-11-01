@@ -35,6 +35,10 @@ export const users = pgTable("users", {
   failedLoginCount: integer("failed_login_count").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
   lastFailedLoginAt: timestamp("last_failed_login_at"),
+  // Droit de sortie de stock en dérogation (chef d'atelier, magasin fermé).
+  // Accordé par défaut, retirable par l'administrateur seul
+  // (`PATCH /api/users/:id/stock-issue-permission`). Sans effet sur les autres rôles.
+  canIssueStock: boolean("can_issue_stock").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
 });
@@ -43,6 +47,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   loginCount: true,
   lastLoginAt: true,
+  canIssueStock: true,
   createdAt: true,
   deletedAt: true,
 });

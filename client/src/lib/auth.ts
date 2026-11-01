@@ -22,6 +22,8 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  /** Droit de sortie de stock en dérogation (chef d'atelier), retirable par l'admin. */
+  canIssueStock?: boolean;
 }
 
 const AUTH_TIMEOUT_MS = 12_000;

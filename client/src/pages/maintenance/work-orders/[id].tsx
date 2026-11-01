@@ -215,7 +215,8 @@ export default function WorkOrderDetails({
 
   // Le chef d'atelier n'a pas ce droit: il a une dérogation motivée, pour les
   // soirs et week-ends où le magasin est fermé. Geste distinct, bouton distinct.
-  const canOverrideIssue = user?.role === 'workshop_manager';
+  // Retiré par l'admin : le bouton disparaît (le serveur refuse aussi, 403).
+  const canOverrideIssue = user?.role === 'workshop_manager' && user?.canIssueStock !== false;
 
   // Motif de sortie exceptionnelle en cours de saisie.
   const [overrideRequirementId, setOverrideRequirementId] = useState<number | null>(null);
@@ -383,8 +384,9 @@ export default function WorkOrderDetails({
     },
   });
 
-  // « Demander la pièce » : le serveur décide au clic. Le stock disponible sort
-  // vers l'OT, le manquant part en demande et l'OT passe en attente de pièces.
+  // « Demander la pièce » : le serveur décide au clic. Rien ne sort ici : le
+  // rayon part « à sortir » chez le magasinier, le manquant en demande et l'OT
+  // passe en attente de pièces.
   const requestPartMutation = useMutation({
     mutationFn: async ({ partId, quantity }: { partId: number; quantity: number }) => {
       const response = await apiRequest("POST", `/api/work-orders/${workOrderId}/parts`, {
@@ -395,8 +397,8 @@ export default function WorkOrderDetails({
     },
     onSuccess: (payload: any, { partId }) => {
       toast({
-        title: payload?.missingQuantity > 0 ? "Pièce demandée" : "Pièce ajoutée",
-        description: payload?.message || "La pièce a été ajoutée à l'ordre de travail.",
+        title: "Pièce demandée",
+        description: payload?.message || "Demande transmise au magasinier.",
       });
       refetchPartsUsed();
       refetchPendingPartRequirements();
@@ -1582,7 +1584,7 @@ export default function WorkOrderDetails({
                               Stock insuffisant : {stockAvailable} disponible(s) pour {partQuantity} demandée(s).
                             </p>
                             {previewIssued > 0 && (
-                              <p>{previewIssued} unité(s) sortiront du stock pour cet OT.</p>
+                              <p>{previewIssued} unité(s) en rayon : le magasinier les sortira pour cet OT.</p>
                             )}
                             {openRequest ? (
                               <p>

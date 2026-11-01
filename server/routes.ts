@@ -226,6 +226,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: user.name,
         email: user.email,
         role: user.role,
+        canIssueStock: user.canIssueStock,
         loginCount: Number(currentLoginCount),
         lastLoginAt: currentLoginAt
       });
@@ -351,6 +352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: user.name,
         email: user.email,
         role: user.role,
+        canIssueStock: user.canIssueStock,
         loginCount: Number(user.loginCount ?? 0),
         lastLoginAt: user.lastLoginAt
       });
@@ -458,6 +460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           email: user.email,
           role: user.role,
           loginCount: effectiveLoginCount,
+          canIssueStock: user.canIssueStock,
           createdAt: user.createdAt,
           lastLoginAt: user.lastLoginAt
         };
