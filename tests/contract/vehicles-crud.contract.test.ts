@@ -39,6 +39,13 @@ const validBody = (registrationNumber = plate()) => ({
   status: "operational",
 });
 
+// POST brut : tout 201 inattendu est enregistré pour le ménage.
+async function post(actor: Actor | undefined, body: unknown) {
+  const res = await call("POST", "/api/vehicles", actor ? { actor, body } : { body });
+  if (res.status === 201) ids.vehicleIds.push(res.body.id);
+  return res;
+}
+
 async function create(actor: Actor = "workshopManager", registrationNumber = plate()) {
   const res = await call("POST", "/api/vehicles", { actor, body: validBody(registrationNumber) });
   if (res.status === 201) ids.vehicleIds.push(res.body.id);
@@ -78,7 +85,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
 
   // DEFAUT PRODUIT : la création consigne le statut deux fois. `storage.createVehicle`
   // (server/storage.ts:871) insère déjà la ligne, puis `POST /api/vehicles`
-  // (server/routes.ts:1090) appelle `recordStatusChange` : deux lignes identiques,
+  // (server/routes.ts:1092-1093) appelle `recordStatusChange` : deux lignes identiques,
   // l'historique d'un véhicule neuf compte un changement qui n'a pas eu lieu.
   it.fails("le statut initial n'est consigné qu'une fois", async () => {
     const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, historyVehicleId));
@@ -96,19 +103,19 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
   });
 
   it.each(["technician", "warehouse"] as const)("%s : création refusée (403)", async (actor) => {
-    const res = await call("POST", "/api/vehicles", { actor, body: validBody() });
+    const res = await post(actor, validBody());
     expect(res.status).toBe(403);
   });
 
   it("sans session : 401", async () => {
-    const res = await call("POST", "/api/vehicles", { body: validBody() });
+    const res = await post(undefined, validBody());
     expect(res.status).toBe(401);
   });
 
   it("immatriculation déjà utilisée : refus lisible, un seul véhicule", async () => {
     const first = await create();
-    const again = await call("POST", "/api/vehicles", { actor: "workshopManager", body: validBody(first.body.registrationNumber) });
-    if (again.status === 201) ids.vehicleIds.push(again.body.id);
+    expect(first.status).toBe(201);
+    const again = await post("workshopManager", validBody(first.body.registrationNumber));
     expect(again.status).toBe(400);
     expect(again.body.message).toBeTruthy();
   });
@@ -117,7 +124,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
     ["corps vide", () => ({})],
     ["marque absente", () => ({ ...validBody(), brand: undefined })],
   ])("%s : 400, jamais 500", async (_label, makeBody) => {
-    const res = await call("POST", "/api/vehicles", { actor: "workshopManager", body: makeBody() });
+    const res = await post("workshopManager", makeBody());
     expect(res.status).toBe(400);
   });
 
@@ -127,7 +134,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
     ["année mal typée", () => ({ ...validBody(), year: "abc" })],
     ["kilométrage mal typé", () => ({ ...validBody(), mileage: "x" })],
   ])("%s : 400, jamais 500", async (_label, makeBody) => {
-    const res = await call("POST", "/api/vehicles", { actor: "workshopManager", body: makeBody() });
+    const res = await post("workshopManager", makeBody());
     expect(res.status).toBe(400);
   });
 });
@@ -197,7 +204,7 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
 
   // DEFAUT PRODUIT : la violation d'unicité est avalée par `storage.updateVehicle`
   // (server/storage.ts:910, rend undefined), puis `PATCH /api/vehicles/:id`
-  // (server/routes.ts:1204) répond 500 « Erreur serveur » au lieu d'un refus lisible 4xx.
+  // (server/routes.ts:1201) répond 500 « Erreur serveur » au lieu d'un refus lisible 4xx.
   it.fails("PATCH : l'immatriculation d'un autre véhicule est refusée (4xx, pas 500)", async () => {
     const res = await call("PATCH", `/api/vehicles/${renamed.id}`, {
       actor: "admin",
@@ -207,7 +214,7 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  // DEFAUT PRODUIT : `PATCH /api/vehicles/:id` (server/routes.ts:1195) passe le corps brut à
+  // DEFAUT PRODUIT : `PATCH /api/vehicles/:id` (server/routes.ts:1193) passe le corps brut à
   // `prepareColumnUpdate`, qui accepte toute colonne : `createdBy` envoyé par le client
   // réécrit l'auteur de la fiche (AGENTS.md §5 : ces champs ne viennent jamais du corps).
   it.fails("PATCH : createdBy du corps ne réécrit pas l'auteur", async () => {
