@@ -270,6 +270,7 @@ export class PartsService {
         .update(parts)
         .set({
           quantity: newStock,
+          reorderAlert: newStock <= part.minQuantity,
           updatedBy: userId ?? null,
           updatedAt: new Date(),
         })

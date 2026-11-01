@@ -60,11 +60,8 @@ describe("PRT3 alerte de stock bas", { timeout: 120000 }, () => {
     expect(await inReorderList(part.id)).toBe(true);
   });
 
-  // DÉFAUT PRODUIT (à corriger par fleet-api / fleet-db) : `partsService.updateStock`
-  // (server/services/parts-service.ts, ~250-300) ne recalcule pas `parts.reorder_alert`, lu par
-  // l'export d'inventaire (server/services/excel-export-service.ts, ~83) : « Alerte CDE » reste
-  // « NON » après une sortie qui passe sous le seuil. `it.fails` : retirer `.fails` après correction.
-  it.fails("export d'inventaire : « Alerte CDE » suit le stock après une sortie", async () => {
+  // Régression : l'export lisait `parts.reorder_alert`, que `updateStock` ne recalculait pas.
+  it("export d'inventaire : « Alerte CDE » suit le stock après une sortie", async () => {
     const { part, userId } = await newPart(20, 5);
     await partsService.updateStock(part.id, -16, "TEST sortie", userId);
     expect(await exportedAlert(part.reference)).toBe("OUI");
