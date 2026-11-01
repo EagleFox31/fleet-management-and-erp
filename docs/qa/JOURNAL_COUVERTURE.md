@@ -1540,3 +1540,51 @@ soumission sans doublon.
 
 **Preuve**
 - `vehicles-crud` rejoué sous verrou et test d'hygiène `it-fails-hygiene` : résultats dans le compte rendu de la PR.
+
+## Lot MIS1 + P2 - Mission, facture, paiement au navigateur
+
+**Quoi**
+- `e2e/13-mission-invoice-payment.spec.ts` : la logistique crée une mission (API), la facture depuis
+  l'écran mission (HT 100 000, TTC 119 250), la secrétaire encaisse en deux fois ; facture soldée, bouton
+  de paiement absent, bouton désactivé pour la logistique. Vérité lue en base ; mission, facture, comptes
+  et client supprimés en fin de spec.
+
+**Comment**
+- Comptes créés par `createE2EUser`, serveur et runner sur `DATABASE_URL_TEST` (branche tests-piste-b),
+  sous verrou, Edge (`E2E_CHANNEL=msedge`).
+
+**Pourquoi**
+- `05-mission-billing-payment` lisait la première facture trouvée et skippait sur base vide.
+
+**Preuve**
+- Spec 13 : 1/1 vert (2,5 min). Pas de défaut produit visé : pas de rouge avant, le test est une
+  couverture de parcours.
+
+**Limites**
+- Mission posée à « livrée » en base : affectation, étapes et lancement non rejoués (documents du
+  véhicule et CPC requis).
+
+## Lot B3 - Temps réel OT entre chef d'atelier et technicien (WO1, WO7, T6)
+
+**Quoi**
+- `e2e/14-realtime-work-order-roles.spec.ts` : trois comptes créés par la spec (chef d'atelier, deux
+  techniciens). Le chef crée un OT affecté au technicien : trame `work_order_created` reçue par le
+  technicien et alerte d'affectation lisible par `/api/alerts`. Un autre technicien est refusé (403) ;
+  le technicien affecté démarre l'OT : trame `work_order_updated` reçue par le chef, statut en base.
+  OT, véhicule et comptes supprimés en fin de spec.
+
+**Comment**
+- Trames lues sur `/ws` de chaque session (`page.on("websocket")`) après `auth_success`, jamais l'écran :
+  le polling de 7 s ne peut pas produire une trame.
+
+**Pourquoi**
+- La spec 06 dépend de comptes déjà en base et ne couvre que la création, dans un seul sens.
+
+**Preuve**
+- Vert 1/1 (2,9 min). Rouge : diffusion du démarrage renommée (`technician-work-orders.routes.ts`,
+  `work_order_updated` -> `wo_changed`, code rétabli) : échec « trame work_order_updated non reçue par le
+  chef d'atelier », 1 failed.
+
+**Limites**
+- ADM2 (changement de rôle), DRV2 (déclaration de panne du chauffeur) et l'invalidation des KPI à
+  l'écran ne sont pas couverts : budget de tours épuisé. Aucun défaut produit constaté.
