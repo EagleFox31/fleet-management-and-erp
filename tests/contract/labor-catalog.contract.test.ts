@@ -117,11 +117,21 @@ describe("CAT1 : catalogue de main-d'oeuvre", { timeout: 60000 }, () => {
   // (server/api/work-order-items.routes.ts : `laborCatalogWriteRoutes` ne porte
   // que POST /). Un poste créé par erreur ne peut être ni corrigé ni retiré
   // sans accès à la base.
+  describe("poste à désactiver", () => {
+    let entryToPatchId = 0;
+    // Mise en place hors du `it.fails` : une erreur de création fait échouer le
+    // hook au lieu de rendre le cas vert.
+    beforeAll(async () => {
+      const { res } = await createEntry();
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      entryToPatchId = res.body.id;
+    }, 60000);
+
   it.fails("désactive un poste par PATCH /api/labor-catalog/:id", async () => {
-    const { res } = await createEntry();
-    const patched = await session.call("PATCH", `/api/labor-catalog/${res.body.id}`, { actor: "manager", body: { isActive: false } });
+    const patched = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: false } });
     expect(patched.status).toBe(200);
-    const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, res.body.id));
+    const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
     expect(row.isActive).toBe(false);
+  });
   });
 });

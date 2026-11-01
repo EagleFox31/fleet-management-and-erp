@@ -1349,11 +1349,15 @@ soumission sans doublon.
      alors que l'OT s'intitule « Maintenance préventive: <titre> » (preventive-maintenance-service.ts:310, :359).
   4. CAT1 : `PATCH /api/labor-catalog/:id` répond 404, aucune route de modification ni de désactivation
      (server/api/work-order-items.routes.ts).
+- Relecture : chaque `it.fails` ne contient plus que l'appel visé et l'assertion métier, la mise en place (véhicule,
+  plan, entrée de catalogue) est dans un `beforeAll` qui contrôle le 201. Rouge rejoué sans `.fails`, erreurs exactes :
+  `expected [ { id } ] to have a length of +0 but got 1` (MNT1), `expected [] to have a length of 1 but got +0`
+  (échéance de plan), `expected [ ... ] to have a length of 1 but got 2` (deux OT), `expected 404 to be 200` (CAT1).
 - Contrat 16/16 cas verts, intégration 11/11, unitaire 838/838, `tsc` 0 erreur.
 
 **Limites**
 - `calculateNextDueDate` lève pour les fréquences quotidienne et hebdomadaire acceptées par le POST : non figé.
-- Bord de mois et fuseau du pointage non testés (WO6).
+- Bord de mois et fuseau du pointage non testés : WO6 repassé de « OK » à « Partiel » au plan.
 - Alerte, clôture de l'OT préventif et recalcul de l'échéance par date non couverts (P3).
 
 **Reste**

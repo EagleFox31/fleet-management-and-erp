@@ -1,5 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { maintenanceSchedules, statusHistory, vehicles, workOrders } from "../../shared/schema";
 import { preventiveMaintenanceService } from "../../server/services/preventive-maintenance-service";
@@ -109,15 +109,24 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
   // portées par le véhicule déclenchent un OT
   // (server/services/preventive-maintenance-service.ts:112) : un plan
   // « dans 5 jours » ne produit jamais d'OT à l'approche de l'échéance.
+  describe("plan actif à échéance proche", () => {
+    let vehicleId = 0;
+    let scheduleId = 0;
+    beforeAll(async () => {
+      const vehicle = await vehicleWith();
+      const [schedule] = await db
+        .insert(maintenanceSchedules)
+        .values({ vehicleId: vehicle.id, title: uniqueTestToken("plan"), frequency: "monthly", frequencyValue: 3, scheduledDate: inDays(5), isActive: true })
+        .returning();
+      scheduleIds.push(schedule.id);
+      vehicleId = vehicle.id;
+      scheduleId = schedule.id;
+    }, 60000);
+
   it.fails("une échéance de plan actif dans la fenêtre déclenche un OT lié au plan", async () => {
-    const vehicle = await vehicleWith();
-    const [schedule] = await db
-      .insert(maintenanceSchedules)
-      .values({ vehicleId: vehicle.id, title: uniqueTestToken("plan"), frequency: "monthly", frequencyValue: 3, scheduledDate: inDays(5), isActive: true })
-      .returning();
-    scheduleIds.push(schedule.id);
-    await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id);
-    expect(await pendingFor(schedule.id)).toHaveLength(1);
+    await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId);
+    expect(await pendingFor(scheduleId)).toHaveLength(1);
+  });
   });
 });
 
@@ -178,13 +187,22 @@ describe("MNT2 : déclenchement par kilométrage", { timeout: 120000 }, () => {
   // préventive: <titre> » (preventive-maintenance-service.ts:310 et :359) : la
   // garde ne trouve jamais rien. Quand le relevé dépasse deux seuils, chaque
   // passage crée un OT de plus pour le même plan, sans qu'aucun ne soit clos.
+  describe("relevé au-dessus de deux seuils", () => {
+    let vehicleId = 0;
+    let planId = 0;
+    beforeAll(async () => {
+      const vehicle = await vehicleWith();
+      const plan = await mileagePlan(vehicle.id, 10000, 1000);
+      vehicleId = vehicle.id;
+      planId = plan.id;
+    }, 60000);
+
   it.fails("deux passages à un kilométrage très au-dessus du seuil ne créent qu'un seul OT en attente par plan", async () => {
-    const vehicle = await vehicleWith();
-    const plan = await mileagePlan(vehicle.id, 10000, 1000);
-    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicle.id, 20000);
-    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicle.id, 20000);
-    const pending = (await pendingFor(plan.id)).filter((wo) => wo.status === "pending");
+    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
+    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
+    const pending = (await pendingFor(planId)).filter((wo) => wo.status === "pending");
     expect(pending).toHaveLength(1);
+  });
   });
 });
 
