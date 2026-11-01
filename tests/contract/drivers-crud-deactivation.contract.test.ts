@@ -13,7 +13,7 @@ import { uniqueTestToken } from "../support/ids";
  * DRV1 : fiche chauffeur (`/api/drivers`) créée et modifiée par un gestionnaire
  * (admin, logistique, secrétariat), désactivée par l'admin. Un chauffeur
  * désactivé sort de l'écran PIN et des affectations.
- * Les cas `it.fails` décrivent un défaut constaté du code produit.
+ * Défauts corrigés : un chauffeur désactivé n'est plus affectable ni connectable par PIN.
  */
 
 const PIN = "5307";
@@ -156,7 +156,7 @@ describe("DRV1 : chauffeur désactivé, affectation", { timeout: 60000 }, () => 
   // Défaut : PATCH /api/missions/:id (server/api/missions.routes.ts) vérifie
   // le CPC du chauffeur affecté, pas `drivers.isActive` ; le refus n'arrive
   // qu'au lancement de la mission.
-  it.fails("un chauffeur désactivé n'est pas affectable à une mission", async () => {
+  it("un chauffeur désactivé n'est pas affectable à une mission", async () => {
     expect((await assign(missionFor.inactive, vehicleIds[1], inactiveDriverId)).status).toBe(400);
   });
 });
@@ -176,12 +176,12 @@ describe("DRV1 : chauffeur désactivé, écran PIN", { timeout: 60000 }, () => {
     expect((await call("DELETE", `/api/drivers/${created.body.id}`, { cookie: adminCookie })).status).toBe(200);
   });
 
-  it.fails("un chauffeur désactivé sort de la liste de l'écran PIN", async () => {
+  it("un chauffeur désactivé sort de la liste de l'écran PIN", async () => {
     const list = await call("GET", "/api/auth/drivers-list");
     expect((list.body as Array<{ id: number }>).map((d) => d.id)).not.toContain(accountId);
   });
 
-  it.fails("un chauffeur désactivé ne se connecte plus par PIN", async () => {
+  it("un chauffeur désactivé ne se connecte plus par PIN", async () => {
     const login = await call("POST", "/api/auth/pin-login", { body: { userId: accountId, pin: PIN } });
     expect(login.status).toBe(401);
   });

@@ -1762,6 +1762,7 @@ router.post("/", async (req, res) => {
           firstName: drivers.firstName,
           lastName: drivers.lastName,
           cpcStatus: drivers.cpcStatus,
+          isActive: drivers.isActive,
         })
         .from(drivers)
         .where(eq(drivers.id, assignmentDriverId))
@@ -1769,6 +1770,9 @@ router.post("/", async (req, res) => {
 
       if (!selectedDriver) {
         return res.status(400).json({ message: "Chauffeur introuvable pour l'affectation." });
+      }
+      if (selectedDriver.isActive === false) {
+        return res.status(400).json({ message: "Ce chauffeur est désactivé, il ne peut pas être affecté." });
       }
 
       const missionWeight =
@@ -2093,6 +2097,7 @@ router.patch("/:id", async (req, res) => {
             firstName: drivers.firstName,
             lastName: drivers.lastName,
             cpcStatus: drivers.cpcStatus,
+            isActive: drivers.isActive,
           })
           .from(drivers)
           .where(eq(drivers.id, driverId))
@@ -2100,6 +2105,9 @@ router.patch("/:id", async (req, res) => {
 
         if (!selectedDriver) {
           return res.status(400).json({ message: "Chauffeur introuvable pour l'affectation." });
+        }
+        if (selectedDriver.isActive === false) {
+          return res.status(400).json({ message: "Ce chauffeur est désactivé, il ne peut pas être affecté." });
         }
 
         const missionWeightRaw = missionUpdates.weight ?? existingMission.weight;

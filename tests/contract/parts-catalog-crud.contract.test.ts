@@ -89,18 +89,18 @@ describe("PRT1 : création", { timeout: 60000 }, () => {
     }
   });
 
-  it.fails("prix non numérique : 400, jamais 500", async () => {
+  it("prix non numérique : 400, jamais 500", async () => {
     const res = await createPart("admin", { unitPrice: "beaucoup" });
     expect(res.status).toBe(400);
     noLeak(res);
   });
 
-  it.fails("stock négatif : refusé (400)", async () => {
+  it("stock négatif : refusé (400)", async () => {
     const res = await createPart("admin", { quantity: -4 });
     expect(res.status).toBe(400);
   });
 
-  it.fails("référence déjà prise : 409 lisible, sans texte d'exception", async () => {
+  it("référence déjà prise : 409 lisible, sans texte d'exception", async () => {
     const first = await createPart("admin");
     const again = await call("POST", "/api/parts", { actor: "admin", body: partBody({ reference: first.body.reference }) });
     expect(again.status).toBe(409);
@@ -187,13 +187,13 @@ describe("PRT1 : suppression", { timeout: 60000 }, () => {
     expect(await rowOf(created.body.id)).toBeDefined();
   });
 
-  it.fails("pièce inconnue : 404, pas une 500", async () => {
+  it("pièce inconnue : 404, pas une 500", async () => {
     const res = await call("DELETE", "/api/parts/2147483000", { actor: "admin" });
     expect(res.status).toBe(404);
     noLeak(res);
   });
 
-  it.fails("pièce déjà supprimée : pas de 500 au second appel", async () => {
+  it("pièce déjà supprimée : pas de 500 au second appel", async () => {
     const part = await createTestPart();
     ids.partIds.push(part.id);
     expect((await call("DELETE", `/api/parts/${part.id}`, { actor: "admin" })).status).toBe(204);

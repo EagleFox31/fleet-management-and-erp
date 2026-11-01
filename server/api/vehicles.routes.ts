@@ -6,6 +6,7 @@ import { vehicleDocuments, vehicles } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { ownerScopeOf } from "../lib/client-scope";
+import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
 
 const router = Router();
@@ -46,6 +47,43 @@ const broadcastVehicleUpdate = (
 
 // Apply authentication middleware to ALL routes in this router
 router.use(authenticate);
+
+/**
+ * GET /api/vehicles : liste paginée. Un client ne reçoit que ses véhicules
+ * (AGENTS.md §11) ; le personnel les voit tous. Déclarée avant routes.ts (gelé).
+ */
+router.get("/", isAnyUser, async (req, res, next) => {
+  try {
+    const str = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+    const result = await listVehicles({
+      search: str(req.query.search),
+      status: str(req.query.status),
+      vehicleType: str(req.query.vehicle_type),
+      limit: boundedInt(req.query.limit, VEHICLE_LIST_DEFAULT_LIMIT, 1, VEHICLE_LIST_MAX_LIMIT),
+      offset: boundedInt(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER),
+      sortBy: str(req.query.sort_by),
+      sortOrder: req.query.sort_order === "asc" ? "asc" : "desc",
+      ownerId: ownerScopeOf(req.user),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture de la liste des véhicules en échec");
+    return next(new AppError(500, "Erreur serveur", { cause: error }));
+  }
+});
+
+/** GET /api/vehicles/all : tous les véhicules (export), cloisonnés comme la liste. */
+router.get("/all", isAnyUser, async (req, res, next) => {
+  try {
+    const result = await listVehicles({ limit: VEHICLE_LIST_MAX_LIMIT, ownerId: ownerScopeOf(req.user) });
+    return res.status(200).json(result.vehicles);
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "lecture de tous les véhicules en échec");
+    return next(new AppError(500, "Erreur serveur", { cause: error }));
+  }
+});
 
 /**
  * GET /api/vehicles/expiring-docs?days=30

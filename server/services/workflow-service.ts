@@ -36,7 +36,13 @@ export class WorkflowService {
       const [created] = await db
         .insert(vehicleAcquisitionWorkflows)
         .values({
-          ...data,
+          userId: data.userId,
+          sessionId: data.sessionId,
+          currentStep: data.currentStep,
+          workflowData: data.workflowData,
+          uploadedFiles: data.uploadedFiles,
+          // Un brouillon naît toujours en cours : la clôture passe par completeWorkflow.
+          status: 'in_progress',
           updatedAt: new Date(),
         })
         .returning();
@@ -85,7 +91,10 @@ export class WorkflowService {
     const [updated] = await db
       .update(vehicleAcquisitionWorkflows)
       .set({
-        ...data,
+        // Liste blanche : ni statut, ni propriétaire, ni session ne se réécrivent ici.
+        ...(data.currentStep !== undefined && { currentStep: data.currentStep }),
+        ...(data.workflowData !== undefined && { workflowData: data.workflowData }),
+        ...(data.uploadedFiles !== undefined && { uploadedFiles: data.uploadedFiles }),
         updatedAt: new Date(),
       })
       .where(

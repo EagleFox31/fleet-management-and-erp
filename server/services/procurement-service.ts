@@ -567,6 +567,19 @@ export class ProcurementService {
     urgency?: 'low' | 'medium' | 'high' | 'critical';
     createdBy: number;
   }): Promise<PurchaseOrder & { lines: PurchaseOrderLine[] }> {
+    // Pas de commande vers un fournisseur désactivé (ni inexistant).
+    const [supplier] = await db
+      .select({ isActive: suppliers.isActive })
+      .from(suppliers)
+      .where(eq(suppliers.id, data.supplierId))
+      .limit(1);
+    if (!supplier) {
+      throw new AppError(404, "Fournisseur introuvable");
+    }
+    if (supplier.isActive === false) {
+      throw new AppError(409, "Ce fournisseur est désactivé : réactivez-le avant de lui passer commande");
+    }
+
     const requirementIds = data.requirementIds || [];
     const requirementQuantities = data.requirementQuantities || [];
     const manualLines = data.manualLines || [];

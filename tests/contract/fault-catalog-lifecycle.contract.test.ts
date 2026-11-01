@@ -111,7 +111,7 @@ describe("CAT2 : traçabilité", { timeout: 60000 }, () => {
     expect((await rowOf(id)).createdBy).toBe(session.userIdOf("workshopManager"));
   });
 
-  it.fails("le valideur ne se forge pas par le corps", async () => {
+  it("le valideur ne se forge pas par le corps", async () => {
     const id = await createFault();
     await call("PATCH", `/api/fault-catalog/${id}`, {
       actor: "workshopManager",
@@ -120,7 +120,7 @@ describe("CAT2 : traçabilité", { timeout: 60000 }, () => {
     expect((await rowOf(id)).validatedBy).not.toBe(session.userIdOf("admin"));
   });
 
-  it.fails("valider une panne enregistre qui l'a validée", async () => {
+  it("valider une panne enregistre qui l'a validée", async () => {
     const id = await createFault();
     await call("PATCH", `/api/fault-catalog/${id}`, { actor: "admin", body: { status: "validated" } });
     expect((await rowOf(id)).validatedBy).toBe(session.userIdOf("admin"));
@@ -128,7 +128,7 @@ describe("CAT2 : traçabilité", { timeout: 60000 }, () => {
 });
 
 describe("CAT2 : modification et suppression", { timeout: 60000 }, () => {
-  it.fails("id inconnu : 404 (et non un 200 vide)", async () => {
+  it("id inconnu : 404 (et non un 200 vide)", async () => {
     const res = await call("PATCH", "/api/fault-catalog/2147483000", { actor: "admin", body: { description: "x" } });
     expect(res.status).toBe(404);
   });

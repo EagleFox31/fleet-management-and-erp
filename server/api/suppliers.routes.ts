@@ -8,6 +8,8 @@ import {
   type SupplierRatingField,
 } from "../../shared/constants/supplier-ratings";
 import { z } from "zod";
+import { AppError } from "../lib/app-error";
+import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
 import type { AppRole } from "@shared/constants/roles";
 
@@ -319,7 +321,7 @@ const checkSupplierCreatePermission = async (
   }
 };
 
-router.post("/", checkSupplierCreatePermission, async (req: Request, res: Response) => {
+router.post("/", checkSupplierCreatePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Le magasinier peut *nommer* un fournisseur (il en a besoin pour rattacher
     // une pièce), mais pas renseigner ses données commerciales — délai de
@@ -365,6 +367,10 @@ router.post("/", checkSupplierCreatePermission, async (req: Request, res: Respon
       });
     }
     
+    if (isUniqueViolation(error)) {
+      return next(new AppError(409, "Un fournisseur porte déjà ce nom", { cause: error }));
+    }
+
     console.error("❌ Erreur lors de la création du fournisseur:", error);
     res.status(500).json({ 
       error: "Erreur lors de la création du fournisseur",
@@ -374,7 +380,7 @@ router.post("/", checkSupplierCreatePermission, async (req: Request, res: Respon
 });
 
 // PATCH /api/suppliers/:id - Mettre à jour un fournisseur (admin, secretary et logistics)
-router.patch("/:id", checkWritePermission, async (req: Request, res: Response) => {
+router.patch("/:id", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -410,6 +416,10 @@ router.patch("/:id", checkWritePermission, async (req: Request, res: Response) =
       });
     }
     
+    if (isUniqueViolation(error)) {
+      return next(new AppError(409, "Un fournisseur porte déjà ce nom", { cause: error }));
+    }
+
     console.error("❌ Erreur lors de la mise à jour du fournisseur:", error);
     res.status(500).json({ 
       error: "Erreur lors de la mise à jour du fournisseur",

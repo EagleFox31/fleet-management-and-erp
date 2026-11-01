@@ -793,6 +793,35 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Une route qui lit ou modifie un véhicule, ou ce qui en dépend, ouverte à un client, passe par `isAnyUser` puis `canAccessOwned` / `ownerScopeOf`. Jamais `authenticate` seul.
 
+### Récidive (2026-11-01) : liste de véhicules lisible par un client
+
+Mise à jour de cette entrée : la même classe de défaut est revenue sur une route non listée.
+
+#### Constat
+- `GET /api/vehicles` (`server/routes.ts`, déclaration héritée) n'exigeait que `authenticate`. Un compte client recevait tous les véhicules (immatriculation, VIN, marque). Un commentaire « Temporairement, tous les utilisateurs voient tous les véhicules » restait en place.
+- Découvert par la relecture de la PR #77 : `it.fails` dans `tests/contract/lists-pagination-filters.contract.test.ts`.
+
+#### Cause racine
+- La prévention du 30 octobre visait les routes documents et kilométrage. La liste de véhicules n'était pas dans son inventaire : la cloison était appliquée route par route, sur une liste écrite à la main.
+- Le TODO « temporairement » sur un accès n'était suivi par aucun contrôle.
+- Classification : contrôle d'accès horizontal manquant (IDOR), récidive.
+
+#### Résolution
+- Commit `854ce30` : `/` et `/all` passent en `isAnyUser` dans `server/api/vehicles.routes.ts`, et la requête est filtrée par `ownerScopeOf` dans `server/services/vehicle-list-service.ts`.
+- `server/app.ts` monte `/api` (ligne 108) avant `registerRoutes` (ligne 109) : le routeur sert donc la requête. La déclaration héritée `server/routes.ts:958` reste en code mort, avec son TODO. Elle se supprime à part, avec son double.
+
+#### Prévention (vérifiable)
+- Contrat `tests/contract/vehicles-lists-client-scope.contract.test.ts` : tableau `LISTS` (`/api/vehicles?limit=1000`, `/api/vehicles/all`, `/api/vehicles/all-with-status`). Pour chaque liste : le client ne voit que son véhicule, le personnel voit les deux, sans session 401.
+- Rouge avant correctif : non démontré. Le fichier a été ajouté dans le même commit que le correctif.
+- Insuffisance constatée : `tests/contract/api-auth-guard.contract.test.ts` vérifie qu'une garde de session existe, et accepte `authenticate`. Il ne voit donc pas l'absence de cloison.
+- Prévention manquante : un contrôle automatique qui échoue sur toute route `/api` lisant ou modifiant un véhicule (liste ou identifiant) gardée par `authenticate` seul, sans `isAnyUser`, `isStaff`, `authorize` ni `ownerScopeOf` / `canAccessOwned`. À produire par fleet-testeur.
+- Résidus non couverts par `854ce30`, vérifiés par lecture de `server/routes.ts` (déclarations sous `authenticate` seul) : `GET /api/vehicles/:id` (ligne 1036), `/check/:registrationNumber` (1016), `/:id/mileage` (3534), `/:id/mileage/history` (3550), `/check-alerts` (4102, lit `storage.getVehicles()`), `/:vehicleId/status-history` (4502), `/:vehicleId/tires` (5027). Leur contrôle de propriétaire n'a pas été relu dans cette passe.
+
+#### Règle Projet (obligatoire)
+- Une liste d'objets possédés passe par `isAnyUser` + `ownerScopeOf`, avec un cas de contrat client sur cette liste.
+- Un TODO « temporairement » ou « pour l'instant » sur un accès se traite comme un défaut ouvert : il se corrige ou il se consigne comme résidu daté dans le journal, jamais en commentaire seul.
+- Ce qui doit être cloisonné ne se liste pas à la main : la prévention cible la classe (routes d'un objet possédé), pas une liste de chemins.
+
 ## 2026-10-31 - Écran ouvert à un rôle que son API refuse
 
 ### Constat
