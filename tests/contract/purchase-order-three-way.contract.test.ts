@@ -159,11 +159,8 @@ describe("PO2 rapprochement commande / facture", { timeout: 120000 }, () => {
     expect(list.body.discrepancies.map((d: { invoiceId: number }) => d.invoiceId)).toContain(row.id);
   });
 
-  // DÉFAUT PRODUIT (à corriger par fleet-api) : server/services/three-way-matching-service.ts:286-295.
-  // À exactement 5 % l'écart est marqué (>= seuil) mais la recommandation reste
-  // « manual_review » (<= seuil). `it.fails` devient rouge dès que le défaut est corrigé :
-  // retirer alors `.fails`.
-  it.fails("exactement 5 % d'écart : écart marqué ET escalade (incohérence seuil >= / <=)", async () => {
+  // Régression : à 5 % pile l'écart est signalé (>= seuil), la recommandation doit suivre.
+  it("exactement 5 % d'écart : écart marqué ET escalade (incohérence seuil >= / <=)", async () => {
     const order = await orderWithTotal(100000);
     const res = await invoiceFor(order.id, 105000);
     expect(res.status).toBe(201);
