@@ -108,11 +108,11 @@ export class ClientBillingService {
         .limit(1);
 
       if (!result || !result.mission) {
-        throw new Error("Mission non trouvée");
+        throw new AppError(404, "Cette mission n'existe pas.");
       }
 
       if (!result.client) {
-        throw new Error("Client non trouvé pour cette mission");
+        throw new AppError(409, "Cette mission n'a pas de client : impossible de la facturer.");
       }
 
       const { mission, client } = result;
@@ -123,14 +123,29 @@ export class ClientBillingService {
         new Date();
 
       // Générer numéro automatique si non fourni (dans la transaction)
-      const invoiceNumber = invoiceData.invoiceNumber || 
+      const invoiceNumber = invoiceData.invoiceNumber ||
         await this.generateInvoiceNumberInTransaction(tx);
 
-      // Calculer montants avec TVA si demandé
-      const amountHT = invoiceData.amount;
+      if (invoiceData.invoiceNumber) {
+        const [taken] = await tx
+          .select({ id: clientInvoices.id })
+          .from(clientInvoices)
+          .where(eq(clientInvoices.invoiceNumber, invoiceNumber))
+          .limit(1);
+        if (taken) {
+          throw new AppError(409, `Le numéro de facture ${invoiceNumber} est déjà utilisé.`);
+        }
+      }
+
+      // Montants arrondis au centime : TTC = HT + TVA exactement, comme stocké.
+      const toCents = (value: number) => Math.round(value * 100) / 100;
+      const amountHT = toCents(invoiceData.amount);
       const vatRate = invoiceData.includeVAT ? 19.25 : 0;
-      const vatAmount = (amountHT * vatRate) / 100;
-      const amountTTC = amountHT + vatAmount;
+      const vatAmount = toCents((amountHT * vatRate) / 100);
+      const amountTTC = toCents(amountHT + vatAmount);
+      if (amountHT <= 0) {
+        throw new AppError(400, "Le montant doit être d'au moins 0,01 FCFA.");
+      }
 
       // Créer la facture (dans la même transaction)
       const [invoice] = await tx
