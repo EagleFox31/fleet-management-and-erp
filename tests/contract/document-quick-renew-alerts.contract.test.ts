@@ -130,7 +130,12 @@ describe("DOC3 : renouvellement rapide d'un document", { timeout: 180000 }, () =
       .select({ dedupeKey: alerts.dedupeKey })
       .from(alerts)
       .where(and(eq(alerts.userId, secretary.id), like(alerts.dedupeKey, "doc_expiry:%")));
-    expect(remaining.map((row) => row.dedupeKey)).toEqual([documentExpiryDedupeKey(other.id, oldExpiry, "due")]);
+    // Le job d'alertes en tâche de fond écrit aussi des échéances d'autres documents de la base
+    // pour toute secrétaire, compte de test compris : ne regarder que les deux documents du test.
+    const ownKeys = remaining
+      .map((row) => row.dedupeKey)
+      .filter((key) => [renewed.id, other.id].some((id) => key?.includes(`:${id}:`)));
+    expect(ownKeys).toEqual([documentExpiryDedupeKey(other.id, oldExpiry, "due")]);
   });
 
   it("P4 : alerte d'Ã©chÃ©ance -> demande -> en cours -> renouvelÃ© : document Ã  jour, demande close, alerte levÃ©e", async () => {
