@@ -26,7 +26,7 @@ cette page dit ce qui est livré, ce qui est en essai et ce qui vient ensuite.
 Historique d'un ordre de travail, coût d'un véhicule, journal des pneus, réception signée des pièces,
 validation des bons de carburant, traitement des anomalies carburant, prix du litre daté, pointage des
 chauffeurs, factures en attente, déclaration de panne par le chauffeur, intervalles de vidange préremplis,
-contrôle qualité des ordres de travail, captcha à la connexion.
+contrôle qualité des ordres de travail. Le captcha à la connexion a été retiré (P-26), le verrouillage reste.
 
 ## Prochains lots
 
