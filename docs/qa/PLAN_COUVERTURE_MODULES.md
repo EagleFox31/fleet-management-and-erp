@@ -376,7 +376,7 @@ sequenceDiagram
 
 ### P2 — Mission → facture client → paiement
 
-État : **OK** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). La mission est posée à « livrée » en base : le lancement n'est pas rejoué.
+État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). La mission est posée à « livrée » en base : le lancement n'est pas rejoué.
 
 ```mermaid
 flowchart LR

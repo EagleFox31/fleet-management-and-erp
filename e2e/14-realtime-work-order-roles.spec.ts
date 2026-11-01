@@ -27,11 +27,18 @@ test.beforeAll(async () => {
   manager = await createE2EUser("workshop_manager", ids);
   technician = await createE2EUser("technician", ids);
   otherTechnician = await createE2EUser("technician", ids);
+  technician.label = "technicien affecté";
+  otherTechnician.label = "autre technicien";
 });
 
 test.afterAll(async () => {
   for (const id of workOrderIds) {
-    await db.delete(workOrders).where(eq(workOrders.id, id)).catch(() => undefined);
+    try {
+      await db.delete(workOrders).where(eq(workOrders.id, id));
+    } catch (error) {
+      console.warn(`ménage e2e : OT ${id} non supprimé`, error);
+      throw new Error(`ménage e2e : OT ${id} non supprimé`, { cause: error });
+    }
   }
   await cleanupCreated(ids);
 });
