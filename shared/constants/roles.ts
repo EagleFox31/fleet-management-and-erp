@@ -132,3 +132,14 @@ export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "l
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+
+/**
+ * Creation et edition du dossier mission (`POST /api/missions`, `PATCH /api/missions/:id`),
+ * budget compris : tout le personnel sauf le chauffeur. Lu par le serveur (staffOnly) et par
+ * l'ecran mission pour masquer edition et budget.
+ */
+export const MISSION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+export function canWriteMission(role: string | null | undefined): boolean {
+  return (MISSION_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}

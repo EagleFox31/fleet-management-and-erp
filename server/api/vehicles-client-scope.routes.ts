@@ -7,7 +7,7 @@ import { isAnyUser, isStaff } from "../middleware/auth";
 import { AppError } from "../lib/app-error";
 import { OUT_OF_SCOPE_MESSAGE, canAccessOwned, ownerScopeOf } from "../lib/client-scope";
 import { tiresService } from "../services/tires-service-simplified";
-import { findOwnedVehicleByRegistration, listVehiclesForOwner } from "../services/vehicle-scope-service";
+import { findOwnedVehicleByRegistration, fuelStatisticsForOwner, listVehiclesForOwner } from "../services/vehicle-scope-service";
 
 /**
  * Cloison client sur les lectures de parc (R-03). Monté AVANT `/vehicles` et avant
@@ -121,7 +121,16 @@ router.get("/fuel-records/vehicle/:vehicleId", ...ownVehicleParam("vehicleId"));
 // Saisie d'exploitation et vues de parc entier : sans objet pour un client.
 router.post("/vehicles/:id/mileage/sync", isStaff);
 router.get("/vehicles/check-alerts", isStaff);
-router.get("/fuel-records/statistics", isStaff);
+router.get("/fuel-records/statistics", isAnyUser, async (req, res, next) => {
+  try {
+    const ownerId = ownerScopeOf(req.user);
+    if (ownerId === null) return next();
+    const period = typeof req.query.period === "string" ? req.query.period : "month";
+    return res.status(200).json(await fuelStatisticsForOwner(ownerId, period));
+  } catch (error) {
+    return next(error);
+  }
+});
 router.get("/fuel-records/consumption-history", isStaff);
 
 // Carburant : un vehicule precise est borne au proprietaire, la liste de toute la flotte est refusee.

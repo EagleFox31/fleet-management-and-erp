@@ -18,6 +18,7 @@ import React, { useEffect, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { canWriteMission } from "@shared/constants/roles";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
@@ -1428,6 +1429,7 @@ export default function MissionDetailsPage() {
       ? (missionFuelTotalQuantity / missionDistanceReelle) * 100
       : null;
 
+  const canEditMission = canWriteMission(user?.role);
   const canManageMissionFuel = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
   const isMissionCompleted = String(mission?.status || "") === "completed";
   const canDeclareMissionWithoutFuel =
@@ -1914,9 +1916,11 @@ export default function MissionDetailsPage() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Missions
             </Button>
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
-                <FileText className="h-3.5 w-3.5" /> Modifier
-              </Button>
+              {canEditMission && (
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
+                  <FileText className="h-3.5 w-3.5" /> Modifier
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

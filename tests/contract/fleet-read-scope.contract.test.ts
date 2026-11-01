@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { assignments, drivers, missions } from "../../shared/schema";
+import { assignments, drivers, fuelRecords, missions } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -434,7 +434,7 @@ describe("parc : routes de routes.ts fermees aux autres clients (R-03)", { timeo
 
   it("client : saisie et vues de parc entier refusees, liste de pneus filtree", async () => {
     expect((await send("POST", `/api/vehicles/${vehicle.A.id}/mileage/sync`, "clientA", {})).status).toBe(403);
-    for (const path of ["/api/vehicles/check-alerts", "/api/fuel-records", "/api/fuel-records/statistics", "/api/fuel-records/consumption-history"]) {
+    for (const path of ["/api/vehicles/check-alerts", "/api/fuel-records", "/api/fuel-records/consumption-history"]) {
       expect((await get(path, "clientA")).status, path).toBe(403);
     }
     const tires = await get("/api/vehicle-tires", "clientA");
@@ -454,8 +454,42 @@ describe("parc : routes de routes.ts fermees aux autres clients (R-03)", { timeo
         expect((await get(path, actor)).status, `${actor} ${path}`).not.toBe(403);
       }
       expect((await get("/api/vehicle-tires", actor)).status, "/api/vehicle-tires").not.toBe(403);
-      expect((await get("/api/vehicles/check-alerts", actor)).status, "/api/vehicles/check-alerts").not.toBe(403);
+      // check-alerts : la route de routes.ts:4174 est masquee par /api/vehicles/:id (dette connue,
+      // routes.ts gele). On fige le comportement actuel : jamais 403 pour le personnel, 404 attendu.
+      expect([200, 404], "/api/vehicles/check-alerts").toContain((await get("/api/vehicles/check-alerts", actor)).status);
       expect((await get("/api/fuel-records/statistics", actor)).status, "/api/fuel-records/statistics").not.toBe(403);
     }
+  });
+});
+
+describe("carburant : statistique du client limitee a ses vehicules (R-03)", { timeout: 60000 }, () => {
+  const created: number[] = [];
+  afterAll(async () => {
+    if (created.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, created));
+  });
+
+  it("client A voit les litres de ses vehicules seulement ; le personnel garde la vue globale", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await db
+      .insert(fuelRecords)
+      .values([
+        { vehicleId: vehicle.A.id, date: today, quantity: 11, cost: "100" },
+        { vehicleId: vehicle.B.id, date: today, quantity: 700, cost: "7000" },
+      ])
+      .returning();
+    created.push(...rows.map((row) => row.id));
+
+    const a = await get("/api/fuel-records/statistics?period=month", "clientA");
+    expect(a.status).toBe(200);
+    expect(a.body.totalFuel).toBe(11);
+    expect(a.body.vehicleStats.map((row: { vehicleId: number }) => row.vehicleId)).toEqual([vehicle.A.id]);
+    const b = await get("/api/fuel-records/statistics?period=month", "clientB");
+    expect(b.body.totalFuel).toBe(700);
+
+    const admin = await get("/api/fuel-records/statistics?period=month", "admin");
+    expect(admin.status).toBe(200);
+    expect(admin.body.vehicleStats.map((row: { vehicleId: number }) => row.vehicleId)).toEqual(
+      expect.arrayContaining([vehicle.A.id, vehicle.B.id]),
+    );
   });
 });

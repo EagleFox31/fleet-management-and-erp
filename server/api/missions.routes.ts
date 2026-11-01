@@ -1,6 +1,9 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
 import { Router, type NextFunction, type Request, type Response } from "express";
-import { assertOwnMission, redactDriverPersonalData, refuseDriver } from "../lib/driver-scope";
+import { assertOwnMission, redactDriverPersonalData } from "../lib/driver-scope";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { canWriteMission } from "@shared/constants/roles";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
 import { eq, and, desc, inArray, ne, or, ilike } from "drizzle-orm";
@@ -18,6 +21,7 @@ import {
 } from "@shared/constants/management-mission-profitability";
 
 const router = Router();
+const log = moduleLogger("missions");
 
 // Cloison chauffeur (R-13) : toute route portant `:id` (presente ou future) exige que
 // la mission soit affectee au chauffeur connecte. Le reste du personnel passe.
@@ -33,7 +37,7 @@ router.param("id", async (req, _res, next, rawId) => {
 /** Ecriture sans objet pour un chauffeur (creation, edition du dossier mission). */
 function staffOnly(req: Request, _res: Response, next: NextFunction): void {
   try {
-    refuseDriver(req.user);
+    if (!canWriteMission(req.user?.role)) throw new AppError(403, "Accès refusé : action réservée au personnel de gestion.");
     next();
   } catch (error) {
     next(error);
@@ -723,7 +727,7 @@ router.get("/", async (req, res) => {
 
     return res.json(missionsWithAssignments);
   } catch (error) {
-    console.error("Get missions error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get missions error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -841,7 +845,7 @@ router.get("/:id", async (req, res) => {
       assignment: safeAssignment,
     });
   } catch (error) {
-    console.error("Get mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -894,7 +898,7 @@ router.get("/:id/fuel-records", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get mission fuel records error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission fuel records error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -1038,7 +1042,7 @@ router.post("/:id/fuel-records", async (req, res) => {
       mission: updatedMission || null,
     });
   } catch (error) {
-    console.error("Create mission fuel record error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
 
     if (error instanceof Error && (error as Error & { code?: string }).code === "INSUFFICIENT_BALANCE") {
       return res.status(422).json({
@@ -1216,7 +1220,7 @@ router.post("/:id/fuel-records/regularize", async (req, res) => {
       regularization: regularizationEntry,
     });
   } catch (error) {
-    console.error("Regularize mission fuel record error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
 
     if (error instanceof Error && (error as Error & { code?: string }).code === "INSUFFICIENT_BALANCE") {
       return res.status(422).json({
@@ -1333,7 +1337,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
       declaration,
     });
   } catch (error) {
-    console.error("Declare mission no-refuel error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -1472,7 +1476,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       fuelUnitPriceSource = source === "real" ? "real" : "fallback";
     } catch (fuelBalanceError) {
       fuelBalanceUnavailable = true;
-      console.error("Mission launch-readiness fuel balance error:", fuelBalanceError);
+      log.error({ err: fuelBalanceError, requestId: req.requestId }, "Mission launch-readiness fuel balance error");
     }
 
     const fuelOk = hasFuelBudget && !fuelBalanceUnavailable && fuelBalanceValue >= Number(fuelBudgetValue || 0);
@@ -1730,7 +1734,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       openRenewalRequests,
     });
   } catch (error) {
-    console.error("Get mission launch readiness error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission launch readiness error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -1872,7 +1876,7 @@ router.post("/", staffOnly, async (req, res) => {
 
     return res.status(201).json(newMission);
   } catch (error) {
-    console.error("Create mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
 });
@@ -2210,7 +2214,7 @@ router.patch("/:id", staffOnly, async (req, res) => {
 
     return res.json(updatedMission);
   } catch (error) {
-    console.error("Update mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update mission error");
     return res.status(500).json({ message: "Erreur lors de la mise à jour de la mission" });
   }
 });
@@ -2573,7 +2577,7 @@ router.put("/:id/status", async (req, res) => {
       warnings,
     });
   } catch (error) {
-    console.error("Update mission status error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update mission status error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -2709,7 +2713,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
 
     return res.status(200).json(legacyOpen);
   } catch (error) {
-    console.error("Get mission document renewal requests error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission document renewal requests error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -2977,7 +2981,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
       targetDocumentTypes: targetDocTypes,
     });
   } catch (error) {
-    console.error("Create mission document renewal request error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

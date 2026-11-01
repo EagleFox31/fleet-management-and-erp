@@ -1,6 +1,6 @@
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db";
-import { users, vehicles } from "@shared/schema";
+import { fuelRecords, users, vehicles } from "@shared/schema";
 
 /**
  * Lectures de véhicules cloisonnées sur le propriétaire (AGENTS.md §11).
@@ -91,4 +91,43 @@ export async function findOwnedVehicleByRegistration(ownerId: number, registrati
     .from(vehicles)
     .where(and(eq(vehicles.registrationNumber, registrationNumber), eq(vehicles.ownerId, ownerId)));
   return row;
+}
+
+const PERIOD_MONTHS: Record<string, number> = { month: 1, quarter: 3 };
+
+/** Debut de periode (meme regle que la statistique carburant de routes.ts). */
+function periodStart(period: string, now = new Date()): string {
+  const d = new Date(now);
+  if (period === "week") d.setDate(d.getDate() - 7);
+  else if (period === "year") d.setFullYear(d.getFullYear() - 1);
+  else d.setMonth(d.getMonth() - (PERIOD_MONTHS[period] ?? 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Statistique carburant d'un client : agregat SQL limite a ses vehicules.
+ * Meme forme que `GET /api/fuel-records/statistics` ({ period, totalFuel, totalCost, vehicleStats }).
+ */
+export async function fuelStatisticsForOwner(ownerId: number, period: string) {
+  const rows = await db
+    .select({
+      vehicleId: vehicles.id,
+      registrationNumber: vehicles.registrationNumber,
+      brand: vehicles.brand,
+      model: vehicles.model,
+      fuel: sql<number>`coalesce(sum(${fuelRecords.quantity}), 0)`.mapWith(Number),
+      cost: sql<number>`coalesce(sum(${fuelRecords.cost}), 0)`.mapWith(Number),
+      recordCount: count(fuelRecords.id),
+    })
+    .from(fuelRecords)
+    .innerJoin(vehicles, eq(fuelRecords.vehicleId, vehicles.id))
+    .where(and(eq(vehicles.ownerId, ownerId), gte(fuelRecords.date, periodStart(period))))
+    .groupBy(vehicles.id, vehicles.registrationNumber, vehicles.brand, vehicles.model);
+  const vehicleStats = rows.map((row) => ({ ...row, distance: 0, avgConsumption: 0 }));
+  return {
+    period,
+    totalFuel: vehicleStats.reduce((sum, row) => sum + row.fuel, 0),
+    totalCost: vehicleStats.reduce((sum, row) => sum + row.cost, 0),
+    vehicleStats,
+  };
 }
