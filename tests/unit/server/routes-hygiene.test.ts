@@ -16,15 +16,11 @@ import { describe, expect, it } from "vitest";
  *    `moduleLogger`, dont la configuration masque `*.password`.
  */
 const KNOWN_DUPLICATE_ROUTES = [
-  "delete /api/alerts/:id",
-  "get /api/alerts",
-  "get /api/alerts/unread",
   "get /api/maintenance-schedules",
   "get /api/parts/:id/usage-history",
   "get /api/statistics/fleet-history",
   "get /api/warehouse/stock-value-history",
   "get /api/warehouse/top-consumed-parts",
-  "patch /api/alerts/:id/read",
   "post /api/check-all-maintenance",
 ];
 

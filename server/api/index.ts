@@ -29,6 +29,7 @@ import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
 import notificationSettingsRoutes from "./notification-settings.routes";
+import alertsRoutes from "./alerts.routes";
 import kpiRoutes from "./kpi.routes";
 import workOrderAuditTrailRoutes from "./work-order-audit-trail.routes";
 import vehicleCostSummaryRoutes from "./vehicle-cost-summary.routes";
@@ -130,6 +131,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(backupsRoutes);
   apiRouter.use(workOrderExportRoutes);
   apiRouter.use(notificationSettingsRoutes);
+  apiRouter.use(alertsRoutes);
   apiRouter.use(kpiRoutes);
   apiRouter.use(workOrderAuditTrailRoutes);
   apiRouter.use(vehicleCostSummaryRoutes);

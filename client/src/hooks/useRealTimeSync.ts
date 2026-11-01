@@ -930,6 +930,10 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       invalidateAlertQueries();
       break;
 
+    case "alerts_read":
+      invalidateCatalogEvent("alerts_read");
+      break;
+
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
     // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).
     case "work_order_item_changed":

@@ -4358,6 +4358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PATCH /api/alerts/:id/read, POST /api/alerts/read-all, DELETE /api/alerts/:id : server/api/alerts.routes.ts
   app.post("/api/alerts", isWorkshopManager, async (req, res) => {
     try {
       const parsedAlert = insertAlertSchema.parse(req.body);
@@ -4374,52 +4375,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       console.error("Create alert error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.patch("/api/alerts/:id/read", authenticate, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'alerte invalide" });
-      }
-      
-      const alert = await storage.getAlert(id);
-      
-      if (!alert) {
-        return res.status(404).json({ message: "Alerte non trouvée" });
-      }
-      
-      const updatedAlert = await storage.markAlertAsRead(id);
-      
-      return res.status(200).json(updatedAlert);
-    } catch (error) {
-      console.error("Mark alert as read error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.delete("/api/alerts/:id", authenticate, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'alerte invalide" });
-      }
-      
-      const alert = await storage.getAlert(id);
-      
-      if (!alert) {
-        return res.status(404).json({ message: "Alerte non trouvée" });
-      }
-      
-      await storage.deleteAlert(id);
-      
-      return res.status(204).send();
-    } catch (error) {
-      console.error("Delete alert error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5676,71 +5631,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(details);
     } catch (error) {
       console.error("Get tire rotation details error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Routes pour les alertes
-  app.get("/api/alerts/unread", authenticate, async (req, res) => {
-    try {
-      const userId = 1; // TODO: récupérer depuis la session utilisateur
-      const alerts = await storage.getUnreadAlertsByUserId(userId);
-      return res.status(200).json(alerts);
-    } catch (error) {
-      console.error("Get unread alerts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.get("/api/alerts", authenticate, async (req, res) => {
-    try {
-      const userId = 1; // TODO: récupérer depuis la session utilisateur
-      const alerts = await storage.getAlertsByUserId(userId);
-      return res.status(200).json(alerts);
-    } catch (error) {
-      console.error("Get alerts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.patch("/api/alerts/:id/read", authenticate, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'alerte invalide" });
-      }
-      
-      const alert = await storage.markAlertAsRead(id);
-      
-      if (!alert) {
-        return res.status(404).json({ message: "Alerte non trouvée" });
-      }
-      
-      return res.status(200).json(alert);
-    } catch (error) {
-      console.error("Mark alert as read error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.delete("/api/alerts/:id", authenticate, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'alerte invalide" });
-      }
-      
-      const deleted = await storage.deleteAlert(id);
-      
-      if (!deleted) {
-        return res.status(404).json({ message: "Alerte non trouvée" });
-      }
-      
-      return res.status(204).send();
-    } catch (error) {
-      console.error("Delete alert error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
