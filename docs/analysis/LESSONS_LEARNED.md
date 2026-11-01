@@ -834,3 +834,22 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une colonne `timestamp` sans fuseau se lit avec le pilote qui l'écrit. Un test qui touche à l'heure fixe un fuseau non UTC, sinon il ne prouve rien.
+
+## 2026-11-01 - Alerte d'un autre compte marquée lue ou supprimée
+
+### Constat
+- `PATCH /api/alerts/:id/read` et `DELETE /api/alerts/:id` écrivaient par id seul : n'importe quel compte connecté marquait lue ou supprimait l'alerte d'un autre. Les ids sont séquentiels.
+
+### Cause racine
+- `storage.markAlertAsRead(id)` / `storage.deleteAlert(id)` ne prennent pas l'utilisateur ; la route ne le passait pas. Les routes existaient en double dans `server/routes.ts`, la seconde copie (morte) n'était pas meilleure.
+- Classification : contrôle d'accès horizontal manquant (IDOR), même classe que l'incident du 2026-10-30. Répétition : contrôle renforcé ci-dessous.
+
+### Résolution
+- `server/api/alerts.routes.ts` + `server/services/alert-inbox-service.ts` : écritures filtrées sur `id` et `user_id` de session, 404 hors périmètre.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/alerts-inbox.contract.test.ts` (alerte d'un autre compte : 404, rien ne change). Sans correctif : 5 rouges sur 6.
+- Hygiène `tests/unit/server/alerts-write-hygiene.test.ts` : `UPDATE` / `DELETE` sur `alerts` limités à une liste gelée ; plus aucun appel à `storage.markAlertAsRead` / `deleteAlert`. Rouge sur main (4 appels).
+
+### Règle Projet (obligatoire)
+- Une écriture sur une ligne nominative (alerte, préférence, brouillon) filtre sur l'utilisateur de session dans la requête SQL elle-même, jamais par un contrôle après lecture.
