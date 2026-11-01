@@ -763,11 +763,10 @@ export class AlertService {
           const sameType = alert.type === alertData.type;
           const sameTitle = alert.title === alertData.title;
           const sameLink = resolvedLink ? alert.link === resolvedLink : true;
-          // Sans clé : seule une alerte non lue identique bloque. Avec clé, les
-          // alertes antérieures à la clé (dedupe_key NULL) comptent encore si non
-          // lues, pour ne pas doubler l'existant au déploiement.
-          const legacy = !dedupeKey || (alert.dedupeKey == null && !alert.isRead);
-          return legacy && sameType && sameTitle && sameLink;
+          // Une alerte non lue identique bloque toujours, quelle que soit sa clé :
+          // celle d'hier (autre jour) comme celle d'avant la clé (dedupe_key NULL,
+          // déploiement). Le rappel quotidien ne repart qu'une fois l'alerte lue.
+          return !alert.isRead && sameType && sameTitle && sameLink;
         });
 
         if (existingAlert) {

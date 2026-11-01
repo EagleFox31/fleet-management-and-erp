@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { alerts, suppliers } from "../../shared/schema";
 import { db } from "../../server/db";
-import { alertService } from "../../server/services/alert-service";
+import { alertService, dailyReminderDedupeKey } from "../../server/services/alert-service";
 import { alertInboxService } from "../../server/services/alert-inbox-service";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
@@ -53,7 +53,7 @@ afterAll(async () => {
   // Les comptes réels admin/secretary de la base ont aussi reçu l'alerte de la fiche de test.
   await db.delete(alerts).where(eq(alerts.link, link));
   await cleanupCreated(ids);
-});
+}, 120000);
 
 describe("ALR1 génération planifiée sans doublon", { timeout: 180000 }, () => {
   it("deux passages successifs : une seule alerte par destinataire", async () => {
@@ -110,6 +110,30 @@ describe("ALR1 génération planifiée sans doublon", { timeout: 180000 }, () =>
     expect(rows).toHaveLength(1);
     expect(rows[0].dedupeKey).toBeNull();
     expect(await alertsOf(secretaryId)).toHaveLength(1);
+  });
+
+  it("J+1 avec l'alerte d'hier non lue : aucune nouvelle alerte", async () => {
+    await db.delete(alerts).where(eq(alerts.link, link));
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await db.insert(alerts).values({
+      userId: adminId,
+      title: "Fiche fournisseur à compléter",
+      message: "TEST alerte d'hier",
+      type: "procurement",
+      priority: "medium",
+      link,
+      dedupeKey: dailyReminderDedupeKey("procurement", "Fiche fournisseur à compléter", link, yesterday),
+    });
+    await alertService.checkIncompleteSupplierAlerts();
+    expect(await alertsOf(adminId)).toHaveLength(1);
+  });
+
+  it("J+1 avec l'alerte d'hier lue : le rappel quotidien repart", async () => {
+    await alertInboxService.markAllRead(adminId);
+    await alertService.checkIncompleteSupplierAlerts();
+    const rows = await alertsOf(adminId);
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((r) => !r.isRead)).toHaveLength(1);
   });
 
   it("fiche complétée : plus de nouvelle alerte", async () => {
