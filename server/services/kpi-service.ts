@@ -83,13 +83,19 @@ export const kpiService = {
     const { from, toExclusive } = resolveKpiBounds(query);
     const res = await db.execute(sql`
       SELECT count(*)::int AS interventions,
-             (COALESCE(SUM(w.cost), 0) + COALESCE(SUM(p.total), 0))::float8 AS total_cost
+             (COALESCE(SUM(w.cost), 0) + COALESCE(SUM(p.total), 0) + COALESCE(SUM(r.total), 0))::float8 AS total_cost
       FROM work_orders w
       LEFT JOIN (
         SELECT work_order_id, SUM(quantity * unit_price) AS total
         FROM parts_used
         GROUP BY work_order_id
       ) p ON p.work_order_id = w.id
+      -- Rotations agrégées à part, comme les pièces : pas de produit cartésien (WO5).
+      LEFT JOIN (
+        SELECT work_order_id, SUM(cost) AS total
+        FROM tire_rotations
+        GROUP BY work_order_id
+      ) r ON r.work_order_id = w.id
       WHERE w.status = 'completed'
         AND COALESCE(w.end_date, w.start_date, w.created_at) >= ${from}::timestamp
         AND COALESCE(w.end_date, w.start_date, w.created_at) < ${toExclusive}::timestamp`);
