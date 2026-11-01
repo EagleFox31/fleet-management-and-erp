@@ -196,7 +196,7 @@ stateDiagram-v2
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, rien ne sort à la demande (rayon « à sortir » chez le magasinier, manquant en demande), rayon réservé | C | OK (`work-order-parts`, `stock-issue-permission`) |
-| WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | À faire |
+| WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | OK (formule unique `shared/work-order-cost.ts` pour écran et PDF ; U `work-order-cost` : NaN impossible, arrondi au centime ; I `work-order-cost` : service technicien = formule ; I `kpi-service` : coût moyen inclut les rotations, sans produit cartésien) |
 | WO6 | Temps technicien : pointage, agrégation mensuelle | I | À faire |
 | WO7 | Notification chef ↔ technicien dans les deux sens | E | À faire |
 
@@ -281,8 +281,8 @@ stateDiagram-v2
 | SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | À faire |
 | PO1 | Commande : création, validation, réception partielle puis totale | E | Partiel (`04-procurement-three-way`) |
 | PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Partiel (`04-procurement-three-way`) |
-| SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | À faire |
-| SINV2 | Double règlement d'une même facture refusé | C | À faire |
+| SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | OK (`supplier-settlement-reject` : rejet avec motif et auteur, libère le reste à régler, rejeu idempotent, motif vide 400, rapproché 409, rejeté non rapprochable 409, autre facture 404, magasinier 403 ; U `supplier-settlement-reject-schema`) |
+| SINV2 | Double règlement d'une même facture refusé | C | OK (déjà couvert par T7 : `supplier-settlement-idempotence` C et I, rejeu même référence, dépassement du total 409, saisies simultanées) |
 
 ### 3.8 Chauffeurs
 
@@ -325,7 +325,7 @@ stateDiagram-v2
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | À rejouer (`05-mission-billing-payment`) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | À faire |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Partiel (`vat-billing-service`, `05`) |
-| CINV2 | Passage automatique en `overdue` | I | À faire |
+| CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
 
 ### 3.11 Alertes et notifications
 
