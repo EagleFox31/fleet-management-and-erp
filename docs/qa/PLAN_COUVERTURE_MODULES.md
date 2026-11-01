@@ -137,9 +137,9 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`) |
+| VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`, contrat `vehicles-crud` : 4 défauts figés) |
 | VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
-| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | À faire |
+| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow`, 1 défaut figé) ; e2e à faire |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
 ### 3.3 Documents et renouvellements
@@ -323,7 +323,7 @@ stateDiagram-v2
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | À rejouer (`05-mission-billing-payment`) |
-| MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | À faire |
+| MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict`, 1 défaut figé) |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
 
