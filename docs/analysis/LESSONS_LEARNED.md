@@ -834,3 +834,29 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une colonne `timestamp` sans fuseau se lit avec le pilote qui l'écrit. Un test qui touche à l'heure fixe un fuseau non UTC, sinon il ne prouve rien.
+
+## 2026-10-31 - Donnees personnelles de chauffeur masquees a l'API REST seulement
+
+### Contexte
+- PR #53 (R-03 cloison client, R-13 chauffeur). CNI, numero de permis et date de naissance reserves a admin, logistics, secretary (`redactDriverPersonalData`).
+
+### Ce qui s'est passe (near miss, recidive)
+- Le masquage ne couvrait que la reponse de `GET /drivers`. Trois autres chemins sortaient la meme donnee : les evenements WebSocket `driver_created|updated|toggled` diffuses en `scope: broadcast` avec la fiche complete (tous les sockets, tous roles), `GET /missions/:id` (jointure `assignment.driver` avec `licenseNumber`), et le repli de `/api/drivers/me` qui liait une fiche par le nom sans verifier qu'elle etait libre.
+- Des routes `/missions/:id` et des routes `update-cpc` etaient gardees par liste noire (`refuseDriver`) ou par un controle propre a chaque handler : un handler ajoute plus tard heritait d'un trou.
+
+### Cause racine
+- Le masquage etait applique a un point d'arrivee (une route) et non a la donnee. Tout nouveau canal (WebSocket, jointure) la contournait. Garde par exclusion de roles au lieu d'inclusion.
+
+### Resolution
+- Charge WebSocket reduite a l'identifiant (`server/lib/driver-realtime.ts`), les ecrans refont un GET filtre par role.
+- `redactDriverPersonalData` applique aussi a `GET /missions/:id` ; sans lecteur, version masquee.
+- `router.param("id")` sur `/missions` : mission du chauffeur exigee pour toute route `/:id`, presente ou future. Liste blanche `isDriverManager` sur `update-cpc` et `sync-cpc-statuses`.
+- Repli `/me` : seule une fiche sans `userId`, et seulement si une seule correspond.
+- Cloison client sur les routes vehicule de `routes.ts` (kilometrage, historique de statut, pneus, OT, carburant) par un routeur monte avant `registerRoutes`.
+
+### Prevention (verifiable)
+- Unitaire `tests/unit/server/driver-realtime.test.ts` : aucune charge broadcast ne contient `cniNumber`, `licenseNumber`, `birthDate` ; refus par defaut sans lecteur.
+- Contrat `tests/contract/fleet-read-scope.contract.test.ts` : chauffeur A sur chaque route `/:id` de la mission de B (403), permis masque pour l'atelier, technicien refuse sur `update-cpc`, client refuse sur les routes vehicule d'un autre, homonyme sur `/me`.
+
+### Regle Projet (obligatoire)
+- Une donnee protegee se masque a la source commune de tous les canaux (REST, WebSocket, jointures), pas dans une route. Tout nouvel evenement `broadcast` ne porte qu'un identifiant. Une garde de role se ecrit en liste blanche.

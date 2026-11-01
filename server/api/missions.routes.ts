@@ -1,6 +1,6 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
-import { Router } from "express";
-import { assertOwnMission } from "../lib/driver-scope";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { assertOwnMission, redactDriverPersonalData, refuseDriver } from "../lib/driver-scope";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
 import { eq, and, desc, inArray, ne, or, ilike } from "drizzle-orm";
@@ -18,6 +18,28 @@ import {
 } from "@shared/constants/management-mission-profitability";
 
 const router = Router();
+
+// Cloison chauffeur (R-13) : toute route portant `:id` (presente ou future) exige que
+// la mission soit affectee au chauffeur connecte. Le reste du personnel passe.
+router.param("id", async (req, _res, next, rawId) => {
+  try {
+    await assertOwnMission(req.user, Number(rawId));
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Ecriture sans objet pour un chauffeur (creation, edition du dossier mission). */
+function staffOnly(req: Request, _res: Response, next: NextFunction): void {
+  try {
+    refuseDriver(req.user);
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 const fuelCardService = new FuelCardService();
 
 type MissionRealtimeEvent =
@@ -707,12 +729,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/missions/:id - Détails d'une mission
-router.get("/:id", async (req, res, next) => {
-  try {
-    await assertOwnMission(req.user, Number.parseInt(req.params.id, 10));
-  } catch (error) {
-    return next(error);
-  }
+router.get("/:id", async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
 
@@ -791,6 +808,7 @@ router.get("/:id", async (req, res, next) => {
           lastName: drivers.lastName,
           employeeNumber: drivers.employeeNumber,
           licenseNumber: drivers.licenseNumber,
+          userId: drivers.userId,
           cpcStatus: drivers.cpcStatus,
         },
       })
@@ -809,10 +827,18 @@ router.get("/:id", async (req, res, next) => {
       assignmentCompletedAt: assignment?.completedAt,
     });
 
+    // Le n de permis ne sort que pour les gestionnaires chauffeur et le chauffeur lui-meme ;
+    // `userId` ne sert qu'a decider du masquage et ne part pas dans la reponse.
+    let safeAssignment: typeof assignment | null = assignment || null;
+    if (assignment?.driver) {
+      const { userId: _driverUserId, ...driverFields } = redactDriverPersonalData(assignment.driver, req.user);
+      safeAssignment = { ...assignment, driver: driverFields as typeof assignment.driver };
+    }
+
     return res.json({
       ...mission,
       ...executionDates,
-      assignment: assignment || null,
+      assignment: safeAssignment,
     });
   } catch (error) {
     console.error("Get mission error:", error);
@@ -1710,7 +1736,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
 });
 
 // POST /api/missions - Créer une nouvelle mission
-router.post("/", async (req, res) => {
+router.post("/", staffOnly, async (req, res) => {
   try {
     // Le routeur est monté derrière authenticate: la session porte toujours
     // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
@@ -1876,7 +1902,7 @@ const updateMissionSchema = z.object({
 });
 
 // PATCH /api/missions/:id - Mettre à jour les infos de mission
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", staffOnly, async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
     if (!Number.isInteger(missionId)) {

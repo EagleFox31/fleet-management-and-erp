@@ -54,7 +54,7 @@ export async function listVehiclesForOwner(ownerId: number, query: ScopedVehicle
 
   const where = and(...conditions);
   const sortColumn =
-    query.sortBy && query.sortBy in SORT_COLUMNS
+    query.sortBy && Object.hasOwn(SORT_COLUMNS, query.sortBy)
       ? SORT_COLUMNS[query.sortBy as keyof typeof SORT_COLUMNS]
       : vehicles.createdAt;
   const orderBy = query.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);

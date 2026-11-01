@@ -1,12 +1,16 @@
 import { Router } from "express";
 import { z } from "zod";
-import { eq, desc, like } from "drizzle-orm";
+import { and, eq, desc, isNull, like } from "drizzle-orm";
 import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { assertOwnDriverRecord, redactDriverPersonalData } from "../lib/driver-scope";
+import { broadcastDriverEvent } from "../lib/driver-realtime";
+import { moduleLogger } from "../lib/logger";
+import { AppError } from "../lib/app-error";
 
+const log = moduleLogger("drivers-management");
 const router = Router();
 router.use(authenticate);
 
@@ -74,22 +78,13 @@ function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string }).code === "23505";
 }
 
+// Diffusion globale : identifiant seul, jamais la fiche (voir server/lib/driver-realtime.ts).
 function broadcastDriverUpdate(
   eventType: "driver_created" | "driver_updated" | "driver_toggled",
-  driver: unknown,
+  _driver: unknown,
   driverId: number,
 ): void {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate(eventType, {
-    entity: "driver",
-    entityId: driverId,
-    payload: { driver },
-    scope: { type: "broadcast" },
-  });
+  broadcastDriverEvent(eventType, driverId);
 }
 
 // GET /api/drivers/me — Profil chauffeur de l'utilisateur connecté + ses missions
@@ -104,20 +99,25 @@ router.get("/me", async (req, res) => {
       .where(eq(drivers.userId, userId))
       .limit(1);
 
-    // Fallback: si userId n'est pas encore renseigné dans drivers, chercher par le nom du user
+    // Repli : lier par le nom une fiche encore sans compte. Une fiche deja liee n'est jamais
+    // reprise (un homonyme ne s'approprie pas la fiche d'un autre), et si plusieurs fiches
+    // libres portent ce nom, on ne lie rien.
     if (!driver) {
       const [currentUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
       if (currentUser?.name) {
-        const parts = currentUser.name.trim().split(" ");
-        const firstName = parts[0];
-        const lastName = parts.slice(1).join(" ");
-        const [found] = await db.select().from(drivers)
-          .where(eq(drivers.firstName, firstName))
-          .limit(1);
-        if (found && found.lastName?.toLowerCase() === lastName.toLowerCase()) {
-          driver = found;
-          // Auto-corriger le lien manquant
-          await db.update(drivers).set({ userId }).where(eq(drivers.id, found.id));
+        const parts = currentUser.name.trim().split(/\s+/);
+        const firstName = parts[0].toLowerCase();
+        const lastName = parts.slice(1).join(" ").toLowerCase();
+        const candidates = (
+          await db.select().from(drivers).where(isNull(drivers.userId))
+        ).filter((row) => row.firstName?.toLowerCase() === firstName && (row.lastName ?? "").toLowerCase() === lastName);
+        if (candidates.length === 1) {
+          const [linked] = await db
+            .update(drivers)
+            .set({ userId })
+            .where(and(eq(drivers.id, candidates[0].id), isNull(drivers.userId)))
+            .returning();
+          if (linked) driver = linked;
         }
       }
     }
@@ -154,10 +154,13 @@ router.get("/me", async (req, res) => {
       .where(eq(assignments.driverId, driver.id))
       .orderBy(desc(missions.pickupDate));
 
-    console.log(`[driver/me] userId=${userId} → driverId=${driver.id} → ${driverMissions.length} missions (statuts: ${driverMissions.map(m => m.status).join(",")||"aucune"})`);
+    log.info(
+      { userId, driverId: driver.id, missions: driverMissions.length, statuses: driverMissions.map((m) => m.status), requestId: req.requestId },
+      "Profil chauffeur charge",
+    );
     return res.status(200).json({ driver, missions: driverMissions });
   } catch (error) {
-    console.error("Get driver/me error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get driver/me error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -194,7 +197,7 @@ router.get("/:id/missions", async (req, res, next) => {
 
     return res.status(200).json(rows);
   } catch (error) {
-    console.error("Get driver missions error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get driver missions error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -214,10 +217,8 @@ router.get("/:id", async (req, res, next) => {
     const driver = redactDriverPersonalData(await cpcTrainingService.getDriverWithCPCStatus(driverId), req.user);
     return res.status(200).json(driver);
   } catch (error) {
-    console.error("Get driver details error:", error);
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur",
-    });
+    log.error({ err: error, requestId: req.requestId }, "Get driver details error");
+    return next(new AppError(500, "Impossible de charger la fiche chauffeur.", { cause: error }));
   }
 });
 
@@ -268,7 +269,7 @@ router.post("/", isDriverManager, async (req, res) => {
       });
     }
 
-    console.error("Create driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create driver error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -357,7 +358,7 @@ router.patch("/:id", isDriverManager, async (req, res) => {
       });
     }
 
-    console.error("Update driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update driver error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -392,7 +393,7 @@ router.patch("/:id/toggle", isDriverManager, async (req, res) => {
       });
     }
 
-    console.error("Toggle driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Toggle driver error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -421,7 +422,7 @@ router.delete("/:id", isAdmin, async (req, res) => {
       driver: fullDriver,
     });
   } catch (error) {
-    console.error("Delete driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Delete driver error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -474,7 +475,7 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
 
     return res.status(201).json({ user: newUser, message: `Compte créé: ${username}` });
   } catch (error: any) {
-    console.error("Create driver user error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create driver user error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

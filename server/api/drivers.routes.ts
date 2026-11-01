@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth";
+import { authenticate, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { assertOwnDriverRecord, redactDriverList, redactDriverPersonalData, refuseDriver } from "../lib/driver-scope";
+import { assertOwnDriverRecord, redactDriverList, redactDriverPersonalData } from "../lib/driver-scope";
+import { broadcastDriverEvent } from "../lib/driver-realtime";
 
 const log = moduleLogger("drivers-routes");
 
@@ -16,34 +17,6 @@ function scopeToDriver<T extends { userId: number | null }>(rows: T[], user: { i
 }
 
 const router = Router();
-
-const broadcastDriverCpcUpdate = (
-  eventType: string,
-  payload: Record<string, unknown>,
-  options?: {
-    driverId?: number | null;
-    actorUserId?: number | null;
-    actorRole?: string | null;
-  },
-) => {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate(eventType, {
-    version: 1,
-    entity: "driver",
-    entityId: options?.driverId ?? null,
-    payload,
-    scope: { type: "broadcast" },
-    actor: {
-      userId: options?.actorUserId ?? null,
-      role: options?.actorRole ?? null,
-    },
-    emittedAt: new Date().toISOString(),
-  });
-};
 
 /**
  * Routes API Drivers & CPC Formations
@@ -100,12 +73,7 @@ router.get("/expiring-cpc", async (req, res, next) => {
  * POST /api/drivers/:id/update-cpc
  * Mise à jour certification CPC chauffeur
  */
-router.post("/:id/update-cpc", async (req, res, next) => {
-  try {
-    refuseDriver(req.user);
-  } catch (error) {
-    return next(error);
-  }
+router.post("/:id/update-cpc", isDriverManager, async (req, res, next) => {
   try {
     const driverId = parseInt(req.params.id);
     const { cpcDate } = req.body;
@@ -123,26 +91,17 @@ router.post("/:id/update-cpc", async (req, res, next) => {
       new Date(cpcDate)
     );
 
-    broadcastDriverCpcUpdate(
+    broadcastDriverEvent(
       "driver_cpc_updated",
-      {
-        driverId,
-        cpcDate,
-        driver,
-      },
-      {
-        driverId,
-        actorUserId: (req as any).session?.userId ?? null,
-        actorRole: (req as any).session?.role ?? null,
-      },
+      driverId,
+      { cpcDate },
+      { userId: (req as any).session?.userId ?? null, role: (req as any).session?.role ?? null },
     );
     
     return res.status(200).json(driver);
   } catch (error) {
-    console.error("Update CPC error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Update CPC error");
+    return next(new AppError(500, "Mise a jour de la certification CPC impossible.", { cause: error }));
   }
 });
 
@@ -150,15 +109,13 @@ router.post("/:id/update-cpc", async (req, res, next) => {
  * GET /api/drivers/cpc-statistics
  * Statistiques formations CPC
  */
-router.get("/cpc-statistics", async (req, res) => {
+router.get("/cpc-statistics", async (req, res, next) => {
   try {
     const stats = await cpcTrainingService.getCPCStatistics();
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get CPC statistics error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Get CPC statistics error");
+    return next(new AppError(500, "Impossible de charger les statistiques CPC.", { cause: error }));
   }
 });
 
@@ -182,10 +139,8 @@ router.get("/:id/cpc-status", async (req, res, next) => {
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
     return res.status(200).json(driver ? redactDriverPersonalData(driver, req.user) : driver);
   } catch (error) {
-    console.error("Get driver CPC status error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Get driver CPC status error");
+    return next(new AppError(500, "Impossible de charger le statut CPC.", { cause: error }));
   }
 });
 
@@ -193,27 +148,21 @@ router.get("/:id/cpc-status", async (req, res, next) => {
  * POST /api/drivers/sync-cpc-statuses
  * Synchronise tous les statuts CPC (maintenance)
  */
-router.post("/sync-cpc-statuses", async (req, res) => {
+router.post("/sync-cpc-statuses", isDriverManager, async (req, res, next) => {
   try {
     const result = await cpcTrainingService.syncAllCPCStatuses();
 
-    broadcastDriverCpcUpdate(
+    broadcastDriverEvent(
       "driver_cpc_statuses_synced",
-      {
-        result,
-      },
-      {
-        actorUserId: (req as any).session?.userId ?? null,
-        actorRole: (req as any).session?.role ?? null,
-      },
+      null,
+      { result },
+      { userId: (req as any).session?.userId ?? null, role: (req as any).session?.role ?? null },
     );
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error("Sync CPC statuses error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Sync CPC statuses error");
+    return next(new AppError(500, "Synchronisation des statuts CPC impossible.", { cause: error }));
   }
 });
 
