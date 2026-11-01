@@ -138,7 +138,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`) |
-| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
+| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | Partiel : masqué et consultable OK ; 3 défauts en `it.fails` (suppression physique, OT et mission sur véhicule supprimé) |
 | VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | À faire |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
@@ -300,7 +300,7 @@ Tables : `fuelRecords`, cartes carburant.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service` ; POST/PATCH plein : nombre illisible refusé au lieu d'être tronqué, `secondary-routes-validation`) |
-| FUEL2 | Consommation par véhicule | I | À faire |
+| FUEL2 | Consommation par véhicule | I | Partiel (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; `it.fails` : véhicule inconnu, 500 au lieu de 404) |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 
 ### 3.10 Clients, missions, facturation
@@ -344,8 +344,8 @@ Tables : `fleetKpiCache`.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Partiel (`management-dashboard-service`) |
-| DIR2 | Rapports filtrés par période | C | À faire |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | À faire |
+| DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes ; droits déjà dans `lot-exports-roles` ; `it.fails` : un plein saisi par l'application absent de l'export) |
 
 ---
 

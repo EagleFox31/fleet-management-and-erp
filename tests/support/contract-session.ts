@@ -53,10 +53,15 @@ export async function startContractSession<A extends string>(actors: Record<A, T
     return { status: response.status, body };
   }
 
+  /** Réponse brute (fichier binaire) : l'appelant lit `arrayBuffer()`. */
+  function raw(method: string, path: string, actor: A): Promise<Response> {
+    return fetch(baseUrl + path, { method, headers: { Cookie: cookies.get(actor)! } });
+  }
+
   async function stop() {
     await cleanupCreated(ids);
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 
-  return { ids, call, userId: (actor: A) => userIds.get(actor)!, stop };
+  return { ids, call, raw, userId: (actor: A) => userIds.get(actor)!, stop };
 }
