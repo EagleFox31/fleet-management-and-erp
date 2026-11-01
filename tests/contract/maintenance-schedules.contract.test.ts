@@ -184,15 +184,15 @@ describe("MNT1 : plan de maintenance", { timeout: 60000 }, () => {
       scheduleWithWorkOrderId = created.body.id;
     }, 60000);
 
-  it.fails("ne répond 204 que si le plan dont un OT a été généré est vraiment supprimé", async () => {
-    const res = await session.call("DELETE", `/api/maintenance-schedules/${scheduleWithWorkOrderId}`, { actor: "manager" });
-    const rows = await db.select({ id: maintenanceSchedules.id }).from(maintenanceSchedules).where(eq(maintenanceSchedules.id, scheduleWithWorkOrderId));
-    if (res.status === 204) {
-      expect(rows).toHaveLength(0);
-    } else {
-      expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(res.status).toBeLessThan(500);
-    }
-  });
+    it.fails("ne répond 204 que si le plan dont un OT a été généré est vraiment supprimé", async () => {
+      const res = await session.call("DELETE", `/api/maintenance-schedules/${scheduleWithWorkOrderId}`, { actor: "manager" });
+      const rows = await db.select({ id: maintenanceSchedules.id }).from(maintenanceSchedules).where(eq(maintenanceSchedules.id, scheduleWithWorkOrderId));
+      if (res.status === 204) {
+        expect(rows).toHaveLength(0);
+      } else {
+        expect(res.status).toBeGreaterThanOrEqual(400);
+        expect(res.status).toBeLessThan(500);
+      }
+    });
   });
 });

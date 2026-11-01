@@ -123,10 +123,10 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
       scheduleId = schedule.id;
     }, 60000);
 
-  it.fails("une échéance de plan actif dans la fenêtre déclenche un OT lié au plan", async () => {
-    await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId);
-    expect(await pendingFor(scheduleId)).toHaveLength(1);
-  });
+    it.fails("une échéance de plan actif dans la fenêtre déclenche un OT lié au plan", async () => {
+      await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
   });
 });
 
@@ -195,14 +195,17 @@ describe("MNT2 : déclenchement par kilométrage", { timeout: 120000 }, () => {
       const plan = await mileagePlan(vehicle.id, 10000, 1000);
       vehicleId = vehicle.id;
       planId = plan.id;
+      // Premier passage en mise en place : il doit laisser exactement un OT en attente.
+      await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
+      const afterFirst = (await pendingFor(planId)).filter((wo) => wo.status === "pending");
+      expect(afterFirst).toHaveLength(1);
     }, 60000);
 
-  it.fails("deux passages à un kilométrage très au-dessus du seuil ne créent qu'un seul OT en attente par plan", async () => {
-    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
-    await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
-    const pending = (await pendingFor(planId)).filter((wo) => wo.status === "pending");
-    expect(pending).toHaveLength(1);
-  });
+    it.fails("un second passage à un kilométrage très au-dessus du seuil ne crée pas de second OT en attente pour le plan", async () => {
+      await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
+      const pending = (await pendingFor(planId)).filter((wo) => wo.status === "pending");
+      expect(pending).toHaveLength(1);
+    });
   });
 });
 

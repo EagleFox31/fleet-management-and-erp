@@ -127,11 +127,11 @@ describe("CAT1 : catalogue de main-d'oeuvre", { timeout: 60000 }, () => {
       entryToPatchId = res.body.id;
     }, 60000);
 
-  it.fails("désactive un poste par PATCH /api/labor-catalog/:id", async () => {
-    const patched = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: false } });
-    expect(patched.status).toBe(200);
-    const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
-    expect(row.isActive).toBe(false);
-  });
+    it.fails("désactive un poste par PATCH /api/labor-catalog/:id", async () => {
+      const patched = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: false } });
+      expect(patched.status).toBe(200);
+      const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
+      expect(row.isActive).toBe(false);
+    });
   });
 });
