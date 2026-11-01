@@ -25,6 +25,7 @@ import managementRoutes from "./management.routes";
 import featureFlagsRoutes from "./feature-flags.routes";
 import vehicleDocumentTypesRoutes from "./vehicle-document-types.routes";
 import authLockoutRoutes from "./auth-lockout.routes";
+import pinAuthRoutes from "./pin-auth.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
@@ -81,6 +82,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
   apiRouter.use(auditWrites(AUDIT_CONFIG));
+  // Ecran PIN : un chauffeur desactive n'y figure plus et ne s'y connecte plus.
+  apiRouter.use(pinAuthRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
