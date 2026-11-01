@@ -159,7 +159,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DOC1 | CRUD centre de renouvellement, désactivation (absent des choix) | C | À faire |
-| DOC2 | Demande : transitions valides, transitions interdites refusées | C | À faire |
+| DOC2 | Demande : transitions valides, transitions interdites refusées | C | OK (`document-renewal-status` : terminée/rejetée 409, en attente → terminée 409, date illisible 400 ; unitaire `document-renewal-statuses`) |
 | DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | À faire |
 
 ### 3.4 Maintenance et atelier
@@ -194,7 +194,7 @@ stateDiagram-v2
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (POST : 400 lisible, `createdBy` de la session, `validatedBy` ignoré ; cycle de vie à faire) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
-| WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | Partiel (`tests/unit/shared/work-order-items`) |
+| WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, rien ne sort à la demande (rayon « à sortir » chez le magasinier, manquant en demande), rayon réservé | C | OK (`work-order-parts`, `stock-issue-permission`) |
 | WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | À faire |
 | WO6 | Temps technicien : pointage, agrégation mensuelle | I | À faire |
