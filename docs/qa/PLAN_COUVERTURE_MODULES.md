@@ -91,8 +91,13 @@ flowchart LR
 | T2 | Sessions : création, expiration, révocation, logout | C | OK (`api-auth-sessions`) |
 | T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; PATCH document, planification, utilisateur, POST/PATCH plein carburant, POST catalogue de pannes dans `secondary-routes-validation` ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate`) |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields` ; commande fournisseur : totaux recalculés, remise bornée 0..100, quantités reçues bornées et jamais en baisse, `purchase-order-amounts` ; facture client : montant borné, TVA/TTC recalculés, `client-invoice-generate` ; facture fournisseur : champs du workflow ignorés, solde initial = TTC, `supplier-invoice-create`) |
+<<<<<<< HEAD
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | À faire |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders` ; `14-realtime-work-order-roles` : trames `work_order_created` chez le technicien et `work_order_updated` chez le chef d'atelier ; invalidation KPI non vérifiée) |
+=======
+| T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | Fait en I (`stock-audit-columns` : created_by/updated_by/dates des pièces et pneus par le service, trois utilisateurs distincts, suppression logique, noms joints) ; routes HTTP non couvertes |
+| T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders`) |
+>>>>>>> origin/main
 | T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
 | T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | À faire |
 
@@ -137,9 +142,9 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`) |
-| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
-| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | À faire |
+| VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`, contrat `vehicles-crud` : 4 défauts figés) |
+| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | Partiel : masqué et consultable OK ; 3 défauts en `it.fails` (suppression physique, OT et mission sur véhicule supprimé) |
+| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e à faire |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
 ### 3.3 Documents et renouvellements
@@ -188,17 +193,22 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | À faire |
-| MNT2 | Déclenchement par date et par kilométrage | I | À faire |
-| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | À faire |
+| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | Partiel : CRUD, droits, 400/404, cloison client, désactivation OK ; 1 défaut en `it.fails` (DELETE répond 204 sans supprimer) |
+| MNT2 | Déclenchement par date et par kilométrage | I | Partiel : fenêtre 30 jours, seuil km, plan inactif OK ; 2 défauts en `it.fails` (échéance du plan ignorée, doublon km) |
+| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | Partiel : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT OK ; 1 manque en `it.fails` (aucune route de désactivation) |
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, rien ne sort à la demande (rayon « à sortir » chez le magasinier, manquant en demande), rayon réservé | C | OK (`work-order-parts`, `stock-issue-permission`) |
 | WO5 | Coût OT = base + pièces + pneus, identique UI et PDF | I / E | OK (formule unique `shared/work-order-cost.ts` pour écran et PDF ; U `work-order-cost` : NaN impossible, arrondi au centime ; I `work-order-cost` : service technicien = formule ; I `kpi-service` : coût moyen inclut les rotations, sans produit cartésien) |
+<<<<<<< HEAD
 | WO6 | Temps technicien : pointage, agrégation mensuelle | I | À faire |
 | WO7 | Notification chef ↔ technicien dans les deux sens | E | Partiel (`14-realtime-work-order-roles` : chef vers technicien, alerte d'affectation + trame ; technicien vers chef, trame de démarrage ; pas d'alerte nominative vers le chef vérifiée) |
+=======
+| WO6 | Temps technicien : pointage, agrégation mensuelle | I | Partiel (`time-tracking` contrat 5 cas, intégration 3 cas : saisie rejouable, totaux mensuels, chauffeur inactif ; limite : bord de mois et fuseau non testés) |
+| WO7 | Notification chef ↔ technicien dans les deux sens | E | À faire |
+>>>>>>> origin/main
 
 ### 3.5 Magasin : pièces
 
@@ -299,8 +309,8 @@ Tables : `fuelRecords`, cartes carburant.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service` ; POST/PATCH plein : nombre illisible refusé au lieu d'être tronqué, `secondary-routes-validation`) |
-| FUEL2 | Consommation par véhicule | I | À faire |
+| FUEL1 | CRUD plein et carte carburant | C | Fait en C, 6 défauts figés (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; `it.fails` : date de recharge illisible 500, quantité illisible ou négative acceptées en 201, véhicule inconnu 500, solde insuffisant 500, client lit les pleins d'un véhicule tiers) ; `fuel-card-service`, `secondary-routes-validation` |
+| FUEL2 | Consommation par véhicule | I | Partiel (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; `it.fails` : véhicule inconnu, 500 au lieu de 404) |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 
 ### 3.10 Clients, missions, facturation
@@ -322,8 +332,13 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
+<<<<<<< HEAD
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Partiel (`13-mission-invoice-payment` : création par l'API logistique, passage à « livrée » en base ; affectation, étapes et lancement non rejoués) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | À faire |
+=======
+| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | À rejouer (`05-mission-billing-payment`) |
+| MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict`, 1 défaut figé) |
+>>>>>>> origin/main
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
 
@@ -343,9 +358,9 @@ Tables : `fleetKpiCache`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DIR1 | KPI recalculés après chaque transition métier | I | Partiel (`management-dashboard-service`) |
-| DIR2 | Rapports filtrés par période | C | À faire |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | À faire |
+| DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
+| DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes ; droits déjà dans `lot-exports-roles` ; `it.fails` : un plein saisi par l'application absent de l'export) |
 
 ---
 
@@ -386,7 +401,7 @@ flowchart LR
 
 ### P3 — Maintenance préventive
 
-État : **À faire**.
+État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance couvert (MNT1, MNT2) ; alerte, clôture de l'OT → véhicule opérationnel et recalcul de la prochaine échéance par date non couverts.
 
 ```mermaid
 flowchart LR

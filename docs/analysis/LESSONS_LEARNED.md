@@ -896,3 +896,43 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Toute table qui référence `users` et peut être écrite par un compte de test se vide dans `cleanupOrphanTestRows` avant la suppression des comptes.
 - Une assertion sur les alertes d'un compte filtre sur les objets créés par le test : le job en tâche de fond écrit pour tous les comptes.
+
+## 2026-11-01 - it.fails qui contient sa mise en place
+
+### Constat
+- Cinq PR de tests (#67, #68, #70, #71, #72) ont été recalées en relecture : un `it.fails(...)` contenait aussi la création du véhicule, du plan ou de la mission, ou le POST d'une fixture.
+
+### Cause racine
+- `it.fails` passe au vert dès que son corps lève, quelle qu'en soit la raison. Un setup en 500 ou une coupure Neon fait donc passer le test sans prouver le défaut visé.
+- Classification : piège de l'outil, répété cinq fois malgré la relecture. Contrôle automatique requis.
+
+### Résolution
+- `tests/unit/server/it-fails-hygiene.test.ts` parcourt `tests/**/*.test.ts` et `e2e/**/*.spec.ts`, repère les `it.fails` / `test.fail` dont le corps appelle une fabrique (`create*`, `seed*`, `make*`, `insert*`, `open*`, `new*`, `setup*`, `db.insert`, `.save`) hors assertion directe sur son statut, ou fait plus d'une requête HTTP.
+- Les occurrences présentes sur main sont gelées (liste explicite, qui ne peut que rétrécir).
+
+### Prévention (vérifiable)
+- Une nouvelle occurrence fait échouer le test unitaire, avec la règle et la correction dans le message.
+- Preuve : un `it.fails` fautif déposé dans `tests/contract/` fait passer le test à rouge (1 failed, clé `fichier::titre` listée) ; retiré, vert.
+
+### Règle Projet (obligatoire)
+- Un `it.fails` ne contient que l'appel visé et l'assertion métier ; la mise en place va dans `beforeAll` ou un `it` témoin.
+
+## 2026-11-01 - Sonde de test : débits NaN écrits, solde global de la carte empoisonné
+
+### Constat
+- Premier passage de `fuel-card-routes.contract.test.ts` (FUEL1) : 8 échecs, `balance` à `null`, un débit « solde insuffisant » accepté en 201. La suite avait elle-même écrit des débits dont la quantité valait NaN.
+
+### Cause racine
+- Produit : `POST /api/fuel-card/consumption` ne valide ni quantité ni prix (`fuel-card-service.ts` ~215-231) : NaN accepté, SUM devient NaN pour toute la carte, et `cost > balance` (comparaison avec NaN toujours fausse) désactive le garde de solde.
+- Test : les sondes de défauts étaient jouées au milieu du fichier, sur une carte au solde global, et leur ligne n'était supprimée qu'en fin de fichier. Classification : sonde destructive sur état partagé, sans ménage immédiat ni filet.
+
+### Résolution
+- Sondes déplacées en fin de fichier, jouées une seule fois en `beforeAll`, ligne supprimée aussitôt (`probe()`), id enregistré avant la suppression.
+- Filet : `afterAll` balaie tout `fuel_records` daté de 2031 (année réservée à ce fichier). Base vérifiée : 0 ligne NaN après le premier passage.
+
+### Prévention (vérifiable)
+- Rejeu du fichier : solde fini à la fin, second passage identique (idempotence). Le balayage 2031 retire toute ligne laissée par une suppression en échec.
+- Limite : un crash du processus avant `afterAll` laisse la ligne jusqu'au passage suivant, qui la balaie.
+
+### Règle Projet (obligatoire)
+- Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
