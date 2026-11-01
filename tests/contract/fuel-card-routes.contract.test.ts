@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { fuelRecords } from "../../shared/schema";
@@ -65,6 +65,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  // Balayage : 2031 est réservée à ce fichier. Un débit NaN resté en base empoisonnerait le solde global.
+  await db.delete(fuelRecords).where(sql`${fuelRecords.date} >= '2031-01-01' AND ${fuelRecords.date} < '2032-01-01'`);
   await session.stop();
 });
 
@@ -324,7 +326,11 @@ describe("FUEL1 : défauts figés (it.fails)", { timeout: 120000 }, () => {
   async function probe(key: string, path: string, body: Record<string, unknown>) {
     const res = await session.call("POST", path, { actor: "admin", body });
     const id = res.body?.recharge?.id ?? res.body?.consumption?.id;
-    if (typeof id === "number") await db.delete(fuelRecords).where(inArray(fuelRecords.id, [id]));
+    if (typeof id === "number") {
+      // L'id est enregistré avant la suppression : si elle échoue, le ménage de fin de fichier le reprend.
+      recordIds.push(id);
+      await db.delete(fuelRecords).where(inArray(fuelRecords.id, [id]));
+    }
     probes[key] = { status: res.status, body: res.body };
   }
 
