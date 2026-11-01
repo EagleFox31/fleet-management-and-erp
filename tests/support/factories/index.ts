@@ -175,7 +175,9 @@ export async function createTestClientInvoice(
       clientId: overrides.clientId,
       invoiceNumber: overrides.invoiceNumber ?? token,
       invoiceDate: overrides.invoiceDate ?? "2026-01-15",
-      dueDate: overrides.dueDate ?? "2026-02-15",
+      // Échéance lointaine : une facture de test échue serait passée en retard
+      // par le cycle de fond d'un serveur branché sur la même base (CINV2).
+      dueDate: overrides.dueDate ?? "2099-02-15",
       amountHT,
       vatAmount,
       amountTTC,
