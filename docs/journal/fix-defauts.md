@@ -46,3 +46,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : valider une panne avec validatedBy forgé : le champ est ignoré et l'utilisateur connecté enregistré.
 - **Preuve** : contrat fault-catalog-lifecycle : les 3 it.fails passent (Expect test to fail).
 - **Reste / risques** : handlers d'origine de routes.ts en code mort.
+
+## 2026-11-01T22:26:19+01:00 — Comptes : auto-désactivation admin, authenticate relit le compte
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : un admin ne peut pas désactiver son propre compte (400) ; authenticate refuse un compte supprimé ou inconnu.
+- **Comment** : admin-users-guard.routes.ts ; authenticate asynchrone avec getUser ; tests auth-middleware et users-admin-self-deactivation.
+- **Pourquoi** : mineurs #66.
+- **Comment tester (QA)** : un admin PATCH son propre /toggle avec isActive=false : 400, compte actif.
+- **Preuve** : unitaires 854/854 ; contrats users-admin-self-deactivation et users-admin-soft-delete verts.
+- **Reste / risques** : getUser (storage.ts, gelé) renvoie encore les comptes supprimés : exception storage.ts à décider ; authorize et authenticate filtrent déjà deletedAt.

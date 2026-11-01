@@ -116,8 +116,29 @@ describe("authenticate", () => {
     const empty = await run(authenticate as Guard, {});
     expect(empty.res.statusCode).toBe(401);
 
+    getUser.mockResolvedValue({ id: 1, role: "technician", deletedAt: null });
     const logged = await run(authenticate as Guard, { userId: 1 });
     expect(logged.next).toHaveBeenCalledOnce();
+  });
+
+  it("relit le compte : un compte supprimé ou inconnu est refusé (401)", async () => {
+    getUser.mockResolvedValue({ id: 1, role: "technician", deletedAt: new Date() });
+    const deleted = await run(authenticate as Guard, { userId: 1 });
+    expect(deleted.res.statusCode).toBe(401);
+    expect(deleted.next).not.toHaveBeenCalled();
+
+    getUser.mockResolvedValue(undefined);
+    const unknown = await run(authenticate as Guard, { userId: 99 });
+    expect(unknown.res.statusCode).toBe(401);
+    expect(unknown.next).not.toHaveBeenCalled();
+  });
+
+  it("échec de lecture du compte : 500 sans détail, jamais next()", async () => {
+    getUser.mockRejectedValue(new Error("connexion perdue : SELECT secret"));
+    const failed = await run(authenticate as Guard, { userId: 1 });
+    expect(failed.res.statusCode).toBe(500);
+    expect(JSON.stringify(failed.res.body)).not.toMatch(/SELECT|connexion/);
+    expect(failed.next).not.toHaveBeenCalled();
   });
 });
 

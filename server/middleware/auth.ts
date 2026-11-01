@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { storage } from "../storage";
+import { moduleLogger } from "../lib/logger";
 import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
@@ -57,7 +58,7 @@ export function isSessionGuard(fn: unknown): boolean {
   return typeof fn === "function" && (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] === true;
 }
 
-export const authenticate = sessionGuard((req: Request, res: Response, next: NextFunction) => {
+export const authenticate = sessionGuard(async (req: Request, res: Response, next: NextFunction) => {
   const debugAuth = process.env.AUTH_DEBUG !== "0";
   if (debugAuth) {
     console.log(`🔐 [AUTH] ${req.method} ${req.path} - Session: ${!!req.session} - UserId: ${req.session?.userId || 'NONE'}`);
@@ -68,6 +69,21 @@ export const authenticate = sessionGuard((req: Request, res: Response, next: Nex
       console.log(`❌ [AUTH] Accès refusé - Non authentifié`);
     }
     return res.status(401).json({ message: 'Non authentifié' });
+  }
+
+  // Le compte est relu : une session survivante d'un compte supprimé ou
+  // inexistant ne passe plus, même sur une route gardée par `authenticate` seul.
+  try {
+    const user = await storage.getUser(req.session.userId);
+    if (!user || user.deletedAt) {
+      if (debugAuth) {
+        console.log(`❌ [AUTH] Accès refusé - Compte supprimé ou inconnu: ${req.session.userId}`);
+      }
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+  } catch (err) {
+    moduleLogger("auth").error({ err, requestId: req.requestId }, "Relecture du compte impossible");
+    return res.status(500).json({ message: 'Erreur serveur' });
   }
 
   if (debugAuth) {

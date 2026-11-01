@@ -28,6 +28,7 @@ import authLockoutRoutes from "./auth-lockout.routes";
 import pinAuthRoutes from "./pin-auth.routes";
 import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
+import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
@@ -90,6 +91,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(partsCatalogRoutes);
   // Catalogue de pannes : valideur pose par le serveur, id inconnu -> 404.
   apiRouter.use(faultCatalogRoutes);
+  // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
+  apiRouter.use(adminUsersGuardRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
