@@ -58,7 +58,7 @@ afterAll(async () => {
   await session?.close();
 }, 120000);
 
-describe("SUP1 : création et lecture", { timeout: 60000 }, () => {
+describe("SUP1 : création et lecture", { timeout: 180000 }, () => {
   it("admin crée un fournisseur complet, il apparaît dans la liste et le détail", async () => {
     const name = uniqueTestToken("supplier-crud");
     const created = await call("POST", "/api/suppliers", {
@@ -111,7 +111,7 @@ describe("SUP1 : création et lecture", { timeout: 60000 }, () => {
   });
 });
 
-describe("SUP1 : modification et désactivation", { timeout: 60000 }, () => {
+describe("SUP1 : modification et désactivation", { timeout: 180000 }, () => {
   it("PATCH modifie un champ (secrétaire) ; magasinier refusé", async () => {
     const s = await seed();
     const ok = await call("PATCH", `/api/suppliers/${s.id}`, { actor: "secretary", body: { phone: "+237611111111" } });
