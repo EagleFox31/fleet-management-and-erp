@@ -191,6 +191,7 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
 describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
   let historyVehicleId = 0;
   let historyWorkOrderId = 0;
+  let historyDeleteStatus = 0;
   beforeAll(async () => {
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
@@ -201,6 +202,8 @@ describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
       .returning();
     workOrderIds.push(wo.id);
     historyWorkOrderId = wo.id;
+    // L'appel visé est joué ici, son statut est l'objet de l'assertion du cas.
+    historyDeleteStatus = (await call("DELETE", `/api/vehicles/${vehicle.id}`)).status;
   }, 60000);
 
   it("refuse un rôle non admin (403) sans toucher au véhicule", async () => {
@@ -232,8 +235,7 @@ describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
   // `deletedAt`. Un véhicule qui porte un OT viole la clé étrangère
   // work_orders.vehicle_id : 500, et l'historique n'est jamais conservé.
   it.fails("supprime un véhicule qui porte un OT en conservant l'OT consultable", async () => {
-    const res = await call("DELETE", `/api/vehicles/${historyVehicleId}`);
-    expect(res.status).toBe(200);
+    expect(historyDeleteStatus).toBe(200);
     const after = await call("GET", `/api/work-orders/${historyWorkOrderId}`);
     expect(after.status).toBe(200);
     const [row] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));

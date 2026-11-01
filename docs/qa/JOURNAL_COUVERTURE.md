@@ -1347,6 +1347,9 @@ soumission sans doublon.
   au lieu de rendre le cas vert. Rouge rejoué sans `.fails`, erreurs exactes : `expected 201 to be 400`
   (mission), `expected 201 to be greater than or equal to 400` (OT), `expected 500 to be 200` (DELETE).
   Contrat 9/9 verts.
+- Garde-fou d'hygiène (`it-fails-hygiene`) : le DELETE de la route est joué dans le `beforeAll` (il
+  faisait deux requêtes dans le `it.fails`), le cas assert son statut puis la lecture de l'OT. Rouge rejoué :
+  `expected 500 to be 200`. Hygiène 7/7.
 - `tsc` 0 erreur, unitaire 838/838, contrat 9/9 cas verts.
 
 **Limites**
