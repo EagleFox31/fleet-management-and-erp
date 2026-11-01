@@ -272,6 +272,20 @@ describe("TIR3 : montage, rotation, démontage par le chef d'atelier", { timeout
     expect((await tireRow(tireId)).stockQuantity).toBe(1);
   });
 
+  it("démontage à un kilométrage inférieur au montage : 400 lisible, le pneu reste monté", async () => {
+    const { tireId, vehicleTireId } = await seedMountedTire();
+    const res = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, {
+      actor: "workshopManager",
+      body: { destination: "stock", removalMileage: 500 },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("VALIDATION");
+    expect(res.body.message).toMatch(/1[\s  ]?000 km/);
+    const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
+    expect(row).toMatchObject({ status: "active", removalMileage: null });
+    expect((await tireRow(tireId)).stockQuantity).toBe(1);
+  });
+
   it("démontage sans destination, ou rebut sans motif : 400, le pneu reste monté", async () => {
     const { tireId, vehicleTireId } = await seedMountedTire();
     for (const body of [{ removalMileage: 2000 }, { destination: "scrap", removalMileage: 2000 }, { destination: "garage" }]) {

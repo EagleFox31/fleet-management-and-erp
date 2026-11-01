@@ -462,6 +462,25 @@ export class TiresService {
    */
   async removeTireFromVehicle(vehicleTireId: number, removal: TireRemoval, userId?: number): Promise<boolean> {
     const removed = await db.transaction(async (tx) => {
+      // Un pneu ne roule pas à l'envers : démonté avant son kilométrage de montage, la saisie est fausse.
+      const [mounted] = await tx
+        .select({ installationMileage: vehicleTires.installationMileage })
+        .from(vehicleTires)
+        .where(and(eq(vehicleTires.id, vehicleTireId), eq(vehicleTires.status, 'active')))
+        .for('update');
+      if (
+        mounted?.installationMileage != null &&
+        removal.removalMileage !== undefined &&
+        removal.removalMileage < mounted.installationMileage
+      ) {
+        const km = (value: number) => `${value.toLocaleString("fr-FR")} km`;
+        throw new AppError(
+          400,
+          `Le kilométrage de démontage (${km(removal.removalMileage)}) est inférieur à celui du montage (${km(mounted.installationMileage)}).`,
+          { fieldErrors: [{ field: "removalMileage", message: `Au moins ${km(mounted.installationMileage)}` }] },
+        );
+      }
+
       const [row] = await tx
         .update(vehicleTires)
         .set({
