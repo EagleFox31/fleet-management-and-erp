@@ -106,9 +106,9 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | Partiel (PATCH : 400 par champ, 409 doublon, champs serveur conservés, `secondary-routes-validation` ; 403 à faire) |
+| ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | OK (`users-admin-soft-delete` : 403 non-admin sur POST/PATCH/DELETE, 401 anonyme, auto-suppression 400 ; PATCH : `secondary-routes-validation`) |
 | ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
-| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | À faire |
+| ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
 | ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | À faire |
 | ADM6 | Journal d'activité alimenté sur les actions sensibles | I | À faire |
