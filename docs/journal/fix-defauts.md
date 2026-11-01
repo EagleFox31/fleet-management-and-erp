@@ -57,3 +57,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : un admin PATCH son propre /toggle avec isActive=false : 400, compte actif.
 - **Preuve** : unitaires 854/854 ; contrats users-admin-self-deactivation et users-admin-soft-delete verts.
 - **Reste / risques** : getUser (storage.ts, gelé) renvoie encore les comptes supprimés : exception storage.ts à décider ; authorize et authenticate filtrent déjà deletedAt.
+
+## 2026-11-01T22:26:20+01:00 — Workflow d'acquisition : liste blanche des champs
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : un corps forgé (status, userId) n'est plus écrit ; la clôture ne passe que par /complete.
+- **Comment** : workflows.routes.ts (Zod) ; workflow-service : colonnes explicites en insert et en update.
+- **Pourquoi** : défaut signalé à la relecture de #72.
+- **Comment tester (QA)** : POST avec status=completed et currentStep=5 : brouillon créé en in_progress, aucun véhicule activé.
+- **Preuve** : tsc 0 erreur ; test de contrat à écrire par le testeur (VEH3 de #72 reste à lui).
+- **Reste / risques** : aucun test de contrat dans ce commit : à couvrir par fleet-testeur.
