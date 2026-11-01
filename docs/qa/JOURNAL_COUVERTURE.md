@@ -833,7 +833,7 @@ soumission sans doublon.
   `technician-work-order-status` : 43/43.
 - Unitaire 807/807 ; `npm run check` 0 erreur ; e2e `03-work-orders` et `06-realtime-work-orders` verts.
 
-## (hash à reporter) - Commande fournisseur : remise bornée, quantités reçues contrôlées (T4)
+## bcd695a - Commande fournisseur : remise bornée, quantités reçues contrôlées (T4)
 
 **Quoi**
 - `POST /api/purchase-orders` : remise hors de 0..100 refusée (400). Un total envoyé par le client
