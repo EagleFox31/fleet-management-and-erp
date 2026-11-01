@@ -299,7 +299,7 @@ Tables : `fuelRecords`, cartes carburant.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| FUEL1 | CRUD plein et carte carburant | C | Partiel (`fuel-card-service` ; POST/PATCH plein : nombre illisible refusé au lieu d'être tronqué, `secondary-routes-validation`) |
+| FUEL1 | CRUD plein et carte carburant | C | Fait en C, 6 défauts figés (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; `it.fails` : date de recharge illisible 500, quantité illisible ou négative acceptées en 201, véhicule inconnu 500, solde insuffisant 500, client lit les pleins d'un véhicule tiers) ; `fuel-card-service`, `secondary-routes-validation` |
 | FUEL2 | Consommation par véhicule | I | Partiel (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; `it.fails` : véhicule inconnu, 500 au lieu de 404) |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 
@@ -343,7 +343,7 @@ Tables : `fleetKpiCache`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DIR1 | KPI recalculés après chaque transition métier | I | Partiel (`management-dashboard-service`) |
+| DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
 | DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
 | DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes ; droits déjà dans `lot-exports-roles` ; `it.fails` : un plein saisi par l'application absent de l'export) |
 
