@@ -35,3 +35,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : créer une pièce avec prix « abc » : 400 ; même référence : 409 ; supprimer deux fois : 204 puis 404.
 - **Preuve** : contrat parts-catalog-crud : 17/22, les 5 it.fails passent (Expect test to fail).
 - **Reste / risques** : les anciens handlers de routes.ts restent en code mort ; console.log de deletePart conservés (à migrer).
+
+## 2026-11-01T22:26:19+01:00 — Catalogue de pannes : valideur serveur, 404
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le valideur d'une panne vient de la session et plus du corps ; un id inconnu donne 404.
+- **Comment** : routeur fault-catalog.routes.ts monté avant routes.ts.
+- **Pourquoi** : CAT2 figés en it.fails.
+- **Comment tester (QA)** : valider une panne avec validatedBy forgé : le champ est ignoré et l'utilisateur connecté enregistré.
+- **Preuve** : contrat fault-catalog-lifecycle : les 3 it.fails passent (Expect test to fail).
+- **Reste / risques** : handlers d'origine de routes.ts en code mort.
