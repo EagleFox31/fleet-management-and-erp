@@ -1,6 +1,10 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
+import { AppError, isAppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("purchase-orders");
 
 const router = Router();
 type PurchaseOrderScope = "parts" | "non_parts";
@@ -275,7 +279,7 @@ router.get("/:id", requireAuth, async (req: Request, res: Response) => {
 /**
  * POST /api/purchase-orders - Créer une commande
  */
-router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Response) => {
+router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Valider les données de base
     const schema = z.object({
@@ -290,7 +294,8 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
         quantityOrdered: z.number().positive(),
         unitPrice: z.number().positive(),
       })).optional().default([]),
-      discountPercentage: z.number().optional(),
+      // Remise bornée : hors de 0..100, le total deviendrait négatif ou gonflé.
+      discountPercentage: z.number().min(0, "La remise ne peut pas être négative.").max(100, "La remise ne peut pas dépasser 100 %.").optional(),
       notes: z.string().optional(),
       urgency: z.enum(['low', 'medium', 'high', 'critical']).optional(),
     }).refine(
@@ -325,19 +330,11 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
 
     res.status(201).json(order);
   } catch (error) {
-    console.error("❌ Erreur lors de la création de la commande:", error);
-    
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        error: "Données invalides",
-        details: error.errors
-      });
+    // Erreurs normalisées par le gestionnaire central : jamais de détail technique.
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "création de commande");
     }
-
-    res.status(500).json({
-      error: "Erreur lors de la création de la commande",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    next(error);
   }
 });
 
@@ -455,11 +452,12 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
  * PATCH /api/purchase-orders/:id/lines/:lineId - Mettre à jour une ligne
  * Utile pour la réception et le contrôle qualité
  */
-router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req: Request, res: Response) => {
+router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const orderId = parseInt(req.params.id);
-    if (Number.isNaN(orderId)) {
-      return res.status(400).json({ error: "ID de commande invalide" });
+    const lineId = parseInt(req.params.lineId);
+    if (Number.isNaN(orderId) || Number.isNaN(lineId)) {
+      throw new AppError(400, "Commande ou ligne invalide.");
     }
 
     const scope = await getScopeByOrderId(orderId);
@@ -467,18 +465,20 @@ router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req
       return denyByScope(res, scope);
     }
 
-    const lineId = parseInt(req.params.lineId);
-    
+    // Quantités entières et positives : une quantité reçue négative gonflait le
+    // stock à la réception suivante (écart calculé depuis une base négative).
+    const quantity = (label: string) =>
+      z.number().int(`${label} : nombre entier attendu.`).min(0, `${label} : la quantité ne peut pas être négative.`).optional();
     const schema = z.object({
-      quantityReceived: z.number().optional(),
-      quantityAccepted: z.number().optional(),
-      quantityRejected: z.number().optional(),
+      quantityReceived: quantity("Quantité reçue"),
+      quantityAccepted: quantity("Quantité acceptée"),
+      quantityRejected: quantity("Quantité refusée"),
       deliveryStatus: z.enum(['pending', 'partial', 'delivered', 'accepted', 'rejected']).optional(),
     });
 
     const data = schema.parse(req.body);
 
-    const updated = await procurementService.updateOrderLine(lineId, data, req.user?.id);
+    const updated = await procurementService.updateOrderLine(lineId, data, req.user?.id, orderId);
 
     broadcastPurchaseOrderUpdate(
       "purchase_order_line_updated",
@@ -497,26 +497,10 @@ router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req
 
     res.json(updated);
   } catch (error) {
-    console.error("❌ Erreur lors de la mise à jour de la ligne:", error);
-    
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        error: "Données invalides",
-        details: error.errors
-      });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "mise à jour de ligne de commande");
     }
-
-    if (error instanceof Error && error.message.includes("Commande introuvable")) {
-      return res.status(404).json({
-        error: "Commande introuvable",
-        details: error.message,
-      });
-    }
-
-    res.status(500).json({
-      error: "Erreur lors de la mise à jour de la ligne",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    next(error);
   }
 });
 
