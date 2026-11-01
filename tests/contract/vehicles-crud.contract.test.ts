@@ -55,6 +55,14 @@ afterAll(async () => {
 }, 120000);
 
 describe("VEH1 : création", { timeout: 180000 }, () => {
+  // Mise en place hors des it.fails : un échec de création ne doit pas passer pour le défaut attendu.
+  let historyVehicleId: number;
+  beforeAll(async () => {
+    const res = await create("workshopManager");
+    expect(res.status).toBe(201);
+    historyVehicleId = res.body.id;
+  });
+
   it.each(["admin", "workshopManager"] as const)("%s crée un véhicule : createdBy = session", async (actor) => {
     const res = await create(actor);
     expect(res.status).toBe(201);
@@ -63,8 +71,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
   });
 
   it("le statut initial est consigné dans l'historique", async () => {
-    const res = await create("workshopManager");
-    const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, res.body.id));
+    const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, historyVehicleId));
     expect(history.length).toBeGreaterThanOrEqual(1);
     expect(history.every((h) => h.status === "operational")).toBe(true);
   });
@@ -74,8 +81,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
   // (server/routes.ts:1090) appelle `recordStatusChange` : deux lignes identiques,
   // l'historique d'un véhicule neuf compte un changement qui n'a pas eu lieu.
   it.fails("le statut initial n'est consigné qu'une fois", async () => {
-    const res = await create("workshopManager");
-    const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, res.body.id));
+    const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, historyVehicleId));
     expect(history.length).toBe(1);
   });
 
@@ -102,6 +108,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
   it("immatriculation déjà utilisée : refus lisible, un seul véhicule", async () => {
     const first = await create();
     const again = await call("POST", "/api/vehicles", { actor: "workshopManager", body: validBody(first.body.registrationNumber) });
+    if (again.status === 201) ids.vehicleIds.push(again.body.id);
     expect(again.status).toBe(400);
     expect(again.body.message).toBeTruthy();
   });
@@ -135,9 +142,9 @@ describe("VEH1 : lecture et unicité", { timeout: 180000 }, () => {
     expect(unknown.body).toEqual({ exists: false });
   });
 
-  it("détail : id inconnu 404, non numérique 400", async () => {
+  it("détail : id inconnu 404, valeur non numérique cherchée comme immatriculation 404", async () => {
     expect((await call("GET", "/api/vehicles/999999999", { actor: "technician" })).status).toBe(404);
-    // Une valeur non numérique est cherchée comme immatriculation (server/routes.ts:1036) : 404.
+    // Une valeur non numérique est cherchée comme immatriculation (server/routes.ts:1052-1060) : 404, et non 400.
     expect((await call("GET", "/api/vehicles/abc", { actor: "technician" })).status).toBe(404);
   });
 
@@ -151,7 +158,18 @@ describe("VEH1 : lecture et unicité", { timeout: 180000 }, () => {
 });
 
 describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
-  it("le chef d'atelier modifie le kilométrage ; le technicien est refusé", async () => {
+  // Mise en place des it.fails : créée ici, hors du test qui porte le défaut.
+  let taken: any;
+  let renamed: any;
+  let authored: any;
+  beforeAll(async () => {
+    taken = (await create()).body;
+    renamed = (await create()).body;
+    authored = (await create("workshopManager")).body;
+    for (const v of [taken, renamed, authored]) expect(v?.id).toBeTruthy();
+  });
+
+  it("le chef d'atelier modifie les notes ; le technicien est refusé", async () => {
     const created = await create();
     const ok = await call("PATCH", `/api/vehicles/${created.body.id}`, { actor: "workshopManager", body: { notes: "Rouge" } });
     expect(ok.status).toBe(200);
@@ -181,11 +199,9 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
   // (server/storage.ts:910, rend undefined), puis `PATCH /api/vehicles/:id`
   // (server/routes.ts:1204) répond 500 « Erreur serveur » au lieu d'un refus lisible 4xx.
   it.fails("PATCH : l'immatriculation d'un autre véhicule est refusée (4xx, pas 500)", async () => {
-    const a = await create();
-    const b = await create();
-    const res = await call("PATCH", `/api/vehicles/${b.body.id}`, {
+    const res = await call("PATCH", `/api/vehicles/${renamed.id}`, {
       actor: "admin",
-      body: { registrationNumber: a.body.registrationNumber },
+      body: { registrationNumber: taken.registrationNumber },
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
@@ -195,12 +211,11 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
   // `prepareColumnUpdate`, qui accepte toute colonne : `createdBy` envoyé par le client
   // réécrit l'auteur de la fiche (AGENTS.md §5 : ces champs ne viennent jamais du corps).
   it.fails("PATCH : createdBy du corps ne réécrit pas l'auteur", async () => {
-    const created = await create("workshopManager");
-    await call("PATCH", `/api/vehicles/${created.body.id}`, {
+    await call("PATCH", `/api/vehicles/${authored.id}`, {
       actor: "admin",
       body: { notes: "Noir", createdBy: session.userIdOf("technician") },
     });
-    expect((await rowOf(created.body.id)).createdBy).toBe(session.userIdOf("workshopManager"));
+    expect((await rowOf(authored.id)).createdBy).toBe(session.userIdOf("workshopManager"));
   });
 
   it("suppression : refusée au chef d'atelier ; id inconnu 404 pour l'admin", async () => {

@@ -155,7 +155,7 @@ describe("MIS2 : conflit de planning", { timeout: 180000 }, () => {
     expect(await conflict(b.id)).toBe(true);
   });
 
-  it("le lancement (in_progress) d'une mission en conflit est refusé (400), statut inchangé", async () => {
+  it("lancement refusé, statut inchangé", async () => {
     const v = await createTestVehicle();
     ids.vehicleIds.push(v.id);
     const [d1, d2] = [await driver(), await driver()];
@@ -171,17 +171,22 @@ describe("MIS2 : conflit de planning", { timeout: 180000 }, () => {
   // que le gestionnaire central réduit à « Ce champ n'est pas valide. » pour chaque motif : le
   // chef de parc ne sait pas pourquoi le lancement est bloqué. NB : la mission de test n'a pas
   // de budget, donc le 400 ci-dessus ne prouve pas à lui seul le conflit (voir `launch-readiness`).
-  it.fails("le lancement (in_progress) est refusé avec le motif du conflit", async () => {
-    const v = await createTestVehicle();
-    ids.vehicleIds.push(v.id);
-    const [d1, d2] = [await driver(), await driver()];
-    await mission({ vehicleId: v.id, driverId: d1.id, from: day(10), to: day(12) });
-    const b = await mission({ vehicleId: v.id, driverId: d2.id, from: day(11), to: day(13) });
-    const res = await call("PUT", `/api/missions/${b.id}/status`, { actor: "admin", body: { status: "in_progress" } });
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).toContain("Conflit planning");
-    const [after] = await db.select().from(missions).where(eq(missions.id, b.id));
-    expect(after.status).toBe("assigned");
+  describe("motif du refus", () => {
+    let blockedId: number;
+    beforeAll(async () => {
+      const v = await createTestVehicle();
+      ids.vehicleIds.push(v.id);
+      const [d1, d2] = [await driver(), await driver()];
+      await mission({ vehicleId: v.id, driverId: d1.id, from: day(10), to: day(12) });
+      blockedId = (await mission({ vehicleId: v.id, driverId: d2.id, from: day(11), to: day(13) })).id;
+      // Le conflit est bien là : sans cela le test ci-dessous ne prouverait rien.
+      expect(await conflict(blockedId)).toBe(true);
+    });
+
+    it.fails("le lancement (in_progress) est refusé avec le motif du conflit", async () => {
+      const res = await call("PUT", `/api/missions/${blockedId}/status`, { actor: "admin", body: { status: "in_progress" } });
+      expect(JSON.stringify(res.body)).toContain("Conflit planning");
+    });
   });
 });
 

@@ -139,7 +139,7 @@ stateDiagram-v2
 |---|---|---|---|
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`, contrat `vehicles-crud` : 4 défauts figés) |
 | VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
-| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow`, 1 défaut figé) ; e2e à faire |
+| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e à faire |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
 ### 3.3 Documents et renouvellements
