@@ -780,7 +780,9 @@ export const tires = pgTable("tires", {
   warrantyMonths: integer("warranty_months"), // Garantie en mois
   maxLoadIndex: integer("max_load_index"), // Indice de charge
   speedRating: text("speed_rating"), // Indice de vitesse
-  stockQuantity: integer("stock_quantity").notNull().default(0), // Quantité en stock
+  stockQuantity: integer("stock_quantity").notNull().default(0), // Quantité en stock (neuf)
+  // Pneus démontés remis en stock : ils ont roulé, comptés à part, non valorisés.
+  usedStockQuantity: integer("used_stock_quantity").notNull().default(0),
   minStockLevel: integer("min_stock_level").notNull().default(2), // Seuil d'alerte
   location: text("location"), // Emplacement de stockage
   notes: text("notes"), // Notes additionnelles
@@ -812,6 +814,8 @@ export const vehicleTires = pgTable("vehicle_tires", {
   removalDate: date("removal_date"), // Date de démontage
   removalMileage: integer("removal_mileage"), // Kilométrage au démontage
   removalReason: text("removal_reason"), // Raison du démontage
+  // Stock d'où vient le pneu monté (shared/constants/tire-stock.ts).
+  stockSource: text("stock_source", { enum: ["new", "used"] }).notNull().default("new"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull()
@@ -871,7 +875,9 @@ export const tireRotationDetails = pgTable("tire_rotation_details", {
 });
 
 // Schémas Zod pour validation
-export const insertTireSchema = createInsertSchema(tires).omit({
+export const insertTireSchema = createInsertSchema(tires, {
+  usedStockQuantity: (schema) => schema.int().min(0, "La quantité usagée doit être positive"),
+}).omit({
   id: true,
   createdBy: true,
   updatedBy: true,

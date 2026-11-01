@@ -306,6 +306,9 @@ export async function initializeDatabase() {
     `);
     await db.execute(sql`ALTER TABLE tires ADD COLUMN IF NOT EXISTS created_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE tires ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id)`);
+    // Stock pneu usagé séparé du neuf — jumelle de server/db/migrations/20261101_tires_used_stock.sql.
+    await db.execute(sql`ALTER TABLE tires ADD COLUMN IF NOT EXISTS used_stock_quantity integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE vehicle_tires ADD COLUMN IF NOT EXISTS stock_source text NOT NULL DEFAULT 'new'`);
     await db.execute(sql`
       UPDATE tires
       SET updated_at = COALESCE(updated_at, created_at, now())

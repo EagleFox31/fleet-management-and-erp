@@ -5448,7 +5448,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/vehicles/:vehicleId/tires", isWorkshopManager, async (req, res) => {
+  app.post("/api/vehicles/:vehicleId/tires", isWorkshopManager, async (req, res, next) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
@@ -5475,6 +5475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           details: error.errors,
         });
       }
+      if (error instanceof AppError) return next(error);
       if (error instanceof Error) {
         if (error.message === "POSITION_OCCUPIED") {
           return res.status(409).json({ message: "Cette position est déjà occupée sur le véhicule" });

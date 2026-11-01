@@ -22,7 +22,7 @@ import { uniqueTestToken } from "../support/ids";
  * - TIR1 : fiche pneu en stock par `warehouse` / `admin`, suppression par `admin` ;
  * - TIR2 : suppression douce, la fiche reste en base mais sort du stock ;
  * - TIR3 : montage, rotation, démontage par `workshop_manager` ; au démontage, destination
- *   obligatoire (`stock` : +1 sur la fiche ; `scrap` : motif, stock inchangé) ;
+ *   obligatoire (`stock` : +1 en usagé sur la fiche ; `scrap` : motif, stock inchangé) ;
  * - TIR4 : inspection ouverte au `technician`.
  */
 
@@ -249,12 +249,13 @@ describe("TIR3 : montage, rotation, démontage par le chef d'atelier", { timeout
     expect(removed.status).toBe(200);
     const [row] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
     expect(row).toMatchObject({ status: "removed", removalMileage: 2000, removalReason: "Véhicule immobilisé" });
-    expect(await tireRow(tireId)).toMatchObject({ stockQuantity: 2, updatedBy: userIds.get("workshopManager") });
+    // Le pneu a roulé : il revient en usagé, le neuf ne bouge pas (tires-used-stock.contract.test.ts).
+    expect(await tireRow(tireId)).toMatchObject({ stockQuantity: 1, usedStockQuantity: 1, updatedBy: userIds.get("workshopManager") });
 
     // Rejouer le démontage ne remet pas une seconde unité en stock.
     const again = await call("PATCH", `/api/vehicle-tires/${vehicleTireId}/remove`, { actor: "workshopManager", body: toStock });
     expect(again.status).toBe(404);
-    expect((await tireRow(tireId)).stockQuantity).toBe(2);
+    expect(await tireRow(tireId)).toMatchObject({ stockQuantity: 1, usedStockQuantity: 1 });
 
     const unknown = await call("PATCH", "/api/vehicle-tires/999999999/remove", { actor: "workshopManager", body: toStock });
     expect(unknown.status).toBe(404);
