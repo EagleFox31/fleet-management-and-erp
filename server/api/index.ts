@@ -1,4 +1,4 @@
-import { Router, RequestHandler } from "express";
+import { Router, RequestHandler, type Request, type Response, type NextFunction } from "express";
 import warehouseRoutes from "./warehouse.routes";
 import fuelCardRoutes from "./fuel-card.routes";
 import vehiclesRoutes from "./vehicles.routes";
@@ -119,8 +119,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   const gardeLectureFournisseurs = authorize([...SUPPLIER_READ_ROLES]);
   apiRouter.use(
     "/suppliers",
-    (req, res, next) =>
+    // Marquée comme garde de session : chacune des deux gardes l'est, le répartiteur aussi.
+    sessionGuard((req: Request, res: Response, next: NextFunction) =>
       (req.method === "GET" || req.method === "HEAD" ? gardeLectureFournisseurs : gardeApprovisionnement)(req, res, next),
+    ),
     suppliersRoutes,
   );
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
@@ -197,7 +199,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
-import { authenticate, authorize, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
+import { authenticate, authorize, sessionGuard, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
 import { PROCUREMENT_ROLES, SUPPLIER_READ_ROLES } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);

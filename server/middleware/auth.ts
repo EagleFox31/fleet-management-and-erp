@@ -49,7 +49,7 @@ export const normalizeRole = (role: string | null | undefined): AppRole => {
  */
 const SESSION_GUARD = Symbol.for("fleetos.sessionGuard");
 
-function sessionGuard<T extends Function>(fn: T): T {
+export function sessionGuard<T extends Function>(fn: T): T {
   (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] = true;
   return fn;
 }

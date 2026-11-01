@@ -79,3 +79,14 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : lancer les contrats drivers-crud-deactivation, suppliers-crud-ratings, parts-catalog-crud, fault-catalog-lifecycle, workflow-vehicle-acquisition sous db-lock.
 - **Preuve** : 7/7, 26/26, 22/22, 12/12, 16/16 ; WFL1 rouge sur l'ancien service et sans le routeur (12 échecs), vert avec ; tsc 0 erreur ; unitaires 854/854 ; hygiène 7/7.
 - **Reste / risques** : api-auth-guard rouge (garde de lecture fournisseurs dans server/api/index.ts non reconnue comme garde de session) ; supplier-settlement-idempotence instable une fois sur deux (vert au rejeu).
+
+## 2026-11-01T23:30:00+01:00 — Véhicules : cloison client sur les listes, jokers LIKE, bornes de pagination
+
+- **Agent** : fix-defauts · **Branche** : `fix/defauts-it-fails` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : GET /api/vehicles et /api/vehicles/all ne renvoient plus tous les véhicules à un client (AGENTS.md §11) ; `%` et `_` de la recherche sont du texte ; offset négatif et limit hors entier sûr se replient sur la valeur par défaut. Le répartiteur de garde de /api/suppliers est marqué comme garde de session (api-auth-guard repasse vert).
+- **Comment** : server/services/vehicle-list-service.ts (requête cloisonnée par `ownerScopeOf`, `escapeLike` de server/lib/sql-like.ts, tri départagé par id) ; routes `/` et `/all` en `isAnyUser` dans api/vehicles.routes.ts, avant routes.ts gelé ; `sessionGuard` exporté.
+- **Pourquoi** : `authenticate` seul laissait un compte client lire immatriculation, VIN et marque de toute la flotte. Défaut répété (87c8678, cf585de) : garde-fou de contrat vehicles-lists-client-scope sur chaque liste véhicules.
+- **Comment tester (QA)** : compte client : liste limitée à ses véhicules, total cohérent ; personnel : tout.
+- **Preuve** : contrats vehicles-lists-client-scope (nouveau) et vehicles-crud verts ; lists-pagination-filters : les 5 it.fails véhicules passent (Expect test to fail), à convertir ; api-auth-guard 2/2 ; unitaires 854/854 ; tsc 0.
+- **Reste / risques** : jokers `%` `_` encore actifs sur ordres de travail et fournisseurs (searchCases partagé) ; GET /api/vehicles/:id/mileage, /mileage/history et /check/:registrationNumber restent sous `authenticate` seul (lecture par id sans cloison) ; routes.ts:958 et :1005 restent en code mort.
