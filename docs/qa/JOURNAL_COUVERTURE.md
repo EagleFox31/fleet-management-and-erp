@@ -1327,6 +1327,31 @@ soumission sans doublon.
 **Reste**
 - FUEL1, DIR1, puis lot A5.
 
+## Piste B, lot B2 : VEH1, VEH3, MIS2 (contrat)
+
+**Quoi**
+- Trois fichiers de contrat exécutés pour la première fois : `vehicles-crud` (VEH1), `vehicle-acquisition-workflow` (VEH3), `mission-planning-conflict` (MIS2). Corrigés : délais de describe à 180 s, `notes` à la place d'une colonne `color` inexistante, `GET /api/vehicles/abc` attendu en 404 (valeur cherchée comme immatriculation).
+- Défauts produit figés en `it.fails`, sans toucher au code produit :
+  - statut initial consigné deux fois (`server/storage.ts:871` et `server/routes.ts:1090`) ;
+  - `year` / `mileage` non numériques : 500 au lieu de 400 (`shared/schema.ts:154-155`) ;
+  - `PATCH /api/vehicles/:id` : `createdBy` du corps réécrit l'auteur (`server/routes.ts:1195`) ;
+  - `PATCH /api/vehicles/:id` : immatriculation déjà prise, 500 (`server/storage.ts:910`, `server/routes.ts:1204`) ;
+  - `PATCH /api/workflows/vehicle-acquisition/:id` : `userId` du corps réaffecte le brouillon (`server/services/workflow-service.ts:88`) ;
+  - lancement de mission refusé : motifs réduits à « Ce champ n'est pas valide. » (`server/api/missions.routes.ts:2366`).
+
+**Pourquoi**
+- Ces fichiers étaient écrits mais jamais exécutés : leur couverture n'était pas prouvée.
+
+**Preuve**
+- Rouge en `it` avant `it.fails` : 2 lignes d'historique au lieu d'1, `year`/`mileage` 500, `createdBy` et `userId` réécrits, immatriculation en double 500, motif absent. Vert ensuite : vehicles-crud 22/22, acquisition + mission 34/34 (run4). `tsc` 0 erreur, unitaire 845/845.
+
+**Limites**
+- Le 400 du lancement de mission ne prouve pas le conflit seul (la mission de test n'a pas de budget) : le conflit est prouvé par `launch-readiness`.
+- Un e2e VEH3 (parcours écran) reste à faire.
+
+**Reste**
+- MIS1 et P2 (rejouer `e2e/05`), lots B3 et B4 non commencés.
+
 ## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
 
 **Quoi**
@@ -1486,3 +1511,32 @@ soumission sans doublon.
 **Pourquoi** : un débit NaN resté en base fausse le solde global de la carte pour tous les fichiers (voir LESSONS_LEARNED).
 **Preuve** : fichier rejoué, 40/40 verts sur la base `tests-piste-a`.
 **Reste** : T8.
+
+## Piste B, lot B2 : reprise de relecture (PR #72)
+
+**Quoi**
+- Mise en place sortie de chaque `it.fails` : `beforeAll` (ou `describe` dédié avec un it témoin) dans `vehicles-crud`, `vehicle-acquisition-workflow` et `mission-planning-conflict`. Un `it.fails` ne contient plus que l'appel visé et l'assertion métier ; l'assertion redondante `status === "assigned"` du lancement est retirée.
+- Corrections de titres : détail `/api/vehicles/abc` (404, cherché comme immatriculation, `server/routes.ts:1052-1060`), PATCH qui modifie `notes`, « lancement refusé, statut inchangé ». Un doublon d'immatriculation qui passerait en 201 est ajouté à `ids.vehicleIds` pour le ménage.
+- Correction du décompte des défauts produit : VEH1 4 (5 `it.fails`), VEH3 **5** (et non 1), MIS2 1, soit 10 (la mention « six défauts » du journal du lot B2 est à lire ainsi). Les quatre défauts VEH3 non documentés le sont désormais (commentaire DEFAUT PRODUIT, cause, fichier:ligne) :
+  - `POST` sans validation (`server/routes.ts:5654`) : corps vide et `currentStep: "abc"` donnent 500 (`server/services/workflow-service.ts:36-42`) ;
+  - `PATCH` d'une session inconnue : 200 et corps `null` (`workflow-service.ts:100`, `routes.ts:5710-5711`) ;
+  - `PATCH` : `status` du corps étalé dans le `set` (`workflow-service.ts:88`), comme `userId`.
+
+**Pourquoi**
+- Un `it.fails` qui crée sa donnée passe au vert si la création échoue : il ne prouve plus le défaut. Garde-fou de la PR #73 (`it-fails-hygiene`).
+
+**Preuve**
+- Rouge sans `.fails` (log `b2r-rouge.log`, copies temporaires supprimées) : 11 échecs, tous sur l'assertion métier : 2 lignes d'historique au lieu d'1 ; 500 au lieu de 400 (année, kilométrage, corps vide, étape) ; PATCH immatriculation prise 500 ; `createdBy` et `userId` réécrits (id différent) ; PATCH inconnu 200 au lieu de 404 ; statut `completed` au lieu de `in_progress` ; motif « Conflit planning » absent.
+- Vert avec `.fails` : trois fichiers ensemble, 58/58 (`b2r-vert.log`). `tsc` (tsconfig temporaire incluant les trois tests) : 0 erreur. `it-fails-hygiene` : 7/7, liste gelée inchangée.
+
+**Reste**
+- Défauts produit à corriger par fleet-api / fleet-db. e2e VEH3 non fait.
+
+## Piste B, lot B2 : correctifs de contre-relecture (PR #72)
+
+**Quoi**
+- `vehicles-crud` : le premier POST du doublon d'immatriculation est vérifié (201) avant le second ; les POST de création refusée, sans session et de corps invalide passent par un helper qui enregistre tout 201 inattendu dans `ids.vehicleIds`, pour le ménage.
+- Références produit recalées dans les commentaires DEFAUT PRODUIT (elles corrigent l'entrée précédente) : `server/routes.ts:1090` devient 1092-1093, `:1195` devient 1193, `:1204` devient 1201.
+
+**Preuve**
+- `vehicles-crud` rejoué sous verrou et test d'hygiène `it-fails-hygiene` : résultats dans le compte rendu de la PR.
