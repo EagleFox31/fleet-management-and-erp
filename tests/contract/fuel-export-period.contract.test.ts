@@ -102,19 +102,31 @@ describe("DIR2 / DIR3 : export carburant par période", { timeout: 60000 }, () =
   // renseigne. Un plein saisi par l'écran (POST /api/fuel-records,
   // server/routes.ts:3328) n'a ni année ni mois : il manque à l'export de son
   // propre mois.
-  it.fails("un plein saisi par l'application figure dans l'export de son mois", async () => {
-    const vehicle = await createTestVehicle();
-    session.ids.vehicleIds.push(vehicle.id);
-    const now = new Date();
-    const created = await session.call("POST", "/api/fuel-records", {
-      actor: "admin",
-      body: { vehicleId: vehicle.id, date: now.toISOString().slice(0, 10), quantity: 25, cost: 17500, mileage: 120000 },
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(201);
-    recordIds.push(created.body.id);
+  describe("plein saisi par l'application", () => {
+    // Date fixe en milieu de mois (passée) : le mois filtré est celui de la date
+    // envoyée, sans dépendre du fuseau ni de la date du jour.
+    const ENTRY_DATE = "2026-06-15";
+    const ENTRY_YEAR = 2026;
+    const ENTRY_MONTH = 6;
+    let registration = "";
+    // Mise en place (véhicule, POST et son 201) hors du `it.fails` : une erreur
+    // de création fait échouer le hook au lieu de rendre le cas vert.
+    beforeAll(async () => {
+      const vehicle = await createTestVehicle();
+      session.ids.vehicleIds.push(vehicle.id);
+      registration = vehicle.registrationNumber;
+      const created = await session.call("POST", "/api/fuel-records", {
+        actor: "admin",
+        body: { vehicleId: vehicle.id, date: ENTRY_DATE, quantity: 25, cost: 17500, mileage: 120000 },
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      recordIds.push(created.body.id);
+    }, 60000);
 
-    const result = await downloadRows(`year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
-    const mine = result.rows.filter((r) => r["Véhicule"] === vehicle.registrationNumber);
-    expect(mine).toHaveLength(1);
+    it.fails("un plein saisi par l'application figure dans l'export de son mois", async () => {
+      const result = await downloadRows(`year=${ENTRY_YEAR}&month=${ENTRY_MONTH}`);
+      const mine = result.rows.filter((r) => r["Véhicule"] === registration);
+      expect(mine).toHaveLength(1);
+    });
   });
 });

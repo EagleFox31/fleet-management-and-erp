@@ -1319,6 +1319,7 @@ soumission sans doublon.
 
 **Preuve**
 - Rejeu sans `.fails` : rouge sur `expected [] to have a length of 1` (export) et sur 500 attendu 404 (statistiques).
+- Relecture : le plein de l'export (véhicule, POST et son 201) est créé dans un `beforeAll`, le `it.fails` ne garde que le téléchargement et l'assertion. La date est fixe (2026-06-15) : le mois filtré est celui de la date envoyée, sans dépendre du fuseau ni du jour. Rouge rejoué sans `.fails` : `expected [] to have a length of 1 but got +0`. Contrat 4/4 verts.
 
 **Limites**
 - Rapports inventaire et performance technicien, historique de consommation : non couverts. FUEL1 et DIR1 non repris.
