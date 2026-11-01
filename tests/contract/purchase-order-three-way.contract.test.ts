@@ -195,7 +195,8 @@ describe("PO2 rapprochement commande / facture", { timeout: 120000 }, () => {
       amountHT: 1000,
       purchaseOrderId: 2147483000,
     });
-    expect([400, 404, 409]).toContain(res.status);
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe("Commande fournisseur introuvable.");
     expect(JSON.stringify(res.body)).not.toMatch(/violates|SQLSTATE|foreign key|stack/i);
     expect(await db.select().from(supplierInvoices).where(eq(supplierInvoices.invoiceNumber, number))).toHaveLength(0);
   });

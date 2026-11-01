@@ -67,6 +67,14 @@ describe("PRT3 alerte de stock bas", { timeout: 120000 }, () => {
     expect(await exportedAlert(part.reference)).toBe("OUI");
   });
 
+  it("ajustement de stock : la colonne reorder_alert suit le seuil dans les deux sens", async () => {
+    const { part, userId } = await newPart(20, 5);
+    const down = await partsService.updateStock(part.id, -16, "TEST sortie", userId);
+    expect(down.reorderAlert).toBe(true);
+    const up = await partsService.updateStock(part.id, 10, "TEST réappro", userId);
+    expect(up.reorderAlert).toBe(false);
+  });
+
   it("pile au seuil : en alerte ; un seul de plus : levée", async () => {
     const { part, userId } = await newPart(5, 5);
     expect(await inReorderList(part.id)).toBe(true);

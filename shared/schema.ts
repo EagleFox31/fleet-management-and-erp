@@ -372,7 +372,7 @@ export const parts = pgTable("parts", {
   category: text("category"), // GROUPE_ARTICLES Excel - classification pièces
   responsiblePerson: text("responsible_person"), // MAGASIN_MECANICIEN Excel - responsable magasin
   realStock: integer("real_stock").default(0), // STOCK_REEL Excel - calculé automatiquement
-  reorderAlert: boolean("reorder_alert").default(false), // Alerte CDE Excel - si realStock <= minQuantity
+  reorderAlert: boolean("reorder_alert").default(false), // Alerte CDE Excel - si quantity <= minQuantity
   deliveryReceiptNumber: text("delivery_receipt_number"), // N_BL_BS Excel - numéro bon livraison
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche pièce
   updatedBy: integer("updated_by").references(() => users.id), // Dernier modificateur
