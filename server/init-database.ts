@@ -366,9 +366,10 @@ export async function initializeDatabase() {
       END;
       $$ LANGUAGE plpgsql;
     `);
-    await db.execute(sql`DROP TRIGGER IF EXISTS trg_sync_document_updated_by ON document_renewal_requests`);
+    // Une seule instruction : DROP puis CREATE échouait quand deux initialisations se croisaient
+    // (redémarrage du serveur de dev pendant un setup de test : « trigger already exists »).
     await db.execute(sql`
-      CREATE TRIGGER trg_sync_document_updated_by
+      CREATE OR REPLACE TRIGGER trg_sync_document_updated_by
       AFTER INSERT OR UPDATE OF completed_by ON document_renewal_requests
       FOR EACH ROW
       EXECUTE FUNCTION fn_sync_document_updated_by();
