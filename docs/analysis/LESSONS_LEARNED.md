@@ -869,6 +869,7 @@ Chaque étape déclenche désormais:
 
 ### Prévention (vérifiable)
 - Contrat `tests/contract/users-admin-soft-delete.contract.test.ts` : connexion refusée, session révoquée (route `authenticate` seule), désactivation révoquée, et seconde ligne de défense (`deletedAt` écrit hors route : gardes et profil refusent). Sans correctif : 3 rouges.
+- Limite connue : cette seconde ligne ne couvre que `authorize`, `isAdmin` et `/api/auth/me`. Les routes gardées par `authenticate` seul et le WebSocket ne relisent pas le compte : si l'effacement des sessions échoue (deux essais, journalisés en erreur), le cookie y reste valide jusqu'à son expiration. Correctif durable : faire relire le compte par `authenticate`.
 
 ### Règle Projet (obligatoire)
 - Un changement d'état qui retire un droit (suppression, désactivation, rôle) coupe aussi les sessions déjà ouvertes, pas seulement les connexions futures.

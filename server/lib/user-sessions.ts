@@ -13,16 +13,19 @@ const log = moduleLogger("user-sessions");
  * Idempotent : un second appel ne trouve plus rien à effacer.
  */
 export async function revokeUserAccess(userId: number, reason: string): Promise<number> {
-  let revoked = 0;
-  try {
-    const result = await db.execute(
-      sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)}`,
-    );
-    revoked = result.rowCount ?? 0;
-  } catch (err) {
-    // Les gardes refusent de toute façon un compte supprimé : on journalise
-    // l'échec sans faire échouer la suppression elle-même.
-    log.error({ err, userId, reason }, "Révocation des sessions impossible");
+  let revoked: number | null = null;
+  // Deux essais : un échec laisse le cookie valide sur les routes gardées par
+  // `authenticate` seul et sur le WebSocket, qui ne relisent pas le compte.
+  // Seuls `authorize`, `isAdmin` et `/api/auth/me` refusent un compte supprimé.
+  for (let attempt = 1; attempt <= 2 && revoked === null; attempt++) {
+    try {
+      const result = await db.execute(
+        sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)}`,
+      );
+      revoked = result.rowCount ?? 0;
+    } catch (err) {
+      log.error({ err, userId, reason, attempt }, "Révocation des sessions impossible");
+    }
   }
 
   const closeUserConnections = (global as { closeUserConnections?: unknown }).closeUserConnections;
@@ -30,6 +33,10 @@ export async function revokeUserAccess(userId: number, reason: string): Promise<
     (closeUserConnections as (targetUserId: number, reason?: string) => void)(userId, reason);
   }
 
+  if (revoked === null) {
+    log.error({ userId, reason }, "Sessions du compte toujours actives : le cookie reste valide sur les routes gardées par authenticate seul");
+    return 0;
+  }
   log.info({ userId, reason, revoked }, "Accès du compte révoqué");
   return revoked;
 }
