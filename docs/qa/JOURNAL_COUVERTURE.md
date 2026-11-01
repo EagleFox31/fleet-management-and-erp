@@ -772,7 +772,7 @@ soumission sans doublon.
   directement du stock la quantité disponible quand le demandeur est technicien. Contraire à la même
   décision ; à traiter à part (change le circuit des demandes).
 
-## (hash à reporter) - Pièce d'OT : toute sortie passe par le magasinier ; droit de sortie du chef d'atelier révocable
+## 136f966 - Pièce d'OT : toute sortie passe par le magasinier ; droit de sortie du chef d'atelier révocable
 
 **Quoi**
 - `POST /api/work-orders/:id/parts` (et `/awaiting-parts` avec une pièce) ne sort plus rien du stock.
