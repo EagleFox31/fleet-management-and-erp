@@ -138,6 +138,38 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });
 
+  it("un véhicule passé hors service n'est pas remis en service par la clôture completed (storage)", async () => {
+    const vehicleId = await newVehicle();
+    const woId = await openWorkOrder(vehicleId);
+    await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicleId));
+    await storage.updateWorkOrder(woId, { status: "completed" });
+    expect(await statusOf(vehicleId)).toBe("out_of_service");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
+  });
+
+  it("réouverture hors storage (UPDATE direct, comme le refus qualité) : le véhicule repasse en maintenance", async () => {
+    const vehicleId = await newVehicle();
+    const woId = await openWorkOrder(vehicleId, "in_progress");
+    await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.id, woId));
+    expect(await statusOf(vehicleId)).toBe("operational");
+    await db.update(workOrders).set({ status: "in_progress" }).where(eq(workOrders.id, woId));
+    expect(await statusOf(vehicleId)).toBe("maintenance");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational", "maintenance"]);
+    // Rejouer la même réouverture (in_progress -> in_progress) ne touche à rien.
+    await db.update(workOrders).set({ status: "in_progress" }).where(eq(workOrders.id, woId));
+    expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational", "maintenance"]);
+  });
+
+  it("réouverture d'un OT sur un véhicule hors service : le véhicule reste hors service", async () => {
+    const vehicleId = await newVehicle();
+    const woId = await openWorkOrder(vehicleId, "in_progress");
+    await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.id, woId));
+    await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicleId));
+    await db.update(workOrders).set({ status: "in_progress" }).where(eq(workOrders.id, woId));
+    expect(await statusOf(vehicleId)).toBe("out_of_service");
+    expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
+  });
+
   it("supprimer le dernier OT ouvert remet le véhicule en service", async () => {
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
