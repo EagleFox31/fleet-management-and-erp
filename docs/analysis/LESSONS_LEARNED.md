@@ -897,6 +897,26 @@ Chaque étape déclenche désormais:
 - Toute table qui référence `users` et peut être écrite par un compte de test se vide dans `cleanupOrphanTestRows` avant la suppression des comptes.
 - Une assertion sur les alertes d'un compte filtre sur les objets créés par le test : le job en tâche de fond écrit pour tous les comptes.
 
+## 2026-11-01 - it.fails qui contient sa mise en place
+
+### Constat
+- Cinq PR de tests (#67, #68, #70, #71, #72) ont été recalées en relecture : un `it.fails(...)` contenait aussi la création du véhicule, du plan ou de la mission, ou le POST d'une fixture.
+
+### Cause racine
+- `it.fails` passe au vert dès que son corps lève, quelle qu'en soit la raison. Un setup en 500 ou une coupure Neon fait donc passer le test sans prouver le défaut visé.
+- Classification : piège de l'outil, répété cinq fois malgré la relecture. Contrôle automatique requis.
+
+### Résolution
+- `tests/unit/server/it-fails-hygiene.test.ts` parcourt `tests/**/*.test.ts` et `e2e/**/*.spec.ts`, repère les `it.fails` / `test.fail` dont le corps appelle une fabrique (`create*`, `seed*`, `make*`, `insert*`, `open*`, `new*`, `setup*`, `db.insert`, `.save`) hors assertion directe sur son statut, ou fait plus d'une requête HTTP.
+- Les occurrences présentes sur main sont gelées (liste explicite, qui ne peut que rétrécir).
+
+### Prévention (vérifiable)
+- Une nouvelle occurrence fait échouer le test unitaire, avec la règle et la correction dans le message.
+- Preuve : un `it.fails` fautif déposé dans `tests/contract/` fait passer le test à rouge (1 failed, clé `fichier::titre` listée) ; retiré, vert.
+
+### Règle Projet (obligatoire)
+- Un `it.fails` ne contient que l'appel visé et l'assertion métier ; la mise en place va dans `beforeAll` ou un `it` témoin.
+
 ## 2026-11-01 - Sonde de test : débits NaN écrits, solde global de la carte empoisonné
 
 ### Constat

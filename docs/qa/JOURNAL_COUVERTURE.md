@@ -1319,12 +1319,82 @@ soumission sans doublon.
 
 **Preuve**
 - Rejeu sans `.fails` : rouge sur `expected [] to have a length of 1` (export) et sur 500 attendu 404 (statistiques).
+- Relecture : le plein de l'export (véhicule, POST et son 201) est créé dans un `beforeAll`, le `it.fails` ne garde que le téléchargement et l'assertion. La date est fixe (2026-06-15) : le mois filtré est celui de la date envoyée, sans dépendre du fuseau ni du jour. Rouge rejoué sans `.fails` : `expected [] to have a length of 1 but got +0`. Contrat 4/4 verts.
 
 **Limites**
 - Rapports inventaire et performance technicien, historique de consommation : non couverts. FUEL1 et DIR1 non repris.
 
 **Reste**
 - FUEL1, DIR1, puis lot A5.
+
+## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
+
+**Quoi**
+- `driver-pin-login` (ADM5, 7 cas) : bon PIN ouvre une session, mauvais PIN, compte supprimé, rôle
+  autre que chauffeur, PIN absent et corps incomplet refusés sans cookie ; la liste PIN n'expose que
+  `id` et `name`.
+- `audit-sensitive-actions` (ADM6, 3 cas) : création, changement de rôle et suppression de compte
+  écrivent une ligne `activity_logs` attribuée à l'admin, mot de passe masqué ; un 403 n'en écrit aucune.
+- `drivers-crud-deactivation` (DRV1, 7 cas) : CRUD logistique, magasin refusé, désactivation réservée
+  à l'admin ; un témoin (chauffeur actif affecté : 200) et trois `it.fails` (affectation, liste PIN,
+  connexion PIN), mise en place en `beforeAll` pour qu'un échec de préparation ne passe pas pour le défaut.
+
+**Pourquoi**
+- Défauts constatés : un chauffeur désactivé reste affectable par `PATCH /api/missions/:id` (seul le CPC
+  est vérifié, le refus n'arrive qu'au lancement) ; il reste sur l'écran PIN et s'y connecte, car
+  `drivers-list` et `pin-login` lisent `users` seul. Correction à arbitrer, non faite ici.
+
+**Preuve**
+- Contrat 17/17 (dont les 3 `it.fails`) ; les cas rejoués en `it` échouent sur l'assertion finale
+  (affectation 200 au lieu de 400, compte encore listé).
+
+## VEH2 - véhicule supprimé : masqué, historique consultable, non assignable
+
+**Quoi**
+- Contrat `vehicle-soft-delete` (9 cas) : un véhicule supprimé (`deletedAt`) est masqué de la liste et de la
+  recherche, ses OT et missions passés restent consultables ; `DELETE /api/vehicles/:id` refusé aux non-admin
+  (403), id invalide 400, inconnu 404, véhicule sans historique supprimé et masqué.
+- Témoin : un véhicule actif avec un chauffeur formé s'assigne à une mission (201).
+
+**Pourquoi**
+- Le plan donnait VEH2 « À faire ». La colonne `vehicles.deletedAt` existe et les listes la filtrent, mais
+  aucune route ne la pose : la suppression est physique.
+
+**Preuve**
+- Trois défauts en `it.fails`, chacun rejoué en `it` pour vérifier le rouge (cf. PR) :
+  1. `DELETE` d'un véhicule portant un OT : 500 (clé étrangère `work_orders_vehicle_id_vehicles_id_fk`),
+     au lieu de 200 avec `deletedAt` posé (server/routes.ts:1222, vehicle-deletion-service-trigger.ts:43).
+  2. `POST /api/work-orders` sur un véhicule supprimé : 201 (server/routes.ts:2130 ne contrôle que l'existence).
+  3. `POST /api/missions` avec un véhicule supprimé : 201 (server/api/missions.routes.ts:1736 sans filtre `deletedAt`).
+- Relecture : les `it.fails` ne contiennent plus que l'appel visé et l'assertion métier ; la mise en place
+  (véhicule supprimé, OT historique) est dans un `beforeAll` : une erreur de préparation fait échouer le hook
+  au lieu de rendre le cas vert. Rouge rejoué sans `.fails`, erreurs exactes : `expected 201 to be 400`
+  (mission), `expected 201 to be greater than or equal to 400` (OT), `expected 500 to be 200` (DELETE).
+  Contrat 9/9 verts.
+- Garde-fou d'hygiène (`it-fails-hygiene`) : le DELETE de la route est joué dans le `beforeAll` (il
+  faisait deux requêtes dans le `it.fails`), le cas assert son statut puis la lecture de l'OT. Rouge rejoué :
+  `expected 500 to be 200`. Hygiène 7/7.
+- `tsc` 0 erreur, unitaire 838/838, contrat 9/9 cas verts.
+
+**Limites**
+- `GET /api/vehicles/:id` renvoie encore un véhicule supprimé (`storage.getVehicle`, server/storage.ts:699) : non figé.
+
+**Reste**
+- Correctif produit (fleet-api / fleet-db) : suppression logique, puis passer les trois `it.fails` en `it`.
+
+## Garde-fou d'hygiène : it.fails sans mise en place
+
+**Quoi**
+- `tests/unit/server/it-fails-hygiene.test.ts` (5 cas) : extrait les `it.fails` / `test.fail` de `tests/` et `e2e/`, signale ceux dont le corps crée des données ou fait plusieurs requêtes. Huit occurrences héritées de main sont gelées.
+
+**Comment**
+- Analyse de texte (commentaires retirés, chaînes respectées), sans base. Une fabrique dont le résultat est assertionné sur `.status` est l'appel visé et n'est pas signalée, pour éviter les faux positifs.
+
+**Pourquoi**
+- `it.fails` passe sur n'importe quel échec : cinq PR ont dû être recalées (#67, #68, #70, #71, #72).
+
+**Preuve**
+- `it.fails` fautif fabriqué : rouge ; propre : vert. Fichier fautif déposé sur disque : 1 failed, retiré : 5/5.
 
 ## 2026-11-01 - FUEL1 et DIR1 : carte carburant et KPI Direction
 

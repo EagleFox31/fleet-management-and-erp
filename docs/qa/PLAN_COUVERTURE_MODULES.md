@@ -110,8 +110,8 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 | ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
 | ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
-| ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | À faire |
-| ADM6 | Journal d'activité alimenté sur les actions sensibles | I | À faire |
+| ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | OK (`driver-pin-login`, 7 cas ; fiche `drivers` désactivée : voir DRV1) |
+| ADM6 | Journal d'activité alimenté sur les actions sensibles | I | OK (`audit-sensitive-actions`, 3 cas : création, rôle, suppression, 403 sans ligne) |
 
 ### 3.2 Parc véhicules
 
@@ -138,7 +138,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`) |
-| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | À faire |
+| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | Partiel : masqué et consultable OK ; 3 défauts en `it.fails` (suppression physique, OT et mission sur véhicule supprimé) |
 | VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | À faire |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
 
@@ -290,7 +290,7 @@ Tables : `drivers` (`is_active`).
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | À faire |
+| DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | Partiel (`drivers-crud-deactivation` : CRUD et RBAC OK ; 2 défauts en `it.fails` : chauffeur désactivé encore affectable, encore sur l'écran PIN) |
 | DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | À faire |
 
 ### 3.9 Carburant
