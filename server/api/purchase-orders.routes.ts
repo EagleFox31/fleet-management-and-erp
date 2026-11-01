@@ -3,6 +3,7 @@ import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 
 const log = moduleLogger("purchase-orders");
 
@@ -52,7 +53,7 @@ const inferScopeFromOrderDetails = (orderDetails: any): PurchaseOrderScope => {
 const getScopeByOrderId = async (orderId: number): Promise<PurchaseOrderScope> => {
   const orderDetails = await procurementService.getPurchaseOrderById(orderId);
   if (!orderDetails) {
-    throw new Error("Commande introuvable");
+    throw new AppError(404, "Commande introuvable.");
   }
   return inferScopeFromOrderDetails(orderDetails);
 };
@@ -137,10 +138,19 @@ const checkApprovalPermission = (req: Request, res: Response, next: NextFunction
   next();
 };
 
+/** Identifiant d'URL : entier positif, sinon 400 lisible (avant : NaN jusqu'à la base, 500). */
+const parseIdParam = (value: string, label: string): number => {
+  const id = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(id) || id <= 0) {
+    throw new AppError(400, `${label} invalide.`);
+  }
+  return id;
+};
+
 /**
  * GET /api/purchase-orders - Liste des commandes avec filtres
  */
-router.get("/", requireAuth, async (req: Request, res: Response) => {
+router.get("/", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, supplierId, createdBy, dateFrom, dateTo } = req.query;
 
@@ -154,18 +164,17 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
 
     res.json(orders);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération des commandes:", error);
-    res.status(500).json({
-      error: "Erreur lors de la récupération des commandes",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "récupération des commandes");
+    }
+    next(error);
   }
 });
 
 /**
  * GET /api/purchase-orders/statistics - Statistiques des commandes
  */
-router.get("/statistics", requireAuth, async (req: Request, res: Response) => {
+router.get("/statistics", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { dateFrom, dateTo } = req.query;
 
@@ -176,11 +185,10 @@ router.get("/statistics", requireAuth, async (req: Request, res: Response) => {
 
     res.json(stats);
   } catch (error) {
-    console.error("❌ Erreur lors du calcul des statistiques:", error);
-    res.status(500).json({
-      error: "Erreur lors du calcul des statistiques",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "calcul des statistiques");
+    }
+    next(error);
   }
 });
 
@@ -188,7 +196,7 @@ router.get("/statistics", requireAuth, async (req: Request, res: Response) => {
  * GET /api/purchase-orders/group-suggestions - Suggestions de regroupement
  * Analyse les demandes en attente et suggère des commandes groupées
  */
-router.get("/group-suggestions", requireAuth, checkWritePermission, async (req: Request, res: Response) => {
+router.get("/group-suggestions", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!canManageScope(req.user?.role, "parts")) {
       return denyByScope(res, "parts");
@@ -204,11 +212,10 @@ router.get("/group-suggestions", requireAuth, checkWritePermission, async (req: 
 
     res.json(suggestions);
   } catch (error) {
-    console.error("❌ Erreur lors du regroupement des demandes:", error);
-    res.status(500).json({
-      error: "Erreur lors du regroupement des demandes",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "regroupement des demandes");
+    }
+    next(error);
   }
 });
 
@@ -216,19 +223,18 @@ router.get("/group-suggestions", requireAuth, checkWritePermission, async (req: 
  * POST /api/purchase-orders/optimize-timing/:supplierId - Optimisation du timing
  * Suggère le meilleur moment pour passer commande
  */
-router.post("/optimize-timing/:supplierId", requireAuth, checkWritePermission, async (req: Request, res: Response) => {
+router.post("/optimize-timing/:supplierId", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const supplierId = parseInt(req.params.supplierId);
+    const supplierId = parseIdParam(req.params.supplierId, "Identifiant de fournisseur");
 
     const optimization = await procurementService.optimizeOrderTiming(supplierId);
 
     res.json(optimization);
   } catch (error) {
-    console.error("❌ Erreur lors de l'optimisation du timing:", error);
-    res.status(500).json({
-      error: "Erreur lors de l'optimisation du timing",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "optimisation du timing");
+    }
+    next(error);
   }
 });
 
@@ -237,42 +243,39 @@ router.post("/optimize-timing/:supplierId", requireAuth, checkWritePermission, a
  * Identifie automatiquement les commandes dont la date de livraison est dépassée
  * IMPORTANT: Doit être AVANT /:id pour éviter conflit de route
  */
-router.get("/overdue", requireAuth, async (req: Request, res: Response) => {
+router.get("/overdue", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    console.log("🚨 Requête de vérification des commandes en retard");
-    
+    log.debug({ requestId: req.requestId }, "vérification des commandes en retard");
+
     const overdueOrders = await procurementService.getOverdueOrders();
-    
+
     res.json(overdueOrders);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération des commandes en retard:", error);
-    
-    res.status(500).json({
-      error: "Erreur lors de la récupération des commandes en retard",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "commandes en retard");
+    }
+    next(error);
   }
 });
 
 /**
  * GET /api/purchase-orders/:id - Détails d'une commande
  */
-router.get("/:id", requireAuth, async (req: Request, res: Response) => {
+router.get("/:id", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = parseInt(req.params.id);
+    const orderId = parseIdParam(req.params.id, "Identifiant de commande");
     const orderDetails = await procurementService.getPurchaseOrderById(orderId);
 
     if (!orderDetails) {
-      return res.status(404).json({ error: "Commande non trouvée" });
+      throw new AppError(404, "Commande introuvable.");
     }
 
     res.json(orderDetails);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération de la commande:", error);
-    res.status(500).json({
-      error: "Erreur lors de la récupération de la commande",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "récupération de la commande");
+    }
+    next(error);
   }
 });
 
@@ -340,26 +343,25 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
 
 /**
  * PATCH /api/purchase-orders/:id/status - Changer le statut
+ * Erreurs au contrat commun : 400 saisie, 404 commande inconnue, 409 transition
+ * ou clôture refusée (AppError du service, libellés d'écran).
  */
-router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Request, res: Response) => {
+const updateOrderStatusSchema = z.object({
+  status: z.enum(PURCHASE_ORDER_STATUSES),
+  deliveryCode: z.string().optional(), // Code de livraison optionnel
+  cancellationReason: z.string().optional(),
+});
+
+router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = parseInt(req.params.id);
-    if (Number.isNaN(orderId)) {
-      return res.status(400).json({ error: "ID de commande invalide" });
-    }
+    const orderId = parseIdParam(req.params.id, "Identifiant de commande");
 
     const scope = await getScopeByOrderId(orderId);
     if (!canManageScope(req.user?.role, scope)) {
       return denyByScope(res, scope);
     }
 
-    const schema = z.object({
-      status: z.enum(['draft', 'sent', 'confirmed', 'cancellation_requested', 'partial', 'delivered', 'completed', 'cancelled']),
-      deliveryCode: z.string().optional(), // Code de livraison optionnel
-      cancellationReason: z.string().optional(),
-    });
-
-    const { status, deliveryCode, cancellationReason } = schema.parse(req.body);
+    const { status, deliveryCode, cancellationReason } = updateOrderStatusSchema.parse(req.body);
 
     // Réception (partielle ou complète) = magasinier ou admin uniquement
     if ((status === "partial" || status === "delivered") && !canRecordDelivery(req.user?.role)) {
@@ -371,17 +373,11 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
 
     // Si on passe en "delivered", le code de livraison est obligatoire
     if (status === 'delivered' && !deliveryCode) {
-      return res.status(400).json({
-        error: "Code de livraison requis",
-        message: "Veuillez fournir un code de livraison pour confirmer la réception"
-      });
+      throw new AppError(400, "Veuillez fournir un code de livraison pour confirmer la réception.");
     }
 
     if (status === "cancellation_requested" && !cancellationReason?.trim()) {
-      return res.status(400).json({
-        error: "Motif requis",
-        message: "Veuillez renseigner le motif d'annulation fournisseur",
-      });
+      throw new AppError(400, "Veuillez renseigner le motif d'annulation fournisseur.");
     }
 
     const updated = await procurementService.updateOrderStatus(
@@ -409,42 +405,11 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
 
     res.json(updated);
   } catch (error) {
-    console.error("❌ Erreur lors de la mise à jour du statut:", error);
-    
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        error: "Données invalides",
-        details: error.errors
-      });
+    // ZodError -> 400 par champ, AppError -> son statut, le reste -> 500 générique avec référence.
+    if (!(error instanceof z.ZodError) && !isAppError(error)) {
+      log.error({ err: error, requestId: req.requestId }, "mise à jour du statut");
     }
-
-    if (error instanceof Error) {
-      if (error.message.includes("Commande introuvable")) {
-        return res.status(404).json({
-          error: "Commande introuvable",
-          details: error.message,
-        });
-      }
-
-      if (error.message.includes("Transition de statut invalide")) {
-        return res.status(400).json({
-          error: "Transition de statut invalide",
-          details: error.message,
-        });
-      }
-
-      if (error.message.includes("Clôture impossible")) {
-        return res.status(400).json({
-          error: "Clôture impossible",
-          details: error.message,
-        });
-      }
-    }
-
-    res.status(500).json({
-      error: "Erreur lors de la mise à jour du statut",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    next(error);
   }
 });
 

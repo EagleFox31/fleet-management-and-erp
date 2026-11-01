@@ -19,6 +19,7 @@ import {
 import { eq, and, desc, sql, inArray, gte, lte, or } from "drizzle-orm";
 import { threeWayMatchingService } from "./three-way-matching-service";
 import { AppError } from "../lib/app-error";
+import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
 
 /**
  * Service de gestion des commandes d'achat groupées
@@ -911,27 +912,18 @@ export class ProcurementService {
       .limit(1);
 
     if (!currentOrder) {
-      throw new Error("Commande introuvable");
+      throw new AppError(404, "Commande introuvable.");
     }
 
     if (currentOrder.status === status) {
       return currentOrder;
     }
 
-    const allowedTransitions: Record<string, string[]> = {
-      draft: ['sent', 'cancelled'],
-      sent: ['confirmed', 'cancelled'],
-      confirmed: ['partial', 'delivered', 'cancellation_requested'],
-      partial: ['delivered', 'cancellation_requested'],
-      cancellation_requested: ['cancelled', 'confirmed', 'partial'],
-      delivered: ['completed'],
-      completed: [],
-      cancelled: [],
-    };
-
-    const nextStatuses = allowedTransitions[currentOrder.status] || [];
-    if (!nextStatuses.includes(status)) {
-      throw new Error(`Transition de statut invalide: ${currentOrder.status} -> ${status}`);
+    if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
+      throw new AppError(
+        409,
+        `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
+      );
     }
 
     // Règle métier stricte:
@@ -947,7 +939,7 @@ export class ProcurementService {
         .where(eq(supplierInvoices.purchaseOrderId, orderId));
 
       if (linkedInvoices.length === 0) {
-        throw new Error("Clôture impossible: facture fournisseur absente (finance non démarrée).");
+        throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
       }
 
       const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
@@ -956,8 +948,9 @@ export class ProcurementService {
           .map((invoice) => invoice.invoiceNumber)
           .filter(Boolean)
           .join(", ");
-        throw new Error(
-          `Clôture impossible: finance non terminée (facture(s) non payée(s)${pendingRefs ? `: ${pendingRefs}` : ""}).`
+        throw new AppError(
+          409,
+          `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
         );
       }
     }
