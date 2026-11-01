@@ -34,7 +34,6 @@ export const FEATURE_FLAGS = {
   incidents: { level: "should", defaultEnabled: false, label: "Déclaration de panne" },
   "oil-change-prefill": { level: "should", defaultEnabled: false, label: "Intervalles de vidange préremplis" },
   "quality-check": { level: "should", defaultEnabled: false, label: "Contrôle qualité des ordres de travail" },
-  captcha: { level: "should", defaultEnabled: false, label: "Captcha à la connexion" },
 
   "email-notifications": { level: "later", defaultEnabled: false, label: "Alertes par e-mail" },
   finance: { level: "later", defaultEnabled: false, label: "Trésorerie et recouvrement" },

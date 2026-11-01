@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatRate, formatAverageCost } from "../../../client/src/components/dashboard/kpi-tiles";
 import { ageInDays, sortByAgeDesc } from "../../../client/src/components/billing/pending-invoices-table";
-import { shouldShowCaptcha } from "../../../client/src/components/auth/altcha-widget";
 import { daysOfMonth, cellKey } from "../../../client/src/components/time-tracking/time-grid";
 import { formatBackupSize, formatBackupDuration } from "../../../client/src/components/admin/backups-panel";
 
@@ -26,12 +25,6 @@ describe("helpers des écrans", () => {
     const sorted = sortByAgeDesc(rows);
     expect((sorted[0] as { clientId: number }).clientId).toBe(2);
     expect((rows[0] as { clientId: number }).clientId).toBe(1);
-  });
-
-  it("le captcha apparaît au seuil ou sur demande du serveur", () => {
-    expect(shouldShowCaptcha(0)).toBe(false);
-    expect(shouldShowCaptcha(3)).toBe(true);
-    expect(shouldShowCaptcha(0, true)).toBe(true);
   });
 
   it("daysOfMonth gère février bissextile et cellKey est stable", () => {
