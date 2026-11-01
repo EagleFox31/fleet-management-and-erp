@@ -160,7 +160,7 @@ stateDiagram-v2
 |---|---|---|---|
 | DOC1 | CRUD centre de renouvellement, désactivation (absent des choix) | C | À faire |
 | DOC2 | Demande : transitions valides, transitions interdites refusées | C | OK (`document-renewal-status` : terminée/rejetée 409, en attente → terminée 409, date illisible 400 ; unitaire `document-renewal-statuses`) |
-| DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | À faire |
+| DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | OK (`document-quick-renew-alerts` : échéance mise à jour, alertes due/expired du document levées, celles d'un autre document gardées ; défaut corrigé : alertes laissées en place) |
 
 ### 3.4 Maintenance et atelier
 
@@ -397,7 +397,7 @@ flowchart LR
 
 ### P4 — Renouvellement documentaire
 
-État : **À faire**.
+État : **OK** (`document-quick-renew-alerts` : alerte → demande → en cours → renouvelé ; une seule demande, close ; document à jour ; alerte levée).
 
 ```mermaid
 flowchart LR
