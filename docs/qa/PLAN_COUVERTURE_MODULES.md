@@ -333,9 +333,9 @@ Tables : `alerts`.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| ALR1 | Génération planifiée sans doublon (deux passages = une alerte) | I | À faire |
-| ALR2 | Marquer lu / tout marquer lu, compteur mis à jour | C | À faire |
-| ALR3 | Notification temps réel reçue par le bon rôle uniquement | E | À faire |
+| ALR1 | Génération planifiée sans doublon (deux passages = une alerte) | I | Fait : une par jour, concurrence et alerte lue corrigées |
+| ALR2 | Marquer lu / tout marquer lu, compteur mis à jour | C | Fait : propriétaire vérifié (défaut corrigé), « tout lu » ajouté |
+| ALR3 | Notification temps réel reçue par le bon rôle uniquement | E | Fait au niveau I (scope user par destinataire) ; e2e non joué |
 
 ### 3.12 Direction, rapports, exports
 
