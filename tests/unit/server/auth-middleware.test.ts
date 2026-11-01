@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Les gardes lisent l'utilisateur en base: on remplace `storage` pour rester sans DB.
 const getUser = vi.fn();
 vi.mock("../../../server/storage", () => ({ storage: { getUser: (id: number) => getUser(id) } }));
+// `authenticate` relit le compte par `findActiveSessionUser` (vrai code), qui interroge `db` :
+// seule la base est simulée, pour que l'échec de lecture traverse le vrai chemin service → garde.
+const selectUsers = vi.fn();
+vi.mock("../../../server/db", () => ({
+  db: { select: () => ({ from: () => ({ where: () => ({ limit: () => selectUsers() }) }) }) },
+}));
 
 import {
   authenticate,
@@ -89,6 +95,7 @@ async function run(guard: Guard, session: { userId?: number } | undefined) {
 
 beforeEach(() => {
   getUser.mockReset();
+  selectUsers.mockReset();
   process.env.AUTH_DEBUG = "0";
 });
 
@@ -116,26 +123,27 @@ describe("authenticate", () => {
     const empty = await run(authenticate as Guard, {});
     expect(empty.res.statusCode).toBe(401);
 
-    getUser.mockResolvedValue({ id: 1, role: "technician", deletedAt: null });
+    selectUsers.mockResolvedValue([{ id: 1, role: "technician", deletedAt: null }]);
     const logged = await run(authenticate as Guard, { userId: 1 });
     expect(logged.next).toHaveBeenCalledOnce();
   });
 
-  it("relit le compte : un compte supprimé ou inconnu est refusé (401)", async () => {
-    getUser.mockResolvedValue({ id: 1, role: "technician", deletedAt: new Date() });
-    const deleted = await run(authenticate as Guard, { userId: 1 });
-    expect(deleted.res.statusCode).toBe(401);
-    expect(deleted.next).not.toHaveBeenCalled();
-
-    getUser.mockResolvedValue(undefined);
+  // Le filtre `deleted_at IS NULL` est en SQL : un compte supprimé revient comme un compte
+  // inconnu (aucune ligne). Prouvé sur base par tests/integration/session-user.test.ts.
+  it("relit le compte : aucune ligne active (supprimé ou inconnu) est refusé (401)", async () => {
+    selectUsers.mockResolvedValue([]);
     const unknown = await run(authenticate as Guard, { userId: 99 });
     expect(unknown.res.statusCode).toBe(401);
     expect(unknown.next).not.toHaveBeenCalled();
   });
 
   it("échec de lecture du compte : 500 sans détail, jamais next()", async () => {
-    getUser.mockRejectedValue(new Error("connexion perdue : SELECT secret"));
+    // L'erreur naît dans la requête SQL et traverse findActiveSessionUser : c'est le chemin réel
+    // d'une coupure de base. storage.getUser (qui l'avalait en 401) n'est plus consulté.
+    selectUsers.mockRejectedValue(new Error("connexion perdue : SELECT secret"));
     const failed = await run(authenticate as Guard, { userId: 1 });
+    expect(selectUsers).toHaveBeenCalledOnce();
+    expect(getUser).not.toHaveBeenCalled();
     expect(failed.res.statusCode).toBe(500);
     expect(JSON.stringify(failed.res.body)).not.toMatch(/SELECT|connexion/);
     expect(failed.next).not.toHaveBeenCalled();

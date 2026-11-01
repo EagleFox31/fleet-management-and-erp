@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { storage } from "../storage";
 import { moduleLogger } from "../lib/logger";
+import { findActiveSessionUser } from "../services/session-user";
 import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
@@ -73,9 +74,11 @@ export const authenticate = sessionGuard(async (req: Request, res: Response, nex
 
   // Le compte est relu : une session survivante d'un compte supprimé ou
   // inexistant ne passe plus, même sur une route gardée par `authenticate` seul.
+  // `findActiveSessionUser` laisse remonter une erreur de base (500), là où
+  // `storage.getUser` l'avalait et la faisait passer pour un compte inconnu (401).
   try {
-    const user = await storage.getUser(req.session.userId);
-    if (!user || user.deletedAt) {
+    const user = await findActiveSessionUser(req.session.userId);
+    if (!user) {
       if (debugAuth) {
         moduleLogger("auth").info({ userId: req.session.userId, requestId: req.requestId }, "Accès refusé : compte supprimé ou inconnu");
       }

@@ -27,9 +27,7 @@ import { describe, expect, it } from "vitest";
  * Les occurrences déjà présentes sont gelées ci-dessous (clé `fichier::titre`) :
  * la liste ne peut que rétrécir. Une nouvelle occurrence fait échouer ce test.
  */
-const KNOWN_SETUP_IN_IT_FAILS: string[] = [
-  "tests/integration/vehicle-status-sync.test.ts::annuler le dernier OT ouvert remet le véhicule en service",
-];
+const KNOWN_SETUP_IN_IT_FAILS: string[] = [];
 
 interface ItFailsCase {
   title: string;
