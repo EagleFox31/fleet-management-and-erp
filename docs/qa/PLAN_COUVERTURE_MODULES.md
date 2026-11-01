@@ -249,14 +249,19 @@ Au démontage, la destination est obligatoire, comme dans RTA Fleet et Eptura : 
 stock ou au rebut (usé, endommagé, crevé). Le statut du montage la conserve : `removed` = remis en
 stock, sinon la cause du rebut. Le rechapage n'est pas modélisé.
 
+Un pneu remis en stock a roulé : il revient en **usagé** (`tires.used_stock_quantity`), à part du neuf.
+Le montage prend du neuf par défaut et trace sa source (`vehicle_tires.stock_source`) ; l'usagé se
+choisit explicitement. Seul le neuf est valorisé et suivi en stock bas.
+
 | # | Test | Niveau | État |
 |---|---|---|---|
 | TIR1 | CRUD fiche pneu par `warehouse` / `admin` ; 403 pour `workshop_manager` | C | OK (`tires-rbac` C : auteur posé par le serveur, corps forgé ignoré ; fiche inexistante 404) |
 | TIR2 | Soft delete : non montable, absent du stock, historique conservé | C | OK (`tires-rbac` C : détail et liste 404 / absent, montage 409, modification et 2e suppression 404 ; pneu monté 409) |
-| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | C OK (`tires-rbac` : stock -1 au montage, démontage vers le stock +1 une seule fois, rebut avec motif sans effet stock, destination obligatoire 400, PATCH générique refuse le statut, rotation invalide 400 sans OT orphelin) ; E OK (`e2e/11` : double clic = 1 requête, trame `vehicle_tire_removed` reçue par le magasinier) |
+| TIR3 | Montage, rotation, démontage par `workshop_manager` | C / E | C OK (`tires-rbac` : stock -1 au montage, démontage vers le stock +1 usagé une seule fois, rebut avec motif sans effet stock, destination obligatoire 400, PATCH générique refuse le statut, rotation invalide 400 sans OT orphelin) ; E OK (`e2e/11` : double clic = 1 requête, trame `vehicle_tire_removed` reçue par le magasinier) |
 | TIR4 | Inspection par `technician` | C | OK (`tires-rbac` C : inspecteur = auteur de la requête ; corps invalide 400 `VALIDATION`) |
 | TIR5 | Brouillon du wizard : restauré, purgé après succès | E | E OK (`e2e/12` : enregistré pendant la saisie, restauré, purgé après création, une seule fiche ; corrige l'auto-enregistrement de `useFormDraft`) |
 | TIR6 | Tableau `PremiumDataTable` : stock bas surligné, corbeille masquée aux non-admin | E | E OK (`e2e/12` : bordure rouge stock bas, corbeille absente pour le magasinier, présente pour l'admin) |
+| TIR7 | Stock usagé séparé du neuf : démontage → usagé, montage neuf par défaut, valeur et stock bas sur le neuf | U / C / E | OK (`tires-used-stock` C : démontage usagé +1 neuf inchangé, rebut sans effet, montage neuf par défaut tracé `new`, usagé explicite, usagé à 0 409, neuf à 0 sans source 409 lisible, deux montages concurrents sur 1 usagé 201 + 409, source inconnue 400, valeur sans usagé, stock bas sur le neuf, création usagé forcé à 0, PATCH négatif 400, technicien 403 ; U `tires-used-stock-schema` ; E `e2e/11` : démontage → usagé) |
 
 ### 3.7 Approvisionnement
 
