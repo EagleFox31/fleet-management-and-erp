@@ -206,6 +206,9 @@ export class WorkOrderItemsService {
     const heuresReelles = toNumericColumn(payload.actualHours);
     const technicianId = Number(payload.technicianId);
 
+    const technicienInconnu = await this.refusTechnicien(payload.technicianId);
+    if (technicienInconnu) return { success: false, error: technicienInconnu };
+
     await db.insert(workOrderItems).values({
       workOrderId,
       laborCatalogId: posteId,
@@ -245,6 +248,24 @@ export class WorkOrderItemsService {
     const verdict = validateWorkOrderItem(fusion);
     if (!verdict.valid) {
       return { success: false, error: verdict.errors.join(" ") };
+    }
+
+    if (estFourni(payload, "technicianId")) {
+      const technicienInconnu = await this.refusTechnicien(payload.technicianId);
+      if (technicienInconnu) return { success: false, error: technicienInconnu };
+    }
+    if (estFourni(payload, "laborCatalogId") && Number(payload.laborCatalogId) !== existant.laborCatalogId) {
+      const posteId = Number(payload.laborCatalogId);
+      if (Number.isInteger(posteId) && posteId > 0) {
+        const [poste] = await db
+          .select({ id: laborCatalog.id })
+          .from(laborCatalog)
+          .where(and(eq(laborCatalog.id, posteId), eq(laborCatalog.isActive, true)))
+          .limit(1);
+        if (!poste) {
+          return { success: false, error: "Poste de main-d'œuvre introuvable ou désactivé." };
+        }
+      }
     }
 
     const maj: Record<string, unknown> = { updatedAt: new Date() };
@@ -292,6 +313,14 @@ export class WorkOrderItemsService {
 
     const resultat = await this.getItemsForWorkOrder(existant.workOrderId);
     return { success: true, data: { ...resultat, workOrderId: existant.workOrderId } };
+  }
+
+  /** Message de refus si `technicianId` désigne un utilisateur inexistant ; vide ou absent : rien à vérifier. */
+  private async refusTechnicien(value: unknown): Promise<string | null> {
+    const id = Number(value);
+    if (value === undefined || value === null || value === "" || !Number.isInteger(id) || id <= 0) return null;
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
+    return user ? null : "Technicien introuvable : choisissez un technicien de la liste.";
   }
 
   async deleteItem(itemId: number): Promise<ServiceResult<WorkOrderItemsResult & { workOrderId: number }>> {

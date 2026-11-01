@@ -297,10 +297,11 @@ export default function WorkOrderDetails({
   });
   const workItemsCount = workItemsData?.items.length ?? 0;
   // Saisie a posteriori permise sur un OT terminé; un OT annulé est figé.
-  // Un technicien ne saisit que sur ses OT: même règle que le serveur.
+  // Un technicien ne saisit que sur ses OT, et un OT clos est figé : même règle que le serveur.
   const canEditWorkItems =
     canProcessWorkOrder &&
     workOrder?.status !== 'cancelled' &&
+    workOrder?.status !== 'completed' &&
     !(user?.role === 'technician' && demarreurEstAutre);
 
   // Fetch parts used in this work order

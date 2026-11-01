@@ -136,4 +136,81 @@ describe("lignes de travail d'un OT", { timeout: 180000 }, () => {
     const [after] = await db.select().from(workOrders).where(eq(workOrders.id, workOrder.id));
     expect(after.cost).toEqual(workOrder.cost);
   });
+  it("refuse toute écriture sur un OT clos et un technicien ou un poste inconnu", async () => {
+    const manager = await createTestUser({ role: "workshop_manager" });
+    ids.userIds.push(manager.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const [open, completed, cancelled] = await db
+      .insert(workOrders)
+      .values([
+        { vehicleId: vehicle.id, title: "TEST lignes OT ouvert", status: "in_progress" },
+        { vehicleId: vehicle.id, title: "TEST lignes OT terminé", status: "in_progress" },
+        { vehicleId: vehicle.id, title: "TEST lignes OT annulé", status: "in_progress" },
+      ])
+      .returning();
+    workOrderIds.push(open.id, completed.id, cancelled.id);
+    const cookie = await login(manager.username);
+
+    // Lignes posées tant que l'OT est ouvert, puis l'OT est clos.
+    const ligne: Record<number, number> = {};
+    for (const wo of [completed, cancelled]) {
+      const created = await call("POST", `/api/work-orders/${wo.id}/items`, {
+        cookie,
+        body: { customLabel: "Ligne avant clôture", actualHours: 1, status: "done" },
+      });
+      expect(created.status).toBe(201);
+      ligne[wo.id] = created.body.items[0].id;
+    }
+    await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.id, completed.id));
+    await db.update(workOrders).set({ status: "cancelled" }).where(eq(workOrders.id, cancelled.id));
+
+    for (const wo of [completed, cancelled]) {
+      const add = await call("POST", `/api/work-orders/${wo.id}/items`, {
+        cookie,
+        body: { customLabel: "Ajout tardif", actualHours: 2 },
+      });
+      expect(add.status).toBe(409);
+      expect(typeof add.body?.message).toBe("string");
+
+      const patch = await call("PATCH", `/api/work-order-items/${ligne[wo.id]}`, {
+        cookie,
+        body: { actualHours: 9 },
+      });
+      expect(patch.status).toBe(409);
+
+      const remove = await call("DELETE", `/api/work-order-items/${ligne[wo.id]}`, { cookie });
+      expect(remove.status).toBe(409);
+    }
+    const [kept] = await db.select().from(workOrderItems).where(eq(workOrderItems.id, ligne[completed.id]));
+    expect(Number(kept.actualHours)).toBe(1);
+
+    // Technicien ou poste inexistant : 400 lisible, pas une erreur de clé étrangère en 500.
+    const ghostTech = await call("POST", `/api/work-orders/${open.id}/items`, {
+      cookie,
+      body: { customLabel: "Fantôme", technicianId: 2147483000, actualHours: 1 },
+    });
+    expect(ghostTech.status).toBe(400);
+    expect(ghostTech.body?.message).not.toMatch(/foreign key|violates|constraint/i);
+
+    const ok = await call("POST", `/api/work-orders/${open.id}/items`, {
+      cookie,
+      body: { customLabel: "Ligne valide", actualHours: 1 },
+    });
+    expect(ok.status).toBe(201);
+    const itemId = ok.body.items[0].id;
+
+    const ghostTechPatch = await call("PATCH", `/api/work-order-items/${itemId}`, {
+      cookie,
+      body: { technicianId: 2147483000 },
+    });
+    expect(ghostTechPatch.status).toBe(400);
+
+    const ghostPoste = await call("PATCH", `/api/work-order-items/${itemId}`, {
+      cookie,
+      body: { laborCatalogId: 2147483000 },
+    });
+    expect(ghostPoste.status).toBe(400);
+    expect(ghostPoste.body?.message).not.toMatch(/foreign key|violates|constraint/i);
+  });
 });

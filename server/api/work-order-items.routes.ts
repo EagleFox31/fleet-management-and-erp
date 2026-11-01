@@ -29,6 +29,17 @@ async function refusPourCetteOT(workOrderId: number, user: Express.Request["user
     return { status: 403, message: "Accès refusé - OT assignée à un autre technicien" };
   }
 
+  // Un OT clos est figé : ses heures ne bougent plus (reprise par le contrôle qualité seulement).
+  if (workOrder.status === "completed") {
+    return {
+      status: 409,
+      message: "Cet ordre de travail est terminé : ses lignes de travail ne se modifient plus. Pour le reprendre, passez par le contrôle qualité.",
+    };
+  }
+  if (workOrder.status === "cancelled") {
+    return { status: 409, message: "Cet ordre de travail est annulé : ses lignes de travail ne se modifient plus." };
+  }
+
   return null;
 }
 
