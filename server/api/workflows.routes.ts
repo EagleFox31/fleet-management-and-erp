@@ -49,6 +49,7 @@ router.patch("/workflows/vehicle-acquisition/:sessionId", authenticate, async (r
     if (!userId) throw new AppError(401, "Non authentifié");
     const data = patchSchema.parse(req.body);
     const workflow = await workflowService.updateWorkflowState(userId, req.params.sessionId, data);
+    if (!workflow) throw new AppError(404, "Brouillon d'acquisition introuvable.");
     return res.status(200).json(workflow);
   } catch (err) {
     if (err instanceof AppError || err instanceof z.ZodError) return next(err);

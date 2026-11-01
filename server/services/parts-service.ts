@@ -3,6 +3,7 @@ import { parts, partsStockMovements, users, workOrders, type Part, type InsertPa
 import { eq, desc, asc, sql, and, lte, gte, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AppError } from "../lib/app-error";
+import { escapeLike } from "../lib/sql-like";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("parts");
@@ -24,7 +25,7 @@ export class PartsService {
     const conditions: SQL[] = [];
     if (search) {
       conditions.push(
-        sql`${parts.name} ILIKE ${`%${search}%`} OR ${parts.reference} ILIKE ${`%${search}%`}`,
+        sql`${parts.name} ILIKE ${`%${escapeLike(search)}%`} OR ${parts.reference} ILIKE ${`%${escapeLike(search)}%`}`,
       );
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

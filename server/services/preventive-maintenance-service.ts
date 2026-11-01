@@ -205,6 +205,30 @@ export class PreventiveMaintenanceService {
           }
         }
 
+        // Échéance d'un plan actif (hors kilométrage) dans la fenêtre d'alerte,
+        // ou dépassée : un OT lié au plan, jamais deux en attente pour le même plan.
+        const plansEchus = await db
+          .select()
+          .from(maintenanceSchedules)
+          .where(and(
+            eq(maintenanceSchedules.vehicleId, vehicle.id),
+            eq(maintenanceSchedules.isActive, true),
+            lte(maintenanceSchedules.scheduledDate, alertDate.toISOString().slice(0, 10)),
+          ));
+        for (const plan of plansEchus) {
+          if (plan.frequency === 'mileage' || !plan.scheduledDate) continue;
+          const [dejaEnAttente] = await db
+            .select({ id: workOrders.id })
+            .from(workOrders)
+            .where(and(
+              eq(workOrders.maintenanceScheduleId, plan.id),
+              eq(workOrders.status, 'pending'),
+            ))
+            .limit(1);
+          if (dejaEnAttente) continue;
+          generatedWorkOrders.push(await this.generateWorkOrderFromSchedule(plan));
+        }
+
         // Immobilisation du véhicule: passer par `vehicleStatusService`, jamais
         // par un `db.update` direct. Le service historise le changement dans
         // `status_history` avec sa cause; l'écriture directe ne laissait qu'une
@@ -314,7 +338,8 @@ export class PreventiveMaintenanceService {
             .from(workOrders)
             .where(and(
               eq(workOrders.vehicleId, vehicleId),
-              eq(workOrders.title, schedule.title),
+              // Le titre de l'OT généré n'est pas celui du plan : le lien fiable est maintenanceScheduleId.
+              eq(workOrders.maintenanceScheduleId, schedule.id),
               eq(workOrders.status, 'pending')
             ))
             .limit(1);

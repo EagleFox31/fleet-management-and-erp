@@ -92,12 +92,10 @@ describe("FUEL2 : statistiques de consommation d'un véhicule", { timeout: 60000
     expect((await session.call("GET", "/api/fuel-card/vehicle/abc/stats", { actor: "admin" })).status).toBe(400);
   });
 
-  // Défaut : un véhicule inconnu lève une Error dans le service
-  // (server/services/fuel-card-service.ts:457) et la route répond 500 avec le
-  // message brut (server/api/fuel-card.routes.ts:196), contre AGENTS.md §10 :
-  // attendu 404 sans détail technique.
-  it.fails("un véhicule inconnu répond 404, pas 500", async () => {
+  // Véhicule inconnu : 404 lisible (le service lève VEHICLE_NOT_FOUND, traduit en AppError).
+  it("un véhicule inconnu répond 404, pas 500", async () => {
     const res = await session.call("GET", "/api/fuel-card/vehicle/2147483000/stats", { actor: "admin" });
     expect(res.status).toBe(404);
+    expect(JSON.stringify(res.body)).not.toMatch(/2147483000|SELECT/);
   });
 });

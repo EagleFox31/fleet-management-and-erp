@@ -62,7 +62,7 @@ afterAll(async () => {
 }, 120000);
 
 describe("VEH1 : création", { timeout: 180000 }, () => {
-  // Mise en place hors des it.fails : un échec de création ne doit pas passer pour le défaut attendu.
+  // Mise en place hors des tests : un échec de création ne doit pas passer pour le défaut attendu.
   let historyVehicleId: number;
   beforeAll(async () => {
     const res = await create("workshopManager");
@@ -83,11 +83,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
     expect(history.every((h) => h.status === "operational")).toBe(true);
   });
 
-  // DEFAUT PRODUIT : la création consigne le statut deux fois. `storage.createVehicle`
-  // (server/storage.ts:871) insère déjà la ligne, puis `POST /api/vehicles`
-  // (server/routes.ts:1092-1093) appelle `recordStatusChange` : deux lignes identiques,
-  // l'historique d'un véhicule neuf compte un changement qui n'a pas eu lieu.
-  it.fails("le statut initial n'est consigné qu'une fois", async () => {
+  it("le statut initial n'est consigné qu'une fois", async () => {
     const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, historyVehicleId));
     expect(history.length).toBe(1);
   });
@@ -128,9 +124,7 @@ describe("VEH1 : création", { timeout: 180000 }, () => {
     expect(res.status).toBe(400);
   });
 
-  // DEFAUT PRODUIT : `year` et `mileage` passent par `Number(val)` (shared/schema.ts:154-155) :
-  // "abc" donne NaN, la validation Zod l'accepte et l'insertion échoue en base : 500 au lieu de 400.
-  it.fails.each([
+  it.each([
     ["année mal typée", () => ({ ...validBody(), year: "abc" })],
     ["kilométrage mal typé", () => ({ ...validBody(), mileage: "x" })],
   ])("%s : 400, jamais 500", async (_label, makeBody) => {
@@ -165,7 +159,7 @@ describe("VEH1 : lecture et unicité", { timeout: 180000 }, () => {
 });
 
 describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
-  // Mise en place des it.fails : créée ici, hors du test qui porte le défaut.
+  // Mise en place : créée ici, hors du test qui porte la vérification.
   let taken: any;
   let renamed: any;
   let authored: any;
@@ -202,10 +196,7 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
     expect((await rowOf(created.body.id)).notes).toBe("Vert");
   });
 
-  // DEFAUT PRODUIT : la violation d'unicité est avalée par `storage.updateVehicle`
-  // (server/storage.ts:910, rend undefined), puis `PATCH /api/vehicles/:id`
-  // (server/routes.ts:1201) répond 500 « Erreur serveur » au lieu d'un refus lisible 4xx.
-  it.fails("PATCH : l'immatriculation d'un autre véhicule est refusée (4xx, pas 500)", async () => {
+  it("PATCH : l'immatriculation d'un autre véhicule est refusée (4xx, pas 500)", async () => {
     const res = await call("PATCH", `/api/vehicles/${renamed.id}`, {
       actor: "admin",
       body: { registrationNumber: taken.registrationNumber },
@@ -214,10 +205,7 @@ describe("VEH1 : modification et suppression", { timeout: 180000 }, () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  // DEFAUT PRODUIT : `PATCH /api/vehicles/:id` (server/routes.ts:1193) passe le corps brut à
-  // `prepareColumnUpdate`, qui accepte toute colonne : `createdBy` envoyé par le client
-  // réécrit l'auteur de la fiche (AGENTS.md §5 : ces champs ne viennent jamais du corps).
-  it.fails("PATCH : createdBy du corps ne réécrit pas l'auteur", async () => {
+  it("PATCH : createdBy du corps ne réécrit pas l'auteur", async () => {
     await call("PATCH", `/api/vehicles/${authored.id}`, {
       actor: "admin",
       body: { notes: "Noir", createdBy: session.userIdOf("technician") },

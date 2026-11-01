@@ -9,10 +9,12 @@ import {
 } from "../../shared/constants/supplier-ratings";
 import { z } from "zod";
 import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
 import type { AppRole } from "@shared/constants/roles";
 
+const supplierLog = moduleLogger("suppliers");
 const router = Router();
 
 type RatingField = SupplierRatingField;
@@ -163,7 +165,7 @@ const broadcastSupplierUpdate = (
 };
 
 // GET /api/suppliers - Récupérer tous les fournisseurs avec filtres optionnels
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const filters: {
       isActive?: boolean;
@@ -172,7 +174,11 @@ router.get("/", async (req: Request, res: Response) => {
     } = {};
 
     if (req.query.isActive !== undefined) {
-      filters.isActive = req.query.isActive === 'true';
+      const rawActive = req.query.isActive;
+      if (rawActive !== "true" && rawActive !== "false") {
+        throw new AppError(400, "Le filtre isActive doit valoir « true » ou « false ».");
+      }
+      filters.isActive = rawActive === "true";
     }
 
     if (req.query.category) {
@@ -186,11 +192,10 @@ router.get("/", async (req: Request, res: Response) => {
     const suppliers = await supplierManagementService.getSuppliers(filters);
     res.json(suppliers);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération des fournisseurs:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des fournisseurs",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    if (!(error instanceof AppError)) {
+      supplierLog.error({ err: error, requestId: req.requestId }, "lecture de la liste des fournisseurs en échec");
+    }
+    next(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des fournisseurs.", { cause: error }));
   }
 });
 

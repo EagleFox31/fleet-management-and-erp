@@ -8,12 +8,14 @@ import { partsService } from "./services/parts-service";
 import { tiresService } from "./services/tires-service-simplified";
 import { FuelService } from "./services/fuel-service";
 import { mileageService } from "./services/mileage-service";
+import { escapeLike } from "./lib/sql-like";
+import { toFuelCardAppError } from "./services/fuel-card-service";
 import { vehicleStatusService } from "./services/vehicle-status-service";
 import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -1013,13 +1015,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Route pour vérifier si un véhicule existe par son immatriculation
-  app.get("/api/vehicles/check/:registrationNumber", authenticate, async (req, res) => {
+  app.get("/api/vehicles/check/:registrationNumber", isAnyUser, async (req, res) => {
     try {
       const registrationNumber = req.params.registrationNumber;
       const vehicle = await storage.getVehicleByRegistration(registrationNumber);
       
       if (!vehicle) {
         return res.status(200).json({ exists: false });
+      }
+
+      if (!(await canAccessOwned(req.user, async () => vehicle.ownerId))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       return res.status(200).json({ 
@@ -1028,7 +1034,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         registrationNumber: vehicle.registrationNumber
       });
     } catch (error) {
-      console.error("Check vehicle error:", error);
+      log.error({ err: error, requestId: req.requestId }, "contrôle d'existence du véhicule en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1086,16 +1092,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Numéro d'immatriculation déjà utilisé" });
       }
       
+      // `createVehicle` consigne déjà le statut initial dans l'historique : ne pas le doubler ici.
       const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
-      
-      // Enregistrer automatiquement le statut initial dans l'historique
-      const { fleetStatisticsService } = await import('./services/fleet-statistics-service');
-      await fleetStatisticsService.recordStatusChange(
-        vehicle.id,
-        vehicle.status,
-        undefined,
-        `Véhicule créé avec le statut ${vehicle.status}`
-      );
       
       return res.status(201).json(vehicle);
     } catch (error) {
@@ -1190,9 +1188,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Corps brut du formulaire : "" vaut champ vidé, et un type invalide
       // doit revenir en 400 plutôt qu'en échec silencieux du stockage.
-      const { data, errors } = prepareColumnUpdate(vehicles, req.body);
+      // Colonnes d'audit et clé : jamais lues du corps (AGENTS.md §5).
+      const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, ...editableBody } = req.body ?? {};
+      const { data, errors } = prepareColumnUpdate(vehicles, editableBody);
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations du véhicule sont invalides.", { fieldErrors: errors }));
+      }
+
+      if (typeof data.registrationNumber === "string" && data.registrationNumber !== vehicle.registrationNumber) {
+        const holder = await storage.getVehicleByRegistration(data.registrationNumber);
+        if (holder && holder.id !== id) {
+          return next(new AppError(409, "Ce numéro d'immatriculation est déjà utilisé par un autre véhicule."));
+        }
       }
 
       const updatedVehicle = await storage.updateVehicle(id, data, userId);
@@ -1208,7 +1215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/vehicles/:id", isAdmin, async (req, res) => {
+  app.delete("/api/vehicles/:id", isAdmin, async (req, res, next) => {
     try {
       const { VehicleDeletionService } = await import('./services/vehicle-deletion-service-trigger');
       const id = parseInt(req.params.id);
@@ -1224,18 +1231,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const reason = req.body?.reason || 'Suppression administrative';
-      const result = await VehicleDeletionService.deleteVehicle(id, reason);
-      
-      return res.status(200).json({ 
-        message: "Véhicule supprimé et archivé avec succès",
-        result 
-      });
+      try {
+        const result = await VehicleDeletionService.deleteVehicle(id, reason);
+        return res.status(200).json({
+          message: "Véhicule supprimé et archivé avec succès",
+          result,
+        });
+      } catch (deleteError) {
+        // Un véhicule référencé (OT, missions, factures...) ne se supprime pas
+        // physiquement : on le masque (deletedAt) pour garder l'historique.
+        const pgCode = (deleteError as any)?.code ?? (deleteError as any)?.cause?.code;
+        if (pgCode !== "23503") throw deleteError;
+        await db.update(vehicles).set({ deletedAt: new Date() }).where(eq(vehicles.id, id));
+        return res.status(200).json({
+          message: "Véhicule retiré de la flotte. Son historique est conservé.",
+          result: { vehicleId: id, archived: false, softDeleted: true },
+        });
+      }
     } catch (error) {
-      console.error("Delete vehicle error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la suppression du véhicule",
-        error: error instanceof Error ? error.message : "Erreur serveur"
-      });
+      log.error({ err: error, requestId: req.requestId }, "Delete vehicle error");
+      return next(new AppError(500, "Erreur lors de la suppression du véhicule", { cause: error }));
     }
   });
 
@@ -1813,7 +1828,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res) => {
+  app.delete("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -1827,11 +1842,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Planification non trouvée" });
       }
       
-      await storage.deleteMaintenanceSchedule(id);
-      
+      // `deleteMaintenanceSchedule` avale la violation de clé étrangère
+      // (work_orders.maintenance_schedule_id) et renvoie false : ne jamais
+      // répondre 204 sans suppression effective.
+      const supprime = await storage.deleteMaintenanceSchedule(id);
+      if (!supprime) {
+        return next(new AppError(409, "Ce plan a généré des ordres de travail : il ne peut pas être supprimé. Désactivez-le à la place."));
+      }
+
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete maintenance schedule error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Delete maintenance schedule error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2016,7 +2037,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Admin et workshop_manager voient tout
         console.log(`📋 Calling getWorkOrders for ${user.role}`);
-        result = await storage.getWorkOrders(status, priority, limit, offset, search);
+        result = await storage.getWorkOrders(status, priority, limit, offset, search ? escapeLike(search) : search);
         console.log(`📋 Got ${result.workOrders.length} work orders, total: ${result.total}`);
       }
       
@@ -2093,12 +2114,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-orders/vehicle/:vehicleId", authenticate, async (req, res) => {
+  app.get("/api/work-orders/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       const orders = await storage.getWorkOrdersByVehicleId(vehicleId);
@@ -2147,6 +2171,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parsedWorkOrder.updatedBy = actorUserId;
       }
       
+      // Un véhicule supprimé (deletedAt posé) ne reçoit plus d'OT.
+      if (parsedWorkOrder.vehicleId) {
+        const [supprime] = await db
+          .select({ id: vehicles.id })
+          .from(vehicles)
+          .where(and(eq(vehicles.id, parsedWorkOrder.vehicleId), sql`${vehicles.deletedAt} IS NOT NULL`))
+          .limit(1);
+        if (supprime) {
+          return res.status(400).json({ message: "Ce véhicule a été supprimé : on ne peut plus créer d'ordre de travail dessus." });
+        }
+      }
+
       // Récupérer l'immatriculation du véhicule si elle n'est pas fournie
       if (!parsedWorkOrder.vehicleRegistration && parsedWorkOrder.vehicleId) {
         const vehicle = await storage.getVehicle(parsedWorkOrder.vehicleId);
@@ -2601,8 +2637,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/parts", authenticate, async (req, res) => {
     try {
       const search = req.query.search as string | undefined;
-      const limit = parseInt(req.query.limit as string || "10");
-      const page = Math.floor(parseInt(req.query.offset as string || "0") / limit) + 1;
+      // Bornes : un limit nul, négatif ou hors entier sûr, ou un offset négatif, retombent sur le repli.
+      const rawLimit = Number.parseInt((req.query.limit as string) || "10", 10);
+      const limit = Number.isSafeInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 10;
+      const rawOffset = Number.parseInt((req.query.offset as string) || "0", 10);
+      const offset = Number.isSafeInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+      const page = Math.floor(offset / limit) + 1;
       const sortBy = req.query.sort_by as string | undefined;
       const sortOrder = req.query.sort_order === "desc" ? "desc" : "asc";
 
@@ -2610,7 +2650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
-      console.error("Get parts error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture de la liste des pièces en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3287,13 +3327,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Fuel Records Routes
-  app.get("/api/fuel-records/vehicle/:vehicleId", authenticate, async (req, res) => {
+  app.get("/api/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
+
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
+
       
       // Récupérer les enregistrements de carburant depuis le service
       const fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
@@ -3307,7 +3352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(enrichedFuelRecords);
     } catch (error) {
-      console.error("Get fuel records error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des pleins du véhicule en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3531,9 +3576,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Statistiques de consommation de carburant
   // Routes pour la gestion du kilométrage
-  app.get("/api/vehicles/:id/mileage", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:id/mileage", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.id);
+      if (isNaN(vehicleId)) {
+        return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       const currentMileage = await mileageService.getCurrentMileage(vehicleId);
       
       return res.json({ 
@@ -3542,26 +3593,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastMileage: currentMileage 
       });
     } catch (error) {
-      console.error("Get vehicle mileage error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture du kilométrage en échec");
       return res.status(500).json({ message: "Erreur lors de la récupération du kilométrage" });
     }
   });
 
-  app.get("/api/vehicles/:id/mileage/history", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:id/mileage/history", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.id);
+      if (isNaN(vehicleId)) {
+        return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       const limit = parseInt(req.query.limit as string) || 50;
       
       const history = await mileageService.getMileageHistory(vehicleId, limit);
       
       return res.json(history);
     } catch (error) {
-      console.error("Get mileage history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture de l'historique kilométrique en échec");
       return res.status(500).json({ message: "Erreur lors de la récupération de l'historique" });
     }
   });
 
-  app.post("/api/vehicles/:id/mileage/sync", authenticate, async (req, res) => {
+  app.post("/api/vehicles/:id/mileage/sync", isStaff, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.id);
       
@@ -3779,7 +3836,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Recharger la carte carburant (crédit)
-  app.post("/api/fuel-card/recharge", isFuelCardManager, async (req, res) => {
+  app.post("/api/fuel-card/recharge", isFuelCardManager, async (req, res, next) => {
     try {
       const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
 
@@ -3844,15 +3901,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(201).json(result);
     } catch (error) {
-      console.error("Fuel card recharge error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
+      log.error({ err: error, requestId: (req as any).requestId }, "recharge de la carte carburant en échec");
+      return next(toFuelCardAppError(error));
     }
   });
   
   // Enregistrer une consommation de carburant (débit)
-  app.post("/api/fuel-card/consumption", authenticate, async (req, res) => {
+  app.post("/api/fuel-card/consumption", authenticate, async (req, res, next) => {
     try {
       const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
       
@@ -3880,10 +3935,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(201).json(result);
     } catch (error) {
-      console.error("Record fuel consumption error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
+      log.error({ err: error, requestId: (req as any).requestId }, "enregistrement de la consommation en échec");
+      return next(toFuelCardAppError(error));
     }
   });
   
@@ -3912,12 +3965,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Statistiques de consommation par véhicule
-  app.get("/api/fuel-card/vehicle/:vehicleId/stats", authenticate, async (req, res) => {
+  app.get("/api/fuel-card/vehicle/:vehicleId/stats", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       const { fuelCardService } = await import("./services/fuel-card-service");
@@ -3925,20 +3981,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get vehicle fuel stats error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
+      log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant du véhicule en échec");
+      return next(toFuelCardAppError(error));
     }
   });
   
   // Détection d'anomalies de consommation
-  app.get("/api/fuel-card/vehicle/:vehicleId/anomalies", authenticate, async (req, res) => {
+  app.get("/api/fuel-card/vehicle/:vehicleId/anomalies", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       const { fuelCardService } = await import("./services/fuel-card-service");
@@ -3946,8 +4003,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(anomalies);
     } catch (error) {
-      console.error("Detect fuel anomalies error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      log.error({ err: error, requestId: (req as any).requestId }, "détection des anomalies carburant en échec");
+      return next(toFuelCardAppError(error));
     }
   });
   
@@ -4099,9 +4156,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Système d'alertes pour les entretiens et documents
-  app.get("/api/vehicles/check-alerts", authenticate, async (req, res) => {
+  app.get("/api/vehicles/check-alerts", isAnyUser, async (req, res) => {
     try {
-      const vehicles = await storage.getVehicles();
+      const ownerScope = ownerScopeOf(req.user);
+      const allVehicles = await storage.getVehicles();
+      const vehicles = {
+        ...allVehicles,
+        vehicles: allVehicles.vehicles.filter((v: any) => ownerScope === null || v.ownerId === ownerScope),
+      };
       const alerts: any[] = [];
       const now = new Date();
       
@@ -4205,7 +4267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(alerts);
     } catch (error) {
-      console.error("Check vehicle alerts error:", error);
+      log.error({ err: error, requestId: req.requestId }, "contrôle des alertes véhicules en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4499,18 +4561,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle status history endpoint - utilise le service de statut dédié
-  app.get("/api/vehicles/:vehicleId/status-history", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:vehicleId/status-history", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       
       const history = await vehicleStatusService.getVehicleStatusHistory(vehicleId);
       return res.status(200).json(history);
     } catch (error) {
-      console.error("Get vehicle status history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture de l'historique de statut en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5024,18 +5089,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle tire tracking routes
-  app.get("/api/vehicles/:vehicleId/tires", authenticate, async (req, res) => {
+  app.get("/api/vehicles/:vehicleId/tires", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
+      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+      }
       
       const vehicleTires = await tiresService.getVehicleTires(vehicleId);
       return res.status(200).json(vehicleTires);
     } catch (error) {
-      console.error("Get vehicle tires error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des pneus du véhicule en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

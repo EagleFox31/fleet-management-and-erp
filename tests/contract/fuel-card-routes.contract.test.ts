@@ -317,10 +317,10 @@ describe("FUEL1 : pleins (liste, lecture par véhicule, suppression)", { timeout
 
 /**
  * Défauts figés. Chaque requête fautive est jouée une fois dans `beforeAll`, ses lignes sont
- * supprimées aussitôt (une valeur NaN fausserait le solde global de la carte), et le `it.fails`
+ * supprimées aussitôt (une valeur NaN fausserait le solde global de la carte), et le `it`
  * ne contient que l'assertion métier.
  */
-describe("FUEL1 : défauts figés (it.fails)", { timeout: 120000 }, () => {
+describe("FUEL1 : validation, erreurs lisibles et cloison", { timeout: 120000 }, () => {
   const probes: Record<string, { status: number; body: any; balanceFinite?: boolean }> = {};
 
   async function probe(key: string, path: string, body: Record<string, unknown>) {
@@ -367,27 +367,27 @@ describe("FUEL1 : défauts figés (it.fails)", { timeout: 120000 }, () => {
     clientRead = await session.call("GET", `/api/fuel-records/vehicle/${foreignVehicleId}`, { actor: "client" });
   });
 
-  it.fails("recharge : date illisible -> 400 (500 aujourd'hui, année NaN à l'insertion)", () => {
+  it("recharge : date illisible -> 400", () => {
     expect(probes.badDate.status).toBe(400);
   });
 
-  it.fails("consommation : quantité illisible -> 400 (201 aujourd'hui, débit NaN qui fausse tout le solde)", () => {
+  it("consommation : quantité illisible -> 400", () => {
     expect(probes.nanQuantity.status).toBe(400);
   });
 
-  it.fails("consommation : quantité négative -> 400 (201 aujourd'hui, le débit négatif crédite la carte)", () => {
+  it("consommation : quantité négative -> 400", () => {
     expect(probes.negativeQuantity.status).toBe(400);
   });
 
-  it.fails("consommation : véhicule inconnu -> 404 (500 aujourd'hui)", () => {
+  it("consommation : véhicule inconnu -> 404", () => {
     expect(probes.unknownVehicle.status).toBe(404);
   });
 
-  it.fails("consommation : solde insuffisant -> 409 (500 aujourd'hui)", () => {
+  it("consommation : solde insuffisant -> 409", () => {
     expect(probes.insufficient.status).toBe(409);
   });
 
-  it.fails("un client ne lit pas les pleins d'un véhicule qui n'est pas le sien -> 403 (200 aujourd'hui)", () => {
+  it("un client ne lit pas les pleins d'un véhicule qui n'est pas le sien -> 403", () => {
     expect(clientRead.status).toBe(403);
   });
 });

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate, isTechnician } from "../middleware/auth";
 import { storage } from "../storage";
+import { AppError } from "../lib/app-error";
 import { workOrderItemsService } from "../services/work-order-items-service";
 
 /**
@@ -205,5 +206,17 @@ laborCatalogWriteRoutes.post("/", async (req, res) => {
   } catch (error) {
     console.error("Create labor catalog entry error:", error);
     return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+laborCatalogWriteRoutes.patch("/:id", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de poste invalide.");
+    const resultat = await workOrderItemsService.updateLaborCatalogEntry(id, req.body ?? {}, req.user?.id);
+    if (!resultat.success) throw new AppError(400, resultat.error);
+    return res.status(200).json(resultat.data);
+  } catch (error) {
+    return next(error);
   }
 });

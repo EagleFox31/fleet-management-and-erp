@@ -9,9 +9,8 @@ import { uniqueTestToken } from "../support/ids";
 /**
  * CAT1, catalogue de main-d'oeuvre : création, lecture, désactivation, droits.
  *
- * Le catalogue n'a que `GET /` et `POST /` : aucune route de modification ni
- * de désactivation (voir le dernier cas, `it.fails`). La désactivation est donc
- * posée par `db.update` pour prouver ce que les consommateurs en font.
+ * Le catalogue expose GET, POST et PATCH /:id (modification, désactivation).
+ * La désactivation est aussi posée par `db.update` pour prouver ce que les consommateurs en font.
  */
 
 type Actor = "manager" | "technician" | "warehouse";
@@ -113,25 +112,37 @@ describe("CAT1 : catalogue de main-d'oeuvre", { timeout: 60000 }, () => {
     expect(statuses).toEqual([201, 400]);
   });
 
-  // Manque : le catalogue n'expose ni modification ni désactivation
-  // (server/api/work-order-items.routes.ts : `laborCatalogWriteRoutes` ne porte
-  // que POST /). Un poste créé par erreur ne peut être ni corrigé ni retiré
-  // sans accès à la base.
   describe("poste à désactiver", () => {
     let entryToPatchId = 0;
-    // Mise en place hors du `it.fails` : une erreur de création fait échouer le
-    // hook au lieu de rendre le cas vert.
+    // Mise en place hors du `it` : une erreur de création fait échouer le hook.
     beforeAll(async () => {
       const { res } = await createEntry();
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       entryToPatchId = res.body.id;
     }, 60000);
 
-    it.fails("désactive un poste par PATCH /api/labor-catalog/:id", async () => {
+    it("désactive un poste par PATCH /api/labor-catalog/:id", async () => {
       const patched = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: false } });
       expect(patched.status).toBe(200);
       const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
       expect(row.isActive).toBe(false);
+      expect(row.updatedBy).not.toBeNull();
+    });
+
+    it("technicien et magasinier : 403, le poste n'est pas modifié", async () => {
+      for (const actor of ["technician", "warehouse"] as const) {
+        const res = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor, body: { label: "TEST refusé" } });
+        expect(res.status).toBe(403);
+      }
+      const [row] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
+      expect(row.label).not.toBe("TEST refusé");
+    });
+
+    it("poste inconnu : 404 ; libellé vide ou isActive mal typé : 400", async () => {
+      expect((await session.call("PATCH", "/api/labor-catalog/2147483000", { actor: "manager", body: { isActive: true } })).status).toBe(404);
+      expect((await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { label: "  " } })).status).toBe(400);
+      expect((await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: "non" } })).status).toBe(400);
+      expect((await session.call("PATCH", "/api/labor-catalog/abc", { actor: "manager", body: {} })).status).toBe(400);
     });
   });
 });

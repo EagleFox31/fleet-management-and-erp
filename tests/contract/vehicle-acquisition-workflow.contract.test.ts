@@ -125,8 +125,6 @@ describe("VEH3 : le brouillon est à son auteur", { timeout: 180000 }, () => {
     expect(mine.body.currentStep).toBe(1);
   });
 
-  // DEFAUT PRODUIT : `updateWorkflowState` (server/services/workflow-service.ts:88) étale le corps
-  // du PATCH dans le `set` : `userId` y est écrit, le brouillon passe à un autre compte.
   describe("brouillon prêt pour le PATCH", () => {
     const s = sid();
     beforeAll(async () => {
@@ -137,7 +135,7 @@ describe("VEH3 : le brouillon est à son auteur", { timeout: 180000 }, () => {
       expect((await rows(s))[0].userId).toBe(session.userIdOf("owner"));
     });
 
-    it.fails("le corps d'un PATCH ne réaffecte pas le brouillon à un autre compte", async () => {
+    it("le corps d'un PATCH ne réaffecte pas le brouillon à un autre compte", async () => {
       await call("PATCH", `${URL}/${s}`, { actor: "owner", body: { userId: session.userIdOf("other") } });
       expect((await rows(s))[0].userId).toBe(session.userIdOf("owner"));
     });
@@ -176,17 +174,12 @@ describe("VEH3 : terminé et abandonné", { timeout: 180000 }, () => {
 });
 
 describe("VEH3 : entrées invalides", { timeout: 180000 }, () => {
-  // DEFAUT PRODUIT : `POST /api/workflows/vehicle-acquisition` (server/routes.ts:5654) passe le corps
-  // brut à `saveWorkflowState` sans validation ; l'insertion (server/services/workflow-service.ts:36-42)
-  // échoue sur `session_id` / `workflow_data` NOT NULL et le catch répond 500 au lieu de 400.
-  it.fails("corps sans sessionId ni données : 400, jamais 500", async () => {
+  it("corps sans sessionId ni données : 400, jamais 500", async () => {
     const res = await call("POST", URL, { actor: "owner", body: {} });
     expect(res.status).toBe(400);
   });
 
-  // DEFAUT PRODUIT : même absence de validation (server/routes.ts:5654) : `currentStep: "abc"` atteint
-  // l'insertion d'une colonne integer (server/services/workflow-service.ts:36-42), 500 au lieu de 400.
-  it.fails("étape hors bornes ou mal typée : 400", async () => {
+  it("étape hors bornes ou mal typée : 400", async () => {
     const res = await call("POST", URL, {
       actor: "owner",
       body: { sessionId: sid(), currentStep: "abc", workflowData: {} },
@@ -194,9 +187,7 @@ describe("VEH3 : entrées invalides", { timeout: 180000 }, () => {
     expect(res.status).toBe(400);
   });
 
-  // DEFAUT PRODUIT : `updateWorkflowState` rend null (server/services/workflow-service.ts:100) et
-  // `PATCH /api/workflows/vehicle-acquisition/:sessionId` (server/routes.ts:5710-5711) répond 200 avec ce null.
-  it.fails("PATCH d'une session inconnue : 404 et non un 200 vide", async () => {
+  it("PATCH d'une session inconnue : 404 et non un 200 vide", async () => {
     const res = await call("PATCH", `${URL}/${sid()}`, { actor: "owner", body: { currentStep: 2 } });
     expect(res.status).toBe(404);
   });
@@ -210,10 +201,8 @@ describe("VEH3 : entrées invalides", { timeout: 180000 }, () => {
     it("témoin : le brouillon est en cours avant le PATCH", async () => {
       expect((await rows(s))[0].status).toBe("in_progress");
     });
-
-    // DEFAUT PRODUIT : même étalement du corps dans le `set` (server/services/workflow-service.ts:88) :
-    // `status: "completed"` clôt le brouillon sans passer par `/complete` (ni `completedAt`).
-    it.fails("le corps d'un PATCH ne peut pas changer le statut du brouillon", async () => {
+    // Liste blanche : `status: "completed"` ne clôt pas le brouillon (seul `/complete` le fait).
+    it("le corps d'un PATCH ne peut pas changer le statut du brouillon", async () => {
       await call("PATCH", `${URL}/${s}`, { actor: "owner", body: { status: "completed" } });
       expect((await rows(s))[0].status).toBe("in_progress");
     });

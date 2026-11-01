@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db";
+import { AppError } from "../lib/app-error";
 import { laborCatalog, users, workOrderItems } from "@shared/schema";
 import {
   computeWorkOrderItemTotals,
@@ -125,6 +126,43 @@ export class WorkOrderItemsService {
       .returning({ id: laborCatalog.id });
 
     return { success: true, data: { id: created.id } };
+  }
+
+  /**
+   * Corrige ou désactive un poste. Le code est immuable (les lignes d'OT y
+   * renvoient) ; un poste ne se supprime jamais, il se désactive.
+   */
+  async updateLaborCatalogEntry(
+    id: number,
+    payload: { label?: unknown; standardHours?: unknown; isActive?: unknown },
+    userId?: number,
+  ): Promise<ServiceResult<{ id: number }>> {
+    const set: Partial<typeof laborCatalog.$inferInsert> = { updatedAt: new Date(), updatedBy: userId ?? null };
+    const fourni = (champ: string) => Object.prototype.hasOwnProperty.call(payload, champ);
+
+    if (fourni("label")) {
+      const label = typeof payload.label === "string" ? payload.label.trim() : "";
+      if (label === "") return { success: false, error: "Le libellé du poste ne peut pas être vide." };
+      set.label = label;
+    }
+    if (fourni("standardHours")) {
+      set.standardHours = toNumericColumn(payload.standardHours as number | string | null);
+    }
+    if (fourni("isActive")) {
+      if (typeof payload.isActive !== "boolean") {
+        return { success: false, error: "L'état actif du poste doit être vrai ou faux." };
+      }
+      set.isActive = payload.isActive;
+    }
+
+    const [updated] = await db
+      .update(laborCatalog)
+      .set(set)
+      .where(eq(laborCatalog.id, id))
+      .returning({ id: laborCatalog.id });
+
+    if (!updated) throw new AppError(404, "Poste introuvable.");
+    return { success: true, data: { id: updated.id } };
   }
 
   /** Lignes d'un OT, enrichies du poste catalogue et du nom du technicien. */
