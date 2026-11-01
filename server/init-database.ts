@@ -510,6 +510,10 @@ export async function initializeDatabase() {
         updated_at timestamp NOT NULL DEFAULT now()
       )
     `);
+    // Rejet d'un règlement (SINV1) — jumelle de server/db/migrations/20261101_supplier_settlement_rejection.sql.
+    await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_by integer REFERENCES users(id)`);
+    await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
+    await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
     await applyLotRecetteSchema();
     await applyPerformanceIndexes();
     await applyMigrationSqlFiles();

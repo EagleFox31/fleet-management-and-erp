@@ -31,6 +31,7 @@ type SupplierInvoiceRealtimeEvent =
   | "supplier_invoice_updated"
   | "supplier_invoice_settlement_recorded"
   | "supplier_invoice_settlement_reconciled"
+  | "supplier_invoice_settlement_rejected"
   | "supplier_invoice_bulk_approved";
 
 function broadcastSupplierInvoiceUpdate(
@@ -799,6 +800,39 @@ router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission,
       invoice: result.invoice,
       message: "Règlement rapproché avec succès",
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /api/supplier-invoices/:id/settlements/:settlementId/reject
+ * Rejeter un règlement saisi, motif obligatoire (SINV1)
+ */
+router.patch("/:id/settlements/:settlementId/reject", checkPaymentPermission, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new AppError(401, "Utilisateur non authentifié");
+    }
+    const invoiceId = Number.parseInt(req.params.id, 10);
+    const settlementId = Number.parseInt(req.params.settlementId, 10);
+    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
+      throw new AppError(400, "Identifiant invalide.");
+    }
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
+
+    const result = await threeWayMatchingService.rejectInvoiceSettlement(invoiceId, settlementId, req.user.id, reason);
+
+    if (!result.replayed) {
+      broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_rejected", {
+        invoiceId,
+        settlement: result.settlement,
+        action: "settlement_rejected",
+        triggeredBy: req.user.id,
+      });
+    }
+
+    res.json({ settlement: result.settlement, message: "Règlement rejeté" });
   } catch (error) {
     next(error);
   }

@@ -1048,6 +1048,10 @@ export const supplierInvoiceSettlements = pgTable("supplier_invoice_settlements"
   reconciledBy: integer("reconciled_by").references(() => users.id),
   reconciledAt: timestamp("reconciled_at"),
   reconciliationNote: text("reconciliation_note"),
+  // Rejet (SINV1) : seul un règlement saisi se rejette, avec un motif obligatoire.
+  rejectedBy: integer("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

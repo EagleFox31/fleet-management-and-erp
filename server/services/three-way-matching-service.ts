@@ -896,6 +896,58 @@ export class ThreeWayMatchingService {
     };
   }
 
+  /**
+   * Rejeter un règlement saisi (chèque refusé, saisie erronée) : il ne compte
+   * plus dans le reste à régler. Le solde de la facture ne bouge pas, puisque
+   * seul un rapprochement le baisse. Rejouer le rejet rend l'état courant.
+   */
+  async rejectInvoiceSettlement(
+    invoiceId: number,
+    settlementId: number,
+    rejectedBy: number,
+    reason: string
+  ): Promise<{ settlement: SupplierInvoiceSettlement; replayed: boolean }> {
+    const rejectionReason = reason.trim();
+    if (!rejectionReason) {
+      throw new AppError(400, "Indiquez le motif du rejet.");
+    }
+
+    const [settlement] = await db
+      .select()
+      .from(supplierInvoiceSettlements)
+      .where(
+        and(
+          eq(supplierInvoiceSettlements.id, settlementId),
+          eq(supplierInvoiceSettlements.supplierInvoiceId, invoiceId)
+        )
+      )
+      .limit(1);
+
+    if (!settlement) {
+      throw new AppError(404, "Ce règlement n'existe plus.");
+    }
+
+    // Compare-and-set : seul le passage recorded -> rejected écrit.
+    const [updated] = await db
+      .update(supplierInvoiceSettlements)
+      .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })
+      .where(and(eq(supplierInvoiceSettlements.id, settlementId), eq(supplierInvoiceSettlements.status, "recorded")))
+      .returning();
+    if (updated) {
+      return { settlement: updated, replayed: false };
+    }
+
+    const [current] = await db
+      .select()
+      .from(supplierInvoiceSettlements)
+      .where(eq(supplierInvoiceSettlements.id, settlementId))
+      .limit(1);
+    if (current?.status === "rejected") {
+      return { settlement: current, replayed: true };
+    }
+    throw new AppError(409, "Un règlement rapproché ne peut pas être rejeté.");
+  }
+
   async getInvoiceSettlements(invoiceId: number) {
     const rows = await db
       .select()
@@ -906,7 +958,7 @@ export class ThreeWayMatchingService {
     const userIds = Array.from(
       new Set(
         rows
-          .flatMap((row) => [row.recordedBy, row.reconciledBy])
+          .flatMap((row) => [row.recordedBy, row.reconciledBy, row.rejectedBy])
           .filter((id): id is number => typeof id === "number")
       )
     );
@@ -931,6 +983,7 @@ export class ThreeWayMatchingService {
       ...row,
       recordedByUser: row.recordedBy ? usersMap.get(row.recordedBy) ?? null : null,
       reconciledByUser: row.reconciledBy ? usersMap.get(row.reconciledBy) ?? null : null,
+      rejectedByUser: row.rejectedBy ? usersMap.get(row.rejectedBy) ?? null : null,
     }));
   }
 
