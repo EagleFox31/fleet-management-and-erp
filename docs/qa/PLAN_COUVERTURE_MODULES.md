@@ -322,7 +322,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
-| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Partiel (`13-mission-invoice-payment` : création par l'API logistique, passage à « livrée » en base ; affectation, étapes et lancement non rejoués) |
+| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Couvert au navigateur (`17-mission-lifecycle` : affectation véhicule + chauffeur par l'écran, lancement avec budgets, livraison, clôture avec FDR, facture ; trames `mission_status_changed` / `mission_completed` lues par un second profil ; lancement refusé pour assurance expirée et CPC invalide ; `13-mission-invoice-payment` garde le règlement). Défauts figés : renouvellement non proposé sur lancement bloqué (écran), PATCH d'affectation sans contrôle d'éligibilité du véhicule (`mission-assignment-eligibility.contract.test.ts`) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict` ; lancement refusé avec le motif du conflit, corrigé par #80) |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
@@ -376,7 +376,7 @@ sequenceDiagram
 
 ### P2 — Mission → facture client → paiement
 
-État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). La mission est posée à « livrée » en base : le lancement n'est pas rejoué.
+État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). Le lancement est rejoué par `17-mission-lifecycle` (mission non posée en base : affectation, lancement, livraison, clôture, facture générée depuis l'écran) ; le règlement reste dans la spec 13, qui pose encore « livrée » en base pour isoler le paiement.
 
 ```mermaid
 flowchart LR
@@ -434,7 +434,7 @@ flowchart LR
 | 1 | T1, T3, T4, T7 | Sécurité et intégrité, valables partout |
 | 2 | PRT4, PRT6, TIR1–TIR4 | Traçabilité stock, dette connue, RBAC pneus déjà corrigé une fois |
 | 3 | WO2, WO3, WO5 | Lot 3 en cours, coût OT |
-| 4 | P2 (rejouer), P3, P6 | Parcours métier les plus utilisés après P1 |
+| 4 | P2 (fait : spec 17), P3, P6 | Parcours métier les plus utilisés après P1 |
 | 5 | Soft delete : ADM3, VEH2, TIR2 + désactivations | Données historiques à préserver |
 | 6 | DOC, FUEL, ALR, DIR | Modules de support |
 
