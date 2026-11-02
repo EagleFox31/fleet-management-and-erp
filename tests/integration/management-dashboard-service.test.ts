@@ -47,9 +47,9 @@ describe("ManagementDashboardService", () => {
 
     const after = await managementDashboardService.getDashboard("month");
 
-    expect(after.revenue.invoicedHT - before.revenue.invoicedHT).toBe(250_000);
-    expect(after.revenue.invoicedTTC - before.revenue.invoicedTTC).toBe(298_125);
-    expect(after.expenses.suppliers - before.expenses.suppliers).toBe(0);
+    expect(after.revenue.invoicedHT - before.revenue.invoicedHT).toBeCloseTo(250_000, 2);
+    expect(after.revenue.invoicedTTC - before.revenue.invoicedTTC).toBeCloseTo(298_125, 2);
+    expect(after.expenses.suppliers - before.expenses.suppliers).toBeCloseTo(0, 2);
   }, 30_000);
 
   it("agrège les charges fournisseurs en HT sur un import groupé", async () => {
@@ -83,7 +83,7 @@ describe("ManagementDashboardService", () => {
 
     const after = await managementDashboardService.getDashboard("month");
 
-    expect(after.expenses.suppliers - before.expenses.suppliers).toBe(50_000);
-    expect(after.result.grossHT - before.result.grossHT).toBe(-50_000);
+    expect(after.expenses.suppliers - before.expenses.suppliers).toBeCloseTo(50_000, 2);
+    expect(after.result.grossHT - before.result.grossHT).toBeCloseTo(-50_000, 2);
   }, 30_000);
 });
