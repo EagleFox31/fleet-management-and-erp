@@ -113,7 +113,8 @@ export const CDC_SCREENS: readonly CdcScreen[] = [
     description: "Indicateurs de maintenance sur une période, avec export PDF et Excel.",
     // Pas d'`alsoRequires: ["exports"]` : les indicateurs (/api/kpi) n'exigent aucun drapeau, seul
     // le téléchargement passe par /api/exports (drapeaux `exports` et `kpi-reports`). Export coupé,
-    // l'écran reste utile : la page masque le bouton par `useFeature("exports")`.
+    // l'écran reste utile : le lot qui livrera l'écran (kpi-reports.tsx n'est encore qu'un écran
+    // « bientôt disponible ») doit masquer le bouton d'export par `useFeature("exports")`.
     feature: "kpi-reports", roles: KPI_VIEWER_ROLES,
     apis: [
       { method: "GET", path: "/api/kpi" },

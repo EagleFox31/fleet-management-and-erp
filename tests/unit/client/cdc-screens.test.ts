@@ -33,9 +33,13 @@ type Access =
  */
 function kpiRoutesWithoutViewers(source: string): string[] {
   if (!/const viewers = authorize\(\[\s*\.\.\.KPI_VIEWER_ROLES\s*\]\)/.test(source)) return ["définition de viewers"];
-  const routes = [...source.matchAll(/router\.(get|post|put|patch|delete)\(\s*("[^"]+")\s*,\s*([A-Za-z_]+)/g)];
+  // Premier argument quelconque (guillemets doubles, simples, gabarit, constante) : un chemin qui
+  // n'est pas un littéral ne se contrôle pas ici, il fait échouer le test plutôt que passer sans garde.
+  const routes = [...source.matchAll(/router\.(get|post|put|patch|delete)\(\s*([^,]+?)\s*,\s*([A-Za-z_]+)/g)];
   if (routes.length === 0) return ["aucune route trouvée"];
-  return routes.filter(([, , , guard]) => guard !== "viewers").map(([, method, path]) => `${method} ${path}`);
+  return routes
+    .filter(([, , path, guard]) => !/^(["'`]).*\1$/.test(path) || guard !== "viewers")
+    .map(([, method, path]) => `${method} ${path}`);
 }
 
 /** Pour chaque écran, ce que le serveur autorise. Un écran absent de cette table échoue ci-dessous. */
@@ -124,7 +128,10 @@ describe("registre des écrans CDC", () => {
   it("les rapports d'indicateurs n'exigent pas le drapeau d'export : /api/kpi n'en dépend pas", () => {
     const kpi = CDC_SCREENS.find((s) => s.id === "kpi-reports") as CdcScreen;
     expect(screenFeatures(kpi)).toEqual(["kpi-reports"]);
-    expect(read("server/api/index.ts")).not.toMatch(/apiRouter\.use\(\s*"\/kpi"[^)]*requireFeature/);
+    // kpiRoutes est monté sans préfixe ni middleware : `apiRouter.use(kpiRoutes)`, aucun `requireFeature` devant.
+    const index = read("server/api/index.ts");
+    expect(index).toMatch(/apiRouter\.use\(\s*kpiRoutes\s*\)/);
+    expect(index).not.toMatch(/apiRouter\.use\([^;]*requireFeature\([^;]*kpiRoutes/);
     expect(kpi.apis.map((api) => api.path)).toContain("/api/exports/kpi-report");
   });
 
@@ -132,6 +139,12 @@ describe("registre des écrans CDC", () => {
     const source = 'const viewers = authorize([...KPI_VIEWER_ROLES]);\nrouter.get("/kpi/a", viewers, h);\nrouter.get("/kpi/b", handle(h));';
     expect(kpiRoutesWithoutViewers(source)).toEqual(['get "/kpi/b"']);
     expect(kpiRoutesWithoutViewers('router.get("/kpi/a", viewers, h);')).toEqual(["définition de viewers"]);
+    const withViewers = "const viewers = authorize([...KPI_VIEWER_ROLES]);\n";
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get('/kpi/s', handle(h));`)).toEqual(["get '/kpi/s'"]);
+    const template = "router.get(`/kpi/${x}`, handle(h));";
+    expect(kpiRoutesWithoutViewers(withViewers + template)).toEqual(["get `/kpi/${x}`"]);
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get(KPI_PATH, viewers, h);`)).toEqual(["get KPI_PATH"]);
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get('/kpi/ok', viewers, h);`)).toEqual([]);
   });
 
   it.each(CDC_SCREENS.map((s) => [s.id, s] as const))("%s : appels d'API déclarés et menu complet", (_id, screen) => {

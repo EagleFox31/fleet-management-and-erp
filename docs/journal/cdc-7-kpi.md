@@ -170,3 +170,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : (1) le test « liste de plusieurs OT » espionne `db.select` et `db.execute` et exige 5 requêtes pour 3 OT (liste, heures, pièces, rotations, taux). (2) comportement gardé, commentaire réécrit.
 - **Pourquoi** : constats mineurs 1 et 2 de relecture de #108.
 - **Preuves** : intégration `work-order-cost` 3/3 sur le Postgres local, relancée après le redémarrage de la base de 21:41.
+
+## 2026-11-02T22:00:00+01:00 — CDC-7 — Relecture #108 : garde des routes KPI, montage, commentaire d'écran, leçon
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (3) l'expression de `kpiRoutesWithoutViewers` ne lisait que les guillemets doubles ; (4) l'assertion sur le montage de `/kpi` était toujours vraie (`apiRouter.use(kpiRoutes)` sans préfixe) ; (5) commentaire de `cdc-screens.ts` affirmant un masquage que l'écran « bientôt disponible » ne fait pas ; (6) leçon de la période KPI à compléter.
+- **Comment** : (3) premier argument quelconque ; guillemets simples, gabarit et constante font échouer la fonction, avec contre-épreuves. (4) exige `apiRouter.use(kpiRoutes)` tel quel et aucun `requireFeature` devant `kpiRoutes`. (5) reformulé en obligation pour le lot qui livrera l'écran. (6) paragraphe de suite dans `LESSONS_LEARNED.md`, sans toucher à l'existant.
+- **Pourquoi** : constats mineurs 3 à 6 de relecture de #108.
+- **Preuves** : unitaires `cdc-screens` 35/35.
