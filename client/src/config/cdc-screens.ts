@@ -111,8 +111,14 @@ export const CDC_SCREENS: readonly CdcScreen[] = [
   {
     id: "kpi-reports", path: "/management/kpi-reports", title: "Rapports d'indicateurs", task: "CDC-7",
     description: "Indicateurs de maintenance sur une période, avec export PDF et Excel.",
+    // Pas d'`alsoRequires: ["exports"]` : les indicateurs (/api/kpi) n'exigent aucun drapeau, seul
+    // le téléchargement passe par /api/exports (drapeaux `exports` et `kpi-reports`). Export coupé,
+    // l'écran reste utile : la page masque le bouton par `useFeature("exports")`.
     feature: "kpi-reports", roles: KPI_VIEWER_ROLES,
-    apis: [{ method: "GET", path: "/api/kpi" }],
+    apis: [
+      { method: "GET", path: "/api/kpi" },
+      { method: "GET", path: "/api/exports/kpi-report" },
+    ],
     menu: { group: "top", label: "Rapports d'indicateurs", icon: TrendingUp },
   },
   // --- Lot #8 : rapport de maintenance

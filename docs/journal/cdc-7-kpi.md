@@ -133,3 +133,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : `ROLES` et `DENIED` dérivés de `ALL_APP_ROLES` (source unique des rôles) ; `KPI_VIEWER_ROLES` doit valoir exactement admin, direction, chef d'atelier. Même dérivation pour le rapport KPI exportable et les taux horaires (tout rôle sauf admin).
 - **Pourquoi** : réserve de relecture de #58 ; un rôle ajouté au schéma est contrôlé sans retoucher le test.
 - **Preuves** : contrat `kpi-cdc` 20/20 sous db-lock.
+
+## 2026-11-02T14:10:00+01:00 — CDC-7 — Réserves : drapeaux de l'écran KPI et garde de chaque route
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (1) la réserve demandait `alsoRequires: ["exports"]` sur l'écran kpi-reports ; (2) -de demandait que chaque route de `kpi.routes.ts` soit gardée par `viewers`.
+- **Comment** : (1) vérification de l'API : `/api/kpi` n'a aucun drapeau, seul `/api/exports/kpi-report` exige `exports` + `kpi-reports`. Ajouter `exports` aurait masqué tout l'écran pour un bouton : l'écran garde `kpi-reports` seul, déclare l'API d'export, et la page masquera le bouton par `useFeature("exports")`. Test qui fige ce choix. (2) `kpiRoutesWithoutViewers` liste les routes de `kpi.routes.ts` dont la première garde n'est pas `viewers`, avec contre-épreuve.
+- **Pourquoi** : réserves de relecture de #58/#59 ; `/api/kpi` n'a pas de garde au montage, une route ajoutée sans `viewers` serait ouverte à tout le personnel.
+- **Preuves** : unitaires `cdc-screens` 35/35, dont la contre-épreuve.
