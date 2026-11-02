@@ -105,7 +105,7 @@ async function seedClient(key: "A" | "B", ownerId: number) {
 }
 
 /** Document de workflow à usage unique, avec son propre fichier : une suppression n'affecte pas les autres tests. */
-async function seedWorkflowDocument(key: "A" | "B", name: string) {
+async function seedWorkflowDocument(key: "A" | "B", name: string, originalName = name) {
   const filePath = join(uploadsDir, name);
   writeFileSync(filePath, `TEST-${name}`);
   const [document] = await db
@@ -114,7 +114,7 @@ async function seedWorkflowDocument(key: "A" | "B", name: string) {
       workflowId: fixture[key].workflowId,
       sessionId: fixture[key].sessionId,
       documentType: "autre",
-      originalName: name,
+      originalName,
       storedName: name,
       filePath,
       fileSize: 6,
@@ -314,5 +314,45 @@ describe("suppression d'un document de workflow : cloison entre clients", { time
       const again = await call("DELETE", `/api/workflows/documents/${document.id}`, { actor });
       expect(again.status).toBe(404);
     }
+  });
+});
+
+describe("téléchargement d'un document de workflow : nom d'origine dans l'en-tête", { timeout: 60000 }, () => {
+  /** Nom de fichier lu dans Content-Disposition : `filename*` (UTF-8) prime sur `filename`. */
+  function filenameOf(header: string | null): string | undefined {
+    const extended = header?.match(/filename\*=UTF-8''([^;]+)/i);
+    if (extended) return decodeURIComponent(extended[1]);
+    return header?.match(/filename="([^"]*)"/)?.[1];
+  }
+
+  it("un nom hors Latin-1 est servi en 200 et restitué intact (avant : 500)", async () => {
+    const original = "Carte grise 车辆 Ω.pdf";
+    const document = await seedWorkflowDocument("B", "cd-unicode.pdf", original);
+    const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toMatch(/^inline;/);
+    expect(filenameOf(download.headers.get("content-disposition"))).toBe(original);
+  });
+
+  it("un guillemet ou un retour à la ligne dans le nom ne sort pas du paramètre filename", async () => {
+    for (const [stored, original] of [
+      ["cd-quote.pdf", 'devis".pdf; filename="autre.exe'],
+      ["cd-crlf.pdf", "a\r\nX-Injecte: 1.pdf"],
+    ]) {
+      const document = await seedWorkflowDocument("B", stored, original);
+      const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
+      expect(download.status).toBe(200);
+      const header = download.headers.get("content-disposition")!;
+      expect(header.match(/filename="/g)).toHaveLength(1);
+      expect(download.headers.get("x-injecte")).toBeNull();
+      expect(filenameOf(header)).toBe(original);
+    }
+  });
+
+  it("non-régression : un nom ASCII simple reste un filename entre guillemets", async () => {
+    const document = await seedWorkflowDocument("B", "cd-ascii.pdf", "facture-2026.pdf");
+    const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toBe('inline; filename="facture-2026.pdf"');
   });
 });

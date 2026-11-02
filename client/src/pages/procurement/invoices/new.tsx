@@ -16,6 +16,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useFormDraft } from "@/hooks/use-form-draft";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { supplierInvoiceDraft } from "@/lib/form-drafts";
 
@@ -131,8 +132,11 @@ export default function NewSupplierInvoicePage() {
     },
   });
 
+  // Un double clic envoyait la saisie deux fois (la seconde finit en 409 « déjà saisie »).
+  const submitInvoice = useSingleFlightMutate(createInvoiceMutation.mutate);
+
   const onSubmit = (data: FormValues) => {
-    createInvoiceMutation.mutate(data);
+    submitInvoice(data);
   };
 
   if (!canCreateInvoice) {

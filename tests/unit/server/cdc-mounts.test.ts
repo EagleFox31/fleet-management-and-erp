@@ -8,10 +8,9 @@ vi.hoisted(() => {
   process.env.AUTH_DEBUG = "0";
 });
 const ROLE_BY_ID = new Map<number, string>();
-vi.mock("../../../server/storage", () => ({
-  storage: {
-    getUser: async (id: number) => (ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined),
-  },
+vi.mock("../../../server/services/session-user", () => ({
+  findActiveSessionUser: async (id: number) =>
+    ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined,
 }));
 vi.mock("../../../server/middleware/session", () => ({
   sessionMiddleware: (_req: unknown, _res: unknown, next: () => void) => next(),

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../server/storage", () => ({ storage: { getUser: async () => undefined } }));
+vi.mock("../../../server/services/session-user", () => ({ findActiveSessionUser: async () => undefined }));
 
 import { AUDIT_MASK } from "../../../shared/contracts/audit-logs";
 import { maskSecrets } from "../../../server/lib/audit";

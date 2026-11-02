@@ -27,6 +27,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import { userMessageOf } from "@/lib/api-error";
+import { checkWorkOrderTransition, WORK_ORDER_STATUSES } from "@shared/constants/work-order-transitions";
+
+const STATUS_OPTIONS: Record<(typeof WORK_ORDER_STATUSES)[number], string> = {
+  pending: "En attente",
+  in_progress: "En cours",
+  awaiting_parts: "En attente pièces",
+  completed: "Terminé",
+  cancelled: "Annulé",
+};
 
 interface EditableWorkOrder {
   id: number;
@@ -50,6 +61,11 @@ interface WorkOrderEditModalProps {
 export function WorkOrderEditModal({ workOrder, open, onOpenChange }: WorkOrderEditModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Mêmes transitions que le serveur : seuls les statuts atteignables sont proposés.
+  const statusOptions = WORK_ORDER_STATUSES.filter(
+    (status) => checkWorkOrderTransition(workOrder.status, status, user?.role).allowed,
+  );
 
   const form = useForm<EditWorkOrderData>({
     resolver: zodResolver(editWorkOrderSchema) as any,
@@ -71,11 +87,11 @@ export function WorkOrderEditModal({ workOrder, open, onOpenChange }: WorkOrderE
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders/statistics"] });
       onOpenChange(false);
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: error.message || "Impossible de modifier l'ordre de travail",
+        description: userMessageOf(error, "Impossible de modifier l'ordre de travail"),
       });
     },
   });
@@ -126,11 +142,11 @@ export function WorkOrderEditModal({ workOrder, open, onOpenChange }: WorkOrderE
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="pending">En attente</SelectItem>
-                      <SelectItem value="in_progress">En cours</SelectItem>
-                      <SelectItem value="awaiting_parts">En attente pièces</SelectItem>
-                      <SelectItem value="completed">Terminé</SelectItem>
-                      <SelectItem value="cancelled">Annulé</SelectItem>
+                      {statusOptions.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {STATUS_OPTIONS[status]}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDocumentExpiry,
   documentExpiryDedupeKey,
+  documentExpiryDedupeKeyPrefixes,
   daysUntilExpiry,
 } from "../../../server/services/document-expiry-rule";
 
@@ -36,5 +37,14 @@ describe("règle d'échéance à 30 jours (T-17a)", () => {
     expect(a).not.toBe(documentExpiryDedupeKey(7, "2027-11-29", "due"));
     expect(a).not.toBe(documentExpiryDedupeKey(7, "2026-11-29", "expired"));
     expect(a).not.toBe(documentExpiryDedupeKey(8, "2026-11-29", "due"));
+  });
+
+  it("les préfixes de levée d'un document ne couvrent pas un autre id qui commence pareil (1 / 12)", () => {
+    const prefixes = documentExpiryDedupeKeyPrefixes(1);
+    const own = [documentExpiryDedupeKey(1, "2026-11-29", "due"), documentExpiryDedupeKey(1, "2026-11-29", "expired")];
+    const other = [documentExpiryDedupeKey(12, "2026-11-29", "due"), documentExpiryDedupeKey(10, "2026-11-29", "expired")];
+    const covered = (key: string) => prefixes.some((p) => key.startsWith(p));
+    expect(own.every(covered)).toBe(true);
+    expect(other.some(covered)).toBe(false);
   });
 });

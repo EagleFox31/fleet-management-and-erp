@@ -32,3 +32,8 @@ export function normalizeRole(role: string | null | undefined): AppRole {
 export function getRoleLabel(role: AppRole): string {
   return ROLE_LABELS[role] ?? ROLE_LABELS.user;
 }
+
+/** Libellé d'un rôle tel que stocké (code ou alias) : table unique de l'UI. */
+export function roleLabelOf(role: string | null | undefined): string {
+  return getRoleLabel(normalizeRole(role));
+}

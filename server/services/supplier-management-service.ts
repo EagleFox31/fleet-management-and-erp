@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { suppliers, supplierInvoices, parts, users } from "../../shared/schema";
 import { eq, and, desc, sql, ilike, or, inArray } from "drizzle-orm";
+import { escapeLike } from "../lib/sql-like";
 import type { Supplier, InsertSupplier } from "../../shared/schema";
 
 export class SupplierManagementService {
@@ -33,15 +34,15 @@ export class SupplierManagementService {
     
     if (filters?.category) {
       // Utiliser ilike pour une recherche insensible à la casse et aux accents
-      conditions.push(ilike(suppliers.category, filters.category));
+      conditions.push(ilike(suppliers.category, escapeLike(filters.category)));
     }
     
     if (filters?.search) {
       conditions.push(
         or(
-          ilike(suppliers.name, `%${filters.search}%`),
-          ilike(suppliers.contactName, `%${filters.search}%`),
-          ilike(suppliers.email, `%${filters.search}%`)
+          ilike(suppliers.name, `%${escapeLike(filters.search)}%`),
+          ilike(suppliers.contactName, `%${escapeLike(filters.search)}%`),
+          ilike(suppliers.email, `%${escapeLike(filters.search)}%`)
         )!
       );
     }
@@ -383,10 +384,10 @@ export class SupplierManagementService {
       .from(suppliers)
       .where(
         or(
-          ilike(suppliers.name, `%${searchTerm}%`),
-          ilike(suppliers.contactName, `%${searchTerm}%`),
-          ilike(suppliers.email, `%${searchTerm}%`),
-          ilike(suppliers.category, `%${searchTerm}%`)
+          ilike(suppliers.name, `%${escapeLike(searchTerm)}%`),
+          ilike(suppliers.contactName, `%${escapeLike(searchTerm)}%`),
+          ilike(suppliers.email, `%${escapeLike(searchTerm)}%`),
+          ilike(suppliers.category, `%${escapeLike(searchTerm)}%`)
         )!
       )
       .orderBy(desc(suppliers.createdAt));
