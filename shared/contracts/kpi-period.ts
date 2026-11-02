@@ -8,6 +8,14 @@
 import { z } from "zod";
 import { isoDateSchema } from "./common";
 
+/** Fuseau des indicateurs : « aujourd'hui » se lit ici, côté serveur comme côté contrat. */
+export const KPI_TIME_ZONE = "Africa/Douala";
+
+/** Jour calendaire de `now` dans le fuseau demandé (`AAAA-MM-JJ`). Seul calcul du jour courant. */
+export function isoDateInZone(now: Date, timeZone: string = KPI_TIME_ZONE): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
 export const KPI_MIN_YEAR = 2000;
 export const KPI_MAX_YEAR = 2100;
 /** Nombre maximal de mois civils touchés par une période (premier et dernier mois compris). */
@@ -35,12 +43,23 @@ export const kpiDateSchema = isoDateSchema
     message: `L'année doit être comprise entre ${KPI_MIN_YEAR} et ${KPI_MAX_YEAR}.`,
   });
 
-/** Message d'erreur de la période, ou `null` si elle est acceptable (une borne absente passe). */
-export function kpiPeriodIssue(q: { from?: string; to?: string }): { message: string; path: "from" | "to" } | null {
-  if (!q.from || !q.to) return null;
-  if (q.from > q.to) return { message: "La date de début doit précéder la date de fin.", path: "from" };
-  if (spanInMonths(q.from, q.to) > KPI_MAX_SPAN_MONTHS) {
-    return { message: `La période ne peut pas dépasser ${KPI_MAX_SPAN_MONTHS} mois.`, path: "to" };
+/**
+ * Message d'erreur de la période, ou `null` si elle est acceptable.
+ *
+ * `from` seul : le serveur complète `to` par aujourd'hui (`kpi-rules.ts`), donc `from=2001-01-01`
+ * couvre plus de 300 mois. On contrôle la période réelle avec `today`, lu à Douala comme le fait
+ * le serveur : en UTC, entre 00:00 et 01:00 à Douala, `from` = aujourd'hui serait refusé (`from > to`). `to` seul reste couvert, le serveur en déduit
+ * `from` sur 12 mois ; sans borne, défaut serveur de 12 mois.
+ */
+export function kpiPeriodIssue(
+  q: { from?: string; to?: string },
+  today: string = isoDateInZone(new Date()),
+): { message: string; path: "from" | "to" } | null {
+  if (!q.from) return null;
+  const to = q.to ?? today;
+  if (q.from > to) return { message: "La date de début doit précéder la date de fin.", path: "from" };
+  if (spanInMonths(q.from, to) > KPI_MAX_SPAN_MONTHS) {
+    return { message: `La période ne peut pas dépasser ${KPI_MAX_SPAN_MONTHS} mois.`, path: q.to ? "to" : "from" };
   }
   return null;
 }

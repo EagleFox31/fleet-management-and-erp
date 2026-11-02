@@ -132,6 +132,29 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
+/**
+ * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
+ * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
+ * des contrôles de `server/api/document-renewals.routes.ts`.
+ */
+export const DOCUMENT_RENEWAL_WRITER_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/**
+ * Lecture des centres et des demandes de renouvellement (`GET /centers`, `GET /requests`) :
+ * les écrivains plus le technicien. Source unique du routeur et de l'événement temps réel
+ * `document_renewal_center_changed`.
+ */
+export const DOCUMENT_RENEWAL_VIEWER_ROLES = [...DOCUMENT_RENEWAL_WRITER_ROLES, "technician"] as const satisfies readonly AppRole[];
+
+/**
+ * Modification d'un véhicule (`PATCH /api/vehicles/:id`) : l'administrateur et le chef
+ * d'atelier modifient toute la fiche. La logistique ne saisit que la capacité des
+ * réservoirs (`tankCapacityL`, FUEL3, décision du 2 novembre 2026), aucun autre champ.
+ */
+export const VEHICLE_EDIT_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
+export const VEHICLE_TANK_CAPACITY_ONLY_ROLES = ["logistics"] as const satisfies readonly AppRole[];
+export const VEHICLE_PATCH_ROLES = [...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as const satisfies readonly AppRole[];
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 

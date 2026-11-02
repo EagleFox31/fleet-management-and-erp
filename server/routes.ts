@@ -15,7 +15,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -23,7 +23,8 @@ import {
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
   maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments,
-  faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows
+  faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows,
+  vehicleTankCapacitySchema, VEHICLE_TANK_CAPACITY_MESSAGE
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
 import { checkWorkOrderTransition } from "@shared/constants/work-order-transitions";
@@ -34,10 +35,12 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError } from "./lib/app-error";
+import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
+import { broadcastFuelRecordChanged } from "./lib/fuel-record-realtime";
 import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
@@ -1172,7 +1175,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/vehicles/:id", isWorkshopManager, async (req, res, next) => {
+  app.patch("/api/vehicles/:id", isVehiclePatcher, async (req, res, next) => {
+    const refusal = vehiclePatchRefusal(req.user?.role, req.body);
+    if (refusal) return next(refusal);
     try {
       const id = parseInt(req.params.id);
       
@@ -1193,6 +1198,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // doit revenir en 400 plutôt qu'en échec silencieux du stockage.
       // Colonnes d'audit et clé : jamais lues du corps (AGENTS.md §5).
       const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, ...editableBody } = req.body ?? {};
+      // Capacité des réservoirs (FUEL3) : 0 ou négatif violerait la contrainte de la base (500).
+      // Même schéma que la création : "" ou null vide la capacité, hors bornes = 400 lisible.
+      if ("tankCapacityL" in editableBody) {
+        const capacity = vehicleTankCapacitySchema.safeParse(editableBody.tankCapacityL);
+        if (!capacity.success) return next(new AppError(400, VEHICLE_TANK_CAPACITY_MESSAGE));
+        editableBody.tankCapacityL = capacity.data;
+      }
       const { data, errors } = prepareColumnUpdate(vehicles, editableBody);
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations du véhicule sont invalides.", { fieldErrors: errors }));
@@ -1211,9 +1223,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Erreur serveur" });
       }
 
+      // Couche 2 : la capacité fait varier la règle tank-overflow et le compteur « sans capacité »
+      // chez les autres profils carburant (même événement que les pleins, AGENTS.md §2).
+      if ("tankCapacityL" in data && (data.tankCapacityL ?? null) !== (vehicle.tankCapacityL ?? null)) {
+        broadcastFuelRecordChanged(id, req.requestId);
+      }
+
       return res.status(200).json(updatedVehicle);
     } catch (error) {
-      console.error("Update vehicle error:", error);
+      // Filet : la contrainte de capacité refusée par la base (le stockage avale d'ordinaire l'erreur).
+      const pgError = (error as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } });
+      const violated = pgError?.code === "23514" ? pgError : pgError?.cause?.code === "23514" ? pgError.cause : null;
+      if (violated?.constraint === "vehicles_tank_capacity_l_positive") {
+        return next(new AppError(400, VEHICLE_TANK_CAPACITY_MESSAGE, { cause: error }));
+      }
+      log.error({ err: error, requestId: req.requestId }, "Update vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3395,6 +3419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         log.error({ err: error, requestId: req.requestId }, "Erreur lors de la vérification des maintenances kilométriques");
       }
 
+      broadcastFuelRecordChanged(fuelRecord.id, req.requestId);
       return res.status(201).json(fuelRecord);
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
@@ -3476,6 +3501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      broadcastFuelRecordChanged(id, req.requestId);
       return res.status(200).json(updatedFuelRecord);
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
@@ -3499,10 +3525,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       await fuelService.deleteFuelRecord(id);
-      
+
+      broadcastFuelRecordChanged(id, req.requestId);
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete fuel record error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Delete fuel record error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5100,22 +5127,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return next(new AppError(400, "Type de document inconnu."));
       }
 
+      // Un identifiant non entier finissait en erreur SQL (500).
+      const workflowIdNumber = Number(workflowId);
+      if (!Number.isSafeInteger(workflowIdNumber) || workflowIdNumber <= 0) {
+        return next(new AppError(400, "Identifiant de workflow invalide."));
+      }
+
       // Le client alimente sa propre session d'acquisition, jamais celle d'un autre.
       // Le personnel autorisé : admin, secrétariat, logistique, chef d'atelier.
-      if (req.user?.role === "client") {
-        const [owned] = await db
-          .select({ id: vehicleAcquisitionWorkflows.id })
-          .from(vehicleAcquisitionWorkflows)
-          .where(and(
-            eq(vehicleAcquisitionWorkflows.id, parseInt(workflowId)),
-            eq(vehicleAcquisitionWorkflows.sessionId, sessionId),
-            eq(vehicleAcquisitionWorkflows.userId, userId),
-          ));
-        if (!owned) return next(new AppError(403, "Accès refusé : cette session d'acquisition n'appartient pas à votre compte."));
+      if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(workflowIdNumber, sessionId)))) {
+        return next(new AppError(403, "Accès refusé : cette session d'acquisition n'appartient pas à votre compte."));
       }
 
       const documentData = {
-        workflowId: parseInt(workflowId),
+        workflowId: workflowIdNumber,
         sessionId: sessionId,
         documentType: documentType,
         originalName: req.file.originalname,

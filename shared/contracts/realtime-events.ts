@@ -10,11 +10,13 @@
  * `part_requirement_updated` (réception), `alert_created`.
  */
 import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
   FUEL_READ_ROLES,
   GPS_VIEW_ROLES,
   MISSION_ADVISORY_ROLES,
   PART_SALE_READ_ROLES,
   STAFF_ROLES,
+  WORK_ORDER_COST_READ_ROLES,
   type AppRole,
 } from "../constants/roles";
 
@@ -74,7 +76,7 @@ export const REALTIME_EVENTS = {
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
-    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers"],
+    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers", "/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary"],
   } as EventDefinition<{ id: number }>,
   fuel_anomaly_resolved: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
@@ -94,6 +96,13 @@ export const REALTIME_EVENTS = {
     scope: { type: "broadcast" },
     invalidates: ["/api/vehicle-document-types"],
   } as EventDefinition<{ code: string }>,
+  workshop_labor_rate_created: {
+    // Un nouveau taux change le coût des OT clos après sa date d'effet : KPI, listes du
+    // technicien et taux d'un OT ouvert (clé `/api/work-orders/:id/labor-rate`, invalidée
+    // par prédicat dans useRealTimeSync, la clé portant l'identifiant).
+    scope: { type: "roles", roles: [...WORK_ORDER_COST_READ_ROLES] },
+    invalidates: [...KPI_QUERY_KEYS, "/api/technician/work-orders", "/api/technician/my-work-orders"],
+  } as EventDefinition<{ effectiveFrom: string }>,
   alerts_read: {
     // Nominatif : les autres onglets du même compte remettent cloche et compteur à jour.
     scope: "user",
@@ -102,6 +111,11 @@ export const REALTIME_EVENTS = {
   backup_failed: {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],
+  } as EventDefinition<{ id: number }>,
+  document_renewal_center_changed: {
+    // Rôles qui lisent ou choisissent un centre (GET /centers).
+    scope: { type: "roles", roles: DOCUMENT_RENEWAL_VIEWER_ROLES },
+    invalidates: ["/api/document-renewals/centers"],
   } as EventDefinition<{ id: number }>,
 
   // Écarts du cahier des charges (chantier CDC, lot CDC-0b). Déclarés ici ; l'émetteur

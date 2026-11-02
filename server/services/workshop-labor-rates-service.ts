@@ -31,6 +31,9 @@ export async function listWorkshopLaborRates(): Promise<WorkshopLaborRate[]> {
   return rows.map(toRate);
 }
 
+/** Date qui choisit le taux d'un OT `w` : sa clôture, sinon aujourd'hui en Africa/Douala. */
+const RATE_DATE_OF_WORK_ORDER = sql`COALESCE(w.end_date::date, (now() AT TIME ZONE 'Africa/Douala')::date)`;
+
 /**
  * Taux en vigueur pour un OT : à sa date de clôture (`end_date`, comme le KPI de coût), sinon
  * aujourd'hui en Africa/Douala pour un OT en cours. `null` s'il n'existe aucun taux à cette date.
@@ -40,7 +43,7 @@ export async function laborRateForWorkOrder(workOrderId: number): Promise<{ effe
     SELECT to_char(r.effective_from, 'YYYY-MM-DD') AS effective_from, r.hourly_rate_ht::float8 AS hourly_rate_ht
     FROM work_orders w
     JOIN workshop_labor_rates r
-      ON r.effective_from <= COALESCE(w.end_date::date, (now() AT TIME ZONE 'Africa/Douala')::date)
+      ON r.effective_from <= ${RATE_DATE_OF_WORK_ORDER}
     WHERE w.id = ${workOrderId}
     ORDER BY r.effective_from DESC
     LIMIT 1`);
@@ -50,6 +53,31 @@ export async function laborRateForWorkOrder(workOrderId: number): Promise<{ effe
   }>;
   const row = rows[0];
   return row ? { effectiveFrom: row.effective_from, hourlyRateHt: Number(row.hourly_rate_ht) } : null;
+}
+
+/**
+ * Taux horaire en vigueur pour plusieurs OT, en une requête (même règle que
+ * `laborRateForWorkOrder`). Un OT sans taux applicable est absent de la table.
+ */
+export async function laborRatesForWorkOrders(workOrderIds: readonly number[]): Promise<Map<number, number>> {
+  const rates = new Map<number, number>();
+  if (workOrderIds.length === 0) return rates;
+  const res = await db.execute(sql`
+    SELECT w.id AS work_order_id, r.hourly_rate_ht::float8 AS hourly_rate_ht
+    FROM work_orders w
+    JOIN LATERAL (
+      SELECT hourly_rate_ht FROM workshop_labor_rates
+      WHERE effective_from <= ${RATE_DATE_OF_WORK_ORDER}
+      ORDER BY effective_from DESC
+      LIMIT 1
+    ) r ON true
+    WHERE w.id IN (${sql.join(workOrderIds.map((id) => sql`${id}`), sql`, `)})`);
+  const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as Array<{
+    work_order_id: number;
+    hourly_rate_ht: number;
+  }>;
+  for (const row of rows) rates.set(Number(row.work_order_id), Number(row.hourly_rate_ht));
+  return rates;
 }
 
 /** `true` si l'OT existe : distingue « OT inconnu » (404) de « aucun taux applicable » (null). */

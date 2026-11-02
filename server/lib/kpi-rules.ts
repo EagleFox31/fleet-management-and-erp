@@ -7,16 +7,12 @@
  * fuseau du serveur (leçon « Heure de fin de verrou décalée du fuseau du serveur »).
  */
 
+import { KPI_TIME_ZONE, isoDateInZone } from "@shared/contracts/kpi-period";
 import { laborCost, laborRateAt as rateLineAt, type LaborRate } from "@shared/work-order-cost";
 
 export type { LaborRate };
 
-export const KPI_TIME_ZONE = "Africa/Douala";
-
-/** Jour calendaire de `now` dans le fuseau demandé (`AAAA-MM-JJ`). */
-export function isoDateInZone(now: Date, timeZone: string = KPI_TIME_ZONE): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
+export { KPI_TIME_ZONE, isoDateInZone };
 
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);

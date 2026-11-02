@@ -22,6 +22,7 @@ import {
 import { workOrderLaborRateRoutes } from "./work-order-labor-rate.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
+import documentRenewalCentersRoutes from "./document-renewal-centers.routes";
 import managementRoutes from "./management.routes";
 import featureFlagsRoutes from "./feature-flags.routes";
 import vehicleDocumentTypesRoutes from "./vehicle-document-types.routes";
@@ -47,6 +48,7 @@ import fuelPricesRoutes from "./fuel-prices.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
+import driverBreakdownsRoutes from "./driver-breakdowns.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
 import partScansRoutes from "./part-scans.routes";
@@ -164,6 +166,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/labor-catalog", isWorkshopManager, laborCatalogWriteRoutes);
   apiRouter.use("/part-requirements", isStaff, partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
+  // Écriture des centres (DOC1) : POST/PATCH /centers ; le GET reste dans le routeur ci-dessus.
+  apiRouter.use("/document-renewals", documentRenewalCentersRoutes);
   apiRouter.use("/management", managementRoutes);
 
   // Ressources du chantier CDC (lot CDC-0a). Squelettes 501 que chaque lot remplace dans son
@@ -222,6 +226,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(timeTrackingRoutes);
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(incidentsRoutes);
+  apiRouter.use(driverBreakdownsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(userStockPermissionRoutes);

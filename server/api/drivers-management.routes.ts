@@ -5,6 +5,7 @@ import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
+import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE } from "../lib/driver-scope";
 
 const router = Router();
 router.use(authenticate);
@@ -165,6 +166,12 @@ router.get("/:id/missions", async (req, res) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) return res.status(400).json({ message: "ID de chauffeur invalide" });
+
+    // Un chauffeur ne lit que ses propres missions (DRV2-3) ; le personnel lit celles de tous.
+    const driverScope = await driverScopeOf(req.user);
+    if (driverScope !== undefined && !driverScope.includes(driverId)) {
+      return res.status(403).json({ message: OUT_OF_DRIVER_PROFILE_MESSAGE });
+    }
 
     const rows = await db
       .select({

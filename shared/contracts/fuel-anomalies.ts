@@ -35,13 +35,26 @@ export type FuelAnomalyResolution = z.infer<typeof fuelAnomalyResolutionSchema>;
 
 
 /**
- * Liste des anomalies (lecture : FUEL_READ_ROLES). Règle `consumption-gap` : un plein
- * dont la quantité dépasse la moyenne du véhicule de plus de deux écarts-types
- * (au moins trois pleins débités), comme `fuelCardService.detectAnomalies`.
+ * Liste des anomalies (lecture : FUEL_READ_ROLES). Règles :
+ * - `consumption-gap` : un plein dont la quantité dépasse la moyenne du véhicule de plus de deux
+ *   écarts-types (au moins trois pleins débités), comme `fuelCardService.detectAnomalies` ;
+ *   `averageQuantity` = moyenne, `threshold` = moyenne + 2 écarts-types.
+ * - `tank-overflow` : quantité supérieure à la capacité du véhicule + tolérance ; `averageQuantity` =
+ *   capacité, `threshold` = capacité + tolérance, `tankCapacityL` renseigné. Muette sans capacité.
+ * - `odometer-regression` : kilométrage inférieur à celui du plein précédent (date puis id) ;
+ *   `averageQuantity` et `threshold` = kilométrage précédent, `mileage` et `previousMileage` renseignés.
  * Le statut est celui de la dernière décision, `open` sans décision.
  */
 export const FUEL_ANOMALIES_PATH = "/api/fuel-card/anomalies";
-export const FUEL_ANOMALY_RULES = ["consumption-gap"] as const;
+export const FUEL_ANOMALY_RULES = ["consumption-gap", "tank-overflow", "odometer-regression"] as const;
+export type FuelAnomalyRule = (typeof FUEL_ANOMALY_RULES)[number];
+
+/** Compteur de l'écran : véhicules sans capacité de réservoir, pour lesquels `tank-overflow` ne dit rien. */
+export const FUEL_ANOMALIES_SUMMARY_PATH = "/api/fuel-card/anomalies/summary";
+export const fuelAnomaliesSummarySchema = z.object({
+  vehiclesWithoutTankCapacity: z.number().int().nonnegative(),
+});
+export type FuelAnomaliesSummary = z.infer<typeof fuelAnomaliesSummarySchema>;
 
 export const fuelAnomalySchema = z.object({
   anomalyKey: fuelAnomalyKeySchema,
@@ -53,6 +66,10 @@ export const fuelAnomalySchema = z.object({
   quantity: z.number(),
   averageQuantity: z.number(),
   threshold: z.number(),
+  // Propres à `odometer-regression` (kilométrages) et `tank-overflow` (capacité), absents sinon.
+  mileage: z.number().int().nullable().optional(),
+  previousMileage: z.number().int().nullable().optional(),
+  tankCapacityL: z.number().nullable().optional(),
   status: z.enum(FUEL_ANOMALY_STATUSES),
   comment: z.string().nullable(),
   resolvedAt: isoDateTimeSchema.nullable(),

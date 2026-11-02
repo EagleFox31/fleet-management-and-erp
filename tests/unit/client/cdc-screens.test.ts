@@ -26,9 +26,21 @@ type Access =
   /** Pas de montage CDC : la garde est celle d'un routeur existant, vérifiée par `check`. */
   | { roles: readonly AppRole[]; check: () => void };
 
-/** `/api/kpi` (server/api/kpi.routes.ts) garde par `authorize([...KPI_VIEWER_ROLES])`, la liste de l'écran. */
-const kpiRouteUsesViewerRoles = (): boolean =>
-  /authorize\(\[\s*\.\.\.KPI_VIEWER_ROLES\s*\]\)/.test(read("server/api/kpi.routes.ts"));
+/**
+ * `/api/kpi` (server/api/kpi.routes.ts) n'a pas de garde au montage : chaque route doit poser
+ * `viewers` (= `authorize([...KPI_VIEWER_ROLES])`, la liste de l'écran). Renvoie les routes sans
+ * garde ; vide = toutes gardées. Une route ajoutée sans `viewers` serait ouverte à tout le personnel.
+ */
+function kpiRoutesWithoutViewers(source: string): string[] {
+  if (!/const viewers = authorize\(\[\s*\.\.\.KPI_VIEWER_ROLES\s*\]\)/.test(source)) return ["définition de viewers"];
+  // Premier argument quelconque (guillemets doubles, simples, gabarit, constante) : un chemin qui
+  // n'est pas un littéral ne se contrôle pas ici, il fait échouer le test plutôt que passer sans garde.
+  const routes = [...source.matchAll(/router\.(get|post|put|patch|delete)\(\s*([^,]+?)\s*,\s*([A-Za-z_]+)/g)];
+  if (routes.length === 0) return ["aucune route trouvée"];
+  return routes
+    .filter(([, , path, guard]) => !/^(["'`]).*\1$/.test(path) || guard !== "viewers")
+    .map(([, method, path]) => `${method} ${path}`);
+}
 
 /** Pour chaque écran, ce que le serveur autorise. Un écran absent de cette table échoue ci-dessous. */
 const SERVER_ACCESS: Record<string, Access> = {
@@ -41,7 +53,7 @@ const SERVER_ACCESS: Record<string, Access> = {
   "telemetry-devices": { mount: "admin/telemetry-devices" },
   "kpi-reports": {
     roles: KPI_VIEWER_ROLES,
-    check: () => expect(kpiRouteUsesViewerRoles()).toBe(true),
+    check: () => expect(kpiRoutesWithoutViewers(read("server/api/kpi.routes.ts"))).toEqual([]),
   },
   "maintenance-report": { mount: "maintenance-reports" },
   "excel-import": { mount: "imports (interventions)" },
@@ -111,6 +123,28 @@ describe("registre des écrans CDC", () => {
   it("le rapport de maintenance exige aussi le drapeau d'export, comme son montage serveur", () => {
     const report = CDC_SCREENS.find((s) => s.id === "maintenance-report");
     expect(screenFeatures(report as CdcScreen)).toEqual(["maintenance-report", "exports"]);
+  });
+
+  it("les rapports d'indicateurs n'exigent pas le drapeau d'export : /api/kpi n'en dépend pas", () => {
+    const kpi = CDC_SCREENS.find((s) => s.id === "kpi-reports") as CdcScreen;
+    expect(screenFeatures(kpi)).toEqual(["kpi-reports"]);
+    // kpiRoutes est monté sans préfixe ni middleware : `apiRouter.use(kpiRoutes)`, aucun `requireFeature` devant.
+    const index = read("server/api/index.ts");
+    expect(index).toMatch(/apiRouter\.use\(\s*kpiRoutes\s*\)/);
+    expect(index).not.toMatch(/apiRouter\.use\([^;]*requireFeature\([^;]*kpiRoutes/);
+    expect(kpi.apis.map((api) => api.path)).toContain("/api/exports/kpi-report");
+  });
+
+  it("la contre-épreuve des routes KPI détecte une route sans viewers", () => {
+    const source = 'const viewers = authorize([...KPI_VIEWER_ROLES]);\nrouter.get("/kpi/a", viewers, h);\nrouter.get("/kpi/b", handle(h));';
+    expect(kpiRoutesWithoutViewers(source)).toEqual(['get "/kpi/b"']);
+    expect(kpiRoutesWithoutViewers('router.get("/kpi/a", viewers, h);')).toEqual(["définition de viewers"]);
+    const withViewers = "const viewers = authorize([...KPI_VIEWER_ROLES]);\n";
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get('/kpi/s', handle(h));`)).toEqual(["get '/kpi/s'"]);
+    const template = "router.get(`/kpi/${x}`, handle(h));";
+    expect(kpiRoutesWithoutViewers(withViewers + template)).toEqual(["get `/kpi/${x}`"]);
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get(KPI_PATH, viewers, h);`)).toEqual(["get KPI_PATH"]);
+    expect(kpiRoutesWithoutViewers(`${withViewers}router.get('/kpi/ok', viewers, h);`)).toEqual([]);
   });
 
   it.each(CDC_SCREENS.map((s) => [s.id, s] as const))("%s : appels d'API déclarés et menu complet", (_id, screen) => {

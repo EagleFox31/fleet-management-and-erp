@@ -4,7 +4,19 @@ import {
   workshopLaborRateSchema,
   workshopLaborRatesResponseSchema,
 } from "@shared/contracts/workshop-labor-rates";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import { createWorkshopLaborRate, listWorkshopLaborRates } from "../services/workshop-labor-rates-service";
+
+/** Couche 2 : un nouveau taux change des coûts d'OT déjà affichés ; les écrans concernés ré-interrogent. */
+function broadcastRateCreated(effectiveFrom: string): void {
+  const broadcastUpdate = (global as any).broadcastUpdate;
+  if (typeof broadcastUpdate !== "function") return;
+  broadcastUpdate("workshop_labor_rate_created", {
+    entity: "workshop_labor_rate",
+    payload: { effectiveFrom },
+    scope: REALTIME_EVENTS.workshop_labor_rate_created.scope,
+  });
+}
 
 /**
  * Taux horaires de main-d'oeuvre de l'atelier (CDC #7). Monté sur `/api/workshop-labor-rates`
@@ -21,7 +33,9 @@ const list: RequestHandler = async (_req, res, next) => {
 const create: RequestHandler = async (req, res, next) => {
   try {
     const input = createWorkshopLaborRateRequestSchema.parse(req.body);
-    res.status(201).json(workshopLaborRateSchema.parse(await createWorkshopLaborRate(req.user!.id, input)));
+    const created = workshopLaborRateSchema.parse(await createWorkshopLaborRate(req.user!.id, input));
+    broadcastRateCreated(created.effectiveFrom);
+    res.status(201).json(created);
   } catch (error) {
     next(error);
   }

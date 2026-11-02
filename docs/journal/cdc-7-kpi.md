@@ -96,3 +96,86 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Rupture de contrat d'entrée** : volontaire. Une période de plus de 36 mois ou hors 2000-2100 passe de 200 (ou 500) à 400. Aucun écran n'envoie de période (`<KpiTiles />` sans props) ; seuls `kpi-cdc` et `kpi.contract` appellent ces routes.
 - **Limite** : une seule borne n'est pas soumise aux 36 mois (la borne manquante est complétée par le serveur) ; le pire cas est d'environ 1 200 mois, sans blocage.
 - **Preuves** : tsc 0 ; unitaires `tests/unit/shared/kpi-period.test.ts` + `kpi-rules-cdc` 47/47 ; contrats `kpi-cdc` + `kpi` + `lot-exports-roles` 209/209 (session de tests).
+
+## 2026-11-02T13:02:41+01:00 — CDC-7 — Réserves : coût des OT du technicien en requêtes groupées
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la liste des OT d'un technicien lançait 5 requêtes par OT pour le coût (N+1). Elle en lance 4 au total, quelle que soit la longueur de la liste.
+- **Comment** : `calculateWorkOrderCosts` prend la liste et groupe heures, pièces et rotations par `work_order_id` ; `laborRatesForWorkOrders` sert les taux en une requête `JOIN LATERAL`. La date qui choisit le taux (`RATE_DATE_OF_WORK_ORDER`) est partagée avec `laborRateForWorkOrder`. Les `console.*` du chemin touché passent à `moduleLogger`.
+- **Pourquoi** : réserve de relecture de #89 ; la règle de coût reste `computeWorkOrderCost`, inchangée.
+- **Preuves** : tsc 0 ; intégration `work-order-cost` 3/3 dont un cas à trois OT (avec taux, sans taux, sans ligne).
+
+## 2026-11-02T13:05:17+01:00 — CDC-7 — Réserves : nouveau taux horaire diffusé en temps réel
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : un taux saisi par l'admin (`POST /api/workshop-labor-rates`) ne rafraîchissait ni le taux d'un OT ouvert, ni les KPI, ni la liste du technicien.
+- **Comment** : événement `workshop_labor_rate_created` au catalogue (portée `WORK_ORDER_COST_READ_ROLES`, invalide `KPI_QUERY_KEYS` et les listes du technicien), émis par la route ; `useRealTimeSync` invalide en plus les clés `/api/work-orders/:id/labor-rate` par prédicat (la clé porte l'identifiant).
+- **Pourquoi** : réserve de relecture de #89 ; règle des 3 couches (AGENTS.md §2).
+- **Aussi** : reprise de 6cf1943 (#60, tests alignés sur #58) pour que la branche soit verte avant la fusion de #60 ; changement identique, sans conflit attendu.
+- **Preuves** : tsc 0 ; unitaires 1195/1196 (rouge connu `pending-invoices-kpi-roles`) dont `tests/unit/shared/labor-rate-realtime.test.ts`.
+
+## 2026-11-02T13:55:00+01:00 — CDC-7 — Réserves : période KPI à une seule borne contrôlée
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `?from=2001-01-01` sans `to` passait le plafond de 36 mois : le serveur complète `to` par aujourd'hui (`kpi-rules.ts`), la période réelle dépassait 300 mois.
+- **Comment** : `kpiPeriodIssue(q, today)` contrôle `from` jusqu'à `to ?? today` (UTC, un jour d'écart sans effet sur un plafond en mois). `to` seul reste couvert : le serveur en déduit `from` sur 12 mois. Un `from` dans le futur sans `to` est désormais refusé comme une période inversée.
+- **Pourquoi** : réserve de relecture de #58/#59 ; même garde que la période à deux bornes, un seul endroit (`refineKpiPeriod`, partagé par KPI, coûts de maintenance et rapports).
+- **Preuves** : unitaires `kpi-period` 14/14 (cas `from` seul ajouté aux schémas KPI, coûts, rapport).
+
+## 2026-11-02T14:00:00+01:00 — CDC-7 — Réserves : refus des KPI vérifié pour tous les rôles
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le contrat KPI ne contrôlait le 403 que pour technicien et client ; chauffeur, secrétariat, logistique et magasin n'étaient pas testés.
+- **Comment** : `ROLES` et `DENIED` dérivés de `ALL_APP_ROLES` (source unique des rôles) ; `KPI_VIEWER_ROLES` doit valoir exactement admin, direction, chef d'atelier. Même dérivation pour le rapport KPI exportable et les taux horaires (tout rôle sauf admin).
+- **Pourquoi** : réserve de relecture de #58 ; un rôle ajouté au schéma est contrôlé sans retoucher le test.
+- **Preuves** : contrat `kpi-cdc` 20/20 sous db-lock.
+
+## 2026-11-02T14:10:00+01:00 — CDC-7 — Réserves : drapeaux de l'écran KPI et garde de chaque route
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (1) la réserve demandait `alsoRequires: ["exports"]` sur l'écran kpi-reports ; (2) -de demandait que chaque route de `kpi.routes.ts` soit gardée par `viewers`.
+- **Comment** : (1) vérification de l'API : `/api/kpi` n'a aucun drapeau, seul `/api/exports/kpi-report` exige `exports` + `kpi-reports`. Ajouter `exports` aurait masqué tout l'écran pour un bouton : l'écran garde `kpi-reports` seul, déclare l'API d'export, et la page masquera le bouton par `useFeature("exports")`. Test qui fige ce choix. (2) `kpiRoutesWithoutViewers` liste les routes de `kpi.routes.ts` dont la première garde n'est pas `viewers`, avec contre-épreuve.
+- **Pourquoi** : réserves de relecture de #58/#59 ; `/api/kpi` n'a pas de garde au montage, une route ajoutée sans `viewers` serait ouverte à tout le personnel.
+- **Preuves** : unitaires `cdc-screens` 35/35, dont la contre-épreuve.
+
+## 2026-11-02T14:20:00+01:00 — CDC-7 — Réserves : jspdf et dompurify corrigés, xlsx sans correctif publié
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : partiel (xlsx en décision)
+- **Quoi** : `npm audit --omit=dev` signalait jspdf (critique, ≤ 4.2.0), dompurify (élevé, ≤ 3.4.16, tiré par jspdf) et xlsx (élevé, toutes versions npm).
+- **Comment** : jspdf `^4.2.1` (correctif de la même majeure) et dompurify 3.4.17 dans la plage déjà admise par jspdf, par `--package-lock-only` (le `node_modules` du worktree est partagé avec le dépôt principal, on n'y écrit pas). Aucune rupture d'API attendue.
+- **Pourquoi** : réserve de relecture de #58 (rapport PDF/Excel).
+- **xlsx** : SheetJS ne publie plus sur npm ; 0.18.5 reste vulnérable (pollution de prototype, ReDoS). Fichiers non fiables lus en deux endroits : `server/api/supplier-invoices.routes.ts:979` (téléversement, côté serveur) et `client/src/lib/excel-utils.ts:85`. Choix laissé à l'utilisateur : SheetJS 0.20.x depuis cdn.sheetjs.com (même API) ou migration vers une autre bibliothèque.
+- **Preuves** : audit avant 38 vulnérabilités (5 critiques), après 37 ; jspdf et dompurify absents de l'audit. Comportement non rejoué : le `node_modules` partagé est encore en 4.2.0, la CI de la PR installe depuis le lockfile.
+
+## 2026-11-02T21:50:00+01:00 — CDC-7 — Relecture #108 : jour de la période lu à Douala dans le contrat
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `kpiPeriodIssue` prenait « aujourd'hui » en UTC alors que le serveur complète `to` à Douala ; entre 00:00 et 01:00 à Douala, `?from=<jour de Douala>` sans `to` était refusé en 400 (`from > to`).
+- **Comment** : `KPI_TIME_ZONE` et `isoDateInZone` vivent dans `shared/contracts/kpi-period.ts` (un seul calcul) ; `server/lib/kpi-rules.ts` les importe et les réexporte sans les redéclarer. Commentaire erroné (« un jour d'écart ne change rien ») corrigé.
+- **Pourquoi** : constat majeur de relecture de #108.
+- **Preuves** : test rouge puis vert à 00:30 Douala (23:30 UTC la veille, horloge simulée) ; unitaires `kpi-period` et `kpi-rules-cdc` 50/50.
+
+## 2026-11-02T21:55:00+01:00 — CDC-7 — Relecture #108 : garde N+1 du coût des OT et commentaire de panne exact
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (1) rien ne faisait échouer un retour à cinq requêtes par OT ; (2) le commentaire de `calculateWorkOrderCosts` disait « comportement inchangé » alors qu'une panne met désormais à zéro la liste entière.
+- **Comment** : (1) le test « liste de plusieurs OT » espionne `db.select` et `db.execute` et exige 5 requêtes pour 3 OT (liste, heures, pièces, rotations, taux). (2) comportement gardé, commentaire réécrit.
+- **Pourquoi** : constats mineurs 1 et 2 de relecture de #108.
+- **Preuves** : intégration `work-order-cost` 3/3 sur le Postgres local, relancée après le redémarrage de la base de 21:41.
+
+## 2026-11-02T22:00:00+01:00 — CDC-7 — Relecture #108 : garde des routes KPI, montage, commentaire d'écran, leçon
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (3) l'expression de `kpiRoutesWithoutViewers` ne lisait que les guillemets doubles ; (4) l'assertion sur le montage de `/kpi` était toujours vraie (`apiRouter.use(kpiRoutes)` sans préfixe) ; (5) commentaire de `cdc-screens.ts` affirmant un masquage que l'écran « bientôt disponible » ne fait pas ; (6) leçon de la période KPI à compléter.
+- **Comment** : (3) premier argument quelconque ; guillemets simples, gabarit et constante font échouer la fonction, avec contre-épreuves. (4) exige `apiRouter.use(kpiRoutes)` tel quel et aucun `requireFeature` devant `kpiRoutes`. (5) reformulé en obligation pour le lot qui livrera l'écran. (6) paragraphe de suite dans `LESSONS_LEARNED.md`, sans toucher à l'existant.
+- **Pourquoi** : constats mineurs 3 à 6 de relecture de #108.
+- **Preuves** : unitaires `cdc-screens` 35/35.

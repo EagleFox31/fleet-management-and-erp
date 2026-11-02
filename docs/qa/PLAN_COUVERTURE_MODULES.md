@@ -92,7 +92,7 @@ flowchart LR
 | T3 | Body invalide → 400 Zod avec message actionnable | C | OK avec cliquet (`write-routes-ratchet` : 32 routes lisant `req.body` sans validation gelées) ; reste gelé, détail : 7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; PATCH document, planification, utilisateur, POST/PATCH plein carburant, POST catalogue de pannes dans `secondary-routes-validation` ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate` |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | OK avec cliquet (`write-routes-ratchet` : 32 routes lisant `req.body` sans protection des champs serveur gelées) ; reste gelé, détail : prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields` ; commande fournisseur : totaux recalculés, remise bornée 0..100, quantités reçues bornées et jamais en baisse, `purchase-order-amounts` ; facture client : montant borné, TVA/TTC recalculés, `client-invoice-generate` ; facture fournisseur : champs du workflow ignorés, solde initial = TTC, `supplier-invoice-create` |
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | Fait en I (`stock-audit-columns` : created_by/updated_by/dates des pièces et pneus par le service, trois utilisateurs distincts, suppression logique, noms joints) ; routes HTTP non couvertes |
-| T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders` ; `14-realtime-work-order-roles` : trames `work_order_created` chez le technicien et `work_order_updated` chez le chef d'atelier ; `15-realtime-work-order-satellites` : création, démarrage, fin et suppression, trame puis refetch observé de `/api/work-orders/statistics` et de la liste chez le chef (sans polling) en moins de 5 s ; OK) |
+| T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | OK (`06-realtime-work-orders` ; `14-realtime-work-order-roles` : trames `work_order_created` chez le technicien et `work_order_updated` chez le chef d'atelier ; `15-realtime-work-order-satellites` : création, démarrage, fin et suppression, trame puis refetch observé de `/api/work-orders/statistics` et de la liste chez le chef (sans polling) en moins de 5 s) |
 | T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
 | T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | OK (`lists-pagination-filters`, 55 cas : véhicules, ordres de travail, pièces, fournisseurs ; pages sans doublon ni trou, total, tri, filtres, supprimé exclu, liste vide, bornes, apostrophe et injection ; les 17 défauts figés sont corrigés par #76 et #80 : jokers `%` et `_` échappés, `offset`/`limit` hors bornes, octet nul, `isActive` invalide, cloison client. Missions et documents : pas de pagination côté serveur) |
 
@@ -107,7 +107,7 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | OK (`users-admin-soft-delete` : 403 non-admin sur POST/PATCH/DELETE, 401 anonyme, auto-suppression 400 ; PATCH : `secondary-routes-validation`) |
-| ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
+| ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | OK (`18-admin-role-change` : magasinier passé technicien, menu et droits suivent après reconnexion ; session ouverte suit les gardes qui relisent la base ; défauts figés ADM2-1, ADM2-2, ADM2-3) |
 | ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
 | ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | OK (`driver-pin-login`, 7 cas ; fiche `drivers` désactivée : voir DRV1) |
@@ -139,7 +139,7 @@ stateDiagram-v2
 |---|---|---|---|
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | OK (`02-fleet-vehicles`, contrat `vehicles-crud` ; défauts corrigés par #80 : statut initial consigné une fois, immatriculation d'un autre véhicule refusée au PATCH, `createdBy` du corps ignoré) |
 | VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | OK (`vehicle-soft-delete` : masqué et consultable ; défauts corrigés par #80 : suppression logique avec OT conservé, ni OT ni mission sur un véhicule supprimé) |
-| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e à faire |
+| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | OK : contrat (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e `16-vehicle-acquisition-resume` (reprise bandeau + rechargement, documents, `completed`, `abandoned` ; 2 défauts écran figés VEH3-UI-1 et VEH3-UI-2) |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | OK (intégration `vehicle-status-sync` ; OT annulé remet le véhicule en service, trigger `trg_work_orders_release_vehicle` (#78), ré-immobilisation à la réouverture, hors service préservé (#79)) |
 
 ### 3.3 Documents et renouvellements
@@ -192,13 +192,13 @@ stateDiagram-v2
 | MNT2 | Déclenchement par date et par kilométrage | I | OK (`preventive-maintenance-triggers` : fenêtre 30 jours, seuil km, plan inactif ; échéance du plan et doublon km corrigés par #80) |
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | OK (`labor-catalog` : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT ; désactivation par PATCH ajoutée par #80) |
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
-| WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403 ; `15-…` : fin d'intervention par le technicien, correction par le chef, création et suppression refusées au technicien, suppression par le chef + trame `work_order_deleted`) |
+| WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | OK (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403 ; `15-…` : fin d'intervention par le technicien, correction par le chef, création et suppression refusées au technicien, suppression par le chef + trame `work_order_deleted`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
 | WO4 | Pièces sur OT : prix catalogue, prix client ignoré, rien ne sort à la demande (rayon « à sortir » chez le magasinier, manquant en demande), rayon réservé | C | OK (`work-order-parts`, `stock-issue-permission`) |
 | WO5 | Coût OT = main-d'oeuvre (heures × taux daté, sinon coût saisi) + pièces + pneus, identique UI, PDF et KPI | I / E | En cours (formule unique `shared/work-order-cost.ts` pour écran, PDF, service technicien et KPI ; U `work-order-cost` : NaN impossible, arrondi au centime, taux présent ou absent, écran = KPI au FCFA ; I `work-order-cost` : service technicien = formule, cas taux daté présent écran = service = KPI ; I `kpi-service` : coût moyen inclut les rotations, sans produit cartésien. Intégration à rejouer sur la base de test) |
-| WO6 | Temps technicien : pointage, agrégation mensuelle | I | Partiel (`time-tracking` contrat 5 cas, intégration 3 cas : saisie rejouable, totaux mensuels, chauffeur inactif ; bord de mois, d'année, 29 février et fuseau (4 fuseaux) couverts par `time-tracking-month-boundary` ; 2 défauts en `it.fails` : une date impossible comme 2033-02-30 sort en erreur de base au lieu de 400) |
-| WO7 | Notification chef ↔ technicien dans les deux sens | E | Partiel (`14-realtime-work-order-roles` : chef vers technicien, alerte d'affectation + trame ; technicien vers chef, trame de démarrage ; `15-…` : alerte « Intervention démarrée » vers le chef figée en `test.fail` : défaut `server/api/technician-work-orders.routes.ts:96`, la route technicien n'appelle jamais `notifyWorkOrderProgress`) |
+| WO6 | Temps technicien : pointage, agrégation mensuelle | I | OK (`time-tracking` contrat 5 cas, intégration 3 cas : saisie rejouable, totaux mensuels, chauffeur inactif ; bord de mois, d'année, 29 février et fuseau (4 fuseaux) couverts par `time-tracking-month-boundary` ; date impossible comme 2033-02-30 refusée en 400 depuis #86) |
+| WO7 | Notification chef ↔ technicien dans les deux sens | E | OK (`14-realtime-work-order-roles` : chef vers technicien, alerte d'affectation + trame ; technicien vers chef, trame de démarrage ; `15-…` : alerte « Intervention démarrée » vers le chef depuis l'écran technicien, corrigé par #86) |
 
 ### 3.5 Magasin : pièces
 
@@ -291,7 +291,7 @@ Tables : `drivers` (`is_active`).
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | OK (`drivers-crud-deactivation` : CRUD et RBAC ; chauffeur désactivé ni affectable, ni sur l'écran PIN, ni connectable, corrigé par #76) |
-| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | À faire |
+| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; défauts figés DRV2-1 panne refusée en 403, DRV2-2 aucun OT créé, DRV2-3 pas de cloison chauffeur à l'API missions) |
 
 ### 3.9 Carburant
 
@@ -322,7 +322,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
-| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Partiel (`13-mission-invoice-payment` : création par l'API logistique, passage à « livrée » en base ; affectation, étapes et lancement non rejoués) |
+| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Couvert au navigateur (`17-mission-lifecycle` : affectation véhicule + chauffeur par l'écran, lancement avec budgets, livraison, clôture avec FDR, facture ; trames `mission_status_changed` / `mission_completed` lues par un second profil ; lancement refusé pour assurance expirée et CPC invalide ; `13-mission-invoice-payment` garde le règlement). Défauts figés : renouvellement non proposé sur lancement bloqué (écran), PATCH d'affectation sans contrôle d'éligibilité du véhicule (`mission-assignment-eligibility.contract.test.ts`) |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict` ; lancement refusé avec le motif du conflit, corrigé par #80) |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
@@ -344,7 +344,7 @@ Tables : `fleetKpiCache`.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
-| DIR2 | Rapports filtrés par période | C | Fait en C (`reports-inventory-period` : mouvements de la fenêtre, bornes incluses, valeur absolue, statistiques, fenêtre vide ; `reports-technician-period` : totaux et taux par technicien et globaux, bornes, fenêtre vide ; export carburant couvert avant). 6 `it.fails` : client et chauffeur non refusés sur les deux rapports (`server/routes.ts:2840`, `2894`), date invalide non refusée en 400 |
+| DIR2 | Rapports filtrés par période | C | Fait en C (`reports-inventory-period` : mouvements de la fenêtre, bornes incluses, valeur absolue, statistiques, fenêtre vide ; `reports-technician-period` : totaux et taux par technicien et globaux, bornes, fenêtre vide ; export carburant couvert avant). Défauts corrigés par #86 : rapports réservés aux rôles `INVENTORY_REPORT_ROLES` / `TECHNICIAN_REPORT_ROLES` (écran `/reports` aligné), date invalide ou inexistante refusée en 400 |
 | DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (XLSX : carburant, inventaire (`exports-inventory-content`), factures fournisseurs et clients (`exports-invoices-content`) en cellules exactes ; droits dans `lot-exports-roles`. Non couverts : exports missions clients, rapport mensuel, véhicules, OT, utilisateurs, complet ; PDF/CSV générés côté navigateur (`pdf-export.ts`) hors de portée du contrat) |
 
 ---
@@ -376,7 +376,7 @@ sequenceDiagram
 
 ### P2 — Mission → facture client → paiement
 
-État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). La mission est posée à « livrée » en base : le lancement n'est pas rejoué.
+État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). Le lancement est rejoué par `17-mission-lifecycle` (mission non posée en base : affectation, lancement, livraison, clôture, facture générée depuis l'écran) ; le règlement reste dans la spec 13, qui pose encore « livrée » en base pour isoler le paiement.
 
 ```mermaid
 flowchart LR
@@ -434,7 +434,7 @@ flowchart LR
 | 1 | T1, T3, T4, T7 | Sécurité et intégrité, valables partout |
 | 2 | PRT4, PRT6, TIR1–TIR4 | Traçabilité stock, dette connue, RBAC pneus déjà corrigé une fois |
 | 3 | WO2, WO3, WO5 | Lot 3 en cours, coût OT |
-| 4 | P2 (rejouer), P3, P6 | Parcours métier les plus utilisés après P1 |
+| 4 | P2 (fait : spec 17), P3, P6 | Parcours métier les plus utilisés après P1 |
 | 5 | Soft delete : ADM3, VEH2, TIR2 + désactivations | Données historiques à préserver |
 | 6 | DOC, FUEL, ALR, DIR | Modules de support |
 
