@@ -20,6 +20,13 @@ const ids = createIdBag();
 const cookies = new Map<AppRole, string>();
 
 /**
+ * `kpi-report` est derriere le drapeau `kpi-reports` (coupe par defaut) : sans
+ * lui la route repond 404 et la matrice de roles n'est pas mise a l'epreuve.
+ * Le cas « drapeau coupe → 404 » vit dans kpi-cdc.contract.test.ts.
+ */
+const previousFlags = process.env.FEATURE_FLAGS;
+
+/**
  * La base de test est partagee entre agents : un nettoyage concurrent peut
  * supprimer un compte ou une session en cours de route. Un 401 sur un role
  * authentifie provoque donc une recreation du compte, une seule fois.
@@ -49,6 +56,7 @@ async function get(path: string, role?: AppRole, retried = false): Promise<{ sta
 }
 
 beforeAll(async () => {
+  process.env.FEATURE_FLAGS = "exports=on,kpi-reports=on";
   const app = await getContractApp();
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -58,6 +66,8 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
+  if (previousFlags === undefined) delete process.env.FEATURE_FLAGS;
+  else process.env.FEATURE_FLAGS = previousFlags;
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
