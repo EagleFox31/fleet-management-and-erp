@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../server/storage", () => ({ storage: { getUser: async () => undefined } }));
+vi.mock("../../../server/services/session-user", () => ({ findActiveSessionUser: async () => undefined }));
 
 import { AUDIT_MASK } from "../../../shared/contracts/audit-logs";
 import { maskSecrets } from "../../../server/lib/audit";
@@ -60,6 +60,12 @@ describe("maskSecrets : clés sensibles par sous-chaîne", () => {
   it("masque pin en mot entier (pin, newPin, pinCode, pin_code)", () => {
     const out = maskSecrets({ pin: "1", newPin: "2", pinCode: "3", pin_code: "4", PIN: "5", "x-pin": "6" }) as Record<string, unknown>;
     for (const key of Object.keys(out)) expect(out[key], key).toBe(AUDIT_MASK);
+  });
+  it("masque les formes collées pincode et passcode, quelle que soit la casse", () => {
+    const out = maskSecrets({ pincode: "1", PINCODE: "2", PinCode: "3", passcode: "4", PassCode: "5", newPasscode: "6", shipping: "7", pinned: "8" }) as Record<string, unknown>;
+    for (const key of ["pincode", "PINCODE", "PinCode", "passcode", "PassCode", "newPasscode"]) expect(out[key], key).toBe(AUDIT_MASK);
+    expect(out.shipping).toBe("7");
+    expect(out.pinned).toBe("8");
   });
   it("ne masque pas les clés qui contiennent seulement les lettres pin", () => {
     const out = maskSecrets({ shipping: "a", shippingAddress: "b", pinned: "c", spinner: "d", mapping: "e", pinpoint: "f" }) as Record<string, unknown>;

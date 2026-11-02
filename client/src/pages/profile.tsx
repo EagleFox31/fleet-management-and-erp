@@ -7,6 +7,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { User, Mail, Shield, Calendar, Key, CheckCircle, Lock, AlertTriangle } from "lucide-react";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -20,19 +21,6 @@ export default function ProfilePage() {
     newPassword: "",
     confirmPassword: "",
   });
-
-  const getRoleLabel = (role: string) => {
-    const labels: Record<string, string> = {
-      admin: "Administrateur",
-      workshop_manager: "Chef d'Atelier",
-      secretary: "Secrétaire",
-      technician: "Technicien",
-      logistics: "Logistique",
-      warehouse: "Magasinier",
-      client: "Client",
-    };
-    return labels[role] || role;
-  };
 
   const getRoleColor = (role: string) => {
     const colors: Record<string, string> = {
@@ -117,7 +105,7 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Mon profil</span>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getRoleColor(user.role)}`}>
-                  {getRoleLabel(user.role)}
+                  {roleLabelOf(user.role)}
                 </span>
               </div>
               <h1 className="text-xl font-bold text-gray-900">{user.name || user.username}</h1>
@@ -146,7 +134,7 @@ export default function ProfilePage() {
                 <Shield className="h-3.5 w-3.5 text-green-600" />
               </div>
               <p className="text-[11px] font-medium text-gray-500 mt-1">Rôle</p>
-              <p className="text-sm font-bold text-gray-800">{getRoleLabel(user.role)}</p>
+              <p className="text-sm font-bold text-gray-800">{roleLabelOf(user.role)}</p>
             </div>
             {(user as any).createdAt && (
               <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-1">
@@ -196,7 +184,7 @@ export default function ProfilePage() {
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Rôle</p>
                 <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${getRoleColor(user.role)}`}>
-                  {getRoleLabel(user.role)}
+                  {roleLabelOf(user.role)}
                 </span>
               </div>
             </div>
@@ -212,7 +200,7 @@ export default function ProfilePage() {
             </div>
             <div className="px-5 py-4">
               <p className="text-xs text-gray-500 mb-3">
-                Votre rôle <span className={`font-semibold px-2 py-0.5 rounded-full text-xs ${getRoleColor(user.role)}`}>{getRoleLabel(user.role)}</span> vous donne accès aux fonctionnalités suivantes :
+                Votre rôle <span className={`font-semibold px-2 py-0.5 rounded-full text-xs ${getRoleColor(user.role)}`}>{roleLabelOf(user.role)}</span> vous donne accès aux fonctionnalités suivantes :
               </p>
               <ul className="space-y-2">
                 {getPermissions(user.role).map((perm, i) => (

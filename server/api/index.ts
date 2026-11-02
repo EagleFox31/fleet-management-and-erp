@@ -1,4 +1,4 @@
-import { Router, RequestHandler } from "express";
+import { Router, RequestHandler, type Request, type Response, type NextFunction } from "express";
 import warehouseRoutes from "./warehouse.routes";
 import fuelCardRoutes from "./fuel-card.routes";
 import vehiclesRoutes from "./vehicles.routes";
@@ -19,16 +19,23 @@ import {
   workOrderItemDetailRoutes,
   workOrderItemsRoutes,
 } from "./work-order-items.routes";
+import { workOrderLaborRateRoutes } from "./work-order-labor-rate.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
 import managementRoutes from "./management.routes";
 import featureFlagsRoutes from "./feature-flags.routes";
 import vehicleDocumentTypesRoutes from "./vehicle-document-types.routes";
 import authLockoutRoutes from "./auth-lockout.routes";
+import pinAuthRoutes from "./pin-auth.routes";
+import partsCatalogRoutes from "./parts-catalog.routes";
+import faultCatalogRoutes from "./fault-catalog.routes";
+import adminUsersGuardRoutes from "./admin-users-guard.routes";
+import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
 import notificationSettingsRoutes from "./notification-settings.routes";
+import alertsRoutes from "./alerts.routes";
 import kpiRoutes from "./kpi.routes";
 import workOrderAuditTrailRoutes from "./work-order-audit-trail.routes";
 import vehicleCostSummaryRoutes from "./vehicle-cost-summary.routes";
@@ -41,7 +48,6 @@ import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
 import qualityCheckRoutes from "./quality-check.routes";
-import authCaptchaRoutes from "./auth-captcha.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
 import partScansRoutes from "./part-scans.routes";
 import partSalesRoutes from "./part-sales.routes";
@@ -51,10 +57,11 @@ import telemetryDevicesRoutes from "./telemetry-devices.routes";
 import workshopLaborRatesRoutes from "./workshop-labor-rates.routes";
 import maintenanceReportsRoutes from "./maintenance-reports.routes";
 import importsRoutes from "./imports.routes";
+import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
+import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
-import { captchaGuard } from "../middleware/captcha-guard";
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
@@ -79,18 +86,15 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
-  // analyse en amont (express.json dans app.ts). Verrouillage d'abord, captcha ensuite.
+  // analyse en amont (express.json dans app.ts).
   const lockoutStore = new DbLockoutStore();
-  const failedCountOf = (prefix: string) => async (username: string) => (await lockoutStore.get(prefix + username)).failedCount;
   apiRouter.post(
     "/auth/login",
     loginLockoutGuard({ store: lockoutStore, keyPrefix: PASSWORD_KEY_PREFIX }),
-    captchaGuard({ getFailedCount: failedCountOf(PASSWORD_KEY_PREFIX) }),
   );
   apiRouter.post(
     "/auth/pin-login",
     loginLockoutGuard({ store: lockoutStore, usernameField: "userId", keyPrefix: PIN_KEY_PREFIX }),
-    captchaGuard({ getFailedCount: failedCountOf(PIN_KEY_PREFIX), usernameField: "userId" }),
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
   apiRouter.use(auditWrites(AUDIT_CONFIG));
@@ -107,6 +111,16 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Le lot #6 remplacera `isAdmin` par une garde jeton marquee (`isSessionGuard`) et ajoutera
   // l'exception justifiee a PUBLIC_ROUTES de ce test. Derriere le drapeau `gps` (404 coupe).
   apiRouter.use("/telemetry", requireFeature("gps"), telemetryRoutes);
+  // Ecran PIN : un chauffeur desactive n'y figure plus et ne s'y connecte plus.
+  apiRouter.use(pinAuthRoutes);
+  // Catalogue pieces : creation et suppression (400/404/409 lisibles), avant routes.ts.
+  apiRouter.use(partsCatalogRoutes);
+  // Catalogue de pannes : valideur pose par le serveur, id inconnu -> 404.
+  apiRouter.use(faultCatalogRoutes);
+  // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
+  apiRouter.use(adminUsersGuardRoutes);
+  // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
+  apiRouter.use(workflowsRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
@@ -126,13 +140,23 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // et le technicien demandent des pièces, ils ne passent pas les commandes —
   // c'est déjà ce que dit le menu, ce n'était pas ce qu'appliquait l'API.
   const gardeApprovisionnement = authorize([...PROCUREMENT_ROLES]);
-  apiRouter.use("/suppliers", gardeApprovisionnement, suppliersRoutes);
+  // Fournisseurs : le chef d'atelier consulte (GET), il n'écrit ni n'évalue.
+  const gardeLectureFournisseurs = authorize([...SUPPLIER_READ_ROLES]);
+  apiRouter.use(
+    "/suppliers",
+    // Marquée comme garde de session : chacune des deux gardes l'est, le répartiteur aussi.
+    sessionGuard((req: Request, res: Response, next: NextFunction) =>
+      (req.method === "GET" || req.method === "HEAD" ? gardeLectureFournisseurs : gardeApprovisionnement)(req, res, next),
+    ),
+    suppliersRoutes,
+  );
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
   apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
   apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
   apiRouter.use("/work-orders", workOrderItemsRoutes);
+  apiRouter.use("/work-orders", workOrderLaborRateRoutes);
   // Lignes de travail: préfixes dédiés, donc garde au montage — toute route
   // ajoutée plus tard dans ces routeurs est couverte d'office.
   apiRouter.use("/work-order-items", isTechnician, workOrderItemDetailRoutes);
@@ -186,6 +210,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(backupsRoutes);
   apiRouter.use(workOrderExportRoutes);
   apiRouter.use(notificationSettingsRoutes);
+  apiRouter.use(alertsRoutes);
   apiRouter.use(kpiRoutes);
   apiRouter.use(workOrderAuditTrailRoutes);
   apiRouter.use(vehicleCostSummaryRoutes);
@@ -198,7 +223,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(qualityCheckRoutes);
-  apiRouter.use(authCaptchaRoutes);
+  apiRouter.use(technicianWorkOrdersRoutes);
+  apiRouter.use(userStockPermissionRoutes);
   apiRouter.use(vehicleDocumentsRoutes);
 
   // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts
@@ -233,7 +259,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
-import { authenticate, authorize, isAdmin, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
+import { authenticate, authorize, isAdmin, sessionGuard, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
 import {
   GPS_VIEW_ROLES,
@@ -244,5 +270,6 @@ import {
   PART_SALE_ROLES,
   PART_SCAN_ROLES,
   PROCUREMENT_ROLES,
+  SUPPLIER_READ_ROLES,
 } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);

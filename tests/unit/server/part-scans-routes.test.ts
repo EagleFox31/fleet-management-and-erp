@@ -14,6 +14,11 @@ vi.mock("../../../server/storage", () => ({
     getUser: async (id: number) => (ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined),
   },
 }));
+// Les gardes relisent le compte par `findActiveSessionUser` (compte supprimé exclu).
+vi.mock("../../../server/services/session-user", () => ({
+  findActiveSessionUser: async (id: number) =>
+    ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined,
+}));
 vi.mock("../../../server/middleware/session", () => ({
   sessionMiddleware: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));

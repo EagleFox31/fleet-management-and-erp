@@ -64,15 +64,23 @@ export const PROCUREMENT_ROLES = ["admin", "secretary", "logistics", "warehouse"
 
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 
+/**
+ * Consultation des fournisseurs : les profils d'approvisionnement, plus le chef
+ * d'atelier qui lit les fiches sans rien écrire (création, modification,
+ * évaluation et désactivation restent à PROCUREMENT_ROLES).
+ */
+export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
 }
 
 /**
- * Indicateurs de pilotage (`/api/kpi/*`) : direction et administrateur.
- * Doit rester aligné sur `isManagementOrAdmin` (server/middleware/auth.ts).
+ * Indicateurs de pilotage (`/api/kpi/*`) : direction, administrateur et chef d'atelier
+ * (le cahier des charges lui donne les pannes, le préventif et les coûts de son atelier).
+ * La garde de `server/api/kpi.routes.ts` et celle de l'export `kpi-report` en dérivent.
  */
-export const KPI_VIEWER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+export const KPI_VIEWER_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
 export function canViewKpi(role: string | null | undefined): boolean {
   return (KPI_VIEWER_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -128,10 +136,36 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logis
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 
 /**
+ * Rapports d'exploitation : inventaire des pièces (`GET /api/reports/inventory`) et
+ * performance des techniciens (`GET /api/reports/technician-performance`).
+ * Lus par `isInventoryReportReader` / `isTechnicianReportReader` et par l'écran `/reports`.
+ */
+export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+export const TECHNICIAN_REPORT_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
+
+export function canReadInventoryReport(role: string | null | undefined): boolean {
+  return (INVENTORY_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+export function canReadTechnicianReport(role: string | null | undefined): boolean {
+  return (TECHNICIAN_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
  * Tout le personnel : tout rôle sauf `client` (cloison client, AGENTS.md §11).
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+
+/**
+ * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel
+ * sauf le chauffeur, qui n'a pas à connaître les coûts d'atelier.
+ */
+export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+export function canReadWorkOrderCost(role: string | null | undefined): boolean {
+  return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
 
 /**
  * Écarts du cahier des charges (chantier CDC, lot CDC-0a). Groupes lus par le montage

@@ -10,6 +10,8 @@ import { BookingConflictAlert } from "@/components/work-orders/booking-conflict-
 import { WorkOrderExportButton } from "@/components/work-orders/work-order-export-button";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
+import { computeWorkOrderCost, partLineCost, totalLaborHours } from "@shared/work-order-cost";
+import { canReadWorkOrderCost } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -215,7 +217,8 @@ export default function WorkOrderDetails({
 
   // Le chef d'atelier n'a pas ce droit: il a une dérogation motivée, pour les
   // soirs et week-ends où le magasin est fermé. Geste distinct, bouton distinct.
-  const canOverrideIssue = user?.role === 'workshop_manager';
+  // Retiré par l'admin : le bouton disparaît (le serveur refuse aussi, 403).
+  const canOverrideIssue = user?.role === 'workshop_manager' && user?.canIssueStock !== false;
 
   // Motif de sortie exceptionnelle en cours de saisie.
   const [overrideRequirementId, setOverrideRequirementId] = useState<number | null>(null);
@@ -290,16 +293,40 @@ export default function WorkOrderDetails({
   );
 
   // Même cache que le panneau Travaux: sert seulement au compteur de l'onglet.
-  const { data: workItemsData } = useQuery<{ items: unknown[] }>({
+  const { data: workItemsData } = useQuery<{
+    items: Array<{ actualHours?: number | string | null; status?: string | null }>;
+  }>({
     queryKey: [`/api/work-orders/${workOrderId}/items`],
     enabled: !!workOrderId,
   });
   const workItemsCount = workItemsData?.items.length ?? 0;
+  const laborHours = totalLaborHours(workItemsData?.items);
+
+  // Taux horaire en vigueur pour cet OT (à sa clôture, sinon aujourd'hui) : même règle que le KPI.
+  // La date de fin fait partie de la clé : clôturer l'OT relit le taux applicable.
+  // Hors `WORK_ORDER_COST_READ_ROLES` (chauffeur, client), la route répond 403 : pas d'appel,
+  // le coût saisi de l'OT s'affiche seul.
+  const canReadLaborRate = canReadWorkOrderCost(user?.role);
+  const {
+    data: laborRate = null,
+    isLoading: laborRateLoading,
+    isError: laborRateError,
+  } = useQuery<{ effectiveFrom: string; hourlyRateHt: number } | null>({
+    // Le second élément est lu comme paramètres de requête (ignorés par le serveur) : il faut un objet.
+    queryKey: [`/api/work-orders/${workOrderId}/labor-rate`, { endDate: workOrder?.endDate ?? undefined }],
+    enabled: !!workOrderId && !!workOrder && canReadLaborRate,
+  });
+  // Un PDF imprimé avant le taux afficherait un autre coût que le KPI : impression bloquée d'ici là.
+  const printBlockedByLaborRate = canReadLaborRate && (laborRateLoading || laborRateError);
+  const printBlockedReason = laborRateError
+    ? "Taux horaire indisponible : impression impossible pour l'instant, rechargez la page."
+    : "Chargement du taux horaire…";
   // Saisie a posteriori permise sur un OT terminé; un OT annulé est figé.
-  // Un technicien ne saisit que sur ses OT: même règle que le serveur.
+  // Un technicien ne saisit que sur ses OT, et un OT clos est figé : même règle que le serveur.
   const canEditWorkItems =
     canProcessWorkOrder &&
     workOrder?.status !== 'cancelled' &&
+    workOrder?.status !== 'completed' &&
     !(user?.role === 'technician' && demarreurEstAutre);
 
   // Fetch parts used in this work order
@@ -383,8 +410,9 @@ export default function WorkOrderDetails({
     },
   });
 
-  // « Demander la pièce » : le serveur décide au clic. Le stock disponible sort
-  // vers l'OT, le manquant part en demande et l'OT passe en attente de pièces.
+  // « Demander la pièce » : le serveur décide au clic. Rien ne sort ici : le
+  // rayon part « à sortir » chez le magasinier, le manquant en demande et l'OT
+  // passe en attente de pièces.
   const requestPartMutation = useMutation({
     mutationFn: async ({ partId, quantity }: { partId: number; quantity: number }) => {
       const response = await apiRequest("POST", `/api/work-orders/${workOrderId}/parts`, {
@@ -395,8 +423,8 @@ export default function WorkOrderDetails({
     },
     onSuccess: (payload: any, { partId }) => {
       toast({
-        title: payload?.missingQuantity > 0 ? "Pièce demandée" : "Pièce ajoutée",
-        description: payload?.message || "La pièce a été ajoutée à l'ordre de travail.",
+        title: "Pièce demandée",
+        description: payload?.message || "Demande transmise au magasinier.",
       });
       refetchPartsUsed();
       refetchPendingPartRequirements();
@@ -826,7 +854,7 @@ export default function WorkOrderDetails({
           const partName = partNameRaw.length > 48 ? `${partNameRaw.slice(0, 47)}…` : partNameRaw;
           const quantity = Number(part.quantity || 0);
           const unitPrice = parseMoney(part.unitPrice);
-          const total = unitPrice * quantity;
+          const total = partLineCost(part.unitPrice, part.quantity);
 
           const rowValues = [partName, String(quantity), formatCurrency(unitPrice), formatCurrency(total)];
           let cellX = margin;
@@ -850,12 +878,19 @@ export default function WorkOrderDetails({
       }
 
       // Bloc des coûts
-      const laborCost = parseMoney(workOrder.laborCost ?? workOrder.cost);
-      const partsCost = safeParts.reduce((sum: number, part: any) => sum + parseMoney(part.unitPrice) * Number(part.quantity || 0), 0);
-      const tireCost = Array.isArray(tireRotations)
-        ? tireRotations.reduce((sum: number, rotation: any) => sum + parseMoney(rotation.cost), 0)
-        : 0;
-      const totalCost = laborCost + partsCost + tireCost;
+      // Même formule que l'écran et le KPI (WO5) : main-d'oeuvre + pièces + rotations de pneus.
+      const {
+        baseCost: laborCost,
+        partsCost,
+        tiresCost: tireCost,
+        totalCost,
+      } = computeWorkOrderCost({
+        baseCost: workOrder.cost,
+        parts: safeParts,
+        tireRotations,
+        laborHours,
+        laborRate: laborRate?.hourlyRateHt ?? null,
+      });
       const noteValue = typeof workOrder.notes === "string" ? workOrder.notes.trim() : "";
 
       const summaryWidth = 86;
@@ -1073,22 +1108,24 @@ export default function WorkOrderDetails({
     ? workOrder.notes
     : getAutoGeneratedInterventionNote();
 
-  const totalPartsCost = Array.isArray(partsUsed) ? partsUsed.reduce(
-    (sum: number, part: any) => sum + (part.unitPrice * part.quantity),
-    0
-  ) : 0;
+  // Main-d'oeuvre + pièces + rotations : une seule formule pour l'écran, le PDF et le KPI (WO5).
+  const {
+    baseCost: baseWorkOrderCost,
+    partsCost: totalPartsCost,
+    tiresCost: totalTireRotationsCost,
+    totalCost: grandTotal,
+    laborValued,
+  } = computeWorkOrderCost({
+    baseCost: workOrder.cost,
+    parts: partsUsed,
+    tireRotations,
+    laborHours,
+    laborRate: laborRate?.hourlyRateHt ?? null,
+  });
   const pendingPartsCount = Array.isArray(pendingPartRequirements) ? pendingPartRequirements.length : 0;
   const usedPartsCount = Array.isArray(partsUsed) ? partsUsed.length : 0;
   const displayedPartsCount = usedPartsCount + pendingPartsCount;
 
-  const totalTireRotationsCost = Array.isArray(tireRotations) ? tireRotations.reduce(
-    (sum: number, rotation: any) => sum + (rotation.cost ? parseFloat(rotation.cost) : 0),
-    0
-  ) : 0;
-
-  // Coût de base de l'intervention (workOrder.cost) + coûts additionnels
-  const baseWorkOrderCost = workOrder.cost ? parseFloat(workOrder.cost.toString()) : 0;
-  const grandTotal = baseWorkOrderCost + totalPartsCost + totalTireRotationsCost;
 
   return (
     <div className="space-y-5">
@@ -1153,6 +1190,8 @@ export default function WorkOrderDetails({
                 variant="outline"
                 size="sm"
                 onClick={handlePrintWorkOrder}
+                disabled={printBlockedByLaborRate}
+                title={printBlockedByLaborRate ? printBlockedReason : undefined}
                 className="bg-white/70 border-green-200 hover:bg-white text-green-800"
                 data-testid="button-print-work-order"
               >
@@ -1582,7 +1621,7 @@ export default function WorkOrderDetails({
                               Stock insuffisant : {stockAvailable} disponible(s) pour {partQuantity} demandée(s).
                             </p>
                             {previewIssued > 0 && (
-                              <p>{previewIssued} unité(s) sortiront du stock pour cet OT.</p>
+                              <p>{previewIssued} unité(s) en rayon : le magasinier les sortira pour cet OT.</p>
                             )}
                             {openRequest ? (
                               <p>
@@ -1654,7 +1693,7 @@ export default function WorkOrderDetails({
                             </span>
                           </td>
                           <td className="px-4 py-3.5 text-gray-500">{formatCurrency(partUsed.unitPrice)}</td>
-                          <td className="px-4 py-3.5 font-semibold text-gray-800">{formatCurrency(partUsed.unitPrice * partUsed.quantity)}</td>
+                          <td className="px-4 py-3.5 font-semibold text-gray-800">{formatCurrency(partLineCost(partUsed.unitPrice, partUsed.quantity))}</td>
                           <td className="px-4 py-3.5">
                             <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                               Utilisée
@@ -1867,9 +1906,7 @@ export default function WorkOrderDetails({
                   <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 flex items-center gap-3">
                     <span className="text-sm text-blue-700">Total rotations</span>
                     <span className="text-base font-bold text-blue-900">
-                      {formatCurrency(tireRotations.reduce((total: number, rotation: any) => {
-                        return total + (rotation.cost ? parseFloat(rotation.cost) : 0);
-                      }, 0))}
+                      {formatCurrency(totalTireRotationsCost)}
                     </span>
                   </div>
                 </div>
@@ -1952,7 +1989,7 @@ export default function WorkOrderDetails({
                             <span className="font-medium">{part.partName}</span>
                             <span className="text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5">×{part.quantity}</span>
                           </div>
-                          <span className="font-semibold">{formatCurrency(part.unitPrice * part.quantity)}</span>
+                          <span className="font-semibold">{formatCurrency(partLineCost(part.unitPrice, part.quantity))}</span>
                         </div>
                       ))}
                     </div>
@@ -1967,7 +2004,16 @@ export default function WorkOrderDetails({
                   <div className="px-4 py-3 space-y-1.5 text-sm">
                     {baseWorkOrderCost > 0 && (
                       <div className="flex justify-between text-muted-foreground">
-                        <span>Main d'œuvre</span><span>{formatCurrency(baseWorkOrderCost)}</span>
+                        <span>
+                          Main d'œuvre
+                          {laborValued && laborRate && (
+                            <span className="ml-1 text-xs" data-testid="labor-cost-basis">
+                              ({laborHours.toLocaleString("fr-FR")} h × {formatCurrency(laborRate.hourlyRateHt)}, taux du{" "}
+                              {new Date(`${laborRate.effectiveFrom}T00:00:00`).toLocaleDateString("fr-FR")})
+                            </span>
+                          )}
+                        </span>
+                        <span>{formatCurrency(baseWorkOrderCost)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-muted-foreground">
@@ -1985,7 +2031,12 @@ export default function WorkOrderDetails({
                 </div>
 
                 <div className="flex justify-end">
-                  <Button onClick={handlePrintWorkOrder} className="bg-purple-600 hover:bg-purple-700">
+                  <Button
+                    onClick={handlePrintWorkOrder}
+                    disabled={printBlockedByLaborRate}
+                    title={printBlockedByLaborRate ? printBlockedReason : undefined}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
                     <Printer className="h-4 w-4 mr-2" />
                     Imprimer le rapport
                   </Button>

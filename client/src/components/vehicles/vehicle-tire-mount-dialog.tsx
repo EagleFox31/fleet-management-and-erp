@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TIRE_MOUNT_POSITIONS } from "@shared/constants/tires";
+import { TIRE_STOCK_SOURCES, TIRE_STOCK_SOURCE_LABELS, usedTiresLabel, type TireStockSource } from "@shared/constants/tire-stock";
 import { CircleDot, Loader2 } from "lucide-react";
 
 interface TireCatalogRow {
@@ -29,7 +30,11 @@ interface TireCatalogRow {
   model: string;
   size: string;
   stockQuantity: number;
+  usedStockQuantity?: number;
 }
+
+const stockOf = (tire: TireCatalogRow, source: TireStockSource) =>
+  source === "used" ? tire.usedStockQuantity ?? 0 : tire.stockQuantity ?? 0;
 
 interface FleetVehicleRow {
   id: number;
@@ -92,6 +97,8 @@ export function VehicleTireMountDialog({
   const [installationMileage, setInstallationMileage] = useState("0");
   const [currentTreadDepth, setCurrentTreadDepth] = useState("");
   const [initialTreadDepth, setInitialTreadDepth] = useState("");
+  // Neuf par défaut ; l'usagé se choisit (le serveur ne bascule jamais seul vers l'usagé).
+  const [stockSource, setStockSource] = useState<TireStockSource>("new");
 
   const effectiveVehicleId = isVehicleLocked ? vehicleId! : Number(selectedVehicleId);
 
@@ -137,7 +144,7 @@ export function VehicleTireMountDialog({
   }, [allVehicleTires, effectiveVehicleId, isVehicleLocked, occupiedPositions]);
 
   const availableTires = useMemo(
-    () => tiresCatalog.filter((tire) => (tire.stockQuantity ?? 0) > 0),
+    () => tiresCatalog.filter((tire) => stockOf(tire, "new") + stockOf(tire, "used") > 0),
     [tiresCatalog],
   );
 
@@ -179,6 +186,7 @@ export function VehicleTireMountDialog({
         installationDate,
         installationMileage: parsedMileage,
         status: "active",
+        stockSource,
       };
 
       const tread = Number(currentTreadDepth);
@@ -199,9 +207,11 @@ export function VehicleTireMountDialog({
       const immat = selectedFleetVehicle?.registrationNumber ?? registrationNumber ?? "véhicule";
       toast({
         title: "Pneu monté",
-        description: `Montage enregistré sur ${immat}. Le stock magasin a été décrémenté.`,
+        description: `Montage enregistré sur ${immat}. Le stock ${stockSource === "used" ? "usagé" : "neuf"} a été décrémenté.`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/tires"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tires/statistics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tires/low-stock"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tires/statistics-advanced"] });
       queryClient.invalidateQueries({ queryKey: ["/api/vehicle-tires"] });
       queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${effectiveVehicleId}/tires`] });
@@ -222,6 +232,13 @@ export function VehicleTireMountDialog({
   });
 
   const selectedTire = availableTires.find((t) => String(t.id) === tireId);
+  const canChooseSource = !!selectedTire && stockOf(selectedTire, "new") > 0 && stockOf(selectedTire, "used") > 0;
+
+  // Une référence sans neuf ne peut être montée qu'en usagé : le choix est affiché, pas implicite.
+  useEffect(() => {
+    if (!selectedTire) return;
+    setStockSource(stockOf(selectedTire, "new") > 0 ? "new" : "used");
+  }, [selectedTire?.id]);
   const displayRegistration = selectedFleetVehicle?.registrationNumber ?? registrationNumber ?? "—";
 
   return (
@@ -317,15 +334,37 @@ export function VehicleTireMountDialog({
                   availableTires.map((tire) => (
                     <SelectItem key={tire.id} value={String(tire.id)}>
                       {tire.brand} {tire.model} · {tire.size} · stock {tire.stockQuantity}
+                      {(tire.usedStockQuantity ?? 0) > 0 ? ` + ${usedTiresLabel(tire.usedStockQuantity ?? 0)}` : ""}
                     </SelectItem>
                   ))
                 )}
               </SelectContent>
             </Select>
             {selectedTire ? (
-              <p className="text-xs text-muted-foreground">
-                {selectedTire.stockQuantity} unité(s) restante(s) après ce montage.
-              </p>
+              <div className="grid gap-2">
+                {canChooseSource ? (
+                  <div className="flex gap-2" role="radiogroup" aria-label="Stock de prélèvement">
+                    {TIRE_STOCK_SOURCES.map((source) => (
+                      <Button
+                        key={source}
+                        type="button"
+                        size="sm"
+                        role="radio"
+                        aria-checked={stockSource === source}
+                        variant={stockSource === source ? "default" : "outline"}
+                        onClick={() => setStockSource(source)}
+                        data-testid={`button-mount-stock-source-${source}`}
+                      >
+                        {TIRE_STOCK_SOURCE_LABELS[source]} ({stockOf(selectedTire, source)})
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  Prélevé sur le stock {TIRE_STOCK_SOURCE_LABELS[stockSource].toLowerCase()} :{" "}
+                  {Math.max(0, stockOf(selectedTire, stockSource) - 1)} unité(s) restante(s) après ce montage.
+                </p>
+              </div>
             ) : null}
           </div>
 

@@ -2,6 +2,12 @@ import { db } from "../db";
 import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
 import { eq, desc, count, sum, avg } from "drizzle-orm";
 
+/** Année et mois (calendaires) d'une date `AAAA-MM-JJ`, pour les colonnes `year` / `month`. */
+function periodOf(date: unknown): { year?: number; month?: number } {
+  const match = typeof date === "string" ? /^(\d{4})-(\d{2})-\d{2}/.exec(date) : null;
+  return match ? { year: Number(match[1]), month: Number(match[2]) } : {};
+}
+
 export class FuelService {
   /**
    * Récupère un enregistrement de carburant par ID - COPIÉ depuis storage-backup.ts
@@ -40,6 +46,7 @@ export class FuelService {
       .insert(fuelRecords)
       .values({
         ...fuelRecord,
+        ...periodOf(fuelRecord.date),
         createdBy: createdById,
         updatedBy: createdById,
       })

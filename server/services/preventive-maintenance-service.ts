@@ -3,6 +3,12 @@ import { maintenanceSchedules, workOrders, vehicles, type MaintenanceSchedule, t
 import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { vehicleStatusService } from "./vehicle-status-service";
 import { describeStatusChange } from "@shared/constants/vehicle-status";
+import { moduleLogger } from "../lib/logger";
+import { preventiveDueDay } from "../lib/kpi-rules";
+import { stampPreventiveDue } from "../lib/preventive-due";
+
+const log = moduleLogger("preventive-maintenance");
+const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -62,16 +68,16 @@ export class PreventiveMaintenanceService {
       if (schedule.isActive) {
         try {
           await this.generateWorkOrderFromSchedule(schedule);
-          console.log(`✅ Ordre de travail automatique créé pour la planification #${schedule.id}`);
+          log.info(`✅ Ordre de travail automatique créé pour la planification #${schedule.id}`);
         } catch (workOrderError) {
-          console.error('Erreur lors de la création automatique de l\'ordre de travail:', workOrderError);
+          log.error({ err: workOrderError }, 'Erreur lors de la création automatique de l\'ordre de travail');
           // Ne pas faire échouer la création de la planification si l'OT échoue
         }
       }
 
       return schedule;
     } catch (error) {
-      console.error('Error creating maintenance schedule:', error);
+      log.error({ err: error }, 'Error creating maintenance schedule');
       throw new Error('Erreur lors de la création de la planification de maintenance');
     }
   }
@@ -147,7 +153,8 @@ export class PreventiveMaintenanceService {
                 'Maintenance préventive programmée',
                 `Maintenance programmée pour le véhicule ${vehicle.registrationNumber}. Date d'échéance: ${maintenanceDate.toLocaleDateString()}`,
                 'maintenance',
-                createdBy
+                createdBy,
+                maintenanceDate
               );
               if (workOrder) { generatedWorkOrders.push(workOrder); declencheur = declencheur ?? workOrder; }
             }
@@ -164,7 +171,8 @@ export class PreventiveMaintenanceService {
                 'Renouvellement assurance',
                 `Assurance du véhicule ${vehicle.registrationNumber} expire le ${insuranceDate.toLocaleDateString()}. Renouvellement requis.`,
                 'insurance',
-                createdBy
+                createdBy,
+                insuranceDate
               );
               if (workOrder) generatedWorkOrders.push(workOrder);
             }
@@ -181,7 +189,8 @@ export class PreventiveMaintenanceService {
                 'Contrôle technique',
                 `Contrôle technique du véhicule ${vehicle.registrationNumber} expire le ${inspectionDate.toLocaleDateString()}. Inspection requise.`,
                 'inspection',
-                createdBy
+                createdBy,
+                inspectionDate
               );
               if (workOrder) generatedWorkOrders.push(workOrder);
             }
@@ -198,10 +207,43 @@ export class PreventiveMaintenanceService {
                 'Renouvellement plaque d\'immatriculation',
                 `Plaque d'immatriculation du véhicule ${vehicle.registrationNumber} expire le ${licensePlateDate.toLocaleDateString()}. Renouvellement requis.`,
                 'license',
-                createdBy
+                createdBy,
+                licensePlateDate
               );
               if (workOrder) generatedWorkOrders.push(workOrder);
             }
+          }
+        }
+
+        // Échéance d'un plan actif (hors kilométrage) dans la fenêtre d'alerte,
+        // ou dépassée : un OT lié au plan, jamais deux pour la même échéance.
+        const plansEchus = await db
+          .select()
+          .from(maintenanceSchedules)
+          .where(and(
+            eq(maintenanceSchedules.vehicleId, vehicle.id),
+            eq(maintenanceSchedules.isActive, true),
+            lte(maintenanceSchedules.scheduledDate, alertDate.toISOString().slice(0, 10)),
+          ));
+        for (const plan of plansEchus) {
+          if (plan.frequency === 'mileage' || !plan.scheduledDate) continue;
+          try {
+            // Un OT ouvert bloque (en attente, démarré, en attente de pièces). Un OT
+            // clôturé bloque aussi tant que l'échéance du plan n'a pas avancé : il
+            // porte l'échéance qu'il a traitée dans `startDate`.
+            const echeance = new Date(plan.scheduledDate);
+            const dejaTraite = (await db
+              .select({ id: workOrders.id, status: workOrders.status, startDate: workOrders.startDate })
+              .from(workOrders)
+              .where(eq(workOrders.maintenanceScheduleId, plan.id)))
+              .some((ot) =>
+                (OPEN_WORK_ORDER_STATUSES as readonly string[]).includes(ot.status) ||
+                (ot.status !== 'cancelled' && ot.startDate != null && new Date(ot.startDate) >= echeance));
+            if (dejaTraite) continue;
+            generatedWorkOrders.push(await this.generateWorkOrderFromSchedule(plan));
+          } catch (error) {
+            // Un plan en échec ne doit pas empêcher les autres.
+            log.error({ err: error, scheduleId: plan.id, vehicleId: vehicle.id }, "Plan préventif : OT non généré");
           }
         }
 
@@ -222,7 +264,7 @@ export class PreventiveMaintenanceService {
 
       return generatedWorkOrders;
     } catch (error) {
-      console.error('Erreur lors de la vérification des maintenances basées sur la date:', error);
+      log.error({ err: error }, 'Erreur lors de la vérification des maintenances basées sur la date');
       return [];
     }
   }
@@ -235,7 +277,8 @@ export class PreventiveMaintenanceService {
     title: string,
     description: string,
     type: 'maintenance' | 'insurance' | 'inspection' | 'license',
-    createdBy?: number
+    createdBy?: number,
+    dueOn?: Date
   ): Promise<WorkOrder | null> {
     try {
       // Vérifier s'il n'y a pas déjà un ordre de travail similaire en cours
@@ -250,7 +293,7 @@ export class PreventiveMaintenanceService {
         .limit(1);
 
       if (existingWorkOrder.length > 0) {
-        console.log(`Ordre de travail déjà existant pour ${title} du véhicule ${vehicle.registrationNumber}`);
+        log.info(`Ordre de travail déjà existant pour ${title} du véhicule ${vehicle.registrationNumber}`);
         return null;
       }
 
@@ -280,11 +323,12 @@ export class PreventiveMaintenanceService {
         })
         .returning();
 
-      console.log(`✅ Ordre de travail basé sur la date créé: ${workOrder.id} pour véhicule ${vehicle.registrationNumber} - ${title}`);
+      await this.stampDue(workOrder.id, preventiveDueDay(dueOn, today));
+      log.info(`✅ Ordre de travail basé sur la date créé: ${workOrder.id} pour véhicule ${vehicle.registrationNumber} - ${title}`);
       broadcastWorkOrderCreated(workOrder, `date_based_${type}`);
       return workOrder;
     } catch (error) {
-      console.error(`Erreur lors de la création de l'ordre de travail pour ${title}:`, error);
+      log.error({ err: error }, `Erreur lors de la création de l'ordre de travail pour ${title}`);
       return null;
     }
   }
@@ -314,13 +358,14 @@ export class PreventiveMaintenanceService {
             .from(workOrders)
             .where(and(
               eq(workOrders.vehicleId, vehicleId),
-              eq(workOrders.title, schedule.title),
+              // Le titre de l'OT généré n'est pas celui du plan : le lien fiable est maintenanceScheduleId.
+              eq(workOrders.maintenanceScheduleId, schedule.id),
               eq(workOrders.status, 'pending')
             ))
             .limit(1);
 
           if (existingWorkOrder.length === 0) {
-            console.log(`🔧 Déclenchement maintenance kilométrique pour véhicule ${vehicleId} à ${currentMileage}km (seuil: ${schedule.scheduledMileage}km)`);
+            log.info(`🔧 Déclenchement maintenance kilométrique pour véhicule ${vehicleId} à ${currentMileage}km (seuil: ${schedule.scheduledMileage}km)`);
             
             const workOrder = await this.generateWorkOrderFromSchedule(schedule);
             generatedWorkOrders.push(workOrder);
@@ -332,15 +377,28 @@ export class PreventiveMaintenanceService {
               .set({ scheduledMileage: nextMileage })
               .where(eq(maintenanceSchedules.id, schedule.id));
 
-            console.log(`✅ Ordre de travail créé pour maintenance kilométrique. Prochain seuil: ${nextMileage}km`);
+            log.info(`✅ Ordre de travail créé pour maintenance kilométrique. Prochain seuil: ${nextMileage}km`);
           }
         }
       }
 
       return generatedWorkOrders;
     } catch (error) {
-      console.error('Erreur lors de la vérification des maintenances kilométriques:', error);
+      log.error({ err: error }, 'Erreur lors de la vérification des maintenances kilométriques');
       return [];
+    }
+  }
+
+  /**
+   * Fige l'échéance de l'OT préventif (`due_date`, `due_mileage`) : le taux de préventif la lit,
+   * replanifier `start_date` ne la déplace plus. Un échec n'annule pas l'OT : l'indicateur se
+   * replie alors sur `start_date`.
+   */
+  private async stampDue(workOrderId: number, dueDate: string, dueMileage?: number | null): Promise<void> {
+    try {
+      await db.transaction((tx) => stampPreventiveDue(tx, workOrderId, { dueDate, dueMileage }));
+    } catch (error) {
+      log.error({ err: error, workOrderId, dueDate }, "échéance de l'OT préventif non enregistrée");
     }
   }
 
@@ -376,12 +434,17 @@ export class PreventiveMaintenanceService {
         })
         .returning();
 
-      console.log(`✅ Ordre de travail préventif créé: ${workOrder.id} pour véhicule ${vehicle.registrationNumber}`);
+      await this.stampDue(
+        workOrder.id,
+        preventiveDueDay(schedule.scheduledDate),
+        schedule.frequency === 'mileage' ? schedule.scheduledMileage : null,
+      );
+      log.info(`✅ Ordre de travail préventif créé: ${workOrder.id} pour véhicule ${vehicle.registrationNumber}`);
       broadcastWorkOrderCreated(workOrder, "preventive_schedule");
       
       return workOrder;
     } catch (error) {
-      console.error('Error generating work order from schedule:', error);
+      log.error({ err: error }, 'Error generating work order from schedule');
       throw error;
     }
   }
@@ -429,7 +492,7 @@ export class PreventiveMaintenanceService {
 
       return schedules;
     } catch (error) {
-      console.error('Error getting vehicle maintenance schedules:', error);
+      log.error({ err: error }, 'Error getting vehicle maintenance schedules');
       return [];
     }
   }
@@ -466,7 +529,7 @@ export class PreventiveMaintenanceService {
         priority: this.calculatePriority(schedule.scheduledDate)
       }));
     } catch (error) {
-      console.error('Error getting upcoming maintenances:', error);
+      log.error({ err: error }, 'Error getting upcoming maintenances');
       return [];
     }
   }
@@ -523,11 +586,11 @@ export class PreventiveMaintenanceService {
       // Générer le prochain ordre de travail
       await this.generateWorkOrderFromSchedule(updatedSchedule);
 
-      console.log(`✅ Maintenance terminée et prochaine planifiée pour le ${nextDueDate.toLocaleDateString('fr-FR')}`);
+      log.info(`✅ Maintenance terminée et prochaine planifiée pour le ${nextDueDate.toLocaleDateString('fr-FR')}`);
       
       return updatedSchedule;
     } catch (error) {
-      console.error('Error completing maintenance and scheduling next:', error);
+      log.error({ err: error }, 'Error completing maintenance and scheduling next');
       return null;
     }
   }
@@ -546,7 +609,7 @@ export class PreventiveMaintenanceService {
 
       return (result.rowCount ?? 0) > 0;
     } catch (error) {
-      console.error('Error deactivating schedule:', error);
+      log.error({ err: error }, 'Error deactivating schedule');
       return false;
     }
   }
@@ -582,7 +645,7 @@ export class PreventiveMaintenanceService {
 
       return updatedSchedule;
     } catch (error) {
-      console.error('Error reactivating schedule:', error);
+      log.error({ err: error }, 'Error reactivating schedule');
       return null;
     }
   }
@@ -626,7 +689,7 @@ export class PreventiveMaintenanceService {
           : 100
       };
     } catch (error) {
-      console.error('Error getting maintenance statistics:', error);
+      log.error({ err: error }, 'Error getting maintenance statistics');
       return {
         totalActiveSchedules: 0,
         upcomingMaintenances: 0,

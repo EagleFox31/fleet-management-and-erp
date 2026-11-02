@@ -793,6 +793,65 @@ Chaque étape déclenche désormais:
 ### Règle Projet (obligatoire)
 - Une route qui lit ou modifie un véhicule, ou ce qui en dépend, ouverte à un client, passe par `isAnyUser` puis `canAccessOwned` / `ownerScopeOf`. Jamais `authenticate` seul.
 
+### Récidive (2026-11-01) : liste de véhicules lisible par un client
+
+Mise à jour de cette entrée : la même classe de défaut est revenue sur une route non listée.
+
+#### Constat
+- `GET /api/vehicles` (`server/routes.ts`, déclaration héritée) n'exigeait que `authenticate`. Un compte client recevait tous les véhicules (immatriculation, VIN, marque). Un commentaire « Temporairement, tous les utilisateurs voient tous les véhicules » restait en place.
+- Découvert par la relecture de la PR #77 : `it.fails` dans `tests/contract/lists-pagination-filters.contract.test.ts`.
+
+#### Cause racine
+- La prévention du 30 octobre visait les routes documents et kilométrage. La liste de véhicules n'était pas dans son inventaire : la cloison était appliquée route par route, sur une liste écrite à la main.
+- Le TODO « temporairement » sur un accès n'était suivi par aucun contrôle.
+- Classification : contrôle d'accès horizontal manquant (IDOR), récidive.
+
+#### Résolution
+- Commit `854ce30` : `/` et `/all` passent en `isAnyUser` dans `server/api/vehicles.routes.ts`, et la requête est filtrée par `ownerScopeOf` dans `server/services/vehicle-list-service.ts`.
+- `server/app.ts` monte `/api` (ligne 108) avant `registerRoutes` (ligne 109) : le routeur sert donc la requête. La déclaration héritée `server/routes.ts:958` reste en code mort, avec son TODO. Elle se supprime à part, avec son double.
+
+#### Prévention (vérifiable)
+- Contrat `tests/contract/vehicles-lists-client-scope.contract.test.ts` : tableau `LISTS` (`/api/vehicles?limit=1000`, `/api/vehicles/all`, `/api/vehicles/all-with-status`). Pour chaque liste : le client ne voit que son véhicule, le personnel voit les deux, sans session 401.
+- Rouge avant correctif : non démontré. Le fichier a été ajouté dans le même commit que le correctif.
+- Insuffisance constatée : `tests/contract/api-auth-guard.contract.test.ts` vérifie qu'une garde de session existe, et accepte `authenticate`. Il ne voit donc pas l'absence de cloison.
+- Prévention manquante : un contrôle automatique qui échoue sur toute route `/api` lisant ou modifiant un véhicule (liste ou identifiant) gardée par `authenticate` seul, sans `isAnyUser`, `isStaff`, `authorize` ni `ownerScopeOf` / `canAccessOwned`. À produire par fleet-testeur.
+- Résidus non couverts par `854ce30`, vérifiés par lecture de `server/routes.ts` (déclarations sous `authenticate` seul) : `GET /api/vehicles/:id` (ligne 1036), `/check/:registrationNumber` (1016), `/:id/mileage` (3534), `/:id/mileage/history` (3550), `/check-alerts` (4102, lit `storage.getVehicles()`), `/:vehicleId/status-history` (4502), `/:vehicleId/tires` (5027). Leur contrôle de propriétaire n'a pas été relu dans cette passe.
+
+#### Règle Projet (obligatoire)
+- Une liste d'objets possédés passe par `isAnyUser` + `ownerScopeOf`, avec un cas de contrat client sur cette liste.
+- Un TODO « temporairement » ou « pour l'instant » sur un accès se traite comme un défaut ouvert : il se corrige ou il se consigne comme résidu daté dans le journal, jamais en commentaire seul.
+- Ce qui doit être cloisonné ne se liste pas à la main : la prévention cible la classe (routes d'un objet possédé), pas une liste de chemins.
+
+### Seconde récidive (2026-11-02) : lectures véhicule, pleins et routes masquées
+
+#### Constat
+- `GET /api/vehicles/:id/mileage`, `.../mileage/history`, `.../status-history`, `.../tires` et `GET /api/fuel-records/vehicle/:id` étaient gardés par `authenticate` seul : un client lisait le kilométrage, l'historique de statut, les pneus et les pleins de n'importe quel véhicule.
+- `GET /api/vehicles/check/:registrationNumber` répondait 403 à un client pour la plaque d'un autre client : le 403 révélait l'existence du véhicule. Désormais `exists: false`, comme pour une plaque inconnue.
+- `GET /api/vehicles/check-alerts` et `GET /api/vehicles/archived`, déclarées dans `server/routes.ts`, étaient mortes : `/api/vehicles/:id`, déclarée avant elles, les masquait. Elles sont déplacées dans `server/api/vehicles.routes.ts` (lignes 124 et 190), avant `/:id`.
+
+#### Cause racine
+- Même cause que le 30 octobre : `authenticate` ne charge pas le rôle, et la cloison reposait sur une convention écrite à la main sur chaque route (`isAnyUser` ou `isStaff`), pas sur un refus par défaut.
+- La garde statique censée détecter ce cas avait un angle mort : `tests/unit/server/vehicle-routes-guard.test.ts` ignorait le préfixe de montage des routeurs de `server/api/`. Un `router.get("/:id/leak", authenticate)` dans `vehicles.routes.ts` (monté sous `/api/vehicles`) était lu hors périmètre, donc passait.
+- Le test de garde n'avait pas été éprouvé par mutation : son existence ne prouvait pas qu'il échoue.
+- Classification : contrôle d'accès horizontal manquant (IDOR), récidive ; faux négatif de la garde statique.
+
+#### Résolution
+- Routes passées en `isAnyUser` avec `canAccessOwned` / `ownerScopeOf` ; `check/:registrationNumber` répond `exists: false` au client pour une plaque d'un autre.
+- Garde statique corrigée : préfixes de montage résolus depuis `server/api/index.ts` (`mountPrefixes`). Prouvé par mutation temporaire (rapporté par la session source, non rejoué lors de cette passe).
+- Commit `57ff6bf` (branche `fix/lot2-cloison-itfails`, PR #80).
+
+#### Prévention (vérifiable)
+- `tests/unit/server/vehicle-routes-guard.test.ts` (présent dans `57ff6bf`) : test « un chemin relatif d'un routeur monté sous /vehicles est résolu avec son préfixe » (lignes 100-108) et « aucune nouvelle route véhicule n'est gardée par authenticate seul » (ligne 116).
+- Limite : `KNOWN_AUTHENTICATE_ONLY` (ligne 19) tolère encore `get /api/vehicles/:id` au motif d'un contrôle « fait dans le handler ». La garde ne vérifie pas ce contrôle.
+- `tests/contract/vehicle-reads-client-scope.contract.test.ts` (présent dans `57ff6bf`, version de la branche modifiée et non commitée à la date de cette entrée) : HTTP réel sur les lectures listées ci-dessus, avec client sur le sien 200, sur un autre 403, personnel 200, anonyme 401 ; `check` (`exists` à `false`), `check-alerts` et `archived` (admin 200, client 403).
+- Rouge avant correctif : non vérifié lors de cette passe.
+- La prévention manquante du 2026-11-01 (ligne 817) est partiellement produite par le test statique. Elle reste à compléter : une route véhicule gardée par `authenticate` seul doit échouer aussi en HTTP. À produire par fleet-testeur.
+
+#### Règle Projet (obligatoire)
+- Une garde statique ne compte comme prévention qu'après une mutation qui la fait échouer (route volontairement mal gardée, test rouge, puis retrait). Une garde non mutée est une hypothèse.
+- Une route déclarée après une route paramétrée (`/:id`) se teste en HTTP : la lecture statique la voit verte alors qu'elle ne répond jamais.
+- Une liste gelée de routes tolérées porte un motif daté et un contrôle nommé dans un test HTTP ; un contrôle « fait dans le handler » sans test HTTP est un résidu à consigner.
+
 ## 2026-10-31 - Écran ouvert à un rôle que son API refuse
 
 ### Constat
@@ -834,3 +893,123 @@ Chaque étape déclenche désormais:
 
 ### Règle Projet (obligatoire)
 - Une colonne `timestamp` sans fuseau se lit avec le pilote qui l'écrit. Un test qui touche à l'heure fixe un fuseau non UTC, sinon il ne prouve rien.
+
+## 2026-11-01 - Alerte d'un autre compte marquée lue ou supprimée
+
+### Constat
+- `PATCH /api/alerts/:id/read` et `DELETE /api/alerts/:id` écrivaient par id seul : n'importe quel compte connecté marquait lue ou supprimait l'alerte d'un autre. Les ids sont séquentiels.
+
+### Cause racine
+- `storage.markAlertAsRead(id)` / `storage.deleteAlert(id)` ne prennent pas l'utilisateur ; la route ne le passait pas. Les routes existaient en double dans `server/routes.ts`, la seconde copie (morte) n'était pas meilleure.
+- Classification : contrôle d'accès horizontal manquant (IDOR), même classe que l'incident du 2026-10-30. Répétition : contrôle renforcé ci-dessous.
+
+### Résolution
+- `server/api/alerts.routes.ts` + `server/services/alert-inbox-service.ts` : écritures filtrées sur `id` et `user_id` de session, 404 hors périmètre.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/alerts-inbox.contract.test.ts` (alerte d'un autre compte : 404, rien ne change). Sans correctif : 5 rouges sur 6.
+- Hygiène `tests/unit/server/alerts-write-hygiene.test.ts` : `UPDATE` / `DELETE` sur `alerts` limités à une liste gelée ; plus aucun appel à `storage.markAlertAsRead` / `deleteAlert`. Rouge sur main (4 appels).
+
+### Règle Projet (obligatoire)
+- Une écriture sur une ligne nominative (alerte, préférence, brouillon) filtre sur l'utilisateur de session dans la requête SQL elle-même, jamais par un contrôle après lecture.
+
+## 2026-11-01 - Compte supprimé toujours connecté
+
+### Constat
+- Après `DELETE /api/users/:id` (soft delete), le compte se reconnectait par `POST /api/auth/login`, et une session ouverte avant la suppression restait valide (gardes de rôle, `GET /api/auth/me`, routes gardées par `authenticate` seul).
+
+### Cause racine
+- `storage.getUser` / `getUserByUsername` rendent aussi les lignes `deleted_at` non nulles ; la connexion et les gardes ne lisaient pas `deletedAt`. La suppression n'effaçait pas les sessions (table `session`), seule la désactivation fermait les WebSocket.
+- Classification : contrôle d'authentification manquant sur un état métier (cycle de vie du compte). `pin-login` et `userService.authenticateUser` le faisaient déjà : contrôle présent sur un chemin, absent sur l'autre.
+
+### Résolution
+- Refus de `deletedAt` dans `POST /api/auth/login`, `authorize`, `isAdmin`, `GET /api/auth/me`.
+- `revokeUserAccess` (`server/lib/user-sessions.ts`) : efface les sessions du compte et ferme ses connexions temps réel, appelée par la suppression et par la désactivation.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/users-admin-soft-delete.contract.test.ts` : connexion refusée, session révoquée (route `authenticate` seule), désactivation révoquée, et seconde ligne de défense (`deletedAt` écrit hors route : gardes et profil refusent). Sans correctif : 3 rouges.
+- Limite connue : cette seconde ligne ne couvre que `authorize`, `isAdmin` et `/api/auth/me`. Les routes gardées par `authenticate` seul et le WebSocket ne relisent pas le compte : si l'effacement des sessions échoue (deux essais, journalisés en erreur), le cookie y reste valide jusqu'à son expiration. Correctif durable : faire relire le compte par `authenticate`.
+
+### Règle Projet (obligatoire)
+- Un changement d'état qui retire un droit (suppression, désactivation, rôle) coupe aussi les sessions déjà ouvertes, pas seulement les connexions futures.
+
+## 2026-11-01 - Fichier de contrat en échec alors que tous ses tests passent
+
+### Constat
+- Plusieurs fichiers de contrat (PR #65, #66, #67) sortaient « 1 failed » avec tous leurs tests verts. Le `afterAll` global (`cleanupOrphanTestRows`, `tests/support/setup-contract.ts`) levait une erreur de clé étrangère.
+
+### Cause racine
+- Le ménage supprime les comptes TEST, mais des tables pointant vers `users` n'étaient pas vidées avant : `document_renewal_centers.created_by` (renouvellement rapide), après `fuel_prices.created_by` plus tôt.
+- Course : le job d'alertes en tâche de fond écrit des alertes pour les comptes de test entre la suppression des alertes et celle des comptes (`alerts_user_id_users_id_fk`).
+- Le même job écrit des échéances d'autres documents de la base pour toute secrétaire : une assertion « alertes restantes du compte » sans filtre sur ses propres documents devient instable.
+- Classification : ménage de test incomplet, répété (troisième FK). Contrôle renforcé ci-dessous.
+
+### Résolution
+- `tests/support/cleanup.ts` : centres et demandes de renouvellement des comptes TEST supprimés ; alertes resupprimées juste avant les comptes ; trois essais, puis seule la course `alerts_user_id` est tolérée (avertissement stderr). Toute autre erreur fait échouer.
+- `tests/contract/document-quick-renew-alerts.contract.test.ts` : assertion restreinte aux préfixes de ses deux documents (`documentExpiryDedupeKeyPrefixes`).
+
+### Prévention (vérifiable)
+- Une nouvelle FK vers `users` oubliée dans le ménage fait échouer le hook global (erreur relevée, pas avalée) : elle se voit au premier fichier de contrat.
+- Preuve : DOC3 rouge avant (FK `alerts_user_id`, puis alerte d'un autre document), vert après.
+
+### Règle Projet (obligatoire)
+- Toute table qui référence `users` et peut être écrite par un compte de test se vide dans `cleanupOrphanTestRows` avant la suppression des comptes.
+- Une assertion sur les alertes d'un compte filtre sur les objets créés par le test : le job en tâche de fond écrit pour tous les comptes.
+
+## 2026-11-01 - it.fails qui contient sa mise en place
+
+### Constat
+- Cinq PR de tests (#67, #68, #70, #71, #72) ont été recalées en relecture : un `it.fails(...)` contenait aussi la création du véhicule, du plan ou de la mission, ou le POST d'une fixture.
+
+### Cause racine
+- `it.fails` passe au vert dès que son corps lève, quelle qu'en soit la raison. Un setup en 500 ou une coupure Neon fait donc passer le test sans prouver le défaut visé.
+- Classification : piège de l'outil, répété cinq fois malgré la relecture. Contrôle automatique requis.
+
+### Résolution
+- `tests/unit/server/it-fails-hygiene.test.ts` parcourt `tests/**/*.test.ts` et `e2e/**/*.spec.ts`, repère les `it.fails` / `test.fail` dont le corps appelle une fabrique (`create*`, `seed*`, `make*`, `insert*`, `open*`, `new*`, `setup*`, `db.insert`, `.save`) hors assertion directe sur son statut, ou fait plus d'une requête HTTP.
+- Les occurrences présentes sur main sont gelées (liste explicite, qui ne peut que rétrécir).
+
+### Prévention (vérifiable)
+- Une nouvelle occurrence fait échouer le test unitaire, avec la règle et la correction dans le message.
+- Preuve : un `it.fails` fautif déposé dans `tests/contract/` fait passer le test à rouge (1 failed, clé `fichier::titre` listée) ; retiré, vert.
+
+### Règle Projet (obligatoire)
+- Un `it.fails` ne contient que l'appel visé et l'assertion métier ; la mise en place va dans `beforeAll` ou un `it` témoin.
+
+## 2026-11-01 - Sonde de test : débits NaN écrits, solde global de la carte empoisonné
+
+### Constat
+- Premier passage de `fuel-card-routes.contract.test.ts` (FUEL1) : 8 échecs, `balance` à `null`, un débit « solde insuffisant » accepté en 201. La suite avait elle-même écrit des débits dont la quantité valait NaN.
+
+### Cause racine
+- Produit : `POST /api/fuel-card/consumption` ne valide ni quantité ni prix (`fuel-card-service.ts` ~215-231) : NaN accepté, SUM devient NaN pour toute la carte, et `cost > balance` (comparaison avec NaN toujours fausse) désactive le garde de solde.
+- Test : les sondes de défauts étaient jouées au milieu du fichier, sur une carte au solde global, et leur ligne n'était supprimée qu'en fin de fichier. Classification : sonde destructive sur état partagé, sans ménage immédiat ni filet.
+
+### Résolution
+- Sondes déplacées en fin de fichier, jouées une seule fois en `beforeAll`, ligne supprimée aussitôt (`probe()`), id enregistré avant la suppression.
+- Filet : `afterAll` balaie tout `fuel_records` daté de 2031 (année réservée à ce fichier). Base vérifiée : 0 ligne NaN après le premier passage.
+
+### Prévention (vérifiable)
+- Rejeu du fichier : solde fini à la fin, second passage identique (idempotence). Le balayage 2031 retire toute ligne laissée par une suppression en échec.
+- Limite : un crash du processus avant `afterAll` laisse la ligne jusqu'au passage suivant, qui la balaie.
+
+### Règle Projet (obligatoire)
+- Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
+
+## 2026-11-02 - Période KPI démesurée : plusieurs secondes de calcul puis 500
+
+### Constat
+- `GET /api/kpi/*` et `GET /api/exports/kpi-report` acceptaient `to=9999-12-30` ou `2026-02-31`. Le calcul des mois de la période bouclait plusieurs secondes avant une 500.
+
+### Cause racine
+- `isoDateSchema` ne contrôle que la forme `AAAA-MM-JJ`, pas la date ni son étendue. La boucle `monthKeysBetween` (`server/lib/kpi-rules.ts`) est linéaire en nombre de mois. Classification : entrée utilisateur non bornée qui pilote un coût de calcul.
+
+### Résolution
+- `shared/contracts/kpi-period.ts` : date réelle du calendrier, années 2000-2100, 36 mois civils au plus ; réponse 400 lisible.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/kpi-period.test.ts` : les quatre schémas refusent période démesurée, date inexistante et années hors bornes.
+- `tests/contract/kpi-cdc.contract.test.ts` : 400 sans détail technique sur ces cas, pour les KPI et le rapport.
+
+### Règle Projet (obligatoire)
+- Tout paramètre de requête qui fixe la taille d'un calcul (période, pagination, profondeur) est borné dans son schéma Zod partagé ; `isoDateSchema` seul ne suffit pas pour une période.

@@ -35,6 +35,10 @@ export const users = pgTable("users", {
   failedLoginCount: integer("failed_login_count").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
   lastFailedLoginAt: timestamp("last_failed_login_at"),
+  // Droit de sortie de stock en dérogation (chef d'atelier, magasin fermé).
+  // Accordé par défaut, retirable par l'administrateur seul
+  // (`PATCH /api/users/:id/stock-issue-permission`). Sans effet sur les autres rôles.
+  canIssueStock: boolean("can_issue_stock").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
 });
@@ -43,6 +47,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   loginCount: true,
   lastLoginAt: true,
+  canIssueStock: true,
   createdAt: true,
   deletedAt: true,
 });
@@ -144,11 +149,12 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   insuranceExpiry: z.string().optional().transform((val) => val ? val : undefined),
   technicalInspectionDate: z.string().optional().transform((val) => val ? val : undefined),
   purchasePrice: z.union([z.string(), z.number()]).optional().transform((val) => val ? String(val) : undefined),
-  tonnage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
-  axleCount: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
-  mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)),
-  year: z.union([z.string(), z.number()]).transform((val) => Number(val)),
-  nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
+  // Un texte non numérique donnerait NaN, accepté ici puis refusé par la base (500) : refus en 400.
+  tonnage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  axleCount: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  year: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
 });
 
 // Documents attachés aux véhicules
@@ -367,7 +373,7 @@ export const parts = pgTable("parts", {
   category: text("category"), // GROUPE_ARTICLES Excel - classification pièces
   responsiblePerson: text("responsible_person"), // MAGASIN_MECANICIEN Excel - responsable magasin
   realStock: integer("real_stock").default(0), // STOCK_REEL Excel - calculé automatiquement
-  reorderAlert: boolean("reorder_alert").default(false), // Alerte CDE Excel - si realStock <= minQuantity
+  reorderAlert: boolean("reorder_alert").default(false), // Alerte CDE Excel - si quantity <= minQuantity
   deliveryReceiptNumber: text("delivery_receipt_number"), // N_BL_BS Excel - numéro bon livraison
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche pièce
   updatedBy: integer("updated_by").references(() => users.id), // Dernier modificateur
@@ -386,9 +392,13 @@ export const insertPartSchema = createInsertSchema(parts).omit({
     (value) => (typeof value === "string" ? value.trim() : value),
     z.enum(PART_UNITS),
   ).optional().default("pièce"),
-  unitPrice: z.string().optional().default("0"),
-  quantity: z.number().int().optional().default(0),
-  minQuantity: z.number().int().optional().default(5),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "Le prix unitaire doit être un nombre positif.")
+    .optional()
+    .default("0"),
+  quantity: z.number().int().min(0, "Le stock ne peut pas être négatif.").optional().default(0),
+  minQuantity: z.number().int().min(0, "Le seuil minimum ne peut pas être négatif.").optional().default(5),
   description: z.string().optional(),
   location: z.string().optional(),
   supplier: z.string().optional(),
@@ -775,7 +785,9 @@ export const tires = pgTable("tires", {
   warrantyMonths: integer("warranty_months"), // Garantie en mois
   maxLoadIndex: integer("max_load_index"), // Indice de charge
   speedRating: text("speed_rating"), // Indice de vitesse
-  stockQuantity: integer("stock_quantity").notNull().default(0), // Quantité en stock
+  stockQuantity: integer("stock_quantity").notNull().default(0), // Quantité en stock (neuf)
+  // Pneus démontés remis en stock : ils ont roulé, comptés à part, non valorisés.
+  usedStockQuantity: integer("used_stock_quantity").notNull().default(0),
   minStockLevel: integer("min_stock_level").notNull().default(2), // Seuil d'alerte
   location: text("location"), // Emplacement de stockage
   notes: text("notes"), // Notes additionnelles
@@ -807,6 +819,8 @@ export const vehicleTires = pgTable("vehicle_tires", {
   removalDate: date("removal_date"), // Date de démontage
   removalMileage: integer("removal_mileage"), // Kilométrage au démontage
   removalReason: text("removal_reason"), // Raison du démontage
+  // Stock d'où vient le pneu monté (shared/constants/tire-stock.ts).
+  stockSource: text("stock_source", { enum: ["new", "used"] }).notNull().default("new"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull()
@@ -866,7 +880,9 @@ export const tireRotationDetails = pgTable("tire_rotation_details", {
 });
 
 // Schémas Zod pour validation
-export const insertTireSchema = createInsertSchema(tires).omit({
+export const insertTireSchema = createInsertSchema(tires, {
+  usedStockQuantity: (schema) => schema.int().min(0, "La quantité usagée doit être positive"),
+}).omit({
   id: true,
   createdBy: true,
   updatedBy: true,
@@ -1037,6 +1053,10 @@ export const supplierInvoiceSettlements = pgTable("supplier_invoice_settlements"
   reconciledBy: integer("reconciled_by").references(() => users.id),
   reconciledAt: timestamp("reconciled_at"),
   reconciliationNote: text("reconciliation_note"),
+  // Rejet (SINV1) : seul un règlement saisi se rejette, avec un motif obligatoire.
+  rejectedBy: integer("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

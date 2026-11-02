@@ -289,7 +289,8 @@ export class ThreeWayMatchingService {
     let recommendation: 'auto_approve' | 'manual_review' | 'escalate';
     if (variancePercentage === 0 && quantityVariance === 0) {
       recommendation = 'auto_approve'; // Match parfait
-    } else if (variancePercentage <= this.VARIANCE_THRESHOLD) {
+    } else if (!hasDiscrepancy) {
+      // Même borne que hasDiscrepancy : à 5 % pile l'écart est signalé, donc escaladé.
       recommendation = 'manual_review'; // Écart acceptable
     } else {
       recommendation = 'escalate'; // Écart significatif
@@ -475,10 +476,67 @@ export class ThreeWayMatchingService {
     data: InsertSupplierInvoice,
     createdByUserId?: number
   ): Promise<{ invoice: SupplierInvoice; validation: any }> {
+    // Champs tenus par le workflow, jamais par la saisie : une facture naissait
+    // « payée » ou « approuvée par » n'importe qui, avec un solde à 0.
+    const {
+      status: _status,
+      validatedBy: _validatedBy,
+      validatedAt: _validatedAt,
+      approvedBy: _approvedBy,
+      approvedAt: _approvedAt,
+      paidBy: _paidBy,
+      paidDate: _paidDate,
+      paymentDate: _paymentDate,
+      isPaymentComplete: _isPaymentComplete,
+      balance: _balance,
+      priceVariance: _priceVariance,
+      quantityVariance: _quantityVariance,
+      variancePercentage: _variancePercentage,
+      hasDiscrepancy: _hasDiscrepancy,
+      ...entered
+    } = data;
+
+    const MAX_AMOUNT = 1_000_000_000_000;
+    for (const [field, value] of Object.entries({
+      amountHT: data.amountHT,
+      subtotal: data.subtotal,
+      vatAmount: data.vatAmount,
+      taxAmount: data.taxAmount,
+      totalTTC: data.totalTTC,
+      totalAmount: data.totalAmount,
+    })) {
+      if (value === undefined || value === null || value === "") continue;
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount < 0 || amount > MAX_AMOUNT) {
+        throw new AppError(400, "Montant de facture invalide : nombre positif attendu.", {
+          cause: new Error(`supplier invoice ${field} invalide`),
+        });
+      }
+    }
+
+    // Commande liée inconnue : refus lisible plutôt qu'une violation de clé étrangère (500).
+    if (data.purchaseOrderId != null) {
+      const [linkedOrder] = await db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, data.purchaseOrderId))
+        .limit(1);
+      if (!linkedOrder) {
+        throw new AppError(404, "Commande fournisseur introuvable.", {
+          cause: new Error(`purchaseOrderId ${data.purchaseOrderId} inexistant`),
+        });
+      }
+    }
+
     // Calculer les montants si non fournis
     const rawAmountHT = this.num(data.amountHT || data.subtotal);
     const rawVatAmount = this.num(data.vatAmount || data.taxAmount);
     const explicitTotal = this.num(data.totalTTC || data.totalAmount);
+
+    // Le réalignement sur le TTC ci-dessous réécrivait le HT d'un TTC trop faible.
+    if (explicitTotal > 0 && rawAmountHT > 0 && explicitTotal < rawAmountHT) {
+      throw new AppError(400, "Le montant TTC ne peut pas être inférieur au montant HT.");
+    }
 
     let amountHT = rawAmountHT;
     let vatAmount = rawVatAmount;
@@ -513,11 +571,36 @@ export class ThreeWayMatchingService {
       totalAmount = explicitTotal;
     }
 
+    const toCents = (value: number) => Math.round(value * 100) / 100;
+    amountHT = toCents(amountHT);
+    vatAmount = toCents(vatAmount);
+    totalAmount = toCents(totalAmount);
+
+    if (!(amountHT > 0) || !(totalAmount >= amountHT)) {
+      throw new AppError(
+        400,
+        amountHT > 0
+          ? "Le montant TTC ne peut pas être inférieur au montant HT."
+          : "Saisissez un montant HT ou TTC supérieur à 0."
+      );
+    }
+
+    const [taken] = await db
+      .select({ id: supplierInvoices.id })
+      .from(supplierInvoices)
+      .where(eq(supplierInvoices.invoiceNumber, data.invoiceNumber))
+      .limit(1);
+    if (taken) {
+      throw new AppError(409, `La facture ${data.invoiceNumber} est déjà saisie.`);
+    }
+
     // Créer la facture
     const [invoice] = await db
       .insert(supplierInvoices)
       .values({
-        ...data,
+        ...entered,
+        // Rien n'est encore réglé : le solde part du TTC.
+        balance: String(totalAmount),
         amountHT: String(amountHT),
         subtotal: String(amountHT),
         vatAmount: String(vatAmount),
@@ -828,6 +911,58 @@ export class ThreeWayMatchingService {
     };
   }
 
+  /**
+   * Rejeter un règlement saisi (chèque refusé, saisie erronée) : il ne compte
+   * plus dans le reste à régler. Le solde de la facture ne bouge pas, puisque
+   * seul un rapprochement le baisse. Rejouer le rejet rend l'état courant.
+   */
+  async rejectInvoiceSettlement(
+    invoiceId: number,
+    settlementId: number,
+    rejectedBy: number,
+    reason: string
+  ): Promise<{ settlement: SupplierInvoiceSettlement; replayed: boolean }> {
+    const rejectionReason = reason.trim();
+    if (!rejectionReason) {
+      throw new AppError(400, "Indiquez le motif du rejet.");
+    }
+
+    const [settlement] = await db
+      .select()
+      .from(supplierInvoiceSettlements)
+      .where(
+        and(
+          eq(supplierInvoiceSettlements.id, settlementId),
+          eq(supplierInvoiceSettlements.supplierInvoiceId, invoiceId)
+        )
+      )
+      .limit(1);
+
+    if (!settlement) {
+      throw new AppError(404, "Ce règlement n'existe plus.");
+    }
+
+    // Compare-and-set : seul le passage recorded -> rejected écrit.
+    const [updated] = await db
+      .update(supplierInvoiceSettlements)
+      .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })
+      .where(and(eq(supplierInvoiceSettlements.id, settlementId), eq(supplierInvoiceSettlements.status, "recorded")))
+      .returning();
+    if (updated) {
+      return { settlement: updated, replayed: false };
+    }
+
+    const [current] = await db
+      .select()
+      .from(supplierInvoiceSettlements)
+      .where(eq(supplierInvoiceSettlements.id, settlementId))
+      .limit(1);
+    if (current?.status === "rejected") {
+      return { settlement: current, replayed: true };
+    }
+    throw new AppError(409, "Un règlement rapproché ne peut pas être rejeté.");
+  }
+
   async getInvoiceSettlements(invoiceId: number) {
     const rows = await db
       .select()
@@ -838,7 +973,7 @@ export class ThreeWayMatchingService {
     const userIds = Array.from(
       new Set(
         rows
-          .flatMap((row) => [row.recordedBy, row.reconciledBy])
+          .flatMap((row) => [row.recordedBy, row.reconciledBy, row.rejectedBy])
           .filter((id): id is number => typeof id === "number")
       )
     );
@@ -863,6 +998,7 @@ export class ThreeWayMatchingService {
       ...row,
       recordedByUser: row.recordedBy ? usersMap.get(row.recordedBy) ?? null : null,
       reconciledByUser: row.reconciledBy ? usersMap.get(row.reconciledBy) ?? null : null,
+      rejectedByUser: row.rejectedBy ? usersMap.get(row.rejectedBy) ?? null : null,
     }));
   }
 

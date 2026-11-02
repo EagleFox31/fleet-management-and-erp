@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,6 +80,8 @@ interface SupplierInvoiceSettlementItem {
   recordedByUser?: { id: number; name: string; role: string } | null;
   reconciledByUser?: { id: number; name: string; role: string } | null;
   reconciledAt: string | null;
+  rejectionReason?: string | null;
+  rejectedAt?: string | null;
   createdAt: string;
 }
 
@@ -117,6 +120,8 @@ export default function SupplierInvoiceDetailsPage() {
   const [proofInputKey, setProofInputKey] = useState(0);
   const [paymentNotes, setPaymentNotes] = useState("");
   const [reconcilingSettlementId, setReconcilingSettlementId] = useState<number | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<SupplierInvoiceSettlementItem | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const detailQueryKey = [`/api/supplier-invoices/${invoiceId}`] as const;
 
@@ -275,7 +280,26 @@ export default function SupplierInvoiceDetailsPage() {
       setReconcilingSettlementId(null);
     },
   });
+  const rejectSettlementMutation = useMutation({
+    mutationFn: async ({ settlementId, reason }: { settlementId: number; reason: string }) => {
+      const res = await apiRequest("PATCH", `/api/supplier-invoices/${invoiceId}/settlements/${settlementId}/reject`, { reason });
+      return res.json();
+    },
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      queryClient.invalidateQueries({ queryKey: settlementsQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/supplier-invoices"] });
+      await refetchSettlements();
+      setRejectTarget(null);
+      setRejectReason("");
+      toast({ title: "Règlement rejeté", description: "Il ne compte plus dans le reste à régler." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erreur", description: userMessageOf(error, "Le rejet du règlement a échoué."), variant: "destructive" });
+    },
+  });
   // Double clic : disabled={isPending} ne change qu'au rendu suivant.
+  const submitRejectSettlement = useSingleFlightMutate(rejectSettlementMutation.mutate);
   const submitRecordSettlement = useSingleFlightMutate(recordSettlementMutation.mutate);
   const submitReconcileSettlement = useSingleFlightMutate(reconcileSettlementMutation.mutate);
 
@@ -739,6 +763,7 @@ export default function SupplierInvoiceDetailsPage() {
                   {settlements.map((settlement) => {
                     const isRecorded = settlement.status === "recorded";
                     const isReconciled = settlement.status === "reconciled";
+                    const isRejected = settlement.status === "rejected";
                     return (
                       <tr key={settlement.id} className="border-t border-gray-100">
                         <td className="px-3 py-2 text-gray-700">
@@ -770,6 +795,14 @@ export default function SupplierInvoiceDetailsPage() {
                             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
                               Rapproché
                             </span>
+                          ) : isRejected ? (
+                            <span
+                              className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 border border-red-200"
+                              title={settlement.rejectionReason ?? undefined}
+                              data-testid={`badge-settlement-rejected-${settlement.id}`}
+                            >
+                              Rejeté
+                            </span>
                           ) : (
                             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
                               Saisi
@@ -778,6 +811,16 @@ export default function SupplierInvoiceDetailsPage() {
                         </td>
                         <td className="px-3 py-2 text-right">
                           {isRecorded && canPay ? (
+                            <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-red-600 hover:text-red-700"
+                              onClick={() => { setRejectTarget(settlement); setRejectReason(""); }}
+                              data-testid={`button-reject-settlement-${settlement.id}`}
+                            >
+                              Rejeter
+                            </Button>
                             <Button
                               size="sm"
                               variant="outline"
@@ -790,6 +833,9 @@ export default function SupplierInvoiceDetailsPage() {
                                 ? "Rapprochement..."
                                 : "Rapprocher"}
                             </Button>
+                            </div>
+                          ) : isRejected && settlement.rejectionReason ? (
+                            <span className="text-xs text-gray-500">{settlement.rejectionReason}</span>
                           ) : (
                             <span className="text-xs text-gray-400">
                               {isReconciled ? "OK" : "—"}
@@ -938,6 +984,41 @@ export default function SupplierInvoiceDetailsPage() {
               data-testid="button-confirm-payment"
             >
               {recordSettlementMutation.isPending ? "Enregistrement..." : "Enregistrer le règlement"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectTarget !== null} onOpenChange={(open) => { if (!open) setRejectTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rejeter le règlement</DialogTitle>
+            <DialogDescription>
+              {rejectTarget
+                ? `Référence ${rejectTarget.paymentReference}, ${formatCurrency(rejectTarget.amount)}. Le règlement ne comptera plus dans le reste à régler.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reject-reason">Motif du rejet</Label>
+            <Textarea
+              id="reject-reason"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Chèque refusé, montant erroné..."
+              rows={3}
+              data-testid="textarea-reject-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => rejectTarget && submitRejectSettlement({ settlementId: rejectTarget.id, reason: rejectReason.trim() })}
+              disabled={rejectSettlementMutation.isPending || !rejectReason.trim()}
+              data-testid="button-confirm-reject-settlement"
+            >
+              {rejectSettlementMutation.isPending ? "Rejet..." : "Rejeter le règlement"}
             </Button>
           </DialogFooter>
         </DialogContent>

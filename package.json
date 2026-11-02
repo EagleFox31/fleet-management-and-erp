@@ -73,8 +73,6 @@
     "@types/react-helmet": "^6.1.11",
     "@types/xlsx": "^0.0.35",
     "@vitest/ui": "^3.2.4",
-    "altcha": "^3.5.0",
-    "altcha-lib": "^2.8.0",
     "archiver": "^7.0.1",
     "barcode-detector": "3.2.3",
     "bcryptjs": "^3.0.2",

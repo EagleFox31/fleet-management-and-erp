@@ -8,9 +8,14 @@ vi.hoisted(() => {
   process.env.AUTH_DEBUG = "0";
 });
 const ROLE_BY_ID = new Map<number, string>();
-vi.mock("../../../server/storage", () => ({
-  storage: {
-    getUser: async (id: number) => (ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined),
+vi.mock("../../../server/services/session-user", () => ({
+  findActiveSessionUser: async (id: number) =>
+    ROLE_BY_ID.has(id) ? { id, username: `u${id}`, role: ROLE_BY_ID.get(id) } : undefined,
+}));
+vi.mock("../../../server/services/workshop-labor-rates-service", () => ({
+  listWorkshopLaborRates: async () => [],
+  createWorkshopLaborRate: async () => {
+    throw new Error("non utilisé ici");
   },
 }));
 vi.mock("../../../server/middleware/session", () => ({
@@ -98,6 +103,32 @@ describe.each(MOUNT_CASES)("montage $name", (mount) => {
   it("drapeaux allumés, rôle autorisé : atteint la route (501 squelette, ou statut `reached`)", async () => {
     process.env.FEATURE_FLAGS = flagsOn(mount.flags);
     for (const role of mount.allowed) expect(await call(mount.method, mount.path, role), role).toBe(mount.reached ?? 501);
+  });
+});
+
+describe("montage workshop-labor-rates (lot #7 : route réelle, plus un squelette)", () => {
+  const path = "/api/workshop-labor-rates";
+  const others = ALL_APP_ROLES.filter((role) => role !== "admin");
+
+  it("drapeau maintenance-report coupé : 404, session ou non", async () => {
+    delete process.env.FEATURE_FLAGS;
+    expect(await call("GET", path)).toBe(404);
+    expect(await call("GET", path, "admin")).toBe(404);
+  });
+
+  it("drapeau allumé, sans session : 401", async () => {
+    process.env.FEATURE_FLAGS = "maintenance-report=on";
+    expect(await call("GET", path)).toBe(401);
+  });
+
+  it("drapeau allumé, tout rôle autre que l'administrateur : 403", async () => {
+    process.env.FEATURE_FLAGS = "maintenance-report=on";
+    for (const role of others) expect(await call("GET", path, role), role).toBe(403);
+  });
+
+  it("drapeau allumé, administrateur : 200 (liste)", async () => {
+    process.env.FEATURE_FLAGS = "maintenance-report=on";
+    expect(await call("GET", path, "admin")).toBe(200);
   });
 });
 

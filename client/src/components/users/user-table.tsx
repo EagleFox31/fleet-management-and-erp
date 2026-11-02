@@ -12,8 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { UserForm } from "./user-form";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { userMessageOf } from "@/lib/api-error";
 
 interface User {
   id: number;
@@ -23,6 +26,8 @@ interface User {
   role: "admin" | "workshop_manager" | "technician" | "client" | "user" | string;
   createdAt?: string;
   lastLoginAt?: string | null;
+  /** Droit de sortie de stock en dérogation (chef d'atelier seulement). */
+  canIssueStock?: boolean;
 }
 
 interface UserTableProps {
@@ -59,6 +64,31 @@ export function UserTable({ users, isLoading }: UserTableProps) {
     },
   });
 
+  // Droit de sortie de stock du chef d'atelier : accordé par défaut, retirable par l'admin.
+  // La cible passe par les variables de la mutation, jamais par un état local.
+  const stockIssueMutation = useMutation({
+    mutationFn: async ({ userId, canIssueStock }: { userId: number; canIssueStock: boolean }) => {
+      const response = await apiRequest("PATCH", `/api/users/${userId}/stock-issue-permission`, { canIssueStock });
+      return response.json();
+    },
+    onSuccess: (_payload, { canIssueStock }) => {
+      toast({
+        title: canIssueStock ? "Droit de sortie rendu" : "Droit de sortie retiré",
+        description: canIssueStock
+          ? "Ce chef d'atelier peut de nouveau sortir une pièce quand le magasin est fermé."
+          : "Ce chef d'atelier ne sort plus de pièce : le magasinier s'en charge.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    },
+    onError: (error: unknown) => {
+      toast({
+        variant: "destructive",
+        title: "Erreur",
+        description: userMessageOf(error, "Le droit de sortie n'a pas pu être modifié."),
+      });
+    },
+  });
+
   // Fonction pour ouvrir la boîte de dialogue de suppression
   const handleDeleteClick = (user: User) => {
     setSelectedUser(user);
@@ -75,24 +105,6 @@ export function UserTable({ users, isLoading }: UserTableProps) {
   const confirmDelete = () => {
     if (selectedUser) {
       deleteUserMutation.mutate(selectedUser.id);
-    }
-  };
-
-  const getRoleLabel = (role: string | undefined) => {
-    if (!role) return "Utilisateur";
-    
-    switch (role) {
-      case "admin":
-        return "Administrateur";
-      case "workshop_manager":
-        return "Gestionnaire atelier";
-      case "technician":
-        return "Technicien";
-      case "client":
-        return "Client";
-      case "user":
-      default:
-        return "Utilisateur";
     }
   };
 
@@ -154,8 +166,21 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                                user.role === "client" ? "destructive" : "secondary"}
                         className="font-normal"
                       >
-                        {getRoleLabel(user.role)}
+                        {roleLabelOf(user.role)}
                       </Badge>
+                      {user.role === "workshop_manager" && (
+                        <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Switch
+                            checked={user.canIssueStock !== false}
+                            disabled={stockIssueMutation.isPending}
+                            onCheckedChange={(checked) =>
+                              stockIssueMutation.mutate({ userId: user.id, canIssueStock: checked })
+                            }
+                            aria-label={`Droit de sortie de stock de ${user.name}`}
+                          />
+                          Sortie de stock (magasin fermé)
+                        </label>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-sm text-muted-foreground">
                       {user.lastLoginAt ? formatCreatedDate(user.lastLoginAt) : "Jamais connecté"}

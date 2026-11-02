@@ -18,6 +18,8 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, sql, inArray, gte, lte, or } from "drizzle-orm";
 import { threeWayMatchingService } from "./three-way-matching-service";
+import { AppError } from "../lib/app-error";
+import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
 
 /**
  * Service de gestion des commandes d'achat groupées
@@ -230,21 +232,17 @@ export class ProcurementService {
   ): Promise<void> {
     if (quantity <= 0) return;
 
-    const [currentPart] = await db
-      .select({ quantity: parts.quantity })
-      .from(parts)
-      .where(eq(parts.id, partId))
-      .limit(1);
-
-    if (!currentPart) return;
-
-    const previousStock = currentPart.quantity || 0;
-    const newStock = previousStock + quantity;
-
-    await db
+    // Incrément atomique : deux réceptions simultanées ne s'écrasent pas.
+    const [credited] = await db
       .update(parts)
-      .set({ quantity: newStock })
-      .where(eq(parts.id, partId));
+      .set({ quantity: sql`coalesce(${parts.quantity}, 0) + ${quantity}` })
+      .where(eq(parts.id, partId))
+      .returning({ quantity: parts.quantity });
+
+    if (!credited) return;
+
+    const newStock = credited.quantity || 0;
+    const previousStock = newStock - quantity;
 
     await db.insert(partsStockMovements).values({
       partId,
@@ -569,6 +567,19 @@ export class ProcurementService {
     urgency?: 'low' | 'medium' | 'high' | 'critical';
     createdBy: number;
   }): Promise<PurchaseOrder & { lines: PurchaseOrderLine[] }> {
+    // Pas de commande vers un fournisseur désactivé (ni inexistant).
+    const [supplier] = await db
+      .select({ isActive: suppliers.isActive })
+      .from(suppliers)
+      .where(eq(suppliers.id, data.supplierId))
+      .limit(1);
+    if (!supplier) {
+      throw new AppError(404, "Fournisseur introuvable");
+    }
+    if (supplier.isActive === false) {
+      throw new AppError(409, "Ce fournisseur est désactivé : réactivez-le avant de lui passer commande");
+    }
+
     const requirementIds = data.requirementIds || [];
     const requirementQuantities = data.requirementQuantities || [];
     const manualLines = data.manualLines || [];
@@ -914,27 +925,18 @@ export class ProcurementService {
       .limit(1);
 
     if (!currentOrder) {
-      throw new Error("Commande introuvable");
+      throw new AppError(404, "Commande introuvable.");
     }
 
     if (currentOrder.status === status) {
       return currentOrder;
     }
 
-    const allowedTransitions: Record<string, string[]> = {
-      draft: ['sent', 'cancelled'],
-      sent: ['confirmed', 'cancelled'],
-      confirmed: ['partial', 'delivered', 'cancellation_requested'],
-      partial: ['delivered', 'cancellation_requested'],
-      cancellation_requested: ['cancelled', 'confirmed', 'partial'],
-      delivered: ['completed'],
-      completed: [],
-      cancelled: [],
-    };
-
-    const nextStatuses = allowedTransitions[currentOrder.status] || [];
-    if (!nextStatuses.includes(status)) {
-      throw new Error(`Transition de statut invalide: ${currentOrder.status} -> ${status}`);
+    if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
+      throw new AppError(
+        409,
+        `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
+      );
     }
 
     // Règle métier stricte:
@@ -950,7 +952,7 @@ export class ProcurementService {
         .where(eq(supplierInvoices.purchaseOrderId, orderId));
 
       if (linkedInvoices.length === 0) {
-        throw new Error("Clôture impossible: facture fournisseur absente (finance non démarrée).");
+        throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
       }
 
       const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
@@ -959,8 +961,9 @@ export class ProcurementService {
           .map((invoice) => invoice.invoiceNumber)
           .filter(Boolean)
           .join(", ");
-        throw new Error(
-          `Clôture impossible: finance non terminée (facture(s) non payée(s)${pendingRefs ? `: ${pendingRefs}` : ""}).`
+        throw new AppError(
+          409,
+          `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
         );
       }
     }
@@ -1144,7 +1147,8 @@ export class ProcurementService {
       quantityRejected?: number;
       deliveryStatus?: 'pending' | 'partial' | 'delivered' | 'accepted' | 'rejected';
     },
-    userId?: number
+    userId?: number,
+    orderId?: number
   ): Promise<PurchaseOrderLine> {
     const [currentLine] = await db
       .select()
@@ -1152,22 +1156,51 @@ export class ProcurementService {
       .where(eq(purchaseOrderLines.id, lineId))
       .limit(1);
 
-    if (!currentLine) {
-      throw new Error("Commande introuvable");
+    // Une ligne d'une autre commande que celle de l'URL est introuvable ici.
+    if (!currentLine || (orderId !== undefined && currentLine.purchaseOrderId !== orderId)) {
+      throw new AppError(404, "Ligne de commande introuvable.");
     }
 
+    const previousReceived = currentLine.quantityReceived || 0;
+    const nextReceived = data.quantityReceived ?? previousReceived;
+    if (nextReceived > currentLine.quantityOrdered) {
+      throw new AppError(400, `Quantité reçue supérieure au commandé (${currentLine.quantityOrdered}).`);
+    }
+    if (nextReceived < previousReceived) {
+      // Le stock déjà crédité ne serait pas repris : une correction passe par
+      // un ajustement de stock tracé.
+      throw new AppError(409, "Une quantité déjà reçue ne se retire pas ici : passez par un ajustement de stock.");
+    }
+    const nextAccepted = data.quantityAccepted ?? currentLine.quantityAccepted ?? 0;
+    const nextRejected = data.quantityRejected ?? currentLine.quantityRejected ?? 0;
+    if (nextAccepted + nextRejected > nextReceived) {
+      throw new AppError(400, "Pièces acceptées et refusées dépassent la quantité reçue.");
+    }
+
+    // Écriture conditionnelle : si une autre réception a modifié la ligne
+    // entre-temps, rien n'est écrit et le stock n'est pas crédité deux fois.
     const [updated] = await db
       .update(purchaseOrderLines)
       .set({
         ...data,
         updatedAt: new Date(),
       })
-      .where(eq(purchaseOrderLines.id, lineId))
+      .where(
+        and(
+          eq(purchaseOrderLines.id, lineId),
+          currentLine.quantityReceived === null
+            ? sql`${purchaseOrderLines.quantityReceived} is null`
+            : eq(purchaseOrderLines.quantityReceived, currentLine.quantityReceived),
+        ),
+      )
       .returning();
+
+    if (!updated) {
+      throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
+    }
 
     console.log(`📦 Ligne commande #${lineId} mise à jour`);
 
-    const previousReceived = currentLine.quantityReceived || 0;
     const newReceived = updated.quantityReceived || 0;
     const receivedDelta = Math.max(0, newReceived - previousReceived);
 

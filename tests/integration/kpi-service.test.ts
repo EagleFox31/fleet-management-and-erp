@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { inArray } from "drizzle-orm";
 import { db } from "../../server/db";
-import { partsUsed, workOrders } from "../../shared/schema";
+import { partsUsed, tireRotations, workOrders } from "../../shared/schema";
 import { kpiService } from "../../server/services/kpi-service";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestVehicle } from "../support/factories";
@@ -13,6 +13,7 @@ const at = (iso: string) => new Date(`${iso}T12:00:00Z`);
 afterEach(async () => {
   if (woIds.length) {
     await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, woIds));
+    await db.delete(tireRotations).where(inArray(tireRotations.workOrderId, woIds));
     await db.delete(workOrders).where(inArray(workOrders.id, woIds));
     woIds.length = 0;
   }
@@ -53,6 +54,13 @@ async function seed() {
     { workOrderId: a.id, partId: part.id, quantity: 2, unitPrice: "1500" },
     { workOrderId: e.id, partId: part.id, quantity: 1, unitPrice: "5000" },
   ]);
+  // Deux rotations sur le même OT que deux lignes de pièces : vérifie aussi
+  // l'absence de produit cartésien entre les deux jointures.
+  const rotation = { vehicleId: vehicle.id, workOrderId: a.id, rotationDate: "2019-03-11", rotationMileage: 1000 };
+  await db.insert(tireRotations).values([
+    { ...rotation, rotationType: "front_to_back", cost: "2000" },
+    { ...rotation, rotationType: "cross_rotation", cost: "500" },
+  ]);
 }
 
 const period = { from: "2019-03-01", to: "2019-04-30" };
@@ -67,27 +75,34 @@ describe("kpiService", () => {
     ]);
   }, 30_000);
 
-  it("mesure la conformité préventive (1 à temps sur 3 échus)", async () => {
-    await seed();
-    const res = await kpiService.preventiveCompliance(period);
-    expect(res.planned).toBe(3);
-    expect(res.doneOnTime).toBe(1);
-    expect(res.rate).toBeCloseTo(1 / 3, 5);
-  }, 30_000);
+  // Conformité préventive : la règle « durée prévue » a été remplacée par l'échéance
+  // (`due_date` + tolérance) et le dénominateur compte les planifications actives sans OT.
+  // Elle est couverte, sur ses propres planifications et véhicules, par
+  // `kpi-service-cdc.test.ts` (« kpiService.preventiveCompliance : à l'échéance »).
 
-  it("calcule le coût moyen sans double comptage des pièces", async () => {
+  it("calcule le coût moyen (main-d'oeuvre + pièces + pneus, WO5) sans double comptage", async () => {
     await seed();
     const res = await kpiService.avgCostPerIntervention(period);
-    // OT clos : 10000+3000, 20000+5000, 0 = 38000 sur 3
-    expect(res).toEqual({ interventions: 3, totalCost: 38000, averageCost: 12667 });
+    // OT clos, sans heures réelles donc coût saisi : 10000+3000+2500, 20000+5000, 0 = 40500 sur 3
+    expect(res).toMatchObject({
+      interventions: 3,
+      totalCost: 40500,
+      averageCost: 13500,
+      laborTotal: 30000,
+      partsTotal: 8000,
+      tiresTotal: 2500,
+      missingCostCount: 1,
+    });
+    expect(res.laborTotal! + res.partsTotal! + res.tiresTotal!).toBe(res.totalCost);
   }, 30_000);
 
   it("renvoie null et non 0 sans donnée sur la période", async () => {
     const empty = { from: "2018-01-01", to: "2018-01-31" };
-    expect(await kpiService.incidentsPerMonth(empty)).toEqual([]);
-    expect(await kpiService.preventiveCompliance(empty)).toEqual({ planned: 0, doneOnTime: 0, rate: null });
-    expect(await kpiService.avgCostPerIntervention(empty)).toEqual({
+    // Mois à zéro compris (CDC #7) : une ligne par mois de la période, jamais un tableau vide.
+    expect(await kpiService.incidentsPerMonth(empty)).toEqual([{ month: "2018-01", count: 0 }]);
+    expect(await kpiService.avgCostPerIntervention(empty)).toMatchObject({
       interventions: 0, totalCost: 0, averageCost: null,
+      laborTotal: 0, partsTotal: 0, tiresTotal: 0, missingCostCount: 0,
     });
   }, 30_000);
 });
