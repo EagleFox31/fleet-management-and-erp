@@ -344,8 +344,8 @@ Tables : `fleetKpiCache`.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
-| DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes, plein saisi par l'application présent (corrigé par #80) ; droits dans `lot-exports-roles` ; contenu des autres exports non vérifié) |
+| DIR2 | Rapports filtrés par période | C | Fait en C (`reports-inventory-period` : mouvements de la fenêtre, bornes incluses, valeur absolue, statistiques, fenêtre vide ; `reports-technician-period` : totaux et taux par technicien et globaux, bornes, fenêtre vide ; export carburant couvert avant). 6 `it.fails` : client et chauffeur non refusés sur les deux rapports (`server/routes.ts:2840`, `2894`), date invalide non refusée en 400 |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (XLSX : carburant, inventaire (`exports-inventory-content`), factures fournisseurs et clients (`exports-invoices-content`) en cellules exactes ; droits dans `lot-exports-roles`. Non couverts : exports missions clients, rapport mensuel, véhicules, OT, utilisateurs, complet ; PDF/CSV générés côté navigateur (`pdf-export.ts`) hors de portée du contrat) |
 
 ---
 
