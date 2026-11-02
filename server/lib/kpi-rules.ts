@@ -160,22 +160,25 @@ export type WorkOrderCostInput = {
   rate: number | null;
   /** Σ quantité × prix unitaire des pièces utilisées. */
   parts: number;
+  /** Σ coût des rotations de pneus de l'OT (`tire_rotations.cost`). */
+  tires: number;
 };
 
-export type WorkOrderCost = { labor: number; parts: number; total: number; laborMissing: boolean };
+export type WorkOrderCost = { labor: number; parts: number; tires: number; total: number; laborMissing: boolean };
 
 /**
  * Main-d'oeuvre : heures réelles × taux quand un taux est en vigueur et que des heures sont
  * saisies ; sinon le coût saisi (jamais les deux : `cost` est déjà la main-d'oeuvre).
- * Montants arrondis au FCFA par composante, donc `labor + parts = total` exactement.
- * Les pneus ne sont pas comptés (décision utilisateur en attente).
+ * Pièces et rotations de pneus s'ajoutent, comme sur l'écran et le PDF de l'OT (WO5).
+ * Montants arrondis au FCFA par composante, donc `labor + parts + tires = total` exactement.
  */
 export function workOrderCost(input: WorkOrderCostInput): WorkOrderCost {
   const valued = input.rate !== null && input.hours > 0;
   const laborRaw = valued ? input.hours * (input.rate as number) : input.cost;
   const labor = Math.round(Math.max(laborRaw, 0));
   const parts = Math.round(Math.max(input.parts, 0));
-  return { labor, parts, total: labor + parts, laborMissing: laborRaw <= 0 };
+  const tires = Math.round(Math.max(input.tires, 0));
+  return { labor, parts, tires, total: labor + parts + tires, laborMissing: laborRaw <= 0 };
 }
 
 export type CostRow = WorkOrderCost & { key: string; label: string; isPreventive: boolean };

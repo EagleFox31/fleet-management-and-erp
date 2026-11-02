@@ -3,12 +3,17 @@ import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
 import { db } from "../db";
-import { missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
+import { alerts, missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { and, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("alert-service");
+
+/** Clé de rappel quotidien (ALR1) : même objet, même jour UTC = même alerte. */
+export function dailyReminderDedupeKey(type: string, title: string, link: string, now: Date = new Date()): string {
+  return `daily:${now.toISOString().slice(0, 10)}:${type}:${link}:${title}`;
+}
 
 type AlertRecipientRole =
   | "admin"
@@ -275,6 +280,7 @@ export class AlertService {
       );
 
       await this.createAlertIfNotExists({
+        remindDaily: true,
         type: "procurement",
         title: "Fiche fournisseur à compléter",
         message:
@@ -342,6 +348,7 @@ export class AlertService {
         
         if (daysPast > 0) {
           await this.createAlertIfNotExists({
+            remindDaily: true,
             workOrderId: wo.id,
             type: 'work_order',
             title: 'Ordre de travail en retard',
@@ -360,6 +367,7 @@ export class AlertService {
         const hoursWaiting = Math.floor((today.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
         
         await this.createAlertIfNotExists({
+          remindDaily: true,
           workOrderId: wo.id,
           type: 'work_order',
           title: 'OT critique non traité',
@@ -393,6 +401,7 @@ export class AlertService {
           const daysPast = Math.floor((new Date().getTime() - new Date(schedule.scheduledDate).getTime()) / (1000 * 60 * 60 * 24));
           
           await this.createAlertIfNotExists({
+            remindDaily: true,
             maintenanceScheduleId: schedule.id,
             vehicleId: schedule.vehicleId,
             type: 'maintenance',
@@ -409,6 +418,7 @@ export class AlertService {
           const excessKm = vehicle.mileage - schedule.scheduledMileage;
           
           await this.createAlertIfNotExists({
+            remindDaily: true,
             maintenanceScheduleId: schedule.id,
             vehicleId: schedule.vehicleId,
             type: 'maintenance',
@@ -434,6 +444,7 @@ export class AlertService {
       const daysPast = Math.floor((new Date().getTime() - new Date(vehicle.nextMaintenanceDate).getTime()) / (1000 * 60 * 60 * 24));
       
       await this.createAlertIfNotExists({
+        remindDaily: true,
         vehicleId: vehicle.id,
         type: 'maintenance',
         title: 'Maintenance en retard',
@@ -452,6 +463,7 @@ export class AlertService {
       
       if (daysUntil > 0 && daysUntil <= 7) {
         await this.createAlertIfNotExists({
+          remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Maintenance programmée',
@@ -492,6 +504,7 @@ export class AlertService {
       // Document expiré
       if (expiry < today) {
         await this.createAlertIfNotExists({
+          remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Document expiré',
@@ -505,6 +518,7 @@ export class AlertService {
       // Document expire dans les 30 jours
       else if (expiry <= thirtyDaysFromNow) {
         await this.createAlertIfNotExists({
+          remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Document expire bientôt',
@@ -586,6 +600,7 @@ export class AlertService {
     // Kilométrage dépassé
     if (remainingKm <= 0) {
       await this.createAlertIfNotExists({
+        remindDaily: true,
         vehicleId: vehicle.id,
         type: 'maintenance',
         title: 'Kilométrage de maintenance dépassé',
@@ -599,6 +614,7 @@ export class AlertService {
     // Kilométrage proche (dans les 5000 km)
     else if (remainingKm <= 5000) {
       await this.createAlertIfNotExists({
+        remindDaily: true,
         vehicleId: vehicle.id,
         type: 'maintenance',
         title: 'Kilométrage de maintenance proche',
@@ -656,6 +672,7 @@ export class AlertService {
         const excessPercent = Math.round(((recentAvg - avgConsumption) / avgConsumption) * 100);
 
         await this.createAlertIfNotExists({
+          remindDaily: true,
           vehicleId: vehicle.id,
           type: 'fuel',
           title: 'Consommation carburant élevée',
@@ -691,6 +708,12 @@ export class AlertService {
     topic?: NotificationTopic;
     /** Clé stable: si fournie, une alerte déjà émise (lue ou non) avec cette clé n'est pas recréée. */
     dedupeKey?: string;
+    /**
+     * Génération planifiée (ALR1) : au plus une alerte par destinataire et par jour
+     * pour le même objet, lue ou non. Sans elle, une alerte lue revenait au passage
+     * suivant (toutes les 5 min) et deux passages simultanés la doublaient.
+     */
+    remindDaily?: boolean;
   }): Promise<void> {
     try {
       const tousLesDestinataires = await this.resolveRecipientUserIds(
@@ -724,17 +747,26 @@ export class AlertService {
         }
       }
 
+      const dedupeKey =
+        alertData.dedupeKey ??
+        (alertData.remindDaily
+          ? dailyReminderDedupeKey(alertData.type, alertData.title, resolvedLink)
+          : undefined);
+
       for (const userId of recipientUserIds) {
-        const candidateAlerts = alertData.dedupeKey
+        const candidateAlerts = dedupeKey
           ? await storage.getAlertsByUserId(userId)
           : await storage.getUnreadAlertsByUserId(userId);
 
         const existingAlert = candidateAlerts.find((alert) => {
-          if (alertData.dedupeKey) return alert.dedupeKey === alertData.dedupeKey;
+          if (dedupeKey && alert.dedupeKey === dedupeKey) return true;
           const sameType = alert.type === alertData.type;
           const sameTitle = alert.title === alertData.title;
           const sameLink = resolvedLink ? alert.link === resolvedLink : true;
-          return sameType && sameTitle && sameLink;
+          // Une alerte non lue identique bloque toujours, quelle que soit sa clé :
+          // celle d'hier (autre jour) comme celle d'avant la clé (dedupe_key NULL,
+          // déploiement). Le rappel quotidien ne repart qu'une fois l'alerte lue.
+          return !alert.isRead && sameType && sameTitle && sameLink;
         });
 
         if (existingAlert) {
@@ -743,22 +775,29 @@ export class AlertService {
 
         // Un destinataire en échec (compte supprimé entre-temps) ne doit pas
         // priver les autres de l'alerte.
-        let created: Awaited<ReturnType<typeof storage.createAlert>>;
+        let created: Alert | undefined;
         try {
-          created = await storage.createAlert({
-            userId,
-            title: alertData.title,
-            message: alertData.message,
-            type: alertData.type,
-            priority: alertData.priority,
-            link: resolvedLink || undefined,
-            topic,
-            ...(alertData.dedupeKey ? { dedupeKey: alertData.dedupeKey } : {}),
-          });
+          // ON CONFLICT DO NOTHING sur uq_alerts_user_dedupe : un passage concurrent
+          // qui a inséré entre la lecture et l'écriture gagne, sans erreur ni événement.
+          [created] = await db
+            .insert(alerts)
+            .values({
+              userId,
+              title: alertData.title,
+              message: alertData.message,
+              type: alertData.type,
+              priority: alertData.priority,
+              link: resolvedLink || undefined,
+              topic,
+              ...(dedupeKey ? { dedupeKey } : {}),
+            })
+            .onConflictDoNothing()
+            .returning();
         } catch (error) {
-          log.error({ err: error, userId, dedupeKey: alertData.dedupeKey }, "alerte non créée pour un destinataire");
+          log.error({ err: error, userId, dedupeKey }, "alerte non créée pour un destinataire");
           continue;
         }
+        if (!created) continue;
 
         // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
         // n'apparaissait qu'au prochain rafraîchissement, sans rien signaler.
@@ -829,6 +868,7 @@ export class AlertService {
       const delayText = delayH > 0 ? `${delayH}h${delayMin > 0 ? ` ${delayMin}min` : ""}` : `${delayMin}min`;
 
       await this.createAlertIfNotExists({
+        remindDaily: true,
         type: "mission",
         title: "Retard au départ",
         message: `Mission ${mission.orderNumber} — départ prévu dépassé de ${delayText}. Mission non encore lancée (statut: ${mission.status}).`,
@@ -860,6 +900,7 @@ export class AlertService {
       const delayText = delayH > 0 ? `${delayH}h${delayMin > 0 ? ` ${delayMin}min` : ""}` : `${delayMin}min`;
 
       await this.createAlertIfNotExists({
+        remindDaily: true,
         type: "mission",
         title: "Retard à la livraison",
         message: `Mission ${mission.orderNumber} — livraison prévue dépassée de ${delayText}. Mission toujours en cours.`,

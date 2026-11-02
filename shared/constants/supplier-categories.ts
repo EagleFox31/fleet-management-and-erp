@@ -53,13 +53,8 @@ export function canRoleEvaluateSupplierCategory(role: string, category: string |
     return true;
   }
 
-  if (role === "workshop_manager") {
-    return (
-      isPartsSupplierCategory(categoryLower) ||
-      categoryLower.includes("carburant") ||
-      isTireSupplierCategory(categoryLower)
-    );
-  }
+  // Le chef d'atelier consulte les fournisseurs, il ne les évalue pas (décision
+  // produit du 1er novembre 2026) : il tombe dans le refus par défaut.
 
   if (role === "logistics") {
     return !categoryLower.includes("télécom") && !categoryLower.includes("telecom");

@@ -48,10 +48,13 @@ import {
   type SortDirection,
 } from "@/components/design-system";
 import { useAuth } from "@/hooks/useAuth";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatPrice } from "@/lib/utils";
 import { formatTireUsageLabel, mapTireUsageToDb } from "@shared/constants/tires";
+import { TIRE_STOCK_SOURCES, TIRE_STOCK_SOURCE_LABELS, usedTiresLabel, type TireStockSource } from "@shared/constants/tire-stock";
 import { useMutation } from "@tanstack/react-query";
 
 export interface TireTableRow {
@@ -61,6 +64,8 @@ export interface TireTableRow {
   size: string;
   tireType: string;
   stockQuantity: number;
+  /** Pneus démontés remis en stock (ont roulé) : non valorisés, hors seuil de stock bas. */
+  usedStockQuantity?: number;
   minStockLevel: number;
   purchasePrice: number;
   supplier: string;
@@ -116,6 +121,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [stockDialogTire, setStockDialogTire] = useState<TireTableRow | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState(0);
+  const [stockKind, setStockKind] = useState<TireStockSource>("new");
 
   const canEditTires = user?.role === "admin" || user?.role === "warehouse";
   const canDeleteTires = user?.role === "admin";
@@ -161,10 +167,11 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
   );
 
   const adjustStockMutation = useMutation({
-    mutationFn: ({ id, stockQuantity }: { id: number; stockQuantity: number }) =>
-      apiRequest("PATCH", `/api/tires/${id}`, { stockQuantity }),
+    mutationFn: ({ id, kind, quantity }: { id: number; kind: TireStockSource; quantity: number }) =>
+      apiRequest("PATCH", `/api/tires/${id}`, kind === "used" ? { usedStockQuantity: quantity } : { stockQuantity: quantity }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tires"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tires/statistics"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tires/statistics-advanced"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tires/low-stock"] });
       toast({
@@ -173,15 +180,22 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
       });
       setStockDialogTire(null);
       setStockAdjustment(0);
+      setStockKind("new");
     },
     onError: (error: Error) => {
       toast({
-        title: "Erreur",
-        description: `Ajustement impossible : ${error.message}`,
+        title: "Ajustement impossible",
+        description: userMessageOf(error, "Le stock n'a pas été modifié."),
         variant: "destructive",
       });
     },
   });
+  const submitStockAdjustment = useSingleFlightMutate(adjustStockMutation.mutate);
+  const dialogCurrentStock = stockDialogTire
+    ? stockKind === "used"
+      ? stockDialogTire.usedStockQuantity ?? 0
+      : stockDialogTire.stockQuantity
+    : 0;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/tires/${id}`),
@@ -247,6 +261,14 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
               {tire.stockQuantity}
               <span className="text-[11px] font-normal text-gray-400 ml-1">pcs</span>
             </span>
+            {(tire.usedStockQuantity ?? 0) > 0 && (
+              <span
+                className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap"
+                data-testid={`tire-used-stock-${tire.id}`}
+              >
+                + {usedTiresLabel(tire.usedStockQuantity ?? 0)}
+              </span>
+            )}
             {isLowStock && (
               <span className="flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600 whitespace-nowrap">
                 <AlertCircle className="h-2.5 w-2.5" />
@@ -298,7 +320,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
       cell: (tire) => (
         <TooltipProvider>
           <div className="flex items-center justify-end gap-0.5">
-            {onMountFromStock && tire.stockQuantity > 0 && (
+            {onMountFromStock && tire.stockQuantity + (tire.usedStockQuantity ?? 0) > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -328,6 +350,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
                         e.stopPropagation();
                         setStockDialogTire(tire);
                         setStockAdjustment(0);
+                        setStockKind("new");
                       }}
                       aria-label={`Ajuster le stock de ${tire.brand} ${tire.model}`}
                       data-testid={`btn-adjust-tire-stock-${tire.id}`}
@@ -423,6 +446,25 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
 
           {stockDialogTire && (
             <div className="space-y-4 py-2">
+              <div className="flex gap-2" role="radiogroup" aria-label="Stock à ajuster">
+                {TIRE_STOCK_SOURCES.map((kind) => (
+                  <Button
+                    key={kind}
+                    type="button"
+                    size="sm"
+                    role="radio"
+                    aria-checked={stockKind === kind}
+                    variant={stockKind === kind ? "default" : "outline"}
+                    onClick={() => {
+                      setStockKind(kind);
+                      setStockAdjustment(0);
+                    }}
+                    data-testid={`button-tire-stock-kind-${kind}`}
+                  >
+                    {TIRE_STOCK_SOURCE_LABELS[kind]}
+                  </Button>
+                ))}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div
                   className="rounded-xl p-3"
@@ -432,7 +474,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
                     Stock actuel
                   </p>
                   <p className="text-sm font-semibold text-gray-800">
-                    {stockDialogTire.stockQuantity} unité(s)
+                    {dialogCurrentStock} unité(s)
                   </p>
                 </div>
                 <div
@@ -443,7 +485,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
                     Après ajustement
                   </p>
                   <p className="font-bold text-[15px] text-green-700">
-                    {Math.max(0, stockDialogTire.stockQuantity + stockAdjustment)} unité(s)
+                    {Math.max(0, dialogCurrentStock + stockAdjustment)} unité(s)
                   </p>
                 </div>
               </div>
@@ -473,9 +515,10 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
                 <Button
                   disabled={stockAdjustment === 0 || adjustStockMutation.isPending}
                   onClick={() =>
-                    adjustStockMutation.mutate({
+                    submitStockAdjustment({
                       id: stockDialogTire.id,
-                      stockQuantity: Math.max(0, stockDialogTire.stockQuantity + stockAdjustment),
+                      kind: stockKind,
+                      quantity: Math.max(0, dialogCurrentStock + stockAdjustment),
                     })
                   }
                   data-testid="button-confirm-tire-stock-adjustment"

@@ -7,10 +7,11 @@ const log = moduleLogger("audit");
  * Cle sensible : sous-chaine, pas seulement egalite exacte (`deviceToken`, `accessToken`,
  * `apiKey`, `x-api-key`). Masquer trop vaut mieux que fuiter dans le journal.
  */
-const SENSITIVE_KEY = /^(authorization|cookie)$|token|secret|password|passwd|api[-_]?key/i;
+const SENSITIVE_KEY = /^(authorization|cookie)$|token|secret|password|passwd|pincode|passcode|api[-_]?key/i;
 
 /**
- * `pin` ne se masque qu'en mot entier (`pin`, `newPin`, `pinCode`, `pin_code`, `x-pin`) :
+ * `pin` ne se masque qu'en mot entier (`pin`, `newPin`, `pinCode`, `pin_code`, `x-pin`) ;
+ * les formes collees `pincode` et `passcode` le sont par sous-chaine (SENSITIVE_KEY) :
  * en sous-chaine il masquerait `shipping`, `pinned` ou `spinner` et degraderait le journal.
  */
 function isPinKey(key: string): boolean {

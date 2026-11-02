@@ -11,7 +11,7 @@ au propriétaire, ou attend sa PR.
 |---|---|---|
 | `shared/schema.ts`, `server/init-database.ts`, `server/db/migrations/20261031_*` | DB | Une PR de schéma (T-07) avec toutes les tables du lot, puis PR d'amendement DB seulement. |
 | `server/api/index.ts` | Architecte | Pré-câblé en T-08 : tous les routeurs du lot montés vides, intercepteurs passe-plat. |
-| `package.json`, lockfile | Architecte | Dépendances ajoutées en T-02 (`docx`, `altcha-lib`, `msw` en dev, `altcha` client). |
+| `package.json`, lockfile | Architecte | Dépendances ajoutées en T-02 (`docx`, `msw` en dev ; `altcha-lib` et `altcha` retirées avec le captcha). |
 | `shared/feature-flags.ts`, `server/lib/feature-flags.ts` | Architecte | Clés listées dans l'ADR §6. |
 | `shared/contracts/*` | Architecte et API | Figés à M0. Ensuite : ajout optionnel seulement, ou PR architecte dédiée. |
 | `shared/contracts/realtime-events.ts` | API | Tout nouvel événement y est déclaré. |

@@ -106,3 +106,74 @@ CREATE TRIGGER vehicle_status_history_trigger
 1. **fuel_records** → Peut affecter le kilométrage
 2. **work_order_parts** → Coûts et inventaire  
 3. **maintenance_schedules** → Planification automatique
+## Mise à jour du 2 novembre 2026 : libération du véhicule en base
+
+**Quoi.** Trigger `trg_work_orders_release_vehicle` (fonction `fn_work_orders_release_vehicle()`),
+`AFTER UPDATE OF status ON work_orders`, déclenché seulement quand un OT **quitte** l'état ouvert
+(`pending`, `in_progress`, `awaiting_parts` vers `completed` ou `cancelled`). Si le véhicule est en
+`maintenance` et ne porte plus aucun OT ouvert, il passe `operational`, une ligne `status_history` est
+écrite (« Véhicule remis en service - Ordre de travail #N terminé|annulé (aucun OT ouvert restant) »)
+et un `vehicle_status_changed` part sur `fleet_events` (relayé en WebSocket par `server/index.ts`,
+qui invalide fiche, liste et historique du véhicule côté client).
+
+**Pourquoi en base.** C'est un invariant inter-tables qui ne doit dépendre d'aucun appelant. Avant :
+seul `storage.updateWorkOrder` le tenait, et seulement pour `completed` ; l'annulation laissait le
+véhicule immobilisé, et les écritures directes (`technician-work-orders-service`, contrôle qualité)
+ne libéraient jamais le véhicule. `server/storage.ts` est gelé (AGENTS.md §9).
+
+**Ce qui ne change pas.**
+- `storage.setVehicleToOperational` lit le statut après le trigger et s'arrête (`operational`) : pas de
+  double écriture, pas de seconde ligne d'historique (test « clôturer deux fois » et « ouvrir puis clôturer »).
+- Ouverture d'OT, réouverture, suppression : toujours côté serveur (`vehicleStatusService`).
+- Un véhicule `out_of_service` n'est jamais remis en service par le trigger ; un véhicule supprimé
+  (`deleted_at`) est ignoré.
+- Aucun rattrapage des données existantes : `POST /api/check-all-maintenance` reste l'outil.
+
+**Concurrence.** `SELECT … FOR UPDATE` sur le véhicule avant le décompte : deux clôtures simultanées
+des deux derniers OT sont sérialisées, la seconde voit la première validée et libère le véhicule.
+
+**Où.** `server/db/migrations/20261102_work_orders_release_vehicle.sql` et sa jumelle
+`WORK_ORDER_VEHICLE_RELEASE_SQL` dans `server/init-database.ts` (dérive contrôlée par
+`tests/unit/server/work-orders-release-vehicle-drift.test.ts`). Preuve d'invariant :
+`tests/integration/vehicle-status-sync.test.ts` (annulation, OT restant ouvert, UPDATE direct, hors service).
+
+**Retour arrière.** Corrigé le 2 novembre 2026 (suivi) : voir l'ordre ci-dessous. Le premier texte
+donnait le `DROP` avant le retrait des fichiers, ce qui ne tient pas : le démarrage suivant rejoue la
+migration et la constante, et recrée le trigger.
+
+## Mise à jour du 2 novembre 2026 (suivi) : ré-immobilisation, hors service, retour arrière
+
+**Trigger miroir.** `trg_work_orders_hold_vehicle` (fonction `fn_work_orders_hold_vehicle()`),
+`AFTER UPDATE OF status ON work_orders`, déclenché seulement quand un OT **redevient** ouvert
+(`completed`/`cancelled` vers `pending`, `in_progress` ou `awaiting_parts`). Cas réel : le refus du
+contrôle qualité (`server/api/quality-check.routes.ts`) repasse l'OT en `in_progress` par un UPDATE
+direct, sans passer par `storage`. Si le véhicule (non supprimé, verrouillé `FOR UPDATE`) est
+`operational`, il passe `maintenance`, une ligne `status_history` est écrite (« Véhicule passé en
+maintenance - Ordre de travail #N rouvert ») et un `vehicle_status_changed` part sur `fleet_events`.
+Un véhicule `out_of_service` ou déjà en `maintenance` n'est pas touché (pas de ligne en double).
+La réouverture par `storage.updateWorkOrder` reste correcte : le trigger pose `maintenance`, puis
+`vehicleStatusService.setVehicleToMaintenance` voit le statut déjà posé et s'arrête.
+
+**Hors service côté serveur.** `vehicleStatusService.setVehicleToOperational` (appelé par
+`storage.updateWorkOrder` à la clôture `completed`) ne remet plus en service qu'un véhicule en
+`maintenance`. Avant, un véhicule `out_of_service` (décision manuelle) repassait `operational`.
+Reste ouvert, hors périmètre : `setVehicleToMaintenance` fait encore passer un véhicule
+`out_of_service` en `maintenance` à la création ou à la réouverture d'un OT par `storage`.
+
+**Où.** `server/db/migrations/20261102_work_orders_hold_vehicle.sql` et sa jumelle
+`WORK_ORDER_VEHICLE_HOLD_SQL` dans `server/init-database.ts` (même test de dérive, paramétré sur les
+deux triggers). Preuves : `tests/integration/vehicle-status-sync.test.ts` (réouverture par UPDATE
+direct, réouverture sur hors service, clôture `completed` sur hors service) et
+`tests/contract/work-order-quality-check.contract.test.ts` (refus qualité puis véhicule en maintenance).
+
+**Données existantes.** Aucun rattrapage. Au 2 novembre 2026, la base de dev compte 4 véhicules
+`operational` portant un OT ouvert, antérieurs au trigger : le trigger n'agit que sur une transition.
+
+**Retour arrière, pour chacun des deux triggers, dans cet ordre :**
+1. retirer de `server/init-database.ts` la constante (`WORK_ORDER_VEHICLE_RELEASE_SQL` ou
+   `WORK_ORDER_VEHICLE_HOLD_SQL`) et sa ligne dans `applyWorkOrderVehicleStatusTriggers()`, et le
+   fichier de migration correspondant (sinon le démarrage suivant recrée le trigger) ;
+2. déployer, puis `DROP TRIGGER IF EXISTS trg_work_orders_<release|hold>_vehicle ON work_orders;`
+   et `DROP FUNCTION IF EXISTS fn_work_orders_<release|hold>_vehicle();`.
+
+Les lignes `status_history` déjà écrites restent (historique réel).

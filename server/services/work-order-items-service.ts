@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db";
+import { AppError } from "../lib/app-error";
 import { laborCatalog, users, workOrderItems } from "@shared/schema";
 import {
   computeWorkOrderItemTotals,
@@ -127,6 +128,48 @@ export class WorkOrderItemsService {
     return { success: true, data: { id: created.id } };
   }
 
+  /**
+   * Corrige ou désactive un poste. Le code est immuable (les lignes d'OT y
+   * renvoient) ; un poste ne se supprime jamais, il se désactive.
+   */
+  async updateLaborCatalogEntry(
+    id: number,
+    payload: { label?: unknown; standardHours?: unknown; isActive?: unknown },
+    userId?: number,
+  ): Promise<ServiceResult<{ id: number }>> {
+    const set: Partial<typeof laborCatalog.$inferInsert> = { updatedAt: new Date(), updatedBy: userId ?? null };
+    const fourni = (champ: string) => Object.prototype.hasOwnProperty.call(payload, champ);
+
+    if (fourni("label")) {
+      const label = typeof payload.label === "string" ? payload.label.trim() : "";
+      if (label === "") return { success: false, error: "Le libellé du poste ne peut pas être vide." };
+      set.label = label;
+    }
+    if (fourni("standardHours")) {
+      const brut = payload.standardHours;
+      const vide = brut === null || (typeof brut === "string" && brut.trim() === "");
+      if (!vide && parseHours(brut) === null) {
+        return { success: false, error: "Les heures standard doivent être un nombre positif ou nul." };
+      }
+      set.standardHours = toNumericColumn(payload.standardHours as number | string | null);
+    }
+    if (fourni("isActive")) {
+      if (typeof payload.isActive !== "boolean") {
+        return { success: false, error: "L'état actif du poste doit être vrai ou faux." };
+      }
+      set.isActive = payload.isActive;
+    }
+
+    const [updated] = await db
+      .update(laborCatalog)
+      .set(set)
+      .where(eq(laborCatalog.id, id))
+      .returning({ id: laborCatalog.id });
+
+    if (!updated) throw new AppError(404, "Poste introuvable.");
+    return { success: true, data: { id: updated.id } };
+  }
+
   /** Lignes d'un OT, enrichies du poste catalogue et du nom du technicien. */
   async getItemsForWorkOrder(workOrderId: number): Promise<WorkOrderItemsResult> {
     const rows = await db
@@ -206,6 +249,9 @@ export class WorkOrderItemsService {
     const heuresReelles = toNumericColumn(payload.actualHours);
     const technicianId = Number(payload.technicianId);
 
+    const technicienInconnu = await this.refusTechnicien(payload.technicianId);
+    if (technicienInconnu) return { success: false, error: technicienInconnu };
+
     await db.insert(workOrderItems).values({
       workOrderId,
       laborCatalogId: posteId,
@@ -245,6 +291,24 @@ export class WorkOrderItemsService {
     const verdict = validateWorkOrderItem(fusion);
     if (!verdict.valid) {
       return { success: false, error: verdict.errors.join(" ") };
+    }
+
+    if (estFourni(payload, "technicianId")) {
+      const technicienInconnu = await this.refusTechnicien(payload.technicianId);
+      if (technicienInconnu) return { success: false, error: technicienInconnu };
+    }
+    if (estFourni(payload, "laborCatalogId") && Number(payload.laborCatalogId) !== existant.laborCatalogId) {
+      const posteId = Number(payload.laborCatalogId);
+      if (Number.isInteger(posteId) && posteId > 0) {
+        const [poste] = await db
+          .select({ id: laborCatalog.id })
+          .from(laborCatalog)
+          .where(and(eq(laborCatalog.id, posteId), eq(laborCatalog.isActive, true)))
+          .limit(1);
+        if (!poste) {
+          return { success: false, error: "Poste de main-d'œuvre introuvable ou désactivé." };
+        }
+      }
     }
 
     const maj: Record<string, unknown> = { updatedAt: new Date() };
@@ -292,6 +356,14 @@ export class WorkOrderItemsService {
 
     const resultat = await this.getItemsForWorkOrder(existant.workOrderId);
     return { success: true, data: { ...resultat, workOrderId: existant.workOrderId } };
+  }
+
+  /** Message de refus si `technicianId` désigne un utilisateur inexistant ; vide ou absent : rien à vérifier. */
+  private async refusTechnicien(value: unknown): Promise<string | null> {
+    const id = Number(value);
+    if (value === undefined || value === null || value === "" || !Number.isInteger(id) || id <= 0) return null;
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
+    return user ? null : "Technicien introuvable : choisissez un technicien de la liste.";
   }
 
   async deleteItem(itemId: number): Promise<ServiceResult<WorkOrderItemsResult & { workOrderId: number }>> {

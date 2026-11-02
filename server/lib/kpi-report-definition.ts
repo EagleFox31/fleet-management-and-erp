@@ -22,7 +22,7 @@ export type KpiReportData = {
 
 const COST_NOTE =
   "Montants en FCFA, hors taxes. Coût d'un OT clos = main-d'oeuvre (heures réelles x taux horaire en vigueur, " +
-  "sinon coût saisi) + pièces utilisées. Les pneus ne sont pas comptés.";
+  "sinon coût saisi) + pièces utilisées + rotations de pneus.";
 
 export function buildKpiReport(data: KpiReportData): ReportDefinition {
   const { period, failures, preventive, cost, costByType, costByVehicle } = data;

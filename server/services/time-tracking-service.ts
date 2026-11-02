@@ -8,6 +8,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 import {
   TIME_CODES,
   type TimeCode,
@@ -24,6 +25,9 @@ export const timeTrackingService = {
   async upsert(input: UpsertTimeTrackingRequest): Promise<TimeTrackingEntry> {
     if (!(TIME_CODES as readonly string[]).includes(input.status)) {
       throw new AppError(400, "Code de pointage inconnu.");
+    }
+    if (!isIsoCalendarDate(input.date)) {
+      throw new AppError(400, "Cette date n'existe pas au calendrier.");
     }
     const [y, m] = input.date.split("-").map(Number);
     const res = await db.execute(sql`

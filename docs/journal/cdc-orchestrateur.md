@@ -17,3 +17,14 @@ Format : `docs/journal/README.md`.
   - Preuve automatisée : aucune (documentation seule).
 - **RAIDER** : couvert : consignation de l'état pour reprise, sans incident à documenter dans `LESSONS_LEARNED.md`. Ne s'applique pas : documentation seule, sans code, sans règle CI, sans changement d'état distant hors push de la branche.
 - **Reste / risques** : décisions 1 à 10 et questions client pour #6 toujours ouvertes. Le plan ne reste exact que si chaque agent y reporte ses changements d'état. `docs/journal/README.md` prévoit un fichier par agent : ce journal est un fichier distinct demandé par l'orchestrateur, et `docs/journal/cdc-0-socle.md` existe déjà dans ce worktree.
+
+## 2026-10-31T21:20:00+01:00 — CDC orchestrateur — État du soir
+
+- **Agent** : api (lot CDC-0a), à la demande de la relecture · **Branche** : `lot/api/CDC-0-socle` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : consigne l'état du chantier au 31/10/2026, soir, dans `docs/plans/cdc-ecarts.md` (section « État au 31/10/2026, soir » et décisions 11 à 13).
+- **Comment** : contenu repris du message de la relecture, rien ajouté. #57 (53c8b89) GO avec réserves (intégration à rejouer sur base isolée ; une base portant déjà l'ancien index unique 0da3e44 le garde). #55 (73bf623 et 4a78183) GO. #56 reprise locale (d406368 service worker seul, 0180483 le reste), non poussée, force push refusé par les permissions. Vague B lancée : CDC-0b socle client (`lot/fe/CDC-0-socle-ui`) et #7 KPI serveur (`lot/api/CDC-7-kpi`) sur `lot/int/CDC-0-base`.
+- **Pourquoi** : que l'état survive à une interruption de session.
+- **Comment tester (QA)** : `grep -n "^## " docs/plans/cdc-ecarts.md` montre la section « État au 31/10/2026, soir » ; la liste des décisions va jusqu'à 13.
+- **RAIDER** : couvert : consignation de l'état. Sans objet : code, test, migration. La leçon sur #56 reste à écrire dans `LESSONS_LEARNED.md`.
+- **Reste / risques** : décisions 11 à 13 en attente de l'utilisateur ; les SHA ci-dessus n'ont pas été revérifiés hors de ce worktree.
