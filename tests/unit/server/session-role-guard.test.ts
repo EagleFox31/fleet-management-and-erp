@@ -39,8 +39,9 @@ const SESSION_ROLE =
   /session\s*(?:\?|!)?\s*\.\s*role\b|session\s+as\s+[^)]+\)\s*(?:\?|!)?\.\s*role\b|session\s*\??\.?\[\s*["'`]role["'`]\s*\]|\{[^}]*\brole\b[^}]*\}\s*=\s*(?:\([^)]*)?req\.session\b/;
 
 const KIND_SHAPE: Record<Kind, RegExp> = {
-  audit: /\b(?:actorRole|role)\s*[:=]/,
-  write: /session\.role\s*=/,
+  // `=(?!=)` : une affectation, jamais une comparaison (`session.role === "admin"` est une décision d'accès).
+  audit: /\b(?:actorRole|role)\s*(?::|=(?!=))/,
+  write: /session\.role\s*=(?!=)/,
 };
 
 function tsFiles(dir: string): string[] {

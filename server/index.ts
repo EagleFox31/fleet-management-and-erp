@@ -36,7 +36,6 @@ import { dbAuditSink } from "./lib/audit-db-sink";
   interface WsSessionRequest extends IncomingMessage {
     session?: {
       userId?: number;
-      role?: string;
     };
     wsMeta?: WsConnectionMeta;
   }
@@ -74,7 +73,7 @@ import { dbAuditSink } from "./lib/audit-db-sink";
 
     sessionMiddleware(request as any, mockResponse as any, (sessionError?: unknown) => {
       if (sessionError) {
-        console.error("Erreur session sur upgrade WebSocket:", sessionError);
+        moduleLogger("websocket").error({ err: sessionError }, "Erreur session sur upgrade WebSocket");
         socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
