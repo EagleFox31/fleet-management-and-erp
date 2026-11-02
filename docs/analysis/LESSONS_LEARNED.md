@@ -1097,3 +1097,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un défaut de classe se corrige sur tous les points d'entrée (HTTP, WebSocket, tâches planifiées), et la garde couvre tout `server/`.
+
+
+## 2026-11-02 - Test « instable » qui dépendait de la date du jour
+
+### Constat
+- `tests/integration/management-dashboard-service.test.ts` (2 cas) échouait en CI et était classé « flaky connu » : delta attendu 250 000, reçu 0.
+
+### Cause racine
+- La période `month` va du 1er à aujourd'hui (`invoiceDate <= endIso`). Le test datait ses factures au 15 et au 16 : hors période du 1er au 14 de chaque mois. Second défaut masqué : `toBe` sur une différence de totaux flottants (249999.99999999977).
+
+### Résolution
+- Jour borné à la date du jour (`Math.min(day, now.getDate())`), deltas monétaires en `toBeCloseTo(x, 2)`. CI de #109 verte (6db199a).
+
+### Prévention (vérifiable)
+- Le job `integration` de la CI tourne sur chaque PR : un test dépendant de la date réapparaît dans la première quinzaine du mois au lieu d'être noyé dans Neon.
+
+### Règle Projet (obligatoire)
+- Avant de classer un test « flaky », vérifier s'il dépend de la date, de l'heure ou du fuseau. Une donnée de test datée doit tomber dans la période testée quel que soit le jour d'exécution ; un montant calculé se compare au centime, jamais par `toBe`.
