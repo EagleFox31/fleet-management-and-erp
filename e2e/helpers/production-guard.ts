@@ -26,7 +26,9 @@ export function productionMarkers(env: NodeJS.ProcessEnv = process.env): string[
 export function hostOf(databaseUrl: string): string {
   const authority = databaseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0] ?? "";
   const at = authority.lastIndexOf("@");
-  return at < 0 ? "" : authority.slice(at + 1).toLowerCase();
+  // Sans `user@`, l'autorité est déjà l'hôte (éventuellement suivi d'un port) : ne jamais
+  // renvoyer "", sinon une URL sans identifiants passerait pour une base inconnue.
+  return (at < 0 ? authority : authority.slice(at + 1)).toLowerCase();
 }
 
 /** Marqueur de production trouvé dans l'hôte de l'URL, ou `null`. */
