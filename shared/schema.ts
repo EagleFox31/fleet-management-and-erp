@@ -86,6 +86,9 @@ export const vehicles = pgTable("vehicles", {
   ownerId: integer("owner_id").references(() => users.id), // Propriétaire du véhicule (pour les clients)
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche véhicule
   tonnage: real("tonnage"), // Capacité de charge en tonnes
+  // Capacité totale des réservoirs en litres (FUEL3, règle tank-overflow). NULL = inconnue, règle muette.
+  // CHECK vehicles_tank_capacity_l_positive en base (server/init-database.ts) : > 0 et fini.
+  tankCapacityL: real("tank_capacity_l"),
   axleCount: integer("axle_count"), // Nombre d'essieux
   engineSpec: text("engine_spec"), // Spécifications du moteur
   vin: text("vin"), // Vehicle Identification Number
@@ -138,6 +141,29 @@ export const workflowDocuments = pgTable("workflow_documents", {
   isTransferred: boolean("is_transferred").notNull().default(false), // Si transféré vers vehicle_documents
 });
 
+/** Bornes de saisie de la capacité des réservoirs (FUEL3). La base n'impose que > 0 : la borne haute est une règle de saisie. */
+export const VEHICLE_TANK_CAPACITY_MIN_L = 1;
+export const VEHICLE_TANK_CAPACITY_MAX_L = 2000;
+export const VEHICLE_TANK_CAPACITY_MESSAGE =
+  `La capacité totale des réservoirs doit être comprise entre ${VEHICLE_TANK_CAPACITY_MIN_L} et ${VEHICLE_TANK_CAPACITY_MAX_L} litres. Laisser le champ vide si elle est inconnue.`;
+
+/**
+ * Capacité des réservoirs en litres, réutilisable par la création et la modification d'un véhicule.
+ * Absent = inchangé ; null ou "" = inconnue (vidée) ; sinon nombre entre les bornes.
+ */
+export const vehicleTankCapacitySchema = z
+  .union([z.string(), z.number(), z.null()])
+  .optional()
+  .transform((val) => {
+    if (val === undefined) return undefined;
+    if (val === null || (typeof val === "string" && val.trim() === "")) return null;
+    return Number(val);
+  })
+  .refine(
+    (n) => n === undefined || n === null || (Number.isFinite(n) && n >= VEHICLE_TANK_CAPACITY_MIN_L && n <= VEHICLE_TANK_CAPACITY_MAX_L),
+    VEHICLE_TANK_CAPACITY_MESSAGE,
+  );
+
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   id: true,
   createdBy: true,
@@ -155,6 +181,7 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
   year: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
   nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  tankCapacityL: vehicleTankCapacitySchema,
 });
 
 // Documents attachés aux véhicules
