@@ -1004,13 +1004,20 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
           dense: true,
         });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
-        if (rawRows.length > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
-          throw new AppError(
-            400,
-            `Fichier trop long : ${SUPPLIER_INVOICE_IMPORT_MAX_ROWS} lignes maximum, découpez-le en plusieurs fichiers.`,
-          );
+        const tooLong = new AppError(
+          400,
+          `Fichier trop long : ${SUPPLIER_INVOICE_IMPORT_MAX_ROWS} lignes maximum, découpez-le en plusieurs fichiers.`,
+        );
+        // sheet_to_json saute les lignes vides : l'étendue de la feuille, pas le nombre de
+        // lignes lues, dit si des lignes au-delà de la fenêtre lue seraient perdues en silence.
+        if (worksheet) {
+          const readEnd = worksheet["!ref"] ? XLSX.utils.decode_range(worksheet["!ref"]).e.r : 0;
+          const fullEnd = worksheet["!fullref"] ? XLSX.utils.decode_range(worksheet["!fullref"]).e.r : readEnd;
+          // Ligne 0 = en-tête : l'indice de la dernière ligne est le nombre de lignes de données.
+          if (fullEnd > readEnd || Math.max(readEnd, fullEnd) > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) throw tooLong;
         }
+        const rawRows = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+        if (rawRows.length > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) throw tooLong;
         data = rawRows.map(pickImportColumns);
       } catch (parseError) {
         if (parseError instanceof AppError) throw parseError;

@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
 import { eq } from "drizzle-orm";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
@@ -131,6 +131,51 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect(status).toBe(400);
     expect(body.message).toMatch(/décompressé/);
     expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+  });
+
+  it("taille décompressée sous-déclarée (central = 1, local = 0) : 400 lisible, pas de décompression sans limite", async () => {
+    const files = unzipSync(toBuffer(XLSX.utils.aoa_to_sheet([HEADERS, validValues("x")])));
+    const z = Buffer.from(zipSync({ ...files, "xl/media/big.bin": new Uint8Array(60 * 1024 * 1024) }));
+    expect(z.length).toBeLessThan(5 * 1024 * 1024);
+    const eocd = z.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    let cursor = z.readUInt32LE(eocd + 16);
+    for (let i = 0; i < z.readUInt16LE(eocd + 10); i++) {
+      const nameLength = z.readUInt16LE(cursor + 28);
+      if (z.subarray(cursor + 46, cursor + 46 + nameLength).toString() === "xl/media/big.bin") {
+        z.writeUInt32LE(1, cursor + 24);
+        z.writeUInt32LE(0, z.readUInt32LE(cursor + 42) + 22);
+      }
+      cursor += 46 + nameLength + z.readUInt16LE(cursor + 30) + z.readUInt16LE(cursor + 32);
+    }
+    const { status, body } = await importFile(z);
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/illisible|décompressé/);
+    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+  });
+
+  it("exactement le maximum de lignes : accepté (lu en entier)", async () => {
+    const rows: Array<Array<string | number>> = [HEADERS];
+    for (let i = 0; i < SUPPLIER_INVOICE_IMPORT_MAX_ROWS; i++) {
+      rows.push([`${uniqueTestToken("lim")}-${i}`, "TESTFOURNISSEURINCONNU", "15/10/2026", "15/11/2026", "1", "19.25", "1"]);
+    }
+    const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet(rows)));
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ total: SUPPLIER_INVOICE_IMPORT_MAX_ROWS, success: 0 });
+  });
+
+  it("lignes vides intercalées qui cachent des lignes au-delà de la fenêtre : 400, rien de perdu en silence", async () => {
+    const number = uniqueTestToken("hole");
+    const rows: Array<Array<string | number>> = [HEADERS];
+    for (let i = 0; i < SUPPLIER_INVOICE_IMPORT_MAX_ROWS - 1; i++) {
+      rows.push(["", "TESTFOURNISSEURINCONNU", "", "", "", "", ""]);
+    }
+    rows.push([], []);
+    for (let i = 0; i < 10; i++) rows.push(validValues(`${number}-${i}`));
+    const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet(rows)));
+    expect(status).toBe(400);
+    expect(body.message).toMatch(new RegExp(String(SUPPLIER_INVOICE_IMPORT_MAX_ROWS)));
+    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect((await rowsFor(`${number}-0`)).length).toBe(0);
   });
 
   it("une formule est lue comme sa valeur calculée, jamais évaluée", async () => {
