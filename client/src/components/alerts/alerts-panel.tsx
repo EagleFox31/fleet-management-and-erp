@@ -25,11 +25,14 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatDate } from "@/lib/utils";
+import { userMessageOf } from "@/lib/api-error";
+import { ALERT_READ_ALL_PATH } from "@shared/contracts/alerts";
 import {
   AlertCircle,
   AlertTriangle,
   Calendar,
   Check,
+  CheckCheck,
   CheckCircle2,
   Clock,
   Eye,
@@ -252,6 +255,40 @@ export function AlertsPanel() {
       queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
     },
   });
+
+  const markAllAsReadMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", ALERT_READ_ALL_PATH, {});
+    },
+    onSuccess: () => {
+      // Couche 1 : la cloche et la liste passent à « lu » sans attendre le refetch.
+      queryClient.setQueryData<DatabaseAlert[]>(["/api/alerts"], (current) =>
+        Array.isArray(current) ? current.map((alert) => ({ ...alert, isRead: true })) : current,
+      );
+      queryClient.setQueryData<DatabaseAlert[]>(["/api/alerts/unread"], (current) =>
+        Array.isArray(current) ? [] : current,
+      );
+      queryClient.setQueryData<any>(["/api/alerts/count"], (current: any) =>
+        current && typeof current === "object" ? { ...current, unread: 0 } : current,
+      );
+      // Couche 3 : resync des écrans qui lisent les alertes.
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts/unread"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts/active"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Échec du marquage",
+        description: userMessageOf(error, "Impossible de marquer les alertes comme lues."),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const unreadPersistedCount = Array.isArray(allDatabaseAlerts)
+    ? allDatabaseAlerts.filter((alert) => !alert.isRead).length
+    : 0;
 
   const deleteAlertMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -744,10 +781,27 @@ export function AlertsPanel() {
         subtitle="Suivi centralise des alertes operationnelles et systeme"
         icon={<AlertCircle className="h-5 w-5" />}
         actions={
-          <Button variant="outline" size="sm" onClick={handleRefresh} className="h-8 gap-2 text-xs">
-            <RefreshCw className="h-3.5 w-3.5" />
-            Actualiser
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => markAllAsReadMutation.mutate()}
+              disabled={unreadPersistedCount === 0 || markAllAsReadMutation.isPending}
+              className="h-8 gap-2 text-xs"
+              data-testid="button-mark-all-alerts-read"
+            >
+              {markAllAsReadMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCheck className="h-3.5 w-3.5" />
+              )}
+              Tout marquer lu
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleRefresh} className="h-8 gap-2 text-xs">
+              <RefreshCw className="h-3.5 w-3.5" />
+              Actualiser
+            </Button>
+          </div>
         }
       >
         <div className="mt-5 pt-5 border-t border-gray-100 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-3">

@@ -1,5 +1,7 @@
 import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
-import { login as apiLogin, logout as apiLogout, getCurrentUser, User, LoginCredentials } from "@/lib/auth";
+import { login as apiLogin, logout as apiLogout, User, LoginCredentials } from "@/lib/auth";
+import { checkSession, nextSessionRetryDelay } from "@/lib/session-check";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { loginFailureOf } from "@/lib/lockout-message";
 import { clientLogger } from "@/lib/logger";
@@ -11,8 +13,6 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** Message de la dernière connexion refusée par verrouillage (429), sinon null. */
   loginLockMessage: string | null;
-  /** Vrai quand le serveur a exigé la preuve captcha à la dernière tentative (400 sur `captcha`). */
-  loginCaptchaRequired: boolean;
   login: (credentials: LoginCredentials) => Promise<boolean>;
   logout: () => Promise<void>;
 }
@@ -23,7 +23,6 @@ export const AuthContext = createContext<AuthContextValue>({
   isAuthenticating: false,
   isAuthenticated: false,
   loginLockMessage: null,
-  loginCaptchaRequired: false,
   login: async () => false,
   logout: async () => {},
 });
@@ -33,48 +32,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true); // bootstrap auth check
   const [isAuthenticating, setIsAuthenticating] = useState(false); // login/logout actions
   const [loginLockMessage, setLoginLockMessage] = useState<string | null>(null);
-  const [loginCaptchaRequired, setLoginCaptchaRequired] = useState(false);
   const { toast } = useToast();
   const authCheckVersionRef = useRef(0);
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
   }, []);
 
-  useEffect(() => {
-    const checkUser = async () => {
-      const checkVersion = ++authCheckVersionRef.current;
-      const watchdog = setTimeout(() => {
-        if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
-          return;
-        }
-        clientLogger.warn("Auth bootstrap watchdog triggered: forcing unauthenticated state");
-        setUser(null);
-        setIsLoading(false);
-      }, 12_000);
+  // Vrai tant que /api/auth/me n'a pas répondu (délai, réseau, 5xx) : on réessaie au lieu
+  // de traiter la lenteur comme une déconnexion. Seul un 401 renvoie vers la connexion.
+  const [sessionUnreachable, setSessionUnreachable] = useState(false);
+  const retryNowRef = useRef<(() => void) | null>(null);
 
-      try {
-        setIsLoading(true);
-        const userData = await getCurrentUser();
-        if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
+  useEffect(() => {
+    const checkVersion = ++authCheckVersionRef.current;
+    const isStale = () => !mountedRef.current || checkVersion !== authCheckVersionRef.current;
+
+    const checkUser = async () => {
+      setIsLoading(true);
+      for (let attempt = 1; ; attempt++) {
+        const result = await checkSession();
+        if (isStale()) return;
+        if (result.status !== "unreachable") {
+          setUser(result.status === "authenticated" ? result.user : null);
+          setSessionUnreachable(false);
+          setIsLoading(false);
           return;
         }
-        setUser(userData);
-      } catch (error) {
-        clientLogger.error("Error checking authentication", { err: error });
-        if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
-          return;
-        }
-        setUser(null);
-      } finally {
-        clearTimeout(watchdog);
-        if (!mountedRef.current || checkVersion !== authCheckVersionRef.current) {
-          return;
-        }
-        setIsLoading(false);
+        clientLogger.warn("Session check unreachable", { attempt });
+        setSessionUnreachable(true);
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, nextSessionRetryDelay(attempt));
+          retryNowRef.current = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        retryNowRef.current = null;
+        if (isStale()) return;
       }
     };
 
@@ -83,13 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (credentials: LoginCredentials): Promise<boolean> => {
     authCheckVersionRef.current += 1; // invalidate stale bootstrap check callbacks
+    setSessionUnreachable(false);
+    retryNowRef.current?.();
     try {
       if (isLoading) {
         setIsLoading(false);
       }
       setIsAuthenticating(true);
       setLoginLockMessage(null);
-      setLoginCaptchaRequired(false);
       const userData = await apiLogin(credentials);
       if (!mountedRef.current) {
         return false;
@@ -108,10 +108,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       const failure = loginFailureOf(error);
       setLoginLockMessage(failure.kind === "locked" ? failure.message : null);
-      setLoginCaptchaRequired(failure.kind === "captcha");
       toast({
         variant: "destructive",
-        title: failure.kind === "locked" ? "Compte verrouillé" : failure.kind === "captcha" ? "Vérification requise" : "Échec de connexion",
+        title: failure.kind === "locked" ? "Compte verrouillé" : "Échec de connexion",
         description: failure.message ?? "Connexion impossible. Vérifiez vos identifiants ou le réseau.",
       });
       return false;
@@ -124,6 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async (): Promise<void> => {
     authCheckVersionRef.current += 1;
+    setSessionUnreachable(false);
+    retryNowRef.current?.();
     try {
       setIsAuthenticating(true);
       await apiLogout();
@@ -156,12 +157,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticating,
     isAuthenticated: !!user,
     loginLockMessage,
-    loginCaptchaRequired,
     login,
     logout,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {isLoading && sessionUnreachable ? <SessionUnreachableNotice onRetry={() => retryNowRef.current?.()} /> : null}
+    </AuthContext.Provider>
+  );
+}
+
+function SessionUnreachableNotice({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="status"
+      data-testid="session-unreachable"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4"
+    >
+      <div className="max-w-sm rounded-lg border bg-card p-6 text-center shadow-sm space-y-3">
+        <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+        <p className="font-medium text-foreground">Le serveur met du temps à répondre</p>
+        <p className="text-sm text-muted-foreground">
+          Votre session est conservée. Nouvelle tentative automatique en cours.
+        </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Réessayer maintenant
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function useAuth() {

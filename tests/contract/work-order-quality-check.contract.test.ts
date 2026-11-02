@@ -1,9 +1,9 @@
 import { createServer, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { qualityCheckResponseSchema } from "../../shared/contracts/quality-check";
 import { db } from "../../server/db";
-import { workOrderQuality, workOrders } from "../../shared/schema";
+import { statusHistory, vehicles, workOrderQuality, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -121,5 +121,24 @@ describe("POST /api/work-orders/:id/quality-check", () => {
     expect(res.body.qcReason).toBe("Fuite persistante");
     const [row] = await db.select().from(workOrders).where(eq(workOrders.id, id));
     expect(row.status).toBe("in_progress");
+  });
+
+  it("rejette : le véhicule remis en service repasse en maintenance, tracé (trg_work_orders_hold_vehicle)", async () => {
+    const vehicle = await createTestVehicle({ status: "operational" });
+    ids.vehicleIds.push(vehicle.id);
+    const [wo] = await db
+      .insert(workOrders)
+      .values({ vehicleId: vehicle.id, title: "OT contrôle qualité véhicule", status: "completed" })
+      .returning();
+    workOrderIds.push(wo.id);
+
+    const res = await call("POST", `/api/work-orders/${wo.id}/quality-check`, { cookie: cookies.get("workshop_manager"), body: { result: "failed", reason: "Bruit au freinage" } });
+    expect(res.status).toBe(200);
+
+    const [v] = await db.select({ status: vehicles.status }).from(vehicles).where(eq(vehicles.id, vehicle.id));
+    expect(v.status).toBe("maintenance");
+    const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, vehicle.id)).orderBy(desc(statusHistory.id));
+    expect(history[0]?.status).toBe("maintenance");
+    expect(history[0]?.notes).toContain(`#${wo.id}`);
   });
 });

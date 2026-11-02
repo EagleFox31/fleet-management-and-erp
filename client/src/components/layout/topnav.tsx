@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Bell, Settings, User, LogOut, ChevronDown, ChevronRight, Wrench, Package, ClipboardList, Fuel, AlertTriangle, Menu } from "lucide-react";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { ContextualHelpButton } from "@/components/help";
 import { LOT_SCREENS } from "@/config/lot-screens";
 
@@ -145,21 +146,6 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       .join('')
       .toUpperCase()
       .slice(0, 2);
-  };
-
-  const getRoleLabel = (role: string) => {
-    const roleLabels = {
-      admin: "Administrateur",
-      workshop_manager: "Chef d'atelier",
-      technician: "Technicien",
-      secretary: "Secrétaire",
-      logistics: "Logisticien",
-      warehouse: "Magasinier",
-      management: "Direction",
-      client: "Client",
-      user: "Utilisateur"
-    };
-    return roleLabels[role as keyof typeof roleLabels] || "Utilisateur";
   };
 
   return (
@@ -312,7 +298,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
                   {user?.name || user?.username}
                 </span>
                 <span className="text-[11px] text-green-600">
-                  {getRoleLabel(user?.role || "user")}
+                  {roleLabelOf(user?.role || "user")}
                 </span>
               </div>
               <ChevronDown className="h-3.5 w-3.5 text-gray-300 hidden md:block" />
@@ -328,7 +314,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
                 <p className="text-sm font-medium text-gray-800">{user?.name || user?.username}</p>
                 <p className="text-xs text-gray-400">{user?.email}</p>
                 <span className="text-[10px] font-medium text-green-700 bg-green-50 w-fit px-2 py-0.5 rounded-full">
-                  {getRoleLabel(user?.role || "user")}
+                  {roleLabelOf(user?.role || "user")}
                 </span>
               </div>
             </DropdownMenuLabel>

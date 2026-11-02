@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
+import { PURCHASE_ORDER_STATUS_LABELS } from "@shared/constants/purchase-order-statuses";
 import { useRetourArriere } from "@/hooks/useRetourArriere";
 
 interface PurchaseOrderLine {
@@ -77,14 +78,14 @@ interface PurchaseOrderDetails {
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: any; accent: string; accentBg: string; accentBorder: string }> = {
-  draft:     { label: "À préparer",           color: "bg-gray-100 text-gray-700 border-gray-200",       icon: FileText,     accent: "#6b7280", accentBg: "#f9fafb", accentBorder: "#e5e7eb" },
-  sent:      { label: "Transmise fournisseur", color: "bg-blue-50 text-blue-700 border-blue-200",        icon: Send,         accent: "#2563eb", accentBg: "#eff6ff", accentBorder: "#bfdbfe" },
-  confirmed: { label: "Confirmée fournisseur", color: "bg-green-50 text-green-700 border-green-200",     icon: CheckCircle,  accent: "#16a34a", accentBg: "#f0fdf4", accentBorder: "#bbf7d0" },
-  cancellation_requested: { label: "Annulation demandée", color: "bg-orange-50 text-orange-700 border-orange-200", icon: AlertTriangle, accent: "#ea580c", accentBg: "#fff7ed", accentBorder: "#fdba74" },
-  partial:   { label: "Réception partielle",   color: "bg-amber-50 text-amber-700 border-amber-200",     icon: Package,      accent: "#d97706", accentBg: "#fffbeb", accentBorder: "#fde68a" },
-  delivered: { label: "Réception complète",    color: "bg-indigo-50 text-indigo-700 border-indigo-200",  icon: Truck,        accent: "#7c3aed", accentBg: "#f5f3ff", accentBorder: "#ddd6fe" },
-  completed: { label: "Clôturée",              color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, accent: "#059669", accentBg: "#ecfdf5", accentBorder: "#a7f3d0" },
-  cancelled: { label: "Annulée",               color: "bg-red-50 text-red-700 border-red-200",           icon: XCircle,      accent: "#dc2626", accentBg: "#fef2f2", accentBorder: "#fecaca" },
+  draft:     { label: PURCHASE_ORDER_STATUS_LABELS.draft,           color: "bg-gray-100 text-gray-700 border-gray-200",       icon: FileText,     accent: "#6b7280", accentBg: "#f9fafb", accentBorder: "#e5e7eb" },
+  sent:      { label: PURCHASE_ORDER_STATUS_LABELS.sent, color: "bg-blue-50 text-blue-700 border-blue-200",        icon: Send,         accent: "#2563eb", accentBg: "#eff6ff", accentBorder: "#bfdbfe" },
+  confirmed: { label: PURCHASE_ORDER_STATUS_LABELS.confirmed, color: "bg-green-50 text-green-700 border-green-200",     icon: CheckCircle,  accent: "#16a34a", accentBg: "#f0fdf4", accentBorder: "#bbf7d0" },
+  cancellation_requested: { label: PURCHASE_ORDER_STATUS_LABELS.cancellation_requested, color: "bg-orange-50 text-orange-700 border-orange-200", icon: AlertTriangle, accent: "#ea580c", accentBg: "#fff7ed", accentBorder: "#fdba74" },
+  partial:   { label: PURCHASE_ORDER_STATUS_LABELS.partial,   color: "bg-amber-50 text-amber-700 border-amber-200",     icon: Package,      accent: "#d97706", accentBg: "#fffbeb", accentBorder: "#fde68a" },
+  delivered: { label: PURCHASE_ORDER_STATUS_LABELS.delivered,    color: "bg-indigo-50 text-indigo-700 border-indigo-200",  icon: Truck,        accent: "#7c3aed", accentBg: "#f5f3ff", accentBorder: "#ddd6fe" },
+  completed: { label: PURCHASE_ORDER_STATUS_LABELS.completed,              color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, accent: "#059669", accentBg: "#ecfdf5", accentBorder: "#a7f3d0" },
+  cancelled: { label: PURCHASE_ORDER_STATUS_LABELS.cancelled,               color: "bg-red-50 text-red-700 border-red-200",           icon: XCircle,      accent: "#dc2626", accentBg: "#fef2f2", accentBorder: "#fecaca" },
 };
 
 const lineStatusConfig: Record<string, { label: string; color: string; dot: string }> = {

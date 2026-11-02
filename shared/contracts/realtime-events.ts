@@ -54,6 +54,11 @@ export const REALTIME_EVENTS = {
     scope: { type: "broadcast" },
     invalidates: ["/api/vehicle-document-types"],
   } as EventDefinition<{ code: string }>,
+  alerts_read: {
+    // Nominatif : les autres onglets du même compte remettent cloche et compteur à jour.
+    scope: "user",
+    invalidates: ["/api/alerts", "/api/alerts/unread", "/api/alerts/active", "/api/alerts/count"],
+  } as EventDefinition<{ alertIds: number[] }>,
   backup_failed: {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],

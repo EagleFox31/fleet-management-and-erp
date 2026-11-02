@@ -40,7 +40,7 @@ D-13 notifications in-app seulement, D-19 données fictives uniquement.
 | P-22 | Given un chauffeur, When il déclare une panne sur son véhicule, Then le chef d'atelier reçoit une alerte en temps réel (trame WebSocket) et peut créer l'OT. | `incidents` |
 | P-24 | Given la création d'un plan « vidange moteur », When le km actuel est saisi, Then l'échéance proposée est km actuel + 10 000 (boîte, pont, satellite : + 50 000), modifiable. | `oil-change-prefill` |
 | P-25 | Given un OT terminé, When le chef d'atelier le rejette avec un motif, Then il repasse en cours ; s'il le valide, il reste terminé. | `quality-check` |
-| P-26 | Given une connexion, When 3 échecs se sont produits, Then un défi apparaît ; sans réussite, aucune tentative n'est enregistrée. | `captcha` |
+| P-26 | Retiré le 1er novembre 2026 : pas de captcha à la connexion. Le verrouillage P-03 reste la protection contre les essais répétés. | — |
 
 ## Coupé du lot
 
