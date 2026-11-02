@@ -47,6 +47,7 @@ import fuelPricesRoutes from "./fuel-prices.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import incidentsRoutes from "./incidents.routes";
+import driverBreakdownsRoutes from "./driver-breakdowns.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
@@ -165,6 +166,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(timeTrackingRoutes);
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(incidentsRoutes);
+  apiRouter.use(driverBreakdownsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(userStockPermissionRoutes);

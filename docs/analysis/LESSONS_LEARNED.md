@@ -1014,3 +1014,20 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Toute transition de statut qui cible un `sessionId` ou un identifiant partagé filtre sur le statut d'origine attendu, dans chaque service qui l'expose. Une clôture annule les écritures différées en attente, pas seulement les futures.
+
+## 2026-11-02 - Rôle de session lu dans des décisions d'autorisation
+
+### Constat
+- Après correction d'ADM2-3 (`/api/purchase-orders`), la même lecture `req.session.role` décidait encore des accès dans les renouvellements de documents (5 routes), les missions (4 handlers) et les besoins en pièces : un compte rétrogradé gardait ses droits jusqu'à la déconnexion.
+
+### Cause racine
+- Le rôle de session est figé à la connexion ; `authenticate` seul ne pose pas `req.user`, donc les handlers lisaient la session par commodité. Le défaut avait été corrigé là où il était signalé, sans balayer les routeurs voisins.
+
+### Résolution
+- Routeurs montés sous `isAnyUser` / `isStaff` (rôle relu en base) et handlers lisant `req.user.role`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-role-guard.test.ts` : aucune lecture de `session.role` dans `server/api/` hors liste gelée (étiquettes d'audit `actorRole`, écriture à la connexion PIN) ; la liste ne peut que diminuer.
+
+### Règle Projet (obligatoire)
+- Une décision d'accès lit `req.user.role`, posé par `authorize` / `isAnyUser` / `isStaff`. Corriger un défaut de classe impose de balayer tout le dépôt, pas seulement la route signalée.

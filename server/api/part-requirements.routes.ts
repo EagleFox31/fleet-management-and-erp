@@ -56,7 +56,7 @@ router.get("/by-part/:partId", authenticate, async (req, res) => {
 router.get("/workflow/statuses", authenticate, async (req, res) => {
   try {
     const currentStatus = req.query.current as string;
-    const userRole = req.session?.role || req.user?.role || "technician";
+    const userRole = req.user?.role || "technician";
 
     if (currentStatus) {
       const nextStatuses = PartRequirementWorkflow.getNextPossibleStatuses(
@@ -149,7 +149,7 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
       return res.status(404).json({ message: "Demande non trouvée" });
     }
 
-    const userRole = req.user?.role || req.session?.role || "technician";
+    const userRole = req.user?.role || "technician";
     const currentUserId = req.user?.id;
 
     const result = await partRequirementsService.updatePartRequirement(

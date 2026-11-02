@@ -5,7 +5,7 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { db } from "../db";
-import { authenticate, isDocumentRenewalWriter } from "../middleware/auth";
+import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
@@ -30,7 +30,7 @@ import {
 
 const log = moduleLogger("document-renewals");
 const router = Router();
-router.use(authenticate);
+router.use(isAnyUser);
 
 const CREATE_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_WRITER_ROLES);
 const VIEW_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_VIEWER_ROLES);
@@ -265,7 +265,7 @@ const syncVehicleMasterDocumentExpiry = async (
 
 router.get("/centers", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -318,7 +318,7 @@ router.get("/centers", async (req, res) => {
 
 router.get("/requests", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -493,7 +493,7 @@ const quickRenewPayloadSchema = z.object({
 
 router.post("/requests", async (req, res, next) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, CREATE_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -706,7 +706,7 @@ router.post("/requests", async (req, res, next) => {
  */
 router.patch("/requests/:id/status", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, CREATE_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -788,7 +788,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         });
       }
 
-      const role = normalizeRole(req.session?.role);
+      const role = normalizeRole(req.user?.role);
       if (!hasRole(role, CREATE_ROLES)) {
         return res.status(403).json({ message: "Accès non autorisé" });
       }
