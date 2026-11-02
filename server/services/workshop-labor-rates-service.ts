@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import type { CreateWorkshopLaborRateRequest, WorkshopLaborRate } from "@shared/contracts/workshop-labor-rates";
 import { workshopLaborRates, type WorkshopLaborRateRow } from "@shared/schema";
 import { db } from "../db";
@@ -29,6 +29,27 @@ function pgErrorOf(error: unknown): { code?: string; constraint?: string } {
 export async function listWorkshopLaborRates(): Promise<WorkshopLaborRate[]> {
   const rows = await db.select().from(workshopLaborRates).orderBy(desc(workshopLaborRates.effectiveFrom));
   return rows.map(toRate);
+}
+
+/**
+ * Taux en vigueur pour un OT : à sa date de clôture (`end_date`, comme le KPI de coût), sinon
+ * aujourd'hui en Africa/Douala pour un OT en cours. `null` s'il n'existe aucun taux à cette date.
+ */
+export async function laborRateForWorkOrder(workOrderId: number): Promise<{ effectiveFrom: string; hourlyRateHt: number } | null> {
+  const res = await db.execute(sql`
+    SELECT to_char(r.effective_from, 'YYYY-MM-DD') AS effective_from, r.hourly_rate_ht::float8 AS hourly_rate_ht
+    FROM work_orders w
+    JOIN workshop_labor_rates r
+      ON r.effective_from <= COALESCE(w.end_date::date, (now() AT TIME ZONE 'Africa/Douala')::date)
+    WHERE w.id = ${workOrderId}
+    ORDER BY r.effective_from DESC
+    LIMIT 1`);
+  const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as Array<{
+    effective_from: string;
+    hourly_rate_ht: number;
+  }>;
+  const row = rows[0];
+  return row ? { effectiveFrom: row.effective_from, hourlyRateHt: Number(row.hourly_rate_ht) } : null;
 }
 
 /** Ajoute un taux daté. Une seconde saisie à la même date d'effet est refusée (409), jamais écrasée. */

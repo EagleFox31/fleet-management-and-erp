@@ -1,6 +1,11 @@
 import { db } from '../db';
-import { workOrders, vehicles, users, partsUsed, parts, tireRotations } from '../../shared/schema';
+import { workOrders, vehicles, users, partsUsed, parts, tireRotations, workOrderItems } from '../../shared/schema';
 import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
+import { computeWorkOrderCost } from '@shared/work-order-cost';
+import { moduleLogger } from '../lib/logger';
+import { laborRateForWorkOrder } from './workshop-labor-rates-service';
+
+const log = moduleLogger('technician-work-orders');
 
 export interface TechnicianWorkOrder {
   id: number;
@@ -131,18 +136,23 @@ export class TechnicianWorkOrdersService {
   }
 
   /**
-   * Calculer le détail des coûts d'un ordre de travail (base + pièces + rotations pneus)
+   * Détail des coûts d'un ordre de travail : même règle que l'écran, le PDF et le KPI
+   * (`shared/work-order-cost.ts`). La main-d'oeuvre vaut heures réelles × taux en vigueur
+   * quand un taux existe, sinon `work_orders.cost`.
    */
   private async calculateWorkOrderCosts(workOrderId: number): Promise<WorkOrderCostBreakdown> {
     try {
-      // Coût de base de l'ordre de travail
       const workOrder = await db
         .select({ cost: workOrders.cost })
         .from(workOrders)
         .where(eq(workOrders.id, workOrderId))
         .limit(1);
 
-      const baseCost = workOrder[0]?.cost ? Number(workOrder[0].cost) : 0;
+      const hoursResult = await db
+        .select({ hours: sql<string>`COALESCE(SUM(${workOrderItems.actualHours}), 0)` })
+        .from(workOrderItems)
+        .where(and(eq(workOrderItems.workOrderId, workOrderId), sql`${workOrderItems.status} <> 'cancelled'`));
+      const rate = await laborRateForWorkOrder(workOrderId);
 
       // Coût des pièces détachées
       const partsResult = await db
@@ -164,18 +174,24 @@ export class TechnicianWorkOrdersService {
 
       const rotationsCost = Number(rotationsResult[0]?.totalRotationsCost) || 0;
 
-      const totalCost = Number(baseCost) + Number(partsCost) + Number(rotationsCost);
-      
-      console.log(`💰 [COST] Ordre ${workOrderId}: Base=${baseCost}, Pièces=${partsCost}, Rotations=${rotationsCost}, Total=${totalCost}`);
-      
+      const { baseCost, totalCost } = computeWorkOrderCost({
+        baseCost: workOrder[0]?.cost,
+        parts: [{ unitPrice: partsCost, quantity: 1 }],
+        tireRotations: [{ cost: rotationsCost }],
+        laborHours: hoursResult[0]?.hours,
+        laborRate: rate?.hourlyRateHt ?? null,
+      });
+
+      log.debug({ workOrderId, baseCost, partsCost, tiresCost: rotationsCost, totalCost }, "coût de l'OT calculé");
+
       return {
-        baseCost: Number(baseCost),
+        baseCost,
         partsCost,
         tiresCost: rotationsCost,
-        totalCost: Number(totalCost),
+        totalCost,
       };
     } catch (error) {
-      console.error(`Erreur calcul coût ordre ${workOrderId}:`, error);
+      log.error({ err: error, workOrderId }, "calcul du coût de l'OT impossible");
       return {
         baseCost: 0,
         partsCost: 0,
