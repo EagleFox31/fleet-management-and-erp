@@ -5108,16 +5108,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Le client alimente sa propre session d'acquisition, jamais celle d'un autre.
       // Le personnel autorisé : admin, secrétariat, logistique, chef d'atelier.
-      if (req.user?.role === "client") {
-        const [owned] = await db
-          .select({ id: vehicleAcquisitionWorkflows.id })
-          .from(vehicleAcquisitionWorkflows)
-          .where(and(
-            eq(vehicleAcquisitionWorkflows.id, workflowIdNumber),
-            eq(vehicleAcquisitionWorkflows.sessionId, sessionId),
-            eq(vehicleAcquisitionWorkflows.userId, userId),
-          ));
-        if (!owned) return next(new AppError(403, "Accès refusé : cette session d'acquisition n'appartient pas à votre compte."));
+      if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(workflowIdNumber, sessionId)))) {
+        return next(new AppError(403, "Accès refusé : cette session d'acquisition n'appartient pas à votre compte."));
       }
 
       const documentData = {

@@ -176,11 +176,15 @@ export class WorkflowDocumentService {
   }
   
   /** Auteur du workflow (`undefined` si le workflow n'existe pas). */
-  static async getWorkflowOwnerId(workflowId: number): Promise<number | undefined> {
+  static async getWorkflowOwnerId(workflowId: number, sessionId?: string): Promise<number | undefined> {
     const [row] = await db
       .select({ userId: vehicleAcquisitionWorkflows.userId })
       .from(vehicleAcquisitionWorkflows)
-      .where(eq(vehicleAcquisitionWorkflows.id, workflowId))
+      .where(and(
+        eq(vehicleAcquisitionWorkflows.id, workflowId),
+        // Avec une session : le workflow doit porter ce sessionId, sinon pas de propriétaire.
+        ...(sessionId === undefined ? [] : [eq(vehicleAcquisitionWorkflows.sessionId, sessionId)]),
+      ))
       .limit(1);
     return row?.userId;
   }
