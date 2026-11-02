@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
+import { isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
@@ -908,7 +909,9 @@ export class DatabaseStorage implements IStorage {
       
       return updatedVehicle;
     } catch (error) {
-      console.error('Error updating vehicle:', error);
+      // Une contrainte CHECK refusée est une saisie invalide : la remonter pour que la route réponde 400.
+      if (isCheckViolation(error)) throw error;
+      storageLog.error({ err: error, vehicleId: id }, "Error updating vehicle");
       return undefined;
     }
   }
