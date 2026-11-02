@@ -67,7 +67,7 @@ export function WorkflowReminders({ compact = false }: { compact?: boolean }) {
   // Mutation pour abandonner un workflow : l'id passe par les variables.
   const abandonMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) => {
-      const response = await apiRequest('PATCH', `/api/workflows/active/${encodeURIComponent(sessionId)}/abandon`);
+      const response = await apiRequest('PATCH', `/api/workflows/vehicle-acquisition/${encodeURIComponent(sessionId)}/abandon`);
       return response.json();
     },
     onSuccess: (_data, { sessionId }) => {

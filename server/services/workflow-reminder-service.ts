@@ -141,7 +141,9 @@ class WorkflowReminderService {
         .where(
           and(
             eq(vehicleAcquisitionWorkflows.userId, userId),
-            eq(vehicleAcquisitionWorkflows.sessionId, sessionId)
+            eq(vehicleAcquisitionWorkflows.sessionId, sessionId),
+            // Un sessionId peut porter une ligne completed : on n'abandonne que le brouillon.
+            eq(vehicleAcquisitionWorkflows.status, 'in_progress')
           )
         );
 

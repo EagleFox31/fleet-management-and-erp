@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import { db } from "../server/db";
-import { vehicleAcquisitionWorkflows, vehicles, workOrders } from "../shared/schema";
+import { activityLogs, vehicleAcquisitionWorkflows, vehicles, workOrders } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
@@ -133,7 +133,10 @@ test.afterAll(async () => {
   for (const registration of registrations) {
     const [vehicle] = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.registrationNumber, registration));
     if (!vehicle) continue;
-    // L'activation ouvre un ordre de travail : il retient le véhicule (clé étrangère).
+    // L'activation écrit dans work_orders (clé étrangère sans cascade : il retient le
+    // véhicule), vehicle_documents et status_history (cascade) et activity_logs
+    // (lien sans clé étrangère, à retirer ici).
+    await db.delete(activityLogs).where(and(eq(activityLogs.entityType, "vehicle"), eq(activityLogs.entityId, vehicle.id)));
     await db.delete(workOrders).where(eq(workOrders.vehicleId, vehicle.id));
     await db.delete(vehicles).where(eq(vehicles.id, vehicle.id));
   }

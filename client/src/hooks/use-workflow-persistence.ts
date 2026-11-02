@@ -84,6 +84,8 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   // Session close (completed ou abandoned) : plus aucune sauvegarde automatique,
   // sinon l'enregistrement differe de updateData recree un brouillon in_progress.
   const sessionClosed = useRef(false);
+  // Sauvegardes differees en attente : annulees a la cloture de la session.
+  const pendingSaves = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   // Charger l'état sauvegardé au démarrage
   const { data: savedWorkflow, isLoading } = useQuery<any>({
@@ -95,6 +97,8 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   // Mutation pour sauvegarder l'état avec PATCH
   const saveMutation = useMutation({
     mutationFn: async (workflowData: any) => {
+      // Une requete deja partie ne se rappelle pas, mais on ne la lance plus apres la cloture.
+      if (sessionClosed.current) return null;
       const response = await fetch(`/api/workflows/vehicle-acquisition/${sessionId}`, {
         method: 'PATCH',
         body: JSON.stringify(workflowData),
@@ -103,7 +107,9 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
         },
       });
       if (!response.ok) {
-        // Si PATCH échoue, essayer POST pour créer
+        // Si PATCH échoue, essayer POST pour créer, sauf si la session est close
+        // (sinon le repli recree un brouillon in_progress sous un sessionId termine).
+        if (sessionClosed.current) return null;
         const createResponse = await fetch('/api/workflows/vehicle-acquisition', {
           method: 'POST',
           body: JSON.stringify(workflowData),
@@ -175,7 +181,11 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
           setCurrentStep(nextStep);
         }
 
-        setTimeout(() => saveWorkflow(newData, nextStep), 500);
+        const timer = setTimeout(() => {
+          pendingSaves.current.delete(timer);
+          saveWorkflow(newData, nextStep);
+        }, 500);
+        pendingSaves.current.add(timer);
         return newData;
       });
     },
@@ -197,6 +207,8 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   // Fonction pour marquer le workflow comme terminé
   const completeWorkflow = useCallback(async () => {
     sessionClosed.current = true;
+    pendingSaves.current.forEach(clearTimeout);
+    pendingSaves.current.clear();
     try {
       const response = await fetch(`/api/workflows/vehicle-acquisition/${sessionId}/complete`, {
         method: 'PATCH',
@@ -211,6 +223,8 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   // Fonction pour abandonner le workflow
   const abandonWorkflow = useCallback(async () => {
     sessionClosed.current = true;
+    pendingSaves.current.forEach(clearTimeout);
+    pendingSaves.current.clear();
     try {
       const response = await fetch(`/api/workflows/vehicle-acquisition/${sessionId}/abandon`, {
         method: 'PATCH',

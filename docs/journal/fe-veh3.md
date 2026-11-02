@@ -11,6 +11,6 @@
   - Prérequis : compte `workshop_manager`, un brouillon d'acquisition en cours.
   - Étapes : ouvrir `/vehicles`, cliquer « Abandonner » sur le bandeau.
   - Attendu : le brouillon disparaît, la reprise par URL ne le retrouve plus.
-  - Preuve : `e2e/16-vehicle-acquisition-resume.spec.ts` 5 tests verts (4 en run complet + abandon rejoué après correction du nettoyage) ; tsc 0 erreur ; vitest 917 passed.
-- **RAIDER** : R/D (contrats intacts), I (abandon répété sans effet), failure memory : la 1re exécution a échoué sur page blanche (compilation à froid de Vite) puis sur un nettoyage bloqué par une clé étrangère.
+  - Preuve : `e2e/16-vehicle-acquisition-resume.spec.ts` 5 sur 5 dans un seul run (voir PR) ; tsc 0 erreur ; vitest 917 passed.
+- **RAIDER** : R/D (contrats intacts), I (abandon filtré sur in_progress, paire completed + in_progress testée), failure memory : la 1re exécution a échoué sur page blanche (compilation à froid de Vite) puis sur un nettoyage bloqué par une clé étrangère.
 - **Reste / risques** : pas de capture d'écran de rôle refusé ; le bandeau n'est visible que pour le propriétaire du brouillon.
