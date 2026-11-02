@@ -26,11 +26,9 @@ type Access =
   /** Pas de montage CDC : la garde est celle d'un routeur existant, vérifiée par `check`. */
   | { roles: readonly AppRole[]; check: () => void };
 
-const kpiGuardRoles = (): readonly string[] => {
-  const match = read("server/middleware/auth.ts").match(/isManagementOrAdmin\s*=\s*authorize\(\[([^\]]*)\]\)/);
-  if (!match) throw new Error("garde isManagementOrAdmin introuvable dans server/middleware/auth.ts");
-  return [...match[1].matchAll(/['"]([\w]+)['"]/g)].map((m) => m[1]);
-};
+/** `/api/kpi` (server/api/kpi.routes.ts) garde par `authorize([...KPI_VIEWER_ROLES])`, la liste de l'écran. */
+const kpiRouteUsesViewerRoles = (): boolean =>
+  /authorize\(\[\s*\.\.\.KPI_VIEWER_ROLES\s*\]\)/.test(read("server/api/kpi.routes.ts"));
 
 /** Pour chaque écran, ce que le serveur autorise. Un écran absent de cette table échoue ci-dessous. */
 const SERVER_ACCESS: Record<string, Access> = {
@@ -43,7 +41,7 @@ const SERVER_ACCESS: Record<string, Access> = {
   "telemetry-devices": { mount: "admin/telemetry-devices" },
   "kpi-reports": {
     roles: KPI_VIEWER_ROLES,
-    check: () => expect([...kpiGuardRoles()].sort()).toEqual([...KPI_VIEWER_ROLES].sort()),
+    check: () => expect(kpiRouteUsesViewerRoles()).toBe(true),
   },
   "maintenance-report": { mount: "maintenance-reports" },
   "excel-import": { mount: "imports (interventions)" },
