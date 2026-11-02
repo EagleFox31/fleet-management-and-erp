@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { documentRenewalCenters } from "@shared/schema";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@shared/contracts/document-renewal-centers";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { assertCenterNameFree, isUniqueViolation } from "../lib/document-renewal-center-resolver";
 import { moduleLogger } from "../lib/logger";
 import { isDocumentRenewalWriter } from "../middleware/auth";
 
@@ -44,28 +45,8 @@ function parseCenterId(raw: string): number {
   return id;
 }
 
-/** Violation de l'unicité SQL du nom (23505), même nom sous un autre type compris. */
-function isUniqueViolation(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string } } | null;
-  return e?.code === "23505" || e?.cause?.code === "23505";
-}
-
-async function assertNameFree(name: string, documentType: string | null, excludeId?: number): Promise<void> {
-  const [clash] = await db
-    .select({ id: documentRenewalCenters.id })
-    .from(documentRenewalCenters)
-    .where(
-      and(
-        sql`lower(${documentRenewalCenters.name}) = lower(${name})`,
-        documentType === null
-          ? isNull(documentRenewalCenters.documentType)
-          : eq(documentRenewalCenters.documentType, documentType as any),
-        excludeId === undefined ? undefined : ne(documentRenewalCenters.id, excludeId),
-      ),
-    )
-    .limit(1);
-  if (clash) throw new AppError(409, DUPLICATE_MESSAGE);
-}
+const EDITABLE_FIELDS = ["name", "documentType", "accreditationNumber", "address", "contact"];
+const assertNameFree = assertCenterNameFree;
 
 router.post("/centers", isDocumentRenewalWriter, async (req, res, next) => {
   try {
@@ -93,7 +74,9 @@ router.post("/centers", isDocumentRenewalWriter, async (req, res, next) => {
 router.patch("/centers/:id", isDocumentRenewalWriter, async (req, res, next) => {
   try {
     const id = parseCenterId(req.params.id);
-    // Champs nommés seulement : rien d'autre ne passe du corps à la base.
+    // Champs nommés seulement : rien d'autre ne passe du corps à la base, et un champ inconnu est refusé.
+    const unknown = Object.keys(req.body ?? {}).filter((key) => !EDITABLE_FIELDS.includes(key));
+    if (unknown.length > 0) throw new AppError(400, "Champ non modifiable dans la requête.");
     const { name, documentType, accreditationNumber, address, contact } = req.body ?? {};
     const picked = Object.fromEntries(
       Object.entries({ name, documentType, accreditationNumber, address, contact }).filter(([, value]) => value !== undefined),

@@ -15,7 +15,12 @@ export const documentRenewalCenterActivePath = (id: number) => `${documentRenewa
 
 export const DOCUMENT_RENEWAL_CENTER_DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"] as const;
 
-const optionalText = (max: number) =>
+/** Forme de comparaison d'un nom de centre : casse, bords et espaces répétés ignorés. */
+export function normalizeCenterName(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export const optionalText =(max: number) =>
   z
     .string()
     .trim()
@@ -24,7 +29,7 @@ const optionalText = (max: number) =>
     .optional()
     .transform((value) => (value ? value : null));
 
-const nameSchema = z.string().trim().min(2, "Nom du centre trop court.").max(150);
+export const nameSchema = z.string().trim().min(2, "Nom du centre trop court.").max(150);
 const documentTypeSchema = z.enum(DOCUMENT_RENEWAL_CENTER_DOCUMENT_TYPES).nullable().optional();
 
 export const createDocumentRenewalCenterRequestSchema = z

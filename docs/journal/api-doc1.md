@@ -14,3 +14,13 @@
   - Preuve automatisée : `tests/contract/document-renewal-centers.contract.test.ts`, `tests/unit/shared/document-renewal-centers.test.ts`.
 - **RAIDER** : couvert D (GET et demandes existants inchangés, contrats de statut et d'alertes rejoués), I (désactiver deux fois = même état), R (aucune colonne, aucune migration) ; sans objet : migration.
 - **Reste / risques** : l'unicité SQL porte sur `name` seul alors que la règle métier est « par type » : deux types ne peuvent pas partager un nom (tâche fleet-db si besoin). Écran « Centres » côté client.
+
+## 2026-11-02 : correctifs d'audit sécurité (PR 99)
+
+- **Agent** : api-doc1 · **Branche** : `lot/api/doc1-centres`
+- **Statut** : fait
+- **Quoi** : (B1) `POST /quick-renew` acceptait un centre désactivé. (B2) la résolution par nom libre utilisait `ilike` sans échappement (`%`, `_`, `\` jokers, 500 sur `\` final), une variante d'espacement d'un centre désactivé créait un centre actif, et `centerName/Address/Contact/AccreditationNumber` n'avaient aucune borne. Mineur : `PATCH /centers/:id` ignorait un champ inconnu.
+- **Comment** : un seul résolveur `server/lib/document-renewal-center-resolver.ts` (`resolveRenewalCenter`, `assertCenterNameFree`) appelé par `POST /requests`, `POST /quick-renew` et le routeur des centres : id puis nom par égalité sur `lower(btrim)` avec espaces répétés réduits, 404 inconnu, 409 désactivé (par id ou par nom), création implicite seulement si aucun centre de ce nom n'existe, course d'unicité (23505) relue. Champs `center*` bornés par `nameSchema` / `optionalText` du contrat (150/300/200/80). Le justificatif téléversé est supprimé quand le centre est refusé. `PATCH /centers/:id` renvoie 400 sur un champ hors `name, documentType, accreditationNumber, address, contact`.
+- **Pourquoi** : audit sécurité de la PR 99.
+- **Preuve automatisée** : `tests/contract/document-renewal-centers.contract.test.ts` (quick-renew 409 id et nom, variante d'espacement, jokers, 151 caractères, champ inconnu), `tests/unit/server/document-renewal-center-resolution.test.ts` (interdit `ilike(documentRenewalCenters.name` dans `server/api`).
+- **RAIDER** : couvert D (contrats de statut et d'alertes rejoués), I (le résolveur rejoue sans doublon), R ; sans objet : migration.

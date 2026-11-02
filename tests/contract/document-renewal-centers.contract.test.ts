@@ -200,3 +200,90 @@ describe("centres de renouvellement : désactivation", { timeout: 180000 }, () =
     expect(rejected[0].centerNameSnapshot).toBe(name);
   });
 });
+
+describe("centres de renouvellement : résolution unique (demande et renouvellement rapide)", { timeout: 180000 }, () => {
+  const requestsPath = "/api/document-renewals/requests";
+  const baseRequest = () => ({ vehicleId, vehicleDocumentId, comment: "Renouvellement test" });
+
+  async function quickRenew(fields: Record<string, string>) {
+    const form = new FormData();
+    form.append("vehicleId", String(vehicleId));
+    form.append("vehicleDocumentId", String(vehicleDocumentId));
+    form.append("comment", "TEST renouvellement rapide");
+    form.append("newExpiryDate", "2028-01-31");
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-centres.pdf");
+    const response = await fetch(`${harness.baseUrl}/api/document-renewals/quick-renew`, {
+      method: "POST",
+      headers: { Cookie: harness.cookies.get("secretary")! },
+      body: form,
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  }
+
+  async function openRequestIds() {
+    const rows = await db.select({ id: documentRenewalRequests.id }).from(documentRenewalRequests).where(eq(documentRenewalRequests.vehicleDocumentId, vehicleDocumentId));
+    return rows.map((row) => row.id);
+  }
+
+  it("centre désactivé : renouvellement rapide refusé (409) par id comme par nom, sans écriture", async () => {
+    const name = `TEST rapide ${SUFFIX}`;
+    const created = await createCenter(name);
+    expect((await call("PATCH", documentRenewalCenterActivePath(created.body.id), "admin", { isActive: false })).status).toBe(200);
+    const before = await openRequestIds();
+
+    expect((await quickRenew({ centerId: String(created.body.id) })).status).toBe(409);
+    expect((await quickRenew({ centerName: name })).status).toBe(409);
+    expect((await quickRenew({ centerName: `  ${name.toUpperCase()}  ` })).status).toBe(409);
+    expect(await openRequestIds()).toEqual(before);
+    const [still] = await db.select().from(documentRenewalCenters).where(eq(documentRenewalCenters.id, created.body.id));
+    expect(still.isActive).toBe(false);
+  });
+
+  it("variante d'espacement ou de casse d'un centre désactivé : 409, aucun nouveau centre", async () => {
+    const name = `TEST espace ${SUFFIX}`;
+    const created = await createCenter(name);
+    expect((await call("PATCH", documentRenewalCenterActivePath(created.body.id), "admin", { isActive: false })).status).toBe(200);
+    const variant = `  test   ESPACE   ${SUFFIX} `;
+
+    expect((await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: variant })).status).toBe(409);
+    expect((await quickRenew({ centerName: variant })).status).toBe(409);
+    const clones = await db.select({ id: documentRenewalCenters.id }).from(documentRenewalCenters).where(eq(documentRenewalCenters.createdBy, harness.userIdOf("secretary")));
+    expect(clones.filter((row) => row.id !== created.body.id && !centerIds.includes(row.id))).toEqual([]);
+  });
+
+  it("les jokers % _ et \\ du nom saisi ne rattachent aucun centre et ne provoquent pas de 500", async () => {
+    const existing = await createCenter(`TEST joker ${SUFFIX}`);
+    for (const typed of [`TEST joker%`, `TEST joker_${SUFFIX}`, `%${SUFFIX}`, `TEST joker ${SUFFIX}\\`]) {
+      const res = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: typed });
+      expect(res.status, typed).toBe(201);
+      const requestId = res.body.requestId ?? res.body.request?.id ?? res.body.id;
+      const [row] = await db.select().from(documentRenewalRequests).where(eq(documentRenewalRequests.id, requestId));
+      expect(row.centerId, typed).not.toBe(existing.body.id);
+      expect(row.centerNameSnapshot, typed).toBe(typed);
+      if (row.centerId) centerIds.push(row.centerId);
+      await db.update(documentRenewalRequests).set({ status: "rejected" }).where(eq(documentRenewalRequests.id, requestId));
+    }
+    expect((await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: "%" })).status).toBe(400);
+  });
+
+  it("400 au-delà des bornes : nom de 151 caractères, adresse, contact, agrément", async () => {
+    const tooLong = "x".repeat(151);
+    expect((await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: tooLong })).status).toBe(400);
+    expect((await quickRenew({ centerName: tooLong })).status).toBe(400);
+    expect((await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: tooLong })).status).toBe(400);
+    for (const [field, max] of [["centerAddress", 300], ["centerContact", 200], ["centerAccreditationNumber", 80]] as const) {
+      const res = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: `TEST borne ${SUFFIX}`, [field]: "y".repeat(max + 1) });
+      expect(res.status, field).toBe(400);
+    }
+  });
+
+  it("PATCH refuse un champ inconnu (400) au lieu de l'ignorer", async () => {
+    const created = await createCenter(`TEST inconnu ${SUFFIX}`);
+    const res = await call("PATCH", documentRenewalCenterPath(created.body.id), "admin", { address: "Douala", isActive: false });
+    expect(res.status).toBe(400);
+    const [row] = await db.select().from(documentRenewalCenters).where(eq(documentRenewalCenters.id, created.body.id));
+    expect(row.isActive).toBe(true);
+    expect(row.address).toBeNull();
+  });
+});
