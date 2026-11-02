@@ -1027,7 +1027,7 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Routeurs montés sous `isAnyUser` / `isStaff` (rôle relu en base) et handlers lisant `req.user.role`.
 
 ### Prévention (vérifiable)
-- `tests/unit/server/session-role-guard.test.ts` : aucune lecture de `session.role` dans `server/api/` hors liste gelée (étiquettes d'audit `actorRole`, écriture à la connexion PIN) ; la liste ne peut que diminuer.
+- `tests/unit/server/session-role-guard.test.ts` : aucune lecture de `session.role` dans tout `server/` (portée étendue le 2 novembre 2026, voir l'entrée « WebSocket : rôle figé en session ») hors liste gelée (étiquettes d'audit `actorRole`, écriture à la connexion PIN) ; la liste ne peut que diminuer.
 
 ### Règle Projet (obligatoire)
 - Une décision d'accès lit `req.user.role`, posé par `authorize` / `isAnyUser` / `isStaff`. Corriger un défaut de classe impose de balayer tout le dépôt, pas seulement la route signalée.
@@ -1079,3 +1079,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Toute table ou colonne existe dans `shared/schema.ts` **et** se crée par `test:db:schema` + `initializeDatabase()` sur une base vide. Une base Neon partagée n'est pas une source de vérité de schéma.
+
+
+## 2026-11-02 - WebSocket : rôle figé en session (3e réapparition d'ADM2-3)
+
+### Constat
+- Après la correction des routeurs HTTP (#102), l'upgrade WebSocket (`server/index.ts`) lisait encore `session.role` : un utilisateur dont le rôle change garde l'ancien sur sa connexion temps réel.
+
+### Cause racine
+- La garde `session-role-guard` ne balayait que `server/api/` ; `server/index.ts` était hors portée. Son motif d'exception acceptait aussi une comparaison (`session.role === "admin"`).
+
+### Résolution
+- L'upgrade relit le compte par `findActiveSessionUser` (même fonction qu'`authenticate`) : compte supprimé → 401, panne de base → 500 sans détail, journalisée par `moduleLogger("websocket")`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-role-guard.test.ts` balaie tout `server/` ; les formes d'exception refusent `===` (`=(?!=)`), une nouvelle décision d'accès dans un fichier gelé échoue.
+
+### Règle Projet (obligatoire)
+- Un défaut de classe se corrige sur tous les points d'entrée (HTTP, WebSocket, tâches planifiées), et la garde couvre tout `server/`.
