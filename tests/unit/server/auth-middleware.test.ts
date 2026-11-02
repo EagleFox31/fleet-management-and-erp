@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Les gardes lisent l'utilisateur en base: on remplace `storage` pour rester sans DB.
+// Garde-fou : plus aucune garde ne doit relire le compte par `storage.getUser` (qui avalait les
+// erreurs en 401). Le mock reste pour prouver qu'il n'est jamais appelé.
 const getUser = vi.fn();
 vi.mock("../../../server/storage", () => ({ storage: { getUser: (id: number) => getUser(id) } }));
-// `authenticate` relit le compte par `findActiveSessionUser` (vrai code), qui interroge `db` :
+// Toutes les gardes relisent le compte par `findActiveSessionUser` (vrai code), qui interroge `db` :
 // seule la base est simulée, pour que l'échec de lecture traverse le vrai chemin service → garde.
 const selectUsers = vi.fn();
 vi.mock("../../../server/db", () => ({
@@ -159,18 +160,18 @@ describe.each(Object.entries(MATRIX))("%s", (_name, { guard, allowed }) => {
     const { res, next } = await run(guard, undefined);
     expect(res.statusCode).toBe(401);
     expect(next).not.toHaveBeenCalled();
-    expect(getUser).not.toHaveBeenCalled();
+    expect(selectUsers).not.toHaveBeenCalled();
   });
 
-  it("401 si l'utilisateur de la session n'existe plus", async () => {
-    getUser.mockResolvedValue(undefined);
+  it("401 si l'utilisateur de la session n'existe plus (ou est supprimé : aucune ligne active)", async () => {
+    selectUsers.mockResolvedValue([]);
     const { res, next } = await run(guard, { userId: 99 });
     expect(res.statusCode).toBe(401);
     expect(next).not.toHaveBeenCalled();
   });
 
   it.each([...ALL_APP_ROLES])("rôle %s", async (role) => {
-    getUser.mockResolvedValue({ id: 7, username: "u", role });
+    selectUsers.mockResolvedValue([{ id: 7, username: "u", role, deletedAt: null }]);
     const { req, res, next } = await run(guard, { userId: 7 });
     if (allowed.includes(role)) {
       expect(next).toHaveBeenCalledOnce();
@@ -183,12 +184,13 @@ describe.each(Object.entries(MATRIX))("%s", (_name, { guard, allowed }) => {
   });
 
   it("500 actionnable si la base tombe, jamais next()", async () => {
-    getUser.mockRejectedValue(new Error("connexion perdue"));
-    const silence = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Toutes les gardes passent par findActiveSessionUser : une coupure n'est plus un 401.
+    selectUsers.mockRejectedValue(new Error("connexion perdue : SELECT secret"));
     const { res, next } = await run(guard, { userId: 7 });
-    silence.mockRestore();
     expect(res.statusCode).toBe(500);
+    expect(JSON.stringify(res.body)).not.toMatch(/SELECT|connexion/);
     expect(next).not.toHaveBeenCalled();
+    expect(getUser).not.toHaveBeenCalled();
   });
 });
 

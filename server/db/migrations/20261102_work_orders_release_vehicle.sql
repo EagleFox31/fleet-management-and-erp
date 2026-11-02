@@ -8,8 +8,10 @@
 -- après l'incident « trigger already exists »), dans une transaction sous verrou consultatif.
 -- Additif : aucune donnée existante modifiée, aucun rattrapage (POST /api/check-all-maintenance,
 -- reconcileVehicleStatusesFromWorkOrders, reste l'outil de rattrapage de l'historique).
--- Retour arrière : DROP TRIGGER IF EXISTS trg_work_orders_release_vehicle ON work_orders;
---                  DROP FUNCTION IF EXISTS fn_work_orders_release_vehicle();
+-- Retour arrière, dans cet ordre (sinon le démarrage suivant recrée le trigger) :
+--   1. retirer WORK_ORDER_VEHICLE_RELEASE_SQL et son appel de server/init-database.ts, et ce fichier ;
+--   2. déployer, puis DROP TRIGGER IF EXISTS trg_work_orders_release_vehicle ON work_orders;
+--      DROP FUNCTION IF EXISTS fn_work_orders_release_vehicle();
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 
 CREATE OR REPLACE FUNCTION fn_work_orders_release_vehicle()
