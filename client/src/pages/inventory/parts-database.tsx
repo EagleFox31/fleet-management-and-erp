@@ -18,6 +18,7 @@ import { z } from "zod";
 import { Plus, Wrench, Package, FileText, Euro } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { userMessageOf } from "@/lib/api-error";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { partCategoryDraft, partSpecificationDraft, partVariantDraft } from "@/lib/form-drafts";
@@ -76,6 +77,8 @@ export default function PartsDatabasePage() {
       queryClient.invalidateQueries({ queryKey: ["/api/parts/categories"] });
       toast({ title: "Catégorie créée avec succès" });
     },
+    onError: (error) =>
+      toast({ title: "Création impossible", description: userMessageOf(error, "La catégorie n'a pas pu être créée."), variant: "destructive" }),
   });
 
   const createSpecificationMutation = useMutation({
@@ -87,6 +90,8 @@ export default function PartsDatabasePage() {
       queryClient.invalidateQueries({ queryKey: [`/api/parts/${variables.partId}/specifications`] });
       toast({ title: "Spécification ajoutée avec succès" });
     },
+    onError: (error) =>
+      toast({ title: "Ajout impossible", description: userMessageOf(error, "La spécification n'a pas pu être ajoutée."), variant: "destructive" }),
   });
 
   const createVariantMutation = useMutation({
@@ -97,6 +102,8 @@ export default function PartsDatabasePage() {
       queryClient.invalidateQueries({ queryKey: [`/api/parts/${variables.partId}/variants`] });
       toast({ title: "Variante créée avec succès" });
     },
+    onError: (error) =>
+      toast({ title: "Création impossible", description: userMessageOf(error, "La variante n'a pas pu être créée."), variant: "destructive" }),
   });
 
   // Forms

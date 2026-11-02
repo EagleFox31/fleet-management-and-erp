@@ -13,7 +13,8 @@ import { uniqueTestToken } from "../support/ids";
  * - un statut hors énumération est refusé (400) ; un champ de traçabilité (`createdBy`,
  *   `validatedBy`) ne se forge pas par le corps ;
  * - pièces associées (`/api/fault-catalog/:id/parts`) : écriture admin et chef d'atelier, lecture du
- *   personnel ; doublon 409, panne archivée figée (409), suppression en cascade (panne ou pièce).
+ *   personnel ; doublon 409, panne archivée figée (409), suppression d'une panne en cascade ; suppression d'une pièce
+ *   citée par une panne refusée (409, FK RESTRICT) ; rôle client refusé en lecture.
  */
 
 const ACTORS = {
@@ -21,6 +22,7 @@ const ACTORS = {
   workshopManager: "workshop_manager",
   technician: "technician",
   warehouse: "warehouse",
+  client: "client",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -266,11 +268,27 @@ describe("CAT2 : pièces associées à une panne", { timeout: 60000 }, () => {
     expect(await linksOf(faultId)).toHaveLength(0);
   });
 
-  it("supprimer une pièce liée à une panne : plus de 500, le lien disparaît", async () => {
+  it("supprimer une pièce liée à une panne : 409 lisible (ex-500), rien n'est supprimé ; le lien retiré, la suppression passe", async () => {
     const faultId = await createFault();
     const partId = await newPartId();
-    await call("POST", `/api/fault-catalog/${faultId}/parts`, { actor: "admin", body: { partId } });
+    const link = await call("POST", `/api/fault-catalog/${faultId}/parts`, { actor: "admin", body: { partId } });
+    const refused = await call("DELETE", `/api/parts/${partId}`, { actor: "admin" });
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toBe("Pièce utilisée dans le catalogue de pannes");
+    expect(await linksOf(faultId)).toHaveLength(1);
+    expect((await call("GET", `/api/parts/${partId}`, { actor: "admin" })).status).toBe(200);
+
+    expect((await call("DELETE", `/api/fault-catalog/${faultId}/parts/${link.body.id}`, { actor: "admin" })).status).toBe(204);
     expect((await call("DELETE", `/api/parts/${partId}`, { actor: "admin" })).status).toBe(204);
-    expect(await linksOf(faultId)).toHaveLength(0);
+  });
+
+  it("un client ne lit pas les pièces d'une panne (403)", async () => {
+    const faultId = await createFault();
+    expect((await call("GET", `/api/fault-catalog/${faultId}/parts`, { actor: "client" })).status).toBe(403);
+  });
+
+  it("identifiant hors plage d'un integer Postgres : 400 et non 500", async () => {
+    const res = await call("GET", "/api/fault-catalog/99999999999/parts", { actor: "technician" });
+    expect(res.status).toBe(400);
   });
 });

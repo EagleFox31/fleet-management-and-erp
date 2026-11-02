@@ -650,7 +650,11 @@ export const insertPartSpecificationSchema = createInsertSchema(partSpecificatio
   .extend({
     specificationName: z.string().trim().min(1, "Le nom de la spécification est obligatoire."),
     specificationValue: z.string().trim().min(1, "La valeur de la spécification est obligatoire."),
-    unit: z.string().trim().min(1, "L'unité ne peut pas être vide.").nullish(),
+    // Champ vide = pas d'unité : "" devient null (le client envoie "" quand la case est vidée).
+    unit: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().nullish(),
+    ),
   });
 
 export const updatePartSpecificationSchema = insertPartSpecificationSchema.partial();
@@ -780,7 +784,7 @@ export const insertFaultCatalogSchema = createInsertSchema(faultCatalog).omit({
 export const faultCatalogParts = pgTable("fault_catalog_parts", {
   id: serial("id").primaryKey(),
   faultCatalogId: integer("fault_catalog_id").references(() => faultCatalog.id, { onDelete: "cascade" }).notNull(),
-  partId: integer("part_id").references(() => parts.id, { onDelete: "cascade" }).notNull(),
+  partId: integer("part_id").references(() => parts.id, { onDelete: "restrict" }).notNull(),
   quantity: integer("quantity").default(1),
   isOptional: boolean("is_optional").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),

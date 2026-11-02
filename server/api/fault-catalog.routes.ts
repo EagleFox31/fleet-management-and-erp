@@ -1,29 +1,18 @@
-import { Router, type NextFunction, type Request } from "express";
+import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { faultCatalog, insertFaultCatalogPartSchema, updateFaultCatalogPartSchema } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { moduleLogger } from "../lib/logger";
+import { idParam, makeFailWith } from "../lib/route-helpers";
 import { isStaff, isWorkshopManager } from "../middleware/auth";
 import { faultCatalogService } from "../services/fault-catalog-service";
 
 const log = moduleLogger("fault-catalog");
 const router = Router();
 
-function idParam(value: string, label: string): number {
-  const id = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(id) || id <= 0) throw new AppError(400, `${label} invalide`);
-  return id;
-}
-
-/** Les AppError et ZodError sont normalisées par le gestionnaire central ; le reste devient une 500 journalisée. */
-function failWith(err: unknown, req: Request, next: NextFunction, logMessage: string) {
-  if (err instanceof AppError) return next(err);
-  if (err instanceof Error && err.name === "ZodError") return next(err);
-  log.error({ err, requestId: req.requestId }, logMessage);
-  return next(new AppError(500, "Erreur serveur", { cause: err }));
-}
+const failWith = makeFailWith(log);
 
 /**
  * Modification d'une fiche du catalogue de pannes. Montée avant le PATCH

@@ -23,6 +23,7 @@ const ACTORS = {
   technician: "technician",
   workshopManager: "workshop_manager",
   secretary: "secretary",
+  client: "client",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -357,5 +358,39 @@ describe("PRT1 : variantes d'une pièce", { timeout: 60000 }, () => {
     expect((await call("DELETE", `/api/parts/${partId}`, { actor: "admin" })).status).toBe(204);
     expect(await db.select().from(partVariants).where(eq(partVariants.partId, partId))).toHaveLength(0);
     expect(await db.select().from(partSpecifications).where(eq(partSpecifications.partId, partId))).toHaveLength(0);
+  });
+});
+
+describe("PRT1 : accès client, unité vide et identifiants hors plage", { timeout: 60000 }, () => {
+  it("un client ne lit ni les spécifications ni les variantes (403)", async () => {
+    const partId = await newPartId();
+    expect((await call("GET", `/api/parts/${partId}/specifications`, { actor: "client" })).status).toBe(403);
+    expect((await call("GET", `/api/parts/${partId}/variants`, { actor: "client" })).status).toBe(403);
+  });
+
+  it("une unité vide est enregistrée comme absente (null), jamais refusée", async () => {
+    const partId = await newPartId();
+    const res = await call("POST", `/api/parts/${partId}/specifications`, {
+      actor: "warehouse",
+      body: { specificationName: uniqueTestToken("long"), specificationValue: "10", unit: "" },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.unit).toBeNull();
+    const patched = await call("PATCH", `/api/parts/${partId}/specifications/${res.body.id}`, {
+      actor: "warehouse",
+      body: { unit: "mm" },
+    });
+    expect(patched.body.unit).toBe("mm");
+    const cleared = await call("PATCH", `/api/parts/${partId}/specifications/${res.body.id}`, {
+      actor: "warehouse",
+      body: { unit: "  " },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.unit).toBeNull();
+  });
+
+  it("identifiant au-delà d'un integer Postgres : 400 et non 500", async () => {
+    expect((await call("GET", "/api/parts/99999999999/specifications", { actor: "technician" })).status).toBe(400);
+    expect((await call("GET", "/api/parts/99999999999/variants", { actor: "technician" })).status).toBe(400);
   });
 });
