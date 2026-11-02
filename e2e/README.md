@@ -28,13 +28,14 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 
 ## Garde-fou : jamais contre la production
 
-`playwright.config.ts` appelle `assertNotProductionDatabase()` (`e2e/helpers/production-guard.ts`) avant toute chose : si la base visée est la production, Playwright refuse de démarrer, avec un message qui dit quoi faire (sans jamais afficher l'URL ni le mot de passe).
+`playwright.config.ts` appelle `assertNotProductionDatabase()` (`e2e/helpers/production-guard.ts`) avant toute chose : si la base visée par cette session est la production, Playwright refuse de démarrer, avec un message qui dit quoi faire (sans jamais afficher l'URL ni le mot de passe).
 
 - Base visée = `DATABASE_URL` de l'environnement (elle prime), à défaut le `.env` du répertoire courant, que le serveur lancé par Playwright chargerait.
 - Est « production » toute base dont l'**hôte** contient un marqueur : l'endpoint Neon de production connu, plus ceux de `E2E_PRODUCTION_DB_MARKERS` (liste séparée par des virgules, pour un autre environnement à protéger).
 - Test de la fonction : `tests/unit/e2e/production-guard.test.ts`.
 - Lancer sur une branche Neon de test, sans toucher au `.env` : `DATABASE_URL=<url de test> DATABASE_URL_TEST=<url de test> node node_modules/@playwright/test/cli.js test`.
-- Limite : avec `E2E_BASE_URL` (serveur déjà lancé), le garde-fou ne voit que la `DATABASE_URL` de la session de test ; c'est à vous de démarrer ce serveur sur la même base de test.
+- Le serveur lancé par Playwright n'est jamais réutilisé (`reuseExistingServer: false`) : il démarre avec la `DATABASE_URL` vérifiée, et Playwright échoue si le port est déjà pris.
+- Limite : avec `E2E_BASE_URL` (serveur extérieur), le garde-fou ne voit que la `DATABASE_URL` de la session de test et ne peut pas savoir sur quelle base ce serveur écrit ; c'est à vous de le démarrer sur la même base de test.
 
 ## Variables optionnelles
 

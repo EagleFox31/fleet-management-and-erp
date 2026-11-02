@@ -47,7 +47,10 @@ export default defineConfig({
           TMPDIR: process.env.TMPDIR || "/tmp",
         },
         url: baseURL,
-        reuseExistingServer: !process.env.CI,
+        // Jamais de réutilisation : un serveur déjà lancé pourrait pointer la production,
+        // et le garde-fou ne voit que la base de cette session. Playwright démarre le sien
+        // (et échoue si le port est pris) ; pour un serveur extérieur, voir E2E_BASE_URL.
+        reuseExistingServer: false,
         timeout: 180_000,
       }
     : undefined,
