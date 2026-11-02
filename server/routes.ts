@@ -15,7 +15,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -35,6 +35,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError } from "./lib/app-error";
+import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
@@ -1174,7 +1175,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/vehicles/:id", isWorkshopManager, async (req, res, next) => {
+  app.patch("/api/vehicles/:id", isVehiclePatcher, async (req, res, next) => {
+    const refusal = vehiclePatchRefusal(req.user?.role, req.body);
+    if (refusal) return next(refusal);
     try {
       const id = parseInt(req.params.id);
       
@@ -1218,6 +1221,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Le stockage rend undefined quand l'écriture échoue : ne pas répondre 200.
       if (!updatedVehicle) {
         return res.status(500).json({ message: "Erreur serveur" });
+      }
+
+      // Couche 2 : la capacité fait varier la règle tank-overflow et le compteur « sans capacité »
+      // chez les autres profils carburant (même événement que les pleins, AGENTS.md §2).
+      if ("tankCapacityL" in data && (data.tankCapacityL ?? null) !== (vehicle.tankCapacityL ?? null)) {
+        broadcastFuelRecordChanged(id, req.requestId);
       }
 
       return res.status(200).json(updatedVehicle);
