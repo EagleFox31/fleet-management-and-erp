@@ -17,7 +17,9 @@ import type { FeatureKey } from "../../shared/feature-flags";
  * (tests/contract/cdc-mounts.contract.test.ts).
  *
  * `flags` : tous requis pour que la route existe ; coupés un à un, la route répond 404.
- * `allowed` : rôles qui atteignent le squelette (501) ; tout autre rôle reçoit 403.
+ * `allowed` : rôles qui atteignent la route ; tout autre rôle reçoit 403.
+ * `reached` : statut que reçoit un rôle autorisé (501 tant que la route est un squelette ;
+ * 400 pour une route réelle appelée sans paramètre, qui ne touche donc pas la base).
  */
 export type MountCase = {
   name: string;
@@ -25,11 +27,13 @@ export type MountCase = {
   path: string;
   flags: readonly FeatureKey[];
   allowed: readonly AppRole[];
+  reached?: number;
 };
 
 export const MOUNT_CASES: readonly MountCase[] = [
   { name: "mission-advisories", method: "GET", path: "/api/mission-advisories", flags: ["mission-maintenance-advisory"], allowed: MISSION_ADVISORY_ROLES },
-  { name: "part-scans", method: "GET", path: "/api/part-scans", flags: ["part-qr"], allowed: PART_SCAN_ROLES },
+  // CDC-3 : route réelle. Sans `code`, un rôle autorisé reçoit 400 (validation), sans lecture en base.
+  { name: "part-scans", method: "GET", path: "/api/part-scans/resolve", flags: ["part-qr"], allowed: PART_SCAN_ROLES, reached: 400 },
   { name: "part-sales (lecture)", method: "GET", path: "/api/part-sales", flags: ["part-sales"], allowed: PART_SALE_READ_ROLES },
   { name: "part-sales (écriture)", method: "POST", path: "/api/part-sales", flags: ["part-sales"], allowed: PART_SALE_ROLES },
   { name: "vehicle-positions", method: "GET", path: "/api/vehicle-positions", flags: ["gps"], allowed: GPS_VIEW_ROLES },
