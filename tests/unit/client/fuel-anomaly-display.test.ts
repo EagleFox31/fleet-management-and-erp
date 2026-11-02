@@ -24,6 +24,10 @@ describe("formatFuelAnomalyFigures", () => {
     expect(f.reference).toMatch(/km$/);
     expect(`${f.value}${f.reference}`).not.toMatch(/ L/);
   });
+  it("odometer-regression sur un pic : précédent et suivant affichés", () => {
+    const f = formatFuelAnomalyFigures({ ...base, rule: "odometer-regression", mileage: 99999, previousMileage: 1000, nextMileage: 1100, averageQuantity: 1000, threshold: 1100 });
+    expect(f.reference).toBe(`Précédent : ${(1000).toLocaleString("fr-FR")} km, suivant : ${(1100).toLocaleString("fr-FR")} km`);
+  });
   it("chaque règle a un libellé", () => {
     for (const r of FUEL_ANOMALY_RULES) expect(FUEL_ANOMALY_RULE_LABELS[r]).toBeTruthy();
   });
