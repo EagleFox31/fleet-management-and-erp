@@ -36,7 +36,6 @@ export const MOUNT_CASES: readonly MountCase[] = [
   { name: "admin/telemetry-devices", method: "GET", path: "/api/admin/telemetry-devices", flags: ["gps"], allowed: ["admin"] },
   // Provisoire jusqu'au lot #6 (jeton d'appareil) : administrateur seulement, jamais sans session.
   { name: "telemetry", method: "POST", path: "/api/telemetry/positions", flags: ["gps"], allowed: ["admin"] },
-  { name: "workshop-labor-rates", method: "GET", path: "/api/workshop-labor-rates", flags: ["maintenance-report"], allowed: ["admin"] },
   // `exports` est allumé par défaut : les tests le coupent explicitement.
   { name: "maintenance-reports", method: "GET", path: "/api/maintenance-reports", flags: ["exports", "maintenance-report"], allowed: MAINTENANCE_REPORT_ROLES },
   { name: "imports (interventions)", method: "POST", path: "/api/imports/interventions", flags: ["excel-import"], allowed: IMPORT_INTERVENTION_ROLES },

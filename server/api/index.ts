@@ -19,6 +19,7 @@ import {
   workOrderItemDetailRoutes,
   workOrderItemsRoutes,
 } from "./work-order-items.routes";
+import { workOrderLaborRateRoutes } from "./work-order-labor-rate.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
 import managementRoutes from "./management.routes";
@@ -155,6 +156,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
   apiRouter.use("/work-orders", workOrderItemsRoutes);
+  apiRouter.use("/work-orders", workOrderLaborRateRoutes);
   // Lignes de travail: préfixes dédiés, donc garde au montage — toute route
   // ajoutée plus tard dans ces routeurs est couverte d'office.
   apiRouter.use("/work-order-items", isTechnician, workOrderItemDetailRoutes);
