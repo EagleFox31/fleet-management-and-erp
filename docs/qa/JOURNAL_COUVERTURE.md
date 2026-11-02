@@ -1822,5 +1822,20 @@ soumission sans doublon.
 
 **Preuve**
 - Vert : 3/3 en deux passages consécutifs (rouge reconfirmé après passage des attentes de refetch en requêtes horodatées, un premier essai avait échoué sur une création lente de la base distante). Rouge : retrait temporaire de l'invalidation `/api/work-orders/statistics` dans `work_order_updated` (`useRealTimeSync.ts`) : échec à l'attente du refetch après le démarrage (spec ligne 132) ; mutation annulée, `git diff client` vide.
-- Défaut (test.fail, correctif à fleet-api) : `server/api/technician-work-orders.routes.ts:"+L+"` diffuse `work_order_updated` mais n'appelle pas `alertService.notifyWorkOrderProgress` (seul `server/routes.ts:2321` le fait) : pas d'alerte pour le chef quand le technicien démarre depuis son écran.
+- Défaut (test.fail, correctif à fleet-api) : `server/api/technician-work-orders.routes.ts:96` diffuse `work_order_updated` mais n'appelle pas `alertService.notifyWorkOrderProgress` (seul `server/routes.ts:2321` le fait) : pas d'alerte pour le chef quand le technicien démarre depuis son écran.
 - Non couvert : MIS1/P2 (affectation, étapes, lancement de mission au navigateur) faute de tours.
+
+## Piste F, relecture : témoin du chef et refetch borné par la trame
+
+**Quoi**
+- Gabarit non rempli `:"+L+"` remplacé par `:96` (`technician-work-orders.routes.ts`).
+- `e2e/15` : le témoin WO7 vérifie maintenant la trame `work_order_updated` de l'OT chez le chef ; les étapes création, démarrage, fin et suppression attendent la trame de CETTE transition (statut et identifiant dans la trame), puis n'acceptent qu'un refetch postérieur à son arrivée (marge 250 ms).
+
+**Comment**
+- `observe` renvoie aussi `frameLog` (trames horodatées) ; `frameArrival` renvoie l'instant d'arrivée.
+
+**Pourquoi**
+- Un refetch tardif d'une étape précédente pouvait satisfaire l'attente de la suivante ; le témoin ne vérifiait aucune trame.
+
+**Preuve**
+- `tsc` global : 0 erreur. Exécution e2e : voir l'entrée suivante.
