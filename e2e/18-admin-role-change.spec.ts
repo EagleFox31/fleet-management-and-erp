@@ -150,51 +150,76 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     }
   });
 
-  test.fail(
-    "ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)",
-    async ({ browser }) => {
+  // Les `test.fail` ne portent que l'action visée et l'assertion (tests/unit/server/it-fails-hygiene.test.ts) :
+  // comptes, sessions et navigation sont posés dans les hooks, avec leurs propres assertions.
+
+  test.describe("ADM2-3 : session ouverte avant le changement de rôle", () => {
+    let staleSession: APIRequestContext;
+    let closeStale: (() => Promise<void>) | undefined;
+
+    test.beforeAll(async ({ browser }) => {
       const target = await createAccount("warehouse", "stale");
       const session = await openSession(browser, target);
+      staleSession = session.request;
+      closeStale = () => session.context().close();
+      expect((await staleSession.get("/api/purchase-orders/group-suggestions")).status()).toBe(200);
       const adminPage = await openSession(browser, admin);
-      try {
-        await patchRole(adminPage.request, target.id, "logistics");
-        expect(await roleOf(target.id)).toBe("logistics");
-        // La logistique n'a pas le périmètre « pièces » : 403 attendu, 200 obtenu
-        // tant que requireAuth reprend le rôle figé en session.
-        expect((await session.request.get("/api/purchase-orders/group-suggestions")).status()).toBe(403);
-      } finally {
-        await session.context().close();
-        await adminPage.context().close();
-      }
-    },
-  );
-
-  test.fail("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ browser }) => {
-    const target = await createAccount("warehouse", "adm");
-    const adminPage = await openSession(browser, admin);
-    try {
-      await adminPage.goto("/admin/users", { waitUntil: "domcontentloaded" });
-      await adminPage.getByPlaceholder("Rechercher un utilisateur…").fill(target.username);
-      const row = adminPage.locator("tr", { hasText: target.username });
-      await expect(row).toBeVisible({ timeout: 60_000 });
-      await row.getByTitle("Modifier").click();
-      await expect(adminPage.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
-    } finally {
+      await patchRole(adminPage.request, target.id, "logistics");
       await adminPage.context().close();
-    }
+      expect(await roleOf(target.id)).toBe("logistics");
+      const me = (await (await staleSession.get("/api/auth/me")).json()) as { role: string };
+      expect(me.role).toBe("logistics");
+    });
+
+    test.afterAll(async () => {
+      await closeStale?.();
+    });
+
+    test.fail("ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)", async () => {
+      // La logistique n'a pas le périmètre « pièces » : 403 attendu, 200 obtenu
+      // tant que requireAuth reprend le rôle figé en session.
+      const res = await staleSession.get("/api/purchase-orders/group-suggestions");
+      expect(res.status()).toBe(403);
+    });
   });
 
-  test.fail("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ browser }) => {
-    const target = await createAccount("warehouse", "nopwd");
-    const adminPage = await openSession(browser, admin);
-    try {
-      const dialog = await openEditDialogOnUsersPage(adminPage, target.username);
-      await chooseRole(adminPage, dialog, "Technicien");
+  test.describe("ADM2-1 : édition depuis /admin/users", () => {
+    let target: E2ECredentials & { id: number };
+
+    test.beforeAll(async () => {
+      target = await createAccount("warehouse", "adm");
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, admin);
+      await page.goto("/admin/users", { waitUntil: "domcontentloaded" });
+      await page.getByPlaceholder("Rechercher un utilisateur…").fill(target.username);
+      await expect(page.locator("tr", { hasText: target.username })).toBeVisible({ timeout: 60_000 });
+    });
+
+    test.fail("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ page }) => {
+      await page.locator("tr", { hasText: target.username }).getByTitle("Modifier").click();
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
+    });
+  });
+
+  test.describe("ADM2-2 : mot de passe laissé vide sur /users", () => {
+    let target: E2ECredentials & { id: number };
+
+    test.beforeAll(async () => {
+      target = await createAccount("warehouse", "nopwd");
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, admin);
+      const dialog = await openEditDialogOnUsersPage(page, target.username);
+      await chooseRole(page, dialog, "Technicien");
       await expect(dialog.getByLabel(/Nouveau mot de passe/)).toHaveValue("");
-      await dialog.getByRole("button", { name: "Mettre à jour" }).click();
+    });
+
+    test.fail("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ page }) => {
+      await page.getByRole("dialog").getByRole("button", { name: "Mettre à jour" }).click();
       await expect.poll(() => roleOf(target.id), { timeout: 5_000 }).toBe("technician");
-    } finally {
-      await adminPage.context().close();
-    }
+    });
   });
 });

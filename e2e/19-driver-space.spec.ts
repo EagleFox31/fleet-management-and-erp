@@ -103,7 +103,7 @@ function captureFrames(page: Page): string[] {
   return frames;
 }
 
-async function openDashboard(page: Page, crew: Crew): Promise<void> {
+async function showDashboard(page: Page, crew: Crew): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByText(`#${crew.orderNumber}`)).toBeVisible({ timeout: 60_000 });
 }
@@ -138,7 +138,7 @@ test.describe("DRV2 : espace chauffeur", () => {
     for (const [own, other] of [[crewA, crewB], [crewB, crewA]] as const) {
       const page = await openSession(browser, own.user);
       try {
-        await openDashboard(page, own);
+        await showDashboard(page, own);
         await expect(page.getByText(own.registration).first()).toBeVisible();
         await expect(page.getByText(other.orderNumber)).toHaveCount(0);
         await expect(page.getByText(other.registration)).toHaveCount(0);
@@ -151,26 +151,31 @@ test.describe("DRV2 : espace chauffeur", () => {
     }
   });
 
-  test.fail("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ browser }) => {
-    const page = await openSession(browser, crewA.user);
-    try {
-      await openDashboard(page, crewA);
+  // Les `test.fail` ne portent que l'action visée et l'assertion (tests/unit/server/it-fails-hygiene.test.ts) :
+  // sessions et navigation sont posées dans les hooks, avec leurs propres assertions.
+
+  test.describe("DRV2-1 : déclaration de panne", () => {
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, crewA.user);
+      await showDashboard(page, crewA);
+    });
+
+    test.fail("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
       const status = await declareBreakdown(page);
       expect(status, "POST de la panne").toBeLessThan(300);
       await expect(page.getByText("Problème signalé")).toBeVisible();
-    } finally {
-      await page.context().close();
-    }
+    });
   });
 
-  test.fail("DRV2-2 : une panne crée un OT, reçu en temps réel par l'atelier", async ({ browser }) => {
-    test.setTimeout(120_000);
+  test.describe("DRV2-2 : la panne crée un OT vu par l'atelier", () => {
     let frames: string[] = [];
-    const atelier = await openSession(browser, workshop, (page) => {
-      frames = captureFrames(page);
-    });
-    const driverPage = await openSession(browser, crewB.user);
-    try {
+    let atelier: Page;
+    let driverPage: Page;
+
+    test.beforeEach(async ({ browser }) => {
+      atelier = await openSession(browser, workshop, (page) => {
+        frames = captureFrames(page);
+      });
       await atelier.goto("/maintenance/work-orders", { waitUntil: "domcontentloaded" });
       await expect
         .poll(() => frames.some((frame) => frame.includes("auth_success")), {
@@ -178,10 +183,17 @@ test.describe("DRV2 : espace chauffeur", () => {
           timeout: 60_000,
         })
         .toBe(true);
+      driverPage = await openSession(browser, crewB.user);
+      await showDashboard(driverPage, crewB);
+    });
 
-      await openDashboard(driverPage, crewB);
+    test.afterEach(async () => {
+      await atelier?.context().close();
+      await driverPage?.context().close();
+    });
+
+    test.fail("DRV2-2 : une panne crée un OT, reçu en temps réel par l'atelier", async () => {
       await declareBreakdown(driverPage);
-
       // Preuve temps réel : une trame, que le polling de la liste ne peut pas produire.
       await expect
         .poll(() => frames.some((frame) => frame.includes("work_order_created") && frame.includes(crewB.registration)), {
@@ -189,43 +201,32 @@ test.describe("DRV2 : espace chauffeur", () => {
           timeout: 15_000,
         })
         .toBe(true);
-      const created = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.vehicleId, crewB.vehicleId));
-      expect(created).toHaveLength(1);
+      const rows = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.vehicleId, crewB.vehicleId));
+      expect(rows).toHaveLength(1);
       await expect(atelier.getByText(crewB.registration).first()).toBeVisible();
-    } finally {
-      await atelier.context().close();
-      await driverPage.context().close();
-    }
+    });
   });
 
-  test.fail("DRV2-3 : GET /api/missions/:id d'un autre chauffeur est refusé (403)", async ({ browser }) => {
-    const page = await openSession(browser, crewA.user);
-    try {
-      expect((await page.request.get(`/api/missions/${crewB.missionId}`)).status()).toBe(403);
-    } finally {
-      await page.context().close();
-    }
-  });
+  test.describe("DRV2-3 : cloison entre chauffeurs à l'API", () => {
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, crewA.user);
+    });
 
-  test.fail("DRV2-3 : GET /api/missions ne liste pas la mission d'un autre chauffeur", async ({ browser }) => {
-    const page = await openSession(browser, crewA.user);
-    try {
-      const response = await page.request.get("/api/missions");
-      expect(response.status()).toBe(200);
-      const body = (await response.json()) as { id: number }[] | { missions?: { id: number }[]; data?: { id: number }[] };
-      const list = Array.isArray(body) ? body : body.missions ?? body.data ?? [];
+    test.fail("DRV2-3 : GET /api/missions/:id d'un autre chauffeur est refusé (403)", async ({ page }) => {
+      const res = await page.request.get(`/api/missions/${crewB.missionId}`);
+      expect(res.status()).toBe(403);
+    });
+
+    test.fail("DRV2-3 : GET /api/missions ne liste pas la mission d'un autre chauffeur", async ({ page }) => {
+      const res = await page.request.get("/api/missions");
+      expect(res.status()).toBe(200);
+      const list = (await res.json()) as { id: number }[];
       expect(list.map((m) => m.id)).not.toContain(crewB.missionId);
-    } finally {
-      await page.context().close();
-    }
-  });
+    });
 
-  test.fail("DRV2-3 : GET /api/drivers/:id/missions d'un autre chauffeur est refusé (403)", async ({ browser }) => {
-    const page = await openSession(browser, crewA.user);
-    try {
-      expect((await page.request.get(`/api/drivers/${crewB.driverId}/missions`)).status()).toBe(403);
-    } finally {
-      await page.context().close();
-    }
+    test.fail("DRV2-3 : GET /api/drivers/:id/missions d'un autre chauffeur est refusé (403)", async ({ page }) => {
+      const res = await page.request.get(`/api/drivers/${crewB.driverId}/missions`);
+      expect(res.status()).toBe(403);
+    });
   });
 });
