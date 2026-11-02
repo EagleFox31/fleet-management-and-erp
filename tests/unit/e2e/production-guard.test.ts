@@ -18,7 +18,16 @@ const env = (v: Record<string, string>) => v as unknown as NodeJS.ProcessEnv;
 describe("production-guard (e2e)", () => {
   it("extrait l'hôte, même avec un mot de passe contenant des caractères spéciaux", () => {
     expect(hostOf("postgresql://u:p@ss@Host.Example:5432/db?x=1")).toBe("host.example:5432");
-    expect(hostOf("pas une url")).toBe("");
+  });
+
+  it("renvoie l'hôte d'une URL sans identifiants : la production n'y échappe pas", () => {
+    expect(hostOf("postgresql://ep-bitter-term-ai6i3ey4.eu-central-1.aws.neon.tech/db")).toBe(
+      "ep-bitter-term-ai6i3ey4.eu-central-1.aws.neon.tech",
+    );
+    expect(hostOf("postgres://Host.Example:5432")).toBe("host.example:5432");
+    const prod = "postgresql://ep-bitter-term-ai6i3ey4.eu-central-1.aws.neon.tech/db";
+    expect(matchProductionMarker(prod, productionMarkers(env({})))).toBe("ep-bitter-term-ai6i3ey4");
+    expect(() => assertNotProductionDatabase(env({ DATABASE_URL: prod }), noDotenv)).toThrow(/production/);
   });
 
   it("reconnaît l'endpoint de production, pooler ou non", () => {
@@ -75,6 +84,14 @@ describe("production-guard (e2e)", () => {
 
   it("playwright.config.ts appelle le garde-fou", () => {
     expect(readFileSync("playwright.config.ts", "utf8")).toMatch(/assertNotProductionDatabase\(\)/);
+  });
+});
+
+describe("playwright.config.ts : serveur", () => {
+  it("ne réutilise jamais un serveur déjà lancé (il pourrait viser la production)", () => {
+    const config = readFileSync("playwright.config.ts", "utf8");
+    expect(config).toMatch(/reuseExistingServer:\s*false/);
+    expect(config).not.toMatch(/reuseExistingServer:(?!\s*false)/);
   });
 });
 
