@@ -131,6 +131,13 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
+/**
+ * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
+ * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
+ * des contrôles de `server/api/document-renewals.routes.ts`.
+ */
+export const DOCUMENT_RENEWAL_WRITER_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 

@@ -8,6 +8,7 @@ import { db } from "../db";
 import { authenticate, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
+import { DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
 import {
   DOCUMENT_RENEWAL_REQUEST_STATUSES,
   documentRenewalTransitionRefusal,
@@ -26,7 +27,7 @@ import {
 const router = Router();
 router.use(authenticate);
 
-const CREATE_ROLES = new Set(["admin", "secretary", "logistics", "workshop_manager"]);
+const CREATE_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_WRITER_ROLES);
 const VIEW_ROLES = new Set(["admin", "secretary", "logistics", "workshop_manager", "technician"]);
 const REQUESTABLE_DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"] as const;
 
