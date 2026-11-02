@@ -47,12 +47,12 @@ PowerShell : `$env:DATABASE_URL_TEST="postgres://fleet:fleet@postgres:5432/fleet
 Plusieurs sessions ou agents en parallèle : une base dédiée chacun dans le même conteneur, jamais `fleet_test` partagée. Un `drizzle-kit push` d'une autre branche y change le schéma entre deux passages et fait échouer des tests sains (échec labor-catalog non reproduit, novembre 2026).
 
 ```bash
-docker exec fleetmaster20-main-postgres-1 createdb -U fleet fleet_test_<session>
+docker compose -f docker-compose.test.yml exec postgres createdb -U fleet fleet_test_<session>
 DATABASE_URL=postgres://fleet:fleet@localhost:54320/fleet_test_<session> node node_modules/drizzle-kit/bin.cjs push --force
 DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test_<session> DATABASE_WS_PROXY=localhost:5433/v1 npm run test:contract
 ```
 
-Repousser le schéma à chaque changement de branche. Supprimer la base en fin de chantier (`dropdb -U fleet fleet_test_<session>`), pas avec `test:db:down`, qui détruit le volume de tout le monde.
+Repousser le schéma à chaque changement de branche. Supprimer la base en fin de chantier (`docker compose -f docker-compose.test.yml exec postgres dropdb -U fleet fleet_test_<session>`), pas avec `test:db:down`, qui détruit le volume de tout le monde.
 
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
