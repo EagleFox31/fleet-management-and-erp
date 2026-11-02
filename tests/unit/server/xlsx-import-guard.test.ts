@@ -73,6 +73,19 @@ describe("readZipDirectory", () => {
     expect(readZipDirectory(Buffer.alloc(10))).toBeNull();
   });
 
+  it("au-delà du budget : AppError 400 lisible, jamais l'erreur interne de la garde", () => {
+    const z = zip({ "a.txt": new Uint8Array(1000), "b.txt": new Uint8Array(500) });
+    let thrown: unknown;
+    try {
+      readZipDirectory(z, 1200);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).status).toBe(400);
+    expect((thrown as AppError).message).toMatch(/décompressé/);
+  });
+
   it("refuse un zip tronqué", () => {
     const z = realWorkbook();
     expect(readZipDirectory(z.subarray(0, Math.floor(z.length / 2)))).toBeNull();

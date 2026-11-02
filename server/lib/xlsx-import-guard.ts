@@ -206,7 +206,15 @@ function rebuild(entries: ZipEntryContent[]): Buffer {
   return Buffer.from(zipSync(files, { level: 0, mtime: CANONICAL_MTIME }));
 }
 
-/** Lit et mesure le zip ; `null` si le tampon n'est pas un zip exploitable. */
+function tooLargeError(maxUncompressedBytes: number): AppError {
+  const megabytes = Math.round((maxUncompressedBytes / (1024 * 1024)) * 100) / 100;
+  return new AppError(400, `Fichier Excel trop volumineux une fois décompressé : ${megabytes} Mo maximum.`);
+}
+
+/**
+ * Lit et mesure le zip ; `null` si le tampon n'est pas un zip exploitable, AppError 400 lisible
+ * au-delà du budget décompressé (jamais l'erreur interne de la garde).
+ */
 export function readZipDirectory(
   buffer: Buffer,
   maxUncompressedBytes: number = Number.MAX_SAFE_INTEGER,
@@ -215,7 +223,7 @@ export function readZipDirectory(
     const { entries, uncompressedBytes } = inspect(buffer, maxUncompressedBytes);
     return { entries: entries.length, uncompressedBytes };
   } catch (error) {
-    if (error instanceof ZipTooLarge) throw error;
+    if (error instanceof ZipTooLarge) throw tooLargeError(maxUncompressedBytes);
     return null;
   }
 }
@@ -229,10 +237,7 @@ export function canonicalWorkbookArchive(buffer: Buffer, maxUncompressedBytes: n
   try {
     return rebuild(inspect(buffer, maxUncompressedBytes).entries);
   } catch (error) {
-    if (error instanceof ZipTooLarge) {
-      const megabytes = Math.round((maxUncompressedBytes / (1024 * 1024)) * 100) / 100;
-      throw new AppError(400, `Fichier Excel trop volumineux une fois décompressé : ${megabytes} Mo maximum.`);
-    }
+    if (error instanceof ZipTooLarge) throw tooLargeError(maxUncompressedBytes);
     // Lecture hors bornes (RangeError), zip incohérent ou reconstruction impossible : même refus.
     throw new AppError(400, "Fichier Excel illisible.", { cause: error });
   }

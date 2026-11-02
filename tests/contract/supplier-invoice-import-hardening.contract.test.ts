@@ -267,4 +267,30 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect(body).toMatchObject({ success: 12, failed: 0, total: 12 });
     expect((await rowsFor(`${number}-far1`)).length).toBe(1);
   });
+
+  // Une cellule seule en colonne XFD fait d'une ligne dense un tableau creux de 16 384 : un
+  // parcours par indice jusqu'à `length` coûte la largeur, pas les cellules (279c2ad : 147 s sur
+  // 302 478 lignes, boucle d'événements bloquée). La réponse doit rester bornée par les cellules présentes.
+  for (const variant of [
+    { name: "xfd", cell: (r: number) => `<c r="XFD${r}"><v>1</v></c>` },
+    { name: "xfdblank", cell: (r: number) => `<c r="XFD${r}" t="inlineStr"><is><t xml:space="preserve"> </t></is></c>` },
+  ]) {
+    it(`${variant.name} : 40 000 lignes d'une seule cellule en XFD, refus 400 en moins de 2 s`, async () => {
+      const rows: string[] = [];
+      for (let r = 1; r <= 40000; r++) rows.push(`<row r="${r}">${variant.cell(r)}</row>`);
+      const file = withSheetXml(toBuffer(XLSX.utils.aoa_to_sheet([["a"]])), (xml) => {
+        expect(xml).toMatch(/<sheetData>[\s\S]*<\/sheetData>/);
+        return xml
+          .replace(/<dimension [^>]*\/>/, "")
+          .replace(/<sheetData>[\s\S]*<\/sheetData>/, `<sheetData>${rows.join("")}</sheetData>`);
+      });
+      const started = performance.now();
+      const { status, body } = await importFile(file);
+      const elapsed = performance.now() - started;
+      expect(status).toBe(400);
+      expect(body.message).toMatch(/trop long/);
+      expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+      expect(elapsed).toBeLessThan(2000);
+    }, 600000);
+  }
 });

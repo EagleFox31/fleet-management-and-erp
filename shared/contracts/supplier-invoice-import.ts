@@ -12,9 +12,10 @@ export const SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Taille décompressée maximale du classeur (octets), mesurée en décompressant réellement chaque
- * entrée du zip. 5000 lignes de facture font quelques Mo de XML ; à 15 Mo, la feuille est lue en
- * entier (sans fenêtre de lignes) en ~0,9 s et +155 Mo au pire (mesure du 2 novembre 2026,
- * feuille pleine ou creuse). À 50 Mo, la même lecture prenait ~4 s.
+ * entrée du zip. 5000 lignes de facture font environ 3,3 Mo de XML ; à 15 Mo, la feuille est lue
+ * en entier (sans fenêtre de lignes) en 0,8 à 1,1 s, de +26 à +225 Mo de RSS selon sa forme (feuille
+ * pleine, creuse, cellules en XFD ; mesures du 2 novembre 2026, le haut de la plage sur une feuille
+ * creuse aux lignes espacées de 100). À 50 Mo, la même lecture prenait ~4 s.
  */
 export const SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES = 15 * 1024 * 1024;
 

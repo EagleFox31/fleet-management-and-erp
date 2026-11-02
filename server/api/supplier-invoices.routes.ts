@@ -14,6 +14,7 @@ import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { uploadedFileCandidates } from "../lib/uploaded-file";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
+import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
   SUPPLIER_INVOICE_IMPORT_COLUMNS,
   SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES,
@@ -972,56 +973,6 @@ function pickImportColumns(raw: Record<string, unknown>): Record<string, unknown
   return row;
 }
 
-function isBlankCell(value: unknown): boolean {
-  return value === undefined || value === null || String(value).trim() === "";
-}
-
-/** Dernière ligne adressable d'une feuille Excel (indice 0). */
-const EXCEL_LAST_ROW_INDEX = 1_048_575;
-
-/**
- * Recale l'étendue `!ref` d'une feuille lue en mode dense sur ses cellules réelles et renvoie le
- * nombre de lignes de données non vides (hors en-tête). La balise `<dimension>` du fichier n'est
- * pas crue : déclarée trop grande, elle ferait refuser un petit fichier ; absente ou trop petite,
- * elle ferait ignorer des lignes en silence. Les colonnes sont bornées aux en-têtes attendus pour
- * que `sheet_to_json` ne parcoure pas une cellule isolée en colonne XFD sur chaque ligne.
- */
-function fitRangeToCells(worksheet: XLSX.WorkSheet): number {
-  const rows = (worksheet["!data"] ?? []) as Array<Array<XLSX.CellObject | undefined> | undefined>;
-  let headerRow = -1;
-  let lastRow = -1;
-  let dataRows = 0;
-  for (const key of Object.keys(rows)) {
-    const r = Number(key);
-    const cells = rows[r];
-    if (!cells || !Array.isArray(cells)) continue;
-    if (!cells.some((cell) => cell && !isBlankCell(cell.v))) continue;
-    if (r > EXCEL_LAST_ROW_INDEX) {
-      throw new AppError(400, "Fichier Excel invalide : ligne au-delà de la limite d'Excel (1 048 576).");
-    }
-    if (headerRow < 0) headerRow = r;
-    else dataRows++;
-    lastRow = r;
-  }
-  if (headerRow < 0) {
-    delete worksheet["!ref"];
-    return 0;
-  }
-  const expected = new Set<string>(SUPPLIER_INVOICE_IMPORT_COLUMNS);
-  const header = rows[headerRow] ?? [];
-  let firstCol = -1;
-  let lastCol = -1;
-  header.forEach((cell, c) => {
-    if (!cell || isBlankCell(cell.v)) return;
-    if (!expected.has(cell.w ?? String(cell.v))) return;
-    if (firstCol < 0) firstCol = c;
-    lastCol = c;
-  });
-  if (firstCol < 0) firstCol = lastCol = 0;
-  worksheet["!ref"] = XLSX.utils.encode_range({ s: { r: headerRow, c: firstCol }, e: { r: lastRow, c: lastCol } });
-  return dataRows;
-}
-
 router.post("/import", checkCreatePermission, (req: Request, res: Response, next: NextFunction) => {
   uploadExcel(req, res, async (err) => {
     if (err) {
@@ -1051,18 +1002,10 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
           dense: true,
         });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        if (worksheet) {
-          const dataRows = fitRangeToCells(worksheet);
-          if (dataRows > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
-            throw new AppError(
-              400,
-              `Fichier trop long : ${dataRows} lignes de données trouvées, ${SUPPLIER_INVOICE_IMPORT_MAX_ROWS} maximum. Découpez-le en plusieurs fichiers.`,
-            );
-          }
-        }
-        const rawRows = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+        const sheet = worksheet ? compactImportSheet(worksheet) : null;
+        const rawRows = sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet) : [];
         if (rawRows.length > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
-          throw new AppError(400, `Fichier trop long : ${SUPPLIER_INVOICE_IMPORT_MAX_ROWS} lignes maximum. Découpez-le en plusieurs fichiers.`);
+          throw importTooLongError(`${rawRows.length} lignes de données trouvées`);
         }
         data = rawRows.map(pickImportColumns);
       } catch (parseError) {
