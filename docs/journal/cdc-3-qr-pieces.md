@@ -33,3 +33,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Un lien QR ouvert par un utilisateur déconnecté atterrit sur la connexion puis le tableau de bord (pas de `?next=`, voir l'entrée CDC-0b du 31 octobre) : à traiter côté client.
   - Écarts d'écran, non corrigés (fichiers client interdits) : `part-scanner` déclare encore `GET` et `POST /api/part-scans` (la racine répond désormais 404) ; à remplacer par `GET /api/part-scans/resolve`. `part-labels` déclare `GET /api/parts` ; l'écran a besoin de `GET /api/part-scans/labels` (rôles identiques : `PART_LABEL_ROLES`).
   - Recherche par expression `upper(btrim(reference))` : un code-barres de référence dont la casse seule diffère de deux pièces donne 409. Une contrainte d'unicité sur cette expression (tâche `fleet-db`) supprimerait le cas ; non faite ici (colonne et index gelés).
+
+## 2026-11-02T13:05:29+01:00 — CDC-3 — Réalignement sur lot/int/CDC-0-base
+
+- **Agent** : api · **Branche** : `lot/api/CDC-3-qr-pieces` · **Commits** : 0bedd1e, 6cf1943
+- **Statut** : fait, relu par la session tests
+- **Quoi** : après les fusions squash de #58 et #59, la PR #60 cible `lot/int/CDC-0-base`, et la base est fusionnée dans la branche (pas de réécriture d'historique).
+- **Comment** : conflit `useRealTimeSync.ts` résolu en gardant le cas `alerts_read` de la base ; `part-scans-routes.test.ts` simule `findActiveSessionUser`, lu désormais par les gardes. 6cf1943 réaligne deux tests périmés depuis #58 (garde de `/api/kpi`, clés KPI sorties de `AWAITING_SCREEN`).
+- **Pourquoi** : ces deux tests étaient rouges sur la base elle-même ; le code était juste.
+- **Preuves** : tsc 0 ; unitaires 1313/1314 (rouge connu `pending-invoices-kpi-roles`) ; contrats `part-scans` + `cdc-mounts` 55/55 sous db-lock (session tests).
