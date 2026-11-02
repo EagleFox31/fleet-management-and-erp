@@ -62,3 +62,5 @@ AAA + factory. Un test qui fait `if (rows.length > 0)` ne teste rien : créer la
 Règle d'or : un bug SQL se rattrape en intégration, un 403 en contrat, un graphe de statut en unitaire. L'e2e ne sert pas à découvrir un UNIQUE.
 
 Un `it.fails` / `test.fail` ne contient que l'appel visé et l'assertion métier : la mise en place (création, POST de fixture, `save()`) va dans `beforeAll` ou un `it` témoin, sinon un setup en échec le fait passer au vert. Garde-fou : `tests/unit/server/it-fails-hygiene.test.ts` (liste gelée).
+
+Pas de `vi.mock` / `vi.doMock` dans `tests/contract` : la config contrat tourne en `isolate: false` (une app et un pool par processus, volontaire), le mock ne s'applique que si aucun fichier précédent du shard n'a chargé le module. Simuler la panne en base (trigger temporaire levant `23505`, voir `document-renewal-centers.contract.test.ts`) ou par injection de dépendance. Garde-fou : `tests/unit/server/contract-no-vi-mock.test.ts`.
