@@ -85,3 +85,14 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Pourquoi** : revue sécurité (le chauffeur lisait le taux horaire) et relecture (PDF qui pouvait diverger du KPI, montant sans explication).
 - **Reporté** : 2 requêtes par OT dans `getTechnicianWorkOrders` (N+1 déjà présent) ; la création d'un taux n'invalide pas `/api/work-orders/*/labor-rate` (relu au plus tard après 5 min de `staleTime`).
 - **Preuves** : tsc 0 ; unitaires 1054/1055 (rouge connu `pending-invoices-kpi-roles`, gelé) dont `tests/unit/shared/work-order-cost-roles.test.ts` ; contrat `work-order-labor-rate` complété (chauffeur 403, 404, 400), à rejouer.
+
+## 2026-11-02T12:14:51+01:00 — CDC-7 — Période des KPI bornée (PR #91)
+
+- **Agent** : api · **Branche** : `lot/api/CDC-7-kpi-period` · **Commit** : voir `git log`
+- **Statut** : fait, contrats joués
+- **Quoi** : une période KPI démesurée (`to=9999-12-30`) ou une date hors calendrier (`2026-02-31`) faisait boucler `monthKeysBetween` pendant plusieurs secondes avant une 500. Elle est désormais refusée en 400 avant tout calcul.
+- **Comment** : `shared/contracts/kpi-period.ts` (date réelle, années 2000-2100, 36 mois civils au plus), appliqué à `kpiQuerySchema`, `maintenanceCostsQuerySchema` et `kpiReportQuerySchema`. Le travail venait de la branche orpheline `wip/kpi-period` (31/10), reprise sur décision de l'utilisateur.
+- **Pourquoi** : une entrée utilisateur ne doit pas pouvoir coûter des secondes de CPU ni produire une 500.
+- **Rupture de contrat d'entrée** : volontaire. Une période de plus de 36 mois ou hors 2000-2100 passe de 200 (ou 500) à 400. Aucun écran n'envoie de période (`<KpiTiles />` sans props) ; seuls `kpi-cdc` et `kpi.contract` appellent ces routes.
+- **Limite** : une seule borne n'est pas soumise aux 36 mois (la borne manquante est complétée par le serveur) ; le pire cas est d'environ 1 200 mois, sans blocage.
+- **Preuves** : tsc 0 ; unitaires `tests/unit/shared/kpi-period.test.ts` + `kpi-rules-cdc` 47/47 ; contrats `kpi-cdc` + `kpi` + `lot-exports-roles` 209/209 (session de tests).

@@ -995,3 +995,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
+
+## 2026-11-02 - Période KPI démesurée : plusieurs secondes de calcul puis 500
+
+### Constat
+- `GET /api/kpi/*` et `GET /api/exports/kpi-report` acceptaient `to=9999-12-30` ou `2026-02-31`. Le calcul des mois de la période bouclait plusieurs secondes avant une 500.
+
+### Cause racine
+- `isoDateSchema` ne contrôle que la forme `AAAA-MM-JJ`, pas la date ni son étendue. La boucle `monthKeysBetween` (`server/lib/kpi-rules.ts`) est linéaire en nombre de mois. Classification : entrée utilisateur non bornée qui pilote un coût de calcul.
+
+### Résolution
+- `shared/contracts/kpi-period.ts` : date réelle du calendrier, années 2000-2100, 36 mois civils au plus ; réponse 400 lisible.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/kpi-period.test.ts` : les quatre schémas refusent période démesurée, date inexistante et années hors bornes.
+- `tests/contract/kpi-cdc.contract.test.ts` : 400 sans détail technique sur ces cas, pour les KPI et le rapport.
+
+### Règle Projet (obligatoire)
+- Tout paramètre de requête qui fixe la taille d'un calcul (période, pagination, profondeur) est borné dans son schéma Zod partagé ; `isoDateSchema` seul ne suffit pas pour une période.

@@ -136,9 +136,12 @@ describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
     const res = await call("GET", KPI_PREVENTIVE_COMPLIANCE_PATH + q, "management");
     expect(preventiveComplianceResponseSchema.safeParse(res.body).success).toBe(true);
     expect(res.body.rate).toBeNull();
-    const future = await call("GET", `${KPI_PREVENTIVE_COMPLIANCE_PATH}?from=2001-01-01&to=2999-01-01`, "admin");
+    // Fenêtre qui déborde dans le futur, sous la limite de 36 mois de `kpi-period.ts`.
+    const year = new Date().getUTCFullYear();
+    const futureEnd = `${year + 2}-01-01`;
+    const future = await call("GET", `${KPI_PREVENTIVE_COMPLIANCE_PATH}?from=${year}-01-01&to=${futureEnd}`, "admin");
     expect(future.status).toBe(200);
-    expect(future.body.periodEnd < "2999-01-01").toBe(true);
+    expect(future.body.periodEnd < futureEnd).toBe(true);
   });
 
   it("coût moyen et ventilations : formes du contrat", async () => {
@@ -160,6 +163,10 @@ describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
       `${KPI_PREVENTIVE_COMPLIANCE_PATH}?from=hier`,
       `${KPI_MAINTENANCE_COSTS_PATH}?groupBy=chauffeur`,
       `${KPI_MAINTENANCE_COSTS_PATH}?from=2021-01-01&to=2020-01-01`,
+      // Période démesurée ou date hors calendrier : refusées avant tout calcul (plus de 500).
+      `${KPI_FAILURES_PATH}?from=2001-01-01&to=9999-12-30`,
+      `${KPI_PREVENTIVE_COMPLIANCE_PATH}?to=2026-02-31`,
+      `${KPI_MAINTENANCE_COSTS_PATH}?from=2020-01-01&to=2023-01-31`,
     ];
     for (const path of bad) {
       const res = await call("GET", path, "management");
@@ -255,7 +262,14 @@ describe("/api/exports/kpi-report", { timeout: 180000 }, () => {
   it("sans période : dernier mois terminé ; paramètres invalides : 400", async () => {
     process.env.FEATURE_FLAGS = "exports=on,kpi-reports=on";
     expect((await call("GET", path, "admin")).status).toBe(200);
-    for (const q of ["format=csv", "period=annee", "from=2021-01-01&to=2020-01-01", "from=hier"]) {
+    for (const q of [
+      "format=csv",
+      "period=annee",
+      "from=2021-01-01&to=2020-01-01",
+      "from=hier",
+      "from=2001-01-01&to=9999-12-30",
+      "to=2026-02-31",
+    ]) {
       const res = await call("GET", `${path}?${q}`, "admin");
       expect(res.status, q).toBe(400);
       expect(res.body).toMatchObject({ code: expect.any(String), message: expect.any(String) });

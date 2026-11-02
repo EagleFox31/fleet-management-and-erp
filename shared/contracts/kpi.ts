@@ -8,7 +8,8 @@
  * chantier CDC sont facultatifs (contrat figé : ajout seulement). Rôles : `KPI_VIEWER_ROLES`.
  */
 import { z } from "zod";
-import { dateRangeQuerySchema, isoDateSchema } from "./common";
+import { isoDateSchema } from "./common";
+import { kpiDateSchema, kpiPeriodQuerySchema, refineKpiPeriod } from "./kpi-period";
 
 export const KPI_INCIDENTS_PER_MONTH_PATH = "/api/kpi/incidents-per-month";
 export const KPI_PREVENTIVE_COMPLIANCE_PATH = "/api/kpi/preventive-compliance";
@@ -18,7 +19,8 @@ export const KPI_FAILURES_PATH = "/api/kpi/failures";
 /** Coût d'entretien ventilé par type (préventif / correctif) ou par véhicule. */
 export const KPI_MAINTENANCE_COSTS_PATH = "/api/kpi/maintenance-costs";
 
-export const kpiQuerySchema = dateRangeQuerySchema;
+/** Période bornée (date réelle, 2000-2100, 36 mois au plus) : voir `kpi-period.ts`. */
+export const kpiQuerySchema = kpiPeriodQuerySchema;
 
 /** Mois `AAAA-MM`. */
 const monthSchema = z.string().regex(/^\d{4}-\d{2}$/);
@@ -83,14 +85,11 @@ export type KpiCostGroup = (typeof KPI_COST_GROUPS)[number];
 
 export const maintenanceCostsQuerySchema = z
   .object({
-    from: isoDateSchema.optional(),
-    to: isoDateSchema.optional(),
+    from: kpiDateSchema.optional(),
+    to: kpiDateSchema.optional(),
     groupBy: z.enum(KPI_COST_GROUPS).default("type"),
   })
-  .refine((q) => !q.from || !q.to || q.from <= q.to, {
-    message: "La date de début doit précéder la date de fin.",
-    path: ["from"],
-  });
+  .superRefine(refineKpiPeriod);
 
 const costGroupSchema = z.object({
   /** `preventive` / `corrective` pour `groupBy=type` ; l'identifiant du véhicule sinon. */
