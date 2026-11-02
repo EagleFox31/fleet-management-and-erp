@@ -1717,3 +1717,59 @@ soumission sans doublon.
 
 **Preuve**
 - Rouge sur le code d'avant (les deux fichiers sources restaurés) : 2 échecs sur 16. Vert après : 16/16.
+
+
+## Piste D, étape 1 : cliquets T1, T3, T4 sur les routes d'écriture
+
+**Quoi**
+- `tests/unit/server/write-routes-ratchet.test.ts` (12 cas, sans base) : analyse statique de toutes les routes POST/PUT/PATCH/DELETE de `server/routes.ts` et `server/api/*.routes.ts` (138 routes après dédoublonnage, Express servant la première déclaration). Trois cliquets : T1 garde de rôle (23 routes gelées), T3 validation du corps (32 sur 88 qui lisent `req.body`), T4 protection des champs serveur (32).
+- `tests/unit/server/support/write-routes-scan.ts` (détection, préfixe de montage par routeur, y compris les routeurs multiples de `work-order-items.routes.ts`) et `support/write-routes-frozen.ts` (les trois listes).
+- Plan : T1, T3, T4 passent à « OK avec cliquet ».
+
+**Comment**
+- Même principe que `vehicle-routes-guard` et `routes-hygiene` : liste gelée, échec dans les deux sens (nouvelle route non conforme, ou entrée gelée devenue conforme). Le message nomme la route et dit quoi faire.
+- Ne sont pas des gardes de rôle : `authenticate`, `isAnyUser`, `requireFeature`, `requireAuth`, `checkAuth`, téléversement. Garde au montage (`apiRouter.use("/x", isStaff, ...)`) comptée.
+- Limite : texte seulement. Un handler passé par référence n'est pas lu pour T3/T4 ; un contrôle fait dans une fonction appelée n'est pas vu (la route reste gelée). Premier passage : le téléversement `upload.single` était pris pour une garde (regex corrompue), la route `post /api/workflows/:sessionId/documents` a été révélée par le test lui-même puis gelée.
+
+**Pourquoi**
+- T1, T3 et T4 n'ont pas de fin naturelle (« toute route ») : un cliquet fige l'existant et interdit la régression, au lieu d'un test par route.
+
+**Preuve**
+- Rouge : route factice `app.post("/api/zz-fake", authenticate, ... values(req.body))` ajoutée temporairement à `server/routes.ts` : 3 cas échouent (T1, T3, T4) en nommant `post /api/zz-fake`. Entrée gelée inexistante ajoutée : le cas T1 échoue (« la liste ne peut que rétrécir »). Retirés : 12/12 vert.
+- `tsc` global : 0 erreur. `npm test` : 82 fichiers, 895 tests verts (avant : 81 fichiers, 883).
+- À examiner par fleet-api (non corrigé ici) : `server/routes.ts:5178` `post /api/test-date-maintenance` (route de test accessible à tout compte connecté) ; `server/api/document-renewals.routes.ts:861` `post /quick-renew` sans garde de rôle.
+
+
+## Piste D, étape 2 : WO6, bord de mois, d'année et fuseau des pointages
+
+**Quoi**
+- `tests/integration/time-tracking-month-boundary.test.ts` (10 cas) : 31 mars / 1er avril, 31 décembre / 1er janvier (l'année change avec le mois), 29 février bissextile, rejeu du dernier jour du mois sans doublon, et le jour saisi relu à l'identique sous TZ = Kiritimati (+14), Pago Pago (-11), Los Angeles, UTC. Année 2033, aucune autre suite n'y écrit. Nettoyage des lignes et du compte créés.
+- 2 `it.fails` (défaut produit) : 30 février et 29 février 2033 ne sont pas refusés en 400.
+- Plan : WO6 mis à jour.
+
+**Comment**
+- Branche Neon `tests-piste-c`, sous `db-lock`. `month` et `year` sont tirés de la chaîne reçue (`time-tracking-service.ts:28`), jamais d'un `Date` : le fuseau du processus est sans effet, le test le fige.
+
+**Pourquoi**
+- WO6 notait « bord de mois et fuseau non testés ».
+
+**Preuve**
+- 13/13 verts avec les 3 cas existants (premier essai : délai de 10 s des hooks dépassé sur la branche froide, relancé avec 60 s). Les 2 `it.fails` passent donc la date impossible lève une erreur qui n'est pas un 400. Pas de rouge sur la version fautive pour les cas de bord : il n'y a pas de défaut de bord, ce sont des garde-fous de comportement correct. Second passage (idempotence) non rejoué faute de tours : nettoyage en `afterAll`.
+- Défaut : `shared/contracts/common.ts:12` (`isoDateSchema` ne vérifie que la forme) puis `server/services/time-tracking-service.ts:27` (`::date` en SQL) : erreur de base au lieu de 400. Correctif à fleet-api.
+
+## Piste D, relecture : les cliquets jugent la route réellement servie
+
+**Quoi**
+- `write-routes-scan.ts` (`allWriteRoutes`) lisait `routes.ts` d'abord. Or `server/app.ts` monte `apiRouter` avant `registerRoutes` : Express sert la version de `server/api`. Les routeurs sont maintenant lus dans l'ordre de montage de `server/api/index.ts` (`mountOrder`), `routes.ts` en dernier.
+- Un garde qui rend la main par `next()` sans répondre (`admin-users-guard.routes.ts`) ne masque plus la vraie route : il est écarté (`isPassThrough`) et ses middlewares (`isAdmin`) sont prêtés à la déclaration servie.
+- Listes gelées : T1 perd `post /api/fuel-card/consumption` ; T3 et T4 perdent `post /api/workflows/vehicle-acquisition` et `patch /api/workflows/vehicle-acquisition/:sessionId`. Aucune entrée ajoutée : aucune route servie non gardée n'est apparue.
+- Non fait : les clés issues de gabarits (`relative(alertPath(":id"))`) restent telles quelles ; les résoudre demande de lire les constantes de chemin, pas simple.
+
+**Comment**
+- `tests/unit/server/write-routes-ratchet.test.ts` : l'ordre `app.use("/api", apiRouter)` avant `registerRoutes`, la version servie de `fuel-card/consumption` vient de `api/fuel-card.routes.ts` et est gardée, ordre de montage, garde `next()` (détection et prêt de middlewares).
+
+**Pourquoi**
+- Les cliquets jugeaient la version morte de routes dupliquées : une route servie gardée figurait comme non gardée, et inversement une route non gardée pouvait échapper.
+
+**Preuve**
+- Rouge avec `routes.ts` remis en premier : 4 échecs (ordre, T1, T3, T4). Vert avec l'ordre corrigé : 15/15.
