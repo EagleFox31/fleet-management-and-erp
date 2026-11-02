@@ -1,13 +1,34 @@
-import { Router } from "express";
-import { insertPartSchema } from "@shared/schema";
+import { Router, type NextFunction, type Request } from "express";
+import {
+  insertPartSchema,
+  insertPartSpecificationSchema,
+  insertPartVariantSchema,
+  updatePartSpecificationSchema,
+  updatePartVariantSchema,
+} from "@shared/schema";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
-import { authenticate, isAdmin, isPartsCatalogManager } from "../middleware/auth";
+import { authenticate, isAdmin, isPartsCatalogManager, isStaff } from "../middleware/auth";
+import { partCatalogChildrenService } from "../services/part-catalog-children-service";
 import { partsService } from "../services/parts-service";
 
 const log = moduleLogger("parts-catalog");
 const router = Router();
+
+function idParam(value: string, label: string): number {
+  const id = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new AppError(400, `${label} invalide`);
+  return id;
+}
+
+/** Les AppError et ZodError sont normalisées par le gestionnaire central ; le reste devient une 500 journalisée. */
+function failWith(err: unknown, req: Request, next: NextFunction, logMessage: string) {
+  if (err instanceof AppError) return next(err);
+  if (err instanceof Error && err.name === "ZodError") return next(err);
+  log.error({ err, requestId: req.requestId }, logMessage);
+  return next(new AppError(500, "Erreur serveur", { cause: err }));
+}
 
 /**
  * Création et suppression de fiches pièce. Montées avant les handlers
@@ -39,6 +60,99 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
     if (err instanceof AppError) return next(err);
     log.error({ err, requestId: req.requestId }, "Échec de la suppression de la pièce");
     return next(new AppError(500, "Erreur serveur", { cause: err }));
+  }
+});
+
+/**
+ * Spécifications et variantes d'une fiche pièce (PRT1). Lecture : tout le personnel (le technicien et
+ * l'atelier choisissent une variante dans une demande) ; écriture : admin et magasin (isPartsCatalogManager).
+ * Référentiel : pas d'événement temps réel, la liste se relit à l'ouverture de la fiche.
+ */
+router.get("/parts/:id([0-9]+)/specifications", isStaff, async (req, res, next) => {
+  try {
+    return res.json(await partCatalogChildrenService.listSpecifications(idParam(req.params.id, "Identifiant de pièce")));
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la lecture des spécifications de la pièce");
+  }
+});
+
+router.post("/parts/:id([0-9]+)/specifications", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    const data = insertPartSpecificationSchema.parse(req.body ?? {});
+    const created = await partCatalogChildrenService.createSpecification(idParam(req.params.id, "Identifiant de pièce"), data);
+    return res.status(201).json(created);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la création de la spécification");
+  }
+});
+
+router.patch("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    const data = updatePartSpecificationSchema.parse(req.body ?? {});
+    const updated = await partCatalogChildrenService.updateSpecification(
+      idParam(req.params.id, "Identifiant de pièce"),
+      idParam(req.params.specId, "Identifiant de spécification"),
+      data,
+    );
+    return res.json(updated);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la modification de la spécification");
+  }
+});
+
+router.delete("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    await partCatalogChildrenService.deleteSpecification(
+      idParam(req.params.id, "Identifiant de pièce"),
+      idParam(req.params.specId, "Identifiant de spécification"),
+    );
+    return res.status(204).send();
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la suppression de la spécification");
+  }
+});
+
+router.get("/parts/:id([0-9]+)/variants", isStaff, async (req, res, next) => {
+  try {
+    return res.json(await partCatalogChildrenService.listVariants(idParam(req.params.id, "Identifiant de pièce")));
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la lecture des variantes de la pièce");
+  }
+});
+
+router.post("/parts/:id([0-9]+)/variants", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    const data = insertPartVariantSchema.parse(req.body ?? {});
+    const created = await partCatalogChildrenService.createVariant(idParam(req.params.id, "Identifiant de pièce"), data);
+    return res.status(201).json(created);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la création de la variante");
+  }
+});
+
+router.patch("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    const data = updatePartVariantSchema.parse(req.body ?? {});
+    const updated = await partCatalogChildrenService.updateVariant(
+      idParam(req.params.id, "Identifiant de pièce"),
+      idParam(req.params.variantId, "Identifiant de variante"),
+      data,
+    );
+    return res.json(updated);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la modification de la variante");
+  }
+});
+
+router.delete("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+  try {
+    await partCatalogChildrenService.deleteVariant(
+      idParam(req.params.id, "Identifiant de pièce"),
+      idParam(req.params.variantId, "Identifiant de variante"),
+    );
+    return res.status(204).send();
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la suppression de la variante");
   }
 });
 

@@ -16,6 +16,11 @@ export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505";
 }
 
+/** Violation d'une clé étrangère (23503) : référence absente à l'écriture, ou ligne encore référencée à la suppression. */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return pgCodeOf(error) === "23503";
+}
+
 /** Violation d'une contrainte CHECK (23514). */
 export function isCheckViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23514";

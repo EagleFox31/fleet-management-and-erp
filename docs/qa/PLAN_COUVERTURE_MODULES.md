@@ -191,7 +191,7 @@ stateDiagram-v2
 | MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | OK (`maintenance-schedules` : CRUD, droits, 400/404, cloison client, désactivation ; DELETE supprime vraiment, corrigé par #80) |
 | MNT2 | Déclenchement par date et par kilométrage | I | OK (`preventive-maintenance-triggers` : fenêtre 30 jours, seuil km, plan inactif ; échéance du plan et doublon km corrigés par #80) |
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | OK (`labor-catalog` : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT ; désactivation par PATCH ajoutée par #80) |
-| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
+| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | OK (contrat `fault-catalog-lifecycle` : cycle de vie, `validatedBy` posé par le serveur, id inconnu 404, pièces associées `/api/fault-catalog/:id/parts` : rôles, doublon 409, panne archivée figée 409, suppression en cascade ; plus aucun `it.fails`) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | OK (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403 ; `15-…` : fin d'intervention par le technicien, correction par le chef, création et suppression refusées au technicien, suppression par le chef + trame `work_order_deleted`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
@@ -222,7 +222,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variante et spécification sans route) |
+| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variantes et spécifications `/api/parts/:id/variants|specifications` : rôles, enfant d'une autre pièce 404, code dupliqué 409, supplément invalide 400, variante référencée 409, cascade) |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » suit le stock (défaut corrigé) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |

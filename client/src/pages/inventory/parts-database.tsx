@@ -58,12 +58,12 @@ export default function PartsDatabasePage() {
   });
 
   const { data: specifications = [] } = useQuery<any>({
-    queryKey: ["/api/parts/specifications"],
+    queryKey: [`/api/parts/${selectedPartId}/specifications`],
     enabled: !!selectedPartId,
   });
 
   const { data: variants = [] } = useQuery<any>({
-    queryKey: ["/api/parts/variants"],
+    queryKey: [`/api/parts/${selectedPartId}/variants`],
     enabled: !!selectedPartId,
   });
 
@@ -79,21 +79,22 @@ export default function PartsDatabasePage() {
   });
 
   const createSpecificationMutation = useMutation({
-    mutationFn: (data: z.infer<typeof specificationSchema>) =>
-      apiRequest("/api/parts/specifications", { method: "POST", body: data }),
-    onSuccess: () => {
+    // La pièce vient de l'URL imbriquée (PRT1) ; le serveur ignore un partId du corps.
+    mutationFn: ({ partId, ...body }: z.infer<typeof specificationSchema>) =>
+      apiRequest(`/api/parts/${partId}/specifications`, { method: "POST", body }),
+    onSuccess: (_result, variables) => {
       clearDraftSpecification(); // saisie enregistree: le brouillon n'a plus lieu d'etre
-      queryClient.invalidateQueries({ queryKey: ["/api/parts/specifications"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/parts/${variables.partId}/specifications`] });
       toast({ title: "Spécification ajoutée avec succès" });
     },
   });
 
   const createVariantMutation = useMutation({
-    mutationFn: (data: z.infer<typeof variantSchema>) =>
-      apiRequest("/api/parts/variants", { method: "POST", body: data }),
-    onSuccess: () => {
+    mutationFn: ({ partId, ...body }: z.infer<typeof variantSchema>) =>
+      apiRequest(`/api/parts/${partId}/variants`, { method: "POST", body }),
+    onSuccess: (_result, variables) => {
       clearDraftVariant(); // saisie enregistree: le brouillon n'a plus lieu d'etre
-      queryClient.invalidateQueries({ queryKey: ["/api/parts/variants"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/parts/${variables.partId}/variants`] });
       toast({ title: "Variante créée avec succès" });
     },
   });
@@ -536,8 +537,8 @@ export default function PartsDatabasePage() {
                           <TableCell className="font-medium">{variant.variantName}</TableCell>
                           <TableCell>{variant.variantCode}</TableCell>
                           <TableCell>
-                            {variant.additionalPrice > 0 
-                              ? `+${variant.additionalPrice.toLocaleString()} XAF` 
+                            {Number(variant.additionalPrice) > 0
+                              ? `+${Number(variant.additionalPrice).toLocaleString()} XAF`
                               : 'Standard'
                             }
                           </TableCell>
