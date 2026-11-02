@@ -59,6 +59,8 @@ async function purge(): Promise<void> {
   const vehicleIds = vehicleRows.map((row) => row.id);
   if (vehicleIds.length > 0) {
     await db.delete(assignments).where(inArray(assignments.vehicleId, vehicleIds));
+    // Un run interrompu (réseau) peut laisser des véhicules : les documents partent en cascade.
+    await db.delete(vehicles).where(inArray(vehicles.id, vehicleIds));
   }
   await db.delete(drivers).where(like(drivers.lastName, `${PREFIX}%`));
 }
