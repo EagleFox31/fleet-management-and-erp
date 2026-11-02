@@ -155,6 +155,11 @@ export const VEHICLE_EDIT_ROLES = ["admin", "workshop_manager"] as const satisfi
 export const VEHICLE_TANK_CAPACITY_ONLY_ROLES = ["logistics"] as const satisfies readonly AppRole[];
 export const VEHICLE_PATCH_ROLES = [...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as const satisfies readonly AppRole[];
 
+/** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
+export function canEditTankCapacity(role: string | null | undefined): boolean {
+  return (VEHICLE_PATCH_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 

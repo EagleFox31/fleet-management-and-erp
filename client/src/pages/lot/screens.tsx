@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
-import { canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
+import { canEditTankCapacity, canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -41,7 +41,7 @@ export function FuelVouchersScreen() {
 /** Chef d'atelier et direction consultent les anomalies sans les traiter (hors FUEL_WRITE_ROLES). */
 export function FuelAnomaliesScreen() {
   const { user } = useAuth();
-  return <FuelAnomaliesTable readOnly={!canWriteFuel(user?.role)} />;
+  return <FuelAnomaliesTable readOnly={!canWriteFuel(user?.role)} canEditTankCapacity={canEditTankCapacity(user?.role)} />;
 }
 
 export function TimeTrackingScreen() {

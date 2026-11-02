@@ -11,13 +11,25 @@ const log = moduleLogger("fuel-record-realtime");
  * Réutilise `fuel_record_validated` faute d'événement dédié : le catalogue invalide
  * `/api/fuel-records`, `/api/fuel-card` (dont `/api/fuel-card/anomalies`) et `/api/fuel-vouchers`,
  * et seuls les rôles carburant le reçoivent. Le nom ne dit pas « modifié » : un événement
- * `fuel_record_changed` est à déclarer dans `shared/contracts/realtime-events.ts` (autre lot).
+ * `fuel_record_changed` reste à déclarer dans `shared/contracts/realtime-events.ts` (autre lot).
  */
 export function broadcastFuelRecordChanged(id: number, requestId?: string): void {
+  emit("fuel_record_validated", id, requestId);
+}
+
+/**
+ * Couche 2 d'une capacité de réservoir modifiée (FUEL3) : `id` est celui du véhicule, pas d'un
+ * plein, d'où un événement distinct de `fuel_record_validated`.
+ */
+export function broadcastVehicleTankCapacityChanged(vehicleId: number, requestId?: string): void {
+  emit("vehicle_tank_capacity_changed", vehicleId, requestId);
+}
+
+function emit(event: "fuel_record_validated" | "vehicle_tank_capacity_changed", id: number, requestId?: string): void {
   const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
   if (typeof broadcast !== "function") {
-    log.warn({ requestId }, "diffusion temps réel indisponible");
+    log.warn({ requestId, event }, "diffusion temps réel indisponible");
     return;
   }
-  broadcast("fuel_record_validated", { id, scope: REALTIME_EVENTS.fuel_record_validated.scope });
+  broadcast(event, { id, scope: REALTIME_EVENTS[event].scope });
 }

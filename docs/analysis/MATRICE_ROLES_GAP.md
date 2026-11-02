@@ -60,6 +60,18 @@ sort** vers un véhicule. Ne pas confondre avec le flux demandes de pièces.
 - `tires.supplier` en texte libre (pas de `supplierId` comme `parts`).
 - KPI dashboard admin : pneus exclus des KPI « pièces en stock » (volontaire).
 
+## Véhicules — capacité des réservoirs (FUEL3, 2 novembre 2026)
+
+| Sujet | Aujourd’hui (code) | Cible métier | Middleware |
+|---|---|---|---|
+| Modifier la fiche véhicule (`PATCH /api/vehicles/:id`) | `admin`, `workshop_manager` | OK | `isVehiclePatcher` |
+| Saisir la capacité des réservoirs (`tankCapacityL`) | `admin`, `workshop_manager`, `logistics` | La logistique gère le carburant | `isVehiclePatcher` + `vehiclePatchRefusal` |
+
+La logistique passe la garde mais ne peut envoyer que `tankCapacityL` : toute autre clé
+renvoie 403 (`server/lib/vehicle-patch-guard.ts`). Rôles : `VEHICLE_PATCH_ROLES`
+(`shared/constants/roles.ts`). Le changement émet `vehicle_tank_capacity_changed`
+(rôles carburant), qui rafraîchit les anomalies et le compteur « sans capacité ».
+
 ## Règle mémo (à retenir)
 - **“Le magasinier a les clés du magasin.”**
 - **“Le chef d’atelier valide le technique.”**

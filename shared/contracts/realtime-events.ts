@@ -78,6 +78,11 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
     invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers", "/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary"],
   } as EventDefinition<{ id: number }>,
+  vehicle_tank_capacity_changed: {
+    // Capacité des réservoirs (FUEL3) : la règle tank-overflow et le compteur « sans capacité » bougent.
+    scope: { type: "roles", roles: FUEL_READ_ROLES },
+    invalidates: ["/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary", "/api/vehicles"],
+  } as EventDefinition<{ id: number }>,
   fuel_anomaly_resolved: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
     // Préfixe de `['/api/fuel-card/vehicle', vehicleId, 'anomalies']` (useFuelCard.ts).

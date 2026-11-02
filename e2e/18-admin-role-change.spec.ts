@@ -13,12 +13,10 @@ import { loginWithSession, type E2ECredentials } from "./helpers/auth";
  * à l'écran (menu) comme à l'API, après reconnexion ; une session déjà ouverte suit
  * aussi le nouveau rôle sur les gardes qui relisent la base (`server/middleware/auth.ts`).
  *
- * Défauts figés par `test.fail` (constats de docs/qa/PLAN_COUVERTURE_MODULES.md, ADM2) :
- * - ADM2-1 : /admin/users, « Modifier » n'ouvre aucun formulaire (client/src/pages/admin/users.tsx:327) ;
- * - ADM2-2 : /users, mot de passe laissé vide = enregistrement refusé par le formulaire
- *   (client/src/components/users/user-form.tsx:48 et :75, `partial` ne couvre pas la chaîne vide) ;
- * - ADM2-3 : une session ouverte garde son ancien rôle sur /api/purchase-orders, dont le
- *   `requireAuth` réécrit `req.user.role` depuis la session (server/api/purchase-orders.routes.ts:101).
+ * Défauts ADM2 (constats de docs/qa/PLAN_COUVERTURE_MODULES.md), corrigés et verrouillés par des tests ordinaires :
+ * - ADM2-1 : /admin/users, « Modifier » ouvre le formulaire d'édition ;
+ * - ADM2-2 : /users, mot de passe laissé vide = enregistrement accepté ;
+ * - ADM2-3 : une session ouverte suit le nouveau rôle sur /api/purchase-orders.
  *
  * Comptes préfixés E2E-ADM2-, supprimés en fin de spec (et à l'ouverture si un run a planté).
  */
@@ -90,7 +88,7 @@ test.afterAll(async () => {
 
 test.describe("ADM2 : changement de rôle par un administrateur", () => {
   test("magasinier passé technicien au navigateur : menu et droits suivent après reconnexion", async ({ browser }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000); // premier test du fichier : compilation à froid du front et trois sessions sur Neon
     const target = await createAccount("warehouse", "mag");
 
     // Avant : un magasinier a le stock et les commandes fournisseur.
@@ -179,7 +177,7 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("ADM2-3 : mise en place réussie (témoin)", () => {});
 
-    test.fail("ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)", async () => {
+    test("ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)", async () => {
       // La logistique n'a pas le périmètre « pièces » : 403 attendu, 200 obtenu
       // tant que requireAuth reprend le rôle figé en session.
       const res = await staleSession.get("/api/purchase-orders/group-suggestions");
@@ -205,7 +203,7 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("ADM2-1 : mise en place réussie (témoin)", () => {});
 
-    test.fail("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ page }) => {
+    test("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ page }) => {
       await page.locator("tr", { hasText: target.username }).getByTitle("Modifier").click();
       await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
     });
@@ -229,7 +227,7 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("ADM2-2 : mise en place réussie (témoin)", () => {});
 
-    test.fail("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ page }) => {
+    test("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ page }) => {
       await page.getByRole("dialog").getByRole("button", { name: "Mettre à jour" }).click();
       await expect.poll(() => roleOf(target.id), { timeout: 5_000 }).toBe("technician");
     });
