@@ -1,6 +1,10 @@
 import * as XLSX from "xlsx";
 import { AppError } from "./app-error";
-import { SUPPLIER_INVOICE_IMPORT_COLUMNS, SUPPLIER_INVOICE_IMPORT_MAX_ROWS } from "../../shared/contracts/supplier-invoice-import";
+import {
+  SUPPLIER_INVOICE_IMPORT_COLUMNS,
+  SUPPLIER_INVOICE_IMPORT_MAX_ROWS,
+  SUPPLIER_INVOICE_IMPORT_REQUIRED_COLUMNS,
+} from "../../shared/contracts/supplier-invoice-import";
 
 /**
  * Extraction de la feuille d'import des factures fournisseur (`POST /api/supplier-invoices/import`),
@@ -14,14 +18,6 @@ export function isBlankCell(value: unknown): boolean {
 
 /** Dernière ligne adressable d'une feuille Excel (indice 0). */
 const EXCEL_LAST_ROW_INDEX = 1_048_575;
-
-/**
- * Plafond des lignes présentes dans la feuille (lignes portant au moins une cellule, même blanche),
- * vérifié avant tout parcours de cellules : en-tête + 5000 lignes de données laissent environ
- * 5000 lignes de marge pour des lignes d'espaces ou de chaînes vides. Au-delà, le fichier n'est
- * pas un import de factures et son parcours n'a pas à être payé.
- */
-export const IMPORT_MAX_PRESENT_ROWS = 2 * SUPPLIER_INVOICE_IMPORT_MAX_ROWS;
 
 type DenseRow = Array<XLSX.CellObject | undefined>;
 
@@ -53,48 +49,60 @@ function headerColumns(cells: DenseRow): Array<{ column: number; cell: XLSX.Cell
   return blank ? null : columns;
 }
 
+/** Refuse un en-tête qui ne porte aucune colonne attendue, ou auquel manque une colonne obligatoire. */
+function assertHeader(columns: Array<{ cell: XLSX.CellObject }>): void {
+  if (columns.length === 0) {
+    throw new AppError(400, `En-têtes introuvables : la première ligne doit contenir les colonnes ${SUPPLIER_INVOICE_IMPORT_COLUMNS.join(", ")}.`);
+  }
+  const found = new Set(columns.map(({ cell }) => cell.w ?? String(cell.v)));
+  const missing = SUPPLIER_INVOICE_IMPORT_REQUIRED_COLUMNS.filter((name) => !found.has(name));
+  if (missing.length > 0) {
+    throw new AppError(
+      400,
+      `Colonnes obligatoires absentes de l'en-tête : ${missing.join(", ")}. Vérifiez leur orthographe et leurs accents.`,
+    );
+  }
+}
+
 /**
  * Feuille compacte à donner à `sheet_to_json` : l'en-tête et les seules lignes de données non
  * vides, réduites aux colonnes attendues. Chaque passe est bornée par les cellules présentes, jamais
  * par l'étendue déclarée (`<dimension>`) ni par la largeur d'une ligne :
- * - hauteur : `length` du tableau dense (O(1)) puis nombre de lignes présentes, refusé au-delà de
- *   `IMPORT_MAX_PRESENT_ROWS` avant de lire une cellule ;
- * - en-tête : cellules présentes de la première ligne non blanche ;
+ * - hauteur : `length` du tableau dense (O(1)), refusée au-delà de la dernière ligne d'Excel ;
+ * - en-tête : cellules présentes de la première ligne non blanche, refusé s'il manque une colonne
+ *   obligatoire ;
  * - lignes de données : accès direct aux colonnes attendues (8 au plus), refus au-delà de 5000.
- * Les lignes blanches sont écartées (comme `sheet_to_json`), aucune ligne n'est perdue en silence.
+ * Le nombre de lignes présentes n'est pas plafonné : une feuille à formules tirées porte des
+ * milliers de lignes calculées vides, et la décompression (plafonnée à 15 Mo) a déjà payé leur coût.
+ * Une ligne qui ne porte rien dans les colonnes attendues est écartée comme une ligne blanche
+ * (comme `sheet_to_json`) ; les cellules des autres colonnes sont ignorées.
  */
 export function compactImportSheet(worksheet: XLSX.WorkSheet): XLSX.WorkSheet | null {
   const rows = (worksheet["!data"] ?? []) as Array<DenseRow | undefined>;
   if (rows.length - 1 > EXCEL_LAST_ROW_INDEX) {
     throw new AppError(400, "Fichier Excel invalide : ligne au-delà de la limite d'Excel (1 048 576).");
   }
-  const present = Object.keys(rows);
-  if (present.length > IMPORT_MAX_PRESENT_ROWS) {
-    throw importTooLongError(`${present.length} lignes renseignées trouvées`);
-  }
   let columns: Array<{ column: number; cell: XLSX.CellObject }> | null = null;
   const dataRows: DenseRow[] = [];
   let dataCount = 0;
-  for (const key of present) {
+  for (const key in rows) {
     const cells = rows[Number(key)];
     if (!Array.isArray(cells)) continue;
     if (columns === null) {
       columns = headerColumns(cells);
+      if (columns !== null) assertHeader(columns);
       continue;
     }
     const picked = columns.map(({ column }) => cells[column]);
     if (picked.every((cell) => !cell || isBlankCell(cell.v))) continue;
     // Au-delà du maximum, on ne garde plus rien mais on finit de compter (8 accès par ligne au
-    // plus, lignes présentes déjà plafonnées) pour donner le nombre exact dans le refus.
+    // plus) pour donner le nombre exact dans le refus.
     if (++dataCount <= SUPPLIER_INVOICE_IMPORT_MAX_ROWS) dataRows.push(picked);
   }
   if (dataCount > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
     throw importTooLongError(`${dataCount} lignes de données trouvées`);
   }
   if (columns === null) return null;
-  if (columns.length === 0) {
-    throw new AppError(400, `En-têtes introuvables : la première ligne doit contenir les colonnes ${SUPPLIER_INVOICE_IMPORT_COLUMNS.join(", ")}.`);
-  }
   const compact: XLSX.WorkSheet = {};
   // Cellule absente = `undefined`, que `sheet_to_json` saute comme un trou du tableau dense.
   compact["!data"] = [columns.map(({ cell }) => cell), ...dataRows] as XLSX.CellObject[][];

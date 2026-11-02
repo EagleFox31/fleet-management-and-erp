@@ -275,22 +275,29 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     { name: "xfd", cell: (r: number) => `<c r="XFD${r}"><v>1</v></c>` },
     { name: "xfdblank", cell: (r: number) => `<c r="XFD${r}" t="inlineStr"><is><t xml:space="preserve"> </t></is></c>` },
   ]) {
-    it(`${variant.name} : 40 000 lignes d'une seule cellule en XFD, refus 400 en moins de 2 s`, async () => {
+    it(`${variant.name} : en-tête + 40 000 lignes d'une seule cellule en XFD, réponse en moins de 2 s, rien à importer`, async () => {
       const rows: string[] = [];
-      for (let r = 1; r <= 40000; r++) rows.push(`<row r="${r}">${variant.cell(r)}</row>`);
-      const file = withSheetXml(toBuffer(XLSX.utils.aoa_to_sheet([["a"]])), (xml) => {
-        expect(xml).toMatch(/<sheetData>[\s\S]*<\/sheetData>/);
-        return xml
-          .replace(/<dimension [^>]*\/>/, "")
-          .replace(/<sheetData>[\s\S]*<\/sheetData>/, `<sheetData>${rows.join("")}</sheetData>`);
+      for (let r = 2; r <= 40001; r++) rows.push(`<row r="${r}">${variant.cell(r)}</row>`);
+      const file = withSheetXml(toBuffer(XLSX.utils.aoa_to_sheet([HEADERS])), (xml) => {
+        expect(xml).toMatch(/<\/sheetData>/);
+        return xml.replace(/<dimension [^>]*\/>/, "").replace("</sheetData>", `${rows.join("")}</sheetData>`);
       });
       const started = performance.now();
       const { status, body } = await importFile(file);
       const elapsed = performance.now() - started;
-      expect(status).toBe(400);
-      expect(body.message).toMatch(/trop long/);
-      expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ total: 0, success: 0, failed: 0 });
       expect(elapsed).toBeLessThan(2000);
     }, 600000);
   }
+
+  it("en-tête « Numero Facture » sans accent : 400 qui nomme la colonne obligatoire absente", async () => {
+    const number = uniqueTestToken("hdr");
+    const misspelled = HEADERS.map((name) => (name === "Numéro Facture" ? "Numero Facture" : name));
+    const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet([misspelled, validValues(number)])));
+    expect(status).toBe(400);
+    expect(body.message).toMatch("Colonnes obligatoires absentes de l'en-tête : Numéro Facture.");
+    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect((await rowsFor(number)).length).toBe(0);
+  });
 });

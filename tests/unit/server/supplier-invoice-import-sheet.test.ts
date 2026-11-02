@@ -1,8 +1,12 @@
 import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
-import { compactImportSheet, IMPORT_MAX_PRESENT_ROWS } from "../../../server/lib/supplier-invoice-import-sheet";
-import { SUPPLIER_INVOICE_IMPORT_COLUMNS, SUPPLIER_INVOICE_IMPORT_MAX_ROWS } from "../../../shared/contracts/supplier-invoice-import";
+import { compactImportSheet } from "../../../server/lib/supplier-invoice-import-sheet";
+import {
+  SUPPLIER_INVOICE_IMPORT_COLUMNS,
+  SUPPLIER_INVOICE_IMPORT_MAX_ROWS,
+  SUPPLIER_INVOICE_IMPORT_REQUIRED_COLUMNS,
+} from "../../../shared/contracts/supplier-invoice-import";
 
 /**
  * Feuille d'import compacte : chaque passe est bornée par les cellules présentes,
@@ -44,8 +48,9 @@ function refusal(fn: () => unknown): AppError {
 
 describe("compactImportSheet", () => {
   it("garde l'en-tête et les lignes non vides, réduites aux colonnes attendues", () => {
+    const others = SUPPLIER_INVOICE_IMPORT_COLUMNS.slice(2).map((name, i): [number, XLSX.CellObject] => [10 + i, s(name)]);
     const ws = sheet([
-      row([[0, s("Numéro Facture")], [1, s("Inconnue")], [2, s("Fournisseur")], [5, s("Numéro Facture")]]),
+      row([[0, s("Numéro Facture")], [1, s("Inconnue")], [2, s("Fournisseur")], [5, s("Numéro Facture")], ...others]),
       row([[0, s("F1")], [1, s("ignoré")], [2, s("ACME")], [5, s("doublon ignoré")]]),
       row([[0, s("   ")]]),
       undefined,
@@ -80,14 +85,26 @@ describe("compactImportSheet", () => {
     expect(refusal(() => compactImportSheet(sheet(rows))).message).toMatch(/1 048 576/);
   });
 
-  it(`plus de ${IMPORT_MAX_PRESENT_ROWS} lignes présentes, même blanches : 400 avant tout parcours de cellules`, () => {
-    const rows = Array.from({ length: IMPORT_MAX_PRESENT_ROWS + 1 }, () => row([[XFD, s(" ")]]));
-    expect(refusal(() => compactImportSheet(sheet(rows))).message).toMatch(`${IMPORT_MAX_PRESENT_ROWS + 1} lignes renseignées`);
+  it("colonne obligatoire mal orthographiée (« Numero Facture » sans accent) : 400 qui la nomme", () => {
+    const misspelled = row(SUPPLIER_INVOICE_IMPORT_COLUMNS.map((name, c) => [c, s(name === "Numéro Facture" ? "Numero Facture" : name)]));
+    const message = refusal(() => compactImportSheet(sheet([misspelled, row([[0, s("F1")]])]))).message;
+    expect(message).toMatch("Colonnes obligatoires absentes de l'en-tête : Numéro Facture.");
   });
 
-  it("lignes larges sous le plafond (cellules en XFD et tous les 1000) : temps borné par les cellules présentes", () => {
+  it("colonnes facultatives absentes (TVA, N° Commande) : accepté", () => {
+    const partial = row(SUPPLIER_INVOICE_IMPORT_REQUIRED_COLUMNS.map((name, c) => [c, s(name)]));
+    expect(XLSX.utils.sheet_to_json(compactImportSheet(sheet([partial, row([[0, s("F1")]])]))!)).toHaveLength(1);
+  });
+
+  it("modèle à formules tirées (50 factures, 20 000 lignes calculées vides) : accepté", () => {
+    const empty = row(SUPPLIER_INVOICE_IMPORT_COLUMNS.map((_, c) => [c, s("")]));
+    const rows = [header(), ...Array.from({ length: 20_000 }, (_, i) => (i < 50 ? row([[0, s(`F${i}`)]]) : empty))];
+    expect(XLSX.utils.sheet_to_json(compactImportSheet(sheet(rows))!)).toHaveLength(50);
+  });
+
+  it("lignes larges (cellules en XFD et tous les 1000) : temps borné par les cellules présentes", () => {
     const spaced = Array.from({ length: 17 }, (_, i) => Math.min(i * 1000, XFD));
-    const blank = Array.from({ length: IMPORT_MAX_PRESENT_ROWS }, () => row(spaced.map((c) => [c, s(" ")])));
+    const blank = Array.from({ length: 2 * SUPPLIER_INVOICE_IMPORT_MAX_ROWS }, () => row(spaced.map((c) => [c, s(" ")])));
     const data = [header(), ...Array.from({ length: SUPPLIER_INVOICE_IMPORT_MAX_ROWS }, (_, i) => row([[0, n(i)], ...spaced.slice(1).map((c): [number, XLSX.CellObject] => [c, n(1)])]))];
     const started = performance.now();
     expect(compactImportSheet(sheet(blank))).toBeNull();

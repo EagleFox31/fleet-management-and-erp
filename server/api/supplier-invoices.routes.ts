@@ -1021,6 +1021,9 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
         errors: [] as Array<{ row: number; message: string }>
       };
 
+      // Rien à importer : pas de lecture des référentiels (toutes les factures existantes).
+      if (data.length === 0) return res.json(results);
+
       // Fournisseurs, factures et commandes lus une seule fois.
       const suppliers = await supplierManagementService.getSuppliers();
       const supplierMap = new Map<string, (typeof suppliers)[number]>(

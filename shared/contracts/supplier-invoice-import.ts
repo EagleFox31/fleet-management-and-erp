@@ -32,3 +32,13 @@ export const SUPPLIER_INVOICE_IMPORT_COLUMNS = [
 ] as const;
 
 export type SupplierInvoiceImportColumn = (typeof SUPPLIER_INVOICE_IMPORT_COLUMNS)[number];
+
+/** Colonnes sans lesquelles aucune ligne ne peut être importée : leur absence de l'en-tête refuse le fichier. */
+export const SUPPLIER_INVOICE_IMPORT_REQUIRED_COLUMNS: readonly SupplierInvoiceImportColumn[] = [
+  "Numéro Facture",
+  "Fournisseur",
+  "Date Facture",
+  "Date Échéance",
+  "Montant HT",
+  "Montant TTC",
+];
