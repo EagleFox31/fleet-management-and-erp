@@ -951,6 +951,9 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       // Aucun toast : un import touche des centaines de lignes.
       invalidateCatalogEvent("import_batch_applied");
       break;
+    case "alerts_read":
+      invalidateCatalogEvent("alerts_read");
+      break;
 
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
     // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).
@@ -1121,6 +1124,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
 
     case "client_invoice_created":
     case "client_invoice_payment_recorded":
+    case "client_invoices_overdue":
       {
         const invoiceFromResult =
           toNumber(asRecord(asRecord(payloadRecord.result)?.invoice)?.id);
@@ -1248,6 +1252,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "supplier_invoice_updated":
     case "supplier_invoice_settlement_recorded":
     case "supplier_invoice_settlement_reconciled":
+    case "supplier_invoice_settlement_rejected":
     case "supplier_invoice_bulk_approved":
       {
         const invoiceId =
@@ -1361,6 +1366,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
 
         // Quand missionId n'est pas fourni (quick renew), on invalide toutes les clés dérivées mission.
         invalidateMissionDerivedQueries(missionId);
+
       }
       queryClient.invalidateQueries({
         predicate: (query) => {

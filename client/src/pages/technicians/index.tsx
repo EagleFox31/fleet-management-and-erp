@@ -28,6 +28,7 @@ import {
   Trash2,
   Search,
 } from "lucide-react";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { apiRequest } from "@/lib/queryClient";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import {
@@ -67,13 +68,6 @@ const ROLE_COLORS: Record<string, string> = {
   workshop_manager: "bg-blue-50 text-blue-700 border border-blue-200",
   technician: "bg-purple-50 text-purple-700 border border-purple-200",
   user: "bg-gray-100 text-gray-500 border border-gray-200",
-};
-
-const getRoleLabel = (role: string) => {
-  if (role === "admin") return "Administrateur";
-  if (role === "workshop_manager") return "Chef d'atelier";
-  if (role === "technician") return "Technicien";
-  return "Utilisateur";
 };
 
 const formatUserDate = (value?: string | null) => {
@@ -414,7 +408,7 @@ export default function TechniciansIndex() {
       header: "Rôle",
       cell: (row) => (
         <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", ROLE_COLORS[row.role] ?? ROLE_COLORS.user)}>
-          {getRoleLabel(row.role)}
+          {roleLabelOf(row.role)}
         </span>
       ),
     },

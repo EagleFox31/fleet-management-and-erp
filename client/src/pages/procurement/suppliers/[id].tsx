@@ -138,7 +138,7 @@ export default function SupplierDetailsPage() {
     normalizedRole === "admin" || normalizedRole === "secretary" || normalizedRole === "logistics";
 
   // Vérifier si l'utilisateur peut créer des commandes
-  const canCreateOrder = ["admin", "workshop_manager", "warehouse", "secretary", "logistics"].includes(normalizedRole);
+  const canCreateOrder = ["admin", "warehouse", "secretary", "logistics"].includes(normalizedRole);
   const ratingFieldPermissions = useMemo(
     () => getRatingFieldPermissions(normalizedRole),
     [normalizedRole]

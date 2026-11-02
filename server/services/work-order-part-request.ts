@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   partRequirements,
@@ -15,6 +15,9 @@ import { describePartRequest, splitPartRequest } from "../lib/part-request";
 export const OPEN_REQUIREMENT_STATUSES: Array<
   "pending" | "approved" | "ordered" | "partially_received" | "received" | "partial" | "delivered"
 > = ["pending", "approved", "ordered", "partially_received", "received", "partial", "delivered"];
+
+/** Demandes qui attendent leur sortie : leur quantité est promise, plus disponible. */
+const RESERVING_STATUSES: Array<"received" | "delivered"> = ["received", "delivered"];
 
 const URGENCIES = ["low", "medium", "high", "critical"] as const;
 type Urgency = (typeof URGENCIES)[number];
@@ -34,7 +37,12 @@ export type PartRequestResult = {
   quantity: number;
   issuedQuantity: number;
   missingQuantity: number;
+  /** Toujours nul : la pièce sort par le magasinier (`/issue`), jamais au clic. */
   partUsed: PartUsed | null;
+  /** Demande « Entrée en stock » créée pour la quantité en rayon, à sortir par le magasin. */
+  stockRequirement: PartRequirement | null;
+  toIssueQuantity: number;
+  /** Demande « En attente » créée pour le manquant (ou demande en cours réutilisée). */
   requirement: PartRequirement | null;
   usedExistingRequirement: boolean;
   workOrderStatusChanged: boolean;
@@ -42,11 +50,13 @@ export type PartRequestResult = {
 };
 
 /**
- * Un seul geste pour l'atelier : « Demander la pièce ». Le stock disponible sort
- * vers l'OT, le manquant devient une demande et l'OT passe en attente de pièces.
- * Tout se joue dans une transaction qui verrouille l'OT puis la pièce : deux
- * demandes simultanées ne sortent pas deux fois la même unité, ni ne créent
- * deux demandes pour le même manque.
+ * Un seul geste pour l'atelier : « Demander la pièce ». Rien ne sort du stock
+ * ici : toute sortie passe par le magasinier (`/issue`), même pièce en rayon.
+ * La quantité en rayon devient une demande « Entrée en stock », à sortir par le
+ * magasin sans approbation ni commande ; le manquant devient une demande « En
+ * attente » et l'OT passe en attente de pièces. Tout se joue dans une
+ * transaction qui verrouille l'OT puis la pièce : deux demandes simultanées ne
+ * promettent pas deux fois la même unité, ni ne créent deux demandes.
  */
 export async function requestPartForWorkOrder(input: PartRequestInput): Promise<PartRequestResult> {
   const { workOrderId, partId, quantity, actor } = input;
@@ -81,62 +91,89 @@ export async function requestPartForWorkOrder(input: PartRequestInput): Promise<
       throw new AppError(404, "Pièce non trouvée");
     }
 
-    const { issued, missing } = splitPartRequest(quantity, Number(part.quantity ?? 0));
+    // Une demande déjà en cours sur cette pièce et cet OT est réutilisée : un
+    // double clic ou un rejeu ne crée rien de neuf.
+    const [existing] = await tx
+      .select()
+      .from(partRequirements)
+      .where(
+        and(
+          eq(partRequirements.workOrderId, workOrderId),
+          eq(partRequirements.partId, partId),
+          inArray(partRequirements.status, OPEN_REQUIREMENT_STATUSES),
+        ),
+      )
+      .orderBy(desc(partRequirements.updatedAt), desc(partRequirements.createdAt))
+      .limit(1);
 
+    if (existing) {
+      return {
+        part: { id: part.id, name: part.name, reference: part.reference ?? null },
+        toIssue: 0,
+        missing: 0,
+        stockRequirement: null,
+        requirement: existing,
+        usedExistingRequirement: true,
+        workOrderStatusChanged: false,
+      };
+    }
+
+    // Le rayon est déjà promis aux demandes « Entrée en stock » qui attendent
+    // leur sortie : seul le reste est disponible pour cette demande.
+    const [{ reserved }] = await tx
+      .select({ reserved: sql<number>`coalesce(sum(${partRequirements.quantityNeeded}), 0)::int` })
+      .from(partRequirements)
+      .where(and(eq(partRequirements.partId, partId), inArray(partRequirements.status, RESERVING_STATUSES)));
+    const { inStock: toIssue, missing } = splitPartRequest(quantity, Number(part.quantity ?? 0) - Number(reserved));
+
+    const workOrderLabel = workOrder.title ? `OT #${workOrderId} - ${workOrder.title}` : `OT #${workOrderId}`;
+    const unitPrice = Number.parseFloat(part.unitPrice ?? "0");
     // Le prix vient du catalogue, jamais du client.
-    const partUsed =
-      issued > 0
-        ? await storage.addPartToWorkOrder(
-            { workOrderId, partId, quantity: issued, unitPrice: part.unitPrice ?? "0" },
-            actor.id,
-            { executor: tx, requireAvailable: true },
-          )
-        : null;
+    const costOf = (count: number) => (unitPrice > 0 ? (unitPrice * count).toString() : undefined);
+    const reason =
+      reasonFromInput || `${workOrderLabel} • Besoin pièce: ${part.name} (${part.reference || "sans-référence"})`;
+
+    // En rayon : la demande arrive directement « à sortir » dans la file du
+    // magasinier, sans approbation ni commande. Le stock ne bouge qu'à la sortie.
+    let stockRequirement: PartRequirement | null = null;
+    if (toIssue > 0) {
+      [stockRequirement] = await tx
+        .insert(partRequirements)
+        .values({
+          partId,
+          workOrderId,
+          vehicleId: workOrder.vehicleId ?? null,
+          quantityNeeded: toIssue,
+          urgency,
+          reason,
+          status: "received",
+          requestedBy: actor.id,
+          estimatedCost: costOf(toIssue),
+          notes: `Créée depuis l'OT #${workOrderId} : ${toIssue} en rayon, à sortir par le magasin.`,
+        })
+        .returning();
+    }
 
     let requirement: PartRequirement | null = null;
-    let usedExistingRequirement = false;
     let workOrderStatusChanged = false;
-
     if (missing > 0) {
-      const [existing] = await tx
-        .select()
-        .from(partRequirements)
-        .where(
-          and(
-            eq(partRequirements.workOrderId, workOrderId),
-            eq(partRequirements.partId, partId),
-            inArray(partRequirements.status, OPEN_REQUIREMENT_STATUSES),
-          ),
-        )
-        .orderBy(desc(partRequirements.updatedAt), desc(partRequirements.createdAt))
-        .limit(1);
-
-      if (existing) {
-        requirement = existing;
-        usedExistingRequirement = true;
-      } else {
-        const workOrderLabel = workOrder.title ? `OT #${workOrderId} - ${workOrder.title}` : `OT #${workOrderId}`;
-        const unitPrice = Number.parseFloat(part.unitPrice ?? "0");
-        [requirement] = await tx
-          .insert(partRequirements)
-          .values({
-            partId,
-            workOrderId,
-            vehicleId: workOrder.vehicleId ?? null,
-            quantityNeeded: missing,
-            urgency,
-            reason:
-              reasonFromInput ||
-              `${workOrderLabel} • Besoin pièce: ${part.name} (${part.reference || "sans-référence"})`,
-            status: "pending",
-            requestedBy: actor.id,
-            estimatedCost: unitPrice > 0 ? (unitPrice * missing).toString() : undefined,
-            notes:
-              `Créée depuis l'OT #${workOrderId} : ${quantity} demandée(s), ` +
-              `${issued} sortie(s) du stock, ${missing} manquante(s).`,
-          })
-          .returning();
-      }
+      [requirement] = await tx
+        .insert(partRequirements)
+        .values({
+          partId,
+          workOrderId,
+          vehicleId: workOrder.vehicleId ?? null,
+          quantityNeeded: missing,
+          urgency,
+          reason,
+          status: "pending",
+          requestedBy: actor.id,
+          estimatedCost: costOf(missing),
+          notes:
+            `Créée depuis l'OT #${workOrderId} : ${quantity} demandée(s), ` +
+            `${toIssue} en rayon, ${missing} manquante(s).`,
+        })
+        .returning();
 
       if (workOrder.status !== "awaiting_parts") {
         await tx.update(workOrders).set({ status: "awaiting_parts" }).where(eq(workOrders.id, workOrderId));
@@ -146,11 +183,11 @@ export async function requestPartForWorkOrder(input: PartRequestInput): Promise<
 
     return {
       part: { id: part.id, name: part.name, reference: part.reference ?? null },
-      issued,
+      toIssue,
       missing,
-      partUsed,
+      stockRequirement,
       requirement,
-      usedExistingRequirement,
+      usedExistingRequirement: false,
       workOrderStatusChanged,
     };
   });
@@ -159,14 +196,17 @@ export async function requestPartForWorkOrder(input: PartRequestInput): Promise<
     workOrder: await storage.getWorkOrder(workOrderId),
     part: outcome.part,
     quantity,
-    issuedQuantity: outcome.issued,
+    // Plus rien ne sort au clic : champ conservé pour les consommateurs existants.
+    issuedQuantity: 0,
+    toIssueQuantity: outcome.toIssue,
     missingQuantity: outcome.missing,
-    partUsed: outcome.partUsed,
+    partUsed: null,
+    stockRequirement: outcome.stockRequirement,
     requirement: outcome.requirement,
     usedExistingRequirement: outcome.usedExistingRequirement,
     workOrderStatusChanged: outcome.workOrderStatusChanged,
     message: describePartRequest({
-      issued: outcome.issued,
+      toIssue: outcome.toIssue,
       missing: outcome.missing,
       existingStatus: outcome.usedExistingRequirement ? outcome.requirement?.status : null,
     }),

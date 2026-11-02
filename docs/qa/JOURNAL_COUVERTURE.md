@@ -739,3 +739,1111 @@ soumission sans doublon.
 - Unitaire 789/789 ; `npm run check` 0 erreur.
 - Lancement e2e sur `E2E_BASE_URL=http://127.0.0.1:5055` : le port 5000 était occupé par une autre
   application, que Playwright réutilisait (`reuseExistingServer`).
+
+## f81714f - OT technicien : plus de sortie de stock, plus de retour en arrière (WO2)
+
+**Quoi**
+- `PATCH /api/technician/work-orders/:id/status` n'accepte plus de pièces : 400 avec un message qui
+  renvoie vers la demande au magasin. L'écran « Mes ordres de travail » remplace le bloc « Pièces
+  utilisées » par un lien vers la fiche de l'OT.
+- Transitions autorisées au technicien : en attente → en cours, en cours → en cours / terminé,
+  en attente de pièces → en cours. Un OT terminé ou annulé est refusé (409).
+- Statut inconnu : 400. Kilométrage inférieur à celui du véhicule : 400, rien n'est écrit.
+
+**Comment**
+- Route déplacée de `server/routes.ts` vers `server/api/technician-work-orders.routes.ts` (Zod,
+  `AppError`, `moduleLogger`). Tout est vérifié avant la première écriture.
+- Table des transitions : `shared/constants/technician-work-order-transitions.ts`.
+
+**Pourquoi**
+- Décision métier : le technicien ne se sert pas au magasin, il demande la pièce pendant la
+  réparation et le magasinier la sort. L'ancienne route décrémentait le stock elle-même, avalait les
+  erreurs (« Statut mis à jour » affiché alors que la pièce n'était pas enregistrée), insérait la
+  ligne de pièce avant la sortie de stock hors transaction, acceptait n'importe quel statut
+  (`n_importe_quoi` enregistré en base) et ignorait sans prévenir un kilométrage plus bas.
+
+**Preuve**
+- Contrat `technician-work-order-status` 7/7 ; 5 cas rouges sur l'ancienne route (200 au lieu de
+  400/409). Avec `work-order-parts`, `work-order-quality-check`, `api-auth-guard` : 22/22.
+- Unitaire 802/802 ; `npm run check` 0 erreur.
+
+**Reste**
+- `POST /api/work-orders/:id/parts` (« demander une pièce », `requestPartForWorkOrder`) sort encore
+  directement du stock la quantité disponible quand le demandeur est technicien. Contraire à la même
+  décision ; à traiter à part (change le circuit des demandes).
+
+## 136f966 - Pièce d'OT : toute sortie passe par le magasinier ; droit de sortie du chef d'atelier révocable
+
+**Quoi**
+- `POST /api/work-orders/:id/parts` (et `/awaiting-parts` avec une pièce) ne sort plus rien du stock.
+  La quantité en rayon devient une demande `received`, « à sortir » dans la file du magasinier, sans
+  approbation ni commande. Le manquant devient une demande `pending` et l'OT passe en attente de pièces.
+- Le rayon déjà promis à une demande `received` / `delivered` est réservé : un second OT ne le compte
+  plus comme disponible.
+- Le chef d'atelier garde la sortie dérogatoire motivée (magasin fermé). L'administrateur la lui retire
+  ou la lui rend : `PATCH /api/users/:id/stock-issue-permission`, interrupteur dans la liste des
+  utilisateurs. Retirée, la sortie est refusée (403) et le stock reste intact.
+
+**Comment**
+- `server/services/work-order-part-request.ts` : pièce verrouillée (FOR UPDATE), demande ouverte
+  réutilisée, réservation calculée en SQL, deux demandes créées dans la transaction.
+- Colonne `users.can_issue_stock` (défaut `true`) : `shared/schema.ts`, `server/init-database.ts`,
+  migration `20261031_users_can_issue_stock.sql`. Contrôle dans `partRequirementsService` (branche
+  dérogation), route admin dans `server/api/user-stock-permission.routes.ts`.
+- Temps réel : une trame `part_requirement_created` par demande créée (la trame `part_used_added`
+  ne part plus de cette route, rien n'y sort).
+- `tests/support/cleanup.ts` : le nettoyage des véhicules TEST orphelins supprime d'abord leurs OT et
+  dépendants, et les prix carburant d'utilisateurs TEST orphelins (clés étrangères qui faisaient
+  échouer le nettoyage global).
+
+**Pourquoi**
+- Décision métier : le technicien ne se sert pas au magasin, même en rayon ; le magasinier sort la
+  pièce. Stock juste et traçable. Le chef d'atelier garde un recours la nuit, sous contrôle de l'admin.
+
+**Preuve**
+- Contrat `stock-issue-permission` 4/4 (nouveau, rouge avant), `work-order-parts` réécrit,
+  `technician-work-order-status` : 17/17 ; `error-contract-and-issue-idempotence` +
+  `part-requirements-chain` 15/15.
+- Intégration `work-order-part-request` 8/8, dont concurrence 5 OT sur un stock de 3.
+- Unitaire 803/803 ; `npm run check` 0 erreur ; e2e `10-work-order-part-request` vert.
+
+## 5592621 - OT : transitions de statut contrôlées sur la modification générique (WO2)
+
+**Quoi**
+- `PATCH /api/work-orders/:id` refuse un OT terminé qu'on voudrait remettre en cours, en attente ou
+  en attente de pièces (409, le retour passe par le contrôle qualité) et un OT annulé qu'on voudrait
+  rouvrir (409). Rien n'est écrit, pas même les autres champs du corps.
+- Le technicien garde ses gestes (démarrer, terminer, reprendre après pièce) ; annuler ou remettre en
+  attente lui est refusé (403). Garder le même statut reste permis (modale d'édition).
+- La modale d'édition ne propose plus que les statuts atteignables pour le rôle connecté, et affiche
+  le message serveur lisible (`userMessageOf`) au lieu de `error.message`.
+
+**Comment**
+- Règle unique `shared/constants/work-order-transitions.ts` (`checkWorkOrderTransition`), utilisée par
+  la route et par la modale ; elle réutilise `canTechnicianTransition`.
+- Contrôle placé après la validation des colonnes, avant toute écriture, levé en `AppError`.
+
+**Pourquoi**
+- La route acceptait n'importe quel passage : un technicien pouvait annuler un OT, et un OT terminé
+  pouvait revenir en cours sans contrôle qualité ni motif.
+
+**Preuve**
+- Contrat `work-order-status-transitions` 5/5 (3 rouges avant le correctif). Voisins
+  `work-order-quality-check`, `work-order-booking-guard`, `api-role-guard-and-validation`,
+  `technician-work-order-status` : 43/43.
+- Unitaire 807/807 ; `npm run check` 0 erreur ; e2e `03-work-orders` et `06-realtime-work-orders` verts.
+
+## bcd695a - Commande fournisseur : remise bornée, quantités reçues contrôlées (T4)
+
+**Quoi**
+- `POST /api/purchase-orders` : remise hors de 0..100 refusée (400). Un total envoyé par le client
+  reste ignoré, HT, remise, TVA et TTC sont recalculés.
+- `PATCH /api/purchase-orders/:id/lines/:lineId` : quantités entières et positives ; quantité reçue
+  plafonnée au commandé (400), jamais en baisse (409, la correction passe par un ajustement de
+  stock) ; acceptées + refusées ≤ reçues (400) ; une ligne d'une autre commande est introuvable (404).
+- Deux réceptions simultanées de la même ligne ne créditent le stock qu'une fois.
+- Les deux routes renvoient leurs erreurs par le gestionnaire central (plus de `details: error.message`).
+
+**Comment**
+- Bornes Zod dans la route ; règles métier dans `procurementService.updateOrderLine` (`AppError`).
+- Écriture de la ligne conditionnée à la quantité reçue lue (verrou optimiste) ; crédit de stock de
+  `registerPartReception` en incrément SQL atomique, aussi utilisé par la livraison de commande.
+
+**Pourquoi**
+- Une remise de 150 % donnait un total négatif. Une quantité reçue de -100 puis de 5 créditait 105
+  pièces, et la livraison suivante (« commandé - déjà reçu ») recréditait encore l'écart. La lecture
+  puis réécriture du stock perdait une réception en cas d'appels simultanés.
+
+**Preuve**
+- Contrat `purchase-order-amounts` 8/8 (6 rouges avant le correctif). `error-contract-and-issue-idempotence`,
+  `part-requirements-chain`, `api-role-guard-and-validation` verts (un dépassement de délai Neon sur un
+  test d'OT, vert au rejeu).
+- Unitaire 807/807 ; `npm run check` 0 erreur.
+
+**Reste**
+- Carburant : le coût saisi est celui du ticket, pas un montant serveur ; écart au prix de référence
+  à traiter comme anomalie, pas en T4. Factures client et fournisseur à vérifier.
+
+## 0c4941b - Facture client : montant borné, TVA et TTC recalculés au centime (T4)
+
+**Quoi**
+- `POST /api/billing/invoices/generate` : mission, montant (> 0, plafonné à 10^12 HT) et échéance
+  (AAAA-MM-JJ) validés (400 lisible). TTC, solde, TVA, statut et auteur envoyés par le client sont ignorés.
+- Mission inconnue 404 ; mission sans client 409 ; numéro de facture déjà pris 409.
+- Écran mission : « Générer Facture » en single-flight, un double clic ne crée plus deux factures.
+
+**Comment**
+- Schéma Zod dans la route, erreurs par le gestionnaire central (`next(error)`), `AppError` dans
+  `clientBillingService.generateInvoiceFromMission` ; HT et TVA arrondis au centime, TTC = HT + TVA.
+
+**Pourquoi**
+- Un montant de -5000 créait une facture négative ; une échéance ou un id invalide, une mission
+  inconnue ou un numéro en double renvoyaient un 500 avec le message technique brut.
+
+**Preuve**
+- Contrat `client-invoice-generate` 11/11 (7 rouges avant le correctif) ; `client-payment-idempotence` 7/7.
+- Unitaire 807/807 ; `npm run check` 0 erreur.
+
+**Reste**
+- Plusieurs factures par mission restent permises (onglet Factures de la mission) : pas de 409 par mission.
+- Factures fournisseur à vérifier (T4).
+
+## c3f3260 - Facture fournisseur : champs du workflow ignorés, solde initial = TTC (T4)
+
+**Quoi**
+- `POST /api/supplier-invoices` : statut, validation, approbation, paiement, solde et écarts envoyés
+  par le client sont ignorés (facture toujours `received`, sans validateur ni payeur).
+- Montants positifs, plafonnés à 10^12, TTC ≥ HT, arrondis au centime (400 lisible) ; numéro déjà
+  saisi 409 ; erreurs par le gestionnaire central.
+- Solde initial = TTC. Écran de saisie en single-flight.
+
+**Comment**
+- Schéma de route = `insertSupplierInvoiceSchema` moins les champs du workflow ; même exclusion et
+  bornes dans `threeWayMatchingService.createSupplierInvoice` (couvre l'import Excel).
+
+**Pourquoi**
+- Une secrétaire pouvait créer une facture « payée » ou « approuvée par » un tiers. Un HT négatif
+  donnait une facture négative ; un TTC trop faible réécrivait le HT. L'écran n'envoie pas de solde :
+  la facture naissait à solde 0 et `/settlements` refusait tout règlement (« solde restant 0 »).
+
+**Preuve**
+- Contrat `supplier-invoice-create` 8/8 (8/8 rouges sur l'ancien code) ; `supplier-settlement-idempotence` vert.
+- Unitaire 807/807 ; `npm run check` 0 erreur. Base : aucune facture non soldée à solde 0, pas de reprise.
+
+**Reste**
+- Import Excel : envoie `totalAmountHT` / `totalAmountTTC` alors que le schéma exige `amountHT` ;
+  chaque ligne échoue probablement. À couvrir par un test rouge.
+
+## 6b066f0 - Import Excel factures fournisseur : lignes du modèle acceptées, erreurs lisibles (T4)
+
+**Quoi**
+- `POST /api/supplier-invoices/import` : chaque ligne passe par la même saisie que `POST /`
+  (champs du workflow ignorés, statut `received`, solde initial = TTC).
+- Dates JJ/MM/AAAA strictes (31/02 refusé) ; `N° Commande` rattaché à la commande, refusé si
+  inconnu ou d'un autre fournisseur (avant : ignoré sans rien dire).
+- Message par ligne rédigé pour l'utilisateur ; erreur imprévue journalisée, ligne avec référence.
+  Fichier refusé ou illisible : 400 au contrat commun. Un événement `supplier_invoice_created` par facture.
+
+**Comment**
+- `createSupplierInvoiceSchema` réutilisé, `ImportRowError` pour les refus de ligne, commandes lues
+  en une requête (`inArray`), `AppError` + `next(error)` pour le fichier.
+
+**Pourquoi**
+- L'import envoyait `totalAmountHT` alors que le schéma exige `amountHT` : toute ligne du modèle
+  échouait, avec le JSON Zod brut affiché à l'écran.
+
+**Preuve**
+- Contrat `supplier-invoice-import` 12/12 (rouge sur l'ancien code : ligne du modèle, montants
+  numériques, dates) ; `supplier-invoice-create` et `supplier-settlement-idempotence` verts.
+- Unitaire 807/807 ; `npm run check` 0 erreur.
+
+**Reste**
+- T3 : `PATCH /api/purchase-orders/:id/status` renvoie encore `details: error.message` en 500.
+
+## b8dbbe1 - Commandes fournisseur : erreurs au contrat commun, transitions en source unique (T3)
+
+**Quoi**
+- `/api/purchase-orders` (liste, statistiques, regroupement, optimisation, retards, détail, statut) :
+  plus de `details: error.message` ; erreurs au contrat commun `{ message, code, requestId }`.
+- Identifiant illisible 400 ; commande inconnue 404 ; transition interdite et clôture sans facture
+  payée 409 (avant 400), message en libellés d'écran (« Annulée », « Transmise fournisseur »).
+
+**Comment**
+- `AppError` dans `procurementService.updateOrderStatus`, `next(error)` dans les routes,
+  `parseIdParam`. `shared/constants/purchase-order-statuses.ts` : statuts, libellés, transitions,
+  repris par le service et `client/src/pages/procurement/orders/[id].tsx`. `console.error` migrés.
+
+**Pourquoi**
+- Le message technique (dont la transition en codes `cancelled -> sent`) partait dans la réponse ;
+  un id non numérique finissait en 500.
+
+**Preuve**
+- Contrat `purchase-order-status-errors` 7/7 (4 rouges sur l'ancien code) ; `purchase-order-amounts` vert.
+- Unitaire 812/812 (5 nouveaux sur la table de transitions) ; `npm run check` 0 erreur.
+
+**Reste**
+- Écran : passer de 400 à 409 est sans effet (il affiche `userMessageOf`). T3 sur `server/routes.ts`.
+
+## 1dc6f93 - Documents de workflow : nom d'origine encodé dans Content-Disposition (sécurité)
+
+**Quoi**
+- `GET /api/workflows/documents/:id` sert le fichier avec un `Content-Disposition` sûr : nom ASCII
+  inchangé, sinon repli ASCII + `filename*` UTF-8 qui restitue le nom exact.
+
+**Comment**
+- `server/lib/content-disposition.ts` (`contentDisposition(type, nom)`, RFC 6266 / 8187), même principe
+  que le paquet `content-disposition` d'Express, sans dépendance ajoutée. Seul appelant à nom saisi :
+  les autres en-têtes (exports, facture PDF, bon d'OT) portent un nom généré par le serveur.
+
+**Pourquoi**
+- `originalName` brut entre guillemets : caractère hors Latin-1 ou retour à la ligne → `setHeader`
+  lève (500) ; un guillemet ouvrait un second paramètre `filename` (nom de téléchargement forgé).
+
+**Preuve**
+- Contrat `vehicle-documents-client-scope` 19/19 (2 rouges sur l'ancien code) ; unitaire
+  `content-disposition` 8/8, total 820/820 ; `npm run check` 0 erreur.
+
+**Reste**
+- Sécurité : chemins stockés relus (`server/routes.ts` ~6090, rapports, preuves) ; `getRoleLabel`.
+
+## d6b2afe - Justificatif de règlement fournisseur : servi seulement sous uploads/ (sécurité)
+
+**Quoi**
+- `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` ne sert plus un fichier hors de
+  `uploads/` ; 400/404 au contrat d'erreur commun, plus de `details: error.message` en 500.
+
+**Comment**
+- `uploadedFileCandidates` (`server/lib/uploaded-file.ts`) remplace `startsWith(<cwd>/uploads)` ;
+  `next(error)` vers le gestionnaire central (qui journalise le `console.error` retiré).
+
+**Pourquoi**
+- `proofReference` est libre via `POST /:id/payment` (legacy) ; le préfixe acceptait un dossier
+  voisin (`uploads-old/secret.txt` servi en 200).
+
+**Preuve**
+- Contrat `supplier-settlement-proof-path` 3/3 (2 rouges sur l'ancien code) ;
+  `supplier-settlement-idempotence` vert ; unitaire 822/822 ; `npm run check` 0 erreur.
+
+## 1fd9250 - Initialisation base : trigger créé en une instruction (fiabilité des suites)
+
+**Quoi / Pourquoi**
+- `DROP TRIGGER` puis `CREATE TRIGGER trg_sync_document_updated_by` : une initialisation concurrente
+  échouait (« already exists »). Cas vécu : remplacer un fichier serveur pour jouer le rouge relance
+  `tsx watch` (dev sur 5055) pendant le setup du contrat ; la suite s'arrête sans aucun test.
+
+**Comment**
+- `CREATE OR REPLACE TRIGGER` (PostgreSQL ≥ 14, Neon 17). Garde-fou `init-database-concurrency`
+  (2 rouges sur l'ancien code) : aucun `CREATE TRIGGER` ni `DROP TRIGGER` nu dans l'init.
+
+**Reste**
+- Sécurité : `getRoleLabel` (5 rôles) ; T3 sur `server/routes.ts`.
+
+## Lot 09f4a7c, a03d7a6, e246e1c, fe07afc - rôles, pneus, planification, documents de workflow
+
+**Quoi**
+- `09f4a7c` : libellés de rôle par `roleLabelOf` (`client/src/lib/contextual-help/roles.ts`) ; cinq
+  tables locales retirées (liste utilisateurs, page techniciens, profil, barre du haut, admin).
+- `a03d7a6` : `PATCH /api/vehicle-tires/:id/remove` refuse un kilométrage de démontage inférieur à
+  celui du montage (400 lisible, pneu toujours monté, stock inchangé).
+- `e246e1c` : `POST /api/maintenance-schedules` : véhicule inconnu 404, date illisible 400 nommé ;
+  `POST /:id/generate-work-order` : id illisible 400. Les trois finissaient en 500.
+- `fe07afc` : documents rattachés à l'activation d'un véhicule depuis le workflow : chemin borné à
+  `uploads/` (`uploadedFileCandidates`) ; `createdAt` en chaîne retiré (l'insertion échouait toujours).
+
+**Pourquoi**
+- Un magasinier, un logisticien ou la direction s'affichait « Utilisateur » dans la liste.
+- Un démontage à rebours fausse l'usure et le coût au km du pneu.
+- `file_path` vient du corps : un fichier du serveur hors `uploads/` devenait un document du véhicule.
+
+**Preuve**
+- Rouge sur l'ancien code : 1 unitaire (garde-fou), 2 intégration, 4 contrat.
+- Vert : `role-labels` 3/3, `workflow-document-paths` 2/2, `tires-rbac` + `secondary-routes-validation`
+  38/38, unitaire 825/825, `npm run check` 0 erreur.
+
+**Reste**
+- Pneus : stock usagé mélangé au neuf. WO3, WO5, parcours P2/P3/P6, soft delete, DOC/FUEL/ALR/DIR.
+
+## Lot c7f565e, d12fdee - lignes de travail d'OT (WO3), demandes de renouvellement (DOC2)
+
+**Quoi**
+- `c7f565e` : `POST /api/work-orders/:id/items`, `PATCH` et `DELETE /api/work-order-items/:id`
+  refusent l'écriture sur un OT terminé ou annulé (409) ; technicien ou poste inexistant : 400 lisible.
+  La fiche OT masque l'édition des lignes sur OT terminé (annulé : déjà masqué).
+- `d12fdee` : `PATCH /api/document-renewals/requests/:id/status` suit le cycle
+  `pending -> in_progress -> completed`, rejet depuis `pending` ou `in_progress` ; terminée ou rejetée
+  définitive (409) ; écriture conditionnelle sur le statut lu ; date d'échéance `AAAA-MM-JJ` réelle,
+  sinon 400. Source : `shared/constants/document-renewal-statuses.ts`, `shared/constants/calendar-date.ts`.
+
+**Pourquoi**
+- Un OT clos ne se reprend que par le contrôle qualité : ses heures ne doivent plus bouger après coup.
+  Un id inconnu finissait en 500 (clé étrangère).
+- Une demande terminée pouvait repasser « en attente » ou être rejetée après coup ; une date illisible
+  partait en erreur SQL.
+
+**Preuve**
+- Rouge sur l'ancien code : 2 contrat (201 au lieu de 409, 200 au lieu de 409).
+- Vert : `work-order-items` 2/2, `document-renewal-status` 1/1, unitaire 837/837, `npm run check` 0 erreur.
+
+**Reste**
+- Pneus : stock usagé séparé du neuf (plan validé : `tires.used_stock_quantity`, `vehicle_tires.stock_source`).
+- FUEL3 (kilométrage décroissant, volume > réservoir) : nouvelle règle d'anomalie, pas de capacité de
+  réservoir en base. WO5, parcours P2/P3/P6, soft delete, DOC1/DOC3, ALR, DIR.
+
+## Lot b4f1cc9, 6696d11 - pneus : stock usagé séparé du neuf (TIR7), nettoyage des tests
+
+**Quoi**
+- `b4f1cc9` : `tires.used_stock_quantity` et `vehicle_tires.stock_source` (`new` | `used`), créés dans
+  `init-database.ts` et `20261101_tires_used_stock.sql`. Démontage vers le stock : usagé +1, neuf
+  inchangé. Montage : neuf par défaut, usagé sur choix explicite (`stockSource`), décrément atomique
+  gardé ; source vide : 409 lisible. Création de fiche : usagé forcé à 0 ; PATCH usagé négatif : 400.
+  Statistiques : valeur et stock bas sur le neuf seul, `usedQuantity` exposé. Écrans : tableau pneus,
+  dialogues de montage et de démontage, tableau de bord magasin. Source : `shared/constants/tire-stock.ts`.
+- `6696d11` : le nettoyage de test supprime les factures d'un fournisseur de test avant lui.
+
+**Pourquoi**
+- Un pneu qui a roulé revenait compté et valorisé comme neuf : stock, valeur d'inventaire et alertes
+  de stock bas faussés.
+- Une facture importée (numéro sans préfixe `TEST-`) bloquait la suppression de son fournisseur et
+  faisait échouer le nettoyage global de toutes les suites de contrat.
+
+**Preuve**
+- Rouge sur l'ancien code : `tires-used-stock` 10/10, unitaire `tires-used-stock-schema` 2/2.
+- Vert : `tires-used-stock`, `tires-rbac`, `supplier-invoice-import` 41/41 ; unitaire 839/839 ;
+  `npm run check` 0 erreur ; `e2e/11` 1/1 (démontage → usagé, trame temps réel).
+
+**Limites**
+- Le stock existant reste compté neuf (aucun backfill : l'origine n'a pas été conservée).
+- Pneu sérialisé et rechapage non modélisés.
+
+**Reste**
+- WO5, DOC1/DOC3 ; FUEL3 = nouvelle règle d'anomalie à cadrer.
+
+## Lot 5ef2af6, 5437147, 0d5db1d - coût d'OT (WO5), rejet de règlement (SINV1), retard client (CINV2)
+
+**Quoi**
+- `5ef2af6` : formule unique `computeWorkOrderCost` (`shared/work-order-cost.ts`) pour l'écran de
+  détail et le PDF de l'OT ; KPI de coût moyen par intervention : rotations de pneus ajoutées.
+- `5437147` : `PATCH /api/supplier-invoices/:id/settlements/:settlementId/reject`, motif obligatoire,
+  colonnes `rejected_by`, `rejected_at`, `rejection_reason` (init + `20261101_supplier_settlement_rejection.sql`),
+  événement `supplier_invoice_settlement_rejected`, bouton « Rejeter » et dialogue de motif.
+- `0d5db1d` : `markOverdueInvoices` dans le cycle de fond ; un paiement partiel garde le retard ;
+  événement `client_invoices_overdue`. Échéance par défaut des factures de test : 2099.
+- SINV2 : déjà couvert par T7, statut mis à jour sans nouveau test.
+
+**Pourquoi**
+- WO5 : une pièce sans prix donnait « NaN » à l'écran et 0 dans le PDF ; le KPI ignorait les pneus.
+- SINV1 : `rejected` existait sans route ; une saisie erronée bloquait le vrai règlement en 409.
+- CINV2 : rien ne posait `overdue`, le compteur « en retard » restait à 0.
+
+**Preuve**
+- Rouge sur l'ancien code : `supplier-settlement-reject` 6/6, `client-invoice-overdue` 2/2,
+  `kpi-service` coût moyen 1/1, unitaires `work-order-cost` et schéma de rejet.
+- Vert : intégration 22/22 (avec `client-payment-idempotence`, `supplier-settlement-idempotence`),
+  contrat 12/12 (avec les deux suites de règlement existantes), unitaire 845/845, `tsc` 0 erreur.
+
+**Limites**
+- Retard calculé à la date de Douala, au plus tard au cycle suivant (5 min).
+- Le rejet n'est pas annulable ; une nouvelle saisie remplace le règlement rejeté.
+- Pas d'e2e : écran de rejet vérifié par `tsc` seulement.
+
+**Reste**
+- ALR1-3, DOC1/DOC3 ; FUEL3 = nouvelle règle d'anomalie à cadrer.
+
+---
+
+## 2026-11-01 : cas partiels PO1, PO2, PRT3, CINV1
+
+**Quoi**
+- Contrats : `purchase-order-lifecycle` (chaîne draft à delivered, rôles, étape sautée 409, rejeu de livraison sans doublon de facture, stock reçu partiel puis complet), `purchase-order-three-way` (écart 0, 2 %, 10 %, facture sans commande, technicien refusé), `client-invoice-payments` (statuts pending/partial/paid, centimes en série, paiement sur facture soldée 409, synthèse client).
+- Intégration : `stock-alert-lifecycle` (sous le seuil, pile au seuil, réappro partielle ou complète, retrait).
+
+**Pourquoi**
+- Lignes du plan en « Partiel » : seuls des e2e ou des services isolés les couvraient, sans rôle refusé ni rejeu.
+
+**Preuve**
+- Vert : PO1 et CINV1 (run du 1er novembre), PO2 8/8, PRT3 5/5 ; unitaire 839/839 ; `npm run check` 0 erreur.
+- Rouge au premier passage, retenu comme défauts produit (tests en `it.fails`, à retirer à la correction) : voir Défauts.
+
+**Défauts rapportés (non corrigés, à fleet-api / fleet-db)**
+1. `server/services/three-way-matching-service.ts:286-295` : à exactement 5 % l'écart est marqué (`>=`) mais la recommandation reste `manual_review` (`<=`). Test : `exactement 5 % d'écart`.
+2. `POST /api/supplier-invoices` avec un `purchaseOrderId` inexistant : 500 au lieu d'un 4xx lisible (`server/api/supplier-invoices.routes.ts`, création). Test : `commande inconnue`.
+3. `server/services/parts-service.ts` (~250-300, `updateStock`) ne recalcule pas `parts.reorder_alert` ; l'export d'inventaire (`excel-export-service.ts` ~83) garde « Alerte CDE » = NON après une sortie sous le seuil. Test : `export d'inventaire`.
+
+**Limites**
+- Ces tests couvrent un comportement existant : pas de « rouge avant correctif », sauf les trois défauts ci-dessus (rouges constatés, gardés en `it.fails`).
+- `POST /auto-approve` volontairement non appelé (il agirait sur toutes les factures reçues de la base).
+
+**Reste**
+- FUEL2/3, VEH2, MNT1/2, DIR2/3.
+
+## Lot 4c5792e, 244f720, b916003 - défauts trouvés par les cas partiels
+
+**Quoi**
+- `4c5792e` : rapprochement 3 voies, la recommandation suit la borne de `hasDiscrepancy` : 5 % pile = `escalate`.
+- `244f720` : `createSupplierInvoice` vérifie la commande liée ; inconnue = 404 « Commande fournisseur introuvable. »
+  (route de création et import Excel).
+- `b916003` : export d'inventaire, « Alerte CDE » = quantité <= seuil (règle de `stock-alerts-service`) ;
+  `updateStock` tient `parts.reorder_alert` à jour.
+- Les trois `it.fails` de la PR #61 redeviennent des `it`.
+
+**Pourquoi**
+- Défauts rapportés par l'agent des cas partiels (entrée précédente), gardés en `it.fails` jusqu'au correctif.
+
+**Preuve**
+- Rouge : les trois `it.fails` passaient sur l'ancien code (défaut présent).
+- Vert : contrat 20/20 (`purchase-order-three-way`, `purchase-order-lifecycle`, `client-invoice-payments`),
+  intégration 19/19 (avec `parts-stock-adjustment`, `supplier-settlement-idempotence`), unitaire 845/845, `tsc` 0.
+
+**Limites**
+- `reorder_alert` reste périmé pour les autres chemins qui modifient `parts.quantity` (réception, sortie) ;
+  plus aucun lecteur serveur ne s'y fie pour décider.
+
+**Reste**
+- ALR1-3, DOC1/DOC3 ; FUEL2/3, VEH2, MNT1/2, DIR2/3.
+
+## Lot d9d09b1, a32b671 - alertes : boîte de l'utilisateur (ALR2), génération planifiée (ALR1, ALR3)
+
+**Quoi**
+- `d9d09b1` : `server/api/alerts.routes.ts` (lu, tout lu, suppression) filtré sur l'utilisateur de
+  session ; `POST /api/alerts/read-all` ; événement `alerts_read` (scope user) ; bouton « Tout marquer
+  lu » ; doublons morts retirés de `server/routes.ts` et de la liste gelée.
+- `a32b671` : clé de rappel quotidien sur les générateurs planifiés, insertion `ON CONFLICT DO NOTHING`
+  sur `uq_alerts_user_dedupe`, pas d'événement sans création.
+
+**Pourquoi**
+- ALR2 : n'importe quel compte pouvait marquer lue ou supprimer l'alerte d'un autre ; pas de « tout lu ».
+- ALR1 : une alerte lue revenait toutes les 5 min ; deux passages simultanés la doublaient.
+
+**Preuve**
+- Rouge sur l'ancien code : `alerts-inbox` 5/6 (200 au lieu de 404 hors périmètre, route read-all
+  absente, événement non déclaré), `alert-generation-dedupe` 2/5 (concurrence, alerte lue recréée).
+- Vert : contrat 12/12 (avec `notification-settings`, `incidents`), intégration
+  `alert-generation-dedupe` 6/6 (dont alerte antérieure à la clé non doublée), unitaire 846/846,
+  `tsc` 0 erreur.
+
+**Limites**
+- Rappel quotidien : une alerte lue revient le lendemain si l'objet est toujours en défaut.
+- ALR3 couvert en intégration (événement par destinataire, technicien exclu), pas en e2e.
+- `document-expiry-alerts` dépasse 90 s, sur main comme sur la branche : le passage parcourt tous les
+  documents réels de la base partagée. Préexistant, non traité ici.
+
+**Reste**
+- DOC1/DOC3 ; FUEL3 à cadrer ; FUEL2, VEH2, MNT1/2, DIR2/3.
+
+## Correctif relecture PR #62 - alertes non lues accumulées d'un jour à l'autre
+
+**Quoi**
+- Une alerte non lue identique (type, titre, lien) bloque toujours la création, quelle que soit sa clé :
+  le rappel quotidien ne repart qu'une fois l'alerte lue.
+- Garde-fou `alerts-write-hygiene` (écritures sur `alerts` gelées) ; leçon dans `LESSONS_LEARNED.md`.
+
+**Pourquoi**
+- Relecture : avec la seule clé du jour, un OT en retard non lu pendant 20 jours donnait 20 alertes
+  non lues par destinataire. Corrige la limite « rappel quotidien » de l'entrée précédente : seule une
+  alerte **lue** revient le lendemain.
+
+**Preuve**
+- Intégration `alert-generation-dedupe` 8/8 (J+1 non lue : aucune création ; J+1 lue : rappel),
+  unitaire 848/848, `tsc` 0 erreur. Garde-fou rouge sur main (4 appels par id seul).
+
+## DOC3 et P4 - renouvellement rapide : alerte d'échéance levée
+
+**Quoi**
+- `POST /api/document-renewals/quick-renew` lève désormais les alertes `doc_expiry` (due et expired)
+  du document renouvelé, pour tous les destinataires, via `alertInboxService.clearDocumentExpiryAlerts`.
+- Le client invalide les queries d'alertes sur `document_renewal_quick_completed`.
+
+**Pourquoi**
+- Test DOC3 rouge sur main : après renouvellement, l'échéance était à jour mais l'alerte restait,
+  le tableau de bord annonçait encore un document renouvelé.
+- La suppression passe par le service d'alertes, seul autorisé par le garde-fou `alerts-write-hygiene`.
+
+**Preuve**
+- Contrat `document-quick-renew-alerts` 2/2 (DOC3, P4) et `document-renewal-status` 1/1,
+  unitaire 848/848, `tsc` 0 erreur.
+
+**Reste**
+- DOC1 (différé) ; FUEL3 à cadrer.
+
+## Relecture PR #64 - délimitation des préfixes, invalidation en double
+
+**Quoi**
+- Unitaire `document-expiry-rule` : les préfixes de levée du document 1 ne couvrent pas les clés des documents 10 et 12.
+- `useRealTimeSync.ts` : bloc d'invalidation DOC3 retiré, le même `case` invalide déjà les quatre clés d'alertes.
+
+**Pourquoi**
+- Relecture : aucun test ne cassait si le `:` final du préfixe disparaissait (le contrat utilise des ids consécutifs).
+
+**Preuve**
+- Unitaire 10/10 sur le fichier, `tsc` 0 erreur.
+
+## ADM1, ADM3 - comptes : écriture réservée à l'admin, suppression qui coupe l'accès
+
+**Quoi**
+- Contrat `users-admin-soft-delete` (9 cas) : 403 non-admin et 401 anonyme sur POST/PATCH/DELETE
+  `/api/users`, auto-suppression refusée, 204 puis 404, ligne conservée, absent de `GET /api/users`.
+- Correctif : la connexion refuse un compte `deletedAt` ; `authorize`, `isAdmin` et `GET /api/auth/me`
+  aussi ; `DELETE /api/users/:id` et `PATCH /api/admin/users/:id/toggle` (désactivation) effacent les
+  sessions du compte et ferment ses connexions temps réel (`server/lib/user-sessions.ts`).
+
+**Pourquoi**
+- Trois cas rouges sur main (écrits d'abord en `it.fails`) : un compte supprimé se reconnectait, et
+  une session ouverte avant la suppression restait valide sur toutes les routes.
+
+**Preuve**
+- Contrat 16/16 (`users-admin-soft-delete`, `api-auth-sessions`, `auth-lockout-admin`), unitaire
+  848/848, `tsc` 0 erreur.
+
+## Piste B, lots B1 et B3 (partiel) - référentiels, statut véhicule, libellés de demande
+
+**Quoi**
+- CLI1, PRT1, SUP1, SUP2, CAT2 au contrat (`clients-crud`, `parts-catalog-crud`, `suppliers-crud-ratings`,
+  `fault-catalog-lifecycle`), VEH4 en intégration (`vehicle-status-sync`), PRT5 en unitaire
+  (`part-requirement-labels-hygiene`). Aide `tests/support/contract-actors.ts` (plusieurs comptes de rôles).
+
+**Pourquoi**
+- Plan `PLAN_COUVERTURE_MODULES.md` : ces cas étaient « à faire ». Les défauts trouvés sont figés en `it.fails`
+  (le test devient rouge le jour du correctif, ce qui force à retirer `.fails`).
+
+**Défauts figés (`it.fails`)**
+- `POST /api/parts` : référence en doublon, 500 ; prix non numérique, 500 ; stock négatif accepté (201).
+- `DELETE /api/parts/:id` : id inconnu ou second appel, 500 au lieu de 404.
+- `POST /api/suppliers` : nom en doublon, 500 au lieu de 409.
+- `POST /api/purchase-orders` : accepte un fournisseur désactivé.
+- Le chef d'atelier est refusé sur tout `/api/suppliers` (montage `PROCUREMENT_ROLES`) : la règle de notation
+  de `supplier-categories.ts` pour ce rôle est inatteignable.
+- `PATCH /api/fault-catalog/:id` : id inconnu, 200 ; `validatedBy` forgeable par le corps et jamais renseigné par le serveur.
+- Annulation du dernier OT ouvert : le véhicule reste en maintenance (`storage.ts`, mise à jour d'OT).
+
+**Preuve**
+- Contrat 74/74 (11 `it.fails`), intégration VEH4 8/8 (1 `it.fails`), unitaire 855/855, `tsc` 0 erreur.
+- PRT5 rouge avec `issued: "Terminé"` ajouté à `requests.tsx` (restauré), vert sans.
+
+**Limites**
+- Variante, spécification, catégories de pièce et pièces associées d'un défaut : aucune route, non couvrables.
+- VEH1, VEH3, MIS2 écrits mais jamais exécutés (consigne d'arrêt) : non livrés. MIS1, P2, ADM2, DRV2, WO1, WO7, T6, P5, P6 non commencés.
+
+## 2026-11-01 - FUEL2, DIR2, DIR3 : statistiques carburant et export par période
+
+**Quoi**
+- `tests/contract/fuel-vehicle-stats.contract.test.ts` : `GET /api/fuel-card/vehicle/:id/stats` (totaux, prix au litre, station la plus fréquente, enregistrements sans débit ignorés, autres véhicules ignorés, zéros, 401/403/400).
+- `tests/contract/fuel-export-period.contract.test.ts` : export XLSX carburant filtré par mois et par année, contenu des cellules relu avec `xlsx`, 403 client, 400 année absente ou mois 13.
+- `tests/support/contract-session.ts` : ajout de `raw()` pour lire un fichier binaire.
+
+**Pourquoi**
+- Plan : FUEL2, DIR2, DIR3 étaient « à faire ».
+
+**Défauts figés (`it.fails`)**
+- Statistiques d'un véhicule inconnu : 500 avec message brut au lieu de 404 (`fuel-card-service.ts:457`, route `fuel-card.routes.ts`).
+- Un plein saisi par `POST /api/fuel-records` n'apparaît pas dans l'export de son mois : l'export filtre sur `fuelRecords.year/month` (`excel-export-service.ts:125`), que seul l'import Excel renseigne.
+
+**Preuve**
+- Rejeu sans `.fails` : rouge sur `expected [] to have a length of 1` (export) et sur 500 attendu 404 (statistiques).
+- Relecture : le plein de l'export (véhicule, POST et son 201) est créé dans un `beforeAll`, le `it.fails` ne garde que le téléchargement et l'assertion. La date est fixe (2026-06-15) : le mois filtré est celui de la date envoyée, sans dépendre du fuseau ni du jour. Rouge rejoué sans `.fails` : `expected [] to have a length of 1 but got +0`. Contrat 4/4 verts.
+
+**Limites**
+- Rapports inventaire et performance technicien, historique de consommation : non couverts. FUEL1 et DIR1 non repris.
+
+**Reste**
+- FUEL1, DIR1, puis lot A5.
+
+## Piste B, lot B2 : VEH1, VEH3, MIS2 (contrat)
+
+**Quoi**
+- Trois fichiers de contrat exécutés pour la première fois : `vehicles-crud` (VEH1), `vehicle-acquisition-workflow` (VEH3), `mission-planning-conflict` (MIS2). Corrigés : délais de describe à 180 s, `notes` à la place d'une colonne `color` inexistante, `GET /api/vehicles/abc` attendu en 404 (valeur cherchée comme immatriculation).
+- Défauts produit figés en `it.fails`, sans toucher au code produit :
+  - statut initial consigné deux fois (`server/storage.ts:871` et `server/routes.ts:1090`) ;
+  - `year` / `mileage` non numériques : 500 au lieu de 400 (`shared/schema.ts:154-155`) ;
+  - `PATCH /api/vehicles/:id` : `createdBy` du corps réécrit l'auteur (`server/routes.ts:1195`) ;
+  - `PATCH /api/vehicles/:id` : immatriculation déjà prise, 500 (`server/storage.ts:910`, `server/routes.ts:1204`) ;
+  - `PATCH /api/workflows/vehicle-acquisition/:id` : `userId` du corps réaffecte le brouillon (`server/services/workflow-service.ts:88`) ;
+  - lancement de mission refusé : motifs réduits à « Ce champ n'est pas valide. » (`server/api/missions.routes.ts:2366`).
+
+**Pourquoi**
+- Ces fichiers étaient écrits mais jamais exécutés : leur couverture n'était pas prouvée.
+
+**Preuve**
+- Rouge en `it` avant `it.fails` : 2 lignes d'historique au lieu d'1, `year`/`mileage` 500, `createdBy` et `userId` réécrits, immatriculation en double 500, motif absent. Vert ensuite : vehicles-crud 22/22, acquisition + mission 34/34 (run4). `tsc` 0 erreur, unitaire 845/845.
+
+**Limites**
+- Le 400 du lancement de mission ne prouve pas le conflit seul (la mission de test n'a pas de budget) : le conflit est prouvé par `launch-readiness`.
+- Un e2e VEH3 (parcours écran) reste à faire.
+
+**Reste**
+- MIS1 et P2 (rejouer `e2e/05`), lots B3 et B4 non commencés.
+
+## Lot ADM5, ADM6, DRV1 - PIN chauffeur, journal d'activité des comptes, fiche chauffeur
+
+**Quoi**
+- `driver-pin-login` (ADM5, 7 cas) : bon PIN ouvre une session, mauvais PIN, compte supprimé, rôle
+  autre que chauffeur, PIN absent et corps incomplet refusés sans cookie ; la liste PIN n'expose que
+  `id` et `name`.
+- `audit-sensitive-actions` (ADM6, 3 cas) : création, changement de rôle et suppression de compte
+  écrivent une ligne `activity_logs` attribuée à l'admin, mot de passe masqué ; un 403 n'en écrit aucune.
+- `drivers-crud-deactivation` (DRV1, 7 cas) : CRUD logistique, magasin refusé, désactivation réservée
+  à l'admin ; un témoin (chauffeur actif affecté : 200) et trois `it.fails` (affectation, liste PIN,
+  connexion PIN), mise en place en `beforeAll` pour qu'un échec de préparation ne passe pas pour le défaut.
+
+**Pourquoi**
+- Défauts constatés : un chauffeur désactivé reste affectable par `PATCH /api/missions/:id` (seul le CPC
+  est vérifié, le refus n'arrive qu'au lancement) ; il reste sur l'écran PIN et s'y connecte, car
+  `drivers-list` et `pin-login` lisent `users` seul. Correction à arbitrer, non faite ici.
+
+**Preuve**
+- Contrat 17/17 (dont les 3 `it.fails`) ; les cas rejoués en `it` échouent sur l'assertion finale
+  (affectation 200 au lieu de 400, compte encore listé).
+
+## VEH2 - véhicule supprimé : masqué, historique consultable, non assignable
+
+**Quoi**
+- Contrat `vehicle-soft-delete` (9 cas) : un véhicule supprimé (`deletedAt`) est masqué de la liste et de la
+  recherche, ses OT et missions passés restent consultables ; `DELETE /api/vehicles/:id` refusé aux non-admin
+  (403), id invalide 400, inconnu 404, véhicule sans historique supprimé et masqué.
+- Témoin : un véhicule actif avec un chauffeur formé s'assigne à une mission (201).
+
+**Pourquoi**
+- Le plan donnait VEH2 « À faire ». La colonne `vehicles.deletedAt` existe et les listes la filtrent, mais
+  aucune route ne la pose : la suppression est physique.
+
+**Preuve**
+- Trois défauts en `it.fails`, chacun rejoué en `it` pour vérifier le rouge (cf. PR) :
+  1. `DELETE` d'un véhicule portant un OT : 500 (clé étrangère `work_orders_vehicle_id_vehicles_id_fk`),
+     au lieu de 200 avec `deletedAt` posé (server/routes.ts:1222, vehicle-deletion-service-trigger.ts:43).
+  2. `POST /api/work-orders` sur un véhicule supprimé : 201 (server/routes.ts:2130 ne contrôle que l'existence).
+  3. `POST /api/missions` avec un véhicule supprimé : 201 (server/api/missions.routes.ts:1736 sans filtre `deletedAt`).
+- Relecture : les `it.fails` ne contiennent plus que l'appel visé et l'assertion métier ; la mise en place
+  (véhicule supprimé, OT historique) est dans un `beforeAll` : une erreur de préparation fait échouer le hook
+  au lieu de rendre le cas vert. Rouge rejoué sans `.fails`, erreurs exactes : `expected 201 to be 400`
+  (mission), `expected 201 to be greater than or equal to 400` (OT), `expected 500 to be 200` (DELETE).
+  Contrat 9/9 verts.
+- Garde-fou d'hygiène (`it-fails-hygiene`) : le DELETE de la route est joué dans le `beforeAll` (il
+  faisait deux requêtes dans le `it.fails`), le cas assert son statut puis la lecture de l'OT. Rouge rejoué :
+  `expected 500 to be 200`. Hygiène 7/7.
+- `tsc` 0 erreur, unitaire 838/838, contrat 9/9 cas verts.
+
+**Limites**
+- `GET /api/vehicles/:id` renvoie encore un véhicule supprimé (`storage.getVehicle`, server/storage.ts:699) : non figé.
+
+**Reste**
+- Correctif produit (fleet-api / fleet-db) : suppression logique, puis passer les trois `it.fails` en `it`.
+
+## Garde-fou d'hygiène : it.fails sans mise en place
+
+**Quoi**
+- `tests/unit/server/it-fails-hygiene.test.ts` (5 cas) : extrait les `it.fails` / `test.fail` de `tests/` et `e2e/`, signale ceux dont le corps crée des données ou fait plusieurs requêtes. Huit occurrences héritées de main sont gelées.
+
+**Comment**
+- Analyse de texte (commentaires retirés, chaînes respectées), sans base. Une fabrique dont le résultat est assertionné sur `.status` est l'appel visé et n'est pas signalée, pour éviter les faux positifs.
+
+**Pourquoi**
+- `it.fails` passe sur n'importe quel échec : cinq PR ont dû être recalées (#67, #68, #70, #71, #72).
+
+**Preuve**
+- `it.fails` fautif fabriqué : rouge ; propre : vert. Fichier fautif déposé sur disque : 1 failed, retiré : 5/5.
+
+## MNT1, MNT2, CAT1, WO6, P3 - maintenance préventive et catalogue main-d'oeuvre
+
+**Quoi**
+- Contrat `maintenance-schedules` (MNT1) : droits (401, 403), corps invalides 400, véhicule inconnu 404, création active
+  qui génère l'OT préventif lié, plan inactif sans OT, PATCH, désactivation et réactivation, DELETE, cloison client.
+- Contrat `labor-catalog` (CAT1) : lecture sur session, écriture réservée au chef d'atelier, code en majuscules, auteur
+  tracé, doublon refusé, deux créations simultanées (201 + 400), poste inactif masqué et refusé sur un OT.
+- Intégration `preventive-maintenance-triggers` (MNT2) : échéance véhicule dans la fenêtre de 30 jours (J+30 oui,
+  J+31 non), OT unique au rejeu et véhicule en maintenance, seuil kilométrique, plan inactif, plans à venir.
+- Support `tests/support/contract-session.ts` : serveur in-process et un compte connecté par rôle.
+- WO6 : déjà couvert par `time-tracking` (contrat 5, intégration 3), passé OK au plan sans nouveau test.
+
+**Pourquoi**
+- Le plan donnait ces lignes « À faire ». Les défauts sont figés en `it.fails` plutôt que corrigés.
+
+**Preuve**
+- Quatre `it.fails`, rejoués en `it`, rouges sur l'assertion visée :
+  1. MNT1 : `DELETE /api/maintenance-schedules/:id` d'un plan avec OT répond 204, le plan existe encore
+     (server/routes.ts:1811, server/storage.ts:1192 avale l'erreur de clé étrangère).
+  2. MNT2 : l'échéance `scheduledDate` d'un plan actif ne déclenche aucun OT, seules les dates du véhicule le font
+     (server/services/preventive-maintenance-service.ts:112).
+  3. MNT2 : un second passage à 20000 km crée un second OT en attente pour le même plan (le premier est joué en
+     mise en place et laisse un seul OT), la garde compare au titre du plan
+     alors que l'OT s'intitule « Maintenance préventive: <titre> » (preventive-maintenance-service.ts:310, :359).
+  4. CAT1 : `PATCH /api/labor-catalog/:id` répond 404, aucune route de modification ni de désactivation
+     (server/api/work-order-items.routes.ts).
+- Relecture : chaque `it.fails` ne contient plus que l'appel visé et l'assertion métier, la mise en place (véhicule,
+  plan, entrée de catalogue) est dans un `beforeAll` qui contrôle le 201. Rouge rejoué sans `.fails`, erreurs exactes :
+  `expected [ { id } ] to have a length of +0 but got 1` (MNT1), `expected [] to have a length of 1 but got +0`
+  (échéance de plan), `expected [ ... ] to have a length of 1 but got 2` (deux OT), `expected 404 to be 200` (CAT1).
+- Contrat 16/16 cas verts, intégration 11/11, unitaire 838/838, `tsc` 0 erreur.
+
+**Limites**
+- `calculateNextDueDate` lève pour les fréquences quotidienne et hebdomadaire acceptées par le POST : non figé.
+- Bord de mois et fuseau du pointage non testés : WO6 repassé de « OK » à « Partiel » au plan.
+- Alerte, clôture de l'OT préventif et recalcul de l'échéance par date non couverts (P3).
+
+**Reste**
+- Correctifs produit (fleet-api) puis passage des quatre `it.fails` en `it`.
+
+## 2026-11-01 - FUEL1 et DIR1 : carte carburant et KPI Direction
+
+**Quoi**
+- `tests/contract/fuel-card-routes.contract.test.ts` : recharge (401, 403 par rôle, 201 par rôle autorisé, solde + montant, prix déduit, 400 sur six corps invalides), consommation (201, solde - coût, 400 par champ manquant), historique filtré (type, véhicule, année/mois, liste vide), statistiques mensuelles, par client, anomalies, liste des pleins par véhicule, suppression (403, 400, 404, 204, second appel 404).
+- `tests/contract/management-dashboard-kpis.contract.test.ts` : le tableau de bord Direction est lu avant et après une transition réelle par l'API (OT en cours puis terminé, OT annulé, véhicule opérationnel, maintenance, hors service, plein saisi puis supprimé, facture fournisseur) ; seules les différences sont vérifiées.
+
+**Pourquoi**
+- Plan : FUEL1 et DIR1 étaient « partiel ». Le solde de la carte est global : valeurs absolues impossibles sur base partagée.
+
+**Défauts figés (`it.fails`, assertion métier seule, requêtes jouées dans `beforeAll` puis lignes supprimées)**
+- `POST /api/fuel-card/recharge` avec une date illisible : 500 (année NaN), `server/api/fuel-card.routes.ts:56`.
+- `POST /api/fuel-card/consumption` : quantité `"abc"` acceptée en 201 et débit NaN écrit ; quantité négative acceptée en 201 (`fuel-card.routes.ts`, `fuel-card-service.ts:217`). Un débit NaN rend `balance` null pour toute la carte et désactive le contrôle `cost > balance` (comparaison avec NaN toujours fausse) : constaté en premier run, base nettoyée ensuite.
+- Véhicule inconnu : 500 au lieu de 404 (`fuel-card-service.ts:218`) ; solde insuffisant : 500 au lieu de 409 (`fuel-card-service.ts:226`, la route renvoie 500 pour toute erreur) et message brut renvoyé.
+- `GET /api/fuel-records/vehicle/:id` ouvert à un client pour un véhicule qui n'est pas le sien (`server/routes.ts:3290`, `authenticate` seul).
+
+**Preuve**
+- Contrat 48/48 (fuel-card-routes + management-dashboard-kpis, 6 `it.fails`).
+- Rejeu du bloc de défauts sans `.fails` : 6 rouges (`expected 500 to be 400`, `expected 201 to be 400` x2, `expected 500 to be 404`, `expected 500 to be 409`, `expected 200 to be 403`).
+
+**Limites**
+- T5 : `tests/integration/stock-audit-columns.test.ts` écrit mais jamais exécuté, non livré (retiré de la PR). T8, T1, T3, T4 non commencés.
+- Double soumission d'une recharge : aucune règle d'idempotence définie, non testée.
+- Facture fournisseur : seule la saisie est couverte, pas validation/approbation/paiement.
+
+**Reste**
+- T5 (fichier écrit à exécuter), T8, puis T1, T3, T4.
+
+## 2026-11-01 - T5 : audit created_by / updated_by des pièces et pneus
+
+**Quoi**
+- `tests/integration/stock-audit-columns.test.ts` (9 tests) : création (created_by = updated_by = auteur), modification par un autre utilisateur (updated_by et updated_at changent, created_by et created_at non), ajustement de stock par un troisième (updated_by, mouvement d'entrée initial du créateur puis mouvement de l'ajustement), suppression logique d'un pneu, noms joints en lecture, pneu supprimé non modifiable.
+
+**Pourquoi**
+- AGENTS.md §5 : quatre champs d'audit obligatoires. Aucun test ne distinguait les auteurs.
+
+**Preuve**
+- Premier run : 1 rouge, erreur de mon attendu (le service écrit aussi un mouvement initial à la création : `[4200, 4202]`), attendu corrigé. Puis 9/9 deux fois de suite (idempotence). Pas de défaut produit trouvé, donc pas d'`it.fails` ni de rouge à prouver.
+
+**Limites**
+- Niveau service seulement : le contrat HTTP (corps client ignorant created_by) n'est pas couvert.
+
+**Reste**
+- T8 (pagination, filtres, recherche), T1, T3, T4.
+
+## 2026-11-01 - FUEL1 : filet de ménage des sondes (réserves de relecture #74)
+
+**Quoi** : `probe()` enregistre l'id avant la suppression ; `afterAll` balaie `fuel_records` daté de 2031.
+**Pourquoi** : un débit NaN resté en base fausse le solde global de la carte pour tous les fichiers (voir LESSONS_LEARNED).
+**Preuve** : fichier rejoué, 40/40 verts sur la base `tests-piste-a`.
+**Reste** : T8.
+
+## Piste B, lot B2 : reprise de relecture (PR #72)
+
+**Quoi**
+- Mise en place sortie de chaque `it.fails` : `beforeAll` (ou `describe` dédié avec un it témoin) dans `vehicles-crud`, `vehicle-acquisition-workflow` et `mission-planning-conflict`. Un `it.fails` ne contient plus que l'appel visé et l'assertion métier ; l'assertion redondante `status === "assigned"` du lancement est retirée.
+- Corrections de titres : détail `/api/vehicles/abc` (404, cherché comme immatriculation, `server/routes.ts:1052-1060`), PATCH qui modifie `notes`, « lancement refusé, statut inchangé ». Un doublon d'immatriculation qui passerait en 201 est ajouté à `ids.vehicleIds` pour le ménage.
+- Correction du décompte des défauts produit : VEH1 4 (5 `it.fails`), VEH3 **5** (et non 1), MIS2 1, soit 10 (la mention « six défauts » du journal du lot B2 est à lire ainsi). Les quatre défauts VEH3 non documentés le sont désormais (commentaire DEFAUT PRODUIT, cause, fichier:ligne) :
+  - `POST` sans validation (`server/routes.ts:5654`) : corps vide et `currentStep: "abc"` donnent 500 (`server/services/workflow-service.ts:36-42`) ;
+  - `PATCH` d'une session inconnue : 200 et corps `null` (`workflow-service.ts:100`, `routes.ts:5710-5711`) ;
+  - `PATCH` : `status` du corps étalé dans le `set` (`workflow-service.ts:88`), comme `userId`.
+
+**Pourquoi**
+- Un `it.fails` qui crée sa donnée passe au vert si la création échoue : il ne prouve plus le défaut. Garde-fou de la PR #73 (`it-fails-hygiene`).
+
+**Preuve**
+- Rouge sans `.fails` (log `b2r-rouge.log`, copies temporaires supprimées) : 11 échecs, tous sur l'assertion métier : 2 lignes d'historique au lieu d'1 ; 500 au lieu de 400 (année, kilométrage, corps vide, étape) ; PATCH immatriculation prise 500 ; `createdBy` et `userId` réécrits (id différent) ; PATCH inconnu 200 au lieu de 404 ; statut `completed` au lieu de `in_progress` ; motif « Conflit planning » absent.
+- Vert avec `.fails` : trois fichiers ensemble, 58/58 (`b2r-vert.log`). `tsc` (tsconfig temporaire incluant les trois tests) : 0 erreur. `it-fails-hygiene` : 7/7, liste gelée inchangée.
+
+**Reste**
+- Défauts produit à corriger par fleet-api / fleet-db. e2e VEH3 non fait.
+
+## Piste B, lot B2 : correctifs de contre-relecture (PR #72)
+
+**Quoi**
+- `vehicles-crud` : le premier POST du doublon d'immatriculation est vérifié (201) avant le second ; les POST de création refusée, sans session et de corps invalide passent par un helper qui enregistre tout 201 inattendu dans `ids.vehicleIds`, pour le ménage.
+- Références produit recalées dans les commentaires DEFAUT PRODUIT (elles corrigent l'entrée précédente) : `server/routes.ts:1090` devient 1092-1093, `:1195` devient 1193, `:1204` devient 1201.
+
+**Preuve**
+- `vehicles-crud` rejoué sous verrou et test d'hygiène `it-fails-hygiene` : résultats dans le compte rendu de la PR.
+
+## Lot MIS1 + P2 - Mission, facture, paiement au navigateur
+
+**Quoi**
+- `e2e/13-mission-invoice-payment.spec.ts` : la logistique crée une mission (API), la facture depuis
+  l'écran mission (HT 100 000, TTC 119 250), la secrétaire encaisse en deux fois ; facture soldée, bouton
+  de paiement absent, bouton désactivé pour la logistique. Vérité lue en base ; mission, facture, comptes
+  et client supprimés en fin de spec.
+
+**Comment**
+- Comptes créés par `createE2EUser`, serveur et runner sur `DATABASE_URL_TEST` (branche tests-piste-b),
+  sous verrou, Edge (`E2E_CHANNEL=msedge`).
+
+**Pourquoi**
+- `05-mission-billing-payment` lisait la première facture trouvée et skippait sur base vide.
+
+**Preuve**
+- Spec 13 : 1/1 vert (2,5 min). Pas de défaut produit visé : pas de rouge avant, le test est une
+  couverture de parcours.
+
+**Limites**
+- Mission posée à « livrée » en base : affectation, étapes et lancement non rejoués (documents du
+  véhicule et CPC requis).
+
+## Lot B3 - Temps réel OT entre chef d'atelier et technicien (WO1, WO7, T6)
+
+**Quoi**
+- `e2e/14-realtime-work-order-roles.spec.ts` : trois comptes créés par la spec (chef d'atelier, deux
+  techniciens). Le chef crée un OT affecté au technicien : trame `work_order_created` reçue par le
+  technicien et alerte d'affectation lisible par `/api/alerts`. Un autre technicien est refusé (403) ;
+  le technicien affecté démarre l'OT : trame `work_order_updated` reçue par le chef, statut en base.
+  OT, véhicule et comptes supprimés en fin de spec.
+
+**Comment**
+- Trames lues sur `/ws` de chaque session (`page.on("websocket")`) après `auth_success`, jamais l'écran :
+  le polling de 7 s ne peut pas produire une trame.
+
+**Pourquoi**
+- La spec 06 dépend de comptes déjà en base et ne couvre que la création, dans un seul sens.
+
+**Preuve**
+- Vert 1/1 (2,9 min). Rouge : diffusion du démarrage renommée (`technician-work-orders.routes.ts`,
+  `work_order_updated` -> `wo_changed`, code rétabli) : échec « trame work_order_updated non reçue par le
+  chef d'atelier », 1 failed.
+
+**Limites**
+- ADM2 (changement de rôle), DRV2 (déclaration de panne du chauffeur) et l'invalidation des KPI à
+  l'écran ne sont pas couverts : budget de tours épuisé. Aucun défaut produit constaté.
+
+
+## T8 : pagination, filtres et recherche des listes principales
+
+**Quoi**
+- `tests/contract/lists-pagination-filters.contract.test.ts` (55 cas, 17 `it.fails`) : véhicules, ordres de travail, pièces, fournisseurs. Pages de 2 sans doublon ni trou avec total cohérent, tri explicite ascendant puis descendant, filtres statut / priorité / `isActive` / catégorie, véhicule supprimé exclu, liste vide, bornes (`limit` et `offset` non numériques, négatifs, démesurés), apostrophe littérale, injection classique, ordres de travail d'un client limités à ses véhicules.
+
+**Comment**
+- Lignes créées par le test et repérées par un jeton unique dans le champ cherché ; nettoyage par id en `afterAll` (`finally`), ordres de travail supprimés avant les véhicules. Les `it.fails` ne contiennent que l'appel visé et l'assertion métier, la mise en place est en `beforeAll`.
+- Missions (`GET /api/missions`) et documents (liste par véhicule) n'ont ni pagination ni filtre côté serveur : rien à tester au contrat.
+
+**Pourquoi**
+- Défauts constatés, non corrigés ici :
+  - `%` et `_` agissent comme jokers dans le `ILIKE` (véhicules `storage.ts:753`, ordres de travail `storage.ts:1333`, pièces `parts-service.ts:27`, fournisseurs `supplier-management-service.ts:36` et `:42`).
+  - Véhicules : `offset` négatif ou `limit` démesuré font échouer le SQL, `getVehicles` avale l'erreur (`storage.ts:844`) et la route répond 200 `{ vehicles: [], total: 0 }` (`routes.ts:963`).
+  - Pièces : `offset` négatif ou `limit` démesuré répondent 500 (`routes.ts:2604`, page non bornée) ; un octet nul dans la recherche répond 500, comme sur les fournisseurs.
+  - Fournisseurs : `isActive=maybe` est lu comme `false` (`suppliers.routes.ts:173`).
+  - `GET /api/vehicles` ne filtre pas sur `ownerScopeOf` : un client voit les véhicules des autres (`routes.ts:958`, AGENTS.md §11).
+  - Observé sans test figé : véhicules, `limit` non numérique ou négatif renvoie tous les véhicules, sans plafond.
+
+**Preuve**
+- Contrat 55/55 (17 `it.fails`) ; les 17 rejoués en `it` : 17 rouges, 38 verts. Hygiène `it-fails-hygiene` 7/7, liste gelée inchangée. `tsc --noEmit` global : 0 erreur ; fichier de test vérifié par un tsconfig temporaire : 0 erreur.
+
+
+## Piste C, étape 1 : garde-fou e2e contre la production
+
+**Quoi**
+- `e2e/helpers/production-guard.ts` et son appel en tête de `playwright.config.ts` : Playwright refuse de démarrer quand la base visée est la production (hôte contenant l'endpoint Neon de production, ou un marqueur de `E2E_PRODUCTION_DB_MARKERS`). Message actionnable, sans URL ni mot de passe.
+- `tests/unit/e2e/production-guard.test.ts` (10 cas) : extraction de l'hôte, pooler ou non, marqueur cherché dans l'hôte seulement, liste étendue par variable, repli sur le `.env`, priorité de la variable d'environnement, message sans secret, appel présent dans la config.
+
+**Comment**
+- Fonction pure, entrées injectables (`env`, lecture du `.env`) : testable sans base ni Playwright. La liste par défaut n'est qu'un plancher, la variable l'étend (RAIDER Agnostic).
+
+**Pourquoi**
+- Le `.env` racine pointe `DATABASE_URL` et `DATABASE_URL_TEST` sur la production ; les specs 07, 08, 10 à 14 créent et suppriment des lignes. Un oubli suffisait pour écrire en production.
+
+**Preuve**
+- Unitaire 10/10. `DATABASE_URL=<endpoint de production> node node_modules/@playwright/test/cli.js test --list` : échec immédiat avec le message du garde-fou (sans le garde-fou, la liste des specs s'affiche). Avec une branche de test : la config se charge.
+
+
+## Piste C, étape 1 bis : le même refus pour les suites intégration et contrat
+
+**Quoi**
+- `assertTestDatabaseNotProduction` (dans `e2e/helpers/production-guard.ts`), appelée par `tests/support/setup-db.ts` avant la redirection de `DATABASE_URL` vers `DATABASE_URL_TEST` : les suites vitest d'intégration et de contrat refusent de démarrer quand l'URL effective vise la production. 4 cas unitaires ajoutés (refus sans URL dans le message, branche de test acceptée, variable de marqueurs, appel présent avant la redirection). `tests/README.md` corrigé : `DATABASE_URL_TEST` ne doit plus être « la même URL ».
+
+**Comment**
+- Réutilise la détection de l'étape 1 (hôte seulement, jamais le chemin ni les identifiants), message sans secret.
+
+**Pourquoi**
+- Le `.env` racine pointe `DATABASE_URL_TEST` sur la production : un `npm run test:contract` ordinaire y écrivait.
+
+**Preuve**
+- Unitaire 14/14. Contrat lancé avec `DATABASE_URL_TEST` sur l'endpoint de production (valeur factice, aucune connexion tentée) : échec immédiat au chargement du setup, message du garde-fou. Sans le garde-fou, le même lancement ouvre la connexion et initialise la base. Avec la branche de test : les contrats tournent.
+
+
+## Piste C, étape 1 ter : nettoyage global des missions d'un compte de test
+
+**Quoi**
+- `tests/support/cleanup.ts` supprime aussi les missions (et leurs factures client) créées par un compte de test orphelin avant de supprimer le compte.
+
+**Pourquoi**
+- Sur la branche de test, le hook global `afterAll` échouait (`missions_created_by_users_id_fk`) et marquait en échec la suite de chaque fichier de contrat, tests verts compris.
+
+**Preuve**
+- Avant : 3 suites en échec au hook, 10 tests verts. Après : plus d'échec de hook.
+
+## Piste C, étape 2 : cloison client sur les lectures de véhicule, deux clients et le personnel
+
+**Quoi**
+- `tests/contract/vehicles-two-clients-isolation.contract.test.ts` (7 cas) : `GET /api/vehicles` (chacun ne voit que le sien, total 1, recherche de l'immatriculation d'autrui = 0, personnel voit tout), `GET /api/vehicles/all`, `GET /api/vehicles/:id` par id et par immatriculation (sien 200, autre client 403 sans fuite de l'immatriculation, personnel 200, sans session 401), véhicule sans propriétaire refusé aux clients, inconnu 404 (jamais 500).
+
+**Comment**
+- Trois comptes réels (admin, client A, client B), trois véhicules, `createApp` en mémoire ; nettoyage des lignes créées.
+
+**Pourquoi**
+- Le plan T8 notait que `GET /api/vehicles` ne filtrait pas sur le propriétaire ; #80 l'a corrigé. Il manquait un test à deux clients qui garde la cloison.
+
+**Preuve**
+- Vert 7/7 sur la branche de test. Rouge sur la version fautive : en neutralisant le refus du détail (`server/routes.ts:1076`, condition remplacée par `false`), 3 des 7 cas échouent (par id, sans propriétaire, par immatriculation). Aucun défaut produit constaté, donc aucun `it.fails`.
+
+
+## Piste C, étape 3 : parcours P5 (pneu) et P6 (stock bas vers réapprovisionnement)
+
+**Quoi**
+- `tests/contract/p5-tire-lifecycle.contract.test.ts` : un pneu de bout en bout (entrée en stock par le magasinier, montage neuf, suppression refusée tant que monté, inspection par le technicien, rotation, démontage vers le stock, remontage explicite de l'usagé et refus du remontage implicite, rebut, suppression refusée au magasinier puis acceptée à l'admin, historique de 2 montages et 1 inspection conservé), stock vérifié en base à chaque étape.
+- `tests/contract/p6-low-stock-to-restock.contract.test.ts` (3 cas) : sortie sous le seuil, alerte avec manque, commande du brouillon à confirmée (alerte inchangée), réception par le magasinier (+10, une entrée de stock à son nom), alerte levée, demande reçue, réception rejouée sans crédit ; réception refusée au technicien ; réception partielle qui laisse l'alerte.
+- Plan : P5 et P6 passent à « Contrat OK ».
+
+**Comment**
+- Deux erreurs de mes hypothèses corrigées au premier passage : la position de pneu `rear_left` n'existe pas (le 400 attendu en 409 était un faux positif de validation) et rejouer `delivered` répond 200 sans créditer (comportement idempotent, vérifié par le stock).
+
+**Pourquoi**
+- Les maillons étaient testés isolément ; rien ne prouvait la chaîne ni la justesse du stock d'une étape à l'autre.
+
+**Preuve**
+- P5 vert 1/1, P6 vert 3/3, deux passages de suite (idempotence). Rouge sur la version fautive : P5 avec le crédit de l'usagé au démontage neutralisé (`tires-service-simplified.ts:512`, `+ 1` en `+ 0`) ; P6 avec le crédit de réception neutralisé (`procurement-service.ts:238`) : 2 des 3 cas échouent. Une première mutation sur `part-requirements-service.ts:430` laissait P6 vert : ce n'est pas le chemin de réception d'une commande, le test ne prétend pas le couvrir.
+
+## Bilan après les correctifs #76 à #80
+
+**Quoi**
+- `PLAN_COUVERTURE_MODULES.md` : 16 lignes mises à jour. Passent OK : T8, VEH1, VEH2, VEH4, MNT1, MNT2, CAT1, PRT5, SUP1, SUP2, DRV1, FUEL1, FUEL2, MIS2 (déjà OK, mention du défaut retirée). Restent partiels avec défauts levés : PRT1 (variante et spécification sans route), DIR3 (exports hors carburant).
+- `couverture-tests.html` versionnée : bilan 52 testés, 16 partiels, 3 non testés (ADM2, DRV2, P5), 2 à construire (DOC1, FUEL3), sur 73.
+
+**Comment**
+- Statuts déduits des `it.fails` retirés par commit (`git show <pr> -- tests`) : plus aucun `it.fails(` sous `tests/` ni `e2e/` sur `main` (67b1588), seul le garde-fou `it-fails-hygiene` cite le mot.
+- PRT5 était couvert depuis #65 (`part-requirement-labels-hygiene`) sans que le plan soit mis à jour.
+
+**Pourquoi**
+- Le plan disait encore « Partiel, `it.fails` » pour des défauts corrigés : le bilan sous-estimait la couverture de 14 éléments.
+
+**Preuve**
+- Décompte du tableau `mods` de la page : `{ OK: 52, P: 16, F: 3, X: 2 }`. Preuves d'exécution des tests convertis : celles des PR #76 à #80 (unitaires 869/869, contrats rejoués, logs `scratchpad/logs/final80-*.log`).
+
+## Piste C, relecture : garde-fou e2e sans contournement
+
+**Quoi**
+- `playwright.config.ts` : `reuseExistingServer: false`. Un serveur déjà lancé sur le port (donc potentiellement sur la production) n'est plus réutilisé.
+- `e2e/helpers/production-guard.ts` : `hostOf` renvoyait `""` pour une URL sans `user@`, ce qui laissait passer la production. L'autorité entière est maintenant l'hôte.
+- `e2e/README.md` : phrase sur le refus précisée (base visée par la session), limite `E2E_BASE_URL` détaillée.
+- Fusion de `docs/couverture-apres-correctifs` (#81) : ligne T8 du plan reprise de #81, entrées de journal conservées toutes deux, ligne vide ajoutée avant l'étape 2.
+
+**Comment**
+- `tests/unit/e2e/production-guard.test.ts` : URL de production sans identifiants (hôte, marqueur, refus) et verrou sur `reuseExistingServer`.
+
+**Pourquoi**
+- Le garde-fou ne voit que la `DATABASE_URL` de la session : réutiliser un serveur existant le contournait. Une URL sans identifiants est valide pour `pg`.
+
+**Preuve**
+- Rouge sur le code d'avant (les deux fichiers sources restaurés) : 2 échecs sur 16. Vert après : 16/16.
+
+
+## Piste D, étape 1 : cliquets T1, T3, T4 sur les routes d'écriture
+
+**Quoi**
+- `tests/unit/server/write-routes-ratchet.test.ts` (12 cas, sans base) : analyse statique de toutes les routes POST/PUT/PATCH/DELETE de `server/routes.ts` et `server/api/*.routes.ts` (138 routes après dédoublonnage, Express servant la première déclaration). Trois cliquets : T1 garde de rôle (23 routes gelées), T3 validation du corps (32 sur 88 qui lisent `req.body`), T4 protection des champs serveur (32).
+- `tests/unit/server/support/write-routes-scan.ts` (détection, préfixe de montage par routeur, y compris les routeurs multiples de `work-order-items.routes.ts`) et `support/write-routes-frozen.ts` (les trois listes).
+- Plan : T1, T3, T4 passent à « OK avec cliquet ».
+
+**Comment**
+- Même principe que `vehicle-routes-guard` et `routes-hygiene` : liste gelée, échec dans les deux sens (nouvelle route non conforme, ou entrée gelée devenue conforme). Le message nomme la route et dit quoi faire.
+- Ne sont pas des gardes de rôle : `authenticate`, `isAnyUser`, `requireFeature`, `requireAuth`, `checkAuth`, téléversement. Garde au montage (`apiRouter.use("/x", isStaff, ...)`) comptée.
+- Limite : texte seulement. Un handler passé par référence n'est pas lu pour T3/T4 ; un contrôle fait dans une fonction appelée n'est pas vu (la route reste gelée). Premier passage : le téléversement `upload.single` était pris pour une garde (regex corrompue), la route `post /api/workflows/:sessionId/documents` a été révélée par le test lui-même puis gelée.
+
+**Pourquoi**
+- T1, T3 et T4 n'ont pas de fin naturelle (« toute route ») : un cliquet fige l'existant et interdit la régression, au lieu d'un test par route.
+
+**Preuve**
+- Rouge : route factice `app.post("/api/zz-fake", authenticate, ... values(req.body))` ajoutée temporairement à `server/routes.ts` : 3 cas échouent (T1, T3, T4) en nommant `post /api/zz-fake`. Entrée gelée inexistante ajoutée : le cas T1 échoue (« la liste ne peut que rétrécir »). Retirés : 12/12 vert.
+- `tsc` global : 0 erreur. `npm test` : 82 fichiers, 895 tests verts (avant : 81 fichiers, 883).
+- À examiner par fleet-api (non corrigé ici) : `server/routes.ts:5178` `post /api/test-date-maintenance` (route de test accessible à tout compte connecté) ; `server/api/document-renewals.routes.ts:861` `post /quick-renew` sans garde de rôle.
+
+
+## Piste D, étape 2 : WO6, bord de mois, d'année et fuseau des pointages
+
+**Quoi**
+- `tests/integration/time-tracking-month-boundary.test.ts` (10 cas) : 31 mars / 1er avril, 31 décembre / 1er janvier (l'année change avec le mois), 29 février bissextile, rejeu du dernier jour du mois sans doublon, et le jour saisi relu à l'identique sous TZ = Kiritimati (+14), Pago Pago (-11), Los Angeles, UTC. Année 2033, aucune autre suite n'y écrit. Nettoyage des lignes et du compte créés.
+- 2 `it.fails` (défaut produit) : 30 février et 29 février 2033 ne sont pas refusés en 400.
+- Plan : WO6 mis à jour.
+
+**Comment**
+- Branche Neon `tests-piste-c`, sous `db-lock`. `month` et `year` sont tirés de la chaîne reçue (`time-tracking-service.ts:28`), jamais d'un `Date` : le fuseau du processus est sans effet, le test le fige.
+
+**Pourquoi**
+- WO6 notait « bord de mois et fuseau non testés ».
+
+**Preuve**
+- 13/13 verts avec les 3 cas existants (premier essai : délai de 10 s des hooks dépassé sur la branche froide, relancé avec 60 s). Les 2 `it.fails` passent donc la date impossible lève une erreur qui n'est pas un 400. Pas de rouge sur la version fautive pour les cas de bord : il n'y a pas de défaut de bord, ce sont des garde-fous de comportement correct. Second passage (idempotence) non rejoué faute de tours : nettoyage en `afterAll`.
+- Défaut : `shared/contracts/common.ts:12` (`isoDateSchema` ne vérifie que la forme) puis `server/services/time-tracking-service.ts:27` (`::date` en SQL) : erreur de base au lieu de 400. Correctif à fleet-api.
+
+## Piste D, relecture : les cliquets jugent la route réellement servie
+
+**Quoi**
+- `write-routes-scan.ts` (`allWriteRoutes`) lisait `routes.ts` d'abord. Or `server/app.ts` monte `apiRouter` avant `registerRoutes` : Express sert la version de `server/api`. Les routeurs sont maintenant lus dans l'ordre de montage de `server/api/index.ts` (`mountOrder`), `routes.ts` en dernier.
+- Un garde qui rend la main par `next()` sans répondre (`admin-users-guard.routes.ts`) ne masque plus la vraie route : il est écarté (`isPassThrough`) et ses middlewares (`isAdmin`) sont prêtés à la déclaration servie.
+- Listes gelées : T1 perd `post /api/fuel-card/consumption` ; T3 et T4 perdent `post /api/workflows/vehicle-acquisition` et `patch /api/workflows/vehicle-acquisition/:sessionId`. Aucune entrée ajoutée : aucune route servie non gardée n'est apparue.
+- Non fait : les clés issues de gabarits (`relative(alertPath(":id"))`) restent telles quelles ; les résoudre demande de lire les constantes de chemin, pas simple.
+
+**Comment**
+- `tests/unit/server/write-routes-ratchet.test.ts` : l'ordre `app.use("/api", apiRouter)` avant `registerRoutes`, la version servie de `fuel-card/consumption` vient de `api/fuel-card.routes.ts` et est gardée, ordre de montage, garde `next()` (détection et prêt de middlewares).
+
+**Pourquoi**
+- Les cliquets jugeaient la version morte de routes dupliquées : une route servie gardée figurait comme non gardée, et inversement une route non gardée pouvait échapper.
+
+**Preuve**
+- Rouge avec `routes.ts` remis en premier : 4 échecs (ordre, T1, T3, T4). Vert avec l'ordre corrigé : 15/15.
+
+## Piste E : DIR2 et DIR3, rapports par période et contenu des exports
+
+**Quoi**
+- `tests/contract/reports-inventory-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre mai 2019, mouvements avant, aux deux bornes et 1 ms après ; sortie comptée en valeur absolue ; statistiques cohérentes avec les lignes ; fenêtre vide ; début après fin ; 401.
+- `tests/contract/reports-technician-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre juin 2019, deux techniciens créés, OT aux bornes et hors fenêtre ; totaux, taux arrondi, totaux globaux, fenêtre vide (taux 0), fenêtre étroite.
+- `tests/contract/exports-inventory-content.contract.test.ts` (4 cas) : cellules exactes de l'export inventaire (alerte OUI/NON, valeur = stock réel x prix, N/A) et ligne TOTAL.
+- `tests/contract/exports-invoices-content.contract.test.ts` (6 cas) : factures fournisseurs (paiements = TTC - solde, IMPAYÉ/PAYÉ, date fr-FR) et clients (échéance, filtre par client sans fuite d'un autre client, nom inconnu, nom trop long en 400).
+- Plan : DIR2 fait en C, DIR3 élargi.
+
+**Comment**
+- Branche Neon `tests-piste-c`, sous `db-lock`. Données au jeton `TEST-`, fenêtres de dates propres (2019) pour que les totaux ne dépendent pas des autres suites, nettoyage en `afterAll` (mouvements, OT, pièces, comptes). Les `it.fails` ne contiennent que l'appel visé.
+
+**Pourquoi**
+- DIR2 ne couvrait que le carburant ; DIR3 notait « contenu des autres exports non vérifié ».
+
+**Preuve**
+- Vert : 26/26 (4 fichiers). Rouge par mutation temporaire, puis restaurée : `<=` en `<` sur la borne haute du rapport inventaire (`server/routes.ts`), borne haute des OT décalée de 1 ms (`reports-service.ts`), valeur du stock calculée sur `quantity` au lieu de `realStock` et Paiements = solde (`excel-export-service.ts`) : les 4 fichiers passent au rouge. Après restauration, `git diff server` vide, vert de nouveau (second passage).
+- Défauts (it.fails, correctif à fleet-api) : `server/routes.ts:2840` et `:2894` `authenticate` seul, client et chauffeur lisent stock, prix, charge des techniciens alors que l'écran les masque (`reports/index.tsx:524`) ; `server/routes.ts:2842` date invalide : 200 vide ; `:2896` : date invalide, pas de 400.
+- Observation, sans test : l'export inventaire valorise au stock réel, le rapport inventaire à la quantité théorique : deux valeurs du stock pour une même pièce.
+
+## Piste E, relecture : décompte du rapport inventaire
+
+**Quoi**
+- Entrée « Piste E » : `reports-inventory-period` compte 5 cas + 3 `it.fails`, pas 6 + 3.
+
+**Comment**
+- Décompte des `it(` et `it.fails(` du fichier (5 et 3) ; le total 26/26 sur les quatre fichiers est cohérent avec 8 + 8 + 6 + 4.
+
+**Pourquoi**
+- Un chiffre faux dans le journal affaiblit les autres.
+
+**Preuve**
+- `grep -c` sur le fichier de contrat : 5 `it(`, 3 `it.fails(`.
+
+
+## Piste F : T6, WO1, WO7, écrans satellites des transitions d'OT
+
+**Quoi**
+- `e2e/15-realtime-work-order-satellites.spec.ts` : (1) chef d'atelier et technicien créés par la spec ; création, démarrage, fin (technicien), correction (chef), refus création/suppression au technicien (403), suppression (chef). Chaque étape : trame WebSocket chez l'autre rôle ET refetch de `/api/work-orders/statistics` (et de la liste) observé (requêtes horodatées de la page) chez le chef, en moins de 5 s. (2) WO7 : `test.fail` « le chef reçoit l'alerte Intervention démarrée » avec témoin.
+
+**Comment**
+- Le tableau de bord du chef n'a pas de polling (`refetchInterval: false`, staleTime 5 min) : un refetch ne peut venir que de l'invalidation. Serveur local port 5072 et Playwright sur la branche Neon `tests-piste-c` (URL en variable d'environnement), sous `db-lock`. Mise en place du `test.fail` en `beforeAll`, le corps ne contient que la lecture des alertes.
+
+**Pourquoi**
+- T6 notait « invalidation KPI non vérifiée », WO7 « pas d'alerte nominative vers le chef ».
+
+**Preuve**
+- Vert : 3/3 en deux passages consécutifs (rouge reconfirmé après passage des attentes de refetch en requêtes horodatées, un premier essai avait échoué sur une création lente de la base distante). Rouge : retrait temporaire de l'invalidation `/api/work-orders/statistics` dans `work_order_updated` (`useRealTimeSync.ts`) : échec à l'attente du refetch après le démarrage (spec ligne 132) ; mutation annulée, `git diff client` vide.
+- Défaut (test.fail, correctif à fleet-api) : `server/api/technician-work-orders.routes.ts:96` diffuse `work_order_updated` mais n'appelle pas `alertService.notifyWorkOrderProgress` (seul `server/routes.ts:2321` le fait) : pas d'alerte pour le chef quand le technicien démarre depuis son écran.
+- Non couvert : MIS1/P2 (affectation, étapes, lancement de mission au navigateur) faute de tours.
+
+## Piste F, relecture : témoin du chef et refetch borné par la trame
+
+**Quoi**
+- Gabarit non rempli `:"+L+"` remplacé par `:96` (`technician-work-orders.routes.ts`).
+- `e2e/15` : le témoin WO7 vérifie maintenant la trame `work_order_updated` de l'OT chez le chef ; les étapes création, démarrage, fin et suppression attendent la trame de CETTE transition (statut et identifiant dans la trame), puis n'acceptent qu'un refetch postérieur à son arrivée (marge 250 ms).
+
+**Comment**
+- `observe` renvoie aussi `frameLog` (trames horodatées) ; `frameArrival` renvoie l'instant d'arrivée.
+
+**Pourquoi**
+- Un refetch tardif d'une étape précédente pouvait satisfaire l'attente de la suivante ; le témoin ne vérifiait aucune trame.
+
+**Preuve**
+- `tsc` global : 0 erreur. Exécution e2e : voir l'entrée suivante.
+
+## Piste F, relecture : exécution e2e non obtenue (correction de l'entrée précédente)
+
+**Quoi**
+- Les modifications de `e2e/15` n'ont pas pu être rejouées : le port 5000 était occupé par le serveur d'un autre run (réutilisation interdite par le garde-fou). Un serveur lancé à part sur le port 5001 (branche de test, sous `db-lock`) a affiché une page blanche, donc aucune socket temps réel : les 3 tests échouent avant la première assertion modifiée (`observe`, attente `auth_success`).
+
+**Pourquoi**
+- Cause non élucidée (serveur de développement lancé hors `npm run dev`). Le correctif de la spec reste donc **non prouvé** ; `tsc` global est à 0 erreur. À rejouer : `E2E_CHANNEL=msedge` sur la branche Neon de test, port 5000 libre, sous `db-lock`.

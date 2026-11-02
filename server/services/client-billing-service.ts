@@ -7,7 +7,7 @@ import {
   type ClientInvoice,
   type ClientPayment
 } from "@shared/schema";
-import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte, inArray, gt, lt } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
@@ -108,11 +108,11 @@ export class ClientBillingService {
         .limit(1);
 
       if (!result || !result.mission) {
-        throw new Error("Mission non trouvée");
+        throw new AppError(404, "Cette mission n'existe pas.");
       }
 
       if (!result.client) {
-        throw new Error("Client non trouvé pour cette mission");
+        throw new AppError(409, "Cette mission n'a pas de client : impossible de la facturer.");
       }
 
       const { mission, client } = result;
@@ -123,14 +123,29 @@ export class ClientBillingService {
         new Date();
 
       // Générer numéro automatique si non fourni (dans la transaction)
-      const invoiceNumber = invoiceData.invoiceNumber || 
+      const invoiceNumber = invoiceData.invoiceNumber ||
         await this.generateInvoiceNumberInTransaction(tx);
 
-      // Calculer montants avec TVA si demandé
-      const amountHT = invoiceData.amount;
+      if (invoiceData.invoiceNumber) {
+        const [taken] = await tx
+          .select({ id: clientInvoices.id })
+          .from(clientInvoices)
+          .where(eq(clientInvoices.invoiceNumber, invoiceNumber))
+          .limit(1);
+        if (taken) {
+          throw new AppError(409, `Le numéro de facture ${invoiceNumber} est déjà utilisé.`);
+        }
+      }
+
+      // Montants arrondis au centime : TTC = HT + TVA exactement, comme stocké.
+      const toCents = (value: number) => Math.round(value * 100) / 100;
+      const amountHT = toCents(invoiceData.amount);
       const vatRate = invoiceData.includeVAT ? 19.25 : 0;
-      const vatAmount = (amountHT * vatRate) / 100;
-      const amountTTC = amountHT + vatAmount;
+      const vatAmount = toCents((amountHT * vatRate) / 100);
+      const amountTTC = toCents(amountHT + vatAmount);
+      if (amountHT <= 0) {
+        throw new AppError(400, "Le montant doit être d'au moins 0,01 FCFA.");
+      }
 
       // Créer la facture (dans la même transaction)
       const [invoice] = await tx
@@ -261,6 +276,35 @@ export class ClientBillingService {
   /**
    * Enregistrer un paiement client
    */
+  /**
+   * Passe en `overdue` les factures échues (échéance strictement passée) et non
+   * soldées, en attente ou partiellement payées (CINV2). Idempotent : un second
+   * passage n'écrit rien. Appelé par le cycle de fond (`server/scheduler.ts`).
+   *
+   * `asOf` : date métier (AAAA-MM-JJ), par défaut aujourd'hui à Douala.
+   * `invoiceIds` : restreint le passage (tests sur base partagée).
+   * Retourne les ids passés en retard.
+   */
+  async markOverdueInvoices(options: { asOf?: string; invoiceIds?: number[] } = {}): Promise<number[]> {
+    const asOf = options.asOf ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Douala" }).format(new Date());
+    if (options.invoiceIds && options.invoiceIds.length === 0) return [];
+    const conditions = [
+      inArray(clientInvoices.status, ["pending", "partial"]),
+      gt(clientInvoices.balance, "0"),
+      lt(clientInvoices.dueDate, asOf),
+    ];
+    if (options.invoiceIds) conditions.push(inArray(clientInvoices.id, options.invoiceIds));
+
+    const rows = await db
+      .update(clientInvoices)
+      .set({ status: "overdue", updatedAt: new Date() })
+      .where(and(...conditions))
+      .returning({ id: clientInvoices.id });
+    const ids = rows.map((r) => r.id);
+    if (ids.length > 0) log.info({ asOf, count: ids.length }, "factures client passées en retard");
+    return ids;
+  }
+
   async recordPayment(invoiceId: number, paymentData: {
     amount: number;
     paymentDate: string;
@@ -330,10 +374,13 @@ export class ClientBillingService {
 
       const newBalance = currentBalance - paymentData.amount;
 
-      // Déterminer le nouveau statut
-      let newStatus: "pending" | "partial" | "paid" = "pending";
+      // Déterminer le nouveau statut. Une facture en retard le reste tant
+      // qu'elle n'est pas soldée (CINV2).
+      let newStatus: "pending" | "partial" | "paid" | "overdue" = "pending";
       if (newBalance <= 0) {
         newStatus = "paid";
+      } else if (invoice.status === "overdue") {
+        newStatus = "overdue";
       } else if (newBalance < parseFloat(invoice.amountTTC)) {
         newStatus = "partial";
       }

@@ -87,7 +87,7 @@ export const PAGE_HELP_MATCHERS: PageHelpMatcher[] = [
         { label: "Voir les réparations en attente", target: '[data-help-target="tech-wo-tabs"]' },
         { label: "Commencer une réparation", target: '[data-help-target="tech-wo-start"]', roles: ["technician"] },
         { label: "Mettre à jour une réparation en cours", target: '[data-help-target="tech-wo-update"]', roles: ["technician"] },
-        { label: "Ajouter une pièce utilisée", target: '[data-help-target="tech-wo-parts"]', prepareAction: "tech-open-update-modal", roles: ["technician"] },
+        { label: "Demander une pièce au magasin", target: '[data-help-target="tech-wo-parts"]', prepareAction: "tech-open-update-modal", roles: ["technician"] },
       ],
     },
   },

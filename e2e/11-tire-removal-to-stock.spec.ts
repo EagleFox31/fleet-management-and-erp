@@ -13,7 +13,7 @@ import { createE2EUser } from "./helpers/test-data";
  * - le chef d'atelier démonte depuis « Pneus montés » ; la destination est
  *   obligatoire, un double clic n'envoie qu'une requête (AGENTS.md §10) ;
  * - le magasinier, sur le suivi pneus, reçoit la trame `vehicle_tire_removed`
- *   avec `destination: "stock"` (AGENTS.md §3) ; la fiche regagne une unité.
+ *   avec `destination: "stock"` (AGENTS.md §3) ; la fiche regagne une unité usagée.
  */
 
 const ids = createIdBag();
@@ -120,7 +120,8 @@ test("chef d'atelier : le pneu démonté revient en stock, le magasin est préve
       .toBe(true);
 
     const [stock] = await db.select().from(tires).where(eq(tires.id, tireId));
-    expect(stock).toMatchObject({ stockQuantity: 1, updatedBy: workshopManager.id });
+    // Le pneu a roulé : il revient en usagé, le neuf ne bouge pas.
+    expect(stock).toMatchObject({ stockQuantity: 0, usedStockQuantity: 1, updatedBy: workshopManager.id });
     const [mounting] = await db.select().from(vehicleTires).where(eq(vehicleTires.id, vehicleTireId));
     expect(mounting).toMatchObject({ status: "removed", removalMileage: 42000 });
   } finally {

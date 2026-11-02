@@ -19,6 +19,24 @@ const recordPaymentSchema = z.object({
   notes: z.string().nullish(),
 });
 
+// Plafond HT : le TTC (HT + 19,25 %) doit tenir dans numeric(15, 2).
+const MAX_INVOICE_AMOUNT_HT = 1_000_000_000_000;
+
+// Seuls ces champs sont lus : TVA, TTC, solde, statut et auteur sont calculés par le serveur.
+const generateInvoiceSchema = z.object({
+  missionId: z.coerce.number({ invalid_type_error: "Mission invalide." })
+    .int("Mission invalide.")
+    .positive("Mission invalide."),
+  amount: z.coerce.number({ invalid_type_error: "Le montant doit être un nombre." })
+    .positive("Le montant doit être supérieur à 0.")
+    .max(MAX_INVOICE_AMOUNT_HT, "Le montant dépasse le plafond autorisé."),
+  dueDate: z.string({ required_error: "La date d'échéance est obligatoire." })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "La date d'échéance est invalide.")
+    .refine((value) => !Number.isNaN(new Date(value).getTime()), "La date d'échéance est invalide."),
+  includeVAT: z.boolean().optional(),
+  invoiceNumber: z.string().trim().min(1).max(50).optional(),
+});
+
 type InvoicePdfItem = {
   description: string;
   quantity: number;
@@ -148,26 +166,20 @@ const broadcastClientInvoiceUpdate = (
  * POST /api/billing/invoices/generate
  * Générer une facture client depuis une mission
  */
-router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Response) => {
+router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { missionId, invoiceNumber, amount, dueDate, includeVAT } = req.body;
-
-    // invoiceNumber is optional - will be auto-generated if not provided
-    if (!missionId || !amount || !dueDate) {
-      return res.status(400).json({ 
-        error: "missionId, amount et dueDate sont requis" 
-      });
-    }
+    // Un montant négatif ou non numérique devenait une facture négative ou NaN.
+    const { missionId, invoiceNumber, amount, dueDate, includeVAT } = generateInvoiceSchema.parse(req.body ?? {});
 
     if (!req.user?.id) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
     const result = await clientBillingService.generateInvoiceFromMission(
-      parseInt(missionId),
+      missionId,
       {
         invoiceNumber, // Optional - service will auto-generate if undefined
-        amount: parseFloat(amount),
+        amount,
         dueDate,
         includeVAT: includeVAT !== false, // TVA 19.25% par défaut
         userId: req.user.id,
@@ -184,7 +196,7 @@ router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Re
     broadcastClientInvoiceUpdate(
       "client_invoice_created",
       {
-        missionId: parseInt(missionId),
+        missionId,
         result,
       },
       {
@@ -196,8 +208,8 @@ router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Re
 
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error generating invoice:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    // Le gestionnaire central journalise : ZodError -> 400, AppError -> son statut.
+    next(error);
   }
 });
 
