@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
+import { ALL_APP_ROLES, STAFF_ROLES, INVENTORY_REPORT_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -209,8 +209,9 @@ export const isStaff = authorize([...STAFF_ROLES]);
 // Demandes de renouvellement de documents (secrétariat, logistique, atelier). Identique à
 // CREATE_ROLES de server/api/document-renewals.routes.ts ; posé avant le téléversement du justificatif.
 export const isDocumentRenewalWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager']);
+export const isWorkflowDocumentWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager', 'client']);
 // Rapports d'exploitation lus par le personnel qui pilote le stock (inventaire) ou l'atelier
 // (performance des techniciens) : ni le client, ni le chauffeur ne lisent stock, prix ou charge.
-export const isWorkflowDocumentWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager', 'client']);
-export const isInventoryReportReader = authorize(['admin', 'management', 'workshop_manager', 'warehouse', 'secretary']);
-export const isTechnicianReportReader = authorize(['admin', 'management', 'workshop_manager']);
+// Listes partagées avec l'écran `/reports` (shared/constants/roles.ts).
+export const isInventoryReportReader = authorize([...INVENTORY_REPORT_ROLES]);
+export const isTechnicianReportReader = authorize([...TECHNICIAN_REPORT_ROLES]);

@@ -1,10 +1,13 @@
 import { AppError } from "./app-error";
+import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 function parseBound(raw: unknown, fallback: () => Date, label: string): Date {
   if (raw === undefined || raw === "") return fallback();
   if (typeof raw !== "string") throw new AppError(400, `${label} invalide.`);
+  // `new Date("2033-02-30")` donne le 2 mars : une date AAAA-MM-JJ doit exister au calendrier.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && !isIsoCalendarDate(raw)) throw new AppError(400, `${label} invalide.`);
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) throw new AppError(400, `${label} invalide.`);
   return date;

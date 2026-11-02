@@ -11,3 +11,15 @@ Worktree `fm-fix-pistes-def`, branche `fix/defauts-pistes-def`, base `tests/pist
 - **Pourquoi** : défauts figés par les pistes de test D, E, F. Valorisation (6) : `parts.real_stock` est une colonne Excel héritée, écrite par un seul chemin sur sept, donc périmée ; `parts.quantity` est le stock vivant. L'export valorise sur `quantity` et ses colonnes « Stock Théorique » et « Stock Réel » deviennent une seule colonne « Stock ». La colonne `real_stock` reste en base (chantier séparé).
 - **Comment tester (QA)** : client ou chauffeur sur `/api/reports/inventory` : 403 ; `?startDate=2033-02-30` : 400 ; technicien qui passe un OT en cours : le chef d'atelier voit « Intervention démarrée — OT #N » dans ses alertes ; créer un OT sur un véhicule hors service : il reste hors service.
 - **Preuve** : voir la description de la PR.
+
+## Relecture : écran Rapports aligné sur les gardes, dates inexistantes refusées
+
+**Quoi**
+- `shared/constants/roles.ts` : `INVENTORY_REPORT_ROLES`, `TECHNICIAN_REPORT_ROLES`, `canReadInventoryReport`, `canReadTechnicianReport`, lus par `isInventoryReportReader` / `isTechnicianReportReader` et par `client/src/pages/reports/index.tsx`.
+- `server/lib/report-period.ts` : une date `AAAA-MM-JJ` absente du calendrier (`2033-02-30`) répond 400 ; `new Date` la convertissait au 2 mars.
+
+**Pourquoi**
+- Les nouvelles gardes refusaient en 403 des exports que l'écran proposait encore à la logistique (inventaire, techniciens) et au secrétariat (techniciens).
+
+**Preuve**
+- `tests/unit/server/report-period-and-roles.test.ts` 4/4 ; rouge sur l'ancien `report-period.ts` (1 échec). tsc 0, unitaires 917/917.
