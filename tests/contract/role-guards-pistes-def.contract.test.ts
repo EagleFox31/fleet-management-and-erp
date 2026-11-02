@@ -110,6 +110,19 @@ describe("POST /api/workflows/:sessionId/documents", { timeout: 60000 }, () => {
     expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
   });
 
+  it.each(["admin", "client"] as const)("workflowId non entier : 400 lisible, rien écrit (%s)", async (actor) => {
+    for (const bad of ["abc", "1.5", "-3", "0"]) {
+      const form = new FormData();
+      form.append("workflowId", bad);
+      form.append("documentType", "carte_grise");
+      form.append("document", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-doc.pdf");
+      const res = await session.raw("POST", `/api/workflows/${sessionId}/documents`, actor, form);
+      expect(res.status, bad).toBe(400);
+      expect(JSON.stringify(await res.json())).not.toMatch(/sql|syntax|NaN/i);
+    }
+    expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
+  });
+
   it("le client propriétaire alimente sa session (201)", async () => {
     const res = await upload("client");
     expect(res.status).toBe(201);
