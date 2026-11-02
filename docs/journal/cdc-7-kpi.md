@@ -142,3 +142,13 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : (1) vérification de l'API : `/api/kpi` n'a aucun drapeau, seul `/api/exports/kpi-report` exige `exports` + `kpi-reports`. Ajouter `exports` aurait masqué tout l'écran pour un bouton : l'écran garde `kpi-reports` seul, déclare l'API d'export, et la page masquera le bouton par `useFeature("exports")`. Test qui fige ce choix. (2) `kpiRoutesWithoutViewers` liste les routes de `kpi.routes.ts` dont la première garde n'est pas `viewers`, avec contre-épreuve.
 - **Pourquoi** : réserves de relecture de #58/#59 ; `/api/kpi` n'a pas de garde au montage, une route ajoutée sans `viewers` serait ouverte à tout le personnel.
 - **Preuves** : unitaires `cdc-screens` 35/35, dont la contre-épreuve.
+
+## 2026-11-02T14:20:00+01:00 — CDC-7 — Réserves : jspdf et dompurify corrigés, xlsx sans correctif publié
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : partiel (xlsx en décision)
+- **Quoi** : `npm audit --omit=dev` signalait jspdf (critique, ≤ 4.2.0), dompurify (élevé, ≤ 3.4.16, tiré par jspdf) et xlsx (élevé, toutes versions npm).
+- **Comment** : jspdf `^4.2.1` (correctif de la même majeure) et dompurify 3.4.17 dans la plage déjà admise par jspdf, par `--package-lock-only` (le `node_modules` du worktree est partagé avec le dépôt principal, on n'y écrit pas). Aucune rupture d'API attendue.
+- **Pourquoi** : réserve de relecture de #58 (rapport PDF/Excel).
+- **xlsx** : SheetJS ne publie plus sur npm ; 0.18.5 reste vulnérable (pollution de prototype, ReDoS). Fichiers non fiables lus en deux endroits : `server/api/supplier-invoices.routes.ts:979` (téléversement, côté serveur) et `client/src/lib/excel-utils.ts:85`. Choix laissé à l'utilisateur : SheetJS 0.20.x depuis cdn.sheetjs.com (même API) ou migration vers une autre bibliothèque.
+- **Preuves** : audit avant 38 vulnérabilités (5 critiques), après 37 ; jspdf et dompurify absents de l'audit. Comportement non rejoué : le `node_modules` partagé est encore en 4.2.0, la CI de la PR installe depuis le lockfile.

@@ -91,7 +91,7 @@
     "framer-motion": "^11.18.2",
     "idb-keyval": "^6.3.0",
     "input-otp": "^1.4.2",
-    "jspdf": "^4.2.0",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.453.0",
