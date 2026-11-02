@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
+import { driverReportOpensWorkOrder, type DriverReportType } from "@shared/contracts/incidents";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
@@ -103,7 +104,7 @@ interface DriverMe {
 
 // ─── Problem types ────────────────────────────────────────────────────────────
 
-const PROBLEM_TYPES = [
+const PROBLEM_TYPES: Array<{ id: DriverReportType; label: string; color: string; textColor: string; Icon: typeof Wrench }> = [
   { id: "breakdown", label: "Panne véhicule", color: "bg-red-500", textColor: "text-white", Icon: Wrench },
   { id: "accident", label: "Accident", color: "bg-orange-500", textColor: "text-white", Icon: AlertTriangle },
   { id: "delay", label: "Retard prévu", color: "bg-amber-400", textColor: "text-gray-900", Icon: Clock },
@@ -245,7 +246,7 @@ function StatusBadge({ status }: { status: string }) {
 // ─── Problem bottom sheet ─────────────────────────────────────────────────────
 
 function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => void }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<DriverReportType | null>(null);
   const [otherText, setOtherText] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -254,10 +255,15 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
   const vehicleId = mission.vehicleId ?? mission.assignment?.vehicle?.id;
 
   const reportMutation = useMutation({
-    mutationFn: (payload: { vehicleId: number; description: string; severity: BreakdownSeverity }) =>
+    mutationFn: (payload: { type: DriverReportType; vehicleId: number; description: string; severity: BreakdownSeverity }) =>
       apiRequest("POST", "/api/driver/breakdowns", payload),
-    onSuccess: () => {
-      toast({ title: "Problème signalé", description: "Votre signalement a été transmis à l'atelier." });
+    onSuccess: (_data, payload) => {
+      toast({
+        title: "Problème signalé",
+        description: driverReportOpensWorkOrder(payload.type)
+          ? "Votre signalement a été transmis à l'atelier."
+          : "Votre signalement a été transmis au chef d'atelier et à l'administration.",
+      });
       // Resync ciblé : OT de l'atelier, incidents, alertes. L'événement temps réel part du serveur.
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
@@ -279,6 +285,7 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
     const problem = PROBLEM_TYPES.find((p) => p.id === selectedId);
     const description = selectedId === "other" && otherText.trim() ? otherText.trim() : problem?.label ?? selectedId;
     submitReport({
+      type: selectedId,
       vehicleId,
       severity,
       description: `[Mission ${mission.orderNumber}] ${description}`.slice(0, 2000),
@@ -331,6 +338,11 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
             value={otherText}
             onChange={(e) => setOtherText(e.target.value)}
           />
+        )}
+        {!vehicleId && (
+          <p className="text-sm text-gray-600" role="note">
+            Aucun véhicule n'est affecté à cette mission. Contactez la logistique pour signaler le problème.
+          </p>
         )}
         <Button
           onClick={handleSubmit}

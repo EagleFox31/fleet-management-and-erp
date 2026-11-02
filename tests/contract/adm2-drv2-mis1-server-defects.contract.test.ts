@@ -242,6 +242,37 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
     expect(list.status).toBe(200);
   });
 
+  it("accident : 201 et OT lié, comme une panne", async () => {
+    const res = await call("POST", "/api/driver/breakdowns", {
+      actor: "driverA",
+      body: { ...body(ownVehicleId), type: "accident" },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.workOrderId).toEqual(expect.any(Number));
+  });
+
+  it.each(["delay", "other"])("%s : 201, incident enregistré, aucun OT ouvert", async (type) => {
+    const marker = uniqueTestToken(`SIGNAL-${type}`);
+    const res = await call("POST", "/api/driver/breakdowns", {
+      actor: "driverA",
+      body: { vehicleId: ownVehicleId, description: marker, severity: "low", type },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.workOrderId).toBeNull();
+    const [row] = await db.select().from(incidents).where(eq(incidents.description, marker));
+    expect(row).toMatchObject({ vehicleId: ownVehicleId, workOrderId: null });
+    expect(await db.select().from(workOrders).where(eq(workOrders.description, marker))).toHaveLength(0);
+  });
+
+  it("type inconnu : 400 lisible", async () => {
+    const res = await call("POST", "/api/driver/breakdowns", {
+      actor: "driverA",
+      body: { ...body(ownVehicleId), type: "vol" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBeTruthy();
+  });
+
   it("véhicule d'un autre : 403, aucun OT", async () => {
     const res = await call("POST", "/api/driver/breakdowns", { actor: "driverA", body: body(otherVehicleId) });
     expect(res.status).toBe(403);
