@@ -135,7 +135,10 @@ export class TechnicianWorkOrdersService {
    * Détail des coûts d'une liste d'OT : même règle que l'écran, le PDF et le KPI
    * (`shared/work-order-cost.ts`). La main-d'oeuvre vaut heures réelles × taux en vigueur
    * quand un taux existe, sinon `work_orders.cost`. Quatre requêtes groupées, quelle que
-   * soit la longueur de la liste. Une panne de base donne des coûts nuls (comportement inchangé).
+   * soit la longueur de la liste. Si l'une des requêtes échoue, l'erreur est journalisée et la
+   * carte renvoyée est vide : l'appelant lit alors `ZERO_COST` pour tous les OT de la liste, y
+   * compris ceux dont le coût de base est renseigné. Avant le calcul groupé, la panne ne
+   * touchait que l'OT en cause.
    */
   private async calculateWorkOrderCosts(
     rows: ReadonlyArray<{ id: number; cost: string | number | null }>,

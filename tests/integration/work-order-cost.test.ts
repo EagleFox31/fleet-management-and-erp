@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../../server/db";
 import { partsUsed, tireRotations, workOrderItems, workOrders, workshopLaborRates } from "../../shared/schema";
@@ -172,7 +172,16 @@ describe("Coût d'un ordre de travail (WO5)", { timeout: 120000 }, () => {
       rotationType: "front_to_back", cost: "40",
     });
 
+    // Garde N+1 : le nombre de requêtes ne dépend pas de la longueur de la liste (la liste elle-même,
+    // puis heures, pièces, rotations et taux). Un retour à cinq requêtes par OT dépasserait 5 ici.
+    const selectSpy = vi.spyOn(db, "select");
+    const executeSpy = vi.spyOn(db, "execute");
     const list = await technicianWorkOrdersService.getTechnicianWorkOrders(technician.id);
+    const queryCount = selectSpy.mock.calls.length + executeSpy.mock.calls.length;
+    selectSpy.mockRestore();
+    executeSpy.mockRestore();
+    expect(list).toHaveLength(3);
+    expect(queryCount).toBe(5);
     const byId = new Map(list.map((row) => [row.id, row]));
     expect(byId.get(a.id)).toMatchObject({ baseCost: 15000, partsCost: 100, tiresCost: 0, cost: 15100 });
     expect(byId.get(b.id)).toMatchObject({ baseCost: 700, partsCost: 100, tiresCost: 40, cost: 840 });

@@ -161,3 +161,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : `KPI_TIME_ZONE` et `isoDateInZone` vivent dans `shared/contracts/kpi-period.ts` (un seul calcul) ; `server/lib/kpi-rules.ts` les importe et les réexporte sans les redéclarer. Commentaire erroné (« un jour d'écart ne change rien ») corrigé.
 - **Pourquoi** : constat majeur de relecture de #108.
 - **Preuves** : test rouge puis vert à 00:30 Douala (23:30 UTC la veille, horloge simulée) ; unitaires `kpi-period` et `kpi-rules-cdc` 50/50.
+
+## 2026-11-02T21:55:00+01:00 — CDC-7 — Relecture #108 : garde N+1 du coût des OT et commentaire de panne exact
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : (1) rien ne faisait échouer un retour à cinq requêtes par OT ; (2) le commentaire de `calculateWorkOrderCosts` disait « comportement inchangé » alors qu'une panne met désormais à zéro la liste entière.
+- **Comment** : (1) le test « liste de plusieurs OT » espionne `db.select` et `db.execute` et exige 5 requêtes pour 3 OT (liste, heures, pièces, rotations, taux). (2) comportement gardé, commentaire réécrit.
+- **Pourquoi** : constats mineurs 1 et 2 de relecture de #108.
+- **Preuves** : intégration `work-order-cost` 3/3 sur le Postgres local, relancée après le redémarrage de la base de 21:41.
