@@ -3,6 +3,7 @@ import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 
 const log = moduleLogger("purchase-orders");
@@ -87,22 +88,11 @@ const broadcastPurchaseOrderUpdate = (
 };
 
 /**
- * Middleware pour vérifier l'authentification
+ * Authentification : `isAnyUser` relit le compte en base et pose `req.user` avec le rôle COURANT.
+ * Avant, `req.user.role` était recopié de la session : un magasinier passé logisticien par
+ * l'admin gardait ses droits de magasinier tant que sa session durait (ADM2-3).
  */
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.session?.userId) {
-    return res.status(401).json({ error: "Non authentifié" });
-  }
-  
-  // Attach minimal user info for use in routes
-  req.user = {
-    id: req.session.userId,
-    username: req.session.username || '',
-    role: req.session.role || 'user',
-  };
-  
-  next();
-};
+const requireAuth = isAnyUser;
 
 /**
  * Middleware pour vérifier les droits de création/modification

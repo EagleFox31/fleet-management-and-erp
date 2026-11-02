@@ -10,6 +10,7 @@
  * `part_requirement_updated` (réception), `alert_created`.
  */
 import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
   FUEL_READ_ROLES,
   GPS_VIEW_ROLES,
   MISSION_ADVISORY_ROLES,
@@ -110,6 +111,11 @@ export const REALTIME_EVENTS = {
   backup_failed: {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],
+  } as EventDefinition<{ id: number }>,
+  document_renewal_center_changed: {
+    // Rôles qui lisent ou choisissent un centre (GET /centers).
+    scope: { type: "roles", roles: DOCUMENT_RENEWAL_VIEWER_ROLES },
+    invalidates: ["/api/document-renewals/centers"],
   } as EventDefinition<{ id: number }>,
 
   // Écarts du cahier des charges (chantier CDC, lot CDC-0b). Déclarés ici ; l'émetteur

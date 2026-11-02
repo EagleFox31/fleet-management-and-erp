@@ -13,6 +13,14 @@ import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { uploadedFileCandidates } from "../lib/uploaded-file";
+import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
+import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
+import {
+  SUPPLIER_INVOICE_IMPORT_COLUMNS,
+  SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES,
+  SUPPLIER_INVOICE_IMPORT_MAX_ROWS,
+  SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES,
+} from "../../shared/contracts/supplier-invoice-import";
 
 const router = Router();
 const log = moduleLogger("supplier-invoices");
@@ -903,7 +911,7 @@ const uploadExcel = multer({
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5 MB
+    fileSize: SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES
   }
 }).single('file');
 
@@ -956,8 +964,13 @@ function parseImportAmount(value: unknown, label: string): number {
   return amount;
 }
 
-function isBlankCell(value: unknown): boolean {
-  return value === undefined || value === null || String(value).trim() === "";
+/** Ne garde que les colonnes attendues : un en-tête `__proto__` ou `constructor` est ignoré. */
+function pickImportColumns(raw: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const column of SUPPLIER_INVOICE_IMPORT_COLUMNS) {
+    if (Object.prototype.hasOwnProperty.call(raw, column)) row[column] = raw[column];
+  }
+  return row;
 }
 
 router.post("/import", checkCreatePermission, (req: Request, res: Response, next: NextFunction) => {
@@ -976,10 +989,28 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
     try {
       let data: Record<string, unknown>[];
       try {
-        const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+        // SheetJS ne lit jamais le tampon téléversé : seulement l'archive reconstruite par la
+        // garde à partir des contenus réellement décompressés (tailles vraies par construction).
+        const archive = canonicalWorkbookArchive(req.file.buffer, SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES);
+        // Lecture complète, sans fenêtre de lignes : le volume est déjà borné par la garde.
+        const workbook = XLSX.read(archive, {
+          type: "buffer",
+          sheets: 0,
+          cellFormula: false,
+          cellHTML: false,
+          cellStyles: false,
+          dense: true,
+        });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        data = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+        const sheet = worksheet ? compactImportSheet(worksheet) : null;
+        const rawRows = sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet) : [];
+        if (rawRows.length > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
+          throw importTooLongError(`${rawRows.length} lignes de données trouvées`);
+        }
+        data = rawRows.map(pickImportColumns);
       } catch (parseError) {
+        if (parseError instanceof AppError) throw parseError;
+        log.warn({ err: parseError, requestId: req.requestId }, "Classeur d'import de facture fournisseur illisible");
         throw new AppError(400, "Fichier Excel illisible.", { cause: parseError });
       }
 
@@ -989,6 +1020,9 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
         total: data.length,
         errors: [] as Array<{ row: number; message: string }>
       };
+
+      // Rien à importer : pas de lecture des référentiels (toutes les factures existantes).
+      if (data.length === 0) return res.json(results);
 
       // Fournisseurs, factures et commandes lus une seule fois.
       const suppliers = await supplierManagementService.getSuppliers();
