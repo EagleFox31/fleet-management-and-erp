@@ -3,6 +3,7 @@ import { vehicleDocuments } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import fs from 'fs/promises';
 import path from 'path';
+import { uploadedFileCandidates } from '../lib/uploaded-file';
 
 export interface DocumentData {
   name: string;
@@ -52,8 +53,6 @@ export class DocumentManagementService {
           filePath: doc.file_path,
           uploadedBy: uploadedById || null,
           expiryDate: doc.expiry_date || null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
         } as any);
 
         console.log(`Document sauvegardé: ${doc.name} (${doc.type})`);
@@ -67,15 +66,19 @@ export class DocumentManagementService {
   }
 
   /**
-   * Vérifie qu'un fichier existe sur le disque
+   * Vérifie que le fichier existe sous uploads/ : le chemin vient du corps de la
+   * requête, un fichier hors du dossier des téléversements n'est jamais rattaché.
    */
   private static async verifyFileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
+    for (const candidate of uploadedFileCandidates(filePath)) {
+      try {
+        await fs.access(candidate);
+        return true;
+      } catch {
+        // candidat suivant
+      }
     }
+    return false;
   }
 
   /**

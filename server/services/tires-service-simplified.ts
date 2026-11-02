@@ -6,6 +6,7 @@ import { activityLogger } from "./activity-logger";
 import type { Tire, InsertTire, VehicleTire, InsertVehicleTire } from "@shared/schema";
 import { computeTireWearScore } from "@shared/constants/tires";
 import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
+import { usedTiresLabel } from "@shared/constants/tire-stock";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
@@ -199,6 +200,8 @@ export class TiresService {
         .insert(tires)
         .values({
           ...tire,
+          // L'usagé naît d'un démontage, jamais d'une création de fiche.
+          usedStockQuantity: 0,
           createdBy: createdBy ?? null,
           updatedBy: createdBy ?? null,
           createdAt: now,
@@ -392,37 +395,45 @@ export class TiresService {
           throw new Error("POSITION_OCCUPIED");
         }
 
-        const [tireRow] = await tx
-          .select({
-            id: tires.id,
-            stockQuantity: tires.stockQuantity,
-          })
-          .from(tires)
-          .where(and(eq(tires.id, data.tireId), isNull(tires.deletedAt)))
-          .limit(1);
+        // Neuf par défaut ; l'usagé se choisit explicitement, jamais en repli implicite.
+        const source = data.stockSource ?? "new";
+        const column = source === "used" ? tires.usedStockQuantity : tires.stockQuantity;
 
-        if (!tireRow || tireRow.stockQuantity <= 0) {
-          throw new Error("INSUFFICIENT_STOCK");
-        }
-
+        // Décrément atomique gardé : deux montages concurrents sur la dernière unité, un seul passe.
         const [updatedTire] = await tx
           .update(tires)
-          .set({
-            stockQuantity: sql`${tires.stockQuantity} - 1`,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tires.id, data.tireId), sql`${tires.stockQuantity} > 0`))
+          .set(
+            source === "used"
+              ? { usedStockQuantity: sql`${column} - 1`, updatedAt: new Date() }
+              : { stockQuantity: sql`${column} - 1`, updatedAt: new Date() },
+          )
+          .where(and(eq(tires.id, data.tireId), isNull(tires.deletedAt), sql`${column} > 0`))
           .returning({ id: tires.id });
 
         if (!updatedTire) {
+          const [tireRow] = await tx
+            .select({ stockQuantity: tires.stockQuantity, usedStockQuantity: tires.usedStockQuantity })
+            .from(tires)
+            .where(and(eq(tires.id, data.tireId), isNull(tires.deletedAt)))
+            .limit(1);
+          if (!tireRow) throw new Error("INSUFFICIENT_STOCK");
+          if (source === "new" && tireRow.usedStockQuantity > 0) {
+            throw new AppError(
+              409,
+              `Aucun pneu neuf de cette référence en stock ; ${usedTiresLabel(tireRow.usedStockQuantity)} disponible(s) : choisissez Usagé pour le monter.`,
+            );
+          }
+          if (source === "used") {
+            throw new AppError(409, "Aucun pneu usagé de cette référence en stock.");
+          }
           throw new Error("INSUFFICIENT_STOCK");
         }
 
-        const [inserted] = await tx.insert(vehicleTires).values(data).returning();
+        const [inserted] = await tx.insert(vehicleTires).values({ ...data, stockSource: source }).returning();
         return inserted;
       });
 
-      console.log(`✅ Tire installed on vehicle: ${JSON.stringify(newVehicleTire)}`);
+      log.info({ vehicleTireId: newVehicleTire.id, tireId: newVehicleTire.tireId, stockSource: newVehicleTire.stockSource }, "pneu monté sur véhicule");
 
       broadcastTireUpdate("vehicle_tire_installed", newVehicleTire.id, {
         vehicleTire: newVehicleTire,
@@ -433,7 +444,7 @@ export class TiresService {
 
       return newVehicleTire;
     } catch (error) {
-      console.error("Error installing tire on vehicle:", error);
+      if (!(error instanceof AppError)) log.error({ err: error, tireId: data.tireId }, "montage de pneu en échec");
       throw error;
     }
   }
@@ -457,11 +468,30 @@ export class TiresService {
 
   /**
    * Démonte le pneu et applique sa destination (`TireRemoval`) dans la même transaction :
-   * remis en stock, la fiche gagne une unité ; mis au rebut, le stock ne bouge pas.
+   * remis en stock, la fiche gagne une unité usagée (le pneu a roulé) ; mis au rebut, le stock ne bouge pas.
    * `false` si le montage n'existe pas ou n'est plus actif (déjà démonté).
    */
   async removeTireFromVehicle(vehicleTireId: number, removal: TireRemoval, userId?: number): Promise<boolean> {
     const removed = await db.transaction(async (tx) => {
+      // Un pneu ne roule pas à l'envers : démonté avant son kilométrage de montage, la saisie est fausse.
+      const [mounted] = await tx
+        .select({ installationMileage: vehicleTires.installationMileage })
+        .from(vehicleTires)
+        .where(and(eq(vehicleTires.id, vehicleTireId), eq(vehicleTires.status, 'active')))
+        .for('update');
+      if (
+        mounted?.installationMileage != null &&
+        removal.removalMileage !== undefined &&
+        removal.removalMileage < mounted.installationMileage
+      ) {
+        const km = (value: number) => `${value.toLocaleString("fr-FR")} km`;
+        throw new AppError(
+          400,
+          `Le kilométrage de démontage (${km(removal.removalMileage)}) est inférieur à celui du montage (${km(mounted.installationMileage)}).`,
+          { fieldErrors: [{ field: "removalMileage", message: `Au moins ${km(mounted.installationMileage)}` }] },
+        );
+      }
+
       const [row] = await tx
         .update(vehicleTires)
         .set({
@@ -479,7 +509,7 @@ export class TiresService {
       const [restocked] = await tx
         .update(tires)
         .set({
-          stockQuantity: sql`${tires.stockQuantity} + 1`,
+          usedStockQuantity: sql`${tires.usedStockQuantity} + 1`,
           updatedBy: userId ?? null,
           updatedAt: new Date(),
         })
@@ -983,7 +1013,8 @@ export class TiresService {
       // Calculer la quantité totale en stock (SOMME des stockQuantity)
       const [stockResult] = await db
         .select({ 
-          totalStock: sql<number>`COALESCE(SUM(${tires.stockQuantity}), 0)` 
+          totalStock: sql<number>`COALESCE(SUM(${tires.stockQuantity}), 0)`,
+          usedQuantity: sql<number>`COALESCE(SUM(${tires.usedStockQuantity}), 0)`,
         })
         .from(tires)
         .where(isNull(tires.deletedAt));
@@ -1029,7 +1060,9 @@ export class TiresService {
         // Nom historique et trompeur, conservé pour compatibilité: préférer
         // `totalStock` (unités) et `totalReferences` (fiches au catalogue).
         totalTires: stockResult?.totalStock?.toString() || "0",
+        // Neuf seul : l'usagé n'est pas valorisé et ne déclenche pas le stock bas.
         totalStock: Number(stockResult?.totalStock || 0),
+        usedQuantity: Number(stockResult?.usedQuantity || 0),
         totalReferences: Number(referencesResult?.count || 0),
         totalValue: Math.round(valueResult?.totalValue || 0),
         activeInstallations: installationsResult?.count || 0,
@@ -1041,6 +1074,8 @@ export class TiresService {
       console.error('Error calculating tire statistics:', error);
       return {
         totalTires: "0",
+        totalStock: 0,
+        usedQuantity: 0,
         totalValue: 0,
         activeInstallations: 0,
         lowStockCount: 0,

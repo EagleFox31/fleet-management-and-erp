@@ -4,7 +4,7 @@ import { z } from "zod";
  * Démontage d'un pneu : l'atelier choisit OBLIGATOIREMENT sa destination,
  * comme dans les logiciels de gestion de pneus du marché (RTA Fleet, Eptura) :
  *
- * - `stock` : pneu réutilisable, il retourne au magasin (`tires.stock_quantity + 1`) ;
+ * - `stock` : pneu réutilisable, il retourne au magasin en usagé (`tires.used_stock_quantity + 1`) ;
  * - `scrap` : pneu mis au rebut, motif obligatoire, le stock ne bouge pas.
  *
  * Le montage (`vehicle_tires`) garde la trace dans son `status` :
@@ -19,7 +19,7 @@ export const TIRE_SCRAP_REASONS = ["worn", "damaged", "punctured"] as const;
 export type TireScrapReason = (typeof TIRE_SCRAP_REASONS)[number];
 
 export const TIRE_REMOVAL_DESTINATION_LABELS: Record<TireRemovalDestination, string> = {
-  stock: "Remettre en stock",
+  stock: "Remettre en stock (usagé)",
   scrap: "Mettre au rebut",
 };
 
@@ -66,6 +66,7 @@ export const VEHICLE_TIRE_LIFECYCLE_FIELDS = [
   "removalDate",
   "removalMileage",
   "removalReason",
+  "stockSource",
 ] as const;
 
 /** Statut du montage après démontage. */

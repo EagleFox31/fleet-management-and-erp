@@ -7,9 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { ClipboardList, Clock, Wrench, CheckCircle, AlertTriangle, Calendar, Truck, Play, CheckSquare, PlayCircle, CheckCircle2 } from "lucide-react";
+import { ClipboardList, Clock, Wrench, CheckCircle, AlertTriangle, Calendar, Truck, Play, CheckSquare, PlayCircle, CheckCircle2, Package } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -44,10 +43,6 @@ export default function MyWorkOrdersPage() {
   const [notes, setNotes] = useState("");
   const [activeTab, setActiveTab] = useState<WorkOrdersTab>(() => getTabFromQuery());
 
-  const [partsUsed, setPartsUsed] = useState<Array<{id: string, partId: string, quantity: number, notes?: string}>>([]);
-  const [newPartId, setNewPartId] = useState<string>("");
-  const [newPartQuantity, setNewPartQuantity] = useState<string>("");
-  const [newPartNotes, setNewPartNotes] = useState<string>("");
   const [mileageUpdate, setMileageUpdate] = useState<string>("");
 
   const { data: workOrdersData, isLoading } = useQuery<any>({
@@ -56,20 +51,19 @@ export default function MyWorkOrdersPage() {
     staleTime: 0,
   });
 
-  const { data: partsData } = useQuery<any>({ queryKey: ['/api/parts'] });
-
+  // Les pièces ne s'ajoutent pas ici : le technicien les demande depuis la fiche de l'OT,
+  // le magasinier les sort du stock.
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ workOrderId, status, notes, partsUsed, mileageUpdate }: {
+    mutationFn: async ({ workOrderId, status, notes, mileageUpdate }: {
       workOrderId: number,
       status: string,
       notes?: string,
-      partsUsed?: Array<{id: string, partId: string, quantity: number, notes?: string}>,
       mileageUpdate?: number
     }) => {
       const response = await fetch(`/api/technician/work-orders/${workOrderId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, notes, partsUsed, mileageUpdate })
+        body: JSON.stringify({ status, notes, mileageUpdate })
       });
       if (!response.ok) {
         const error = await response.json();
@@ -89,7 +83,6 @@ export default function MyWorkOrdersPage() {
       setIsUpdateModalOpen(false);
       setSelectedWorkOrder(null);
       setNotes("");
-      setPartsUsed([]);
       setMileageUpdate("");
     },
     onError: (error: any) => {
@@ -101,7 +94,6 @@ export default function MyWorkOrdersPage() {
     setSelectedWorkOrder(workOrder);
     setNewStatus(targetStatus);
     setNotes("");
-    setPartsUsed([]);
     setMileageUpdate("");
     setIsUpdateModalOpen(true);
   };
@@ -112,30 +104,9 @@ export default function MyWorkOrdersPage() {
         workOrderId: selectedWorkOrder.id,
         status: newStatus,
         notes: notes.trim() || undefined,
-        partsUsed: partsUsed.length > 0 ? partsUsed : undefined,
         mileageUpdate: mileageUpdate ? parseInt(mileageUpdate) : undefined
       });
     }
-  };
-
-  const addPartToList = () => {
-    if (!newPartId || !newPartQuantity || parseFloat(newPartQuantity) <= 0) {
-      toast({ title: "Erreur", description: "Veuillez sélectionner une pièce et indiquer une quantité valide.", variant: "destructive" });
-      return;
-    }
-    setPartsUsed([...partsUsed, {
-      id: Date.now().toString(),
-      partId: newPartId,
-      quantity: parseFloat(newPartQuantity),
-      notes: newPartNotes.trim() || undefined
-    }]);
-    setNewPartId("");
-    setNewPartQuantity("");
-    setNewPartNotes("");
-  };
-
-  const removePartFromList = (partIndex: number) => {
-    setPartsUsed(partsUsed.filter((_, index) => index !== partIndex));
   };
 
   const selectedVehicleMileage =
@@ -497,65 +468,25 @@ export default function MyWorkOrdersPage() {
 
             <Separator />
 
-            <div className="space-y-3" data-help-target="tech-wo-parts">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs sm:text-sm font-semibold">Pièces utilisées</Label>
-                <span className="text-xs text-muted-foreground">{partsUsed.length} pièce(s) ajoutée(s)</span>
-              </div>
-
-              {partsUsed.length > 0 && (
-                <div className="space-y-2">
-                  {partsUsed.map((part, index) => {
-                    const partInfo = Array.isArray(partsData?.parts) ? partsData.parts.find((p: any) => p.id.toString() === part.partId) : null;
-                    return (
-                      <div key={part.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700">
-                        <div className="flex-1 min-w-0 pr-2">
-                          <div className="font-semibold text-xs sm:text-sm truncate">{partInfo?.name || `Pièce #${part.partId}`}</div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            Quantité: {part.quantity} {part.notes && `• ${part.notes}`}
-                          </div>
-                        </div>
-                        <Button size="sm" variant="outline" onClick={() => removePartFromList(index)} className="h-7 text-xs text-rose-600 hover:bg-rose-50 rounded-lg shrink-0">
-                          Retirer
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Grille responsive : flex-col sur mobile, grid sur écran sm+ */}
-              <div className="flex flex-col sm:grid sm:grid-cols-12 gap-2 p-3 bg-slate-50/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl">
-                <div className="w-full sm:col-span-5">
-                  <Label htmlFor="newPart" className="sr-only">Pièce</Label>
-                  <Select value={newPartId} onValueChange={setNewPartId}>
-                    <SelectTrigger className="w-full text-xs h-9 rounded-lg">
-                      <SelectValue placeholder="Sélectionner une pièce" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.isArray(partsData?.parts) && partsData.parts.map((part: any) => (
-                        <SelectItem key={part.id} value={part.id.toString()}>
-                          {part.name} ({part.stock} en stock)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2 sm:contents">
-                  <div className="flex-1 sm:col-span-2">
-                    <Label htmlFor="newQuantity" className="sr-only">Quantité</Label>
-                    <Input id="newQuantity" type="number" placeholder="Qté" value={newPartQuantity} onChange={(e) => setNewPartQuantity(e.target.value)} className="text-xs h-9 rounded-lg" />
-                  </div>
-                  <div className="flex-2 sm:col-span-3">
-                    <Label htmlFor="newPartNotes" className="sr-only">Notes</Label>
-                    <Input id="newPartNotes" placeholder="Notes (optionnel)" value={newPartNotes} onChange={(e) => setNewPartNotes(e.target.value)} className="text-xs h-9 rounded-lg" />
-                  </div>
-                </div>
-                <div className="w-full sm:col-span-2">
-                  <Button size="sm" onClick={addPartToList} disabled={!newPartId || !newPartQuantity} className="w-full h-9 text-xs rounded-lg">
-                    Ajouter
-                  </Button>
-                </div>
+            <div
+              className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80"
+              data-help-target="tech-wo-parts"
+              data-testid="tech-wo-parts-info"
+            >
+              <Package className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <div className="space-y-1 text-xs sm:text-sm">
+                <p className="font-semibold text-foreground">Besoin d'une pièce ?</p>
+                <p className="text-muted-foreground">
+                  Demandez-la depuis la fiche de l'ordre de travail. Le magasin la sortira du stock.
+                </p>
+                {selectedWorkOrder && (
+                  <Link
+                    href={`/maintenance/work-orders/${selectedWorkOrder.id}`}
+                    className="inline-block font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    Ouvrir la fiche de l'OT
+                  </Link>
+                )}
               </div>
             </div>
 

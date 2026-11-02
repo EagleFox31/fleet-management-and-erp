@@ -39,3 +39,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Comment tester (QA)** : drapeau `FEATURE_FLAGS=captcha=on`, `GET /api/auth/challenge` renvoie un défi ; preuve unitaire : `node node_modules/vitest/vitest.mjs run tests/unit/server/captcha.test.ts` -> 6 passed.
 - **RAIDER** : couvert I/D (sans effet drapeau coupé), E (fail-closed sans clé) ; contrat HTTP et montage devant `/auth/login` et `/auth/pin-login` restent à faire.
 - **Reste / risques** : brancher `getFailedCount` sur le magasin de `lot/be/T-12-verrouillage` une fois la table fusionnée ; réutilisation d'une preuve (anti-rejeu) non traitée.
+
+## 2026-11-01T20:30:00+01:00 — P-26 — Retrait du captcha ALTCHA
+
+- **Branche** : `chore/retrait-captcha` · **Commit** : voir `git log`
+- **Statut** : livré (PR #63)
+- **Quoi** : captcha retiré en entier (garde, `GET /api/auth/challenge`, widget, drapeau, dépendances `altcha` / `altcha-lib`). Le verrouillage après échecs (`loginLockoutGuard`) reste sur `/auth/login` et `/auth/pin-login`.
+- **Pourquoi** : décision produit, captcha jugé trop lourd pour l'usage ; retrait complet plutôt que drapeau coupé, pour ne pas garder de code mort.
+- **Comment tester (QA)** : 3 échecs puis bon mot de passe : 200, même avec `FEATURE_FLAGS=captcha=on` ; `/api/auth/challenge` : 404.
+- **Reste / risques** : aucun ; un `captcha=on` résiduel dans `FEATURE_FLAGS` est ignoré.

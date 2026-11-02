@@ -21,6 +21,7 @@ import {
 } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { useAuth } from "@/hooks/useAuth";
+import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { cn, formatDate } from "@/lib/utils";
 import {
   UserPlus,
@@ -321,19 +322,6 @@ export default function UsersAdminPage() {
       toast({ variant: "destructive", title: "Erreur", description: error.message || "Impossible de modifier le statut du chauffeur." }),
   });
 
-  const getRoleLabel = (role: string) =>
-    ({
-      admin: "Administrateur",
-      management: "Direction",
-      workshop_manager: "Gestionnaire d'atelier",
-      technician: "Technicien",
-      secretary: "Secrétaire",
-      logistics: "Logistique",
-      warehouse: "Magasinier",
-      client: "Client",
-      user: "Utilisateur standard",
-    }[role] ?? role);
-
   // Passe par le helper partagé: le libellé « fonctionnalité à venir » doit être
   // identique partout dans l'app.
   const handleEditUser = (_u: User) => notifyComingSoon("L'édition des utilisateurs");
@@ -404,7 +392,7 @@ export default function UsersAdminPage() {
       header: "Rôle",
       cell: (u) => (
         <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-500 border border-gray-200")}>
-          {getRoleLabel(u.role)}
+          {roleLabelOf(u.role)}
         </span>
       ),
     },
@@ -584,7 +572,7 @@ export default function UsersAdminPage() {
             isLoading={statsLoading}
             roleFilter={roleFilter}
             roleOrder={roleOrder}
-            getRoleLabel={getRoleLabel}
+            getRoleLabel={roleLabelOf}
             onRoleChange={(role) => { setRoleFilter(role); setCurrentPage(1); }}
           />
 

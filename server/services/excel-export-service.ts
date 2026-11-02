@@ -76,13 +76,16 @@ export class ExcelExportService {
       "Référence": part.reference,
       "Désignation": part.name,
       "Catégorie": part.category || "N/A",
-      "Stock Théorique": part.quantity,
-      "Stock Réel": part.realStock || 0,
+      // Une seule colonne : `quantity` est le stock vivant, mis à jour par tous les mouvements.
+      // `real_stock` (héritée de l'Excel) n'est synchronisée que par un chemin d'écriture : périmée.
+      "Stock": part.quantity,
       "Seuil Min": part.minQuantity,
       "Unité": part.unit,
-      "Alerte CDE": part.reorderAlert ? "OUI" : "NON",
+      // Même règle que la liste de réappro (stock-alerts-service) : la colonne
+      // reorder_alert n'est pas tenue à jour par tous les mouvements de stock.
+      "Alerte CDE": part.quantity <= part.minQuantity ? "OUI" : "NON",
       "Prix Unitaire": parseFloat(part.unitPrice || "0"),
-      "Valeur Stock": (part.realStock || 0) * parseFloat(part.unitPrice || "0"),
+      "Valeur Stock": part.quantity * parseFloat(part.unitPrice || "0"),
       "Fournisseur": part.supplier || "N/A",
       "Emplacement": part.location || "N/A",
     }));
@@ -95,8 +98,7 @@ export class ExcelExportService {
       "Référence": "TOTAL",
       "Désignation": `${totalParts} pièces`,
       "Catégorie": "",
-      "Stock Théorique": null,
-      "Stock Réel": null,
+      "Stock": null,
       "Seuil Min": null,
       "Unité": "",
       "Alerte CDE": "",
@@ -120,10 +122,14 @@ export class ExcelExportService {
   async exportFuelConsumption(year: number, month?: number) {
     console.log(`Exporting fuel consumption for ${month ? `${month}/` : ''}${year}...`);
 
-    const conditions = [eq(fuelRecords.year, year)];
+    // `year` / `month` ne sont renseignés que par l'import Excel : un plein saisi à l'écran ne les
+    // porte pas toujours. Repli sur la date du plein pour ne pas l'exclure de l'export de son mois.
+    const conditions = [
+      sql`COALESCE(${fuelRecords.year}, EXTRACT(YEAR FROM ${fuelRecords.date})::int) = ${year}`,
+    ];
 
     if (month !== undefined) {
-      conditions.push(eq(fuelRecords.month, month));
+      conditions.push(sql`COALESCE(${fuelRecords.month}, EXTRACT(MONTH FROM ${fuelRecords.date})::int) = ${month}`);
     }
 
     const records = await db
