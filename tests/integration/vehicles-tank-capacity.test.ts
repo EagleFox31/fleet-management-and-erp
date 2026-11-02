@@ -37,13 +37,28 @@ describe("FUEL3 : capacité des réservoirs en base", { timeout: 120_000 }, () =
     expect(rows[0].constraints).toHaveLength(1);
   });
 
+  // Autonome : ne suppose pas qu'un seed (RCT-) a déjà tourné. Un véhicule inséré sans
+  // la colonne, comme ceux d'avant FUEL3, reste à NULL.
   it("les véhicules existants restent à NULL (capacité inconnue, règle muette)", async () => {
-    const { rows } = await pool.query(
-      `SELECT count(*)::int AS total, count(tank_capacity_l)::int AS renseignes
-         FROM vehicles WHERE registration_number NOT LIKE 'TEST%'`,
-    );
-    expect(rows[0].total).toBeGreaterThan(0);
-    expect(rows[0].renseignes).toBe(0);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: inserted } = await client.query(
+        `INSERT INTO vehicles (registration_number, brand, model, year)
+         VALUES ($1, 'TEST', 'FUEL3', 2020) RETURNING tank_capacity_l`,
+        [`TEST-FUEL3-NULL-${Date.now()}`],
+      );
+      expect(inserted[0].tank_capacity_l).toBeNull();
+
+      const { rows } = await client.query(
+        `SELECT count(tank_capacity_l)::int AS renseignes
+           FROM vehicles WHERE registration_number NOT LIKE 'TEST%'`,
+      );
+      expect(rows[0].renseignes).toBe(0);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 
   it("accepte une capacité positive ou NULL, refuse 0, négatif, NaN et Infinity", async () => {
