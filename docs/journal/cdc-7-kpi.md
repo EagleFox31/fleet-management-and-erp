@@ -96,3 +96,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Rupture de contrat d'entrée** : volontaire. Une période de plus de 36 mois ou hors 2000-2100 passe de 200 (ou 500) à 400. Aucun écran n'envoie de période (`<KpiTiles />` sans props) ; seuls `kpi-cdc` et `kpi.contract` appellent ces routes.
 - **Limite** : une seule borne n'est pas soumise aux 36 mois (la borne manquante est complétée par le serveur) ; le pire cas est d'environ 1 200 mois, sans blocage.
 - **Preuves** : tsc 0 ; unitaires `tests/unit/shared/kpi-period.test.ts` + `kpi-rules-cdc` 47/47 ; contrats `kpi-cdc` + `kpi` + `lot-exports-roles` 209/209 (session de tests).
+
+## 2026-11-02T13:02:41+01:00 — CDC-7 — Réserves : coût des OT du technicien en requêtes groupées
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la liste des OT d'un technicien lançait 5 requêtes par OT pour le coût (N+1). Elle en lance 4 au total, quelle que soit la longueur de la liste.
+- **Comment** : `calculateWorkOrderCosts` prend la liste et groupe heures, pièces et rotations par `work_order_id` ; `laborRatesForWorkOrders` sert les taux en une requête `JOIN LATERAL`. La date qui choisit le taux (`RATE_DATE_OF_WORK_ORDER`) est partagée avec `laborRateForWorkOrder`. Les `console.*` du chemin touché passent à `moduleLogger`.
+- **Pourquoi** : réserve de relecture de #89 ; la règle de coût reste `computeWorkOrderCost`, inchangée.
+- **Preuves** : tsc 0 ; intégration `work-order-cost` 3/3 dont un cas à trois OT (avec taux, sans taux, sans ligne).

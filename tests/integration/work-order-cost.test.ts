@@ -130,4 +130,52 @@ describe("Coût d'un ordre de travail (WO5)", { timeout: 120000 }, () => {
     const byVehicle = await kpiService.maintenanceCosts({ from: "2017-06-15", to: "2017-06-15", groupBy: "vehicle" });
     expect(byVehicle.groups.find((g) => g.key === String(vehicle.id))).toMatchObject({ interventions: 1, totalCost: 25000 });
   });
+
+  it("liste de plusieurs OT : chaque coût reste celui de son OT (calcul groupé)", async () => {
+    const technician = await createTestUser({ role: "technician" });
+    ids.userIds.push(technician.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const part = await createTestPart();
+    ids.partIds.push(part.id);
+
+    // Date propre à ce test (contrainte unique sur la date d'effet, base partagée).
+    const [rate] = await db
+      .insert(workshopLaborRates)
+      .values({ effectiveFrom: "2019-04-01", hourlyRateHt: "5000" })
+      .returning();
+    rateIds.push(rate.id);
+
+    // A : clos sous le taux 2019, valorisé aux heures. B : clos avant tout taux, coût saisi.
+    // C : aucune ligne liée, coût saisi seul.
+    const [a, b, c] = await db
+      .insert(workOrders)
+      .values([
+        { vehicleId: vehicle.id, technicianId: technician.id, title: "TEST-wo5-lot-a", status: "completed", cost: "1",
+          startDate: new Date("2019-04-10T08:00:00Z"), endDate: new Date("2019-04-11T16:00:00Z") },
+        { vehicleId: vehicle.id, technicianId: technician.id, title: "TEST-wo5-lot-b", status: "completed", cost: "700",
+          startDate: new Date("2000-02-10T08:00:00Z"), endDate: new Date("2000-02-11T16:00:00Z") },
+        { vehicleId: vehicle.id, technicianId: technician.id, title: "TEST-wo5-lot-c", cost: "300" },
+      ])
+      .returning();
+    woIds.push(a.id, b.id, c.id);
+    await db.insert(workOrderItems).values([
+      { workOrderId: a.id, customLabel: "TEST a", actualHours: "3", status: "done" },
+      { workOrderId: b.id, customLabel: "TEST b", actualHours: "4", status: "done" },
+    ]);
+    await db.insert(partsUsed).values([
+      { workOrderId: a.id, partId: part.id, quantity: 1, unitPrice: "100" },
+      { workOrderId: b.id, partId: part.id, quantity: 2, unitPrice: "50" },
+    ]);
+    await db.insert(tireRotations).values({
+      vehicleId: vehicle.id, workOrderId: b.id, rotationDate: "2000-02-11", rotationMileage: 1000,
+      rotationType: "front_to_back", cost: "40",
+    });
+
+    const list = await technicianWorkOrdersService.getTechnicianWorkOrders(technician.id);
+    const byId = new Map(list.map((row) => [row.id, row]));
+    expect(byId.get(a.id)).toMatchObject({ baseCost: 15000, partsCost: 100, tiresCost: 0, cost: 15100 });
+    expect(byId.get(b.id)).toMatchObject({ baseCost: 700, partsCost: 100, tiresCost: 40, cost: 840 });
+    expect(byId.get(c.id)).toMatchObject({ baseCost: 300, partsCost: 0, tiresCost: 0, cost: 300 });
+  });
 });
