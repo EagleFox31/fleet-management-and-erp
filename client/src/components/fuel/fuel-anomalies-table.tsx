@@ -13,7 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 import { userMessageOf } from "@/lib/api-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatFuelAnomalyFigures } from "@/lib/fuel-anomaly-display";
 import { formatDate } from "@/lib/utils";
+import { getFuelAnomalyRuleLabel } from "@shared/constants/fuel-anomaly-rules";
 import {
   FUEL_ANOMALIES_PATH,
   FUEL_ANOMALY_STATUSES,
@@ -67,12 +69,23 @@ export function FuelAnomaliesTable({ readOnly = false }: { readOnly?: boolean })
   const columns: PremiumDataTableColumn<FuelAnomaly>[] = [
     { id: "date", header: "Date", cell: (a) => (a.date ? formatDate(a.date) : "—") },
     { id: "vehicle", header: "Véhicule", cell: (a) => a.vehicleLabel ?? `#${a.vehicleId}` },
-    { id: "quantity", header: "Quantité", align: "right", cell: (a) => `${a.quantity.toLocaleString("fr-FR")} L` },
     {
-      id: "average",
-      header: "Moyenne / seuil",
+      id: "rule",
+      header: "Règle",
+      cell: (a) => <span data-testid={`fuel-anomaly-rule-${a.anomalyKey}`}>{getFuelAnomalyRuleLabel(a.rule)}</span>,
+    },
+    {
+      id: "value",
+      header: "Constaté",
       align: "right",
-      cell: (a) => `${a.averageQuantity.toLocaleString("fr-FR")} L / ${a.threshold.toLocaleString("fr-FR")} L`,
+      cell: (a) => <span data-testid={`fuel-anomaly-value-${a.anomalyKey}`}>{formatFuelAnomalyFigures(a).value}</span>,
+    },
+    {
+      id: "reference",
+      header: "Référence",
+      cell: (a) => (
+        <span data-testid={`fuel-anomaly-reference-${a.anomalyKey}`}>{formatFuelAnomalyFigures(a).reference ?? "—"}</span>
+      ),
     },
     {
       id: "status",
@@ -89,7 +102,7 @@ export function FuelAnomaliesTable({ readOnly = false }: { readOnly?: boolean })
       header: "",
       align: "right",
       cell: (a) => (
-        <Button size="sm" variant="outline" onClick={() => startEditing(a)} data-testid={`fuel-anomaly-resolve-${a.fuelRecordId}`}>
+        <Button size="sm" variant="outline" onClick={() => startEditing(a)} data-testid={`fuel-anomaly-resolve-${a.anomalyKey}`}>
           <ClipboardCheck className="mr-1 h-4 w-4" aria-hidden="true" />
           Traiter
         </Button>
