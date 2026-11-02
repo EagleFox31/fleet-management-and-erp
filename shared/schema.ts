@@ -149,11 +149,12 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   insuranceExpiry: z.string().optional().transform((val) => val ? val : undefined),
   technicalInspectionDate: z.string().optional().transform((val) => val ? val : undefined),
   purchasePrice: z.union([z.string(), z.number()]).optional().transform((val) => val ? String(val) : undefined),
-  tonnage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
-  axleCount: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
-  mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)),
-  year: z.union([z.string(), z.number()]).transform((val) => Number(val)),
-  nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined),
+  // Un texte non numérique donnerait NaN, accepté ici puis refusé par la base (500) : refus en 400.
+  tonnage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  axleCount: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  year: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
 });
 
 // Documents attachés aux véhicules

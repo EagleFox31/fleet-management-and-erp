@@ -167,10 +167,8 @@ describe("MIS2 : conflit de planning", { timeout: 180000 }, () => {
     expect(after.status).toBe("assigned");
   });
 
-  // DEFAUT PRODUIT : le refus renvoie `details: launchErrors` (server/api/missions.routes.ts:2366),
-  // que le gestionnaire central réduit à « Ce champ n'est pas valide. » pour chaque motif : le
-  // chef de parc ne sait pas pourquoi le lancement est bloqué. NB : la mission de test n'a pas
-  // de budget, donc le 400 ci-dessus ne prouve pas à lui seul le conflit (voir `launch-readiness`).
+  // Le refus nomme ses motifs dans le message (le chef de parc voit pourquoi).
+  // NB : la mission de test n'a pas de budget, le 400 seul ne prouve donc pas le conflit.
   describe("motif du refus", () => {
     let blockedId: number;
     beforeAll(async () => {
@@ -183,7 +181,7 @@ describe("MIS2 : conflit de planning", { timeout: 180000 }, () => {
       expect(await conflict(blockedId)).toBe(true);
     });
 
-    it.fails("le lancement (in_progress) est refusé avec le motif du conflit", async () => {
+    it("le lancement (in_progress) est refusé avec le motif du conflit", async () => {
       const res = await call("PUT", `/api/missions/${blockedId}/status`, { actor: "admin", body: { status: "in_progress" } });
       expect(JSON.stringify(res.body)).toContain("Conflit planning");
     });

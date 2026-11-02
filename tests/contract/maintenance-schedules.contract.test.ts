@@ -169,13 +169,10 @@ describe("MNT1 : plan de maintenance", { timeout: 60000 }, () => {
     expect(all.body.map((s: any) => s.id)).not.toContain(scheduleB.id);
   });
 
-  // Défaut : DELETE /api/maintenance-schedules/:id (server/routes.ts:1811) ignore
-  // le résultat de `storage.deleteMaintenanceSchedule` (server/storage.ts:1192),
-  // qui avale l'erreur de clé étrangère (work_orders.maintenance_schedule_id)
-  // et renvoie false : la route répond 204 alors que le plan existe toujours.
+  // DELETE d'un plan portant un OT généré : 409 (clé étrangère), jamais un 204 sans suppression.
   describe("plan portant un OT généré", () => {
     let scheduleWithWorkOrderId = 0;
-    // Mise en place hors du `it.fails` : une erreur de préparation fait échouer
+    // Mise en place hors du `it` : une erreur de préparation fait échouer
     // le hook au lieu de rendre le cas vert.
     beforeAll(async () => {
       const vehicle = await newVehicle();
@@ -184,7 +181,7 @@ describe("MNT1 : plan de maintenance", { timeout: 60000 }, () => {
       scheduleWithWorkOrderId = created.body.id;
     }, 60000);
 
-    it.fails("ne répond 204 que si le plan dont un OT a été généré est vraiment supprimé", async () => {
+    it("ne répond 204 que si le plan dont un OT a été généré est vraiment supprimé", async () => {
       const res = await session.call("DELETE", `/api/maintenance-schedules/${scheduleWithWorkOrderId}`, { actor: "manager" });
       const rows = await db.select({ id: maintenanceSchedules.id }).from(maintenanceSchedules).where(eq(maintenanceSchedules.id, scheduleWithWorkOrderId));
       if (res.status === 204) {

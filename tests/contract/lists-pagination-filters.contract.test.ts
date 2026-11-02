@@ -66,7 +66,7 @@ async function walkPages(d: Domain, pageSize: number) {
 const idsOf = (d: Domain, res: { body: any }): number[] => d.rows(res.body).map((r: any) => r.id);
 
 /** Cas communs à toutes les listes recherchables. */
-function searchCases(getDomain: () => Domain, quoteRowId: () => number, options: { nulByteRejected?: boolean; jokersEscaped?: boolean } = {}) {
+function searchCases(getDomain: () => Domain, quoteRowId: () => number) {
   it("liste vide : jeton inconnu", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: uniqueTestToken("absent") })}`);
@@ -98,26 +98,21 @@ function searchCases(getDomain: () => Domain, quoteRowId: () => number, options:
     }
   });
 
-  // Défaut figé : un octet nul dans la recherche est refusé par PostgreSQL et la route répond 500
-  // (véhicules et ordres de travail avalent l'erreur et renvoient une liste vide, sans 500).
-  if (options.nulByteRejected) {
-    it.fails("octet nul dans la recherche : 400 ou liste vide, pas 500", async () => {
-      const d = getDomain();
-      const res = await get(`${d.path}?${q({ search: "\u0000x" })}`);
-      expect(res.status).toBeLessThan(500);
-    });
-  }
+  it("octet nul dans la recherche : 400 ou liste, jamais 500", async () => {
+    const d = getDomain();
+    const res = await get(`${d.path}?${q({ search: "\u0000x" })}`);
+    expect(res.status).toBeLessThan(500);
+  });
 
-  // Défaut figé (sauf jokersEscaped) : `%` et `_` ne sont pas échappés avant le ILIKE, ils agissent comme jokers.
-  const jokerIt = options.jokersEscaped ? it : it.fails;
-  jokerIt("joker % : traité comme texte, aucune ligne ne contient un pourcent", async () => {
+  // `%` et `_` sont échappés avant le ILIKE (server/lib/sql-like.ts) : ils cherchent du texte.
+  it("joker % : traité comme texte, aucune ligne ne contient un pourcent", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}-%` })}`);
     expect(res.status).toBe(200);
     expect(idsOf(d, res)).toEqual([]);
   });
 
-  jokerIt("joker _ : traité comme texte, aucune ligne ne contient un souligné", async () => {
+  it("joker _ : traité comme texte, aucune ligne ne contient un souligné", async () => {
     const d = getDomain();
     const res = await get(`${d.path}?${q({ search: `${d.token}_0` })}`);
     expect(res.status).toBe(200);
@@ -175,7 +170,7 @@ describe("T8 : véhicules", { timeout: 120000 }, () => {
     expect(byBrand.body.vehicles.every((v: any) => /lvmarquea/i.test(v.brand))).toBe(true);
   });
 
-  searchCases(paginationSet, () => quoteId, { jokersEscaped: true });
+  searchCases(paginationSet, () => quoteId);
 
   it.each([["limit", "abc"], ["limit", "-1"], ["limit", "0"], ["offset", "abc"]])("borne %s=%s : 200, jamais 500", async (name, value) => {
     const res = await get(`/api/vehicles?${q({ search: token, [name]: value })}`);
@@ -300,7 +295,7 @@ describe("T8 : pièces", { timeout: 120000 }, () => {
     expect(res.body.total).toBe(1);
   });
 
-  searchCases(paginationSet, () => quoteId, { nulByteRejected: true });
+  searchCases(paginationSet, () => quoteId);
 
   it.each([["limit", "abc"], ["limit", "-1"], ["limit", "0"], ["offset", "abc"]])("borne %s=%s : 200, jamais 500", async (name, value) => {
     const res = await get(`/api/parts?${q({ search: token, [name]: value })}`);
@@ -308,14 +303,13 @@ describe("T8 : pièces", { timeout: 120000 }, () => {
     noLeak(res);
   });
 
-  // Défaut figé : routes.ts, GET /api/parts : `page = floor(offset / limit) + 1` n'est pas borné,
-  // un offset négatif donne un OFFSET négatif en SQL et la route répond 500.
-  it.fails("offset négatif : 400 ou repli, pas 500", async () => {
+  // Bornes de GET /api/parts : offset négatif et limit hors entier sûr retombent sur le repli.
+  it("offset négatif : 400 ou repli, pas 500", async () => {
     const res = await get(`/api/parts?${q({ search: token, offset: -1 })}`);
     expect(res.status).toBeLessThan(500);
   });
 
-  it.fails("limit hors entier sûr : 400 ou repli, pas 500", async () => {
+  it("limit hors entier sûr : 400 ou repli, pas 500", async () => {
     const res = await get(`/api/parts?${q({ search: token, limit: "99999999999999999999" })}`);
     expect(res.status).toBeLessThan(500);
   });
@@ -367,7 +361,7 @@ describe("T8 : fournisseurs (liste complète filtrable, sans pagination)", { tim
     expect(idsOf(domain, first)[0]).toBe(quoteId);
   });
 
-  searchCases(() => ({ ...domain, seeded: everySeeded() }), () => quoteId, { nulByteRejected: true });
+  searchCases(() => ({ ...domain, seeded: everySeeded() }), () => quoteId);
 
   it("paramètres de pagination inconnus : ignorés, 200, liste complète", async () => {
     const res = await get(`/api/suppliers?${q({ search: token, limit: "abc", offset: -1, page: 0 })}`);
@@ -375,15 +369,14 @@ describe("T8 : fournisseurs (liste complète filtrable, sans pagination)", { tim
     expect(sorted(res)).toEqual(everySeeded());
   });
 
-  // Défaut figé : suppliers.routes.ts, `isActive = (valeur === 'true')` : une valeur invalide est lue comme
-  // « inactif » et la liste revient avec les seuls fournisseurs inactifs, sans 400.
-  it.fails("isActive invalide : 400 ou filtre ignoré, pas lu comme inactif", async () => {
+  // `isActive` autre que true/false : 400 lisible, jamais lu comme « inactif ».
+  it("isActive invalide : 400 ou filtre ignoré, pas lu comme inactif", async () => {
     const res = await get(`/api/suppliers?${q({ search: token, isActive: "maybe" })}`);
     expect(res.status === 400 || idsOf(domain, res).includes(seeded[0])).toBe(true);
   });
 
-  // Défaut figé : la catégorie passe par ILIKE sans échappement, `%` agit comme joker.
-  it.fails("catégorie avec joker % : traitée comme texte", async () => {
+  // La catégorie est échappée avant le ILIKE : `%` est du texte.
+  it("catégorie avec joker % : traitée comme texte", async () => {
     const res = await get(`/api/suppliers?${q({ category: `${token}-%` })}`);
     expect(idsOf(domain, res)).toEqual([]);
   });

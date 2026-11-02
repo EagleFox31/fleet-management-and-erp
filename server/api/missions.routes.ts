@@ -2,7 +2,7 @@ import { getFuelPriceAt } from "../services/fuel-price-service";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
-import { eq, and, desc, inArray, ne, or, ilike } from "drizzle-orm";
+import { eq, and, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -1733,9 +1733,10 @@ router.post("/", async (req, res) => {
           licensePlateExpiry: vehicles.licensePlateExpiry,
         })
         .from(vehicles)
-        .where(eq(vehicles.id, assignmentVehicleId))
+        .where(and(eq(vehicles.id, assignmentVehicleId), isNull(vehicles.deletedAt)))
         .limit(1);
 
+      // Un véhicule supprimé (deletedAt posé) est traité comme introuvable.
       if (!selectedVehicle) {
         return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
       }
@@ -2370,8 +2371,10 @@ router.put("/:id/status", async (req, res) => {
 
       if (launchErrors.length > 0) {
         return res.status(400).json({
-          message: "Impossible de lancer la mission: prérequis métier non satisfaits.",
-          details: launchErrors,
+          // Les motifs vont dans le message : le gestionnaire central réduit
+          // un `details` de chaînes à « Ce champ n'est pas valide. ».
+          message: `Impossible de lancer la mission : ${launchErrors.join(" ")}`,
+          errors: launchErrors.map((motif) => ({ field: "status", message: motif })),
         });
       }
     }

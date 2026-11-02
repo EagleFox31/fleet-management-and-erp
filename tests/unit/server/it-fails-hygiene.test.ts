@@ -142,9 +142,8 @@ function offendersOnDisk(): string[] {
 }
 
 describe("it.fails : pas de mise en place dans le corps", () => {
-  it("l'extraction trouve bien des it.fails", () => {
-    const total = scannedFiles().flatMap((f) => extractItFails(readFileSync(f, "utf8"))).length;
-    expect(total).toBeGreaterThan(0);
+  it("l'extraction trouve un it.fails fabriqué (le dépôt peut n'en contenir aucun)", () => {
+    expect(extractItFails('it.fails("cas", async () => { expect(1).toBe(2); });')).toHaveLength(1);
   });
 
   it("un it.fails fautif fabriqué est signalé", () => {
@@ -195,6 +194,10 @@ describe("it.fails : pas de mise en place dans le corps", () => {
     const cases = extractItFails(src);
     expect(cases.map((c) => c.title)).toEqual(["a", "b %s", "c %s", "d"]);
     expect(setupReasonsIn(cases[3].body)).toEqual([]);
+  });
+
+  it("le balayage lit bien des fichiers de test", () => {
+    expect(scannedFiles().length).toBeGreaterThan(0);
   });
 
   it("aucun nouvel it.fails ne porte sa mise en place", () => {

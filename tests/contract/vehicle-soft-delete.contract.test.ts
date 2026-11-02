@@ -113,7 +113,7 @@ afterAll(async () => {
 });
 
 describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
-  // Mise en place des cas `it.fails` : hors du `it.fails`, une erreur de
+  // Mise en place des cas ci-dessous : hors du `it`, une erreur de
   // préparation (500, coupure de base) fait échouer le hook, jamais passer le cas.
   let seededDeleted: Awaited<ReturnType<typeof seedDeletedVehicle>>;
   beforeAll(async () => {
@@ -161,10 +161,7 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
   });
 
-  // Défaut : la création de mission (server/api/missions.routes.ts:1736) lit le
-  // véhicule sans filtrer `deletedAt` : un véhicule supprimé reçoit une mission
-  // (201). Le témoin ci-dessus prouve que seul `deletedAt` change.
-  it.fails("un véhicule supprimé n'est pas assignable à une mission (400)", async () => {
+  it("un véhicule supprimé n'est pas assignable à une mission (400)", async () => {
     const { vehicle, driverId } = seededDeleted;
     const orderKo = uniqueTestToken("ord");
     const res = await call("POST", "/api/missions", { body: missionBody(vehicle.id, driverId, orderKo) });
@@ -174,10 +171,7 @@ describe("VEH2 : véhicule supprimé", { timeout: 60000 }, () => {
     expect(created).toHaveLength(0);
   });
 
-  // Défaut : POST /api/work-orders (server/routes.ts:2130) ne vérifie que
-  // l'existence du véhicule, pas `deletedAt` : l'OT est créé (201) sur un
-  // véhicule supprimé.
-  it.fails("ne reçoit pas de nouvel OT (4xx)", async () => {
+  it("ne reçoit pas de nouvel OT (4xx)", async () => {
     const { vehicle } = seededDeleted;
     const res = await call("POST", "/api/work-orders", {
       body: { vehicleId: vehicle.id, title: "TEST OT sur véhicule supprimé" },
@@ -230,15 +224,18 @@ describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
     expect(list.body.vehicles.map((v: any) => v.id)).not.toContain(vehicle.id);
   });
 
-  // Défaut : la route supprime physiquement la ligne (server/routes.ts:1222,
-  // server/services/vehicle-deletion-service-trigger.ts) au lieu de poser
-  // `deletedAt`. Un véhicule qui porte un OT viole la clé étrangère
-  // work_orders.vehicle_id : 500, et l'historique n'est jamais conservé.
-  it.fails("supprime un véhicule qui porte un OT en conservant l'OT consultable", async () => {
+  it("supprime un véhicule qui porte un OT en conservant l'OT consultable", async () => {
     expect(historyDeleteStatus).toBe(200);
     const after = await call("GET", `/api/work-orders/${historyWorkOrderId}`);
     expect(after.status).toBe(200);
     const [row] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
     expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("un second DELETE sur un véhicule déjà retiré répond 404 sans le modifier", async () => {
+    const [before] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
+    expect((await call("DELETE", `/api/vehicles/${historyVehicleId}`)).status).toBe(404);
+    const [after] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
+    expect(after.deletedAt?.getTime()).toBe(before.deletedAt?.getTime());
   });
 });

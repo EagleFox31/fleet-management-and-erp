@@ -104,11 +104,8 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
     expect(await preventiveMaintenanceService.checkDateBasedMaintenance(2147483000, "maintenance")).toHaveLength(0);
   });
 
-  // Manque : l'échéance d'un plan actif (`maintenance_schedules.scheduled_date`)
-  // n'est lue que par `getUpcomingMaintenances` (affichage). Seules les dates
-  // portées par le véhicule déclenchent un OT
-  // (server/services/preventive-maintenance-service.ts:112) : un plan
-  // « dans 5 jours » ne produit jamais d'OT à l'approche de l'échéance.
+  // Échéance d'un plan actif (`maintenance_schedules.scheduled_date`) : déclenche un OT lié au plan
+  // dans la fenêtre d'alerte, au même titre que les dates portées par le véhicule.
   describe("plan actif à échéance proche", () => {
     let vehicleId = 0;
     let scheduleId = 0;
@@ -123,9 +120,33 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
       scheduleId = schedule.id;
     }, 60000);
 
-    it.fails("une échéance de plan actif dans la fenêtre déclenche un OT lié au plan", async () => {
+    it("une échéance de plan actif dans la fenêtre déclenche un OT lié au plan", async () => {
       await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId);
       expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("OT démarré, second passage : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "in_progress" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("OT en attente de pièces, second passage : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "awaiting_parts" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("OT clôturé, même échéance : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("échéance avancée après clôture : un nouvel OT", async () => {
+      await db.update(maintenanceSchedules).set({ scheduledDate: inDays(8) }).where(eq(maintenanceSchedules.id, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(1);
+      expect(await pendingFor(scheduleId)).toHaveLength(2);
     });
   });
 });
@@ -182,11 +203,9 @@ describe("MNT2 : déclenchement par kilométrage", { timeout: 120000 }, () => {
     expect(after.scheduledMileage).toBe(15000);
   });
 
-  // Défaut : le garde-fou anti-doublon cherche un OT « pending » dont le titre
-  // est celui du plan, alors que l'OT généré s'intitule « Maintenance
-  // préventive: <titre> » (preventive-maintenance-service.ts:310 et :359) : la
-  // garde ne trouve jamais rien. Quand le relevé dépasse deux seuils, chaque
-  // passage crée un OT de plus pour le même plan, sans qu'aucun ne soit clos.
+  // Garde-fou anti-doublon : un seul OT « pending » par plan (clé : maintenanceScheduleId,
+  // le titre de l'OT généré n'étant pas celui du plan). Quand le relevé dépasse deux
+  // seuils, un second passage ne crée pas d'OT de plus.
   describe("relevé au-dessus de deux seuils", () => {
     let vehicleId = 0;
     let planId = 0;
@@ -201,7 +220,7 @@ describe("MNT2 : déclenchement par kilométrage", { timeout: 120000 }, () => {
       expect(afterFirst).toHaveLength(1);
     }, 60000);
 
-    it.fails("un second passage à un kilométrage très au-dessus du seuil ne crée pas de second OT en attente pour le plan", async () => {
+    it("un second passage à un kilométrage très au-dessus du seuil ne crée pas de second OT en attente pour le plan", async () => {
       await preventiveMaintenanceService.checkMileageBasedMaintenance(vehicleId, 20000);
       const pending = (await pendingFor(planId)).filter((wo) => wo.status === "pending");
       expect(pending).toHaveLength(1);

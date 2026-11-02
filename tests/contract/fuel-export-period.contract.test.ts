@@ -97,11 +97,7 @@ describe("DIR2 / DIR3 : export carburant par période", { timeout: 60000 }, () =
     expect((await session.call("GET", `/api/exports/fuel-consumption?year=${YEAR}&month=13`, { actor: "admin" })).status).toBe(400);
   });
 
-  // Défaut : l'export filtre sur les colonnes `year` et `month`
-  // (server/services/excel-export-service.ts:125) que seul l'import Excel
-  // renseigne. Un plein saisi par l'écran (POST /api/fuel-records,
-  // server/routes.ts:3328) n'a ni année ni mois : il manque à l'export de son
-  // propre mois.
+  // L'export retombe sur la date du plein quand `year` / `month` sont absents, et la saisie les renseigne.
   describe("plein saisi par l'application", () => {
     // Date fixe en milieu de mois (passée) : le mois filtré est celui de la date
     // envoyée, sans dépendre du fuseau ni de la date du jour.
@@ -109,7 +105,7 @@ describe("DIR2 / DIR3 : export carburant par période", { timeout: 60000 }, () =
     const ENTRY_YEAR = 2026;
     const ENTRY_MONTH = 6;
     let registration = "";
-    // Mise en place (véhicule, POST et son 201) hors du `it.fails` : une erreur
+    // Mise en place (véhicule, POST et son 201) hors du test : une erreur
     // de création fait échouer le hook au lieu de rendre le cas vert.
     beforeAll(async () => {
       const vehicle = await createTestVehicle();
@@ -123,7 +119,7 @@ describe("DIR2 / DIR3 : export carburant par période", { timeout: 60000 }, () =
       recordIds.push(created.body.id);
     }, 60000);
 
-    it.fails("un plein saisi par l'application figure dans l'export de son mois", async () => {
+    it("un plein saisi par l'application figure dans l'export de son mois", async () => {
       const result = await downloadRows(`year=${ENTRY_YEAR}&month=${ENTRY_MONTH}`);
       const mine = result.rows.filter((r) => r["Véhicule"] === registration);
       expect(mine).toHaveLength(1);

@@ -122,10 +122,14 @@ export class ExcelExportService {
   async exportFuelConsumption(year: number, month?: number) {
     console.log(`Exporting fuel consumption for ${month ? `${month}/` : ''}${year}...`);
 
-    const conditions = [eq(fuelRecords.year, year)];
+    // `year` / `month` ne sont renseignés que par l'import Excel : un plein saisi à l'écran ne les
+    // porte pas toujours. Repli sur la date du plein pour ne pas l'exclure de l'export de son mois.
+    const conditions = [
+      sql`COALESCE(${fuelRecords.year}, EXTRACT(YEAR FROM ${fuelRecords.date})::int) = ${year}`,
+    ];
 
     if (month !== undefined) {
-      conditions.push(eq(fuelRecords.month, month));
+      conditions.push(sql`COALESCE(${fuelRecords.month}, EXTRACT(MONTH FROM ${fuelRecords.date})::int) = ${month}`);
     }
 
     const records = await db
