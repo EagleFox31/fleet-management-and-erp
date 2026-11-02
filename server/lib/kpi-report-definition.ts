@@ -55,7 +55,7 @@ export function buildKpiReport(data: KpiReportData): ReportDefinition {
             detail: `dont ${preventive.withoutWorkOrder ?? 0} sans OT, ${preventive.cancelled ?? 0} annulés`,
           },
           { label: "Interventions closes", value: formatReportCell(cost.interventions, "integer"), detail: "OT terminés dans la période" },
-          { label: "Coût total (FCFA)", value: formatReportCell(cost.totalCost, "amount"), detail: `main-d'oeuvre ${cost.laborTotal ?? 0}, pièces ${cost.partsTotal ?? 0}` },
+          { label: "Coût total (FCFA)", value: formatReportCell(cost.totalCost, "amount"), detail: `main-d'oeuvre ${cost.laborTotal ?? 0}, pièces ${cost.partsTotal ?? 0}, pneus ${cost.tiresTotal ?? 0}` },
           { label: "Coût moyen par intervention (FCFA)", value: formatReportCell(cost.averageCost, "amount"), detail: `${cost.missingCostCount ?? 0} OT sans main-d'oeuvre` },
         ],
         note: laborNote,

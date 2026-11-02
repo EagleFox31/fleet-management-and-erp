@@ -7,6 +7,10 @@
  * fuseau du serveur (leçon « Heure de fin de verrou décalée du fuseau du serveur »).
  */
 
+import { laborCost, laborRateAt as rateLineAt, type LaborRate } from "@shared/work-order-cost";
+
+export type { LaborRate };
+
 export const KPI_TIME_ZONE = "Africa/Douala";
 
 /** Jour calendaire de `now` dans le fuseau demandé (`AAAA-MM-JJ`). */
@@ -140,15 +144,9 @@ export function summarizePreventive(
 
 // --- Coût ------------------------------------------------------------------------------
 
-export type LaborRate = { effectiveFrom: string; hourlyRateHt: number };
-
 /** Taux en vigueur à `date` : la ligne au plus grand `effectiveFrom` inférieur ou égal à la date. */
 export function laborRateAt(rates: readonly LaborRate[], date: string): number | null {
-  let best: LaborRate | null = null;
-  for (const rate of rates) {
-    if (rate.effectiveFrom <= date && (best === null || rate.effectiveFrom > best.effectiveFrom)) best = rate;
-  }
-  return best ? best.hourlyRateHt : null;
+  return rateLineAt(rates, date)?.hourlyRateHt ?? null;
 }
 
 export type WorkOrderCostInput = {
@@ -169,12 +167,12 @@ export type WorkOrderCost = { labor: number; parts: number; tires: number; total
 /**
  * Main-d'oeuvre : heures réelles × taux quand un taux est en vigueur et que des heures sont
  * saisies ; sinon le coût saisi (jamais les deux : `cost` est déjà la main-d'oeuvre).
- * Pièces et rotations de pneus s'ajoutent, comme sur l'écran et le PDF de l'OT (WO5).
- * Montants arrondis au FCFA par composante, donc `labor + parts + tires = total` exactement.
+ * Pièces et rotations de pneus s'ajoutent. La règle de main-d'oeuvre est celle de l'écran et
+ * du PDF de l'OT (WO5, `shared/work-order-cost.ts`) ; seul l'arrondi diffère : le KPI arrondit
+ * au FCFA par composante, donc `labor + parts + tires = total` exactement, l'écran au centime.
  */
 export function workOrderCost(input: WorkOrderCostInput): WorkOrderCost {
-  const valued = input.rate !== null && input.hours > 0;
-  const laborRaw = valued ? input.hours * (input.rate as number) : input.cost;
+  const laborRaw = laborCost({ baseCost: input.cost, laborHours: input.hours, laborRate: input.rate }).amount;
   const labor = Math.round(Math.max(laborRaw, 0));
   const parts = Math.round(Math.max(input.parts, 0));
   const tires = Math.round(Math.max(input.tires, 0));

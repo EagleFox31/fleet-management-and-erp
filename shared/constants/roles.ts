@@ -158,6 +158,16 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
 
 /**
+ * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel
+ * sauf le chauffeur, qui n'a pas à connaître les coûts d'atelier.
+ */
+export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+export function canReadWorkOrderCost(role: string | null | undefined): boolean {
+  return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
  * Écarts du cahier des charges (chantier CDC, lot CDC-0a). Groupes lus par le montage
  * de `server/api/index.ts` et, plus tard, par les écrans : ne pas les recopier.
  */

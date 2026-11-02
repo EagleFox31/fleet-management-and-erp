@@ -53,7 +53,7 @@ export const avgCostPerInterventionResponseSchema = z.object({
   averageCost: z.number().min(0).nullable(),
   /** `false` tant qu'aucun taux horaire n'existe : les heures réelles ne sont alors pas valorisées. */
   laborValued: z.boolean().optional(),
-  /** Part main-d'oeuvre et part pièces du total (somme = `totalCost`, pneus exclus). */
+  /** Parts main-d'oeuvre, pièces et pneus du total (`laborTotal + partsTotal + tiresTotal = totalCost`). */
   laborTotal: z.number().min(0).optional(),
   partsTotal: z.number().min(0).optional(),
   tiresTotal: z.number().min(0).optional(),
