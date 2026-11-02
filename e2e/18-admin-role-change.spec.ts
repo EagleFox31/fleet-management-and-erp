@@ -176,11 +176,8 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("ADM2-3 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)", async () => {
       // La logistique n'a pas le périmètre « pièces » : 403 attendu, 200 obtenu
@@ -205,11 +202,8 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("ADM2-1 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ page }) => {
       await page.locator("tr", { hasText: target.username }).getByTitle("Modifier").click();
@@ -232,11 +226,8 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("ADM2-2 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ page }) => {
       await page.getByRole("dialog").getByRole("button", { name: "Mettre à jour" }).click();

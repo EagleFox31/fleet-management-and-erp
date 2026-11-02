@@ -119,6 +119,11 @@ async function declareBreakdown(page: Page): Promise<number> {
   return response.status();
 }
 
+/** Trame `work_order_created` dont le payload vise ce véhicule (les payloads portent `vehicleId`, pas l'immatriculation, quelle que soit leur enveloppe). */
+function isWorkOrderCreatedFor(frame: string, vehicleId: number): boolean {
+  return frame.includes("work_order_created") && new RegExp(String.raw`"vehicleId"\s*:\s*${vehicleId}(?!\d)`).test(frame);
+}
+
 test.beforeAll(async () => {
   await purge();
   const client = await createTestClient({ name: token("CLIENT") });
@@ -161,11 +166,8 @@ test.describe("DRV2 : espace chauffeur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("DRV2-1 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
       const status = await declareBreakdown(page);
@@ -200,17 +202,14 @@ test.describe("DRV2 : espace chauffeur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("DRV2-2 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("DRV2-2 : une panne crée un OT, reçu en temps réel par l'atelier", async () => {
       await declareBreakdown(driverPage);
       // Preuve temps réel : une trame, que le polling de la liste ne peut pas produire.
       await expect
-        .poll(() => frames.some((frame) => frame.includes("work_order_created") && frame.includes(crewB.registration)), {
+        .poll(() => frames.some((frame) => isWorkOrderCreatedFor(frame, crewB.vehicleId)), {
           message: "trame work_order_created absente côté atelier",
           timeout: 15_000,
         })
@@ -227,11 +226,8 @@ test.describe("DRV2 : espace chauffeur", () => {
     });
 
     // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
-
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
-
     test("DRV2-3 : mise en place réussie (témoin)", () => {});
-
 
     test.fail("DRV2-3 : GET /api/missions/:id d'un autre chauffeur est refusé (403)", async ({ page }) => {
       const res = await page.request.get(`/api/missions/${crewB.missionId}`);
