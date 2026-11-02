@@ -7,6 +7,7 @@ import {
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate } from "../middleware/auth";
+import { alertService } from "../services/alert-service";
 import { storage } from "../storage";
 
 const log = moduleLogger("technician-work-orders");
@@ -92,6 +93,24 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
 
     const updatedOrder = await storage.updateWorkOrder(workOrderId, updateData as never);
     if (mileageToWrite) await storage.updateVehicle(workOrder.vehicleId, mileageToWrite);
+
+    // Avancement vers l'encadrement : le chef d'atelier est prévenu du démarrage ou de la fin,
+    // comme pour PATCH /api/work-orders/:id. Une alerte non envoyée ne fait pas échouer le geste.
+    if (body.status !== workOrder.status && (body.status === "in_progress" || body.status === "completed")) {
+      const vehicle = workOrder.vehicleId ? await storage.getVehicle(workOrder.vehicleId).catch(() => undefined) : undefined;
+      alertService
+        .notifyWorkOrderProgress({
+          workOrderId,
+          workOrderTitle: updatedOrder?.title || workOrder.title,
+          newStatus: body.status,
+          technicianName: user.name ?? null,
+          vehicleRegistration: vehicle?.registrationNumber ?? null,
+          excludeUserId: userId,
+        })
+        .catch((error) => {
+          log.error({ err: error, workOrderId, requestId: req.requestId }, "alerte d'avancement non envoyée");
+        });
+    }
 
     const broadcast = (global as any).broadcastUpdate;
     if (typeof broadcast === "function") {

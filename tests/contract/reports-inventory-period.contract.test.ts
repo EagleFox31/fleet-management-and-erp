@@ -91,19 +91,17 @@ describe("DIR2 : rapport inventaire par periode", { timeout: 60000 }, () => {
     expect((await session.call("GET", q(START, END), { actor: null })).status).toBe(401);
   });
 
-  // DEFAUT server/routes.ts:2840 : `authenticate` seul, un client lit tout le stock et les prix.
-  it.fails("un client est refuse (403) sur le rapport inventaire", async () => {
+  it("un client est refuse (403) sur le rapport inventaire", async () => {
     const res = await session.call("GET", q(START, END), { actor: "client" });
     expect(res.status).toBe(403);
   });
 
-  it.fails("un chauffeur est refuse (403) sur le rapport inventaire", async () => {
+  it("un chauffeur est refuse (403) sur le rapport inventaire", async () => {
     const res = await session.call("GET", q(START, END), { actor: "driver" });
     expect(res.status).toBe(403);
   });
 
-  // DEFAUT server/routes.ts:2842 : `new Date("pas-une-date")` = Invalid Date, comparaison fausse, 200 vide au lieu de 400.
-  it.fails("une date invalide renvoie 400", async () => {
+  it("une date invalide renvoie 400", async () => {
     const res = await session.call("GET", q("pas-une-date", END), { actor: "admin" });
     expect(res.status).toBe(400);
   });

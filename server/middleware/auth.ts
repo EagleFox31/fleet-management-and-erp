@@ -206,3 +206,11 @@ export const isAnyUser = authorize([...ALL_ROLES]);
 // Tout le personnel (tout rôle sauf `client`) : écritures faites par l'exploitation
 // sur un véhicule, qu'un client consulte sans les saisir (kilométrage, position).
 export const isStaff = authorize([...STAFF_ROLES]);
+// Demandes de renouvellement de documents (secrétariat, logistique, atelier). Identique à
+// CREATE_ROLES de server/api/document-renewals.routes.ts ; posé avant le téléversement du justificatif.
+export const isDocumentRenewalWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager']);
+// Rapports d'exploitation lus par le personnel qui pilote le stock (inventaire) ou l'atelier
+// (performance des techniciens) : ni le client, ni le chauffeur ne lisent stock, prix ou charge.
+export const isWorkflowDocumentWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager', 'client']);
+export const isInventoryReportReader = authorize(['admin', 'management', 'workshop_manager', 'warehouse', 'secretary']);
+export const isTechnicianReportReader = authorize(['admin', 'management', 'workshop_manager']);

@@ -187,8 +187,7 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
 
 /**
  * WO7, technicien vers chef : l'alerte nominative « Intervention démarrée ».
- * La mise en place (OT, démarrage, sessions) est dans `beforeAll` ; le corps du
- * `test.fail` ne contient que la lecture des alertes du chef et l'assertion.
+ * La mise en place (OT, démarrage, sessions) est dans `beforeAll` ; le test lit les alertes du chef.
  */
 test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
   let bossPage: Page;
@@ -227,12 +226,8 @@ test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
     expect(row.status).toBe("in_progress");
   });
 
-  // Défaut produit : `PATCH /api/technician/work-orders/:id/status`
-  // (server/api/technician-work-orders.routes.ts) diffuse `work_order_updated` mais
-  // n'appelle jamais `alertService.notifyWorkOrderProgress` (appelé seulement par
-  // `PATCH /api/work-orders/:id`, server/routes.ts:2321). Le chef d'atelier n'a donc
-  // aucune alerte nominative quand le technicien démarre depuis son écran.
-  test.fail("le chef d'atelier reçoit l'alerte « Intervention démarrée »", async () => {
+  // Corrigé : `PATCH /api/technician/work-orders/:id/status` appelle `alertService.notifyWorkOrderProgress`.
+  test("le chef d'atelier reçoit l'alerte « Intervention démarrée »", async () => {
     await expect
       .poll(
         async () => {

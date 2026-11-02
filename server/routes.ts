@@ -15,7 +15,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff } from "./middleware/auth";
+import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -23,7 +23,7 @@ import {
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
   maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments,
-  faultCatalog, vehicleTires, insertFaultCatalogSchema
+  faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
 import { checkWorkOrderTransition } from "@shared/constants/work-order-transitions";
@@ -32,6 +32,7 @@ import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColu
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
+import { parseReportPeriod } from "./lib/report-period";
 import { AppError } from "./lib/app-error";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -2837,10 +2838,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint dédié pour les rapports d'inventaire
-  app.get("/api/reports/inventory", authenticate, async (req, res) => {
+  app.get("/api/reports/inventory", isInventoryReportReader, async (req, res, next) => {
     try {
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+      const { startDate, endDate } = parseReportPeriod(req.query);
       
       console.log('Generating inventory report for period:', startDate, 'to', endDate);
       
@@ -2885,16 +2885,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       console.error("Get inventory report error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // Endpoint dédié pour les rapports de performance des techniciens
-  app.get("/api/reports/technician-performance", authenticate, async (req, res) => {
+  app.get("/api/reports/technician-performance", isTechnicianReportReader, async (req, res, next) => {
     try {
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+      const { startDate, endDate } = parseReportPeriod(req.query);
       
       console.log('Generating technician performance report for period:', startDate, 'to', endDate);
       
@@ -2904,6 +2904,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(reportData);
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       console.error("Get technician performance report error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
@@ -5071,7 +5072,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour les documents de workflow d'acquisition
-  app.post("/api/workflows/:sessionId/documents", authenticate, upload.single('document'), async (req, res, next) => {
+  app.post("/api/workflows/:sessionId/documents", isWorkflowDocumentWriter, upload.single('document'), async (req, res, next) => {
     try {
       const { WorkflowDocumentService, isWorkflowDocumentType } = await import('./services/workflow-document-service');
       const sessionId = req.params.sessionId;
@@ -5097,6 +5098,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!isWorkflowDocumentType(documentType)) {
         return next(new AppError(400, "Type de document inconnu."));
+      }
+
+      // Le client alimente sa propre session d'acquisition, jamais celle d'un autre.
+      // Le personnel autorisé : admin, secrétariat, logistique, chef d'atelier.
+      if (req.user?.role === "client") {
+        const [owned] = await db
+          .select({ id: vehicleAcquisitionWorkflows.id })
+          .from(vehicleAcquisitionWorkflows)
+          .where(and(
+            eq(vehicleAcquisitionWorkflows.id, parseInt(workflowId)),
+            eq(vehicleAcquisitionWorkflows.sessionId, sessionId),
+            eq(vehicleAcquisitionWorkflows.userId, userId),
+          ));
+        if (!owned) return next(new AppError(403, "Accès refusé : cette session d'acquisition n'appartient pas à votre compte."));
       }
 
       const documentData = {
@@ -5175,7 +5190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint pour déclencher une action depuis les alertes de maintenance
-  app.post("/api/test-date-maintenance", authenticate, async (req, res) => {
+  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, async (req, res) => {
     try {
       const payloadSchema = z.object({
         vehicleId: z.number().int().positive(),
