@@ -278,6 +278,24 @@ npm run test:e2e           # Playwright (voir e2e/README.md)
 
 Arborescence et règles : `tests/README.md`. Ne pas colocaliser de `*.test.ts` dans `client/`, `server/` ou `shared/`.
 
+### Base de test : Postgres local par défaut
+
+Les suites **intégration** et **contrat** tournent sur le Postgres local Docker,
+pas sur Neon :
+
+```bash
+npm run test:db:up      # conteneurs + schéma Drizzle (port 54320)
+DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:5433/v1 npm run test:contract   # ou test:integration
+npm run test:db:down    # supprime aussi le volume
+```
+
+- **Neon seulement pour les e2e** (Playwright), qui ont besoin d'un serveur
+  complet sur une base réelle, et jamais contre la production.
+- La CI fait de même sur toute PR vers `main`.
+- Les conteneurs sont partagés entre sessions : ne pas lancer `test:db:down` sur
+  une base qu'une autre session utilise.
+- Détails et pièges : `tests/README.md`, section « Postgres local ».
+
 Notes :
 
 - Lancer **`npm run check` sur tout le projet** — ne pas filtrer la sortie sur ses
