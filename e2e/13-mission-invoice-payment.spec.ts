@@ -19,7 +19,8 @@ import { createE2EUser } from "./helpers/test-data";
  * Limite assumée : le lancement d'une mission exige affectation, documents du
  * véhicule et CPC du chauffeur (`PUT /api/missions/:id/status`). Ce parcours ne
  * le rejoue pas : la mission est créée par l'API puis posée à « livrée » en
- * base, état à partir duquel l'écran autorise la facturation.
+ * base, état à partir duquel l'écran autorise la facturation. Le lancement est
+ * rejoué au navigateur par `17-mission-lifecycle`.
  */
 
 const HT = 100000;
