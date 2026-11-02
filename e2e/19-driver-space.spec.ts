@@ -11,15 +11,10 @@ import { loginWithSession, type E2ECredentials } from "./helpers/auth";
  *
  * Vert : chaque chauffeur voit sa mission active sur son tableau de bord, jamais celle d'un autre.
  *
- * Défauts figés par `test.fail` (constats de docs/qa/PLAN_COUVERTURE_MODULES.md, DRV2) :
- * - DRV2-1 : la déclaration de panne poste sur POST /api/alerts, réservé à isWorkshopManager
- *   (server/routes.ts:4286) : 403 pour le chauffeur (client/src/pages/driver/dashboard.tsx:241) ;
- * - DRV2-2 : aucune panne ne crée d'OT (POST /api/incidents est derrière le drapeau `incidents`,
- *   désactivé, shared/feature-flags.ts:34, et ne crée pas d'OT, server/services/incident-service.ts:135-151).
- *   L'attente est jouée à deux rôles : le chef d'atelier doit recevoir la trame `work_order_created` ;
- * - DRV2-3 : pas de cloison chauffeur sur GET /api/missions et /api/missions/:id
- *   (server/api/missions.routes.ts:589 et :692) ni sur /api/drivers/:id/missions
- *   (server/api/drivers-management.routes.ts:164). /api/drivers/me, lui, est cloisonné.
+ * Défauts DRV2 (constats de docs/qa/PLAN_COUVERTURE_MODULES.md), corrigés et verrouillés par des tests ordinaires :
+ * - DRV2-1 : la déclaration de panne poste sur POST /api/driver/breakdowns (le chauffeur n'a pas accès à POST /api/alerts) ;
+ * - DRV2-2 : la panne crée un OT ; le chef d'atelier reçoit la trame `work_order_created` (jouée à deux rôles) ;
+ * - DRV2-3 : cloison chauffeur sur GET /api/missions, /api/missions/:id et /api/drivers/:id/missions.
  *
  * Données préfixées E2E-DRV2-, supprimées en fin de spec (et à l'ouverture si un run a planté).
  */
@@ -113,7 +108,7 @@ async function declareBreakdown(page: Page): Promise<number> {
   await page.getByRole("button", { name: "Signaler un problème" }).click();
   await page.getByRole("button", { name: /Panne véhicule/ }).click();
   const [response] = await Promise.all([
-    page.waitForResponse((r) => r.request().method() === "POST" && /\/api\/(alerts|incidents)/.test(r.url())),
+    page.waitForResponse((r) => r.request().method() === "POST" && /\/api\/(alerts|incidents|driver\/breakdowns)/.test(r.url())),
     page.getByRole("button", { name: "Envoyer le signalement" }).click(),
   ]);
   return response.status();
@@ -169,7 +164,7 @@ test.describe("DRV2 : espace chauffeur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("DRV2-1 : mise en place réussie (témoin)", () => {});
 
-    test.fail("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
+    test("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
       const status = await declareBreakdown(page);
       expect(status, "POST de la panne").toBeLessThan(300);
       await expect(page.getByText("Problème signalé")).toBeVisible();
@@ -205,7 +200,7 @@ test.describe("DRV2 : espace chauffeur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("DRV2-2 : mise en place réussie (témoin)", () => {});
 
-    test.fail("DRV2-2 : une panne crée un OT, reçu en temps réel par l'atelier", async () => {
+    test("DRV2-2 : une panne crée un OT, reçu en temps réel par l'atelier", async () => {
       await declareBreakdown(driverPage);
       // Preuve temps réel : une trame, que le polling de la liste ne peut pas produire.
       await expect
@@ -229,19 +224,19 @@ test.describe("DRV2 : espace chauffeur", () => {
     // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
     test("DRV2-3 : mise en place réussie (témoin)", () => {});
 
-    test.fail("DRV2-3 : GET /api/missions/:id d'un autre chauffeur est refusé (403)", async ({ page }) => {
+    test("DRV2-3 : GET /api/missions/:id d'un autre chauffeur est refusé (403)", async ({ page }) => {
       const res = await page.request.get(`/api/missions/${crewB.missionId}`);
       expect(res.status()).toBe(403);
     });
 
-    test.fail("DRV2-3 : GET /api/missions ne liste pas la mission d'un autre chauffeur", async ({ page }) => {
+    test("DRV2-3 : GET /api/missions ne liste pas la mission d'un autre chauffeur", async ({ page }) => {
       const res = await page.request.get("/api/missions");
       expect(res.status()).toBe(200);
       const list = (await res.json()) as { id: number }[];
       expect(list.map((m) => m.id)).not.toContain(crewB.missionId);
     });
 
-    test.fail("DRV2-3 : GET /api/drivers/:id/missions d'un autre chauffeur est refusé (403)", async ({ page }) => {
+    test("DRV2-3 : GET /api/drivers/:id/missions d'un autre chauffeur est refusé (403)", async ({ page }) => {
       const res = await page.request.get(`/api/drivers/${crewB.driverId}/missions`);
       expect(res.status()).toBe(403);
     });

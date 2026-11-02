@@ -130,6 +130,17 @@ function extractDocumentIssueTypes(details?: string[]): MissionDocumentType[] {
 
 function extractApiError(error: unknown): ApiErrorInfo {
   if (!(error instanceof Error)) return { title: "Erreur inconnue" };
+  // Contrat shared/errors.ts : motifs dans `errors[{ field, message }]`, repris
+  // dans `message`. On garde les motifs en liste et on retire leur doublon du titre.
+  if (isApiError(error) && error.fieldErrors?.length) {
+    const motifs = error.fieldErrors.map((item) => item.message).filter(Boolean);
+    const separator = error.message.indexOf(" : ");
+    const title =
+      separator > 0 && motifs.length > 0 && error.message.endsWith(motifs[motifs.length - 1])
+        ? error.message.slice(0, separator)
+        : error.message;
+    return { title, details: motifs };
+  }
   const raw = error.message;
   const jsonStart = raw.indexOf("{");
   if (jsonStart >= 0) {

@@ -395,13 +395,10 @@ test.describe("MIS1 : lancement refusé pour une raison métier", () => {
   });
 });
 
-test.describe("MIS1 : défaut figé", () => {
-  // DEFAUT PRODUIT (client/src/pages/missions/[id].tsx, extractApiError ~l.131-141) : le client lit
-  // les motifs du refus dans `payload.details`, alors que PUT /api/missions/:id/status
-  // (server/api/missions.routes.ts, « Impossible de lancer la mission : ... ») les renvoie dans
-  // `message` et `errors`. `launchBlockedDocumentTypes` reste vide : l'action « Créer demande de
-  // renouvellement » n'est jamais proposée sur un lancement bloqué par un document. A corriger par
-  // fleet-fe ; retirer `test.fail` une fois corrigé. Le témoin (le refus s'affiche bien, avec son
+test.describe("MIS1 : lancement bloqué par un document", () => {
+  // Défaut corrigé (client/src/pages/missions/[id].tsx, extractApiError) : le client lisait les motifs
+  // dans `payload.details`, alors que PUT /api/missions/:id/status les renvoie dans `message` et
+  // `errors` ; l'action « Créer demande de renouvellement » n'était jamais proposée. Le témoin (le refus s'affiche bien, avec son
   // motif) est le cas « assurance du véhicule expirée » ci-dessus.
   test.describe.configure({ timeout: 240_000 });
   let blocked: { id: number };
@@ -430,7 +427,7 @@ test.describe("MIS1 : défaut figé", () => {
     await loginWithSession(page, logistics);
   });
 
-  test.fail("lancement bloqué par un document : la demande de renouvellement est proposée", async ({ page }) => {
+  test("lancement bloqué par un document : la demande de renouvellement est proposée", async ({ page }) => {
     await page.goto(`/missions/${blocked.id}`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("button-transition-mission-status-header").click();
     await expect(

@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
@@ -24,6 +26,8 @@ import {
   Droplets,
   Fuel,
   X,
+  Wrench,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextualHelpButton } from "@/components/help";
@@ -100,11 +104,21 @@ interface DriverMe {
 // ─── Problem types ────────────────────────────────────────────────────────────
 
 const PROBLEM_TYPES = [
-  { id: "breakdown", label: "Panne véhicule", color: "bg-red-500", textColor: "text-white", emoji: "🔴" },
-  { id: "accident", label: "Accident", color: "bg-orange-500", textColor: "text-white", emoji: "🟠" },
-  { id: "delay", label: "Retard prévu", color: "bg-amber-400", textColor: "text-gray-900", emoji: "🕐" },
-  { id: "other", label: "Autre", color: "bg-gray-600", textColor: "text-white", emoji: "💬" },
+  { id: "breakdown", label: "Panne véhicule", color: "bg-red-500", textColor: "text-white", Icon: Wrench },
+  { id: "accident", label: "Accident", color: "bg-orange-500", textColor: "text-white", Icon: AlertTriangle },
+  { id: "delay", label: "Retard prévu", color: "bg-amber-400", textColor: "text-gray-900", Icon: Clock },
+  { id: "other", label: "Autre", color: "bg-gray-600", textColor: "text-white", Icon: MessageSquare },
 ];
+
+type BreakdownSeverity = "low" | "medium" | "high";
+
+const SEVERITY_OPTIONS: Array<{ id: BreakdownSeverity; label: string }> = [
+  { id: "low", label: "Faible" },
+  { id: "medium", label: "Moyenne" },
+  { id: "high", label: "Élevée" },
+];
+
+const MIN_DESCRIPTION_LENGTH = 5;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -236,27 +250,38 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const [severity, setSeverity] = useState<BreakdownSeverity>("medium");
+  const vehicleId = mission.vehicleId ?? mission.assignment?.vehicle?.id;
+
   const reportMutation = useMutation({
-    mutationFn: (payload: { type: string; vehicleId?: number; description: string }) =>
-      apiRequest("POST", "/api/alerts", payload),
+    mutationFn: (payload: { vehicleId: number; description: string; severity: BreakdownSeverity }) =>
+      apiRequest("POST", "/api/driver/breakdowns", payload),
     onSuccess: () => {
-      toast({ title: "Problème signalé", description: "Votre signalement a été envoyé." });
+      toast({ title: "Problème signalé", description: "Votre signalement a été transmis à l'atelier." });
+      // Resync ciblé : OT de l'atelier, incidents, alertes. L'événement temps réel part du serveur.
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
       onClose();
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Erreur", description: "Impossible d'envoyer le signalement." });
+    onError: (error: unknown) => {
+      toast({
+        variant: "destructive",
+        title: "Signalement non envoyé",
+        description: userMessageOf(error, "Impossible d'envoyer le signalement. Réessayez."),
+      });
     },
   });
+  const submitReport = useSingleFlightMutate(reportMutation.mutate);
 
   const handleSubmit = () => {
-    if (!selectedId) return;
+    if (!selectedId || !vehicleId) return;
     const problem = PROBLEM_TYPES.find((p) => p.id === selectedId);
     const description = selectedId === "other" && otherText.trim() ? otherText.trim() : problem?.label ?? selectedId;
-    reportMutation.mutate({
-      type: "incident",
-      vehicleId: mission.vehicleId ?? mission.assignment?.vehicle?.id,
-      description: `[Mission ${mission.orderNumber}] ${description}`,
+    submitReport({
+      vehicleId,
+      severity,
+      description: `[Mission ${mission.orderNumber}] ${description}`.slice(0, 2000),
     });
   };
 
@@ -275,10 +300,28 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
               className={`flex flex-col items-center justify-center gap-2 rounded-2xl p-4 border-2 transition-all font-semibold text-sm
                 ${selectedId === p.id ? `${p.color} ${p.textColor} border-transparent scale-95` : "bg-gray-50 text-gray-700 border-gray-200"}`}
             >
-              <span className="text-2xl">{p.emoji}</span>
+              <p.Icon className="h-6 w-6" aria-hidden="true" />
               {p.label}
             </button>
           ))}
+        </div>
+        <div className="space-y-2" role="group" aria-label="Gravité">
+          <p className="text-sm font-semibold text-gray-700">Gravité</p>
+          <div className="grid grid-cols-3 gap-2">
+            {SEVERITY_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={severity === option.id}
+                onClick={() => setSeverity(option.id)}
+                className={`rounded-xl border-2 py-2 text-sm font-semibold transition-all ${
+                  severity === option.id ? "bg-gray-900 text-white border-transparent" : "bg-gray-50 text-gray-700 border-gray-200"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
         {selectedId === "other" && (
           <textarea
@@ -291,7 +334,7 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
         )}
         <Button
           onClick={handleSubmit}
-          disabled={!selectedId || reportMutation.isPending || (selectedId === "other" && !otherText.trim())}
+          disabled={!selectedId || !vehicleId || reportMutation.isPending || (selectedId === "other" && otherText.trim().length < MIN_DESCRIPTION_LENGTH)}
           className="w-full h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-base"
         >
           {reportMutation.isPending ? "Envoi..." : "Envoyer le signalement"}
