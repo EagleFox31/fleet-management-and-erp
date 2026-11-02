@@ -25,7 +25,9 @@ Même Neon que `npm run dev` (`DATABASE_URL`). Pas de copie, pas de « branche �
 
 Les factories créent des lignes préfixées `TEST-` (username, immat, référence pièce…). `afterEach` les supprime ; un filet `afterAll` enlève d'éventuels orphelins `TEST-*` si un test a crashé.
 
-`DATABASE_URL_TEST` dans `.env` pointe vers **la même URL**. Si la variable manque, on retombe sur `DATABASE_URL`.
+`DATABASE_URL_TEST` doit viser une **branche Neon de test**, passée en variable d'environnement au lancement (sans modifier `.env`). Si la variable manque, on retombe sur `DATABASE_URL`.
+
+**Garde-fou** : `tests/support/setup-db.ts` refuse de démarrer (intégration et contrat) quand l'URL effective vise la production (endpoint Neon de production ou marqueur de `E2E_PRODUCTION_DB_MARKERS`). Même détection que pour les e2e : `e2e/helpers/production-guard.ts`, cas unitaires dans `tests/unit/e2e/production-guard.test.ts`.
 
 ## Pattern
 

@@ -1611,6 +1611,80 @@ soumission sans doublon.
 **Preuve**
 - Contrat 55/55 (17 `it.fails`) ; les 17 rejoués en `it` : 17 rouges, 38 verts. Hygiène `it-fails-hygiene` 7/7, liste gelée inchangée. `tsc --noEmit` global : 0 erreur ; fichier de test vérifié par un tsconfig temporaire : 0 erreur.
 
+
+## Piste C, étape 1 : garde-fou e2e contre la production
+
+**Quoi**
+- `e2e/helpers/production-guard.ts` et son appel en tête de `playwright.config.ts` : Playwright refuse de démarrer quand la base visée est la production (hôte contenant l'endpoint Neon de production, ou un marqueur de `E2E_PRODUCTION_DB_MARKERS`). Message actionnable, sans URL ni mot de passe.
+- `tests/unit/e2e/production-guard.test.ts` (10 cas) : extraction de l'hôte, pooler ou non, marqueur cherché dans l'hôte seulement, liste étendue par variable, repli sur le `.env`, priorité de la variable d'environnement, message sans secret, appel présent dans la config.
+
+**Comment**
+- Fonction pure, entrées injectables (`env`, lecture du `.env`) : testable sans base ni Playwright. La liste par défaut n'est qu'un plancher, la variable l'étend (RAIDER Agnostic).
+
+**Pourquoi**
+- Le `.env` racine pointe `DATABASE_URL` et `DATABASE_URL_TEST` sur la production ; les specs 07, 08, 10 à 14 créent et suppriment des lignes. Un oubli suffisait pour écrire en production.
+
+**Preuve**
+- Unitaire 10/10. `DATABASE_URL=<endpoint de production> node node_modules/@playwright/test/cli.js test --list` : échec immédiat avec le message du garde-fou (sans le garde-fou, la liste des specs s'affiche). Avec une branche de test : la config se charge.
+
+
+## Piste C, étape 1 bis : le même refus pour les suites intégration et contrat
+
+**Quoi**
+- `assertTestDatabaseNotProduction` (dans `e2e/helpers/production-guard.ts`), appelée par `tests/support/setup-db.ts` avant la redirection de `DATABASE_URL` vers `DATABASE_URL_TEST` : les suites vitest d'intégration et de contrat refusent de démarrer quand l'URL effective vise la production. 4 cas unitaires ajoutés (refus sans URL dans le message, branche de test acceptée, variable de marqueurs, appel présent avant la redirection). `tests/README.md` corrigé : `DATABASE_URL_TEST` ne doit plus être « la même URL ».
+
+**Comment**
+- Réutilise la détection de l'étape 1 (hôte seulement, jamais le chemin ni les identifiants), message sans secret.
+
+**Pourquoi**
+- Le `.env` racine pointe `DATABASE_URL_TEST` sur la production : un `npm run test:contract` ordinaire y écrivait.
+
+**Preuve**
+- Unitaire 14/14. Contrat lancé avec `DATABASE_URL_TEST` sur l'endpoint de production (valeur factice, aucune connexion tentée) : échec immédiat au chargement du setup, message du garde-fou. Sans le garde-fou, le même lancement ouvre la connexion et initialise la base. Avec la branche de test : les contrats tournent.
+
+
+## Piste C, étape 1 ter : nettoyage global des missions d'un compte de test
+
+**Quoi**
+- `tests/support/cleanup.ts` supprime aussi les missions (et leurs factures client) créées par un compte de test orphelin avant de supprimer le compte.
+
+**Pourquoi**
+- Sur la branche de test, le hook global `afterAll` échouait (`missions_created_by_users_id_fk`) et marquait en échec la suite de chaque fichier de contrat, tests verts compris.
+
+**Preuve**
+- Avant : 3 suites en échec au hook, 10 tests verts. Après : plus d'échec de hook.
+
+## Piste C, étape 2 : cloison client sur les lectures de véhicule, deux clients et le personnel
+
+**Quoi**
+- `tests/contract/vehicles-two-clients-isolation.contract.test.ts` (7 cas) : `GET /api/vehicles` (chacun ne voit que le sien, total 1, recherche de l'immatriculation d'autrui = 0, personnel voit tout), `GET /api/vehicles/all`, `GET /api/vehicles/:id` par id et par immatriculation (sien 200, autre client 403 sans fuite de l'immatriculation, personnel 200, sans session 401), véhicule sans propriétaire refusé aux clients, inconnu 404 (jamais 500).
+
+**Comment**
+- Trois comptes réels (admin, client A, client B), trois véhicules, `createApp` en mémoire ; nettoyage des lignes créées.
+
+**Pourquoi**
+- Le plan T8 notait que `GET /api/vehicles` ne filtrait pas sur le propriétaire ; #80 l'a corrigé. Il manquait un test à deux clients qui garde la cloison.
+
+**Preuve**
+- Vert 7/7 sur la branche de test. Rouge sur la version fautive : en neutralisant le refus du détail (`server/routes.ts:1076`, condition remplacée par `false`), 3 des 7 cas échouent (par id, sans propriétaire, par immatriculation). Aucun défaut produit constaté, donc aucun `it.fails`.
+
+
+## Piste C, étape 3 : parcours P5 (pneu) et P6 (stock bas vers réapprovisionnement)
+
+**Quoi**
+- `tests/contract/p5-tire-lifecycle.contract.test.ts` : un pneu de bout en bout (entrée en stock par le magasinier, montage neuf, suppression refusée tant que monté, inspection par le technicien, rotation, démontage vers le stock, remontage explicite de l'usagé et refus du remontage implicite, rebut, suppression refusée au magasinier puis acceptée à l'admin, historique de 2 montages et 1 inspection conservé), stock vérifié en base à chaque étape.
+- `tests/contract/p6-low-stock-to-restock.contract.test.ts` (3 cas) : sortie sous le seuil, alerte avec manque, commande du brouillon à confirmée (alerte inchangée), réception par le magasinier (+10, une entrée de stock à son nom), alerte levée, demande reçue, réception rejouée sans crédit ; réception refusée au technicien ; réception partielle qui laisse l'alerte.
+- Plan : P5 et P6 passent à « Contrat OK ».
+
+**Comment**
+- Deux erreurs de mes hypothèses corrigées au premier passage : la position de pneu `rear_left` n'existe pas (le 400 attendu en 409 était un faux positif de validation) et rejouer `delivered` répond 200 sans créditer (comportement idempotent, vérifié par le stock).
+
+**Pourquoi**
+- Les maillons étaient testés isolément ; rien ne prouvait la chaîne ni la justesse du stock d'une étape à l'autre.
+
+**Preuve**
+- P5 vert 1/1, P6 vert 3/3, deux passages de suite (idempotence). Rouge sur la version fautive : P5 avec le crédit de l'usagé au démontage neutralisé (`tires-service-simplified.ts:512`, `+ 1` en `+ 0`) ; P6 avec le crédit de réception neutralisé (`procurement-service.ts:238`) : 2 des 3 cas échouent. Une première mutation sur `part-requirements-service.ts:430` laissait P6 vert : ce n'est pas le chemin de réception d'une commande, le test ne prétend pas le couvrir.
+
 ## Bilan après les correctifs #76 à #80
 
 **Quoi**
@@ -1626,3 +1700,20 @@ soumission sans doublon.
 
 **Preuve**
 - Décompte du tableau `mods` de la page : `{ OK: 52, P: 16, F: 3, X: 2 }`. Preuves d'exécution des tests convertis : celles des PR #76 à #80 (unitaires 869/869, contrats rejoués, logs `scratchpad/logs/final80-*.log`).
+
+## Piste C, relecture : garde-fou e2e sans contournement
+
+**Quoi**
+- `playwright.config.ts` : `reuseExistingServer: false`. Un serveur déjà lancé sur le port (donc potentiellement sur la production) n'est plus réutilisé.
+- `e2e/helpers/production-guard.ts` : `hostOf` renvoyait `""` pour une URL sans `user@`, ce qui laissait passer la production. L'autorité entière est maintenant l'hôte.
+- `e2e/README.md` : phrase sur le refus précisée (base visée par la session), limite `E2E_BASE_URL` détaillée.
+- Fusion de `docs/couverture-apres-correctifs` (#81) : ligne T8 du plan reprise de #81, entrées de journal conservées toutes deux, ligne vide ajoutée avant l'étape 2.
+
+**Comment**
+- `tests/unit/e2e/production-guard.test.ts` : URL de production sans identifiants (hôte, marqueur, refus) et verrou sur `reuseExistingServer`.
+
+**Pourquoi**
+- Le garde-fou ne voit que la `DATABASE_URL` de la session : réutiliser un serveur existant le contournait. Une URL sans identifiants est valide pour `pg`.
+
+**Preuve**
+- Rouge sur le code d'avant (les deux fichiers sources restaurés) : 2 échecs sur 16. Vert après : 16/16.

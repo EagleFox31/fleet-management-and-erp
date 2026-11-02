@@ -87,7 +87,7 @@ flowchart LR
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| T1 | Toute route `/api` : 401 sans session, 403 avec rôle non autorisé | C / E | Partiel (`api-auth-guard` statique ; 403 par session réelle sur 7 POST principaux dans `api-role-guard-and-validation`, sur l'ajustement de stock et sur la saisie/modification d'un plein (`fuel-records-and-document-paths`) ; cloison entre clients et saisies réservées au personnel (`vehicle-documents-client-scope`) ; E : 403 forgé au contrat d'erreur, bouton de paiement désactivé avec sa raison, corbeille pièce masquée au magasinier, `e2e/07`, `e2e/08`) |
+| T1 | Toute route `/api` : 401 sans session, 403 avec rôle non autorisé | C / E | Partiel (`api-auth-guard` statique ; 403 par session réelle sur 7 POST principaux dans `api-role-guard-and-validation`, sur l'ajustement de stock et sur la saisie/modification d'un plein (`fuel-records-and-document-paths`) ; cloison entre clients et saisies réservées au personnel (`vehicle-documents-client-scope`) ; lectures de véhicule avec deux clients et le personnel : liste, `/all`, détail par id et par immatriculation, véhicule sans propriétaire, inconnu (`vehicles-two-clients-isolation`) ; E : 403 forgé au contrat d'erreur, bouton de paiement désactivé avec sa raison, corbeille pièce masquée au magasinier, `e2e/07`, `e2e/08`) |
 | T2 | Sessions : création, expiration, révocation, logout | C | OK (`api-auth-sessions`) |
 | T3 | Body invalide → 400 Zod avec message actionnable | C | Partiel (7 POST principaux + PATCH véhicule, OT, fournisseur, client, pièce, pneu, panne couverts par `api-role-guard-and-validation` ; ajustement de stock ; PATCH document, planification, utilisateur, POST/PATCH plein carburant, POST catalogue de pannes dans `secondary-routes-validation` ; E : toast métier sans détail technique, `e2e/08` ; reste les autres routes de `server/routes.ts`, à brancher sur `prepareColumnUpdate`) |
 | T4 | Champs serveur ignorés si envoyés par le client (`created_by`, `updated_by`, prix, totaux) | C | Partiel (prix pièce OT, champs d'audit au PATCH pièce, `requestedBy` et statut/date de livraison à la création d'une demande de pièce, ratchet `insert-schemas-server-fields` ; commande fournisseur : totaux recalculés, remise bornée 0..100, quantités reçues bornées et jamais en baisse, `purchase-order-amounts` ; facture client : montant borné, TVA/TTC recalculés, `client-invoice-generate` ; facture fournisseur : champs du workflow ignorés, solde initial = TTC, `supplier-invoice-create`) |
@@ -408,7 +408,7 @@ flowchart LR
 
 ### P5 — Cycle de vie d'un pneu
 
-État : **À faire**.
+État : **Contrat OK** (`p5-tire-lifecycle` : entrée en stock par le magasinier, montage neuf, suppression refusée tant que monté, inspection, rotation, démontage vers le stock (usagé +1), remontage explicite de l'usagé, rebut, suppression refusée au magasinier puis acceptée à l'admin, historique conservé ; stock vérifié à chaque étape). Pas d'e2e : aucun maillon ne se prouve seulement au navigateur.
 
 ```mermaid
 flowchart LR
@@ -417,7 +417,7 @@ flowchart LR
 
 ### P6 — Stock bas → réapprovisionnement
 
-État : **Partiel** (service d'alertes testé, pas le parcours complet).
+État : **Contrat OK** (`p6-low-stock-to-restock` : sortie sous le seuil, alerte avec manque, commande fournisseur de brouillon à confirmée sans effet sur l'alerte, réception par le magasinier (+10, une entrée de stock à son nom), alerte levée, demande reçue, réception rejouée sans crédit en double ; réception refusée au technicien ; réception partielle qui laisse l'alerte). Pas d'e2e.
 
 ```mermaid
 flowchart LR
