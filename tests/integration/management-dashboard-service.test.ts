@@ -13,9 +13,11 @@ import { uniqueTestToken } from "../support/ids";
 
 const ids = createIdBag();
 
+// La période "month" va du 1er à aujourd'hui : un jour fixe (15, 16) sort de la
+// période du 1er au 14 du mois et le test échoue selon la date du jour.
 function currentMonthInvoiceDate(day = 15): string {
   const now = new Date();
-  return toIsoDateOnly(new Date(now.getFullYear(), now.getMonth(), day));
+  return toIsoDateOnly(new Date(now.getFullYear(), now.getMonth(), Math.min(day, now.getDate())));
 }
 
 afterEach(async () => {
