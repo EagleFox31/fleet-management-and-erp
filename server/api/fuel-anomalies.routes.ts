@@ -28,7 +28,11 @@ router.get("/fuel-card/anomalies", requireFeature("fuel-anomalies"), authenticat
 /** Compteur « véhicules sans capacité » : la règle `tank-overflow` y est muette. Mêmes rôles que la liste. */
 router.get("/fuel-card/anomalies/summary", requireFeature("fuel-anomalies"), authenticate, authorize([...FUEL_READ_ROLES]), async (_req, res, next) => {
   try {
-    res.json(fuelAnomaliesSummarySchema.parse({ vehiclesWithoutTankCapacity: await fuelAnomalyResolutionService.vehiclesWithoutTankCapacity() }));
+    const [vehiclesWithoutTankCapacity, vehicles] = await Promise.all([
+      fuelAnomalyResolutionService.vehiclesWithoutTankCapacity(),
+      fuelAnomalyResolutionService.listVehiclesWithoutTankCapacity(),
+    ]);
+    res.json(fuelAnomaliesSummarySchema.parse({ vehiclesWithoutTankCapacity, vehicles }));
   } catch (err) {
     next(err);
   }

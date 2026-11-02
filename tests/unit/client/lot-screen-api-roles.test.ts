@@ -81,7 +81,11 @@ const SCREEN_APIS: Record<string, Declaration> = {
     ],
   },
   "fuel-anomalies": {
-    apis: [{ file: "fuel-anomalies.routes.ts", path: "/fuel-card/anomalies" }],
+    apis: [
+      { file: "fuel-anomalies.routes.ts", path: "/fuel-card/anomalies" },
+      // Panneau « véhicules sans capacité » ; sa saisie (PATCH véhicule) vit dans server/routes.ts, hors de ce test.
+      { file: "fuel-anomalies.routes.ts", path: "/fuel-card/anomalies/summary" },
+    ],
     writes: [
       {
         api: { file: "fuel-anomalies.routes.ts", method: "patch", path: "/fuel-card/anomalies/:id" },

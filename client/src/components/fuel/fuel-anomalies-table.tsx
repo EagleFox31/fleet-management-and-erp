@@ -14,6 +14,7 @@ import { userMessageOf } from "@/lib/api-error";
 import { useContractQuery } from "@/lib/contract-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatFuelAnomalyFigures } from "@/lib/fuel-anomaly-display";
+import { TankCapacityPanel } from "./tank-capacity-panel";
 import { formatDate } from "@/lib/utils";
 import { getFuelAnomalyRuleLabel } from "@shared/constants/fuel-anomaly-rules";
 import {
@@ -38,7 +39,7 @@ export const FUEL_ANOMALY_STATUS_LABELS: Record<FuelAnomalyStatus, string> = {
  * Anomalies carburant (P-18). `readOnly` pour qui consulte sans traiter (chef d'atelier,
  * direction : hors `FUEL_WRITE_ROLES`) : la colonne Traiter n'existe pas pour eux.
  */
-export function FuelAnomaliesTable({ readOnly = false }: { readOnly?: boolean }) {
+export function FuelAnomaliesTable({ readOnly = false, canEditTankCapacity = false }: { readOnly?: boolean; canEditTankCapacity?: boolean }) {
   const { toast } = useToast();
   const anomalies = useContractQuery(FUEL_ANOMALIES_PATH, fuelAnomaliesResponseSchema);
   const [editing, setEditing] = useState<FuelAnomaly | null>(null);
@@ -113,6 +114,7 @@ export function FuelAnomaliesTable({ readOnly = false }: { readOnly?: boolean })
   return (
     <div className="space-y-4" data-testid="fuel-anomalies">
       <HeaderCard moduleLabel="Carburant" title="Anomalies carburant" icon={<AlertTriangle className="h-5 w-5" />} />
+      <TankCapacityPanel canEdit={canEditTankCapacity} />
       {anomalies.isError ? (
         <LoadingError isLoading={false} error={anomalies.error} onRetry={() => anomalies.refetch()} />
       ) : (

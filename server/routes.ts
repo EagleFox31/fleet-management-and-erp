@@ -40,7 +40,7 @@ import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
-import { broadcastFuelRecordChanged } from "./lib/fuel-record-realtime";
+import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
 import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
@@ -1224,9 +1224,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Couche 2 : la capacité fait varier la règle tank-overflow et le compteur « sans capacité »
-      // chez les autres profils carburant (même événement que les pleins, AGENTS.md §2).
+      // chez les autres profils carburant (AGENTS.md §2).
       if ("tankCapacityL" in data && (data.tankCapacityL ?? null) !== (vehicle.tankCapacityL ?? null)) {
-        broadcastFuelRecordChanged(id, req.requestId);
+        broadcastVehicleTankCapacityChanged(id, req.requestId);
       }
 
       return res.status(200).json(updatedVehicle);

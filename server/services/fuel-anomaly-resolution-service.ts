@@ -21,6 +21,10 @@ export const TANK_OVERFLOW_TOLERANCE_PERCENT = 5;
 // Constante du module, jamais une saisie : insérée telle quelle pour que Postgres la type en entier.
 const TOLERANCE_SQL = sql.raw(String(Math.trunc(TANK_OVERFLOW_TOLERANCE_PERCENT)));
 
+/** Véhicule actif, non électrique, sans capacité : `tank-overflow` y est muette. Compteur et liste partagent ce filtre. */
+const MISSING_TANK_CAPACITY = sql`tank_capacity_l IS NULL AND deleted_at IS NULL AND fuel_type IS DISTINCT FROM 'electric'`;
+export const MISSING_TANK_CAPACITY_LIST_LIMIT = 100;
+
 type Row = {
   anomaly_key: string;
   fuel_record_id: number;
@@ -178,8 +182,16 @@ export const fuelAnomalyResolutionService = {
   /** Véhicules (hors retirés) sans capacité de réservoir : la règle `tank-overflow` y est muette. */
   async vehiclesWithoutTankCapacity(): Promise<number> {
     const res = await db.execute(sql`
-      SELECT count(*) FILTER (WHERE tank_capacity_l IS NULL AND deleted_at IS NULL AND fuel_type IS DISTINCT FROM 'electric') AS n FROM vehicles`);
+      SELECT count(*) FILTER (WHERE ${MISSING_TANK_CAPACITY}) AS n FROM vehicles`);
     return Number(rowsOf<{ n: string | number }>(res)[0]?.n ?? 0);
+  },
+
+  /** Les mêmes véhicules, à compléter depuis l'écran (au plus `limit`, par immatriculation). */
+  async listVehiclesWithoutTankCapacity(limit = MISSING_TANK_CAPACITY_LIST_LIMIT): Promise<{ id: number; label: string }[]> {
+    const res = await db.execute(sql`
+      SELECT id, registration_number AS label FROM vehicles
+      WHERE ${MISSING_TANK_CAPACITY} ORDER BY registration_number, id LIMIT ${limit}`);
+    return rowsOf<{ id: number; label: string | null }>(res).map((r) => ({ id: Number(r.id), label: r.label ?? `#${r.id}` }));
   },
 
   /** Clés à retirer de la liste active : les anomalies justifiées. */
