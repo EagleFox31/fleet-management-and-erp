@@ -107,7 +107,7 @@ Tables : `users` (soft delete `deleted_at`), `userOnboarding`, `activityLogs`.
 | # | Test | Niveau | État |
 |---|---|---|---|
 | ADM1 | CRUD utilisateur par admin, 403 pour les autres rôles | C | OK (`users-admin-soft-delete` : 403 non-admin sur POST/PATCH/DELETE, 401 anonyme, auto-suppression 400 ; PATCH : `secondary-routes-validation`) |
-| ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | À faire |
+| ADM2 | Changement de rôle : menus et droits appliqués à la session suivante | E | OK (`18-admin-role-change` : magasinier passé technicien, menu et droits suivent après reconnexion ; session ouverte suit les gardes qui relisent la base ; défauts figés ADM2-1, ADM2-2, ADM2-3) |
 | ADM3 | Soft delete : connexion refusée, session révoquée, absent des listes, historique conservé | C | OK (`users-admin-soft-delete` ; défaut corrigé : un compte supprimé se reconnectait et gardait sa session) |
 | ADM4 | Login / logout, mauvais mot de passe | E | OK (`01-auth-login`) |
 | ADM5 | PIN chauffeur : bon PIN, mauvais PIN, chauffeur désactivé | C | OK (`driver-pin-login`, 7 cas ; fiche `drivers` désactivée : voir DRV1) |
@@ -291,7 +291,7 @@ Tables : `drivers` (`is_active`).
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | OK (`drivers-crud-deactivation` : CRUD et RBAC ; chauffeur désactivé ni affectable, ni sur l'écran PIN, ni connectable, corrigé par #76) |
-| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | À faire |
+| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; défauts figés DRV2-1 panne refusée en 403, DRV2-2 aucun OT créé, DRV2-3 pas de cloison chauffeur à l'API missions) |
 
 ### 3.9 Carburant
 

@@ -175,6 +175,13 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
       await closeStale?.();
     });
 
+    // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
+
+    // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
+
+    test("ADM2-3 : mise en place réussie (témoin)", () => {});
+
+
     test.fail("ADM2-3 : magasinier passé logistique, session ouverte : plus de suggestions de regroupement (403)", async () => {
       // La logistique n'a pas le périmètre « pièces » : 403 attendu, 200 obtenu
       // tant que requireAuth reprend le rôle figé en session.
@@ -197,6 +204,13 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
       await expect(page.locator("tr", { hasText: target.username })).toBeVisible({ timeout: 60_000 });
     });
 
+    // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
+
+    // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
+
+    test("ADM2-1 : mise en place réussie (témoin)", () => {});
+
+
     test.fail("ADM2-1 : /admin/users, « Modifier » ouvre un formulaire d'édition", async ({ page }) => {
       await page.locator("tr", { hasText: target.username }).getByTitle("Modifier").click();
       await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
@@ -216,6 +230,13 @@ test.describe("ADM2 : changement de rôle par un administrateur", () => {
       await chooseRole(page, dialog, "Technicien");
       await expect(dialog.getByLabel(/Nouveau mot de passe/)).toHaveValue("");
     });
+
+    // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
+
+    // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
+
+    test("ADM2-2 : mise en place réussie (témoin)", () => {});
+
 
     test.fail("ADM2-2 : /users, changer le rôle sans toucher au mot de passe enregistre", async ({ page }) => {
       await page.getByRole("dialog").getByRole("button", { name: "Mettre à jour" }).click();
