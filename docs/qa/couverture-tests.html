@@ -64,20 +64,20 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
 
 <div class="wrap">
 <header>
-  <div class="eyebrow">Chantier tests · mis à jour le 2 novembre 2026</div>
+  <div class="eyebrow">Chantier tests · mis à jour le 2 novembre 2026, 10:45</div>
   <h1>Couverture des tests FleetMaster</h1>
-  <p class="lead">Source : <span class="mono">docs/qa/PLAN_COUVERTURE_MODULES.md</span>, après fusion des PR #61 à #80. Les correctifs #76 à #80 ont levé tous les défauts gardés en <span class="mono">it.fails</span> : il n'en reste aucun sur <span class="mono">main</span>. 67 cas de test et 6 parcours bout en bout, soit 73 éléments.</p>
+  <p class="lead">Source : <span class="mono">docs/qa/PLAN_COUVERTURE_MODULES.md</span>, après fusion des PR #61 à #86. Les correctifs #76 à #80 puis #86 ont levé tous les défauts gardés en <span class="mono">it.fails</span> : il n'en reste aucun sur <span class="mono">main</span>. 67 cas de test et 6 parcours bout en bout, soit 73 éléments.</p>
 </header>
 
 <section aria-label="Bilan">
   <div class="stats">
-    <div class="stat" style="--c:var(--ok)"><b class="tn">71,2 %</b><span>Testés : 52 éléments</span></div>
-    <div class="stat" style="--c:var(--partial)"><b class="tn">21,9 %</b><span>Partiels : 16</span></div>
-    <div class="stat" style="--c:var(--todo)"><b class="tn">4,1 %</b><span>Non testés : 3</span></div>
+    <div class="stat" style="--c:var(--ok)"><b class="tn">84,9 %</b><span>Testés : 62 éléments</span></div>
+    <div class="stat" style="--c:var(--partial)"><b class="tn">9,6 %</b><span>Partiels : 7</span></div>
+    <div class="stat" style="--c:var(--todo)"><b class="tn">2,7 %</b><span>Non testés : 2</span></div>
     <div class="stat" style="--c:var(--out)"><b class="tn">2,7 %</b><span>À construire : 2</span></div>
   </div>
-  <div class="bar" role="img" aria-label="52 testés, 16 partiels, 3 non testés, 2 à construire">
-    <i style="width:71.2%;background:var(--ok)"></i><i style="width:21.9%;background:var(--partial)"></i><i style="width:4.1%;background:var(--todo)"></i><i style="width:2.7%;background:var(--out)"></i>
+  <div class="bar" role="img" aria-label="62 testés, 7 partiels, 2 non testés, 2 à construire">
+    <i style="width:84.9%;background:var(--ok)"></i><i style="width:9.6%;background:var(--partial)"></i><i style="width:2.7%;background:var(--todo)"></i><i style="width:2.7%;background:var(--out)"></i>
   </div>
   <div class="legend">
     <span style="--c:var(--ok)">Testé (OK ou Fait)</span>
@@ -85,7 +85,7 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
     <span style="--c:var(--todo)">Non testé (À faire)</span>
     <span style="--c:var(--out)">À construire : fonctionnalité absente</span>
   </div>
-  <p class="foot">Cas seuls (sans parcours) : 50 testés (74,6 %), 13 partiels (19,4 %), 2 non testés (3,0 %), 2 à construire (3,0 %). Le 1er novembre à 18:00 : 29 testés sur 73 (39,7 %).</p>
+  <p class="foot">Cas seuls (sans parcours) : 58 testés (86,6 %), 5 partiels (7,5 %), 2 non testés (3,0 %), 2 à construire (3,0 %). Le 1er novembre à 18:00 : 29 testés sur 73 (39,7 %) ; avant les pistes C à F : 52 (71,2 %).</p>
 </section>
 
 <section>
@@ -106,6 +106,11 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
       <tr><td class="mono">#76</td><td>Lot 1 : chauffeur désactivé, fournisseurs, pièces, pannes, workflow d'acquisition, jokers de recherche</td><td>DRV1, SUP1, SUP2 passent OK</td></tr>
       <tr><td class="mono">#78, #79</td><td>Statut véhicule par trigger en base, ré-immobilisation à la réouverture d'OT</td><td>VEH4 passe OK</td></tr>
       <tr><td class="mono">#80</td><td>Lot 2 : cloison client sur les lectures véhicule, derniers <span class="mono">it.fails</span> convertis</td><td>T8, VEH1, VEH2, MNT1, MNT2, CAT1, FUEL1, FUEL2 passent OK</td></tr>
+      <tr><td class="mono">#82</td><td>Piste C : garde-fou base de production (Playwright, vitest), cloison client véhicules, parcours stock</td><td>P5, P6 passent OK</td></tr>
+      <tr><td class="mono">#83</td><td>Piste D : cliquets des routes d'écriture (gardes, validation, champs serveur), pointages en bord de mois</td><td>T1, T3, T4 OK avec liste gelée</td></tr>
+      <tr><td class="mono">#84</td><td>Piste E : rapports par période, contenu exact des exports XLSX</td><td>DIR2 couvert, DIR3 élargi</td></tr>
+      <tr><td class="mono">#85</td><td>Piste F : e2e des écrans satellites des transitions d'OT (trame puis refetch, sans polling)</td><td>T6, WO1 couverts</td></tr>
+      <tr><td class="mono">#86</td><td>8 défauts corrigés : gardes de rôle (rapports, renouvellement, documents de workflow, route de test), dates inexistantes en 400, alerte « Intervention démarrée », export stock</td><td>WO6, WO7, DIR2 passent OK ; plus aucun <span class="mono">it.fails</span></td></tr>
     </tbody>
   </table></div>
 </section>
@@ -115,14 +120,12 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
   <div class="tracks">
     <div class="track">
       <h3>Non testés</h3>
-      <div class="lot"><header><strong>Écrans à deux comptes</strong></header><div class="ids" data-ids="ADM2 DRV2"></div><p>Playwright : changement de rôle appliqué à la session suivante ; espace chauffeur, déclaration de panne qui crée un OT.</p></div>
-      <div class="lot"><header><strong>Parcours stock</strong></header><div class="ids" data-ids="P5 P6"></div><p>Cycle de vie d'un pneu ; stock bas jusqu'à la réception.</p></div>
+      <div class="lot"><header><strong>Écrans à deux comptes</strong></header><div class="ids" data-ids="ADM2 DRV2"></div><p>Playwright : changement de rôle appliqué à la session suivante ; espace chauffeur.</p></div>
     </div>
     <div class="track">
       <h3>Partiels à compléter</h3>
-      <div class="lot"><header><strong>Transverses</strong></header><div class="ids" data-ids="T1 T3 T4"></div><p>Sans fin naturelle : à clore par un test de cliquet qui gèle la liste des routes restantes de <span class="mono">routes.ts</span>.</p></div>
-      <div class="lot"><header><strong>Écrans et temps réel</strong></header><div class="ids" data-ids="T6 WO1 WO7 VEH3 MIS1 P2 P3"></div><p>Invalidation des KPI, alerte nominative vers le chef d'atelier, e2e d'acquisition, affectation et étapes de mission.</p></div>
-      <div class="lot"><header><strong>Fonctionnel absent ou limite connue</strong></header><div class="ids" data-ids="PRT1 CAT2 WO6 DIR2 DIR3"></div><p>Variante et spécification de pièce sans route, pièces associées aux pannes sans route ; bord de mois des pointages ; contenu des exports hors carburant.</p></div>
+      <div class="lot"><header><strong>Écrans et parcours</strong></header><div class="ids" data-ids="VEH3 MIS1 P2 P3"></div><p>e2e d'acquisition véhicule ; lancement de mission (affectation, documents véhicule, CPC chauffeur) ; parcours mission-facture et maintenance préventive.</p></div>
+      <div class="lot"><header><strong>Fonctionnel absent ou limite connue</strong></header><div class="ids" data-ids="PRT1 CAT2 DIR3"></div><p>Variante de pièce sans route ; <span class="mono">validatedBy</span> du catalogue ; exports PDF/CSV générés dans le navigateur et exports missions, mensuel, véhicules, OT, utilisateurs.</p></div>
     </div>
   </div>
 </section>
@@ -130,11 +133,10 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
 <section>
   <h2>Points ouverts</h2>
   <ul class="plain">
-    <li><span class="mono">setVehicleToMaintenance</span> passe encore un véhicule hors service en maintenance à la création ou réouverture d'OT.</li>
-    <li>Cloison des lectures <span class="mono">GET /api/vehicles</span>, <span class="mono">/all</span>, <span class="mono">/:id</span> : gardée dans le handler, test HTTP à écrire.</li>
-    <li>Écran fournisseurs : la route côté client n'ouvre pas encore la liste au chef d'atelier (consultation seule décidée).</li>
-    <li>Tests instables sur Neon : <span class="mono">work-order-quality-check</span> (délai 5 s), <span class="mono">supplier-settlement-idempotence</span> en rejeu groupé.</li>
-    <li>Le <span class="mono">DATABASE_URL</span> du <span class="mono">.env</span> racine pointe sur la production : un e2e lancé sans redirection y écrit. Garde-fou à ajouter.</li>
+    <li>Cliquets T1, T3, T4 : 23 routes d'écriture sans garde de rôle et 32 sans validation restent gelées ; la liste ne peut que réduire.</li>
+    <li>Documents de workflow : un <span class="mono">workflowId</span> non numérique envoyé par un client répond 500 au lieu de 400.</li>
+    <li>Export stock : une seule colonne « Stock » (valorisée sur la quantité), la colonne <span class="mono">realStock</span> héritée reste en base, à retirer.</li>
+    <li>Base de test : <span class="mono">DATABASE_URL_TEST</span> sur une branche Neon dédiée ; garde-fou qui refuse la production pour Playwright et vitest (#82).</li>
   </ul>
   <p class="foot">DOC1 (centres de renouvellement) et FUEL3 (capacité du réservoir) restent des fonctionnalités à cadrer avant tout test.</p>
 </section>
@@ -143,11 +145,11 @@ ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
 <script>
 const S={OK:"var(--ok)",P:"var(--partial)",R:"var(--replay)",F:"var(--todo)",X:"var(--out)"};
 const mods=[
- ["Transverses",{T2:"OK",T5:"OK",T7:"OK",T8:"OK",T1:"P",T3:"P",T4:"P",T6:"P"}],
+ ["Transverses",{T1:"OK",T2:"OK",T3:"OK",T4:"OK",T5:"OK",T6:"OK",T7:"OK",T8:"OK"}],
  ["Administration",{ADM1:"OK",ADM3:"OK",ADM4:"OK",ADM5:"OK",ADM6:"OK",ADM2:"F"}],
  ["Parc véhicules",{VEH1:"OK",VEH2:"OK",VEH4:"OK",VEH3:"P"}],
  ["Documents",{DOC2:"OK",DOC3:"OK",DOC1:"X"}],
- ["Maintenance et atelier",{WO2:"OK",WO3:"OK",WO4:"OK",WO5:"OK",MNT1:"OK",MNT2:"OK",CAT1:"OK",CAT2:"P",WO1:"P",WO6:"P",WO7:"P"}],
+ ["Maintenance et atelier",{WO2:"OK",WO3:"OK",WO4:"OK",WO5:"OK",MNT1:"OK",MNT2:"OK",CAT1:"OK",WO1:"OK",WO6:"OK",WO7:"OK",CAT2:"P"}],
  ["Magasin : pièces",{PRT2:"OK",PRT3:"OK",PRT4:"OK",PRT5:"OK",PRT6:"OK",PRT1:"P"}],
  ["Magasin : pneus",{TIR1:"OK",TIR2:"OK",TIR3:"OK",TIR4:"OK",TIR5:"OK",TIR6:"OK",TIR7:"OK"}],
  ["Approvisionnement",{PO1:"OK",PO2:"OK",SINV1:"OK",SINV2:"OK",SUP1:"OK",SUP2:"OK"}],
@@ -155,8 +157,8 @@ const mods=[
  ["Carburant",{FUEL1:"OK",FUEL2:"OK",FUEL3:"X"}],
  ["Clients, missions, facturation",{CINV1:"OK",CINV2:"OK",CLI1:"OK",MIS2:"OK",MIS1:"P"}],
  ["Alertes",{ALR1:"OK",ALR2:"OK",ALR3:"OK"}],
- ["Direction, rapports",{DIR1:"OK",DIR2:"P",DIR3:"P"}],
- ["Parcours bout en bout",{P1:"OK",P4:"OK",P2:"P",P3:"P",P6:"P",P5:"F"}]
+ ["Direction, rapports",{DIR1:"OK",DIR2:"OK",DIR3:"P"}],
+ ["Parcours bout en bout",{P1:"OK",P4:"OK",P5:"OK",P6:"OK",P2:"P",P3:"P"}]
 ];
 const all={};mods.forEach(([,c])=>Object.assign(all,c));
 const chips=ids=>ids.map(i=>`<span class="chip" style="--c:${S[all[i]]}">${i}</span>`).join("");
