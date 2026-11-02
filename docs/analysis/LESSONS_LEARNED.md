@@ -1080,6 +1080,33 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un analyseur de fichier téléversé donne à la bibliothèque une entrée canonique reconstruite, jamais l'octet reçu. Chaque passe sur ce fichier est mesurée sur son entrée la plus défavorable (largeur, hauteur, creux, valeurs blanches) et porte un test de borne de temps ou de mémoire, rouge sur le code précédent.
+## 2026-11-02 - Postgres local pour intégration et contrat : le bootstrap n'était pas « from scratch »
+
+### Constat
+- Mise en place d'un Postgres Docker (`docker-compose.test.yml`) et d'une CI (`.github/workflows/ci.yml`) pour sortir les suites intégration et contrat de la latence Neon. Premier passage : 34 fichiers d'intégration en échec dès `setupFiles`, `relation "users" does not exist`.
+- Second near miss : wsproxy refusait toute connexion, `address postgres:5432postgres:5432: too many colons`.
+- Trois tests échouent en local : `part-requirement-received-by` (régression produit, pas infra : `ensureAutoSupplierInvoiceFromOrder` lève « montant HT > 0 » sur une commande dont `totalAmountHT` reste à 0, contrôle ajouté par c3f3260 après le test c06fa45) ; `management-dashboard-service` ×2 dans le passage complet, verts seuls (déjà noté flaky le 2026-10-30, journal de couverture l.171). Note du 2026-11-02 : les deux sont
+  résolus depuis, `received-by` par #110 sur `main`, le tableau de bord par a7aabc1/6db199a (voir l'entrée
+  « test classé instable qui dépendait de la date du jour »).
+
+### Cause racine
+- `initializeDatabase()` (`server/init-database.ts`) ne crée aucune table : il suppose un `drizzle-kit push` initial jamais rejoué, et n'avait jamais tourné sur une base vide. L'idempotence (`IF NOT EXISTS`) masquait l'absence de création.
+- `APPEND_PORT` de wsproxy est concaténé tel quel à `address=` ; le driver Neon envoie déjà `host:port`.
+- La branche Neon de test porte 6 tables absentes de `shared/schema.ts` (`destination_rates`, `idempotency_keys`, `import_batches`, `operation_costs`…) : écritures d'autres branches sur une base partagée. Triggers identiques (7/7).
+
+### Résolution
+- `npm run test:db:schema` (`drizzle-kit push --force` sur le port TCP direct 54320) avant la première suite, appelé par `test:db:up` et par chaque job CI.
+- `APPEND_PORT` retiré, `ALLOW_ADDR_REGEX` restreint à `^postgres:5432$`.
+- `server/db.ts` : `DATABASE_WS_PROXY` (sans protocole) bascule le driver sur un proxy en clair ; absent = Neon, inchangé.
+
+### Prévention (vérifiable)
+- La CI part d'une base vide à chaque job : toute dépendance à un état Neon préexistant (table hors schéma, ligne de référence) casse en CI avant de casser ailleurs.
+- Les 6 tables hors schéma ne sont pas reproduites en local : un test qui en dépend échouera en CI, c'est voulu. Les porter dans `shared/schema.ts` + `init-database.ts` (AGENTS.md §5) ou les retirer.
+- Durées mesurées le 2026-11-02 : intégration 53 s en local (34 fichiers) ; contrat et référence Neon dans `docs/plans/ci-postgres-local.md`.
+
+### Règle Projet (obligatoire)
+- Toute table ou colonne existe dans `shared/schema.ts` **et** se crée par `test:db:schema` + `initializeDatabase()` sur une base vide. Une base Neon partagée n'est pas une source de vérité de schéma.
+
 
 ## 2026-11-02 - WebSocket : rôle figé en session (3e réapparition d'ADM2-3)
 
@@ -1097,3 +1124,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un défaut de classe se corrige sur tous les points d'entrée (HTTP, WebSocket, tâches planifiées), et la garde couvre tout `server/`.
+
+
+## 2026-11-02 - Test « instable » qui dépendait de la date du jour
+
+### Constat
+- `tests/integration/management-dashboard-service.test.ts` (2 cas) échouait en CI et était classé « flaky connu » : delta attendu 250 000, reçu 0.
+
+### Cause racine
+- La période `month` va du 1er à aujourd'hui (`invoiceDate <= endIso`). Le test datait ses factures au 15 et au 16 : hors période du 1er au 14 de chaque mois. Second défaut masqué : `toBe` sur une différence de totaux flottants (249999.99999999977).
+
+### Résolution
+- Jour borné à la date du jour (`Math.min(day, now.getDate())`), deltas monétaires en `toBeCloseTo(x, 2)`. CI de #109 verte (6db199a).
+
+### Prévention (vérifiable)
+- Le job `integration` de la CI tourne sur chaque PR : un test dépendant de la date réapparaît dans la première quinzaine du mois au lieu d'être noyé dans Neon.
+
+### Règle Projet (obligatoire)
+- Avant de classer un test « flaky », vérifier s'il dépend de la date, de l'heure ou du fuseau. Une donnée de test datée doit tomber dans la période testée quel que soit le jour d'exécution ; un montant calculé se compare au centime, jamais par `toBe`.
