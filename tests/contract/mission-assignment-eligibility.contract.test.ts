@@ -109,6 +109,22 @@ describe("MIS1 : un véhicule en maintenance n'est pas affectable", () => {
       missionId = await plannedMission();
     }, 60000);
 
+    // Témoin du `it.fails` ci-dessous : même PATCH, véhicule disponible, accepté et affectation écrite.
+    // Sans lui, un 403 ou un 500 sur la route garderait le `it.fails` vert.
+    it("témoin : avec un véhicule disponible, accepté et affectation créée", async () => {
+      const vehicle = await createTestVehicle();
+      ids.vehicleIds.push(vehicle.id);
+      const okDriverId = (await driver()).id;
+      const okMissionId = await plannedMission();
+      const res = await call("PATCH", `/api/missions/${okMissionId}`, {
+        actor: "logistics",
+        body: { assignment: { vehicleId: vehicle.id, driverId: okDriverId } },
+      });
+      expect(res.status).toBe(200);
+      const rows = await db.select().from(assignments).where(inArray(assignments.missionId, [okMissionId]));
+      expect(rows.map((r) => r.vehicleId)).toContain(vehicle.id);
+    });
+
     it.fails("avec affectation : refusé en 400 (défaut : accepté)", async () => {
       const res = await call("PATCH", `/api/missions/${missionId}`, {
         actor: "logistics",
