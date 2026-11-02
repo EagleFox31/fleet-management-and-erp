@@ -151,25 +151,32 @@ describe("coût d'une intervention", () => {
   });
 
   it("valorise les heures réelles quand un taux existe, sinon garde le coût saisi", () => {
-    expect(workOrderCost({ cost: 1000, hours: 2.5, rate: 6000, parts: 3000 })).toEqual({
-      labor: 15000, parts: 3000, total: 18000, laborMissing: false,
+    expect(workOrderCost({ cost: 1000, hours: 2.5, rate: 6000, parts: 3000, tires: 0 })).toEqual({
+      labor: 15000, parts: 3000, tires: 0, total: 18000, laborMissing: false,
     });
-    expect(workOrderCost({ cost: 10000, hours: 2, rate: null, parts: 3000 })).toEqual({
-      labor: 10000, parts: 3000, total: 13000, laborMissing: false,
+    expect(workOrderCost({ cost: 10000, hours: 2, rate: null, parts: 3000, tires: 0 })).toEqual({
+      labor: 10000, parts: 3000, tires: 0, total: 13000, laborMissing: false,
     });
     // heures sans saisie ni taux : main-d'oeuvre manquante
-    expect(workOrderCost({ cost: 0, hours: 2, rate: null, parts: 500 }).laborMissing).toBe(true);
+    expect(workOrderCost({ cost: 0, hours: 2, rate: null, parts: 500, tires: 0 }).laborMissing).toBe(true);
+  });
+
+  it("ajoute les rotations de pneus, comme l'écran et le PDF de l'OT (WO5)", () => {
+    expect(workOrderCost({ cost: 0, hours: 2, rate: 5000, parts: 3000, tires: 2500 })).toEqual({
+      labor: 10000, parts: 3000, tires: 2500, total: 15500, laborMissing: false,
+    });
   });
 
   it("jamais de double comptage : cost et heures ne s'additionnent pas", () => {
-    expect(workOrderCost({ cost: 10000, hours: 1, rate: 5000, parts: 0 }).total).toBe(5000);
+    expect(workOrderCost({ cost: 10000, hours: 1, rate: 5000, parts: 0, tires: 0 }).total).toBe(5000);
   });
 
-  it("arrondit au FCFA par composante : labor + parts = total", () => {
-    const c = workOrderCost({ cost: 0, hours: 1.333, rate: 5000, parts: 100.4 });
+  it("arrondit au FCFA par composante : labor + parts + tires = total", () => {
+    const c = workOrderCost({ cost: 0, hours: 1.333, rate: 5000, parts: 100.4, tires: 49.6 });
     expect(c.labor).toBe(6665);
     expect(c.parts).toBe(100);
-    expect(c.total).toBe(c.labor + c.parts);
+    expect(c.tires).toBe(50);
+    expect(c.total).toBe(c.labor + c.parts + c.tires);
   });
 
   it("ventile par groupe, moyenne arrondie, null si vide", () => {

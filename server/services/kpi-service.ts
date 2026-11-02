@@ -10,10 +10,11 @@
  *   aucun OT préventif. Réalisé à temps : `completed` et clos au plus tard à l'échéance plus la
  *   tolérance (`KPI_PREVENTIVE_TOLERANCE_DAYS`, 0 par défaut). Annulé = non réalisé ;
  * - coût d'une intervention : OT `completed` dont `end_date` tombe dans la période, main-d'oeuvre
- *   (heures réelles x taux en vigueur, sinon `work_orders.cost`) + pièces (`parts_used`). Les
- *   pneus ne sont pas comptés. Montants en FCFA entiers, hors taxes.
+ *   (heures réelles x taux en vigueur, sinon `work_orders.cost`) + pièces (`parts_used`)
+ *   + rotations de pneus (`tire_rotations`), comme l'écran et le PDF de l'OT. Montants en FCFA
+ *   entiers, hors taxes.
  *
- * Pièces et heures sont agrégées par OT dans des sous-requêtes : jamais de somme jointe
+ * Pièces, pneus et heures sont agrégés par OT dans des sous-requêtes : jamais de somme jointe
  * (double comptage, cf. shared/schema.ts, work_orders).
  */
 import { sql } from "drizzle-orm";
@@ -81,6 +82,7 @@ type CostSource = {
   cost: string | number | null;
   hours: string | number | null;
   parts: string | number | null;
+  tires: string | number | null;
   done_on: string;
 };
 
@@ -95,7 +97,9 @@ async function loadCostRows(from: string, toExclusive: string): Promise<{ rows: 
              (SELECT COALESCE(SUM(i.actual_hours), 0) FROM work_order_items i
                WHERE i.work_order_id = w.id AND i.status <> 'cancelled') AS hours,
              (SELECT COALESCE(SUM(pu.quantity * pu.unit_price), 0) FROM parts_used pu
-               WHERE pu.work_order_id = w.id) AS parts
+               WHERE pu.work_order_id = w.id) AS parts,
+             (SELECT COALESCE(SUM(tr.cost), 0) FROM tire_rotations tr
+               WHERE tr.work_order_id = w.id) AS tires
       FROM work_orders w
       JOIN vehicles v ON v.id = w.vehicle_id
       WHERE w.status = 'completed'
@@ -112,6 +116,7 @@ async function loadCostRows(from: string, toExclusive: string): Promise<{ rows: 
       hours: Number(r.hours ?? 0),
       rate: laborRateAt(rates, r.done_on),
       parts: Number(r.parts ?? 0),
+      tires: Number(r.tires ?? 0),
     });
     return { ...cost, key: String(r.vehicle_id), label: r.registration_number, isPreventive: r.is_preventive === true };
   });
@@ -203,6 +208,7 @@ export const kpiService = {
       laborValued,
       laborTotal: sum(rows, (r) => r.labor),
       partsTotal: sum(rows, (r) => r.parts),
+      tiresTotal: sum(rows, (r) => r.tires),
       missingCostCount: rows.filter((r) => r.laborMissing).length,
     };
   },

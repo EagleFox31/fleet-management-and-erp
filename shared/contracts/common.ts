@@ -7,9 +7,13 @@
  * ne peuvent pas diverger.
  */
 import { z } from "zod";
+import { isIsoCalendarDate } from "../constants/calendar-date";
 
 /** Date calendaire `AAAA-MM-JJ`. */
-export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ.");
+export const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ.")
+  .refine(isIsoCalendarDate, "Cette date n'existe pas au calendrier.");
 
 /** Horodatage ISO 8601 renvoyé par le serveur. */
 export const isoDateTimeSchema = z.string().datetime({ offset: true });

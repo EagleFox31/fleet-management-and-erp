@@ -64,6 +64,13 @@ export const PROCUREMENT_ROLES = ["admin", "secretary", "logistics", "warehouse"
 
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 
+/**
+ * Consultation des fournisseurs : les profils d'approvisionnement, plus le chef
+ * d'atelier qui lit les fiches sans rien écrire (création, modification,
+ * évaluation et désactivation restent à PROCUREMENT_ROLES).
+ */
+export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
 }
@@ -127,6 +134,22 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logis
 
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
+
+/**
+ * Rapports d'exploitation : inventaire des pièces (`GET /api/reports/inventory`) et
+ * performance des techniciens (`GET /api/reports/technician-performance`).
+ * Lus par `isInventoryReportReader` / `isTechnicianReportReader` et par l'écran `/reports`.
+ */
+export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+export const TECHNICIAN_REPORT_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
+
+export function canReadInventoryReport(role: string | null | undefined): boolean {
+  return (INVENTORY_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+export function canReadTechnicianReport(role: string | null | undefined): boolean {
+  return (TECHNICIAN_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
 
 /**
  * Tout le personnel : tout rôle sauf `client` (cloison client, AGENTS.md §11).

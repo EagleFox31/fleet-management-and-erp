@@ -42,6 +42,3 @@ export const unlockUserResponseSchema = z.object({ id: z.number().int(), unlocke
 export type LockedResponse = z.infer<typeof lockedResponseSchema>;
 export type LockedUser = z.infer<typeof lockedUserSchema>;
 export type UnlockUserResponse = z.infer<typeof unlockUserResponseSchema>;
-
-/** Nombre d'échecs à partir duquel la preuve captcha est exigée (P-26). */
-export const CAPTCHA_AFTER_FAILED_ATTEMPTS = 3;

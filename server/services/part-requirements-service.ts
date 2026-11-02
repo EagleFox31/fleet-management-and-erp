@@ -9,6 +9,9 @@ const log = moduleLogger("part-requirements");
 
 
 export const STALE_STATUS_ERROR = "La demande a déjà changé de statut. Rechargez la page.";
+/** Le chef d'atelier dont l'administrateur a retiré le droit de sortie (`users.can_issue_stock`). */
+export const STOCK_ISSUE_REVOKED_ERROR =
+  "Votre droit de sortie de stock a été retiré par l'administrateur. Le magasinier sort la pièce.";
 
 /** Annule la transaction quand une autre requête a déjà fait passer la demande. */
 class StaleStatusError extends Error {}
@@ -298,6 +301,17 @@ export class PartRequirementsService {
           );
           if (!derogation.valid) {
             return { success: false, error: derogation.error };
+          }
+
+          // Droit retirable par l'administrateur : vérifié en base à chaque sortie,
+          // pour qu'un retrait prenne effet sans attendre une nouvelle connexion.
+          if (userRole === 'workshop_manager') {
+            const [actor] = currentUserId
+              ? await db.select({ canIssueStock: users.canIssueStock }).from(users).where(eq(users.id, currentUserId))
+              : [];
+            if (!actor?.canIssueStock) {
+              return { success: false, error: STOCK_ISSUE_REVOKED_ERROR };
+            }
           }
 
           overrideApplied = true;

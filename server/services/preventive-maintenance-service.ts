@@ -8,6 +8,7 @@ import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 const log = moduleLogger("preventive-maintenance");
+const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -214,6 +215,38 @@ export class PreventiveMaintenanceService {
           }
         }
 
+        // Échéance d'un plan actif (hors kilométrage) dans la fenêtre d'alerte,
+        // ou dépassée : un OT lié au plan, jamais deux pour la même échéance.
+        const plansEchus = await db
+          .select()
+          .from(maintenanceSchedules)
+          .where(and(
+            eq(maintenanceSchedules.vehicleId, vehicle.id),
+            eq(maintenanceSchedules.isActive, true),
+            lte(maintenanceSchedules.scheduledDate, alertDate.toISOString().slice(0, 10)),
+          ));
+        for (const plan of plansEchus) {
+          if (plan.frequency === 'mileage' || !plan.scheduledDate) continue;
+          try {
+            // Un OT ouvert bloque (en attente, démarré, en attente de pièces). Un OT
+            // clôturé bloque aussi tant que l'échéance du plan n'a pas avancé : il
+            // porte l'échéance qu'il a traitée dans `startDate`.
+            const echeance = new Date(plan.scheduledDate);
+            const dejaTraite = (await db
+              .select({ id: workOrders.id, status: workOrders.status, startDate: workOrders.startDate })
+              .from(workOrders)
+              .where(eq(workOrders.maintenanceScheduleId, plan.id)))
+              .some((ot) =>
+                (OPEN_WORK_ORDER_STATUSES as readonly string[]).includes(ot.status) ||
+                (ot.status !== 'cancelled' && ot.startDate != null && new Date(ot.startDate) >= echeance));
+            if (dejaTraite) continue;
+            generatedWorkOrders.push(await this.generateWorkOrderFromSchedule(plan));
+          } catch (error) {
+            // Un plan en échec ne doit pas empêcher les autres.
+            log.error({ err: error, scheduleId: plan.id, vehicleId: vehicle.id }, "Plan préventif : OT non généré");
+          }
+        }
+
         // Immobilisation du véhicule: passer par `vehicleStatusService`, jamais
         // par un `db.update` direct. Le service historise le changement dans
         // `status_history` avec sa cause; l'écriture directe ne laissait qu'une
@@ -325,7 +358,8 @@ export class PreventiveMaintenanceService {
             .from(workOrders)
             .where(and(
               eq(workOrders.vehicleId, vehicleId),
-              eq(workOrders.title, schedule.title),
+              // Le titre de l'OT généré n'est pas celui du plan : le lien fiable est maintenanceScheduleId.
+              eq(workOrders.maintenanceScheduleId, schedule.id),
               eq(workOrders.status, 'pending')
             ))
             .limit(1);

@@ -21,6 +21,7 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -685,6 +686,8 @@ export default function MissionDetailsPage() {
       setErrorModal({ title: "Erreur facturation", description: error.message });
     },
   });
+  // Un double clic créait deux factures pour la même saisie.
+  const submitGenerateInvoice = useSingleFlightMutate(generateInvoiceMutation.mutate);
 
   const updateMissionStatusMutation = useMutation({
     mutationFn: async (
@@ -1131,7 +1134,7 @@ export default function MissionDetailsPage() {
       setErrorModal({ title: "Montant invalide", description: "Veuillez saisir un montant valide." });
       return;
     }
-    generateInvoiceMutation.mutate();
+    submitGenerateInvoice();
   };
 
   const toDateInputValue = (dateValue: string | null | undefined): string => {

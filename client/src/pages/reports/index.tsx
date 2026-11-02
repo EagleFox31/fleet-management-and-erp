@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -521,7 +522,10 @@ export default function ReportsIndex() {
       return;
     }
 
-    if ((reportType === "parts-inventory" || reportType === "technician-performance") && isClient) {
+    if (
+      (reportType === "parts-inventory" && !canReadInventoryReport(user?.role)) ||
+      (reportType === "technician-performance" && !canReadTechnicianReport(user?.role))
+    ) {
       toast({
         title: "🔒 Accès refusé", 
         description: "Ce rapport n'est pas disponible pour votre rôle utilisateur.",
@@ -645,10 +649,12 @@ export default function ReportsIndex() {
       { value: "maintenance-costs", label: "Coûts de maintenance" },
       { value: "fuel-consumption", label: "Consommation de carburant" }
     ] : []),
-    // Données opérationnelles - Accès selon le rôle
-    ...(user?.role !== 'client' ? [
+    // Données opérationnelles : mêmes rôles que les gardes serveur (shared/constants/roles.ts)
+    ...(canReadInventoryReport(user?.role) ? [
       { value: "parts-inventory", label: "Inventaire des pièces" },
-      { value: "technician-performance", label: "Performance des techniciens" }
+    ] : []),
+    ...(canReadTechnicianReport(user?.role) ? [
+      { value: "technician-performance", label: "Performance des techniciens" },
     ] : []),
   ];
 

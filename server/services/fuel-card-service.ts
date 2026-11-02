@@ -1,9 +1,32 @@
 import { getFuelPriceAt } from "./fuel-price-service";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { db } from "../db";
 import { fuelRecords, users, vehicles, type FuelRecord } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 
-type FuelCardServiceErrorCode = "INSUFFICIENT_BALANCE";
+type FuelCardServiceErrorCode = "INSUFFICIENT_BALANCE" | "INVALID_INPUT" | "VEHICLE_NOT_FOUND";
+
+const log = moduleLogger("fuel-card-service");
+
+/**
+ * Traduit une erreur du service en AppError lisible : 400 saisie invalide, 404 véhicule
+ * inconnu, 409 solde insuffisant. Toute autre erreur devient une 500 générique (la cause
+ * reste dans les logs, jamais dans la réponse).
+ */
+export function toFuelCardAppError(error: unknown): AppError {
+  if (error instanceof AppError) return error;
+  const code = (error as { code?: string } | null)?.code;
+  const message = error instanceof Error ? error.message : "";
+  if (code === "INVALID_INPUT") return new AppError(400, message, { cause: error });
+  if (code === "VEHICLE_NOT_FOUND") return new AppError(404, "Véhicule introuvable.", { cause: error });
+  if (code === "INSUFFICIENT_BALANCE") return new AppError(409, "Solde de la carte carburant insuffisant.", { cause: error });
+  return new AppError(500, "Erreur serveur", { cause: error });
+}
+
+function isReadableDate(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
+}
 
 type FuelCardServiceError = Error & {
   code?: FuelCardServiceErrorCode;
@@ -119,7 +142,11 @@ export class FuelCardService {
     notes?: string;
     userId: number;
   }) {
-    console.log("Recharging fuel card:", data);
+    log.info({ amount: data.amount, paymentMode: data.paymentMode, userId: data.userId }, "recharge de la carte carburant");
+
+    if (!isReadableDate(data.date)) {
+      throw this.createServiceError("Date de recharge illisible.", "INVALID_INPUT");
+    }
     
     const amount = Number(data.amount);
     const providedQuantity = Number(data.quantity);
@@ -206,7 +233,20 @@ export class FuelCardService {
     isPreDeparture?: boolean;
     userId: number;
   }) {
-    console.log("Recording fuel consumption:", data);
+    log.info({ vehicleId: data.vehicleId, quantity: data.quantity, userId: data.userId }, "consommation de carburant");
+
+    if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
+      throw this.createServiceError("La quantité doit être un nombre positif.", "INVALID_INPUT");
+    }
+    if (!Number.isFinite(data.unitPrice) || data.unitPrice <= 0) {
+      throw this.createServiceError("Le prix unitaire doit être un nombre positif.", "INVALID_INPUT");
+    }
+    if (!Number.isInteger(data.vehicleId) || data.vehicleId <= 0) {
+      throw this.createServiceError("Identifiant de véhicule invalide.", "INVALID_INPUT");
+    }
+    if (!isReadableDate(data.date)) {
+      throw this.createServiceError("Date de consommation illisible.", "INVALID_INPUT");
+    }
     
     // Vérifier que le véhicule existe
     const [vehicle] = await db
@@ -215,7 +255,7 @@ export class FuelCardService {
       .where(eq(vehicles.id, data.vehicleId));
     
     if (!vehicle) {
-      throw new Error(`Véhicule ${data.vehicleId} non trouvé`);
+      throw this.createServiceError(`Véhicule ${data.vehicleId} non trouvé`, "VEHICLE_NOT_FOUND");
     }
     
     // Calculer coût et nouveau solde
@@ -454,7 +494,7 @@ export class FuelCardService {
       .where(eq(vehicles.id, vehicleId));
     
     if (!vehicle) {
-      throw new Error(`Véhicule ${vehicleId} non trouvé`);
+      throw this.createServiceError(`Véhicule ${vehicleId} non trouvé`, "VEHICLE_NOT_FOUND");
     }
     
     // Statistiques globales

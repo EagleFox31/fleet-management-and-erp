@@ -54,6 +54,7 @@ export const avgCostPerInterventionResponseSchema = z.object({
   /** Part main-d'oeuvre et part pièces du total (somme = `totalCost`, pneus exclus). */
   laborTotal: z.number().min(0).optional(),
   partsTotal: z.number().min(0).optional(),
+  tiresTotal: z.number().min(0).optional(),
   /** OT clos de la période sans aucune main-d'oeuvre saisie ni valorisable. */
   missingCostCount: z.number().int().min(0).optional(),
 });

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { storage } from "../storage";
-import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
+import { moduleLogger } from "../lib/logger";
+import { findActiveSessionUser } from "../services/session-user";
+import { ALL_APP_ROLES, STAFF_ROLES, INVENTORY_REPORT_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -48,7 +49,7 @@ export const normalizeRole = (role: string | null | undefined): AppRole => {
  */
 const SESSION_GUARD = Symbol.for("fleetos.sessionGuard");
 
-function sessionGuard<T extends Function>(fn: T): T {
+export function sessionGuard<T extends Function>(fn: T): T {
   (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] = true;
   return fn;
 }
@@ -57,7 +58,7 @@ export function isSessionGuard(fn: unknown): boolean {
   return typeof fn === "function" && (fn as unknown as Record<symbol, boolean>)[SESSION_GUARD] === true;
 }
 
-export const authenticate = sessionGuard((req: Request, res: Response, next: NextFunction) => {
+export const authenticate = sessionGuard(async (req: Request, res: Response, next: NextFunction) => {
   const debugAuth = process.env.AUTH_DEBUG !== "0";
   if (debugAuth) {
     console.log(`🔐 [AUTH] ${req.method} ${req.path} - Session: ${!!req.session} - UserId: ${req.session?.userId || 'NONE'}`);
@@ -68,6 +69,23 @@ export const authenticate = sessionGuard((req: Request, res: Response, next: Nex
       console.log(`❌ [AUTH] Accès refusé - Non authentifié`);
     }
     return res.status(401).json({ message: 'Non authentifié' });
+  }
+
+  // Le compte est relu : une session survivante d'un compte supprimé ou
+  // inexistant ne passe plus, même sur une route gardée par `authenticate` seul.
+  // `findActiveSessionUser` laisse remonter une erreur de base (500), là où
+  // `storage.getUser` l'avalait et la faisait passer pour un compte inconnu (401).
+  try {
+    const user = await findActiveSessionUser(req.session.userId);
+    if (!user) {
+      if (debugAuth) {
+        moduleLogger("auth").info({ userId: req.session.userId, requestId: req.requestId }, "Accès refusé : compte supprimé ou inconnu");
+      }
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+  } catch (err) {
+    moduleLogger("auth").error({ err, requestId: req.requestId }, "Relecture du compte impossible");
+    return res.status(500).json({ message: 'Erreur serveur' });
   }
 
   if (debugAuth) {
@@ -84,8 +102,8 @@ export const authorize = (roles: string[]) => {
     }
     
     try {
-      const user = await storage.getUser(req.session.userId);
-      
+      // Même lecture qu'authenticate : compte supprimé exclu, panne de base remontée (500, pas 401).
+      const user = await findActiveSessionUser(req.session.userId);
       if (!user) {
         return res.status(401).json({ message: 'Utilisateur non trouvé' });
       }
@@ -117,7 +135,7 @@ export const authorize = (roles: string[]) => {
       
       next();
     } catch (error) {
-      console.error('Error in authorization middleware:', error);
+      moduleLogger("auth").error({ err: error, requestId: req.requestId }, "Error in authorization middleware");
       return res.status(500).json({ message: 'Erreur serveur' });
     }
   });
@@ -130,8 +148,8 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
   }
   
   try {
-    const user = await storage.getUser(req.session.userId);
-    
+    // Même lecture qu'authenticate : compte supprimé exclu, panne de base remontée (500, pas 401).
+    const user = await findActiveSessionUser(req.session.userId);
     if (!user) {
       return res.status(401).json({ message: 'Utilisateur non trouvé' });
     }
@@ -149,7 +167,7 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
     
     next();
   } catch (error) {
-    console.error('Error in admin authorization middleware:', error);
+    moduleLogger("auth").error({ err: error, requestId: req.requestId }, "Error in admin authorization middleware");
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 });
@@ -188,3 +206,12 @@ export const isAnyUser = authorize([...ALL_ROLES]);
 // Tout le personnel (tout rôle sauf `client`) : écritures faites par l'exploitation
 // sur un véhicule, qu'un client consulte sans les saisir (kilométrage, position).
 export const isStaff = authorize([...STAFF_ROLES]);
+// Demandes de renouvellement de documents (secrétariat, logistique, atelier). Identique à
+// CREATE_ROLES de server/api/document-renewals.routes.ts ; posé avant le téléversement du justificatif.
+export const isDocumentRenewalWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager']);
+export const isWorkflowDocumentWriter = authorize(['admin', 'secretary', 'logistics', 'workshop_manager', 'client']);
+// Rapports d'exploitation lus par le personnel qui pilote le stock (inventaire) ou l'atelier
+// (performance des techniciens) : ni le client, ni le chauffeur ne lisent stock, prix ou charge.
+// Listes partagées avec l'écran `/reports` (shared/constants/roles.ts).
+export const isInventoryReportReader = authorize([...INVENTORY_REPORT_ROLES]);
+export const isTechnicianReportReader = authorize([...TECHNICIAN_REPORT_ROLES]);

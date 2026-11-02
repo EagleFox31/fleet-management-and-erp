@@ -12,8 +12,6 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** Message de la dernière connexion refusée par verrouillage (429), sinon null. */
   loginLockMessage: string | null;
-  /** Vrai quand le serveur a exigé la preuve captcha à la dernière tentative (400 sur `captcha`). */
-  loginCaptchaRequired: boolean;
   login: (credentials: LoginCredentials) => Promise<boolean>;
   logout: () => Promise<void>;
 }
@@ -24,7 +22,6 @@ export const AuthContext = createContext<AuthContextValue>({
   isAuthenticating: false,
   isAuthenticated: false,
   loginLockMessage: null,
-  loginCaptchaRequired: false,
   login: async () => false,
   logout: async () => {},
 });
@@ -34,7 +31,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true); // bootstrap auth check
   const [isAuthenticating, setIsAuthenticating] = useState(false); // login/logout actions
   const [loginLockMessage, setLoginLockMessage] = useState<string | null>(null);
-  const [loginCaptchaRequired, setLoginCaptchaRequired] = useState(false);
   const { toast } = useToast();
   const authCheckVersionRef = useRef(0);
   const mountedRef = useRef(true);
@@ -93,7 +89,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setIsAuthenticating(true);
       setLoginLockMessage(null);
-      setLoginCaptchaRequired(false);
       const userData = await apiLogin(credentials);
       if (!mountedRef.current) {
         return false;
@@ -112,10 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       const failure = loginFailureOf(error);
       setLoginLockMessage(failure.kind === "locked" ? failure.message : null);
-      setLoginCaptchaRequired(failure.kind === "captcha");
       toast({
         variant: "destructive",
-        title: failure.kind === "locked" ? "Compte verrouillé" : failure.kind === "captcha" ? "Vérification requise" : "Échec de connexion",
+        title: failure.kind === "locked" ? "Compte verrouillé" : "Échec de connexion",
         description: failure.message ?? "Connexion impossible. Vérifiez vos identifiants ou le réseau.",
       });
       return false;
@@ -162,7 +156,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticating,
     isAuthenticated: !!user,
     loginLockMessage,
-    loginCaptchaRequired,
     login,
     logout,
   };

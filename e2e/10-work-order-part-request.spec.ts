@@ -10,9 +10,10 @@ import { createE2EUser } from "./helpers/test-data";
 
 /**
  * « Demander la pièce » depuis l'OT, niveau UI, deux rôles :
- * - le technicien demande 3 unités d'une pièce dont 1 seule est en stock ;
+ * - le technicien demande 3 unités d'une pièce dont 1 seule est en rayon ;
  *   l'écran annonce le partage avant l'envoi, un double clic n'envoie qu'une
- *   requête (AGENTS.md §10) ;
+ *   requête (AGENTS.md §10). Rien ne sort du stock : l'unité en rayon attend
+ *   le magasinier (« Entrée en stock »), le manquant part en demande ;
  * - le magasinier, sur ses demandes, reçoit la trame `part_requirement_created`
  *   (preuve temps réel que le polling ne peut pas produire, AGENTS.md §3).
  */
@@ -52,7 +53,7 @@ test.afterAll(async () => {
   await cleanupCreated(ids);
 });
 
-test("technicien : le disponible sort, le manquant part en demande, le magasin est prévenu en temps réel", async ({
+test("technicien : le rayon attend le magasinier, le manquant part en demande, le magasin est prévenu en temps réel", async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -95,7 +96,7 @@ test("technicien : le disponible sort, le manquant part en demande, le magasin e
     await dialog.getByLabel("Quantité").fill("3");
 
     const preview = dialog.getByTestId("part-request-preview");
-    await expect(preview).toContainText("1 unité(s) sortiront du stock pour cet OT.");
+    await expect(preview).toContainText("1 unité(s) en rayon : le magasinier les sortira pour cet OT.");
     await expect(preview).toContainText("Une demande sera créée pour 2 unité(s) manquante(s).");
     await expect(preview).toContainText("L'OT passera en attente de pièces.");
 
@@ -115,11 +116,11 @@ test("technicien : le disponible sort, le manquant part en demande, le magasin e
       .toBe(true);
 
     const [stock] = await db.select().from(parts).where(eq(parts.id, part.id));
-    expect(stock.quantity).toBe(0);
+    expect(stock.quantity).toBe(1);
     const lines = await db.select().from(partsUsed).where(eq(partsUsed.workOrderId, workOrder.id));
-    expect(lines.map((l) => l.quantity)).toEqual([1]);
+    expect(lines).toHaveLength(0);
     const requirements = await db.select().from(partRequirements).where(eq(partRequirements.workOrderId, workOrder.id));
-    expect(requirements.map((r) => [r.status, r.quantityNeeded])).toEqual([["pending", 2]]);
+    expect(requirements.map((r) => [r.status, r.quantityNeeded]).sort()).toEqual([["pending", 2], ["received", 1]]);
     const [current] = await db.select().from(workOrders).where(eq(workOrders.id, workOrder.id));
     expect(current.status).toBe("awaiting_parts");
   } finally {

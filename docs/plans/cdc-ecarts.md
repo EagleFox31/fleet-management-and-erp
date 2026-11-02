@@ -61,6 +61,9 @@ Base d'intégration `lot/int/CDC-0-base` : fusion de DB-1 et CDC-0a, créée par
 8. **D5** (ancien service worker qui cache `/api` sans cloison) : correctif avant la recette ou après ?
 9. **Triggers d'alertes** non rejoués au démarrage (défaut existant `check_work_order_overdue()`) : à traiter ou non ?
 10. **Fuite de prix** : `GET /api/parts/:id` (`server/routes.ts:2711`, gelé) renvoie le prix au technicien. Intercepteur à décider.
+11. **#56** : force push de la branche, ou nouvelle branche. Le force push a été refusé par les permissions.
+12. **Service worker** : correctif d406368 avant la recette, par dérogation au gel.
+13. **Tests existants** : amendement par la session de tests des tests existants que #7 rend rouges.
 
 ## Questions au client pour #6
 
@@ -70,3 +73,11 @@ Base d'intégration `lot/int/CDC-0-base` : fusion de DB-1 et CDC-0a, créée par
 4. Qui paie la SIM ou les données du téléphone chauffeur : téléphone personnel ou fourni ?
 5. Consentement et vie privée des chauffeurs : localisation limitée aux missions, conservation, information écrite (loi camerounaise 2024/017) ?
 6. Hébergement des positions au Cameroun (cahier §4) ?
+
+## État au 31/10/2026, soir
+
+- **#57** (53c8b89) : GO avec réserves. L'intégration est à rejouer sur une base isolée avant fusion. Une base qui porte déjà l'ancien index unique (0da3e44) le garde.
+- **#55** (73bf623 et 4a78183) : GO. `pincode` et `passcode` ajoutés au masquage.
+- **#56** : reprise locale (d406368 pour le service worker seul, 0180483 pour le reste), non poussée. Le force push a été refusé par les permissions ; décision de l'utilisateur en attente. Une leçon dans `LESSONS_LEARNED.md` est à écrire ensuite.
+- **Vague B lancée** : CDC-0b socle client (`lot/fe/CDC-0-socle-ui`) et #7 KPI serveur (`lot/api/CDC-7-kpi`), tous deux sur la branche d'intégration `lot/int/CDC-0-base` (#57 et #55).
+- **Décisions ajoutées** : 11 (force push de #56 ou nouvelle branche), 12 (correctif du service worker d406368 avant la recette, par dérogation au gel), 13 (amendement par la session de tests des tests existants que #7 rend rouges).

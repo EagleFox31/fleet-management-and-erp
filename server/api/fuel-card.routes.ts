@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { authenticate, isFuelCardManager } from "../middleware/auth";
-import { fuelCardService } from "../services/fuel-card-service";
+import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("fuel-card");
 
 const router = Router();
 
@@ -53,7 +56,7 @@ router.get("/balance", async (_req, res) => {
 
 // Recharger la carte carburant (crédit)
 // Rôles autorisés: admin, logistics, secretary
-router.post("/recharge", isFuelCardManager, async (req, res) => {
+router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
     const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
 
@@ -107,15 +110,13 @@ router.post("/recharge", isFuelCardManager, async (req, res) => {
     
     return res.status(201).json(result);
   } catch (error) {
-    console.error("Fuel card recharge error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: (req as any).requestId }, "recharge de la carte carburant en échec");
+    return next(toFuelCardAppError(error));
   }
 });
 
 // Enregistrer une consommation de carburant (débit)
-router.post("/consumption", async (req, res) => {
+router.post("/consumption", async (req, res, next) => {
   try {
     const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
     
@@ -150,10 +151,8 @@ router.post("/consumption", async (req, res) => {
     
     return res.status(201).json(result);
   } catch (error) {
-    console.error("Record fuel consumption error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: (req as any).requestId }, "enregistrement de la consommation en échec");
+    return next(toFuelCardAppError(error));
   }
 });
 
@@ -181,7 +180,7 @@ router.get("/history", async (req, res) => {
 });
 
 // Statistiques de consommation par véhicule
-router.get("/vehicle/:vehicleId/stats", async (req, res) => {
+router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.vehicleId);
     
@@ -193,15 +192,13 @@ router.get("/vehicle/:vehicleId/stats", async (req, res) => {
     
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get vehicle fuel stats error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant du véhicule en échec");
+    return next(toFuelCardAppError(error));
   }
 });
 
 // Détection d'anomalies de consommation
-router.get("/vehicle/:vehicleId/anomalies", async (req, res) => {
+router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
   try {
     const vehicleId = parseInt(req.params.vehicleId);
     
@@ -213,8 +210,8 @@ router.get("/vehicle/:vehicleId/anomalies", async (req, res) => {
     
     return res.status(200).json(anomalies);
   } catch (error) {
-    console.error("Detect fuel anomalies error:", error);
-    return res.status(500).json({ message: "Erreur serveur" });
+    log.error({ err: error, requestId: (req as any).requestId }, "détection des anomalies carburant en échec");
+    return next(toFuelCardAppError(error));
   }
 });
 
