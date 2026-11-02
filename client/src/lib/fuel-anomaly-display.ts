@@ -12,11 +12,16 @@ export interface FuelAnomalyFigures {
 /** Valeur constatée et référence selon la règle, avec la bonne unité (L ou km). */
 export function formatFuelAnomalyFigures(a: FuelAnomaly): FuelAnomalyFigures {
   switch (a.rule) {
-    case "odometer-regression":
+    case "odometer-regression": {
+      const parts = [
+        a.previousMileage != null ? `Précédent : ${nf(a.previousMileage)} km` : null,
+        a.nextMileage != null ? `suivant : ${nf(a.nextMileage)} km` : null,
+      ].filter((p): p is string => p !== null);
       return {
         value: a.mileage != null ? `${nf(a.mileage)} km` : "—",
-        reference: a.previousMileage != null ? `Précédent : ${nf(a.previousMileage)} km` : null,
+        reference: parts.length ? parts.join(", ") : null,
       };
+    }
     case "tank-overflow":
       return {
         value: `${nf(a.quantity)} L`,

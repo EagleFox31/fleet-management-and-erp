@@ -18,8 +18,15 @@ import { fuelAnomalyKeySchema } from "@shared/contracts/fuel-anomalies";
  */
 export const TANK_OVERFLOW_TOLERANCE_PERCENT = 5;
 
-// Constante du module, jamais une saisie : insérée telle quelle pour que Postgres la type en entier.
-const TOLERANCE_SQL = sql.raw(String(Math.trunc(TANK_OVERFLOW_TOLERANCE_PERCENT)));
+/**
+ * Constante du module, jamais une saisie : insérée telle quelle en littéral numérique, décimales comprises
+ * (Postgres type `5` en entier et `5.5` en numeric, la comparaison reste exacte dans les deux cas).
+ */
+export function toleranceSqlLiteral(percent: number): string {
+  if (!Number.isFinite(percent) || percent < 0) throw new Error(`Tolérance tank-overflow invalide : ${percent}`);
+  return String(percent);
+}
+const TOLERANCE_SQL = sql.raw(toleranceSqlLiteral(TANK_OVERFLOW_TOLERANCE_PERCENT));
 
 /** Véhicule actif, non électrique, sans capacité : `tank-overflow` y est muette. Compteur et liste partagent ce filtre. */
 const MISSING_TANK_CAPACITY = sql`tank_capacity_l IS NULL AND deleted_at IS NULL AND fuel_type IS DISTINCT FROM 'electric'`;
@@ -102,7 +109,8 @@ export const fuelAnomalyResolutionService = {
       gap AS (
         SELECT 'consumption-gap'::text AS rule, b.id, b.vehicle_id, b.date, b.quantity,
                b.avg_q::numeric AS reference, (b.avg_q + 2 * b.sd_q)::numeric AS threshold,
-               NULL::integer AS mileage, NULL::integer AS previous_mileage, NULL::real AS tank_capacity_l
+               NULL::integer AS mileage, NULL::integer AS previous_mileage, NULL::real AS tank_capacity_l,
+               NULL::integer AS next_mileage
           FROM base b
          WHERE b.n >= 3 AND b.quantity > b.avg_q + 2 * b.sd_q
       ),
@@ -111,7 +119,8 @@ export const fuelAnomalyResolutionService = {
         SELECT 'tank-overflow'::text AS rule, fr.id, fr.vehicle_id, fr.date, fr.quantity,
                v.tank_capacity_l::numeric AS reference,
                v.tank_capacity_l::numeric * (100 + ${TOLERANCE_SQL}) / 100 AS threshold,
-               NULL::integer AS mileage, NULL::integer AS previous_mileage, v.tank_capacity_l AS tank_capacity_l
+               NULL::integer AS mileage, NULL::integer AS previous_mileage, v.tank_capacity_l AS tank_capacity_l,
+               NULL::integer AS next_mileage
           FROM fuel_records fr
           JOIN vehicles v ON v.id = fr.vehicle_id
          WHERE fr.vehicle_id IS NOT NULL
@@ -121,25 +130,44 @@ export const fuelAnomalyResolutionService = {
       ),
       readings AS (
         SELECT fr.id, fr.vehicle_id, fr.date, fr.quantity, fr.mileage,
-               LAG(fr.mileage) OVER (PARTITION BY fr.vehicle_id ORDER BY fr.date, fr.id) AS previous_mileage
+               LAG(fr.mileage) OVER o AS previous_mileage,
+               LAG(fr.mileage, 2) OVER o AS before_previous_mileage,
+               LAG(fr.id) OVER o AS previous_id,
+               LAG(fr.date) OVER o AS previous_date,
+               LAG(fr.quantity) OVER o AS previous_quantity
           FROM fuel_records fr
          WHERE fr.vehicle_id IS NOT NULL
            AND fr.date IS NOT NULL
            AND fr.fuel_type IS DISTINCT FROM 'electric'
            AND fr.mileage > 0
+        WINDOW o AS (PARTITION BY fr.vehicle_id ORDER BY fr.date, fr.id)
       ),
-      regression AS (
-        SELECT 'odometer-regression'::text AS rule, rd.id, rd.vehicle_id, rd.date, rd.quantity,
-               rd.previous_mileage::numeric AS reference, rd.previous_mileage::numeric AS threshold,
-               rd.mileage AS mileage, rd.previous_mileage AS previous_mileage, NULL::real AS tank_capacity_l
+      drops AS (
+        -- Pic isolé : le plein courant retrouve au moins le kilométrage d'avant le précédent, c'est donc
+        -- le précédent qui est faux (1000, 99999, 1100 marque 99999). Sinon le plein courant est le fautif.
+        SELECT rd.*, (rd.before_previous_mileage IS NOT NULL AND rd.mileage >= rd.before_previous_mileage) AS spike
           FROM readings rd
          WHERE rd.mileage < rd.previous_mileage
+      ),
+      regression AS (
+        SELECT 'odometer-regression'::text AS rule,
+               CASE WHEN d.spike THEN d.previous_id ELSE d.id END AS id,
+               d.vehicle_id,
+               CASE WHEN d.spike THEN d.previous_date ELSE d.date END AS date,
+               CASE WHEN d.spike THEN d.previous_quantity ELSE d.quantity END AS quantity,
+               (CASE WHEN d.spike THEN d.before_previous_mileage ELSE d.previous_mileage END)::numeric AS reference,
+               (CASE WHEN d.spike THEN d.mileage ELSE d.previous_mileage END)::numeric AS threshold,
+               CASE WHEN d.spike THEN d.previous_mileage ELSE d.mileage END AS mileage,
+               CASE WHEN d.spike THEN d.before_previous_mileage ELSE d.previous_mileage END AS previous_mileage,
+               NULL::real AS tank_capacity_l,
+               CASE WHEN d.spike THEN d.mileage END AS next_mileage
+          FROM drops d
       ),
       found AS (
         SELECT * FROM gap UNION ALL SELECT * FROM overflow UNION ALL SELECT * FROM regression
       )
       SELECT f.rule, f.id, f.vehicle_id, to_char(f.date, 'YYYY-MM-DD') AS day, f.quantity, f.reference, f.threshold,
-             f.mileage, f.previous_mileage, f.tank_capacity_l, v.registration_number AS vehicle_label,
+             f.mileage, f.previous_mileage, f.next_mileage, f.tank_capacity_l, v.registration_number AS vehicle_label,
              r.status, r.comment, to_char(r.resolved_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS iso
         FROM found f
         LEFT JOIN vehicles v ON v.id = f.vehicle_id
@@ -149,7 +177,7 @@ export const fuelAnomalyResolutionService = {
     type ListRow = {
       rule: FuelAnomaly["rule"]; id: number; vehicle_id: number; day: string | null; quantity: number;
       reference: string | number; threshold: string | number; mileage: number | null;
-      previous_mileage: number | null; tank_capacity_l: number | null; vehicle_label: string | null;
+      previous_mileage: number | null; next_mileage: number | null; tank_capacity_l: number | null; vehicle_label: string | null;
       status: FuelAnomaly["status"] | null; comment: string | null; iso: string | null;
     };
     return rowsOf<ListRow>(res).map((r) => ({
@@ -168,6 +196,7 @@ export const fuelAnomalyResolutionService = {
         ? {
             mileage: r.mileage == null ? null : Number(r.mileage),
             previousMileage: r.previous_mileage == null ? null : Number(r.previous_mileage),
+            ...(r.next_mileage == null ? {} : { nextMileage: Number(r.next_mileage) }),
           }
         : {}),
       ...(r.rule === "tank-overflow"
