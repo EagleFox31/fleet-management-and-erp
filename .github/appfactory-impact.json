@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "fallback": "all",
+  "ignorePaths": [
+    "docs/**",
+    "*.md",
+    "**/*.md",
+    "check-out.txt",
+    ".claude/**",
+    ".gitattributes",
+    ".gitignore",
+    "**/.gitignore",
+    ".replit",
+    "attached_assets/**",
+    "backup/**",
+    "uploads/**",
+    "generated-icon.png",
+    "RAPPORT_RETOURS_P2",
+    "test/**",
+    "test-*.js"
+  ],
+  "surfaces": {
+    "e2e": {
+      "paths": ["e2e/**", "playwright.config.ts"],
+      "gates": ["typecheck"]
+    },
+    "scripts": {
+      "paths": ["scripts/**", "drizzle.config.ts"],
+      "gates": ["typecheck"]
+    },
+    "mobile": {
+      "paths": ["android/**", "capacitor.config.ts", ".github/workflows/build-android-apk.yml"],
+      "gates": []
+    },
+    "shared": {
+      "paths": ["shared/**", "package.json", "package-lock.json", "tsconfig.json"],
+      "gates": ["typecheck", "unit"]
+    },
+    "server": {
+      "paths": [
+        "server/**",
+        "tests/integration/**",
+        "tests/contract/**",
+        "tests/support/**",
+        "e2e/helpers/production-guard.ts",
+        "vitest.integration.config.ts",
+        "vitest.contract.config.ts"
+      ],
+      "gates": ["typecheck", "unit", "integration", "contract"],
+      "dependsOn": ["shared"]
+    },
+    "client": {
+      "paths": ["client/**", "public/**", "components.json", "vite.config.ts", "tailwind.config.ts", "postcss.config.js"],
+      "gates": ["typecheck", "unit"],
+      "dependsOn": ["shared"]
+    },
+    "unit-tests": {
+      "paths": ["tests/unit/**", "vitest.config.ts"],
+      "gates": ["typecheck", "unit"]
+    },
+    "ci": {
+      "paths": [".github/**", "docker-compose.test.yml"],
+      "gates": ["typecheck", "unit", "integration", "contract"]
+    }
+  }
+}

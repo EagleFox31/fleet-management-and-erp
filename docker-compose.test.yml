@@ -1,0 +1,37 @@
+# Base Postgres locale pour `npm run test:integration` / `npm run test:contract`.
+# Le driver Neon (@neondatabase/serverless) dialogue en WebSocket : wsproxy fait le pont vers Postgres.
+#
+#   npm run test:db:up
+#   DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:5433/v1 npm run test:contract
+#   npm run test:db:down
+#
+# L'hôte « postgres » de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node.
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      POSTGRES_DB: fleet_test
+    ports:
+      - "54320:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet -d fleet_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  wsproxy:
+    # Dépôt sans tag versionné (dernier commit 2024-11) : image épinglée par digest, ici et dans la CI.
+    image: ghcr.io/neondatabase/wsproxy:latest@sha256:7f2e2149aa6a57ba382a140102fba44f5053f3e44389ccc18adcecf896054efb
+    # Pas d'APPEND_PORT : le driver envoie déjà `address=postgres:5432`, la valeur serait concaténée.
+    environment:
+      ALLOW_ADDR_REGEX: "^postgres:5432$"
+      LOG_TRAFFIC: "false"
+    ports:
+      - "5433:80"
+    depends_on:
+      postgres:
+        condition: service_healthy

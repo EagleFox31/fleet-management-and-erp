@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { isUniqueViolation } from "../lib/pg-errors";
 import { laborCatalog, users, workOrderItems } from "@shared/schema";
 import {
   computeWorkOrderItemTotals,
@@ -114,16 +115,25 @@ export class WorkOrderItemsService {
       return { success: false, error: `Le code ${code} existe déjà dans le catalogue.` };
     }
 
-    const [created] = await db
-      .insert(laborCatalog)
-      .values({
-        code,
-        label,
-        standardHours: toNumericColumn(payload.standardHours),
-        createdBy: userId ?? null,
-        updatedBy: userId ?? null,
-      })
-      .returning({ id: laborCatalog.id });
+    let created: { id: number };
+    try {
+      [created] = await db
+        .insert(laborCatalog)
+        .values({
+          code,
+          label,
+          standardHours: toNumericColumn(payload.standardHours),
+          createdBy: userId ?? null,
+          updatedBy: userId ?? null,
+        })
+        .returning({ id: laborCatalog.id });
+    } catch (error) {
+      // Deux créations simultanées : la contrainte UNIQUE tranche, la réponse reste un refus métier.
+      if (isUniqueViolation(error)) {
+        return { success: false, error: `Le code ${code} existe déjà dans le catalogue.` };
+      }
+      throw error;
+    }
 
     return { success: true, data: { id: created.id } };
   }
