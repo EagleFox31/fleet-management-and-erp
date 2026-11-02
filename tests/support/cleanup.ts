@@ -8,6 +8,7 @@ import {
   documentRenewalCenters,
   documentRenewalRequests,
   fuelPrices,
+  missions,
   fuelRecords,
   partRequirements,
   parts,
@@ -182,6 +183,11 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(documentRenewalCenters).where(inArray(documentRenewalCenters.createdBy, testUsers));
   // Prix carburant saisi par un compte de test : bloquait la suppression du compte (FK).
   await db.delete(fuelPrices).where(inArray(fuelPrices.createdBy, testUsers));
+  // Mission créée par un compte de test : bloquait la suppression du compte (FK
+  // missions_created_by_users_id_fk) et faisait échouer le hook global de tous les fichiers.
+  const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
+  await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
+  await db.delete(missions).where(inArray(missions.createdBy, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));
