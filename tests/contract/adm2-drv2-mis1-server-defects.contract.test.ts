@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { assignments, drivers, incidents, missions, users, vehicles, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
+import { createIncident } from "../../server/services/incident-service";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
@@ -150,6 +151,8 @@ describe("MIS1-API-1 : éligibilité du véhicule sur PATCH /api/missions/:id", 
 describe("DRV2-3 : cloison chauffeur sur les missions", { timeout: 180000 }, () => {
   let own: { id: number };
   let foreign: { id: number };
+  let ownSecondProfile: { id: number };
+  let secondProfileDriverId = 0;
   let driverAId = 0;
   let driverBId = 0;
 
@@ -162,7 +165,22 @@ describe("DRV2-3 : cloison chauffeur sur les missions", { timeout: 180000 }, () 
     const vB = await newVehicle();
     own = await newMission({ vehicleId: vA.id, driverId: dA.id });
     foreign = await newMission({ vehicleId: vB.id, driverId: dB.id });
+    // `drivers.user_id` n'est pas unique : le compte A porte une seconde fiche, ses missions comptent aussi.
+    const dA2 = await newDriver(session.userIdOf("driverA"));
+    const vA2 = await newVehicle();
+    ownSecondProfile = await newMission({ vehicleId: vA2.id, driverId: dA2.id });
+    secondProfileDriverId = dA2.id;
   }, 120000);
+
+  it("deux fiches pour un même compte : missions des deux, quel que soit l'ordre de création", async () => {
+    const listed = ((await call("GET", "/api/missions", { actor: "driverA" })).body as { id: number }[]).map((m) => m.id);
+    expect(listed).toEqual(expect.arrayContaining([own.id, ownSecondProfile.id]));
+    expect(listed).not.toContain(foreign.id);
+    expect((await call("GET", `/api/missions/${ownSecondProfile.id}`, { actor: "driverA" })).status).toBe(200);
+    expect((await call("GET", `/api/drivers/${driverAId}/missions`, { actor: "driverA" })).status).toBe(200);
+    expect((await call("GET", `/api/drivers/${secondProfileDriverId}/missions`, { actor: "driverA" })).status).toBe(200);
+    expect((await call("GET", `/api/drivers/${driverBId}/missions`, { actor: "driverA" })).status).toBe(403);
+  });
 
   it("GET /api/missions : le chauffeur ne liste que ses missions", async () => {
     const res = await call("GET", "/api/missions", { actor: "driverA" });
@@ -243,7 +261,52 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
   });
 
   it("admin : véhicule inconnu, 404 lisible", async () => {
-    const res = await call("POST", "/api/driver/breakdowns", { actor: "admin", body: body(2147483000) });
+    const marker = uniqueTestToken("PANNE");
+    const res = await call("POST", "/api/driver/breakdowns", {
+      actor: "admin",
+      body: { vehicleId: 2147483000, description: marker, severity: "high" },
+    });
     expect(res.status).toBe(404);
+    // Message du service (une route absente renverrait un autre texte) et aucun OT ni incident écrit.
+    expect(res.body.message).toMatch(/hicule introuvable/);
+    expect(await db.select().from(workOrders).where(eq(workOrders.description, marker))).toHaveLength(0);
+    expect(await db.select().from(incidents).where(eq(incidents.description, marker))).toHaveLength(0);
+  });
+
+  it("échec dans la transaction après l'insertion de l'OT : aucun OT ne subsiste (rollback)", async () => {
+    const marker = uniqueTestToken("ROLLBACK");
+    const failingDb = {
+      transaction: (fn: (tx: unknown) => Promise<unknown>) =>
+        db.transaction((tx) =>
+          fn(
+            new Proxy(tx, {
+              get(target, prop, receiver) {
+                if (prop === "insert") {
+                  return (table: unknown) => {
+                    if (table === incidents) throw new Error("échec simulé de l'insertion de l'incident");
+                    return (target as any).insert(table);
+                  };
+                }
+                return Reflect.get(target, prop, receiver);
+              },
+            }),
+          ),
+        ),
+    };
+    await expect(
+      createIncident(
+        { id: session.userIdOf("admin"), role: "admin" },
+        { vehicleId: ownVehicleId, description: marker, severity: "high" },
+        {
+          db: failingDb,
+          assignedVehicleIds: async () => [],
+          notifyRoles: async () => undefined,
+          broadcast: () => undefined,
+        },
+        { openWorkOrder: true },
+      ),
+    ).rejects.toThrow(/simulé/);
+    expect(await db.select().from(workOrders).where(eq(workOrders.description, marker))).toHaveLength(0);
+    expect(await db.select().from(incidents).where(eq(incidents.description, marker))).toHaveLength(0);
   });
 });

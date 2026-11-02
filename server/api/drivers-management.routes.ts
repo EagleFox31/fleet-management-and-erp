@@ -169,7 +169,7 @@ router.get("/:id/missions", async (req, res) => {
 
     // Un chauffeur ne lit que ses propres missions (DRV2-3) ; le personnel lit celles de tous.
     const driverScope = await driverScopeOf(req.user);
-    if (driverScope !== undefined && driverScope !== driverId) {
+    if (driverScope !== undefined && !driverScope.includes(driverId)) {
       return res.status(403).json({ message: OUT_OF_DRIVER_PROFILE_MESSAGE });
     }
 

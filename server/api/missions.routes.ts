@@ -608,7 +608,7 @@ router.get("/", async (req, res) => {
   try {
     // Chauffeur : seulement les missions où il est affecté (DRV2-3).
     const driverScope = await driverScopeOf(req.user);
-    if (driverScope === null) {
+    if (driverScope !== undefined && driverScope.length === 0) {
       return res.json([]);
     }
     const allMissions = await db
@@ -656,7 +656,7 @@ router.get("/", async (req, res) => {
           ? undefined
           : inArray(
               missions.id,
-              db.select({ id: assignments.missionId }).from(assignments).where(eq(assignments.driverId, driverScope)),
+              db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverScope)),
             ),
       )
       .orderBy(desc(missions.createdAt));
@@ -890,7 +890,7 @@ router.post("/:id/fuel-records", async (req, res) => {
     }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
-    const actorRole = String(req.session?.role || "").trim().toLowerCase();
+    const actorRole = String(req.user?.role || "").trim().toLowerCase();
 
     if (!actorUserId) {
       return res.status(401).json({ message: "Session invalide. Veuillez vous reconnecter." });
@@ -1044,7 +1044,7 @@ router.post("/:id/fuel-records/regularize", async (req, res) => {
     }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
-    const actorRole = String(req.session?.role || "").trim().toLowerCase();
+    const actorRole = String(req.user?.role || "").trim().toLowerCase();
 
     if (!actorUserId) {
       return res.status(401).json({ message: "Session invalide. Veuillez vous reconnecter." });
@@ -1222,7 +1222,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
     }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
-    const actorRole = String(req.session?.role || "").trim().toLowerCase();
+    const actorRole = String(req.user?.role || "").trim().toLowerCase();
 
     if (!actorUserId) {
       return res.status(401).json({ message: "Session invalide. Veuillez vous reconnecter." });
@@ -2734,7 +2734,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
     }
 
     const actorId = typeof req.session?.userId === "number" ? req.session.userId : null;
-    const actorRole = String(req.session?.role || "").trim().toLowerCase();
+    const actorRole = String(req.user?.role || "").trim().toLowerCase();
     const allowedRequesterRoles = new Set(["admin", "logistics", "workshop_manager", "secretary"]);
 
     if (!actorId) {
