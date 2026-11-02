@@ -88,7 +88,7 @@ test.afterAll(async () => {
 
 test.describe("ADM2 : changement de rôle par un administrateur", () => {
   test("magasinier passé technicien au navigateur : menu et droits suivent après reconnexion", async ({ browser }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000); // premier test du fichier : compilation à froid du front et trois sessions sur Neon
     const target = await createAccount("warehouse", "mag");
 
     // Avant : un magasinier a le stock et les commandes fournisseur.
