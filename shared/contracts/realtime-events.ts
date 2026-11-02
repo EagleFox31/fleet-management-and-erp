@@ -36,6 +36,11 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
     invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers", "/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary"],
   } as EventDefinition<{ id: number }>,
+  fuel_record_changed: {
+    // Plein créé, modifié ou supprimé : les anomalies calculées à la lecture et la carte bougent.
+    scope: { type: "roles", roles: FUEL_READ_ROLES },
+    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers", "/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary"],
+  } as EventDefinition<{ id: number }>,
   vehicle_tank_capacity_changed: {
     // Capacité des réservoirs (FUEL3) : la règle tank-overflow et le compteur « sans capacité » bougent.
     scope: { type: "roles", roles: FUEL_READ_ROLES },
