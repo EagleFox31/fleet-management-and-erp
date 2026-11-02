@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
@@ -8,7 +8,7 @@ import { db } from "../db";
 import { authenticate, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
-import { DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
+import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
 import {
   DOCUMENT_RENEWAL_REQUEST_STATUSES,
   documentRenewalTransitionRefusal,
@@ -16,6 +16,7 @@ import {
 } from "@shared/constants/document-renewal-statuses";
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
+import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
@@ -32,7 +33,7 @@ const router = Router();
 router.use(authenticate);
 
 const CREATE_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_WRITER_ROLES);
-const VIEW_ROLES = new Set(["admin", "secretary", "logistics", "workshop_manager", "technician"]);
+const VIEW_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_VIEWER_ROLES);
 const REQUESTABLE_DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"] as const;
 
 /** Nom de centre facultatif : vide devient null, sinon mêmes bornes que le contrat des centres. */
@@ -367,7 +368,7 @@ router.get("/requests", async (req, res) => {
 
     return res.status(200).json(rows);
   } catch (error) {
-    console.error("Get document renewal requests error:", error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des demandes de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -490,7 +491,7 @@ const quickRenewPayloadSchema = z.object({
     }),
 });
 
-router.post("/requests", async (req, res) => {
+router.post("/requests", async (req, res, next) => {
   try {
     const role = normalizeRole(req.session?.role);
     if (!hasRole(role, CREATE_ROLES)) {
@@ -693,7 +694,8 @@ router.post("/requests", async (req, res) => {
       request: createdRequest,
     });
   } catch (error) {
-    console.error("Create document renewal request error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "création d'une demande de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -771,12 +773,12 @@ router.patch("/requests/:id/status", async (req, res) => {
 
     return res.status(200).json(updated);
   } catch (error) {
-    console.error("Update renewal request status error:", error);
+    log.error({ err: error, requestId: req.requestId }, "changement de statut d'une demande de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response) => {
+router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response, next: NextFunction) => {
   uploadRenewalProof(req, res, async (uploadError) => {
     try {
       if (uploadError) {
@@ -827,7 +829,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           try {
             fs.unlinkSync(req.file.path);
           } catch (unlinkError) {
-            console.error("Erreur suppression justificatif après payload invalide:", unlinkError);
+            log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après payload invalide impossible");
           }
         }
         return res.status(400).json({
@@ -1150,10 +1152,11 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         try {
           fs.unlinkSync(req.file.path);
         } catch (unlinkError) {
-          console.error("Erreur suppression justificatif après échec quick renew:", unlinkError);
+          log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après échec du renouvellement rapide impossible");
         }
       }
-      console.error("Quick renew document error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "renouvellement rapide d'un document");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

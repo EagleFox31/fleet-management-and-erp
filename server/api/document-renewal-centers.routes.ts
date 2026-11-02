@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { documentRenewalCenters } from "@shared/schema";
-import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import {
   createDocumentRenewalCenterRequestSchema,
   setDocumentRenewalCenterActiveRequestSchema,
@@ -9,14 +8,14 @@ import {
 } from "@shared/contracts/document-renewal-centers";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
-import { assertCenterNameFree, isUniqueViolation } from "../lib/document-renewal-center-resolver";
+import { assertCenterNameFree, cleanCenterName, DUPLICATE_CENTER_MESSAGE, isUniqueViolation } from "../lib/document-renewal-center-resolver";
+import { broadcastCenterChanged } from "../lib/document-renewal-center-events";
 import { moduleLogger } from "../lib/logger";
 import { isDocumentRenewalWriter } from "../middleware/auth";
 
 const log = moduleLogger("document-renewal-centers");
 const router = Router();
 
-const DUPLICATE_MESSAGE = "Un centre de ce nom existe déjà pour ce type de document.";
 const CENTER_COLUMNS = {
   id: documentRenewalCenters.id,
   name: documentRenewalCenters.name,
@@ -27,18 +26,6 @@ const CENTER_COLUMNS = {
   isActive: documentRenewalCenters.isActive,
 };
 
-/** Couche 2 : les profils qui choisissent un centre rechargent la liste. */
-function broadcastCenterChanged(id: number): void {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") return;
-  broadcastUpdate("document_renewal_center_changed", {
-    entity: "document_renewal_center",
-    entityId: id,
-    payload: { id },
-    scope: REALTIME_EVENTS.document_renewal_center_changed.scope,
-  });
-}
-
 function parseCenterId(raw: string): number {
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) throw new AppError(404, "Centre agréé introuvable.");
@@ -46,21 +33,21 @@ function parseCenterId(raw: string): number {
 }
 
 const EDITABLE_FIELDS = ["name", "documentType", "accreditationNumber", "address", "contact"];
-const assertNameFree = assertCenterNameFree;
 
 router.post("/centers", isDocumentRenewalWriter, async (req, res, next) => {
   try {
     const body = createDocumentRenewalCenterRequestSchema.parse(req.body ?? {});
     const documentType = body.documentType ?? null;
-    await assertNameFree(body.name, documentType);
+    const name = cleanCenterName(body.name);
+    await assertCenterNameFree(name);
     let created;
     try {
       [created] = await db
         .insert(documentRenewalCenters)
-        .values({ ...body, documentType, createdBy: req.user?.id ?? null })
+        .values({ ...body, name, documentType, createdBy: req.user?.id ?? null })
         .returning(CENTER_COLUMNS);
     } catch (err) {
-      if (isUniqueViolation(err)) throw new AppError(409, DUPLICATE_MESSAGE, { cause: err });
+      if (isUniqueViolation(err)) throw new AppError(409, DUPLICATE_CENTER_MESSAGE, { cause: err });
       throw err;
     }
     log.info({ centerId: created.id, userId: req.user?.id, requestId: req.requestId }, "centre de renouvellement créé");
@@ -89,9 +76,10 @@ router.patch("/centers/:id", isDocumentRenewalWriter, async (req, res, next) => 
       .limit(1);
     if (!current) throw new AppError(404, "Centre agréé introuvable.");
 
-    const nextName = body.name ?? current.name;
-    const nextType = body.documentType === undefined ? current.documentType : body.documentType;
-    if (body.name !== undefined || body.documentType !== undefined) await assertNameFree(nextName, nextType, id);
+    if (body.name !== undefined) {
+      body.name = cleanCenterName(body.name);
+      await assertCenterNameFree(body.name, id);
+    }
 
     let updated;
     try {
@@ -101,7 +89,7 @@ router.patch("/centers/:id", isDocumentRenewalWriter, async (req, res, next) => 
         .where(eq(documentRenewalCenters.id, id))
         .returning(CENTER_COLUMNS);
     } catch (err) {
-      if (isUniqueViolation(err)) throw new AppError(409, DUPLICATE_MESSAGE, { cause: err });
+      if (isUniqueViolation(err)) throw new AppError(409, DUPLICATE_CENTER_MESSAGE, { cause: err });
       throw err;
     }
     log.info({ centerId: id, userId: req.user?.id, requestId: req.requestId }, "centre de renouvellement modifié");
@@ -116,6 +104,9 @@ router.patch("/centers/:id", isDocumentRenewalWriter, async (req, res, next) => 
 router.patch("/centers/:id/active", isDocumentRenewalWriter, async (req, res, next) => {
   try {
     const id = parseCenterId(req.params.id);
+    // Champ nommé seulement ; un champ inconnu est refusé en 400, comme au PATCH principal.
+    const unknown = Object.keys(req.body ?? {}).filter((key) => key !== "isActive");
+    if (unknown.length > 0) throw new AppError(400, "Champ non modifiable dans la requête.");
     const { isActive: requested } = req.body ?? {};
     const { isActive } = setDocumentRenewalCenterActiveRequestSchema.parse({ isActive: requested });
     const [updated] = await db

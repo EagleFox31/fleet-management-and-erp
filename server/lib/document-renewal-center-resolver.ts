@@ -1,8 +1,9 @@
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { documentRenewalCenters } from "@shared/schema";
 import { normalizeCenterName } from "@shared/contracts/document-renewal-centers";
 import { db } from "../db";
 import { AppError } from "./app-error";
+import { broadcastCenterChanged } from "./document-renewal-center-events";
 
 /**
  * Résolution unique d'un centre de renouvellement (DOC1), partagée par
@@ -12,8 +13,13 @@ import { AppError } from "./app-error";
  */
 
 export const DISABLED_CENTER_MESSAGE = "Ce centre agréé est désactivé.";
-export const DUPLICATE_CENTER_MESSAGE = "Un centre de ce nom existe déjà pour ce type de document.";
+/** Le nom est unique tous types confondus (unicité SQL sur `name`) : le message ne parle donc pas de type. */
+export const DUPLICATE_CENTER_MESSAGE = "Un centre de ce nom existe déjà.";
 
+/** Nom tel qu'il est stocké : bords retirés, espaces (dont l'insécable) ramenés à un seul espace simple. */
+export function cleanCenterName(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ");
+}
 
 const normalizedNameSql = () =>
   sql`regexp_replace(lower(btrim(${documentRenewalCenters.name})), '\\s+', ' ', 'g')`;
@@ -23,17 +29,17 @@ export function isUniqueViolation(err: unknown): boolean {
   return e?.code === "23505" || e?.cause?.code === "23505";
 }
 
-/** 409 si un centre de même nom normalisé existe déjà pour ce type (actif ou non). */
-export async function assertCenterNameFree(name: string, documentType: string | null, excludeId?: number): Promise<void> {
+/**
+ * 409 si un centre de même nom normalisé existe déjà, quel que soit son type (actif ou non),
+ * comme l'unicité SQL du nom.
+ */
+export async function assertCenterNameFree(name: string, excludeId?: number): Promise<void> {
   const [clash] = await db
     .select({ id: documentRenewalCenters.id })
     .from(documentRenewalCenters)
     .where(
       and(
         sql`${normalizedNameSql()} = ${normalizeCenterName(name)}`,
-        documentType === null
-          ? isNull(documentRenewalCenters.documentType)
-          : eq(documentRenewalCenters.documentType, documentType as any),
         excludeId === undefined ? undefined : ne(documentRenewalCenters.id, excludeId),
       ),
     )
@@ -53,7 +59,7 @@ export type ResolveCenterInput = {
 };
 
 export type ResolvedCenter =
-  | { ok: true; id: number; name: string; accreditationNumber: string | null }
+  | { ok: true; id: number; name: string; accreditationNumber: string | null; created?: boolean }
   | { ok: false; status: 404 | 409; message: string };
 
 const COLUMNS = {
@@ -75,7 +81,7 @@ export async function resolveRenewalCenter(input: ResolveCenterInput): Promise<R
 
   const wanted = normalizeCenterName(input.centerName);
   const find = async () =>
-    (await db.select(COLUMNS).from(documentRenewalCenters).where(sql`${normalizedNameSql()} = ${wanted}`).limit(1))[0];
+    (await db.select(COLUMNS).from(documentRenewalCenters).where(sql`${normalizedNameSql()} = ${wanted}`).orderBy(asc(documentRenewalCenters.id)).limit(1))[0];
 
   const fromRow = (row: NonNullable<Awaited<ReturnType<typeof find>>>): ResolvedCenter =>
     row.isActive
@@ -89,7 +95,7 @@ export async function resolveRenewalCenter(input: ResolveCenterInput): Promise<R
     const [created] = await db
       .insert(documentRenewalCenters)
       .values({
-        name: input.centerName.trim().replace(/\s+/g, " "),
+        name: cleanCenterName(input.centerName),
         documentType: input.documentType as any,
         accreditationNumber: input.centerAccreditationNumber ?? null,
         address: input.centerAddress ?? null,
@@ -97,7 +103,9 @@ export async function resolveRenewalCenter(input: ResolveCenterInput): Promise<R
         createdBy: input.actorUserId,
       })
       .returning(COLUMNS);
-    return fromRow(created);
+    broadcastCenterChanged(created.id);
+    const resolved = fromRow(created);
+    return resolved.ok ? { ...resolved, created: true } : resolved;
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
     // Course avec une création concurrente du même nom.

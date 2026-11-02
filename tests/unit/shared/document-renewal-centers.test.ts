@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
+import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import {
   createDocumentRenewalCenterRequestSchema,
@@ -16,14 +16,14 @@ const hook = readFileSync(path.resolve(__dirname, "../../../client/src/hooks/use
 describe("DOC1 : événement document_renewal_center_changed", () => {
   const def = REALTIME_EVENTS.document_renewal_center_changed;
 
-  it("est déclaré en dernier du catalogue, en portée rôles, sans broadcast", () => {
-    expect(Object.keys(REALTIME_EVENTS).at(-1)).toBe("document_renewal_center_changed");
+  it("est déclaré en portée rôles, sans broadcast", () => {
     expect(def.scope).toMatchObject({ type: "roles" });
   });
 
   it("couvre les rôles écrivains et invalide la liste des choix", () => {
     const roles = (def.scope as { roles: readonly string[] }).roles;
     for (const role of DOCUMENT_RENEWAL_WRITER_ROLES) expect(roles).toContain(role);
+    expect(roles).toEqual(DOCUMENT_RENEWAL_VIEWER_ROLES);
     expect(def.invalidates).toContain("/api/document-renewals/centers");
   });
 

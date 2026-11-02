@@ -1,4 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Le résolveur réel, sauf quand un test force un 409 levé en AppError (course perdue contre une création concurrente).
+const resolverControl = vi.hoisted(() => ({ forceConflict: false }));
+vi.mock("../../server/lib/document-renewal-center-resolver", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../server/lib/document-renewal-center-resolver")>();
+  const { AppError } = await import("../../server/lib/app-error");
+  return {
+    ...actual,
+    resolveRenewalCenter: (input: Parameters<typeof actual.resolveRenewalCenter>[0]) =>
+      resolverControl.forceConflict ? Promise.reject(new AppError(409, actual.DUPLICATE_CENTER_MESSAGE)) : actual.resolveRenewalCenter(input),
+  };
+});
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../../server/db";
 import { documentRenewalCenters, documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
@@ -11,6 +23,7 @@ import { REALTIME_EVENTS } from "../../shared/contracts/realtime-events";
 import { startContractActors } from "../support/contract-actors";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
+import { resolveRenewalCenter } from "../../server/lib/document-renewal-center-resolver";
 
 /** DOC1 : gestion des centres de renouvellement (écriture, désactivation, garde des demandes). */
 const ids = createIdBag();
@@ -118,6 +131,37 @@ describe("centres de renouvellement : écriture", { timeout: 180000 }, () => {
     // L'unicité SQL porte sur le nom seul : même nom sous un autre type = 409 aussi (voir rapport).
     const otherType = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `TEST doublon ${SUFFIX}`, documentType: "assurance" });
     expect(otherType.status).toBe(409);
+  });
+
+  it("409 si le même nom, à la casse près, existe sous un autre type, sans parler de type dans le message", async () => {
+    const first = await createCenter(`TEST Nom ${SUFFIX}`, "carte_grise");
+    expect(first.status).toBe(201);
+    const second = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `TEST nom ${SUFFIX}`, documentType: "assurance" });
+    expect(second.status).toBe(409);
+    expect(second.body.message).not.toMatch(/type/i);
+    expect(JSON.stringify(second.body)).not.toMatch(/duplicate|constraint|sql/i);
+    const patched = await createCenter(`TEST autre ${SUFFIX}`, "assurance");
+    const clash = await call("PATCH", documentRenewalCenterPath(patched.body.id), "admin", { name: `TEST NOM ${SUFFIX}` });
+    expect(clash.status).toBe(409);
+    expect(clash.body.message).not.toMatch(/type/i);
+  });
+
+  it("l'espace insécable est ramené à un espace simple avant insertion", async () => {
+    const res = await createCenter(`TEST\u00a0nbsp \u00a0 ${SUFFIX}`);
+    expect(res.status).toBe(201);
+    expect(res.body.name).toBe(`TEST nbsp ${SUFFIX}`);
+    const again = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `test nbsp ${SUFFIX}` });
+    expect(again.status).toBe(409);
+  });
+
+  it("deux POST concurrents de variantes de casse : exactement un 201, les autres 409 (jamais 500)", async () => {
+    const variants = [`TEST Course ${SUFFIX}`, `test course ${SUFFIX}`, `TEST COURSE ${SUFFIX}`, `  Test   Course ${SUFFIX}`];
+    const results = await Promise.all(variants.map((name, i) => call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, i % 2 ? "admin" : "secretary", { name })));
+    for (const res of results) if (res.body?.id) centerIds.push(res.body.id);
+    const statuses = results.map((res) => res.status).sort();
+    expect(statuses).toEqual([201, 409, 409, 409]);
+    const rows = await db.select({ id: documentRenewalCenters.id }).from(documentRenewalCenters).where(inArray(documentRenewalCenters.id, results.filter((r) => r.status === 201).map((r) => r.body.id)));
+    expect(rows).toHaveLength(1);
   });
 
   it("PATCH modifie les champs, refuse un nom pris (409), 404 si inconnu", async () => {
@@ -276,6 +320,58 @@ describe("centres de renouvellement : résolution unique (demande et renouvellem
       const res = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: `TEST borne ${SUFFIX}`, [field]: "y".repeat(max + 1) });
       expect(res.status, field).toBe(400);
     }
+  });
+
+  it("PATCH /active refuse un champ inconnu (400) et ne change rien", async () => {
+    const created = await createCenter(`TEST inconnu actif ${SUFFIX}`);
+    const res = await call("PATCH", documentRenewalCenterActivePath(created.body.id), "admin", { isActive: false, name: "autre" });
+    expect(res.status).toBe(400);
+    const [row] = await db.select().from(documentRenewalCenters).where(eq(documentRenewalCenters.id, created.body.id));
+    expect(row.isActive).toBe(true);
+    expect(row.name).toBe(created.body.name);
+  });
+
+  it("création implicite d'un centre (demande, résolveur) : l'événement document_renewal_center_changed part avec l'id du centre", async () => {
+    spy.mockClear();
+    const res = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: `TEST implicite ${SUFFIX}` });
+    expect(res.status).toBe(201);
+    const requestId = res.body.requestId ?? res.body.request?.id ?? res.body.id;
+    const [row] = await db.select().from(documentRenewalRequests).where(eq(documentRenewalRequests.id, requestId));
+    expect(row.centerId).toBeTruthy();
+    centerIds.push(row.centerId!);
+    await db.update(documentRenewalRequests).set({ status: "rejected" }).where(eq(documentRenewalRequests.id, requestId));
+    const events = spy.mock.calls.filter(([event]) => event === "document_renewal_center_changed");
+    expect(events).toHaveLength(1);
+    expect(events[0][1].payload).toEqual({ id: row.centerId });
+    expect(events[0][1].scope).toEqual(REALTIME_EVENTS.document_renewal_center_changed.scope);
+
+    // Le même nom, réutilisé, ne crée rien et n'émet rien.
+    spy.mockClear();
+    const reused = await resolveRenewalCenter({ centerName: `test IMPLICITE ${SUFFIX}`, documentType: "assurance", actorUserId: null });
+    expect(reused).toMatchObject({ ok: true, id: row.centerId });
+    expect(spy).not.toHaveBeenCalled();
+
+    // Le résolveur (partagé par /requests et /quick-renew) émet à la création, et marque le centre créé.
+    const created = await resolveRenewalCenter({ centerName: `TEST implicite direct ${SUFFIX}`, documentType: null, actorUserId: null });
+    expect(created).toMatchObject({ ok: true, created: true });
+    if (created?.ok) centerIds.push(created.id);
+    expect(spy.mock.calls.filter(([event]) => event === "document_renewal_center_changed")).toHaveLength(1);
+  });
+
+  it("un 409 levé par le résolveur reste un 409 sur /requests et /quick-renew (pas un 500)", async () => {
+    const before = await openRequestIds();
+    resolverControl.forceConflict = true;
+    try {
+      const viaRequest = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: `TEST conflit ${SUFFIX}` });
+      expect(viaRequest.status).toBe(409);
+      expect(viaRequest.body.message).toBe("Un centre de ce nom existe déjà.");
+      const viaQuick = await quickRenew({ centerName: `TEST conflit ${SUFFIX}` });
+      expect(viaQuick.status).toBe(409);
+      expect(viaQuick.body.message).toBe("Un centre de ce nom existe déjà.");
+    } finally {
+      resolverControl.forceConflict = false;
+    }
+    expect(await openRequestIds()).toEqual(before);
   });
 
   it("PATCH refuse un champ inconnu (400) au lieu de l'ignorer", async () => {

@@ -603,6 +603,23 @@ export async function initializeDatabase() {
       DROP CONSTRAINT IF EXISTS document_renewal_requests_escort_user_id_users_id_fk
     `);
     await db.execute(sql`ALTER TABLE document_renewal_centers ADD COLUMN IF NOT EXISTS accreditation_number text`);
+    // Unicité du nom normalisé, seulement s'il n'y a aucun doublon (miroir de
+    // server/db/migrations/20261102_document_renewal_centers_unique_name.sql, AGENTS.md §5).
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+        IF NOT EXISTS (
+          SELECT 1
+          FROM document_renewal_centers
+          GROUP BY regexp_replace(lower(btrim(name)), '\\s+', ' ', 'g')
+          HAVING count(*) > 1
+        ) THEN
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_document_renewal_centers_name_normalized
+            ON document_renewal_centers ((regexp_replace(lower(btrim(name)), '\\s+', ' ', 'g')));
+        END IF;
+      END $$
+    `);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS renewal_reference text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS renewal_visit_date date`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS center_accreditation_snapshot text`);
