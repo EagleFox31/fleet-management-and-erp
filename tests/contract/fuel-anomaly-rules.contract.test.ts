@@ -5,8 +5,10 @@ import {
   FUEL_ANOMALIES_SUMMARY_PATH,
   fuelAnomaliesResponseSchema,
   fuelAnomaliesSummarySchema,
+  type FuelAnomaliesSummary,
 } from "../../shared/contracts/fuel-anomalies";
 import { VEHICLE_TANK_CAPACITY_MESSAGE, fuelAnomalyResolutions, fuelRecords, vehicles } from "../../shared/schema";
+import { REALTIME_EVENTS } from "../../shared/contracts/realtime-events";
 import { db } from "../../server/db";
 import { VEHICLE_TANK_CAPACITY_ONLY_MESSAGE } from "../../server/lib/vehicle-patch-guard";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -93,6 +95,20 @@ describe("GET /api/fuel-card/anomalies/summary : véhicules sans capacité", { t
     expect(Math.abs((await count()) - (await direct()))).toBeLessThanOrEqual(3);
   });
 
+  it("liste les véhicules à compléter : présent sans capacité, absent une fois saisie, borné par le compteur", async () => {
+    const listed = async () => {
+      const body = (await api.call("GET", FUEL_ANOMALIES_SUMMARY_PATH, { actor: "logistics" })).body as FuelAnomaliesSummary;
+      expect(body.vehicles.length).toBeLessThanOrEqual(body.vehiclesWithoutTankCapacity);
+      return body.vehicles.map((v) => v.id);
+    };
+    await db.update(vehicles).set({ tankCapacityL: null }).where(eq(vehicles.id, vehicleId));
+    // La liste est tronquée (100) : ne conclure à la présence que si la flotte de test est petite.
+    const without = await listed();
+    if (without.length < 100) expect(without).toContain(vehicleId);
+    await db.update(vehicles).set({ tankCapacityL: 90 }).where(eq(vehicles.id, vehicleId));
+    expect(await listed()).not.toContain(vehicleId);
+  });
+
   it("drapeau coupé : 404 normalisé", async () => {
     process.env.FEATURE_FLAGS = "fuel-anomalies=off";
     try {
@@ -151,14 +167,15 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
       expect(bad.body.message).toBe(VEHICLE_TANK_CAPACITY_MESSAGE);
     });
 
-    it("changer la capacité émet fuel_record_validated (rôles carburant) ; une valeur identique n'émet rien", async () => {
+    it("changer la capacité émet vehicle_tank_capacity_changed (rôles carburant), pas fuel_record_validated ; une valeur identique n'émet rien", async () => {
       events.length = 0;
       expect((await refusalOf({ tankCapacityL: 91 })).status).toBe(200);
-      const emitted = events.filter((e) => e.event === "fuel_record_validated" && e.data.id === vehicleId);
+      const emitted = events.filter((e) => e.event === "vehicle_tank_capacity_changed" && e.data.id === vehicleId);
       expect(emitted).toHaveLength(1);
-      expect(emitted[0].data.scope).toMatchObject({ type: "roles" });
+      expect(emitted[0].data.scope).toEqual(REALTIME_EVENTS.vehicle_tank_capacity_changed.scope);
+      expect(events.filter((e) => e.event === "fuel_record_validated")).toHaveLength(0);
       expect((await refusalOf({ tankCapacityL: 91 })).status).toBe(200);
-      expect(events.filter((e) => e.event === "fuel_record_validated" && e.data.id === vehicleId)).toHaveLength(1);
+      expect(events.filter((e) => e.event === "vehicle_tank_capacity_changed" && e.data.id === vehicleId)).toHaveLength(1);
     });
 
     it("{ tankCapacityL, autre champ } : 403 lisible, rien n'est écrit", async () => {

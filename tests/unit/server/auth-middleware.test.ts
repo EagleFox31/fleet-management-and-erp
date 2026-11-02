@@ -27,6 +27,7 @@ import {
   isStockIssuer,
   isTechnician,
   isTireCatalogManager,
+  isVehiclePatcher,
   isWorkshopManager,
   normalizeRole,
 } from "../../../server/middleware/auth";
@@ -64,6 +65,9 @@ const MATRIX: Record<string, { guard: Guard; allowed: string[] }> = {
     guard: isFuelRecordWriter as Guard,
     allowed: ["admin", "workshop_manager", "secretary", "logistics"],
   },
+  // PATCH véhicule : la logistique passe la garde mais ne peut écrire que tankCapacityL
+  // (server/lib/vehicle-patch-guard.ts, FUEL3).
+  isVehiclePatcher: { guard: isVehiclePatcher as Guard, allowed: ["admin", "workshop_manager", "logistics"] },
   isManagementOrAdmin: { guard: isManagementOrAdmin as Guard, allowed: ["admin", "management"] },
   isAnyUser: { guard: isAnyUser as Guard, allowed: [...ALL_APP_ROLES] },
   // Saisies d'exploitation sur un véhicule (kilométrage, position) : un client consulte, il ne saisit pas.

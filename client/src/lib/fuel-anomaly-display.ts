@@ -20,7 +20,7 @@ export function formatFuelAnomalyFigures(a: FuelAnomaly): FuelAnomalyFigures {
     case "tank-overflow":
       return {
         value: `${nf(a.quantity)} L`,
-        reference: `Réservoir : ${nf(a.tankCapacityL ?? a.averageQuantity)} L`,
+        reference: `Réservoir : ${nf(a.tankCapacityL ?? a.averageQuantity)} L, seuil : ${nf(a.threshold)} L`,
       };
     default:
       return {

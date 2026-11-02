@@ -14,10 +14,9 @@ describe("formatFuelAnomalyFigures", () => {
     expect(f.value).toContain("L");
     expect(f.reference).toMatch(/Moyenne.*L.*seuil.*L/);
   });
-  it("tank-overflow compare à la capacité", () => {
-    const f = formatFuelAnomalyFigures({ ...base, rule: "tank-overflow", tankCapacityL: 70 });
-    expect(f.reference).toContain("Réservoir");
-    expect(f.reference).toContain("70");
+  it("tank-overflow compare à la capacité et affiche le seuil toléré", () => {
+    const f = formatFuelAnomalyFigures({ ...base, rule: "tank-overflow", averageQuantity: 70, threshold: 73.5, tankCapacityL: 70 });
+    expect(f.reference).toBe(`Réservoir : 70 L, seuil : ${(73.5).toLocaleString("fr-FR")} L`);
   });
   it("odometer-regression en km, jamais en L", () => {
     const f = formatFuelAnomalyFigures({ ...base, rule: "odometer-regression", mileage: 98000, previousMileage: 98500, averageQuantity: 98500, threshold: 98500 });
