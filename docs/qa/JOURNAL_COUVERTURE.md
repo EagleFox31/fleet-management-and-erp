@@ -1777,7 +1777,7 @@ soumission sans doublon.
 ## Piste E : DIR2 et DIR3, rapports par période et contenu des exports
 
 **Quoi**
-- `tests/contract/reports-inventory-period.contract.test.ts` (6 cas + 3 `it.fails`) : fenêtre mai 2019, mouvements avant, aux deux bornes et 1 ms après ; sortie comptée en valeur absolue ; statistiques cohérentes avec les lignes ; fenêtre vide ; début après fin ; 401.
+- `tests/contract/reports-inventory-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre mai 2019, mouvements avant, aux deux bornes et 1 ms après ; sortie comptée en valeur absolue ; statistiques cohérentes avec les lignes ; fenêtre vide ; début après fin ; 401.
 - `tests/contract/reports-technician-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre juin 2019, deux techniciens créés, OT aux bornes et hors fenêtre ; totaux, taux arrondi, totaux globaux, fenêtre vide (taux 0), fenêtre étroite.
 - `tests/contract/exports-inventory-content.contract.test.ts` (4 cas) : cellules exactes de l'export inventaire (alerte OUI/NON, valeur = stock réel x prix, N/A) et ligne TOTAL.
 - `tests/contract/exports-invoices-content.contract.test.ts` (6 cas) : factures fournisseurs (paiements = TTC - solde, IMPAYÉ/PAYÉ, date fr-FR) et clients (échéance, filtre par client sans fuite d'un autre client, nom inconnu, nom trop long en 400).
@@ -1793,3 +1793,17 @@ soumission sans doublon.
 - Vert : 26/26 (4 fichiers). Rouge par mutation temporaire, puis restaurée : `<=` en `<` sur la borne haute du rapport inventaire (`server/routes.ts`), borne haute des OT décalée de 1 ms (`reports-service.ts`), valeur du stock calculée sur `quantity` au lieu de `realStock` et Paiements = solde (`excel-export-service.ts`) : les 4 fichiers passent au rouge. Après restauration, `git diff server` vide, vert de nouveau (second passage).
 - Défauts (it.fails, correctif à fleet-api) : `server/routes.ts:2840` et `:2894` `authenticate` seul, client et chauffeur lisent stock, prix, charge des techniciens alors que l'écran les masque (`reports/index.tsx:524`) ; `server/routes.ts:2842` date invalide : 200 vide ; `:2896` : date invalide, pas de 400.
 - Observation, sans test : l'export inventaire valorise au stock réel, le rapport inventaire à la quantité théorique : deux valeurs du stock pour une même pièce.
+
+## Piste E, relecture : décompte du rapport inventaire
+
+**Quoi**
+- Entrée « Piste E » : `reports-inventory-period` compte 5 cas + 3 `it.fails`, pas 6 + 3.
+
+**Comment**
+- Décompte des `it(` et `it.fails(` du fichier (5 et 3) ; le total 26/26 sur les quatre fichiers est cohérent avec 8 + 8 + 6 + 4.
+
+**Pourquoi**
+- Un chiffre faux dans le journal affaiblit les autres.
+
+**Preuve**
+- `grep -c` sur le fichier de contrat : 5 `it(`, 3 `it.fails(`.
