@@ -934,6 +934,10 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       invalidateCatalogEvent("alerts_read");
       break;
 
+    case "document_renewal_center_changed":
+      invalidateCatalogEvent("document_renewal_center_changed");
+      break;
+
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
     // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).
     case "work_order_item_changed":

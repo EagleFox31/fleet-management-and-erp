@@ -63,6 +63,11 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],
   } as EventDefinition<{ id: number }>,
+  document_renewal_center_changed: {
+    // Rôles qui lisent ou choisissent un centre (GET /centers).
+    scope: { type: "roles", roles: ["admin", "secretary", "logistics", "workshop_manager", "technician"] },
+    invalidates: ["/api/document-renewals/centers"],
+  } as EventDefinition<{ id: number }>,
 } as const;
 
 export type RealtimeEventName = keyof typeof REALTIME_EVENTS;

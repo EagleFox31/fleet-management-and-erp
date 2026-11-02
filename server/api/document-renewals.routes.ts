@@ -14,6 +14,7 @@ import {
   documentRenewalTransitionRefusal,
   isDocumentRenewalRequestStatus,
 } from "@shared/constants/document-renewal-statuses";
+import { moduleLogger } from "../lib/logger";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
   documentRenewalCenters,
@@ -24,6 +25,7 @@ import {
   vehicles,
 } from "@shared/schema";
 
+const log = moduleLogger("document-renewals");
 const router = Router();
 router.use(authenticate);
 
@@ -265,6 +267,12 @@ router.get("/centers", async (req, res) => {
       documentTypeRaw.length > 0 &&
       (REQUESTABLE_DOCUMENT_TYPES as readonly string[]).includes(documentTypeRaw);
 
+    // Écran de gestion (DOC1) : centres désactivés visibles des seuls rôles écrivains, 403 sinon.
+    const includeInactive = req.query.includeInactive === "1";
+    if (includeInactive && !hasRole(role, CREATE_ROLES)) {
+      return res.status(403).json({ message: "Accès non autorisé" });
+    }
+
     const rows = await db
       .select({
         id: documentRenewalCenters.id,
@@ -279,10 +287,12 @@ router.get("/centers", async (req, res) => {
       .where(
         isTyped
           ? and(
-              eq(documentRenewalCenters.isActive, true),
+              includeInactive ? undefined : eq(documentRenewalCenters.isActive, true),
               sql`(${documentRenewalCenters.documentType} is null or ${documentRenewalCenters.documentType} = ${documentTypeRaw})`,
             )
-          : eq(documentRenewalCenters.isActive, true),
+          : includeInactive
+            ? undefined
+            : eq(documentRenewalCenters.isActive, true),
       )
       .orderBy(documentRenewalCenters.name);
 
@@ -293,7 +303,7 @@ router.get("/centers", async (req, res) => {
       })),
     );
   } catch (error) {
-    console.error("Get document renewal centers error:", error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des centres de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -643,6 +653,7 @@ router.post("/requests", async (req, res) => {
           id: documentRenewalCenters.id,
           name: documentRenewalCenters.name,
           accreditationNumber: documentRenewalCenters.accreditationNumber,
+          isActive: documentRenewalCenters.isActive,
         })
         .from(documentRenewalCenters)
         .where(eq(documentRenewalCenters.id, centerId))
@@ -650,6 +661,9 @@ router.post("/requests", async (req, res) => {
 
       if (!existingCenter) {
         return res.status(404).json({ message: "Centre agréé introuvable." });
+      }
+      if (!existingCenter.isActive) {
+        return res.status(409).json({ message: "Ce centre agréé est désactivé." });
       }
       centerNameSnapshot = existingCenter.name;
       centerAccreditationSnapshot = resolveCenterAccreditation(existingCenter);
@@ -659,11 +673,15 @@ router.post("/requests", async (req, res) => {
           id: documentRenewalCenters.id,
           name: documentRenewalCenters.name,
           accreditationNumber: documentRenewalCenters.accreditationNumber,
+          isActive: documentRenewalCenters.isActive,
         })
         .from(documentRenewalCenters)
         .where(ilike(documentRenewalCenters.name, payload.centerName))
         .limit(1);
 
+      if (foundCenter && !foundCenter.isActive) {
+        return res.status(409).json({ message: "Ce centre agréé est désactivé." });
+      }
       if (foundCenter) {
         centerId = foundCenter.id;
         centerNameSnapshot = foundCenter.name;

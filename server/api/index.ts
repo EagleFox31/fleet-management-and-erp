@@ -21,6 +21,7 @@ import {
 } from "./work-order-items.routes";
 import partRequirementsRoutes from "./part-requirements.routes";
 import documentRenewalsRoutes from "./document-renewals.routes";
+import documentRenewalCentersRoutes from "./document-renewal-centers.routes";
 import managementRoutes from "./management.routes";
 import featureFlagsRoutes from "./feature-flags.routes";
 import vehicleDocumentTypesRoutes from "./vehicle-document-types.routes";
@@ -138,6 +139,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/labor-catalog", isWorkshopManager, laborCatalogWriteRoutes);
   apiRouter.use("/part-requirements", isStaff, partRequirementsRoutes);
   apiRouter.use("/document-renewals", documentRenewalsRoutes);
+  // Écriture des centres (DOC1) : POST/PATCH /centers ; le GET reste dans le routeur ci-dessus.
+  apiRouter.use("/document-renewals", documentRenewalCentersRoutes);
   apiRouter.use("/management", managementRoutes);
 
   // Routeurs du lot recette (T-08). Chemins relatifs à /api, déclarés dans chaque fichier :
