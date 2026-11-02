@@ -152,3 +152,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Pourquoi** : réserve de relecture de #58 (rapport PDF/Excel).
 - **xlsx** : SheetJS ne publie plus sur npm ; 0.18.5 reste vulnérable (pollution de prototype, ReDoS). Fichiers non fiables lus en deux endroits : `server/api/supplier-invoices.routes.ts:979` (téléversement, côté serveur) et `client/src/lib/excel-utils.ts:85`. Choix laissé à l'utilisateur : SheetJS 0.20.x depuis cdn.sheetjs.com (même API) ou migration vers une autre bibliothèque.
 - **Preuves** : audit avant 38 vulnérabilités (5 critiques), après 37 ; jspdf et dompurify absents de l'audit. Comportement non rejoué : le `node_modules` partagé est encore en 4.2.0, la CI de la PR installe depuis le lockfile.
+
+## 2026-11-02T21:50:00+01:00 — CDC-7 — Relecture #108 : jour de la période lu à Douala dans le contrat
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `kpiPeriodIssue` prenait « aujourd'hui » en UTC alors que le serveur complète `to` à Douala ; entre 00:00 et 01:00 à Douala, `?from=<jour de Douala>` sans `to` était refusé en 400 (`from > to`).
+- **Comment** : `KPI_TIME_ZONE` et `isoDateInZone` vivent dans `shared/contracts/kpi-period.ts` (un seul calcul) ; `server/lib/kpi-rules.ts` les importe et les réexporte sans les redéclarer. Commentaire erroné (« un jour d'écart ne change rien ») corrigé.
+- **Pourquoi** : constat majeur de relecture de #108.
+- **Preuves** : test rouge puis vert à 00:30 Douala (23:30 UTC la veille, horloge simulée) ; unitaires `kpi-period` et `kpi-rules-cdc` 50/50.

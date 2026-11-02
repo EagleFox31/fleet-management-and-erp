@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { kpiReportQuerySchema } from "../../../shared/contracts/exports";
 import { kpiQuerySchema, maintenanceCostsQuerySchema } from "../../../shared/contracts/kpi";
 import {
   KPI_MAX_SPAN_MONTHS,
+  KPI_TIME_ZONE,
+  isoDateInZone,
   isRealCalendarDate,
   kpiPeriodIssue,
   kpiPeriodQuerySchema,
@@ -86,4 +88,23 @@ describe("schémas de requête des KPI et du rapport", () => {
       expect(schema.safeParse({}).success).toBe(true);
     });
   }
+});
+
+describe("jour courant à Douala (UTC+1)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("isoDateInZone lit le jour dans Africa/Douala, pas en UTC", () => {
+    expect(KPI_TIME_ZONE).toBe("Africa/Douala");
+    expect(isoDateInZone(new Date("2026-11-02T23:30:00Z"))).toBe("2026-11-03");
+    expect(isoDateInZone(new Date("2026-11-02T22:59:00Z"))).toBe("2026-11-02");
+  });
+
+  it("à 00:30 à Douala (23:30 UTC la veille), `from` = jour de Douala sans `to` est accepté", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-02T23:30:00Z"));
+    expect(kpiPeriodQuerySchema.safeParse({ from: "2026-11-03" }).success).toBe(true);
+    expect(kpiQuerySchema.safeParse({ from: "2026-11-03" }).success).toBe(true);
+    // lendemain de Douala : toujours refusé
+    expect(kpiPeriodQuerySchema.safeParse({ from: "2026-11-04" }).success).toBe(false);
+  });
 });
