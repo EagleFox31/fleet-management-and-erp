@@ -124,3 +124,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : `kpiPeriodIssue(q, today)` contrôle `from` jusqu'à `to ?? today` (UTC, un jour d'écart sans effet sur un plafond en mois). `to` seul reste couvert : le serveur en déduit `from` sur 12 mois. Un `from` dans le futur sans `to` est désormais refusé comme une période inversée.
 - **Pourquoi** : réserve de relecture de #58/#59 ; même garde que la période à deux bornes, un seul endroit (`refineKpiPeriod`, partagé par KPI, coûts de maintenance et rapports).
 - **Preuves** : unitaires `kpi-period` 14/14 (cas `from` seul ajouté aux schémas KPI, coûts, rapport).
+
+## 2026-11-02T14:00:00+01:00 — CDC-7 — Réserves : refus des KPI vérifié pour tous les rôles
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le contrat KPI ne contrôlait le 403 que pour technicien et client ; chauffeur, secrétariat, logistique et magasin n'étaient pas testés.
+- **Comment** : `ROLES` et `DENIED` dérivés de `ALL_APP_ROLES` (source unique des rôles) ; `KPI_VIEWER_ROLES` doit valoir exactement admin, direction, chef d'atelier. Même dérivation pour le rapport KPI exportable et les taux horaires (tout rôle sauf admin).
+- **Pourquoi** : réserve de relecture de #58 ; un rôle ajouté au schéma est contrôlé sans retoucher le test.
+- **Preuves** : contrat `kpi-cdc` 20/20 sous db-lock.

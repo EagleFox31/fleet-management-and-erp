@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { KPI_VIEWER_ROLES } from "../../shared/constants/roles";
+import { ALL_APP_ROLES, KPI_VIEWER_ROLES } from "../../shared/constants/roles";
 import { EXPORTS_BASE_PATH } from "../../shared/contracts/exports";
 import {
   avgCostPerInterventionResponseSchema,
@@ -39,10 +39,11 @@ let server: Server;
 let baseUrl = "";
 const ids = createIdBag();
 const cookies = new Map<string, string>();
-const ROLES = ["admin", "management", "workshop_manager", "technician", "client"] as const satisfies readonly TestUserRole[];
+/** Tous les rôles du schéma : un rôle ajouté plus tard est contrôlé sans retoucher ce test. */
+const ROLES = ALL_APP_ROLES;
 
-async function login(role: TestUserRole) {
-  const user = await createTestUser({ role });
+async function login(role: string) {
+  const user = await createTestUser({ role: role as TestUserRole });
   ids.userIds.push(user.id);
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
@@ -96,11 +97,16 @@ afterAll(async () => {
 });
 
 const ALLOWED = ["admin", "management", "workshop_manager"] as const;
-const DENIED = ["technician", "client"] as const;
+/** Tous les autres rôles : technicien et client, mais aussi chauffeur, secrétariat, logistique, magasin… */
+const DENIED = ALL_APP_ROLES.filter((role) => !(ALLOWED as readonly string[]).includes(role));
 
 describe("rôles des indicateurs", () => {
-  it("le chef d'atelier appartient aux lecteurs des indicateurs", () => {
-    expect([...KPI_VIEWER_ROLES]).toEqual(expect.arrayContaining([...ALLOWED]));
+  it("les lecteurs des indicateurs sont exactement direction, admin et chef d'atelier", () => {
+    expect([...KPI_VIEWER_ROLES].sort()).toEqual([...ALLOWED].sort());
+  });
+
+  it("les rôles refusés couvrent chauffeur, secrétariat, logistique et magasin", () => {
+    expect(DENIED).toEqual(expect.arrayContaining(["driver", "secretary", "logistics", "warehouse", "technician", "client"]));
   });
 });
 
@@ -113,7 +119,7 @@ const PATHS = [
 ];
 
 describe("/api/kpi/* : rôles", { timeout: 120000 }, () => {
-  it.each(PATHS)("%s : 401 sans session, 403 technicien et client, 200 direction, admin et chef d'atelier", async (path) => {
+  it.each(PATHS)("%s : 401 sans session, 403 pour tout rôle hors lecteurs, 200 direction, admin et chef d'atelier", async (path) => {
     const q = "?from=2001-01-01&to=2001-12-31";
     expect((await call("GET", path + q)).status).toBe(401);
     for (const role of DENIED) expect((await call("GET", path + q, role)).status, role).toBe(403);
@@ -186,7 +192,7 @@ describe("/api/workshop-labor-rates", { timeout: 120000 }, () => {
   it("administrateur seul : 401 sans session, 403 pour les autres rôles", async () => {
     process.env.FEATURE_FLAGS = "maintenance-report=on";
     expect((await call("GET", WORKSHOP_LABOR_RATES_PATH)).status).toBe(401);
-    for (const role of ["management", "workshop_manager", "technician", "client"]) {
+    for (const role of ALL_APP_ROLES.filter((r) => r !== "admin")) {
       expect((await call("GET", WORKSHOP_LABOR_RATES_PATH, role)).status, role).toBe(403);
       expect((await call("POST", WORKSHOP_LABOR_RATES_PATH, role, { effectiveFrom: RATE_DATE, hourlyRateHt: 5000 })).status, role).toBe(403);
     }
@@ -233,7 +239,7 @@ describe("/api/exports/kpi-report", { timeout: 180000 }, () => {
     expect((await call("GET", `${path}?${range}`, "admin")).status).toBe(404);
   });
 
-  it("drapeaux allumés : 401 sans session, 403 technicien et client, 200 direction, admin et chef d'atelier", async () => {
+  it("drapeaux allumés : 401 sans session, 403 pour tout rôle hors lecteurs, 200 direction, admin et chef d'atelier", async () => {
     process.env.FEATURE_FLAGS = "exports=on,kpi-reports=on";
     expect((await call("GET", `${path}?${range}`)).status).toBe(401);
     for (const role of DENIED) expect((await call("GET", `${path}?${range}`, role)).status, role).toBe(403);
