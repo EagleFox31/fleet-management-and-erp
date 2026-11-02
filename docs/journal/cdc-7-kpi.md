@@ -61,3 +61,14 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
   - `tests/integration/kpi-service.test.ts` (~61, ~82, ~87-91) : série à zéros, champs optionnels, coût sur `end_date`.
   - `tests/contract/lot-exports-roles.contract.test.ts:70-86` : `kpi-report` répond 404 tant que `kpi-reports` est coupé ; ajouter le drapeau ou exclure le chemin.
 - **Hors périmètre** : le défaut d'invalidation temps réel des KPI (clé `["/api/kpi"]`, événements de création et suppression d'OT) va à l'écran #7 ; `useRealTimeSync.ts` n'est pas touché.
+
+## 2026-11-02T12:14:51+01:00 — CDC-7 — Période des KPI bornée (PR #91)
+
+- **Agent** : api · **Branche** : `lot/api/CDC-7-kpi-period` · **Commit** : voir `git log`
+- **Statut** : fait, contrats joués
+- **Quoi** : une période KPI démesurée (`to=9999-12-30`) ou une date hors calendrier (`2026-02-31`) faisait boucler `monthKeysBetween` pendant plusieurs secondes avant une 500. Elle est désormais refusée en 400 avant tout calcul.
+- **Comment** : `shared/contracts/kpi-period.ts` (date réelle, années 2000-2100, 36 mois civils au plus), appliqué à `kpiQuerySchema`, `maintenanceCostsQuerySchema` et `kpiReportQuerySchema`. Le travail venait de la branche orpheline `wip/kpi-period` (31/10), reprise sur décision de l'utilisateur.
+- **Pourquoi** : une entrée utilisateur ne doit pas pouvoir coûter des secondes de CPU ni produire une 500.
+- **Rupture de contrat d'entrée** : volontaire. Une période de plus de 36 mois ou hors 2000-2100 passe de 200 (ou 500) à 400. Aucun écran n'envoie de période (`<KpiTiles />` sans props) ; seuls `kpi-cdc` et `kpi.contract` appellent ces routes.
+- **Limite** : une seule borne n'est pas soumise aux 36 mois (la borne manquante est complétée par le serveur) ; le pire cas est d'environ 1 200 mois, sans blocage.
+- **Preuves** : tsc 0 ; unitaires `tests/unit/shared/kpi-period.test.ts` + `kpi-rules-cdc` 47/47 ; contrats `kpi-cdc` + `kpi` + `lot-exports-roles` 209/209 (session de tests).

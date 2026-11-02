@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 import { KPI_VIEWER_ROLES, type AppRole } from "../constants/roles";
-import { isoDateSchema } from "./common";
+import { kpiDateSchema, refineKpiPeriod } from "./kpi-period";
 
 export const EXPORTS_BASE_PATH = "/api/exports";
 
@@ -73,13 +73,10 @@ export const KPI_REPORT_FORMATS = ["xlsx", "pdf"] as const;
 export const kpiReportQuerySchema = z
   .object({
     period: z.enum(KPI_REPORT_PERIODS).default("month"),
-    from: isoDateSchema.optional(),
-    to: isoDateSchema.optional(),
+    from: kpiDateSchema.optional(),
+    to: kpiDateSchema.optional(),
     format: z.enum(KPI_REPORT_FORMATS).default("xlsx"),
   })
-  .refine((q) => !q.from || !q.to || q.from <= q.to, {
-    message: "La date de début doit précéder la date de fin.",
-    path: ["from"],
-  });
+  .superRefine(refineKpiPeriod);
 
 export type KpiReportQuery = z.infer<typeof kpiReportQuerySchema>;
