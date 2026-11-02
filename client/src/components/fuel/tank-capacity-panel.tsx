@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LoadingError } from "@/components/ui/loading-error";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
 import { userMessageOf } from "@/lib/api-error";
@@ -45,6 +46,9 @@ export function TankCapacityPanel({ canEdit }: { canEdit: boolean }) {
   });
   const save = useSingleFlightMutate(mutation.mutate);
 
+  if (summary.isError) {
+    return <LoadingError isLoading={false} error={summary.error} onRetry={() => summary.refetch()} />;
+  }
   if (!summary.data || summary.data.vehiclesWithoutTankCapacity === 0) return null;
   const { vehiclesWithoutTankCapacity: count, vehicles } = summary.data;
 

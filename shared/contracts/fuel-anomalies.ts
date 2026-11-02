@@ -54,7 +54,7 @@ export const FUEL_ANOMALIES_SUMMARY_PATH = "/api/fuel-card/anomalies/summary";
 export const fuelAnomaliesSummarySchema = z.object({
   vehiclesWithoutTankCapacity: z.number().int().nonnegative(),
   /** Les véhicules à compléter, triés par immatriculation, tronqués (le compteur reste le total). */
-  vehicles: z.array(z.object({ id: z.number().int(), label: z.string() })),
+  vehicles: z.array(z.object({ id: z.number().int(), label: z.string() })).default([]),
 });
 export type FuelAnomaliesSummary = z.infer<typeof fuelAnomaliesSummarySchema>;
 
