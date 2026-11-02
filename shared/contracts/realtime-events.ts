@@ -15,6 +15,7 @@ import {
   MISSION_ADVISORY_ROLES,
   PART_SALE_READ_ROLES,
   STAFF_ROLES,
+  WORK_ORDER_COST_READ_ROLES,
   type AppRole,
 } from "../constants/roles";
 
@@ -94,6 +95,13 @@ export const REALTIME_EVENTS = {
     scope: { type: "broadcast" },
     invalidates: ["/api/vehicle-document-types"],
   } as EventDefinition<{ code: string }>,
+  workshop_labor_rate_created: {
+    // Un nouveau taux change le coût des OT clos après sa date d'effet : KPI, listes du
+    // technicien et taux d'un OT ouvert (clé `/api/work-orders/:id/labor-rate`, invalidée
+    // par prédicat dans useRealTimeSync, la clé portant l'identifiant).
+    scope: { type: "roles", roles: [...WORK_ORDER_COST_READ_ROLES] },
+    invalidates: [...KPI_QUERY_KEYS, "/api/technician/work-orders", "/api/technician/my-work-orders"],
+  } as EventDefinition<{ effectiveFrom: string }>,
   alerts_read: {
     // Nominatif : les autres onglets du même compte remettent cloche et compteur à jour.
     scope: "user",

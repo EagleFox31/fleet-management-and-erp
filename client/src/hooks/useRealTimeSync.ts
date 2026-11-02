@@ -923,6 +923,13 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "time_tracking_updated":
       invalidateCatalogEvent("time_tracking_updated");
       break;
+    case "workshop_labor_rate_created":
+      invalidateCatalogEvent("workshop_labor_rate_created");
+      // Taux d'un OT ouvert : la clé porte l'identifiant (`/api/work-orders/:id/labor-rate`).
+      queryClient.invalidateQueries({
+        predicate: (query) => typeof query.queryKey[0] === "string" && query.queryKey[0].endsWith("/labor-rate"),
+      });
+      break;
     case "vehicle_document_type_changed":
       invalidateCatalogEvent("vehicle_document_type_changed");
       // Satellites : documents d'un véhicule et panneau d'échéances.

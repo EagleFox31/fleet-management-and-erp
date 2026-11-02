@@ -105,3 +105,13 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Comment** : `calculateWorkOrderCosts` prend la liste et groupe heures, pièces et rotations par `work_order_id` ; `laborRatesForWorkOrders` sert les taux en une requête `JOIN LATERAL`. La date qui choisit le taux (`RATE_DATE_OF_WORK_ORDER`) est partagée avec `laborRateForWorkOrder`. Les `console.*` du chemin touché passent à `moduleLogger`.
 - **Pourquoi** : réserve de relecture de #89 ; la règle de coût reste `computeWorkOrderCost`, inchangée.
 - **Preuves** : tsc 0 ; intégration `work-order-cost` 3/3 dont un cas à trois OT (avec taux, sans taux, sans ligne).
+
+## 2026-11-02T13:05:17+01:00 — CDC-7 — Réserves : nouveau taux horaire diffusé en temps réel
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : un taux saisi par l'admin (`POST /api/workshop-labor-rates`) ne rafraîchissait ni le taux d'un OT ouvert, ni les KPI, ni la liste du technicien.
+- **Comment** : événement `workshop_labor_rate_created` au catalogue (portée `WORK_ORDER_COST_READ_ROLES`, invalide `KPI_QUERY_KEYS` et les listes du technicien), émis par la route ; `useRealTimeSync` invalide en plus les clés `/api/work-orders/:id/labor-rate` par prédicat (la clé porte l'identifiant).
+- **Pourquoi** : réserve de relecture de #89 ; règle des 3 couches (AGENTS.md §2).
+- **Aussi** : reprise de 6cf1943 (#60, tests alignés sur #58) pour que la branche soit verte avant la fusion de #60 ; changement identique, sans conflit attendu.
+- **Preuves** : tsc 0 ; unitaires 1195/1196 (rouge connu `pending-invoices-kpi-roles`) dont `tests/unit/shared/labor-rate-realtime.test.ts`.
