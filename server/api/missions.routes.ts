@@ -15,9 +15,27 @@ import {
   extractMissionActualRoadExpensesHT,
   mergeMissionActualFdrCost,
 } from "@shared/constants/management-mission-profitability";
+import { AppError } from "../lib/app-error";
+import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
+
+// Cloison chauffeur (DRV2-3) : toute route `/:id/...` du routeur refuse un chauffeur
+// non affecté à la mission. Le personnel n'est pas filtré. Mission inconnue : 403 aussi,
+// pour ne pas révéler l'existence d'un identifiant.
+router.param("id", async (req, _res, next, value) => {
+  try {
+    const missionId = Number(value);
+    if (!Number.isInteger(missionId)) return next();
+    if (!(await canAccessMissionAsDriver(req.user, missionId))) {
+      throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 type MissionRealtimeEvent =
   | "mission_created"
@@ -588,6 +606,11 @@ function broadcastDocumentRenewalCreatedFromMission(
 // GET /api/missions - Liste toutes les missions
 router.get("/", async (req, res) => {
   try {
+    // Chauffeur : seulement les missions où il est affecté (DRV2-3).
+    const driverScope = await driverScopeOf(req.user);
+    if (driverScope === null) {
+      return res.json([]);
+    }
     const allMissions = await db
       .select({
         id: missions.id,
@@ -628,6 +651,14 @@ router.get("/", async (req, res) => {
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
+      .where(
+        driverScope === undefined
+          ? undefined
+          : inArray(
+              missions.id,
+              db.select({ id: assignments.missionId }).from(assignments).where(eq(assignments.driverId, driverScope)),
+            ),
+      )
       .orderBy(desc(missions.createdAt));
 
     // Get assignments for each mission
@@ -2083,13 +2114,31 @@ router.patch("/:id", async (req, res) => {
             id: vehicles.id,
             registrationNumber: vehicles.registrationNumber,
             tonnage: vehicles.tonnage,
+            status: vehicles.status,
+            insuranceExpiry: vehicles.insuranceExpiry,
+            technicalInspectionDate: vehicles.technicalInspectionDate,
+            licensePlateExpiry: vehicles.licensePlateExpiry,
           })
           .from(vehicles)
-          .where(eq(vehicles.id, vehicleId))
+          .where(and(eq(vehicles.id, vehicleId), isNull(vehicles.deletedAt)))
           .limit(1);
 
         if (!selectedVehicle) {
           return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
+        }
+
+        // Même règle que la création (POST /) : un véhicule à l'atelier ou en défaut
+        // d'assurance, de visite technique ou de plaque ne s'affecte pas non plus par PATCH.
+        const eligibilite = getMissionEligibility(selectedVehicle);
+        if (!eligibilite.eligible) {
+          return res.status(400).json({
+            message: formatEligibilityRefusal(selectedVehicle.registrationNumber, eligibilite.blockers),
+            blockers: eligibilite.blockers,
+            errors: eligibilite.blockers.map((blocker) => ({
+              field: "assignment.vehicleId",
+              message: blocker.reason,
+            })),
+          });
         }
 
         const [selectedDriver] = await db
