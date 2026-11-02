@@ -1060,7 +1060,9 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Constat
 - Mise en place d'un Postgres Docker (`docker-compose.test.yml`) et d'une CI (`.github/workflows/ci.yml`) pour sortir les suites intégration et contrat de la latence Neon. Premier passage : 34 fichiers d'intégration en échec dès `setupFiles`, `relation "users" does not exist`.
 - Second near miss : wsproxy refusait toute connexion, `address postgres:5432postgres:5432: too many colons`.
-- Trois tests échouent en local : `part-requirement-received-by` (régression produit, pas infra : `ensureAutoSupplierInvoiceFromOrder` lève « montant HT > 0 » sur une commande dont `totalAmountHT` reste à 0, contrôle ajouté par c3f3260 après le test c06fa45) ; `management-dashboard-service` ×2 dans le passage complet, verts seuls (déjà noté flaky le 2026-10-30, journal de couverture l.171).
+- Trois tests échouent en local : `part-requirement-received-by` (régression produit, pas infra : `ensureAutoSupplierInvoiceFromOrder` lève « montant HT > 0 » sur une commande dont `totalAmountHT` reste à 0, contrôle ajouté par c3f3260 après le test c06fa45) ; `management-dashboard-service` ×2 dans le passage complet, verts seuls (déjà noté flaky le 2026-10-30, journal de couverture l.171). Note du 2026-11-02 : les deux sont
+  résolus depuis, `received-by` par #110 sur `main`, le tableau de bord par a7aabc1/6db199a (voir l'entrée
+  « test classé instable qui dépendait de la date du jour »).
 
 ### Cause racine
 - `initializeDatabase()` (`server/init-database.ts`) ne crée aucune table : il suppose un `drizzle-kit push` initial jamais rejoué, et n'avait jamais tourné sur une base vide. L'idempotence (`IF NOT EXISTS`) masquait l'absence de création.

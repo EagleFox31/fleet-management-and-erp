@@ -1,6 +1,6 @@
 # CI et Postgres local pour les suites intégration et contrat
 
-Date : 2026-11-02. Branche : `fix/workflow-id-400`.
+Date : 2026-11-02. Branche : `ci-postgres-local`.
 
 ## Constat
 
@@ -21,11 +21,13 @@ Résultats hors vert, à ne pas confondre avec le montage :
   `[201, 400]`. Défaut produit révélé par la latence basse : le contrôle « le code existe déjà »
   précédait l'`INSERT` et la contrainte UNIQUE tranchait en 500. Corrigé dans
   `server/services/work-order-items-service.ts` (violation 23505 → refus métier 400), 3/3 verts.
-- `management-dashboard-service` ×2 (intégration) : flaky connu, verts isolés.
+- `management-dashboard-service` ×2 (intégration) : classé flaky à tort, dépendait de la date du jour
+  (factures au 15/16 hors période `month`). Corrigé le 2026-11-02 (a7aabc1, 6db199a), vert en CI.
 - `part-requirement-received-by` (intégration) : `Saisissez un montant HT ou TTC supérieur à 0`
   (`three-way-matching-service.ts`, contrôle ajouté le 2026-11-01 par c3f3260, test du 2026-10-30).
   Échoue aussi sur Neon (vérifié le 2026-11-02) : régression produit sur `main`, indépendante du
-  montage ; non corrigée ici.
+  montage ; non corrigée ici. Corrigée ensuite sur `main` par #110 (2f504bb), job `integration` vert
+  depuis la fusion de main (c87e6a2).
 
 ## Montage
 

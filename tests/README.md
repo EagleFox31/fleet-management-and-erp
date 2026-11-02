@@ -47,7 +47,8 @@ PowerShell : `$env:DATABASE_URL_TEST="postgres://fleet:fleet@postgres:5432/fleet
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
 - Les variables d'environnement priment sur `.env` (`node --env-file`), pas besoin de modifier le fichier.
-- Le `tmpfs` du conteneur repart vide à chaque `up` : la base est recréée par `initializeDatabase()`.
+- Le `tmpfs` du conteneur repart vide à chaque `up` : les tables sont recréées par `test:db:schema`
+  (appelé par `test:db:up`), pas par `initializeDatabase()`, qui suppose le schéma déjà poussé.
 
 La CI (`.github/workflows/ci.yml`) utilise le même montage en `services:`, avec le contrat découpé en shards vitest
 (`--shard=i/n`), une base par shard.
