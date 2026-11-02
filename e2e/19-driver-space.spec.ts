@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../server/db";
-import { assignments, clients, drivers, missions, users, vehicles, workOrders } from "../shared/schema";
+import { assignments, clients, drivers, incidents, missions, users, vehicles, workOrders } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
@@ -40,7 +40,8 @@ async function purge(): Promise<void> {
   const vehicleRows = await db.select({ id: vehicles.id }).from(vehicles).where(like(vehicles.registrationNumber, `${PREFIX}%`));
   const vehicleIds = vehicleRows.map((row) => row.id);
   if (vehicleIds.length > 0) {
-    // Le jour où une panne crée un OT (DRV2-2), il part avec le véhicule de test.
+    // Une panne crée un incident et un OT (DRV2-2) : ils partent avec le véhicule de test.
+    await db.delete(incidents).where(inArray(incidents.vehicleId, vehicleIds));
     await db.delete(workOrders).where(inArray(workOrders.vehicleId, vehicleIds));
     await db.delete(assignments).where(inArray(assignments.vehicleId, vehicleIds));
   }
