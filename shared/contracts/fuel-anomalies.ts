@@ -46,6 +46,8 @@ export type FuelAnomalyResolution = z.infer<typeof fuelAnomalyResolutionSchema>;
  *   précédent), mais le précédent quand c'est un pic isolé, c.-à-d. quand le kilométrage qui le suit
  *   retrouve au moins celui d'avant le pic (`nextMileage` renseigné, `threshold` = kilométrage suivant,
  *   `averageQuantity` = kilométrage d'avant le pic). `mileage` et `previousMileage` renseignés.
+ *   Limites connues : l'écart n'est pas pesé (10000, 10400, 10390 marque 10400) ; un pic sur le
+ *   premier plein connu (99999, 1000, 1100) marque encore 1000, faute de plein d'avant.
  * Le statut est celui de la dernière décision, `open` sans décision.
  */
 export const FUEL_ANOMALIES_PATH = "/api/fuel-card/anomalies";

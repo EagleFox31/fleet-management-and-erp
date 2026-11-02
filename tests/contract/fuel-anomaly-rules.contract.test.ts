@@ -174,6 +174,7 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
       expect(emitted).toHaveLength(1);
       expect(emitted[0].data.scope).toEqual(REALTIME_EVENTS.vehicle_tank_capacity_changed.scope);
       expect(events.filter((e) => e.event === "fuel_record_validated")).toHaveLength(0);
+      expect(events.filter((e) => e.event === "fuel_record_changed")).toHaveLength(0);
       expect((await refusalOf({ tankCapacityL: 91 })).status).toBe(200);
       expect(events.filter((e) => e.event === "vehicle_tank_capacity_changed" && e.data.id === vehicleId)).toHaveLength(1);
     });
