@@ -47,13 +47,11 @@ function declaredQueryKeys(): Set<string> {
 const declared = declaredQueryKeys();
 
 /**
- * Clés dont l'écran n'existe pas encore sur cette base : les routes serveur sont livrées par la
- * PR #58 (CDC-7), l'écran par le lot CDC-7 qui posera `KPI_FAILURES_PATH` et
- * `KPI_MAINTENANCE_COSTS_PATH` ; les pages CDC-4 (ventes) et CDC-6 (carte) sont encore vides. Liste figée : retirer l'entrée quand la clé existe côté client.
+ * Clés dont l'écran n'existe pas encore sur cette base : les pages CDC-4 (ventes) et CDC-6 (carte)
+ * sont encore vides. Les clés KPI en sont sorties avec #58 (`KPI_FAILURES_PATH`,
+ * `KPI_MAINTENANCE_COSTS_PATH` dans shared/contracts/kpi.ts). Liste figée : retirer l'entrée quand la clé existe côté client.
  */
 const AWAITING_SCREEN: Record<string, string> = {
-  "/api/kpi/failures": "CDC-7 : tuile des pannes",
-  "/api/kpi/maintenance-costs": "CDC-7 : tuile des coûts de maintenance",
   "/api/part-sales": "CDC-4 : écran des ventes de pièces",
   "/api/vehicle-positions": "CDC-6 : carte de la flotte",
 };
@@ -82,8 +80,6 @@ describe("événements temps réel : clés d'invalidation", () => {
 
   it("la liste des clés en attente d'écran est figée", () => {
     expect(Object.keys(AWAITING_SCREEN).sort()).toEqual([
-      "/api/kpi/failures",
-      "/api/kpi/maintenance-costs",
       "/api/part-sales",
       "/api/vehicle-positions",
     ]);
