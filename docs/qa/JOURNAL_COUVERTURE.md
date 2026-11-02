@@ -1653,6 +1653,7 @@ soumission sans doublon.
 
 **Preuve**
 - Avant : 3 suites en échec au hook, 10 tests verts. Après : plus d'échec de hook.
+
 ## Piste C, étape 2 : cloison client sur les lectures de véhicule, deux clients et le personnel
 
 **Quoi**
@@ -1683,6 +1684,39 @@ soumission sans doublon.
 
 **Preuve**
 - P5 vert 1/1, P6 vert 3/3, deux passages de suite (idempotence). Rouge sur la version fautive : P5 avec le crédit de l'usagé au démontage neutralisé (`tires-service-simplified.ts:512`, `+ 1` en `+ 0`) ; P6 avec le crédit de réception neutralisé (`procurement-service.ts:238`) : 2 des 3 cas échouent. Une première mutation sur `part-requirements-service.ts:430` laissait P6 vert : ce n'est pas le chemin de réception d'une commande, le test ne prétend pas le couvrir.
+
+## Bilan après les correctifs #76 à #80
+
+**Quoi**
+- `PLAN_COUVERTURE_MODULES.md` : 16 lignes mises à jour. Passent OK : T8, VEH1, VEH2, VEH4, MNT1, MNT2, CAT1, PRT5, SUP1, SUP2, DRV1, FUEL1, FUEL2, MIS2 (déjà OK, mention du défaut retirée). Restent partiels avec défauts levés : PRT1 (variante et spécification sans route), DIR3 (exports hors carburant).
+- `couverture-tests.html` versionnée : bilan 52 testés, 16 partiels, 3 non testés (ADM2, DRV2, P5), 2 à construire (DOC1, FUEL3), sur 73.
+
+**Comment**
+- Statuts déduits des `it.fails` retirés par commit (`git show <pr> -- tests`) : plus aucun `it.fails(` sous `tests/` ni `e2e/` sur `main` (67b1588), seul le garde-fou `it-fails-hygiene` cite le mot.
+- PRT5 était couvert depuis #65 (`part-requirement-labels-hygiene`) sans que le plan soit mis à jour.
+
+**Pourquoi**
+- Le plan disait encore « Partiel, `it.fails` » pour des défauts corrigés : le bilan sous-estimait la couverture de 14 éléments.
+
+**Preuve**
+- Décompte du tableau `mods` de la page : `{ OK: 52, P: 16, F: 3, X: 2 }`. Preuves d'exécution des tests convertis : celles des PR #76 à #80 (unitaires 869/869, contrats rejoués, logs `scratchpad/logs/final80-*.log`).
+
+## Piste C, relecture : garde-fou e2e sans contournement
+
+**Quoi**
+- `playwright.config.ts` : `reuseExistingServer: false`. Un serveur déjà lancé sur le port (donc potentiellement sur la production) n'est plus réutilisé.
+- `e2e/helpers/production-guard.ts` : `hostOf` renvoyait `""` pour une URL sans `user@`, ce qui laissait passer la production. L'autorité entière est maintenant l'hôte.
+- `e2e/README.md` : phrase sur le refus précisée (base visée par la session), limite `E2E_BASE_URL` détaillée.
+- Fusion de `docs/couverture-apres-correctifs` (#81) : ligne T8 du plan reprise de #81, entrées de journal conservées toutes deux, ligne vide ajoutée avant l'étape 2.
+
+**Comment**
+- `tests/unit/e2e/production-guard.test.ts` : URL de production sans identifiants (hôte, marqueur, refus) et verrou sur `reuseExistingServer`.
+
+**Pourquoi**
+- Le garde-fou ne voit que la `DATABASE_URL` de la session : réutiliser un serveur existant le contournait. Une URL sans identifiants est valide pour `pg`.
+
+**Preuve**
+- Rouge sur le code d'avant (les deux fichiers sources restaurés) : 2 échecs sur 16. Vert après : 16/16.
 
 
 ## Piste D, étape 1 : cliquets T1, T3, T4 sur les routes d'écriture
@@ -1723,10 +1757,27 @@ soumission sans doublon.
 - 13/13 verts avec les 3 cas existants (premier essai : délai de 10 s des hooks dépassé sur la branche froide, relancé avec 60 s). Les 2 `it.fails` passent donc la date impossible lève une erreur qui n'est pas un 400. Pas de rouge sur la version fautive pour les cas de bord : il n'y a pas de défaut de bord, ce sont des garde-fous de comportement correct. Second passage (idempotence) non rejoué faute de tours : nettoyage en `afterAll`.
 - Défaut : `shared/contracts/common.ts:12` (`isoDateSchema` ne vérifie que la forme) puis `server/services/time-tracking-service.ts:27` (`::date` en SQL) : erreur de base au lieu de 400. Correctif à fleet-api.
 
+## Piste D, relecture : les cliquets jugent la route réellement servie
+
+**Quoi**
+- `write-routes-scan.ts` (`allWriteRoutes`) lisait `routes.ts` d'abord. Or `server/app.ts` monte `apiRouter` avant `registerRoutes` : Express sert la version de `server/api`. Les routeurs sont maintenant lus dans l'ordre de montage de `server/api/index.ts` (`mountOrder`), `routes.ts` en dernier.
+- Un garde qui rend la main par `next()` sans répondre (`admin-users-guard.routes.ts`) ne masque plus la vraie route : il est écarté (`isPassThrough`) et ses middlewares (`isAdmin`) sont prêtés à la déclaration servie.
+- Listes gelées : T1 perd `post /api/fuel-card/consumption` ; T3 et T4 perdent `post /api/workflows/vehicle-acquisition` et `patch /api/workflows/vehicle-acquisition/:sessionId`. Aucune entrée ajoutée : aucune route servie non gardée n'est apparue.
+- Non fait : les clés issues de gabarits (`relative(alertPath(":id"))`) restent telles quelles ; les résoudre demande de lire les constantes de chemin, pas simple.
+
+**Comment**
+- `tests/unit/server/write-routes-ratchet.test.ts` : l'ordre `app.use("/api", apiRouter)` avant `registerRoutes`, la version servie de `fuel-card/consumption` vient de `api/fuel-card.routes.ts` et est gardée, ordre de montage, garde `next()` (détection et prêt de middlewares).
+
+**Pourquoi**
+- Les cliquets jugeaient la version morte de routes dupliquées : une route servie gardée figurait comme non gardée, et inversement une route non gardée pouvait échapper.
+
+**Preuve**
+- Rouge avec `routes.ts` remis en premier : 4 échecs (ordre, T1, T3, T4). Vert avec l'ordre corrigé : 15/15.
+
 ## Piste E : DIR2 et DIR3, rapports par période et contenu des exports
 
 **Quoi**
-- `tests/contract/reports-inventory-period.contract.test.ts` (6 cas + 3 `it.fails`) : fenêtre mai 2019, mouvements avant, aux deux bornes et 1 ms après ; sortie comptée en valeur absolue ; statistiques cohérentes avec les lignes ; fenêtre vide ; début après fin ; 401.
+- `tests/contract/reports-inventory-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre mai 2019, mouvements avant, aux deux bornes et 1 ms après ; sortie comptée en valeur absolue ; statistiques cohérentes avec les lignes ; fenêtre vide ; début après fin ; 401.
 - `tests/contract/reports-technician-period.contract.test.ts` (5 cas + 3 `it.fails`) : fenêtre juin 2019, deux techniciens créés, OT aux bornes et hors fenêtre ; totaux, taux arrondi, totaux globaux, fenêtre vide (taux 0), fenêtre étroite.
 - `tests/contract/exports-inventory-content.contract.test.ts` (4 cas) : cellules exactes de l'export inventaire (alerte OUI/NON, valeur = stock réel x prix, N/A) et ligne TOTAL.
 - `tests/contract/exports-invoices-content.contract.test.ts` (6 cas) : factures fournisseurs (paiements = TTC - solde, IMPAYÉ/PAYÉ, date fr-FR) et clients (échéance, filtre par client sans fuite d'un autre client, nom inconnu, nom trop long en 400).
@@ -1743,6 +1794,20 @@ soumission sans doublon.
 - Défauts (it.fails, correctif à fleet-api) : `server/routes.ts:2840` et `:2894` `authenticate` seul, client et chauffeur lisent stock, prix, charge des techniciens alors que l'écran les masque (`reports/index.tsx:524`) ; `server/routes.ts:2842` date invalide : 200 vide ; `:2896` : date invalide, pas de 400.
 - Observation, sans test : l'export inventaire valorise au stock réel, le rapport inventaire à la quantité théorique : deux valeurs du stock pour une même pièce.
 
+## Piste E, relecture : décompte du rapport inventaire
+
+**Quoi**
+- Entrée « Piste E » : `reports-inventory-period` compte 5 cas + 3 `it.fails`, pas 6 + 3.
+
+**Comment**
+- Décompte des `it(` et `it.fails(` du fichier (5 et 3) ; le total 26/26 sur les quatre fichiers est cohérent avec 8 + 8 + 6 + 4.
+
+**Pourquoi**
+- Un chiffre faux dans le journal affaiblit les autres.
+
+**Preuve**
+- `grep -c` sur le fichier de contrat : 5 `it(`, 3 `it.fails(`.
+
 
 ## Piste F : T6, WO1, WO7, écrans satellites des transitions d'OT
 
@@ -1757,5 +1822,28 @@ soumission sans doublon.
 
 **Preuve**
 - Vert : 3/3 en deux passages consécutifs (rouge reconfirmé après passage des attentes de refetch en requêtes horodatées, un premier essai avait échoué sur une création lente de la base distante). Rouge : retrait temporaire de l'invalidation `/api/work-orders/statistics` dans `work_order_updated` (`useRealTimeSync.ts`) : échec à l'attente du refetch après le démarrage (spec ligne 132) ; mutation annulée, `git diff client` vide.
-- Défaut (test.fail, correctif à fleet-api) : `server/api/technician-work-orders.routes.ts:"+L+"` diffuse `work_order_updated` mais n'appelle pas `alertService.notifyWorkOrderProgress` (seul `server/routes.ts:2321` le fait) : pas d'alerte pour le chef quand le technicien démarre depuis son écran.
+- Défaut (test.fail, correctif à fleet-api) : `server/api/technician-work-orders.routes.ts:96` diffuse `work_order_updated` mais n'appelle pas `alertService.notifyWorkOrderProgress` (seul `server/routes.ts:2321` le fait) : pas d'alerte pour le chef quand le technicien démarre depuis son écran.
 - Non couvert : MIS1/P2 (affectation, étapes, lancement de mission au navigateur) faute de tours.
+
+## Piste F, relecture : témoin du chef et refetch borné par la trame
+
+**Quoi**
+- Gabarit non rempli `:"+L+"` remplacé par `:96` (`technician-work-orders.routes.ts`).
+- `e2e/15` : le témoin WO7 vérifie maintenant la trame `work_order_updated` de l'OT chez le chef ; les étapes création, démarrage, fin et suppression attendent la trame de CETTE transition (statut et identifiant dans la trame), puis n'acceptent qu'un refetch postérieur à son arrivée (marge 250 ms).
+
+**Comment**
+- `observe` renvoie aussi `frameLog` (trames horodatées) ; `frameArrival` renvoie l'instant d'arrivée.
+
+**Pourquoi**
+- Un refetch tardif d'une étape précédente pouvait satisfaire l'attente de la suivante ; le témoin ne vérifiait aucune trame.
+
+**Preuve**
+- `tsc` global : 0 erreur. Exécution e2e : voir l'entrée suivante.
+
+## Piste F, relecture : exécution e2e non obtenue (correction de l'entrée précédente)
+
+**Quoi**
+- Les modifications de `e2e/15` n'ont pas pu être rejouées : le port 5000 était occupé par le serveur d'un autre run (réutilisation interdite par le garde-fou). Un serveur lancé à part sur le port 5001 (branche de test, sous `db-lock`) a affiché une page blanche, donc aucune socket temps réel : les 3 tests échouent avant la première assertion modifiée (`observe`, attente `auth_success`).
+
+**Pourquoi**
+- Cause non élucidée (serveur de développement lancé hors `npm run dev`). Le correctif de la spec reste donc **non prouvé** ; `tsc` global est à 0 erreur. À rejouer : `E2E_CHANNEL=msedge` sur la branche Neon de test, port 5000 libre, sous `db-lock`.

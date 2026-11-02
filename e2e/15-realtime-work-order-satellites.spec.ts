@@ -47,10 +47,14 @@ test.afterAll(async () => {
 async function observe(context: BrowserContext, credentials: E2ECredentials) {
   const page = await context.newPage();
   const frames: string[] = [];
+  // Mêmes trames, horodatées à leur arrivée : sert à borner l'attente d'un refetch.
+  const frameLog: { payload: string; at: number }[] = [];
   page.on("websocket", (socket) => {
     if (!socket.url().includes("/ws")) return;
     socket.on("framereceived", (frame) => {
-      frames.push(typeof frame.payload === "string" ? frame.payload : frame.payload.toString());
+      const payload = typeof frame.payload === "string" ? frame.payload : frame.payload.toString();
+      frames.push(payload);
+      frameLog.push({ payload, at: Date.now() });
     });
   });
   await loginWithSession(page, credentials);
@@ -66,7 +70,7 @@ async function observe(context: BrowserContext, credentials: E2ECredentials) {
   page.on("request", (request) => {
     if (request.method() === "GET") requests.push({ path: new URL(request.url()).pathname, at: Date.now() });
   });
-  return { page, frames, requests };
+  return { page, frames, frameLog, requests };
 }
 
 const frameOf = (frames: string[], type: string, needle: string) =>
@@ -84,6 +88,34 @@ async function expectRefetch(requests: { path: string; at: number }[], path: str
       timeout: REFETCH_BUDGET_MS,
     })
     .toBe(true);
+}
+
+/**
+ * Attend la trame `type` (contenant tous les `needles`) arrivée à partir de `since`, et renvoie
+ * l'instant de son arrivée. Un refetch n'est ensuite compté que s'il est postérieur à cette trame
+ * (moins une marge d'ordonnancement des événements Playwright) : le refetch tardif d'une étape
+ * précédente ne peut pas satisfaire l'attente de l'étape courante.
+ */
+const FRAME_ORDER_SLACK_MS = 250;
+async function frameArrival(
+  frameLog: { payload: string; at: number }[],
+  type: string,
+  needles: string[],
+  since: number,
+  label: string,
+): Promise<number> {
+  let arrival = 0;
+  await expect
+    .poll(
+      () => {
+        const hit = frameLog.find((f) => f.at >= since && f.payload.includes(type) && needles.every((n) => f.payload.includes(n)));
+        arrival = hit?.at ?? 0;
+        return arrival > 0;
+      },
+      { message: `trame ${type} (${label}) non reçue par le chef après la transition`, timeout: 15_000 },
+    )
+    .toBe(true);
+  return arrival - FRAME_ORDER_SLACK_MS;
 }
 
 async function createWorkOrder(boss: Page, vehicleId: number, title: string, technicianId: number) {
@@ -131,7 +163,8 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
       // Création (T6 : trame chez le technicien, refetch chez le chef lui-même).
       const sinceCreate = Date.now();
       const workOrderId = await createWorkOrder(boss.page, vehicle.id, title, technician.id);
-      await expectRefetch(boss.requests, STATS, sinceCreate);
+      const createdFrom = await frameArrival(boss.frameLog, "work_order_created", [title], sinceCreate, "création");
+      await expectRefetch(boss.requests, STATS, createdFrom);
       await expect
         .poll(() => frameOf(tech.frames, "work_order_created", title), { timeout: 15_000 })
         .toBe(true);
@@ -142,11 +175,9 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
         data: { status: "in_progress" },
       });
       expect(started.status(), await started.text()).toBe(200);
-      await expect
-        .poll(() => frameOf(boss.frames, "work_order_updated", title), { timeout: 15_000 })
-        .toBe(true);
-      await expectRefetch(boss.requests, STATS, sinceStart);
-      await expectRefetch(boss.requests, LIST, sinceStart);
+      const startedFrom = await frameArrival(boss.frameLog, "work_order_updated", [title, '"status":"in_progress"'], sinceStart, "démarrage");
+      await expectRefetch(boss.requests, STATS, startedFrom);
+      await expectRefetch(boss.requests, LIST, startedFrom);
 
       // Fin d'intervention par le technicien : même chaîne.
       const sinceDone = Date.now();
@@ -154,7 +185,8 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
         data: { status: "completed" },
       });
       expect(done.status(), await done.text()).toBe(200);
-      await expectRefetch(boss.requests, STATS, sinceDone);
+      const doneFrom = await frameArrival(boss.frameLog, "work_order_updated", [title, '"status":"completed"'], sinceDone, "fin");
+      await expectRefetch(boss.requests, STATS, doneFrom);
       const [completed] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
       expect(completed.status).toBe("completed");
 
@@ -177,7 +209,8 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
           timeout: 15_000,
         })
         .toBe(true);
-      await expectRefetch(boss.requests, STATS, sinceDelete);
+      const deletedFrom = await frameArrival(boss.frameLog, "work_order_deleted", [String(workOrderId)], sinceDelete, "suppression");
+      await expectRefetch(boss.requests, STATS, deletedFrom);
     } finally {
       await bossContext.close();
       await techContext.close();
@@ -191,6 +224,7 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
  */
 test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
   let bossPage: Page;
+  let bossFrames: string[] = [];
   let bossContext: BrowserContext;
   let workOrderId: number;
   let startedStatus = 0;
@@ -205,6 +239,7 @@ test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
     try {
       const boss = await observe(bossContext, manager);
       bossPage = boss.page;
+      bossFrames = boss.frames;
       const tech = await observe(techContext, technician);
       workOrderId = await createWorkOrder(boss.page, vehicle.id, title, technician.id);
       const started = await tech.page.request.patch(`/api/technician/work-orders/${workOrderId}/status`, {
@@ -222,6 +257,9 @@ test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
 
   test("témoin : le démarrage a réussi et le chef a reçu la trame", async () => {
     expect(startedStatus).toBe(200);
+    await expect
+      .poll(() => frameOf(bossFrames, "work_order_updated", `"workOrderId":${workOrderId}`), { timeout: 15_000 })
+      .toBe(true);
     const [row] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
     expect(row.status).toBe("in_progress");
   });

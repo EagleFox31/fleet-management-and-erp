@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, expect, it } from "vitest";
 import {
   T1_WITHOUT_ROLE_GUARD,
@@ -6,8 +8,11 @@ import {
 } from "./support/write-routes-frozen";
 import {
   PUBLIC_BY_DESIGN,
+  serverDir,
   allWriteRoutes,
   hasRoleGuard,
+  isPassThrough,
+  mountOrder,
   protectsServerFields,
   readsBody,
   validatesBody,
@@ -126,6 +131,39 @@ router.post("/b", isAdmin, async (req, res) => { leakSchema.parse(req.body); });
     expect(withBody.length).toBeGreaterThan(60);
     expect(routes.some((r) => r.key === "post /api/vehicles")).toBe(true);
     expect(routes.some((r) => r.key === "patch /api/work-order-items/:id" || r.key.startsWith("patch /api/work-order-items/"))).toBe(true);
+  });
+
+  it("lit server/api avant routes.ts : server/app.ts monte apiRouter avant registerRoutes", () => {
+    const app = readFileSync(join(serverDir, "app.ts"), "utf8");
+    expect(app.indexOf('app.use("/api", apiRouter)')).toBeGreaterThan(-1);
+    expect(app.indexOf('app.use("/api", apiRouter)')).toBeLessThan(app.indexOf("registerRoutes(app)"));
+    const key = "post /api/fuel-card/consumption";
+    const served = routes.find((r) => r.key === key);
+    expect(served?.file).toBe("api/fuel-card.routes.ts");
+    expect(served ? hasRoleGuard(served) : false).toBe(true);
+    const fromRoutesTs = routes.filter((r) => r.file === "routes.ts");
+    expect(fromRoutesTs.length).toBeGreaterThan(0);
+    expect(routes.filter((r) => r.file === undefined)).toEqual([]);
+  });
+
+  it("l'ordre de montage de server/api/index.ts est celui du service", () => {
+    const order = mountOrder(readFileSync(join(serverDir, "api", "index.ts"), "utf8"));
+    expect(order.length).toBeGreaterThan(20);
+    expect(order.indexOf("api/pin-auth.routes.ts")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("api/pin-auth.routes.ts")).toBeLessThan(order.indexOf("api/vehicles.routes.ts"));
+    expect(new Set(order).size).toBe(order.length);
+  });
+
+  it("un garde qui rend la main par next() ne masque pas la vraie route et lui prête ses middlewares", () => {
+    const [guard, real] = src(
+      `router.patch("/t", authenticate, isAdmin, (req, _res, next) => { return next(); });
+       router.patch("/u", isAdmin, async (req, res) => { res.json({}); next(); });`,
+    );
+    expect(isPassThrough(guard)).toBe(true);
+    expect(isPassThrough(real)).toBe(false);
+    const toggle = routes.find((r) => r.key === "patch /api/admin/users/:id/toggle");
+    expect(toggle?.file).toBe("routes.ts");
+    expect(toggle?.middlewares).toContain("isAdmin");
   });
 
   it("les routes ouvertes par conception existent encore", () => {
