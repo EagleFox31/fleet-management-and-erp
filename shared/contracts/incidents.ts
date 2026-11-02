@@ -19,6 +19,24 @@ export const createIncidentRequestSchema = z.object({
   severity: z.enum(INCIDENT_SEVERITIES),
 });
 
+/**
+ * Signalement du chauffeur (`POST /api/driver/breakdowns`). Seuls une panne et un accident
+ * ouvrent un OT ; un retard ou un autre signalement reste un incident qui alerte l'atelier et l'admin.
+ * `type` absent vaut `breakdown` (compatibilité avec les appels antérieurs).
+ */
+export const DRIVER_REPORT_TYPES = ["breakdown", "accident", "delay", "other"] as const;
+export type DriverReportType = (typeof DRIVER_REPORT_TYPES)[number];
+
+const WORK_ORDER_REPORT_TYPES: readonly DriverReportType[] = ["breakdown", "accident"];
+
+export function driverReportOpensWorkOrder(type: DriverReportType): boolean {
+  return WORK_ORDER_REPORT_TYPES.includes(type);
+}
+
+export const driverReportRequestSchema = createIncidentRequestSchema.extend({
+  type: z.enum(DRIVER_REPORT_TYPES).default("breakdown"),
+});
+
 export const incidentsQuerySchema = z.object({ status: z.enum(INCIDENT_STATUSES).optional() });
 
 export const incidentSchema = z.object({

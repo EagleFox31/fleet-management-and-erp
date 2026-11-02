@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { notifyComingSoon } from "@/lib/coming-soon";
 import {
   Dialog,
   DialogContent,
@@ -218,6 +217,7 @@ export default function UsersAdminPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [activeTab, setActiveTab] = useState("users");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [, setLocation] = useLocation();
   const [isDriverDialogOpen, setIsDriverDialogOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
@@ -322,9 +322,7 @@ export default function UsersAdminPage() {
       toast({ variant: "destructive", title: "Erreur", description: error.message || "Impossible de modifier le statut du chauffeur." }),
   });
 
-  // Passe par le helper partagé: le libellé « fonctionnalité à venir » doit être
-  // identique partout dans l'app.
-  const handleEditUser = (_u: User) => notifyComingSoon("L'édition des utilisateurs");
+  const handleEditUser = (u: User) => setEditingUser(u);
 
   const handleToggleUser = (u: User) =>
     toggleUserMutation.mutate({ userId: u.id, isActive: !!u.deletedAt });
@@ -656,6 +654,35 @@ export default function UsersAdminPage() {
             }}
             onCancel={() => setIsAddDialogOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog modifier utilisateur : même formulaire que /users */}
+      <Dialog open={editingUser !== null} onOpenChange={(open) => { if (!open) setEditingUser(null); }}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Modifier l'utilisateur</DialogTitle>
+            <DialogDescription>Modifiez les informations et le rôle d'accès. Laissez le mot de passe vide pour le conserver.</DialogDescription>
+          </DialogHeader>
+          {editingUser && (
+            <UserForm
+              isEdit
+              userId={editingUser.id}
+              initialData={{
+                username: editingUser.username,
+                name: editingUser.name,
+                email: editingUser.email,
+                role: editingUser.role,
+                password: "",
+              }}
+              onSuccess={() => {
+                setEditingUser(null);
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
+              }}
+              onCancel={() => setEditingUser(null)}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
