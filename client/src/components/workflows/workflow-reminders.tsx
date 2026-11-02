@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { useLocation } from 'wouter';
+import { apiRequest } from '@/lib/queryClient';
+import { userMessageOf } from '@/lib/api-error';
 import { 
   Clock, 
   AlertTriangle, 
@@ -62,27 +64,32 @@ export function WorkflowReminders({ compact = false }: { compact?: boolean }) {
     queryKey: ['/api/workflows/stats'],
   });
 
-  // Mutation pour abandonner un workflow
+  // Mutation pour abandonner un workflow : l'id passe par les variables.
   const abandonMutation = useMutation({
-    mutationFn: async (sessionId: string) => {
-      const response = await fetch(`/api/workflows/active/${sessionId}/abandon`, {
-        method: 'PATCH',
-      });
-      if (!response.ok) throw new Error('Erreur lors de l\'abandon');
+    mutationFn: async ({ sessionId }: { sessionId: string }) => {
+      const response = await apiRequest('PATCH', `/api/workflows/active/${encodeURIComponent(sessionId)}/abandon`);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { sessionId }) => {
+      // Couche 1 : retrait immediat du brouillon dans le cache local.
+      queryClient.setQueryData<ActiveWorkflow[]>(['/api/workflows/active'], (prev) =>
+        prev ? prev.filter((w) => w.sessionId !== sessionId) : prev,
+      );
+      // Couche 3 : liste, statistiques et reprise du brouillon abandonne.
+      // Couche 2 : le brouillon est propre a son auteur, aucun autre profil
+      // n'affiche cette liste, donc pas d'evenement WebSocket.
+      queryClient.invalidateQueries({ queryKey: ['/api/workflows/active'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/workflows/stats'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/workflows/vehicle-acquisition/${sessionId}`] });
       toast({
         title: "Workflow abandonné",
         description: "Le workflow d'acquisition a été abandonné avec succès.",
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/workflows/active'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/workflows/stats'] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Erreur",
-        description: "Impossible d'abandonner le workflow.",
+        description: userMessageOf(error, "Impossible d'abandonner le workflow."),
         variant: "destructive",
       });
     },
@@ -93,7 +100,7 @@ export function WorkflowReminders({ compact = false }: { compact?: boolean }) {
   };
 
   const handleAbandonWorkflow = (sessionId: string) => {
-    abandonMutation.mutate(sessionId);
+    abandonMutation.mutate({ sessionId });
   };
 
   const getStepName = (step: number): string => {
@@ -159,6 +166,17 @@ export function WorkflowReminders({ compact = false }: { compact?: boolean }) {
               >
                 <PlayCircle className="h-3 w-3 mr-1" />
                 Continuer
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleAbandonWorkflow(workflow.sessionId)}
+                disabled={abandonMutation.isPending}
+                className="h-6 px-2 text-xs text-red-700 hover:bg-red-50"
+                aria-label={`Abandonner l'acquisition ${workflow.vehicleInfo.registrationNumber}`}
+              >
+                <XCircle className="h-3 w-3 mr-1" />
+                Abandonner
               </Button>
             </div>
           ))}

@@ -81,6 +81,9 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   const [data, setData] = useState<VehicleAcquisitionData>(defaultData);
   const [currentStep, setCurrentStep] = useState(1);
   const hydratedFromServer = useRef(false);
+  // Session close (completed ou abandoned) : plus aucune sauvegarde automatique,
+  // sinon l'enregistrement differe de updateData recree un brouillon in_progress.
+  const sessionClosed = useRef(false);
 
   // Charger l'état sauvegardé au démarrage
   const { data: savedWorkflow, isLoading } = useQuery<any>({
@@ -135,6 +138,7 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
   // Sauvegarder automatiquement à chaque changement
   const saveWorkflow = useCallback(
     (newData: VehicleAcquisitionData, step: number) => {
+      if (sessionClosed.current) return;
       const workflowToSave = {
         sessionId,
         currentStep: step,
@@ -192,24 +196,28 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
 
   // Fonction pour marquer le workflow comme terminé
   const completeWorkflow = useCallback(async () => {
+    sessionClosed.current = true;
     try {
       const response = await fetch(`/api/workflows/vehicle-acquisition/${sessionId}/complete`, {
         method: 'PATCH',
       });
       if (!response.ok) throw new Error('Erreur de finalisation');
     } catch (error) {
+      sessionClosed.current = false;
       console.error('Erreur lors de la finalisation du workflow:', error);
     }
   }, [sessionId]);
 
   // Fonction pour abandonner le workflow
   const abandonWorkflow = useCallback(async () => {
+    sessionClosed.current = true;
     try {
       const response = await fetch(`/api/workflows/vehicle-acquisition/${sessionId}/abandon`, {
         method: 'PATCH',
       });
       if (!response.ok) throw new Error('Erreur d\'abandon');
     } catch (error) {
+      sessionClosed.current = false;
       console.error('Erreur lors de l\'abandon du workflow:', error);
     }
   }, [sessionId]);
