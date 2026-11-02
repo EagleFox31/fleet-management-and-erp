@@ -12,13 +12,13 @@ import { startContractSession } from "../support/contract-session";
  * taux reste admin ; cette route ne sert qu'un taux, au personnel. Un client n'y a pas accès.
  */
 
-type Actor = "technician" | "warehouse" | "client";
+type Actor = "technician" | "warehouse" | "client" | "driver";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const workOrderIds: number[] = [];
 const rateIds: number[] = [];
 
 beforeAll(async () => {
-  session = await startContractSession<Actor>({ technician: "technician", warehouse: "warehouse", client: "client" });
+  session = await startContractSession<Actor>({ technician: "technician", warehouse: "warehouse", client: "client", driver: "driver" });
 }, 60000);
 
 afterAll(async () => {
