@@ -178,7 +178,7 @@ export const fuelAnomalyResolutionService = {
   /** Véhicules (hors retirés) sans capacité de réservoir : la règle `tank-overflow` y est muette. */
   async vehiclesWithoutTankCapacity(): Promise<number> {
     const res = await db.execute(sql`
-      SELECT count(*) FILTER (WHERE tank_capacity_l IS NULL AND deleted_at IS NULL) AS n FROM vehicles`);
+      SELECT count(*) FILTER (WHERE tank_capacity_l IS NULL AND deleted_at IS NULL AND fuel_type IS DISTINCT FROM 'electric') AS n FROM vehicles`);
     return Number(rowsOf<{ n: string | number }>(res)[0]?.n ?? 0);
   },
 

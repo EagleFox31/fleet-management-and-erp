@@ -8,6 +8,7 @@ import {
 } from "../../shared/contracts/fuel-anomalies";
 import { VEHICLE_TANK_CAPACITY_MESSAGE, fuelAnomalyResolutions, fuelRecords, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
+import { VEHICLE_TANK_CAPACITY_ONLY_MESSAGE } from "../../server/lib/vehicle-patch-guard";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -130,11 +131,55 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
     expect(res.body.tankCapacityL).toBe(60);
   });
 
-  it("403 client, technicien et logistique ; 401 anonyme", async () => {
+  it("403 client et technicien ; 401 anonyme", async () => {
     expect((await patchCapacity(100, "client")).status).toBe(403);
     expect((await patchCapacity(100, "technician")).status).toBe(403);
-    expect((await patchCapacity(100, "logistics")).status).toBe(403);
     expect((await patchCapacity(100)).status).toBe(401);
+  });
+
+  describe("logistique : la capacité seule", () => {
+    const refusalOf = (body: unknown) => api.call("PATCH", `/api/vehicles/${vehicleId}`, { actor: "logistics", body });
+    const stored = async () => (await db.select({ c: vehicles.tankCapacityL, n: vehicles.notes }).from(vehicles).where(eq(vehicles.id, vehicleId)))[0];
+
+    it("{ tankCapacityL } : 200 et valeur enregistrée, mêmes bornes (400 lisible hors bornes)", async () => {
+      const res = await refusalOf({ tankCapacityL: 88 });
+      expect(res.status).toBe(200);
+      expect(res.body.tankCapacityL).toBe(88);
+      expect((await stored()).c).toBe(88);
+      const bad = await refusalOf({ tankCapacityL: 0 });
+      expect(bad.status).toBe(400);
+      expect(bad.body.message).toBe(VEHICLE_TANK_CAPACITY_MESSAGE);
+    });
+
+    it("changer la capacité émet fuel_record_validated (rôles carburant) ; une valeur identique n'émet rien", async () => {
+      events.length = 0;
+      expect((await refusalOf({ tankCapacityL: 91 })).status).toBe(200);
+      const emitted = events.filter((e) => e.event === "fuel_record_validated" && e.data.id === vehicleId);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0].data.scope).toMatchObject({ type: "roles" });
+      expect((await refusalOf({ tankCapacityL: 91 })).status).toBe(200);
+      expect(events.filter((e) => e.event === "fuel_record_validated" && e.data.id === vehicleId)).toHaveLength(1);
+    });
+
+    it("{ tankCapacityL, autre champ } : 403 lisible, rien n'est écrit", async () => {
+      const before = await stored();
+      const res = await refusalOf({ tankCapacityL: 55, notes: "TEST logistique" });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe(VEHICLE_TANK_CAPACITY_ONLY_MESSAGE);
+      expect(JSON.stringify(res.body)).not.toMatch(/constraint|SQL|stack/i);
+      expect(await stored()).toEqual(before);
+    });
+
+    it("{ autre champ } et corps vide : 403", async () => {
+      expect((await refusalOf({ notes: "TEST logistique" })).status).toBe(403);
+      expect((await refusalOf({})).status).toBe(403);
+    });
+
+    it("rôles déjà autorisés : toute la fiche reste modifiable", async () => {
+      const res = await api.call("PATCH", `/api/vehicles/${vehicleId}`, { actor: "workshopManager", body: { notes: "TEST atelier", tankCapacityL: 90 } });
+      expect(res.status).toBe(200);
+      expect(res.body.notes).toBe("TEST atelier");
+    });
   });
 });
 

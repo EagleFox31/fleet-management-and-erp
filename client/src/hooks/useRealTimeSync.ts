@@ -95,6 +95,7 @@ const CRITICAL_RESYNC_KEYS: string[] = [
   "/api/fuel-card/history",
   "/api/fuel-vouchers",
   "/api/fuel-card/anomalies",
+  "/api/fuel-card/anomalies/summary",
   // Pneus: écran partagé magasin/atelier, sans `refetchInterval` propre.
   // Sans ces clés, une coupure du WebSocket laissait la page figée jusqu'au
   // rechargement manuel.
