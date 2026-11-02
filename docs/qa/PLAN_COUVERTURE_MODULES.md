@@ -139,7 +139,7 @@ stateDiagram-v2
 |---|---|---|---|
 | VEH1 | CRUD véhicule, unicité immatriculation | E / C | OK (`02-fleet-vehicles`, contrat `vehicles-crud` ; défauts corrigés par #80 : statut initial consigné une fois, immatriculation d'un autre véhicule refusée au PATCH, `createdBy` du corps ignoré) |
 | VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | OK (`vehicle-soft-delete` : masqué et consultable ; défauts corrigés par #80 : suppression logique avec OT conservé, ni OT ni mission sur un véhicule supprimé) |
-| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e à faire |
+| VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | OK : contrat (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e `16-vehicle-acquisition-resume` (reprise bandeau + rechargement, documents, `completed`, `abandoned` ; 2 défauts écran figés VEH3-UI-1 et VEH3-UI-2) |
 | VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | OK (intégration `vehicle-status-sync` ; OT annulé remet le véhicule en service, trigger `trg_work_orders_release_vehicle` (#78), ré-immobilisation à la réouverture, hors service préservé (#79)) |
 
 ### 3.3 Documents et renouvellements

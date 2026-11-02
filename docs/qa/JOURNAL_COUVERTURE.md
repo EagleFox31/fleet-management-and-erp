@@ -1865,3 +1865,19 @@ soumission sans doublon.
 - **Quoi** : `POST /api/workflows/:sessionId/documents` renvoyait 500 quand `workflowId` n'était pas un entier positif (`parseInt("abc")` = NaN passé à la requête SQL). Il renvoie désormais 400 « Identifiant de workflow invalide. », pour le personnel comme pour le client, sans rien écrire.
 - **Comment** : validation `Number.isSafeInteger(n) && n > 0` avant la vérification d'appartenance et l'écriture (`server/routes.ts`). Cas ajouté dans `tests/contract/role-guards-pistes-def.contract.test.ts` (`abc`, `1.5`, `-3`, `0`, admin et client) : rouge prouvé sur l'ancien code (500), 16/16 vert après.
 - **Pourquoi** : règle AGENTS.md §10, une entrée invalide donne un 400 lisible, jamais une erreur SQL en 500.
+
+## VEH3 : e2e acquisition de véhicule
+
+- **Quoi** : `e2e/16-vehicle-acquisition-resume.spec.ts`, 5 tests : reprise de l'étape en cours depuis le bandeau « Workflows en cours » puis après rechargement (état venu du serveur) ; documents obligatoires refusés tant qu'il en manque, puis téléversés et vérifiés en base ; fin `completed` (véhicule créé) ; fin `abandoned` (brouillon retiré du bandeau et de la reprise). Résultat sur la base de test tests-piste-c : **5 passed (6,1 min)**, Edge (`E2E_CHANNEL=msedge`).
+- **Défauts produit figés** (non corrigés ici) :
+  - VEH3-UI-1 : aucun écran ne propose d'abandonner un brouillon. Le bouton n'existe que dans le mode complet de `WorkflowReminders`, or le seul montage est compact (`client/src/pages/vehicles/index.tsx:119`) ; le wizard ne fait jamais appel à `abandonWorkflow` (`client/src/pages/workflows/vehicle-acquisition.tsx:102`). Test en `test.fail`.
+  - VEH3-UI-2 : après l'activation, l'enregistrement différé de 500 ms (`client/src/hooks/use-workflow-persistence.ts:171`) part après `completeWorkflow()` ; le PATCH tombe en 404 et le repli POST recrée un brouillon `in_progress` de même sessionId : l'acquisition terminée réapparaît dans « Workflows en cours ». Comportement actuel asserté, avec la consigne de bascule une fois corrigé.
+- **Comment** : chaque test crée son propre compte et ses données préfixées `E2E-VEH3` ; nettoyage par sacs d'identifiants, aucun nettoyage global (base partagée).
+- **Pourquoi** : le contrat ne voit pas VEH3-UI-2 (il n'envoie pas l'enregistrement tardif du navigateur) ; seul le parcours écran le révèle.
+- **Piège** : le port 5000 du poste est pris par Docker Desktop. Lancer le serveur sur un autre port (`PORT=5055`), puis `E2E_BASE_URL=http://127.0.0.1:5055 node --env-file=.env node_modules/@playwright/test/cli.js test ...` (le `--env-file` est requis : la spec importe `server/db`).
+
+## VEH3 : e2e acquisition de véhicule, résultat d'exécution
+
+- **Quoi** : `e2e/16-vehicle-acquisition-resume.spec.ts` rejoué en entier : 5 passed (6,2 min), un worker, `E2E_CHANNEL=msedge`, serveur sur le port 5057, base Neon de test (`tests-piste-c`), sous `db-lock`. `tsc` global : 0 erreur.
+- **Preuve rouge/vert** : VEH3-UI-2 était rouge à la première exécution (brouillon `in_progress` recréé après `completed`), puis figé tel quel ; VEH3-UI-1 est un `test.fail` (passe tant que le bouton Abandonner n'existe pas, devient rouge dès qu'il est monté).
+- **Piège** : un verrou `db-test.lock` périmé laissé par une exécution tuée bloque l'attente d'environ 17 min avant d'être repris ; la sortie reste vide pendant ce temps.
