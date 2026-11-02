@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,5 +27,11 @@ describe("dépendance xlsx", () => {
 
   it("l'archive est présente dans le dépôt", () => {
     expect(existsSync(resolve(root, "vendor/xlsx-0.20.3.tgz"))).toBe(true);
+  });
+
+  it("l'integrity du lockfile est le sha512 réel de l'archive", () => {
+    const archive = readFileSync(resolve(root, "vendor/xlsx-0.20.3.tgz"));
+    const digest = `sha512-${createHash("sha512").update(archive).digest("base64")}`;
+    expect(lock.packages["node_modules/xlsx"].integrity).toBe(digest);
   });
 });
