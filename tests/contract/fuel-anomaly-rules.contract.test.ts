@@ -214,8 +214,9 @@ describe("temps réel des pleins : la liste des anomalies des autres profils se 
     const deleted = await api.call("DELETE", `/api/fuel-records/${created.body.id}`, { actor: "workshopManager" });
     expect(deleted.status).toBe(204);
 
-    const emitted = events.filter((e) => e.event === "fuel_record_validated" && e.data.id === created.body.id);
+    const emitted = events.filter((e) => e.event === "fuel_record_changed" && e.data.id === created.body.id);
     expect(emitted).toHaveLength(3);
+    expect(events.filter((e) => e.event === "fuel_record_validated" && e.data.id === created.body.id)).toHaveLength(0);
     expect(emitted[0].data.scope).toMatchObject({ type: "roles" });
   });
 });
