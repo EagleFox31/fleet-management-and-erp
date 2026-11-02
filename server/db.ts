@@ -5,6 +5,19 @@ import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;
 
+/**
+ * Postgres hors Neon (tests locaux, CI) : le driver passe par un proxy WebSocket
+ * (`ghcr.io/neondatabase/wsproxy`) désigné par DATABASE_WS_PROXY, ex. `localhost:5433/v1`.
+ * Sans protocole ; le proxy est joint en clair (`ws:`), donc réservé à une machine locale.
+ * Non défini = Neon, comportement inchangé.
+ */
+if (process.env.DATABASE_WS_PROXY) {
+  neonConfig.wsProxy = process.env.DATABASE_WS_PROXY;
+  neonConfig.useSecureWebSocket = false;
+  // Postgres standard authentifie en SCRAM : pas de pipeline « mot de passe en clair ».
+  neonConfig.pipelineConnect = false;
+}
+
 if (!process.env.DATABASE_URL) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",

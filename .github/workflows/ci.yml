@@ -1,0 +1,145 @@
+# CI proportionnée à la surface modifiée (règle change-scoped) : l'analyse d'impact
+# AppFactory lit .github/appfactory-impact.json et chaque job ne tourne que si sa « gate »
+# est requise. Un dispatch manuel force toutes les gates.
+#
+# Intégration et contrat tournent contre un Postgres du runner, derrière wsproxy
+# (le driver Neon dialogue en WebSocket). Le contrat est découpé en shards vitest,
+# chacun avec sa propre base : pas de partage d'état entre shards.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24
+  # Hôte « postgres » = label du service ; résolu par wsproxy sur le réseau du job, pas par Node.
+  DATABASE_URL_TEST: postgres://fleet:fleet@postgres:5432/fleet_test
+  DATABASE_WS_PROXY: localhost:5433/v1
+
+jobs:
+  impact:
+    uses: EagleFox31/appfactory-project-automation/.github/workflows/reusable-impact-analysis.yml@0523510a8e42290df3bae5749d034b1637569af5
+    with:
+      appfactory_ref: 0523510a8e42290df3bae5749d034b1637569af5
+      config_path: .github/appfactory-impact.json
+      mode: ${{ github.event_name == 'workflow_dispatch' && 'all' || 'auto' }}
+
+  typecheck:
+    needs: impact
+    if: ${{ contains(fromJSON(needs.impact.outputs.gates), 'typecheck') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+
+  unit:
+    needs: impact
+    if: ${{ contains(fromJSON(needs.impact.outputs.gates), 'unit') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test -- --reporter=dot
+
+  integration:
+    needs: impact
+    if: ${{ contains(fromJSON(needs.impact.outputs.gates), 'integration') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: fleet
+          POSTGRES_PASSWORD: fleet
+          POSTGRES_DB: fleet_test
+        ports:
+          - 54320:5432
+        options: >-
+          --health-cmd "pg_isready -U fleet -d fleet_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+      wsproxy:
+        image: ghcr.io/neondatabase/wsproxy:latest@sha256:7f2e2149aa6a57ba382a140102fba44f5053f3e44389ccc18adcecf896054efb
+        env:
+          ALLOW_ADDR_REGEX: "^postgres:5432$"
+          LOG_TRAFFIC: "false"
+        ports:
+          - 5433:80
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Les scripts chargent `.env` via node --env-file : le fichier doit exister, les variables
+      # d'environnement du job priment sur son contenu.
+      - run: touch .env
+      # Schéma Drizzle sur la base vide (initializeDatabase() ne crée pas les tables), via le port TCP direct.
+      - run: npm run test:db:schema
+      - run: npm run test:integration -- --reporter=dot
+
+  contract:
+    needs: impact
+    if: ${{ contains(fromJSON(needs.impact.outputs.gates), 'contract') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: fleet
+          POSTGRES_PASSWORD: fleet
+          POSTGRES_DB: fleet_test
+        ports:
+          - 54320:5432
+        options: >-
+          --health-cmd "pg_isready -U fleet -d fleet_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+      wsproxy:
+        image: ghcr.io/neondatabase/wsproxy:latest@sha256:7f2e2149aa6a57ba382a140102fba44f5053f3e44389ccc18adcecf896054efb
+        env:
+          ALLOW_ADDR_REGEX: "^postgres:5432$"
+          LOG_TRAFFIC: "false"
+        ports:
+          - 5433:80
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: touch .env
+      - run: npm run test:db:schema
+      - run: npm run test:contract -- --reporter=dot --shard=${{ matrix.shard }}/${{ strategy.job-total }}
