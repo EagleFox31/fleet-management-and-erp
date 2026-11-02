@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import { storage } from "../storage";
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
 import { ALL_APP_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
@@ -103,10 +102,9 @@ export const authorize = (roles: string[]) => {
     }
     
     try {
-      const user = await storage.getUser(req.session.userId);
-      
-      // Un compte supprimé ou désactivé n'a plus de session valide.
-      if (!user || user.deletedAt) {
+      // Même lecture qu'authenticate : compte supprimé exclu, panne de base remontée (500, pas 401).
+      const user = await findActiveSessionUser(req.session.userId);
+      if (!user) {
         return res.status(401).json({ message: 'Utilisateur non trouvé' });
       }
 
@@ -137,7 +135,7 @@ export const authorize = (roles: string[]) => {
       
       next();
     } catch (error) {
-      console.error('Error in authorization middleware:', error);
+      moduleLogger("auth").error({ err: error, requestId: req.requestId }, "Error in authorization middleware");
       return res.status(500).json({ message: 'Erreur serveur' });
     }
   });
@@ -150,10 +148,9 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
   }
   
   try {
-    const user = await storage.getUser(req.session.userId);
-    
-    // Un compte supprimé ou désactivé n'a plus de session valide.
-    if (!user || user.deletedAt) {
+    // Même lecture qu'authenticate : compte supprimé exclu, panne de base remontée (500, pas 401).
+    const user = await findActiveSessionUser(req.session.userId);
+    if (!user) {
       return res.status(401).json({ message: 'Utilisateur non trouvé' });
     }
     
@@ -170,7 +167,7 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
     
     next();
   } catch (error) {
-    console.error('Error in admin authorization middleware:', error);
+    moduleLogger("auth").error({ err: error, requestId: req.requestId }, "Error in admin authorization middleware");
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 });

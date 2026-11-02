@@ -261,7 +261,9 @@ export class VehicleStatusService {
   async setVehicleToOperational(vehicleId: number, workOrderId: number, updatedById?: number): Promise<void> {
     try {
       const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
-      if (!vehicle || vehicle.status === 'operational') return;
+      // Seul un véhicule en maintenance est remis en service : hors service (décision manuelle)
+      // ou déjà en service, la clôture d'un OT ne change rien (aligné sur trg_work_orders_release_vehicle).
+      if (!vehicle || vehicle.status !== 'maintenance') return;
 
       // Un véhicule peut porter plusieurs OT en parallèle (moteur + pneus).
       // Clôturer l'un ne le rend pas apte: il reste au pont pour les autres.

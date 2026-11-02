@@ -363,8 +363,79 @@ WHEN (
 )
 EXECUTE FUNCTION fn_work_orders_release_vehicle();`;
 
-async function applyWorkOrderVehicleRelease() {
+/**
+ * Miroir de WORK_ORDER_VEHICLE_RELEASE_SQL : un OT clôturé qui redevient ouvert (refus du contrôle
+ * qualité, réouverture) immobilise de nouveau le véhicule en service. Doit rester identique à
+ * server/db/migrations/20261102_work_orders_hold_vehicle.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/work-orders-release-vehicle-drift.test.ts.
+ */
+export const WORK_ORDER_VEHICLE_HOLD_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE OR REPLACE FUNCTION fn_work_orders_hold_vehicle()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_status text;
+  v_created_at timestamp;
+BEGIN
+  SELECT status, created_at INTO v_status, v_created_at
+  FROM vehicles
+  WHERE id = NEW.vehicle_id AND deleted_at IS NULL
+  FOR UPDATE;
+
+  -- Seul un véhicule en service est immobilisé : hors service reste hors service, maintenance reste
+  -- maintenance (aucune ligne d'historique en double).
+  IF v_status IS DISTINCT FROM 'operational' THEN
+    RETURN NULL;
+  END IF;
+
+  UPDATE vehicles SET status = 'maintenance' WHERE id = NEW.vehicle_id;
+
+  INSERT INTO status_history (vehicle_id, status, date, notes, updated_by_id)
+  VALUES (
+    NEW.vehicle_id,
+    'maintenance',
+    GREATEST((now() AT TIME ZONE 'UTC')::date, v_created_at::date),
+    format('Véhicule passé en maintenance - Ordre de travail #%s rouvert', NEW.id),
+    NULL
+  );
+
+  PERFORM pg_notify(
+    'fleet_events',
+    json_build_object(
+      'source', 'database',
+      'version', 1,
+      'entity', 'vehicle',
+      'entityId', NEW.vehicle_id,
+      'eventType', 'vehicle_status_changed',
+      'payload', json_build_object(
+        'vehicleId', NEW.vehicle_id,
+        'status', 'maintenance',
+        'previousStatus', 'operational',
+        'workOrderId', NEW.id,
+        'source', 'work_order_trigger'
+      ),
+      'emittedAt', to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    )::text
+  );
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_work_orders_hold_vehicle
+AFTER UPDATE OF status ON work_orders
+FOR EACH ROW
+WHEN (
+  OLD.status IN ('completed', 'cancelled')
+  AND NEW.status IN ('pending', 'in_progress', 'awaiting_parts')
+)
+EXECUTE FUNCTION fn_work_orders_hold_vehicle();`;
+
+async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
+  await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
 }
 
 async function applyLotRecetteSchema() {
@@ -603,8 +674,9 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
     await applyLotRecetteSchema();
-    // Trigger de libération du véhicule — jumelle de server/db/migrations/20261102_work_orders_release_vehicle.sql.
-    await applyWorkOrderVehicleRelease();
+    // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
+    // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
+    await applyWorkOrderVehicleStatusTriggers();
     await applyPerformanceIndexes();
     await applyMigrationSqlFiles();
     await applyBootstrapSqlFiles();
