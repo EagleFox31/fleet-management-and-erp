@@ -40,25 +40,23 @@ afterAll(async () => {
 const find = (reference: string) => rows.find((r) => r["Référence"] === reference)!;
 
 describe("DIR3 : export inventaire, cellules exactes", { timeout: 60000 }, () => {
-  it("une piece en stock bas : alerte OUI, valeur = stock reel x prix, fournisseur et emplacement", () => {
+  it("une piece en stock bas : alerte OUI, valeur = stock vivant (quantity) x prix, fournisseur et emplacement", () => {
     expect(find(low.reference)).toMatchObject({
-      "Stock Théorique": 2,
-      "Stock Réel": 6,
+      Stock: 2,
       "Seuil Min": 5,
       "Alerte CDE": "OUI",
       "Prix Unitaire": 125.5,
-      "Valeur Stock": 753,
+      "Valeur Stock": 251,
       Fournisseur: "Fournisseur DIR3",
       Emplacement: "DIR3-A1",
     });
   });
 
-  it("une piece sans stock reel ni fournisseur : 0, N/A, alerte NON, valeur 0", () => {
+  it("une piece sans fournisseur : N/A, alerte NON, valeur = 7 x 10", () => {
     expect(find(ok.reference)).toMatchObject({
-      "Stock Théorique": 7,
-      "Stock Réel": 0,
+      Stock: 7,
       "Alerte CDE": "NON",
-      "Valeur Stock": 0,
+      "Valeur Stock": 70,
       Fournisseur: "N/A",
     });
   });

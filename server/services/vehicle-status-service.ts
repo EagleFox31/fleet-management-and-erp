@@ -238,7 +238,9 @@ export class VehicleStatusService {
   ): Promise<void> {
     try {
       const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
-      if (!vehicle || vehicle.status === 'maintenance') return;
+      // Seul un véhicule en service est immobilisé : hors service (décision manuelle) reste hors
+      // service, maintenance reste maintenance (aligné sur trg_work_orders_hold_vehicle).
+      if (!vehicle || vehicle.status !== 'operational') return;
 
       await db.update(vehicles).set({ status: 'maintenance' }).where(eq(vehicles.id, vehicleId));
       

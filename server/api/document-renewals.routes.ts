@@ -5,7 +5,7 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { db } from "../db";
-import { authenticate } from "../middleware/auth";
+import { authenticate, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 import {
@@ -858,7 +858,7 @@ router.patch("/requests/:id/status", async (req, res) => {
   }
 });
 
-router.post("/quick-renew", (req: Request, res: Response) => {
+router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response) => {
   uploadRenewalProof(req, res, async (uploadError) => {
     try {
       if (uploadError) {

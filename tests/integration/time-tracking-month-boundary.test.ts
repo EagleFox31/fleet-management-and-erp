@@ -94,15 +94,11 @@ describe("pointages : fuseau horaire du processus", () => {
 });
 
 describe("pointages : date impossible", () => {
-  // Défaut produit : `isoDateSchema` (shared/contracts/common.ts:12) ne vérifie que la forme
-  // AAAA-MM-JJ ; une date qui n'existe pas atteint le `::date` de SQL et sort en erreur de base
-  // (500) au lieu d'un 400 « date invalide ». Le service ne la valide pas non plus
-  // (server/services/time-tracking-service.ts:27). À retirer à la correction.
-  it.fails("30 février : refus 400 (aujourd'hui erreur de base)", async () => {
+  it("30 février : refus 400", async () => {
     await expect(svc.upsert({ userId, date: "2033-02-30", status: "JT" })).rejects.toMatchObject({ status: 400 });
   }, 30_000);
 
-  it.fails("29 février d'une année non bissextile : refus 400 (aujourd'hui erreur de base)", async () => {
+  it("29 février d'une année non bissextile : refus 400", async () => {
     await expect(svc.upsert({ userId, date: "2033-02-29", status: "JT" })).rejects.toMatchObject({ status: 400 });
   }, 30_000);
 });

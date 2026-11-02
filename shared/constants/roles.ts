@@ -135,6 +135,22 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logis
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 
 /**
+ * Rapports d'exploitation : inventaire des pièces (`GET /api/reports/inventory`) et
+ * performance des techniciens (`GET /api/reports/technician-performance`).
+ * Lus par `isInventoryReportReader` / `isTechnicianReportReader` et par l'écran `/reports`.
+ */
+export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+export const TECHNICIAN_REPORT_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
+
+export function canReadInventoryReport(role: string | null | undefined): boolean {
+  return (INVENTORY_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+export function canReadTechnicianReport(role: string | null | undefined): boolean {
+  return (TECHNICIAN_REPORT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
  * Tout le personnel : tout rôle sauf `client` (cloison client, AGENTS.md §11).
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */

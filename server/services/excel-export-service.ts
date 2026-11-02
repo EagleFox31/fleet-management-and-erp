@@ -76,15 +76,16 @@ export class ExcelExportService {
       "Référence": part.reference,
       "Désignation": part.name,
       "Catégorie": part.category || "N/A",
-      "Stock Théorique": part.quantity,
-      "Stock Réel": part.realStock || 0,
+      // Une seule colonne : `quantity` est le stock vivant, mis à jour par tous les mouvements.
+      // `real_stock` (héritée de l'Excel) n'est synchronisée que par un chemin d'écriture : périmée.
+      "Stock": part.quantity,
       "Seuil Min": part.minQuantity,
       "Unité": part.unit,
       // Même règle que la liste de réappro (stock-alerts-service) : la colonne
       // reorder_alert n'est pas tenue à jour par tous les mouvements de stock.
       "Alerte CDE": part.quantity <= part.minQuantity ? "OUI" : "NON",
       "Prix Unitaire": parseFloat(part.unitPrice || "0"),
-      "Valeur Stock": (part.realStock || 0) * parseFloat(part.unitPrice || "0"),
+      "Valeur Stock": part.quantity * parseFloat(part.unitPrice || "0"),
       "Fournisseur": part.supplier || "N/A",
       "Emplacement": part.location || "N/A",
     }));
@@ -97,8 +98,7 @@ export class ExcelExportService {
       "Référence": "TOTAL",
       "Désignation": `${totalParts} pièces`,
       "Catégorie": "",
-      "Stock Théorique": null,
-      "Stock Réel": null,
+      "Stock": null,
       "Seuil Min": null,
       "Unité": "",
       "Alerte CDE": "",

@@ -54,8 +54,8 @@ export async function startContractSession<A extends string>(actors: Record<A, T
   }
 
   /** Réponse brute (fichier binaire) : l'appelant lit `arrayBuffer()`. */
-  function raw(method: string, path: string, actor: A): Promise<Response> {
-    return fetch(baseUrl + path, { method, headers: { Cookie: cookies.get(actor)! } });
+  function raw(method: string, path: string, actor: A, body?: BodyInit): Promise<Response> {
+    return fetch(baseUrl + path, { method, headers: { Cookie: cookies.get(actor)! }, body });
   }
 
   async function stop() {

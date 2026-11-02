@@ -92,19 +92,17 @@ describe("DIR2 : rapport performance techniciens par periode", { timeout: 60000 
     expect((await session.call("GET", q(START, END), { actor: null })).status).toBe(401);
   });
 
-  // DEFAUT server/routes.ts:2894 : `authenticate` seul, un client lit la charge et les noms des techniciens.
-  it.fails("un client est refuse (403) sur le rapport techniciens", async () => {
+  it("un client est refuse (403) sur le rapport techniciens", async () => {
     const res = await session.call("GET", q(START, END), { actor: "client" });
     expect(res.status).toBe(403);
   });
 
-  it.fails("un chauffeur est refuse (403) sur le rapport techniciens", async () => {
+  it("un chauffeur est refuse (403) sur le rapport techniciens", async () => {
     const res = await session.call("GET", q(START, END), { actor: "driver" });
     expect(res.status).toBe(403);
   });
 
-  // DEFAUT server/routes.ts:2896 : date invalide = Invalid Date transmis a la requete SQL, pas de 400.
-  it.fails("une date invalide renvoie 400", async () => {
+  it("une date invalide renvoie 400", async () => {
     const res = await session.call("GET", q("pas-une-date", END), { actor: "admin" });
     expect(res.status).toBe(400);
   });
