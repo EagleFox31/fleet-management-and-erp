@@ -294,7 +294,8 @@ npm run test:db:down    # supprime aussi le volume
 - La CI fait de même sur toute PR vers `main`.
 - Les conteneurs sont partagés entre sessions : ne pas lancer `test:db:down` sur
   une base qu'une autre session utilise.
-- Détails et pièges : `tests/README.md`, section « Postgres local ».
+- Sous PowerShell, utiliser la variante `$env:` donnée dans `tests/README.md`.
+- Détails et pièges : `tests/README.md`, section « Postgres local (plus rapide que Neon) ».
 
 Notes :
 
