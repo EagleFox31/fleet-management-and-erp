@@ -35,12 +35,23 @@ export const kpiDateSchema = isoDateSchema
     message: `L'année doit être comprise entre ${KPI_MIN_YEAR} et ${KPI_MAX_YEAR}.`,
   });
 
-/** Message d'erreur de la période, ou `null` si elle est acceptable (une borne absente passe). */
-export function kpiPeriodIssue(q: { from?: string; to?: string }): { message: string; path: "from" | "to" } | null {
-  if (!q.from || !q.to) return null;
-  if (q.from > q.to) return { message: "La date de début doit précéder la date de fin.", path: "from" };
-  if (spanInMonths(q.from, q.to) > KPI_MAX_SPAN_MONTHS) {
-    return { message: `La période ne peut pas dépasser ${KPI_MAX_SPAN_MONTHS} mois.`, path: "to" };
+/**
+ * Message d'erreur de la période, ou `null` si elle est acceptable.
+ *
+ * `from` seul : le serveur complète `to` par aujourd'hui (`kpi-rules.ts`), donc `from=2001-01-01`
+ * couvre plus de 300 mois. On contrôle la période réelle avec `today` (UTC par défaut : un jour
+ * d'écart ne change rien à un plafond en mois). `to` seul reste couvert, le serveur en déduit
+ * `from` sur 12 mois ; sans borne, défaut serveur de 12 mois.
+ */
+export function kpiPeriodIssue(
+  q: { from?: string; to?: string },
+  today: string = new Date().toISOString().slice(0, 10),
+): { message: string; path: "from" | "to" } | null {
+  if (!q.from) return null;
+  const to = q.to ?? today;
+  if (q.from > to) return { message: "La date de début doit précéder la date de fin.", path: "from" };
+  if (spanInMonths(q.from, to) > KPI_MAX_SPAN_MONTHS) {
+    return { message: `La période ne peut pas dépasser ${KPI_MAX_SPAN_MONTHS} mois.`, path: q.to ? "to" : "from" };
   }
   return null;
 }

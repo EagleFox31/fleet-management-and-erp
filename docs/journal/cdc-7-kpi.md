@@ -115,3 +115,12 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
 - **Pourquoi** : réserve de relecture de #89 ; règle des 3 couches (AGENTS.md §2).
 - **Aussi** : reprise de 6cf1943 (#60, tests alignés sur #58) pour que la branche soit verte avant la fusion de #60 ; changement identique, sans conflit attendu.
 - **Preuves** : tsc 0 ; unitaires 1195/1196 (rouge connu `pending-invoices-kpi-roles`) dont `tests/unit/shared/labor-rate-realtime.test.ts`.
+
+## 2026-11-02T13:55:00+01:00 — CDC-7 — Réserves : période KPI à une seule borne contrôlée
+
+- **Agent** : api · **Branche** : `lot/api/cdc-reserves` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : `?from=2001-01-01` sans `to` passait le plafond de 36 mois : le serveur complète `to` par aujourd'hui (`kpi-rules.ts`), la période réelle dépassait 300 mois.
+- **Comment** : `kpiPeriodIssue(q, today)` contrôle `from` jusqu'à `to ?? today` (UTC, un jour d'écart sans effet sur un plafond en mois). `to` seul reste couvert : le serveur en déduit `from` sur 12 mois. Un `from` dans le futur sans `to` est désormais refusé comme une période inversée.
+- **Pourquoi** : réserve de relecture de #58/#59 ; même garde que la période à deux bornes, un seul endroit (`refineKpiPeriod`, partagé par KPI, coûts de maintenance et rapports).
+- **Preuves** : unitaires `kpi-period` 14/14 (cas `from` seul ajouté aux schémas KPI, coûts, rapport).

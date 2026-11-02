@@ -36,10 +36,19 @@ describe("spanInMonths", () => {
 });
 
 describe("kpiPeriodIssue", () => {
-  it("laisse passer une borne absente ou une période de 36 mois", () => {
+  it("laisse passer l'absence de borne, `to` seul ou une période de 36 mois", () => {
     expect(kpiPeriodIssue({})).toBeNull();
-    expect(kpiPeriodIssue({ from: "2001-01-01" })).toBeNull();
+    expect(kpiPeriodIssue({ to: "2026-03-31" })).toBeNull();
     expect(kpiPeriodIssue({ from: "2024-01-01", to: "2026-12-31" })).toBeNull();
+  });
+
+  it("`from` seul : contrôlé jusqu'à aujourd'hui, comme le fait le serveur", () => {
+    const today = "2026-11-02";
+    expect(kpiPeriodIssue({ from: "2024-01-01" }, today)).toBeNull();
+    const tooLong = kpiPeriodIssue({ from: "2001-01-01" }, today);
+    expect(tooLong?.path).toBe("from");
+    expect(tooLong?.message).toContain(String(KPI_MAX_SPAN_MONTHS));
+    expect(kpiPeriodIssue({ from: "2027-01-01" }, today)?.path).toBe("from");
   });
 
   it("refuse une période inversée sur `from`, une période trop longue sur `to`", () => {
@@ -66,6 +75,7 @@ describe("schémas de requête des KPI et du rapport", () => {
         { from: "1999-12-31" },
         { to: "2101-01-01" },
         { from: "2020-01-01", to: "2023-01-31" },
+        { from: "2001-01-01" },
       ]) {
         expect(schema.safeParse(query).success, `${name} ${JSON.stringify(query)}`).toBe(false);
       }
