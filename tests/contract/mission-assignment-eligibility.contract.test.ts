@@ -12,10 +12,8 @@ import { uniqueTestToken } from "../support/ids";
  * `POST /api/missions` refuse un véhicule en maintenance (getMissionEligibility).
  * `PATCH /api/missions/:id` doit refuser de même : c'est le chemin de l'écran « Modifier ».
  *
- * DEFAUT PRODUIT figé par `it.fails` : le PATCH (server/api/missions.routes.ts, bloc d'affectation
- * de `router.patch("/:id")`, ~l.1861 et suivantes) contrôle chauffeur, tonnage et CPC mais n'appelle
- * pas getMissionEligibility : un véhicule en maintenance est affecté. A corriger par fleet-api ;
- * retirer `.fails` ensuite.
+ * Défaut corrigé (MIS1-API-1) : le PATCH (bloc d'affectation de `router.patch("/:id")`) appelle
+ * désormais getMissionEligibility comme le POST ; le cas « avec affectation » est un test ordinaire.
  */
 
 const ACTORS = { logistics: "logistics" } as const;
@@ -109,8 +107,8 @@ describe("MIS1 : un véhicule en maintenance n'est pas affectable", () => {
       missionId = await plannedMission();
     }, 60000);
 
-    // Témoin du `it.fails` ci-dessous : même PATCH, véhicule disponible, accepté et affectation écrite.
-    // Sans lui, un 403 ou un 500 sur la route garderait le `it.fails` vert.
+    // Témoin : même PATCH, véhicule disponible, accepté et affectation écrite. Il prouve que le
+    // refus ci-dessous vient de l'éligibilité et non d'un 403 ou d'un 500 sur la route.
     it("témoin : avec un véhicule disponible, accepté et affectation créée", async () => {
       const vehicle = await createTestVehicle();
       ids.vehicleIds.push(vehicle.id);
@@ -123,9 +121,9 @@ describe("MIS1 : un véhicule en maintenance n'est pas affectable", () => {
       expect(res.status).toBe(200);
       const rows = await db.select().from(assignments).where(inArray(assignments.missionId, [okMissionId]));
       expect(rows.map((r) => r.vehicleId)).toContain(vehicle.id);
-    });
+    }, 60000); // crée véhicule, chauffeur et mission sur Neon : le délai par défaut (5 s) ne suffit pas
 
-    it.fails("avec affectation : refusé en 400 (défaut : accepté)", async () => {
+    it("avec affectation : refusé en 400", async () => {
       const res = await call("PATCH", `/api/missions/${missionId}`, {
         actor: "logistics",
         body: { assignment: { vehicleId, driverId } },
