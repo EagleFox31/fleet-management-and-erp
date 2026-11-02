@@ -202,4 +202,12 @@ describe("compteur véhicules sans capacité", () => {
     await db.update(vehicles).set({ tankCapacityL: null, deletedAt: new Date() }).where(eq(vehicles.id, v.id));
     expect(await svc.vehiclesWithoutTankCapacity()).toBe(before);
   }, 30_000);
+
+  it("ignore les véhicules électriques (la règle tank-overflow les exclut déjà)", async () => {
+    const before = await svc.vehiclesWithoutTankCapacity();
+    const v = await vehicle(null);
+    expect(await svc.vehiclesWithoutTankCapacity()).toBe(before + 1);
+    await db.update(vehicles).set({ fuelType: "electric" }).where(eq(vehicles.id, v.id));
+    expect(await svc.vehiclesWithoutTankCapacity()).toBe(before);
+  }, 30_000);
 });

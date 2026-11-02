@@ -34,7 +34,7 @@ export const REALTIME_EVENTS = {
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
-    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers"],
+    invalidates: ["/api/fuel-records", "/api/fuel-card", "/api/fuel-vouchers", "/api/fuel-card/anomalies", "/api/fuel-card/anomalies/summary"],
   } as EventDefinition<{ id: number }>,
   fuel_anomaly_resolved: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
