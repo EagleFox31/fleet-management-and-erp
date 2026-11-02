@@ -1,6 +1,7 @@
 import { alertService } from "./services/alert-service";
 import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
+import { clientBillingService } from "./services/client-billing-service";
 
 const log = moduleLogger("scheduler");
 
@@ -52,6 +53,8 @@ async function runAlertCycle(reason: string): Promise<void> {
 
   try {
     await alertService.runAllAlertChecks();
+    // Erreur capturée en interne : un échec ici n'interrompt pas le cycle.
+    await markOverdueClientInvoices(reason);
   } catch (err) {
     log.error({ err, reason }, "cycle d'alertes en échec");
   } finally {
@@ -66,6 +69,27 @@ async function runAlertCycle(reason: string): Promise<void> {
     } else {
       log.info({ durationMs, reason }, "cycle d'alertes terminé");
     }
+  }
+}
+
+/** Factures client échues non soldées -> `overdue` (CINV2), avec diffusion temps réel. */
+async function markOverdueClientInvoices(reason: string): Promise<void> {
+  try {
+    const invoiceIds = await clientBillingService.markOverdueInvoices();
+    const broadcastUpdate = (global as any).broadcastUpdate;
+    if (invoiceIds.length > 0 && typeof broadcastUpdate === "function") {
+      broadcastUpdate("client_invoices_overdue", {
+        version: 1,
+        entity: "client_invoice",
+        entityId: null,
+        payload: { invoiceIds },
+        scope: { type: "broadcast" },
+        actor: { userId: null, role: null },
+        emittedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    log.error({ err, reason }, "passage des factures client en retard en échec");
   }
 }
 

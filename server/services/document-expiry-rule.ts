@@ -40,3 +40,8 @@ export function documentExpiryDedupeKey(
 ): string {
   return `doc_expiry:${status}:${documentId}:${expiryDate.slice(0, 10)}`;
 }
+
+/** Préfixes des clés d'échéance d'un document, toutes échéances confondues (levée au renouvellement). */
+export function documentExpiryDedupeKeyPrefixes(documentId: number): string[] {
+  return (["due", "expired"] as const).map((status) => `doc_expiry:${status}:${documentId}:`);
+}

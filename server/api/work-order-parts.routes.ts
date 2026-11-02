@@ -7,7 +7,11 @@ import {
   getPartRequirementProgressLabel,
 } from "@shared/constants/part-requirements";
 import { storage } from "../storage";
-import { partRequirementsService, STALE_STATUS_ERROR } from "../services/part-requirements-service";
+import {
+  partRequirementsService,
+  STALE_STATUS_ERROR,
+  STOCK_ISSUE_REVOKED_ERROR,
+} from "../services/part-requirements-service";
 import {
   OPEN_REQUIREMENT_STATUSES,
   requestPartForWorkOrder,
@@ -135,7 +139,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
     );
 
     // Avec une pièce, le serveur décide au clic comme pour « Demander la pièce » :
-    // le stock disponible sort vers l'OT, seul le manquant part en demande.
+    // le rayon part « à sortir » chez le magasinier, le manquant en demande.
     if (hasPartPayload) {
       const result = await requestPartForWorkOrder({
         workOrderId,
@@ -192,25 +196,21 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
 function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) {
   const broadcast = (global as any).broadcastUpdate;
   if (!broadcast) return;
-  const workOrderId = result.workOrder?.id ?? result.partUsed?.workOrderId ?? result.requirement?.workOrderId;
+  const workOrderId =
+    result.workOrder?.id ?? result.stockRequirement?.workOrderId ?? result.requirement?.workOrderId;
   const actor = user ? { userId: user.id, role: user.role, username: user.username } : null;
 
-  if (result.partUsed) {
-    broadcast("part_used_added", {
-      workOrderId,
-      partId: result.part.id,
-      partUsed: result.partUsed,
-      source: "work_order_part_request",
-    });
-  }
-
-  if (result.requirement && !result.usedExistingRequirement) {
+  // Demande « à sortir » (en rayon) puis demande du manquant : chacune arrive
+  // dans la file du magasin par sa propre trame.
+  const created = result.usedExistingRequirement ? [] : [result.stockRequirement, result.requirement];
+  for (const requirement of created) {
+    if (!requirement) continue;
     broadcast("part_requirement_created", {
-      requirementId: result.requirement.id,
+      requirementId: requirement.id,
       workOrderId,
       partId: result.part.id,
-      status: result.requirement.status,
-      requirement: result.requirement,
+      status: requirement.status,
+      requirement,
       source: "work_order_part_request",
       actor,
     });
@@ -236,8 +236,8 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
 }
 
 // « Demander la pièce » : le serveur décide au clic (voir `requestPartForWorkOrder`).
-// 201 dès qu'une sortie ou une demande est créée ; 200 si seule une demande
-// déjà en cours est réutilisée.
+// 201 dès qu'une demande est créée ; 200 si seule une demande déjà en cours est
+// réutilisée. Rien ne sort du stock ici : le magasinier sort par `/issue`.
 router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
   try {
     const result = await requestPartForWorkOrder({
@@ -249,7 +249,7 @@ router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
       reason: req.body?.reason,
     });
     broadcastPartRequest(result, req.user);
-    const created = result.partUsed !== null || (result.requirement !== null && !result.usedExistingRequirement);
+    const created = !result.usedExistingRequirement && (result.stockRequirement !== null || result.requirement !== null);
     return res.status(created ? 201 : 200).json(result);
   } catch (error) {
     if (isAppError(error)) {
@@ -380,7 +380,8 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
       if (isAppError(stockError)) {
         return res.status(stockError.status).json({ message: stockError.message });
       }
-      const status = issueResult.error === STALE_STATUS_ERROR ? 409 : 400;
+      const status =
+        issueResult.error === STALE_STATUS_ERROR ? 409 : issueResult.error === STOCK_ISSUE_REVOKED_ERROR ? 403 : 400;
       return res.status(status).json({ message: issueResult.error });
     }
 

@@ -53,7 +53,7 @@ interface VehicleTireRemoveDialogProps {
 }
 
 const DESTINATION_HINTS: Record<TireRemovalDestination, string> = {
-  stock: "Pneu réutilisable : il retourne au magasin, le stock de sa référence augmente d'une unité.",
+  stock: "Pneu réutilisable : il retourne au magasin en usagé, à part du neuf de sa référence.",
   scrap: "Pneu hors d'usage : il ne revient pas en stock.",
 };
 
@@ -83,7 +83,7 @@ export function VehicleTireRemoveDialog({ mountedTire, onOpenChange }: VehicleTi
         title: "Pneu démonté",
         description:
           removal.destination === "stock"
-            ? "Le pneu est revenu en stock magasin."
+            ? "Le pneu est revenu au magasin, en stock usagé."
             : "Le pneu est mis au rebut, le stock est inchangé.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/tires"] });

@@ -3,6 +3,7 @@ import { parts, partsStockMovements, users, workOrders, type Part, type InsertPa
 import { eq, desc, asc, sql, and, lte, gte, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AppError } from "../lib/app-error";
+import { escapeLike } from "../lib/sql-like";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("parts");
@@ -24,7 +25,7 @@ export class PartsService {
     const conditions: SQL[] = [];
     if (search) {
       conditions.push(
-        sql`${parts.name} ILIKE ${`%${search}%`} OR ${parts.reference} ILIKE ${`%${search}%`}`,
+        sql`${parts.name} ILIKE ${`%${escapeLike(search)}%`} OR ${parts.reference} ILIKE ${`%${escapeLike(search)}%`}`,
       );
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -132,7 +133,7 @@ export class PartsService {
       .limit(1);
 
     if (existingPart.length > 0) {
-      throw new Error("Une pièce avec cette référence existe déjà");
+      throw new AppError(409, "Une pièce avec cette référence existe déjà");
     }
 
     const normalizedQuantity = insertPart.quantity ?? 0;
@@ -226,7 +227,7 @@ export class PartsService {
     // Vérifier que la pièce existe
     const existingPart = await this.getPartById(id);
     if (!existingPart) {
-      throw new Error("Pièce non trouvée");
+      throw new AppError(404, "Pièce non trouvée");
     }
 
     // Supprimer les mouvements de stock associés
@@ -270,6 +271,7 @@ export class PartsService {
         .update(parts)
         .set({
           quantity: newStock,
+          reorderAlert: newStock <= part.minQuantity,
           updatedBy: userId ?? null,
           updatedAt: new Date(),
         })

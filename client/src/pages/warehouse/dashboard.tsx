@@ -17,6 +17,7 @@ import { OverdueInvoicesAlert } from "@/components/dashboard/overdue-invoices-al
 import { HeaderCard, KpiGrid, KpiTile, CardShell, AlertBannerCard, PremiumTabsNav } from "@/components/design-system";
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
+import { usedTiresLabel } from "@shared/constants/tire-stock";
 
 type StockMovement = {
   movementType?: string | null;
@@ -40,6 +41,8 @@ export default function WarehouseDashboard() {
   const { data: tireStats, isLoading: tireStatsLoading } = useQuery<{
     totalReferences?: number;
     totalStock?: number;
+    /** Pneus usagés remis en stock : hors valeur et hors `totalStock` (neuf). */
+    usedQuantity?: number;
     totalValue?: number;
   }>({
     queryKey: ["/api/tires/statistics"],
@@ -406,7 +409,9 @@ export default function WarehouseDashboard() {
                 ) : (
                   <p className="text-2xl font-bold text-gray-800">{tireStats?.totalReferences ?? 0}</p>
                 )}
-                <p className="text-[11px] text-gray-400">{tireStats?.totalStock ?? 0} unités en rayon</p>
+                <p className="text-[11px] text-gray-400">{tireStats?.totalStock ?? 0} neufs en rayon
+                  {(tireStats?.usedQuantity ?? 0) > 0 ? ` + ${usedTiresLabel(tireStats?.usedQuantity ?? 0)}` : ""}
+                </p>
               </div>
             </CardShell>
 
