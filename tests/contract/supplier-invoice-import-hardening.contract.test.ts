@@ -38,6 +38,14 @@ function toBuffer(sheet: XLSX.WorkSheet): Buffer {
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
+/** Réécrit le XML de la première feuille d'un classeur produit par `toBuffer`. */
+function withSheetXml(workbook: Buffer, transform: (xml: string) => string): Buffer {
+  const files = unzipSync(workbook);
+  const path = "xl/worksheets/sheet1.xml";
+  files[path] = new TextEncoder().encode(transform(new TextDecoder().decode(files[path])));
+  return Buffer.from(zipSync(files));
+}
+
 async function importFile(content: Buffer | Uint8Array, filename = "factures.xlsx") {
   const form = new FormData();
   form.append(
@@ -232,7 +240,31 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect((await rowsFor(number)).length).toBe(1);
   });
 
-  // Réserves connues, non corrigées : la lecture complète d'une feuille de 50 Mo coûte ~4 s.
-  it.todo("3 lignes + <dimension ref=\"A1:B8000\"/> : accepté avec 3 lignes (aujourd'hui refusé « trop long »)");
-  it.todo("sans <dimension>, 10 lignes + 2 lignes à A7000 : 12 importées ou refus explicite (aujourd'hui 10 importées)");
+  // La balise <dimension> est déclarative : le serveur compte les lignes réellement présentes.
+  it("3 lignes + <dimension ref=\"A1:G8000\"/> : accepté avec 3 lignes", async () => {
+    const number = uniqueTestToken("fdim");
+    const sheet = XLSX.utils.aoa_to_sheet([HEADERS, ...[0, 1, 2].map((i) => validValues(`${number}-${i}`))]);
+    const file = withSheetXml(toBuffer(sheet), (xml) => {
+      expect(xml).toMatch(/<dimension [^>]*\/>/);
+      return xml.replace(/<dimension [^>]*\/>/, '<dimension ref="A1:G8000"/>');
+    });
+    const { status, body } = await importFile(file);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ success: 3, failed: 0, total: 3 });
+    expect((await rowsFor(`${number}-2`)).length).toBe(1);
+  });
+
+  it("sans <dimension>, 10 lignes + 2 lignes en A7000 : les 12 lignes sont importées", async () => {
+    const number = uniqueTestToken("nodim");
+    const sheet = XLSX.utils.aoa_to_sheet([HEADERS, ...Array.from({ length: 10 }, (_, i) => validValues(`${number}-${i}`))]);
+    XLSX.utils.sheet_add_aoa(sheet, [validValues(`${number}-far0`), validValues(`${number}-far1`)], { origin: "A7000" });
+    const file = withSheetXml(toBuffer(sheet), (xml) => {
+      expect(xml).toMatch(/<dimension [^>]*\/>/);
+      return xml.replace(/<dimension [^>]*\/>/, "");
+    });
+    const { status, body } = await importFile(file);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ success: 12, failed: 0, total: 12 });
+    expect((await rowsFor(`${number}-far1`)).length).toBe(1);
+  });
 });

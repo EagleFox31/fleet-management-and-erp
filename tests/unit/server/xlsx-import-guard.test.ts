@@ -8,7 +8,7 @@ import { canonicalWorkbookArchive, readZipDirectory } from "../../../server/lib/
 /**
  * Niveau U : la garde mesure le contenu RÉEL d'un .xlsx (décompression plafonnée) et ne
  * croit ni les tailles déclarées, ni un répertoire central en désaccord avec l'en-tête local.
- * Les fixtures sont générées en mémoire ; le budget est injecté (quelques Ko, pas 50 Mo).
+ * Les fixtures sont générées en mémoire ; le budget est injecté (quelques Ko, pas 15 Mo).
  */
 
 const KB = 1024;

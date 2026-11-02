@@ -10,8 +10,13 @@ export const SUPPLIER_INVOICE_IMPORT_MAX_ROWS = 5000;
 /** Taille maximale du fichier téléversé (octets). */
 export const SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
-/** Taille décompressée maximale du classeur (octets), mesurée en décompressant réellement chaque entrée du zip. */
-export const SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+/**
+ * Taille décompressée maximale du classeur (octets), mesurée en décompressant réellement chaque
+ * entrée du zip. 5000 lignes de facture font quelques Mo de XML ; à 15 Mo, la feuille est lue en
+ * entier (sans fenêtre de lignes) en ~0,9 s et +155 Mo au pire (mesure du 2 novembre 2026,
+ * feuille pleine ou creuse). À 50 Mo, la même lecture prenait ~4 s.
+ */
+export const SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES = 15 * 1024 * 1024;
 
 /** Seules colonnes lues : toute autre colonne du fichier est ignorée. */
 export const SUPPLIER_INVOICE_IMPORT_COLUMNS = [
