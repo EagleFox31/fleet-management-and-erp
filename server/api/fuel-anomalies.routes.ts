@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   fuelAnomaliesResponseSchema,
+  fuelAnomaliesSummarySchema,
   fuelAnomalyParamsSchema,
   updateFuelAnomalyRequestSchema,
 } from "@shared/contracts/fuel-anomalies";
@@ -19,6 +20,15 @@ const router = Router();
 router.get("/fuel-card/anomalies", requireFeature("fuel-anomalies"), authenticate, authorize([...FUEL_READ_ROLES]), async (_req, res, next) => {
   try {
     res.json(fuelAnomaliesResponseSchema.parse(await fuelAnomalyResolutionService.list()));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Compteur « véhicules sans capacité » : la règle `tank-overflow` y est muette. Mêmes rôles que la liste. */
+router.get("/fuel-card/anomalies/summary", requireFeature("fuel-anomalies"), authenticate, authorize([...FUEL_READ_ROLES]), async (_req, res, next) => {
+  try {
+    res.json(fuelAnomaliesSummarySchema.parse({ vehiclesWithoutTankCapacity: await fuelAnomalyResolutionService.vehiclesWithoutTankCapacity() }));
   } catch (err) {
     next(err);
   }
