@@ -138,6 +138,13 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logis
  */
 export const DOCUMENT_RENEWAL_WRITER_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
 
+/**
+ * Lecture des centres et des demandes de renouvellement (`GET /centers`, `GET /requests`) :
+ * les écrivains plus le technicien. Source unique du routeur et de l'événement temps réel
+ * `document_renewal_center_changed`.
+ */
+export const DOCUMENT_RENEWAL_VIEWER_ROLES = [...DOCUMENT_RENEWAL_WRITER_ROLES, "technician"] as const satisfies readonly AppRole[];
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 

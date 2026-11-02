@@ -9,7 +9,7 @@
  * Réutilisés sans redéclaration : `work_order_updated` (contrôle qualité),
  * `part_requirement_updated` (réception), `alert_created`.
  */
-import { FUEL_READ_ROLES, type AppRole } from "../constants/roles";
+import { DOCUMENT_RENEWAL_VIEWER_ROLES, FUEL_READ_ROLES, type AppRole } from "../constants/roles";
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -62,6 +62,11 @@ export const REALTIME_EVENTS = {
   backup_failed: {
     scope: { type: "roles", roles: ["admin"] },
     invalidates: ["/api/admin/backups", "/api/admin/backups/alerts"],
+  } as EventDefinition<{ id: number }>,
+  document_renewal_center_changed: {
+    // Rôles qui lisent ou choisissent un centre (GET /centers).
+    scope: { type: "roles", roles: DOCUMENT_RENEWAL_VIEWER_ROLES },
+    invalidates: ["/api/document-renewals/centers"],
   } as EventDefinition<{ id: number }>,
 } as const;
 
