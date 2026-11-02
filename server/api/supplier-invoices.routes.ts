@@ -13,6 +13,13 @@ import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { uploadedFileCandidates } from "../lib/uploaded-file";
+import { assertWorkbookArchiveSafe } from "../lib/xlsx-import-guard";
+import {
+  SUPPLIER_INVOICE_IMPORT_COLUMNS,
+  SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES,
+  SUPPLIER_INVOICE_IMPORT_MAX_ROWS,
+  SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES,
+} from "../../shared/contracts/supplier-invoice-import";
 
 const router = Router();
 const log = moduleLogger("supplier-invoices");
@@ -903,7 +910,7 @@ const uploadExcel = multer({
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5 MB
+    fileSize: SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES
   }
 }).single('file');
 
@@ -956,6 +963,15 @@ function parseImportAmount(value: unknown, label: string): number {
   return amount;
 }
 
+/** Ne garde que les colonnes attendues : un en-tête `__proto__` ou `constructor` est ignoré. */
+function pickImportColumns(raw: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const column of SUPPLIER_INVOICE_IMPORT_COLUMNS) {
+    if (Object.prototype.hasOwnProperty.call(raw, column)) row[column] = raw[column];
+  }
+  return row;
+}
+
 function isBlankCell(value: unknown): boolean {
   return value === undefined || value === null || String(value).trim() === "";
 }
@@ -976,10 +992,29 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
     try {
       let data: Record<string, unknown>[];
       try {
-        const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+        assertWorkbookArchiveSafe(req.file.buffer, SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES);
+        // sheetRows = en-tête + MAX lignes + 1 ligne témoin pour détecter le dépassement.
+        const workbook = XLSX.read(req.file.buffer, {
+          type: "buffer",
+          sheets: 0,
+          sheetRows: SUPPLIER_INVOICE_IMPORT_MAX_ROWS + 2,
+          cellFormula: false,
+          cellHTML: false,
+          cellStyles: false,
+          dense: true,
+        });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        data = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+        const rawRows = worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
+        if (rawRows.length > SUPPLIER_INVOICE_IMPORT_MAX_ROWS) {
+          throw new AppError(
+            400,
+            `Fichier trop long : ${SUPPLIER_INVOICE_IMPORT_MAX_ROWS} lignes maximum, découpez-le en plusieurs fichiers.`,
+          );
+        }
+        data = rawRows.map(pickImportColumns);
       } catch (parseError) {
+        if (parseError instanceof AppError) throw parseError;
+        log.warn({ err: parseError, requestId: req.requestId }, "Classeur d'import de facture fournisseur illisible");
         throw new AppError(400, "Fichier Excel illisible.", { cause: parseError });
       }
 
