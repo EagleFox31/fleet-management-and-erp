@@ -73,3 +73,15 @@ Agent : api (lot CDC #7) · Branche : `lot/api/CDC-7-kpi` · Base : `lot/int/CDC
   - `technician-work-orders-service` lit heures et taux et passe par la formule partagée ; `console.*` migrés vers `moduleLogger`.
   - Réserves de la relecture de #58 levées : `tests/integration/kpi-service.test.ts` réaligné (champs ajoutés, série à zéros, conformité préventive renvoyée à `kpi-service-cdc.test.ts`), détail « pneus » dans l'export KPI, commentaire du contrat corrigé.
 - **Pourquoi** : décision utilisateur ; dès qu'un taux existait, l'écran et le KPI divergeaient pour le même OT.
+
+## 2026-11-02T12:18:25+01:00 — CDC-7 — Coût d'OT : réserves de sécurité et de relecture (PR #89)
+
+- **Agent** : api · **Branche** : `lot/api/ot-cost-alignment` · **Commit** : voir `git log`
+- **Statut** : fait ; contrat à rejouer
+- **Quoi** :
+  - `GET /api/work-orders/:id/labor-rate` réservé à `WORK_ORDER_COST_READ_ROLES` (personnel hors chauffeur), au lieu de `isStaff`.
+  - Identifiant au-delà de 2147483647 : 400 au lieu de 500. OT inexistant : 404, distinct de `null` (aucun taux applicable).
+  - Écran d'OT : pas d'appel du taux hors de ces rôles ; impression bloquée tant que le taux charge ou a échoué (sinon le PDF différerait du KPI) ; la ligne « Main d'œuvre » affiche « h × taux, taux du JJ/MM/AAAA » quand le coût est valorisé.
+- **Pourquoi** : revue sécurité (le chauffeur lisait le taux horaire) et relecture (PDF qui pouvait diverger du KPI, montant sans explication).
+- **Reporté** : 2 requêtes par OT dans `getTechnicianWorkOrders` (N+1 déjà présent) ; la création d'un taux n'invalide pas `/api/work-orders/*/labor-rate` (relu au plus tard après 5 min de `staleTime`).
+- **Preuves** : tsc 0 ; unitaires 1054/1055 (rouge connu `pending-invoices-kpi-roles`, gelé) dont `tests/unit/shared/work-order-cost-roles.test.ts` ; contrat `work-order-labor-rate` complété (chauffeur 403, 404, 400), à rejouer.

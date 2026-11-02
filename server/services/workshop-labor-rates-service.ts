@@ -52,6 +52,13 @@ export async function laborRateForWorkOrder(workOrderId: number): Promise<{ effe
   return row ? { effectiveFrom: row.effective_from, hourlyRateHt: Number(row.hourly_rate_ht) } : null;
 }
 
+/** `true` si l'OT existe : distingue « OT inconnu » (404) de « aucun taux applicable » (null). */
+export async function workOrderExists(workOrderId: number): Promise<boolean> {
+  const res = await db.execute(sql`SELECT 1 FROM work_orders WHERE id = ${workOrderId} LIMIT 1`);
+  const rows = Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? [];
+  return rows.length > 0;
+}
+
 /** Ajoute un taux daté. Une seconde saisie à la même date d'effet est refusée (409), jamais écrasée. */
 export async function createWorkshopLaborRate(userId: number, input: CreateWorkshopLaborRateRequest): Promise<WorkshopLaborRate> {
   try {

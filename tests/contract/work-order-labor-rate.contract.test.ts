@@ -52,6 +52,8 @@ describe("WO5 : taux horaire d'un OT", { timeout: 60000 }, () => {
 
     expect((await session.call("GET", path, { actor: null })).status).toBe(401);
     expect((await session.call("GET", path, { actor: "client" })).status).toBe(403);
+    // Le chauffeur est du personnel mais ne voit pas les coûts d'atelier (WORK_ORDER_COST_READ_ROLES).
+    expect((await session.call("GET", path, { actor: "driver" })).status).toBe(403);
 
     for (const actor of ["technician", "warehouse"] as const) {
       const res = await session.call("GET", path, { actor });
@@ -83,6 +85,17 @@ describe("WO5 : taux horaire d'un OT", { timeout: 60000 }, () => {
   it("identifiant non entier : 400 au contrat d'erreur", async () => {
     const res = await session.call("GET", "/api/work-orders/abc/labor-rate", { actor: "technician" });
     expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ message: expect.any(String) });
+  });
+
+  it("identifiant au-delà d'un integer Postgres : 400, pas 500", async () => {
+    const res = await session.call("GET", "/api/work-orders/99999999999/labor-rate", { actor: "technician" });
+    expect(res.status).toBe(400);
+  });
+
+  it("OT inexistant : 404, distinct de « aucun taux » (null)", async () => {
+    const res = await session.call("GET", "/api/work-orders/2147483647/labor-rate", { actor: "technician" });
+    expect(res.status).toBe(404);
     expect(res.body).toMatchObject({ message: expect.any(String) });
   });
 });

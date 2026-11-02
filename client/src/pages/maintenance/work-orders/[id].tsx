@@ -11,6 +11,7 @@ import { WorkOrderExportButton } from "@/components/work-orders/work-order-expor
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { computeWorkOrderCost, partLineCost, totalLaborHours } from "@shared/work-order-cost";
+import { canReadWorkOrderCost } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -303,11 +304,23 @@ export default function WorkOrderDetails({
 
   // Taux horaire en vigueur pour cet OT (à sa clôture, sinon aujourd'hui) : même règle que le KPI.
   // La date de fin fait partie de la clé : clôturer l'OT relit le taux applicable.
-  const { data: laborRate = null } = useQuery<{ effectiveFrom: string; hourlyRateHt: number } | null>({
+  // Hors `WORK_ORDER_COST_READ_ROLES` (chauffeur, client), la route répond 403 : pas d'appel,
+  // le coût saisi de l'OT s'affiche seul.
+  const canReadLaborRate = canReadWorkOrderCost(user?.role);
+  const {
+    data: laborRate = null,
+    isLoading: laborRateLoading,
+    isError: laborRateError,
+  } = useQuery<{ effectiveFrom: string; hourlyRateHt: number } | null>({
     // Le second élément est lu comme paramètres de requête (ignorés par le serveur) : il faut un objet.
     queryKey: [`/api/work-orders/${workOrderId}/labor-rate`, { endDate: workOrder?.endDate ?? undefined }],
-    enabled: !!workOrderId && !!workOrder,
+    enabled: !!workOrderId && !!workOrder && canReadLaborRate,
   });
+  // Un PDF imprimé avant le taux afficherait un autre coût que le KPI : impression bloquée d'ici là.
+  const printBlockedByLaborRate = canReadLaborRate && (laborRateLoading || laborRateError);
+  const printBlockedReason = laborRateError
+    ? "Taux horaire indisponible : impression impossible pour l'instant, rechargez la page."
+    : "Chargement du taux horaire…";
   // Saisie a posteriori permise sur un OT terminé; un OT annulé est figé.
   // Un technicien ne saisit que sur ses OT, et un OT clos est figé : même règle que le serveur.
   const canEditWorkItems =
@@ -1101,6 +1114,7 @@ export default function WorkOrderDetails({
     partsCost: totalPartsCost,
     tiresCost: totalTireRotationsCost,
     totalCost: grandTotal,
+    laborValued,
   } = computeWorkOrderCost({
     baseCost: workOrder.cost,
     parts: partsUsed,
@@ -1176,6 +1190,8 @@ export default function WorkOrderDetails({
                 variant="outline"
                 size="sm"
                 onClick={handlePrintWorkOrder}
+                disabled={printBlockedByLaborRate}
+                title={printBlockedByLaborRate ? printBlockedReason : undefined}
                 className="bg-white/70 border-green-200 hover:bg-white text-green-800"
                 data-testid="button-print-work-order"
               >
@@ -1988,7 +2004,16 @@ export default function WorkOrderDetails({
                   <div className="px-4 py-3 space-y-1.5 text-sm">
                     {baseWorkOrderCost > 0 && (
                       <div className="flex justify-between text-muted-foreground">
-                        <span>Main d'œuvre</span><span>{formatCurrency(baseWorkOrderCost)}</span>
+                        <span>
+                          Main d'œuvre
+                          {laborValued && laborRate && (
+                            <span className="ml-1 text-xs" data-testid="labor-cost-basis">
+                              ({laborHours.toLocaleString("fr-FR")} h × {formatCurrency(laborRate.hourlyRateHt)}, taux du{" "}
+                              {new Date(`${laborRate.effectiveFrom}T00:00:00`).toLocaleDateString("fr-FR")})
+                            </span>
+                          )}
+                        </span>
+                        <span>{formatCurrency(baseWorkOrderCost)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-muted-foreground">
@@ -2006,7 +2031,12 @@ export default function WorkOrderDetails({
                 </div>
 
                 <div className="flex justify-end">
-                  <Button onClick={handlePrintWorkOrder} className="bg-purple-600 hover:bg-purple-700">
+                  <Button
+                    onClick={handlePrintWorkOrder}
+                    disabled={printBlockedByLaborRate}
+                    title={printBlockedByLaborRate ? printBlockedReason : undefined}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
                     <Printer className="h-4 w-4 mr-2" />
                     Imprimer le rapport
                   </Button>
