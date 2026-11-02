@@ -12,6 +12,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { craftZip, zip64Extra, type CraftedEntry } from "../support/zip-craft";
 
 /**
  * Niveau C, durcissement de l'import Excel (SheetJS 0.20.3) :
@@ -153,6 +154,32 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
   });
 
+  it("data descriptor (bit 3) + taille locale 300 Mo, central honnête : 400 lisible, sans pic mémoire", async () => {
+    const number = uniqueTestToken("dd");
+    const files = unzipSync(toBuffer(XLSX.utils.aoa_to_sheet([HEADERS, validValues(number)])));
+    const entries: CraftedEntry[] = Object.entries(files).map(([name, data]) =>
+      name === "xl/worksheets/sheet1.xml" ? { name, data, localFlags: 0x0008, localSize: 300 * 1024 * 1024 } : { name, data },
+    );
+    const before = process.memoryUsage().arrayBuffers;
+    const { status, body } = await importFile(craftZip(entries));
+    // Serveur dans le même processus : SheetJS aurait alloué 300 Mo d'après l'en-tête local.
+    expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(100 * 1024 * 1024);
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/illisible/);
+    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect((await rowsFor(number)).length).toBe(0);
+  });
+
+  it("extra ZIP64 local + bit 3 sur une entrée vide : 400 lisible", async () => {
+    const files = unzipSync(toBuffer(XLSX.utils.aoa_to_sheet([HEADERS, validValues("x")])));
+    const entries: CraftedEntry[] = Object.entries(files).map(([name, data]) => ({ name, data }));
+    entries.push({ name: "xl/media/j0.bin", data: new Uint8Array(0), localFlags: 0x0008, localExtra: zip64Extra(5 * 2 ** 30) });
+    const { status, body } = await importFile(craftZip(entries));
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/illisible/);
+    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+  });
+
   it("exactement le maximum de lignes : accepté (lu en entier)", async () => {
     const rows: Array<Array<string | number>> = [HEADERS];
     for (let i = 0; i < SUPPLIER_INVOICE_IMPORT_MAX_ROWS; i++) {
@@ -204,4 +231,8 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect(Object.keys(Object.prototype)).toEqual([]);
     expect((await rowsFor(number)).length).toBe(1);
   });
+
+  // Réserves connues, non corrigées : la lecture complète d'une feuille de 50 Mo coûte ~4 s.
+  it.todo("3 lignes + <dimension ref=\"A1:B8000\"/> : accepté avec 3 lignes (aujourd'hui refusé « trop long »)");
+  it.todo("sans <dimension>, 10 lignes + 2 lignes à A7000 : 12 importées ou refus explicite (aujourd'hui 10 importées)");
 });

@@ -13,7 +13,7 @@ import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { uploadedFileCandidates } from "../lib/uploaded-file";
-import { assertWorkbookArchiveSafe } from "../lib/xlsx-import-guard";
+import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import {
   SUPPLIER_INVOICE_IMPORT_COLUMNS,
   SUPPLIER_INVOICE_IMPORT_MAX_FILE_BYTES,
@@ -992,9 +992,11 @@ router.post("/import", checkCreatePermission, (req: Request, res: Response, next
     try {
       let data: Record<string, unknown>[];
       try {
-        assertWorkbookArchiveSafe(req.file.buffer, SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES);
+        // SheetJS ne lit jamais le tampon téléversé : seulement l'archive reconstruite par la
+        // garde à partir des contenus réellement décompressés (tailles vraies par construction).
+        const archive = canonicalWorkbookArchive(req.file.buffer, SUPPLIER_INVOICE_IMPORT_MAX_UNCOMPRESSED_BYTES);
         // sheetRows = en-tête + MAX lignes + 1 ligne témoin pour détecter le dépassement.
-        const workbook = XLSX.read(req.file.buffer, {
+        const workbook = XLSX.read(archive, {
           type: "buffer",
           sheets: 0,
           sheetRows: SUPPLIER_INVOICE_IMPORT_MAX_ROWS + 2,

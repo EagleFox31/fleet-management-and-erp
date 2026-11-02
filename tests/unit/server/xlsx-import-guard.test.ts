@@ -1,8 +1,9 @@
-import { zipSync } from "fflate";
+import { craftZip, zip64Extra, type CraftedEntry } from "../../support/zip-craft";
+import { unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
-import { assertWorkbookArchiveSafe, readZipDirectory } from "../../../server/lib/xlsx-import-guard";
+import { canonicalWorkbookArchive, readZipDirectory } from "../../../server/lib/xlsx-import-guard";
 
 /**
  * Niveau U : la garde mesure le contenu RÉEL d'un .xlsx (décompression plafonnée) et ne
@@ -45,7 +46,7 @@ function centralEntry(z: Buffer, name: string): { cd: number; local: number } {
 function expectRefused(buffer: Buffer, pattern: RegExp, budget = BUDGET): void {
   let thrown: unknown;
   try {
-    assertWorkbookArchiveSafe(buffer, budget);
+    canonicalWorkbookArchive(buffer, budget);
   } catch (error) {
     thrown = error;
   }
@@ -78,13 +79,13 @@ describe("readZipDirectory", () => {
   });
 });
 
-describe("assertWorkbookArchiveSafe", () => {
+describe("canonicalWorkbookArchive", () => {
   it("accepte un classeur valide", () => {
-    expect(() => assertWorkbookArchiveSafe(realWorkbook(), FULL_BUDGET)).not.toThrow();
+    expect(() => canonicalWorkbookArchive(realWorkbook(), FULL_BUDGET)).not.toThrow();
   });
 
   it("accepte des entrées stockées (méthode 0) sous le budget", () => {
-    expect(() => assertWorkbookArchiveSafe(zip({ "a.txt": new Uint8Array(KB) }, 0), BUDGET)).not.toThrow();
+    expect(() => canonicalWorkbookArchive(zip({ "a.txt": new Uint8Array(KB) }, 0), BUDGET)).not.toThrow();
   });
 
   it("refuse une décompression excessive honnête (400 lisible)", () => {
@@ -170,6 +171,110 @@ describe("assertWorkbookArchiveSafe", () => {
     const z = zip({ "a.txt": new Uint8Array(100) });
     z.writeUInt32LE(z.length + 100, centralEntry(z, "a.txt").cd + 42);
     expectRefused(z, /illisible/);
+  });
+});
+
+function workbookEntries(): CraftedEntry[] {
+  const files = unzipSync(realWorkbook());
+  return Object.entries(files).map(([name, data]) => ({ name, data }));
+}
+
+describe("Contournements par écart garde / SheetJS (data descriptor, ZIP64)", () => {
+  it("témoin : l'archive fabriquée sans piège est acceptée", () => {
+    expect(() => canonicalWorkbookArchive(craftZip(workbookEntries()), FULL_BUDGET)).not.toThrow();
+  });
+
+  it("dd300 : bit 3 + taille locale 300 Mo (central honnête) refusé", () => {
+    const entries = workbookEntries().map((e) =>
+      e.name === "xl/worksheets/sheet1.xml" ? { ...e, localFlags: 0x0008, localSize: 300 * 1024 * 1024 } : e,
+    );
+    expectRefused(craftZip(entries), /illisible/, FULL_BUDGET);
+  });
+
+  it("d5 : extra ZIP64 local + bit 3 sur une entrée vide refusé", () => {
+    const entries: CraftedEntry[] = [
+      ...workbookEntries(),
+      { name: "xl/media/j0.bin", data: new Uint8Array(0), localFlags: 0x0008, localExtra: zip64Extra(5 * 2 ** 30) },
+    ];
+    expectRefused(craftZip(entries), /illisible/, FULL_BUDGET);
+  });
+
+  it("extra ZIP64 dans le répertoire central refusé", () => {
+    const entries: CraftedEntry[] = [
+      ...workbookEntries(),
+      { name: "xl/media/j0.bin", data: new Uint8Array(10), centralExtra: zip64Extra(10) },
+    ];
+    expectRefused(craftZip(entries), /illisible/, FULL_BUDGET);
+  });
+
+  it("bit 3 avec tailles locales à 0 (cas légitime) accepté", () => {
+    const entries = workbookEntries().map((e) => ({ ...e, localFlags: 0x0008, localSize: 0, localCompressedSize: 0 }));
+    expect(() => canonicalWorkbookArchive(craftZip(entries), FULL_BUDGET)).not.toThrow();
+  });
+
+  it("nom d'entrée en double refusé", () => {
+    const entries = workbookEntries();
+    expectRefused(craftZip([...entries, { ...entries[0] }]), /illisible/, FULL_BUDGET);
+  });
+
+  it("nom d'entrée vide refusé", () => {
+    expectRefused(craftZip([...workbookEntries(), { name: "", data: new Uint8Array(1) }]), /illisible/, FULL_BUDGET);
+  });
+});
+
+describe("Archive canonique rendue à SheetJS", () => {
+  /** Chaque en-tête local de l'archive : drapeaux, tailles, extra et contenu réel. */
+  function localHeaders(z: Buffer) {
+    const real = unzipSync(z);
+    const eocd = z.lastIndexOf(EOCD);
+    let cursor = z.readUInt32LE(eocd + 16);
+    const headers = [];
+    for (let i = 0; i < z.readUInt16LE(eocd + 10); i++) {
+      const nameLength = z.readUInt16LE(cursor + 28);
+      const name = z.subarray(cursor + 46, cursor + 46 + nameLength).toString();
+      const local = z.readUInt32LE(cursor + 42);
+      headers.push({
+        name,
+        flags: z.readUInt16LE(local + 6),
+        localCompressed: z.readUInt32LE(local + 18),
+        localSize: z.readUInt32LE(local + 22),
+        localExtra: z.readUInt16LE(local + 28),
+        centralExtra: z.readUInt16LE(cursor + 30),
+        centralSize: z.readUInt32LE(cursor + 24),
+        realSize: real[name].length,
+      });
+      cursor += 46 + nameLength + z.readUInt16LE(cursor + 30) + z.readUInt16LE(cursor + 32);
+    }
+    return headers;
+  }
+
+  it("bit 3 légitime en entrée : sortie sans data descriptor ni extra, tailles locales = tailles réelles", () => {
+    const entries = workbookEntries().map((e) => ({ ...e, localFlags: 0x0008, localSize: 0, localCompressedSize: 0 }));
+    const canonical = canonicalWorkbookArchive(craftZip(entries), FULL_BUDGET);
+    const headers = localHeaders(canonical);
+    expect(headers.length).toBe(entries.length);
+    for (const h of headers) {
+      expect(h.flags & 0x0008).toBe(0);
+      expect(h.localExtra).toBe(0);
+      expect(h.centralExtra).toBe(0);
+      expect(h.localSize).toBe(h.realSize);
+      expect(h.localCompressed).toBe(h.realSize);
+      expect(h.centralSize).toBe(h.realSize);
+    }
+  });
+
+  it("SheetJS relit l'archive canonique avec les données d'origine", () => {
+    const canonical = canonicalWorkbookArchive(realWorkbook(), FULL_BUDGET);
+    const read = XLSX.read(canonical, { type: "buffer", dense: true, cellFormula: false });
+    expect(XLSX.utils.sheet_to_json(read.Sheets[read.SheetNames[0]], { header: 1 })).toEqual([["a", "b"], [1, 2]]);
+  });
+
+  it("la sortie ne réutilise pas le tampon téléversé et est stable d'un appel à l'autre", () => {
+    const upload = realWorkbook();
+    const first = canonicalWorkbookArchive(upload, FULL_BUDGET);
+    expect(first.equals(upload)).toBe(false);
+    expect(canonicalWorkbookArchive(upload, FULL_BUDGET).equals(first)).toBe(true);
+    expect(canonicalWorkbookArchive(first, FULL_BUDGET).equals(first)).toBe(true);
   });
 });
 
