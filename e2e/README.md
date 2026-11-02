@@ -26,10 +26,21 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
   `node --env-file=.env node_modules/@playwright/test/cli.js test e2e/07-double-submit-integrity.spec.ts`
 - `npx playwright show-report` pour ouvrir le rapport HTML apres un run
 
+## Garde-fou : jamais contre la production
+
+`playwright.config.ts` appelle `assertNotProductionDatabase()` (`e2e/helpers/production-guard.ts`) avant toute chose : si la base visée est la production, Playwright refuse de démarrer, avec un message qui dit quoi faire (sans jamais afficher l'URL ni le mot de passe).
+
+- Base visée = `DATABASE_URL` de l'environnement (elle prime), à défaut le `.env` du répertoire courant, que le serveur lancé par Playwright chargerait.
+- Est « production » toute base dont l'**hôte** contient un marqueur : l'endpoint Neon de production connu, plus ceux de `E2E_PRODUCTION_DB_MARKERS` (liste séparée par des virgules, pour un autre environnement à protéger).
+- Test de la fonction : `tests/unit/e2e/production-guard.test.ts`.
+- Lancer sur une branche Neon de test, sans toucher au `.env` : `DATABASE_URL=<url de test> DATABASE_URL_TEST=<url de test> node node_modules/@playwright/test/cli.js test`.
+- Limite : avec `E2E_BASE_URL` (serveur déjà lancé), le garde-fou ne voit que la `DATABASE_URL` de la session de test ; c'est à vous de démarrer ce serveur sur la même base de test.
+
 ## Variables optionnelles
 
 - `E2E_BASE_URL`: URL d'une app deja demarree (sinon Playwright lance `npm run dev`)
 - `E2E_CHANNEL`: navigateur installe a utiliser a la place du Chromium de Playwright (`msedge`, `chrome`). Utile quand `playwright install` n'a pas ete lance sur le poste
+- `E2E_PRODUCTION_DB_MARKERS`: hôtes (ou fragments) supplémentaires traités comme production par le garde-fou
 - `DATABASE_URL`: requise par les specs 07 et 08, qui creent leurs donnees directement en base (d'ou `node --env-file=.env`)
 - `E2E_USERNAME`: login e2e pour les specs 01 a 05 (defaut `admin`)
 - `E2E_PASSWORD`: mot de passe associe (defaut `admin123`)
@@ -84,7 +95,7 @@ Ne pas lancer `npm run test:integration` ni `npm run test:contract` pendant les 
 (`cleanupOrphanTestRows`) supprime **toutes** les lignes `TEST-`, y compris les utilisateurs que l'e2e vient de creer.
 Symptome : page de connexion au milieu d'un test, `GET /api/auth/me` en 404 dans les logs serveur.
 
-Ne pas lancer la suite contre une base de production. Pour un jeu de donnees de depart, voir `scripts/README-SEEDING.md`.
+Ne pas lancer la suite contre une base de production (le garde-fou ci-dessus l'interdit). Pour un jeu de donnees de depart, voir `scripts/README-SEEDING.md`.
 
 ## Limites connues
 

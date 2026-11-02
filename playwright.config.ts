@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { assertNotProductionDatabase } from "./e2e/helpers/production-guard";
+
+// Refuse de démarrer si la base visée est la production (voir e2e/README.md).
+assertNotProductionDatabase();
 
 const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:5000";
 const useManagedWebServer = !process.env.E2E_BASE_URL;
