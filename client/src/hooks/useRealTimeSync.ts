@@ -915,6 +915,9 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "fuel_record_validated":
       invalidateCatalogEvent("fuel_record_validated");
       break;
+    case "fuel_record_changed":
+      invalidateCatalogEvent("fuel_record_changed");
+      break;
     case "vehicle_tank_capacity_changed":
       invalidateCatalogEvent("vehicle_tank_capacity_changed");
       break;

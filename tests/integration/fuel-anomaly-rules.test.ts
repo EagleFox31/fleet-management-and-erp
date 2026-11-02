@@ -5,7 +5,9 @@ import { fuelAnomalyResolutions, fuelRecords, vehicles } from "../../shared/sche
 import {
   fuelAnomalyResolutionService as svc,
   TANK_OVERFLOW_TOLERANCE_PERCENT,
+  toleranceSqlLiteral,
 } from "../../server/services/fuel-anomaly-resolution-service";
+import { storage } from "../../server/storage";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle } from "../support/factories";
 
@@ -76,6 +78,13 @@ describe("règle tank-overflow", () => {
     });
     expect([equalCapacity.id, equalTolerance.id]).not.toContain(found[0].fuelRecordId);
   }, 30_000);
+
+  it("tolérance décimale : littéral SQL sans troncature, valeur invalide refusée", () => {
+    expect(toleranceSqlLiteral(5)).toBe("5");
+    expect(toleranceSqlLiteral(2.5)).toBe("2.5");
+    expect(() => toleranceSqlLiteral(Number.NaN)).toThrow();
+    expect(() => toleranceSqlLiteral(-1)).toThrow();
+  });
 
   it("muette sans capacité renseignée", async () => {
     const v = await vehicle(null);
@@ -158,6 +167,36 @@ describe("règle odometer-regression", () => {
     expect((await anomaliesOf(v.id, "odometer-regression")).map((a) => a.fuelRecordId)).toEqual([dropped.id]);
   }, 30_000);
 
+  it("pic isolé : le plein fautif est le pic, pas le plein suivant qui retrouve la série", async () => {
+    const v = await vehicle();
+    await fill(v, { date: "2090-08-01", mileage: 1000 });
+    const spike = await fill(v, { date: "2090-08-02", mileage: 99999 });
+    await fill(v, { date: "2090-08-03", mileage: 1100 });
+    await fill(v, { date: "2090-08-04", mileage: 1200 });
+    const found = await anomaliesOf(v.id, "odometer-regression");
+    expect(found.map((a) => a.fuelRecordId)).toEqual([spike.id]);
+    expect(found[0]).toMatchObject({
+      anomalyKey: `odometer-regression:${spike.id}`,
+      date: "2090-08-02",
+      mileage: 99999,
+      previousMileage: 1000,
+      nextMileage: 1100,
+      averageQuantity: 1000,
+      threshold: 1100,
+    });
+  }, 30_000);
+
+  it("chute sous la série d'avant : le plein courant reste le fautif, sans nextMileage", async () => {
+    const v = await vehicle();
+    await fill(v, { date: "2090-09-01", mileage: 1000 });
+    await fill(v, { date: "2090-09-02", mileage: 2000 });
+    const dropped = await fill(v, { date: "2090-09-03", mileage: 500 });
+    const found = await anomaliesOf(v.id, "odometer-regression");
+    expect(found.map((a) => a.fuelRecordId)).toEqual([dropped.id]);
+    expect(found[0].previousMileage).toBe(2000);
+    expect(found[0]).not.toHaveProperty("nextMileage");
+  }, 30_000);
+
   it("ignore un plein électrique et un plein sans véhicule ; les véhicules ne se mélangent pas", async () => {
     const v = await vehicle();
     const other = await vehicle();
@@ -209,5 +248,17 @@ describe("compteur véhicules sans capacité", () => {
     expect(await svc.vehiclesWithoutTankCapacity()).toBe(before + 1);
     await db.update(vehicles).set({ fuelType: "electric" }).where(eq(vehicles.id, v.id));
     expect(await svc.vehiclesWithoutTankCapacity()).toBe(before);
+  }, 30_000);
+});
+
+describe("storage.updateVehicle : une contrainte CHECK remonte au lieu d'être avalée", () => {
+  it("capacité 0 : l'erreur 23514 est levée (la route la traduit en 400)", async () => {
+    const v = await vehicle(50);
+    await expect(storage.updateVehicle(v.id, { tankCapacityL: 0 })).rejects.toMatchObject({
+      code: "23514",
+      constraint: "vehicles_tank_capacity_l_positive",
+    });
+    const [row] = await db.select({ c: vehicles.tankCapacityL }).from(vehicles).where(eq(vehicles.id, v.id));
+    expect(row.c).toBe(50);
   }, 30_000);
 });

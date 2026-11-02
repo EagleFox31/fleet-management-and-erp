@@ -41,8 +41,13 @@ export type FuelAnomalyResolution = z.infer<typeof fuelAnomalyResolutionSchema>;
  *   `averageQuantity` = moyenne, `threshold` = moyenne + 2 écarts-types.
  * - `tank-overflow` : quantité supérieure à la capacité du véhicule + tolérance ; `averageQuantity` =
  *   capacité, `threshold` = capacité + tolérance, `tankCapacityL` renseigné. Muette sans capacité.
- * - `odometer-regression` : kilométrage inférieur à celui du plein précédent (date puis id) ;
- *   `averageQuantity` et `threshold` = kilométrage précédent, `mileage` et `previousMileage` renseignés.
+ * - `odometer-regression` : kilométrage inférieur à celui du plein précédent (date puis id). Le plein
+ *   marqué est le plein fautif : le plus bas en général (`averageQuantity` et `threshold` = kilométrage
+ *   précédent), mais le précédent quand c'est un pic isolé, c.-à-d. quand le kilométrage qui le suit
+ *   retrouve au moins celui d'avant le pic (`nextMileage` renseigné, `threshold` = kilométrage suivant,
+ *   `averageQuantity` = kilométrage d'avant le pic). `mileage` et `previousMileage` renseignés.
+ *   Limites connues : l'écart n'est pas pesé (10000, 10400, 10390 marque 10400) ; un pic sur le
+ *   premier plein connu (99999, 1000, 1100) marque encore 1000, faute de plein d'avant.
  * Le statut est celui de la dernière décision, `open` sans décision.
  */
 export const FUEL_ANOMALIES_PATH = "/api/fuel-card/anomalies";
@@ -71,6 +76,8 @@ export const fuelAnomalySchema = z.object({
   // Propres à `odometer-regression` (kilométrages) et `tank-overflow` (capacité), absents sinon.
   mileage: z.number().int().nullable().optional(),
   previousMileage: z.number().int().nullable().optional(),
+  // Pic isolé seulement : kilométrage du plein suivant, plus bas que celui du plein marqué.
+  nextMileage: z.number().int().nullable().optional(),
   tankCapacityL: z.number().nullable().optional(),
   status: z.enum(FUEL_ANOMALY_STATUSES),
   comment: z.string().nullable(),

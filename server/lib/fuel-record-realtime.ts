@@ -7,25 +7,22 @@ const log = moduleLogger("fuel-record-realtime");
  * Couche 2 d'un plein créé, modifié ou supprimé : les règles d'anomalie (`tank-overflow`,
  * `odometer-regression`, `consumption-gap`) sont calculées à la lecture, donc le moindre plein
  * change la liste des anomalies des autres profils.
- *
- * Réutilise `fuel_record_validated` faute d'événement dédié : le catalogue invalide
- * `/api/fuel-records`, `/api/fuel-card` (dont `/api/fuel-card/anomalies`) et `/api/fuel-vouchers`,
- * et seuls les rôles carburant le reçoivent. Le nom ne dit pas « modifié » : un événement
- * `fuel_record_changed` reste à déclarer dans `shared/contracts/realtime-events.ts` (autre lot).
+ * Événement dédié `fuel_record_changed` (rôles carburant), distinct de `fuel_record_validated`
+ * qui reste celui de la validation d'un bon.
  */
 export function broadcastFuelRecordChanged(id: number, requestId?: string): void {
-  emit("fuel_record_validated", id, requestId);
+  emit("fuel_record_changed", id, requestId);
 }
 
 /**
  * Couche 2 d'une capacité de réservoir modifiée (FUEL3) : `id` est celui du véhicule, pas d'un
- * plein, d'où un événement distinct de `fuel_record_validated`.
+ * plein, d'où un événement distinct de `fuel_record_changed`.
  */
 export function broadcastVehicleTankCapacityChanged(vehicleId: number, requestId?: string): void {
   emit("vehicle_tank_capacity_changed", vehicleId, requestId);
 }
 
-function emit(event: "fuel_record_validated" | "vehicle_tank_capacity_changed", id: number, requestId?: string): void {
+function emit(event: "fuel_record_changed" | "vehicle_tank_capacity_changed", id: number, requestId?: string): void {
   const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
   if (typeof broadcast !== "function") {
     log.warn({ requestId, event }, "diffusion temps réel indisponible");

@@ -41,6 +41,7 @@ import { vehicleDocumentationService } from "./services/vehicle-documentation-se
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
+import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
@@ -1231,10 +1232,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedVehicle);
     } catch (error) {
-      // Filet : la contrainte de capacité refusée par la base (le stockage avale d'ordinaire l'erreur).
-      const pgError = (error as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } });
-      const violated = pgError?.code === "23514" ? pgError : pgError?.cause?.code === "23514" ? pgError.cause : null;
-      if (violated?.constraint === "vehicles_tank_capacity_l_positive") {
+      // Filet : la contrainte de capacité refusée par la base (storage.updateVehicle remonte les CHECK).
+      if (isCheckViolation(error) && pgConstraintOf(error) === "vehicles_tank_capacity_l_positive") {
         return next(new AppError(400, VEHICLE_TANK_CAPACITY_MESSAGE, { cause: error }));
       }
       log.error({ err: error, requestId: req.requestId }, "Update vehicle error");
