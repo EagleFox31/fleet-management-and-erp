@@ -1,0 +1,175 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Couverture tests FleetMaster</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;700&display=swap">
+<style>
+/* Layout: colonne de lecture 960px ; bilan en tête, détail par module, puis plan sur deux pistes horaires */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --fg:#1b2230; --muted:#5b6577; --line:#dde1e8;
+  --ok:#1f8a5b; --partial:#c98a12; --replay:#6a5acd; --todo:#c2413a; --accent:#2c5fb3; --out:#8a93a3;
+  --f-display:"Archivo",system-ui,sans-serif; --f-body:"IBM Plex Sans",system-ui,sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --surface:#1a2029; --fg:#e4e8ef; --muted:#9aa4b5; --line:#2b3340;
+  --ok:#3fb67f; --partial:#e0a63a; --replay:#9a8cf0; --todo:#e8675f; --accent:#6f9be8; --out:#7c8596; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --surface:#1a2029; --fg:#e4e8ef; --muted:#9aa4b5; --line:#2b3340;
+  --ok:#3fb67f; --partial:#e0a63a; --replay:#9a8cf0; --todo:#e8675f; --accent:#6f9be8; --out:#7c8596; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:960px;margin:0 auto;padding-block:32px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1,h2{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:1.9rem} h2{font-size:1.25rem}
+.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:600}
+.lead{color:var(--muted);max-width:65ch;margin:6px 0 0}
+section{display:grid;gap:14px;min-width:0}
+.mono{font-family:var(--f-mono);font-size:.85em}
+.tn{font-variant-numeric:tabular-nums}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:grid;gap:2px;border-top:3px solid var(--c)}
+.stat b{font-family:var(--f-display);font-size:2rem;line-height:1.1}
+.stat span{color:var(--muted);font-size:.85rem}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)}
+.bar i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.85rem;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--c);margin-right:6px;vertical-align:-1px}
+
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+tr:last-child td{border-bottom:none}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mini{display:flex;height:8px;width:120px;border-radius:4px;overflow:hidden;background:var(--line);margin-top:6px}
+.mini i{display:block;height:100%}
+.ids{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-family:var(--f-mono);font-size:.75rem;padding:1px 6px;border-radius:4px;border:1px solid var(--c);color:var(--c);white-space:nowrap}
+
+.tracks{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.track{display:grid;gap:10px;align-content:start;min-width:0}
+.track h3{margin:0;font-size:.95rem;font-family:var(--f-body);font-weight:600}
+.track p.who{margin:0;color:var(--muted);font-size:.85rem}
+.lot{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:6px}
+.lot header{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
+.lot strong{font-weight:600}
+.time{font-family:var(--f-mono);font-size:.8rem;color:var(--accent)}
+.lot p{margin:0;color:var(--muted);font-size:.86rem}
+.close{border-left:3px solid var(--accent)}
+ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;max-width:72ch}
+.decide{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.decide ol{margin:0;padding-left:20px;display:grid;gap:8px}
+.foot{color:var(--muted);font-size:.8rem}
+@media (max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.tracks{grid-template-columns:1fr}h1{font-size:1.55rem}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Chantier tests · mis à jour le 2 novembre 2026</div>
+  <h1>Couverture des tests FleetMaster</h1>
+  <p class="lead">Source : <span class="mono">docs/qa/PLAN_COUVERTURE_MODULES.md</span>, après fusion des PR #61 à #80. Les correctifs #76 à #80 ont levé tous les défauts gardés en <span class="mono">it.fails</span> : il n'en reste aucun sur <span class="mono">main</span>. 67 cas de test et 6 parcours bout en bout, soit 73 éléments.</p>
+</header>
+
+<section aria-label="Bilan">
+  <div class="stats">
+    <div class="stat" style="--c:var(--ok)"><b class="tn">71,2 %</b><span>Testés : 52 éléments</span></div>
+    <div class="stat" style="--c:var(--partial)"><b class="tn">21,9 %</b><span>Partiels : 16</span></div>
+    <div class="stat" style="--c:var(--todo)"><b class="tn">4,1 %</b><span>Non testés : 3</span></div>
+    <div class="stat" style="--c:var(--out)"><b class="tn">2,7 %</b><span>À construire : 2</span></div>
+  </div>
+  <div class="bar" role="img" aria-label="52 testés, 16 partiels, 3 non testés, 2 à construire">
+    <i style="width:71.2%;background:var(--ok)"></i><i style="width:21.9%;background:var(--partial)"></i><i style="width:4.1%;background:var(--todo)"></i><i style="width:2.7%;background:var(--out)"></i>
+  </div>
+  <div class="legend">
+    <span style="--c:var(--ok)">Testé (OK ou Fait)</span>
+    <span style="--c:var(--partial)">Partiel : test existant, cas manquants</span>
+    <span style="--c:var(--todo)">Non testé (À faire)</span>
+    <span style="--c:var(--out)">À construire : fonctionnalité absente</span>
+  </div>
+  <p class="foot">Cas seuls (sans parcours) : 50 testés (74,6 %), 13 partiels (19,4 %), 2 non testés (3,0 %), 2 à construire (3,0 %). Le 1er novembre à 18:00 : 29 testés sur 73 (39,7 %).</p>
+</section>
+
+<section>
+  <h2>Par module</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Module</th><th>Testé</th><th>Partiel</th><th>Non testé / à construire</th></tr></thead>
+    <tbody id="mods"></tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Depuis le 1er novembre au soir</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>PR</th><th>Contenu</th><th>Effet sur la couverture</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">#67–#75</td><td>ADM5, ADM6, DRV1 ; pistes A3 à A5 et B2, B3 : maintenance, carburant, Direction, véhicules, missions, temps réel OT</td><td>Tests écrits, défauts figés en <span class="mono">it.fails</span></td></tr>
+      <tr><td class="mono">#77</td><td>T8 : pagination, filtres et recherche des listes principales (55 cas)</td><td>17 défauts figés</td></tr>
+      <tr><td class="mono">#76</td><td>Lot 1 : chauffeur désactivé, fournisseurs, pièces, pannes, workflow d'acquisition, jokers de recherche</td><td>DRV1, SUP1, SUP2 passent OK</td></tr>
+      <tr><td class="mono">#78, #79</td><td>Statut véhicule par trigger en base, ré-immobilisation à la réouverture d'OT</td><td>VEH4 passe OK</td></tr>
+      <tr><td class="mono">#80</td><td>Lot 2 : cloison client sur les lectures véhicule, derniers <span class="mono">it.fails</span> convertis</td><td>T8, VEH1, VEH2, MNT1, MNT2, CAT1, FUEL1, FUEL2 passent OK</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Ce qui reste</h2>
+  <div class="tracks">
+    <div class="track">
+      <h3>Non testés</h3>
+      <div class="lot"><header><strong>Écrans à deux comptes</strong></header><div class="ids" data-ids="ADM2 DRV2"></div><p>Playwright : changement de rôle appliqué à la session suivante ; espace chauffeur, déclaration de panne qui crée un OT.</p></div>
+      <div class="lot"><header><strong>Parcours stock</strong></header><div class="ids" data-ids="P5 P6"></div><p>Cycle de vie d'un pneu ; stock bas jusqu'à la réception.</p></div>
+    </div>
+    <div class="track">
+      <h3>Partiels à compléter</h3>
+      <div class="lot"><header><strong>Transverses</strong></header><div class="ids" data-ids="T1 T3 T4"></div><p>Sans fin naturelle : à clore par un test de cliquet qui gèle la liste des routes restantes de <span class="mono">routes.ts</span>.</p></div>
+      <div class="lot"><header><strong>Écrans et temps réel</strong></header><div class="ids" data-ids="T6 WO1 WO7 VEH3 MIS1 P2 P3"></div><p>Invalidation des KPI, alerte nominative vers le chef d'atelier, e2e d'acquisition, affectation et étapes de mission.</p></div>
+      <div class="lot"><header><strong>Fonctionnel absent ou limite connue</strong></header><div class="ids" data-ids="PRT1 CAT2 WO6 DIR2 DIR3"></div><p>Variante et spécification de pièce sans route, pièces associées aux pannes sans route ; bord de mois des pointages ; contenu des exports hors carburant.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Points ouverts</h2>
+  <ul class="plain">
+    <li><span class="mono">setVehicleToMaintenance</span> passe encore un véhicule hors service en maintenance à la création ou réouverture d'OT.</li>
+    <li>Cloison des lectures <span class="mono">GET /api/vehicles</span>, <span class="mono">/all</span>, <span class="mono">/:id</span> : gardée dans le handler, test HTTP à écrire.</li>
+    <li>Écran fournisseurs : la route côté client n'ouvre pas encore la liste au chef d'atelier (consultation seule décidée).</li>
+    <li>Tests instables sur Neon : <span class="mono">work-order-quality-check</span> (délai 5 s), <span class="mono">supplier-settlement-idempotence</span> en rejeu groupé.</li>
+    <li>Le <span class="mono">DATABASE_URL</span> du <span class="mono">.env</span> racine pointe sur la production : un e2e lancé sans redirection y écrit. Garde-fou à ajouter.</li>
+  </ul>
+  <p class="foot">DOC1 (centres de renouvellement) et FUEL3 (capacité du réservoir) restent des fonctionnalités à cadrer avant tout test.</p>
+</section>
+</div>
+
+<script>
+const S={OK:"var(--ok)",P:"var(--partial)",R:"var(--replay)",F:"var(--todo)",X:"var(--out)"};
+const mods=[
+ ["Transverses",{T2:"OK",T5:"OK",T7:"OK",T8:"OK",T1:"P",T3:"P",T4:"P",T6:"P"}],
+ ["Administration",{ADM1:"OK",ADM3:"OK",ADM4:"OK",ADM5:"OK",ADM6:"OK",ADM2:"F"}],
+ ["Parc véhicules",{VEH1:"OK",VEH2:"OK",VEH4:"OK",VEH3:"P"}],
+ ["Documents",{DOC2:"OK",DOC3:"OK",DOC1:"X"}],
+ ["Maintenance et atelier",{WO2:"OK",WO3:"OK",WO4:"OK",WO5:"OK",MNT1:"OK",MNT2:"OK",CAT1:"OK",CAT2:"P",WO1:"P",WO6:"P",WO7:"P"}],
+ ["Magasin : pièces",{PRT2:"OK",PRT3:"OK",PRT4:"OK",PRT5:"OK",PRT6:"OK",PRT1:"P"}],
+ ["Magasin : pneus",{TIR1:"OK",TIR2:"OK",TIR3:"OK",TIR4:"OK",TIR5:"OK",TIR6:"OK",TIR7:"OK"}],
+ ["Approvisionnement",{PO1:"OK",PO2:"OK",SINV1:"OK",SINV2:"OK",SUP1:"OK",SUP2:"OK"}],
+ ["Chauffeurs",{DRV1:"OK",DRV2:"F"}],
+ ["Carburant",{FUEL1:"OK",FUEL2:"OK",FUEL3:"X"}],
+ ["Clients, missions, facturation",{CINV1:"OK",CINV2:"OK",CLI1:"OK",MIS2:"OK",MIS1:"P"}],
+ ["Alertes",{ALR1:"OK",ALR2:"OK",ALR3:"OK"}],
+ ["Direction, rapports",{DIR1:"OK",DIR2:"P",DIR3:"P"}],
+ ["Parcours bout en bout",{P1:"OK",P4:"OK",P2:"P",P3:"P",P6:"P",P5:"F"}]
+];
+const all={};mods.forEach(([,c])=>Object.assign(all,c));
+const chips=ids=>ids.map(i=>`<span class="chip" style="--c:${S[all[i]]}">${i}</span>`).join("");
+const tb=document.getElementById("mods");
+mods.forEach(([name,c])=>{
+  const ids=Object.keys(c),n=ids.length,by=k=>ids.filter(i=>c[i]===k);
+  const ok=by("OK"),p=by("P"),rest=ids.filter(i=>!["OK","P"].includes(c[i]));
+  const seg=k=>`<i style="width:${by(k).length/n*100}%;background:${S[k]}"></i>`;
+  tb.insertAdjacentHTML("beforeend",`<tr><td><strong>${name}</strong><div class="mini">${seg("OK")+seg("P")+seg("R")+seg("F")+seg("X")}</div></td>
+  <td class="n">${ok.length}/${n} · ${Math.round(ok.length/n*100)} %</td>
+  <td><div class="ids">${chips(p)||'<span class="foot">aucun</span>'}</div></td>
+  <td><div class="ids">${chips(rest)||'<span class="foot">aucun</span>'}</div></td></tr>`);
+});
+document.querySelectorAll("[data-ids]").forEach(el=>{el.innerHTML=chips(el.dataset.ids.split(" "))});
+</script>

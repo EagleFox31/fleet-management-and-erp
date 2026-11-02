@@ -94,7 +94,7 @@ flowchart LR
 | T5 | Audit `parts` / `tires` : `created_by` + `updated_by` à la création, `updated_by` à chaque modification | I | Fait en I (`stock-audit-columns` : created_by/updated_by/dates des pièces et pneus par le service, trois utilisateurs distincts, suppression logique, noms joints) ; routes HTTP non couvertes |
 | T6 | Règle des 3 couches : cache local, trame WebSocket chez un autre rôle, invalidation liste + KPI | E | Partiel (`06-realtime-work-orders` ; `14-realtime-work-order-roles` : trames `work_order_created` chez le technicien et `work_order_updated` chez le chef d'atelier ; invalidation KPI non vérifiée) |
 | T7 | Idempotence : double soumission sans doublon (paiement, réception, sortie de stock) | C / E | Fait (réception et sortie de stock, règlement et rapprochement fournisseur, encaissement client, ajustement de stock ; E : double clic encaissement et ajustement, `e2e/07` ; garde `useSingleFlightMutate` aussi sur règlement et rapprochement fournisseur, réception et sortie de demande, sortie depuis l'OT, livraison de commande) |
-| T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | Partiel (`lists-pagination-filters`, 55 cas : véhicules, ordres de travail, pièces, fournisseurs ; pages sans doublon ni trou, total, tri, filtres, supprimé exclu, liste vide, bornes, apostrophe et injection ; 17 `it.fails` : jokers `%` et `_` non échappés, `offset` négatif ou `limit` démesuré (liste vide silencieuse, 500 sur les pièces), octet nul 500, `isActive` invalide, véhicules non cloisonnés pour un client. Missions et documents : pas de pagination côté serveur) |
+| T8 | Listes : pagination, filtres, recherche, éléments supprimés exclus | C | OK (`lists-pagination-filters`, 55 cas : véhicules, ordres de travail, pièces, fournisseurs ; pages sans doublon ni trou, total, tri, filtres, supprimé exclu, liste vide, bornes, apostrophe et injection ; les 17 défauts figés sont corrigés par #76 et #80 : jokers `%` et `_` échappés, `offset`/`limit` hors bornes, octet nul, `isActive` invalide, cloison client. Missions et documents : pas de pagination côté serveur) |
 
 ---
 
@@ -137,10 +137,10 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| VEH1 | CRUD véhicule, unicité immatriculation | E / C | Partiel (`02-fleet-vehicles`, contrat `vehicles-crud` : 4 défauts figés) |
-| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | Partiel : masqué et consultable OK ; 3 défauts en `it.fails` (suppression physique, OT et mission sur véhicule supprimé) |
+| VEH1 | CRUD véhicule, unicité immatriculation | E / C | OK (`02-fleet-vehicles`, contrat `vehicles-crud` ; défauts corrigés par #80 : statut initial consigné une fois, immatriculation d'un autre véhicule refusée au PATCH, `createdBy` du corps ignoré) |
+| VEH2 | Soft delete : masqué, OT et missions passés consultables, non assignable | C | OK (`vehicle-soft-delete` : masqué et consultable ; défauts corrigés par #80 : suppression logique avec OT conservé, ni OT ni mission sur un véhicule supprimé) |
 | VEH3 | Acquisition : reprise de l'étape en cours, documents joints, `completed` / `abandoned` | E | Contrat OK (`vehicle-acquisition-workflow` : 5 défauts figés) ; e2e à faire |
-| VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | Partiel (intégration `vehicle-status-sync` : 7 verts, OT annulé laisse le véhicule en maintenance : `it.fails`) |
+| VEH4 | Statut synchronisé avec ouverture / clôture d'OT, tracé dans `statusHistory` | I | OK (intégration `vehicle-status-sync` ; OT annulé remet le véhicule en service, trigger `trg_work_orders_release_vehicle` (#78), ré-immobilisation à la réouverture, hors service préservé (#79)) |
 
 ### 3.3 Documents et renouvellements
 
@@ -188,9 +188,9 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | Partiel : CRUD, droits, 400/404, cloison client, désactivation OK ; 1 défaut en `it.fails` (DELETE répond 204 sans supprimer) |
-| MNT2 | Déclenchement par date et par kilométrage | I | Partiel : fenêtre 30 jours, seuil km, plan inactif OK ; 2 défauts en `it.fails` (échéance du plan ignorée, doublon km) |
-| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | Partiel : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT OK ; 1 manque en `it.fails` (aucune route de désactivation) |
+| MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | OK (`maintenance-schedules` : CRUD, droits, 400/404, cloison client, désactivation ; DELETE supprime vraiment, corrigé par #80) |
+| MNT2 | Déclenchement par date et par kilométrage | I | OK (`preventive-maintenance-triggers` : fenêtre 30 jours, seuil km, plan inactif ; échéance du plan et doublon km corrigés par #80) |
+| CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | OK (`labor-catalog` : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT ; désactivation par PATCH ajoutée par #80) |
 | CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | Partiel (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
@@ -222,11 +222,11 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence, prix non numérique, stock négatif, suppression inconnue en 500/201 : `it.fails` ; variante et spécification sans route) |
+| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variante et spécification sans route) |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » suit le stock (défaut corrigé) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
-| PRT5 | Libellés affichés = constantes partagées (aucune table locale) | U | À faire |
+| PRT5 | Libellés affichés = constantes partagées (aucune table locale) | U | OK (U `part-requirement-labels-hygiene` : chaîne complète, aucune table locale, libellés interdits absents) |
 | PRT6 | Entrée en stock attribuée au magasinier, pas au demandeur (`receivedBy`) | C | OK (`part-requirements-chain` C : PATCH, corps forgé ignoré ; `part-requirement-received-by` I : commande fournisseur partielle puis complète) |
 
 ### 3.6 Magasin : pneus
@@ -277,8 +277,8 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | Partiel (contrat `suppliers-crud-ratings` ; nom en doublon en 500, commande vers fournisseur désactivé acceptée : `it.fails`) |
-| SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | Partiel (matrice rôle x critère x catégorie au contrat ; le chef d'atelier est refusé par le montage de `/suppliers` : `it.fails`) |
+| SUP1 | CRUD fournisseur, désactivation (absent des nouvelles commandes) | C | OK (contrat `suppliers-crud-ratings` ; nom en doublon 409 et commande vers fournisseur désactivé refusée, corrigés par #76) |
+| SUP2 | Évaluation fournisseur par catégorie, selon le rôle | C | OK (matrice rôle x critère x catégorie au contrat ; chef d'atelier en consultation seule, décision du 1er novembre, appliquée par #76) |
 | PO1 | Commande : création, validation, réception partielle puis totale | E | Fait en C (`purchase-order-lifecycle.contract`) en plus de `04` |
 | PO2 | Rapprochement commande / réception / facture : écart bloquant | E / C | Fait en C (`purchase-order-three-way.contract`) ; défauts 5 % et commande inconnue corrigés |
 | SINV1 | Règlement `recorded → reconciled / rejected`, upload de preuve | C | OK (`supplier-settlement-reject` : rejet avec motif et auteur, libère le reste à régler, rejeu idempotent, motif vide 400, rapproché 409, rejeté non rapprochable 409, autre facture 404, magasinier 403 ; U `supplier-settlement-reject-schema`) |
@@ -290,7 +290,7 @@ Tables : `drivers` (`is_active`).
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | Partiel (`drivers-crud-deactivation` : CRUD et RBAC OK ; 2 défauts en `it.fails` : chauffeur désactivé encore affectable, encore sur l'écran PIN) |
+| DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | OK (`drivers-crud-deactivation` : CRUD et RBAC ; chauffeur désactivé ni affectable, ni sur l'écran PIN, ni connectable, corrigé par #76) |
 | DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | À faire |
 
 ### 3.9 Carburant
@@ -299,8 +299,8 @@ Tables : `fuelRecords`, cartes carburant.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| FUEL1 | CRUD plein et carte carburant | C | Fait en C, 6 défauts figés (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; `it.fails` : date de recharge illisible 500, quantité illisible ou négative acceptées en 201, véhicule inconnu 500, solde insuffisant 500, client lit les pleins d'un véhicule tiers) ; `fuel-card-service`, `secondary-routes-validation` |
-| FUEL2 | Consommation par véhicule | I | Partiel (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; `it.fails` : véhicule inconnu, 500 au lieu de 404) |
+| FUEL1 | CRUD plein et carte carburant | C | OK (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; 6 défauts corrigés par #80 : date et quantité illisibles 400, quantité négative 400, véhicule inconnu 404, solde insuffisant 409, cloison client) ; `fuel-card-service`, `secondary-routes-validation` |
+| FUEL2 | Consommation par véhicule | I | OK (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; véhicule inconnu 404, corrigé par #80) |
 | FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
 
 ### 3.10 Clients, missions, facturation
@@ -323,7 +323,7 @@ stateDiagram-v2
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
 | MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Partiel (`13-mission-invoice-payment` : création par l'API logistique, passage à « livrée » en base ; affectation, étapes et lancement non rejoués) |
-| MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict`, 1 défaut figé) |
+| MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict` ; lancement refusé avec le motif du conflit, corrigé par #80) |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
 
@@ -345,7 +345,7 @@ Tables : `fleetKpiCache`.
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
 | DIR2 | Rapports filtrés par période | C | Partiel (export carburant par mois et par année couvert ; rapports inventaire et techniciens non couverts) |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes ; droits déjà dans `lot-exports-roles` ; `it.fails` : un plein saisi par l'application absent de l'export) |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (export carburant XLSX : cellules exactes, plein saisi par l'application présent (corrigé par #80) ; droits dans `lot-exports-roles` ; contenu des autres exports non vérifié) |
 
 ---
 
