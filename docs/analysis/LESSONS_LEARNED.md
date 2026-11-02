@@ -1031,3 +1031,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une décision d'accès lit `req.user.role`, posé par `authorize` / `isAnyUser` / `isStaff`. Corriger un défaut de classe impose de balayer tout le dépôt, pas seulement la route signalée.
+
+## 2026-11-02 - Import Excel des factures : trois contournements successifs de la même garde
+
+### Constat
+- `POST /api/supplier-invoices/import` (SheetJS 0.20.3) a été contourné trois fois en relecture, à chaque fois sous les plafonds annoncés (5 Mo téléversés, 5000 lignes) :
+  1. tailles du zip sous-déclarées (répertoire central = 1, en-tête local = 0) : SheetJS décompressait sans limite ;
+  2. bit 3 (data descriptor) avec une taille locale de 300 Mo : 6 Ko téléversés, 1,4 Go de RSS ;
+  3. une seule cellule en colonne XFD sur chacune de 302 478 lignes (1,3 Mo téléversés, feuille de 15 Mo) : 147,6 s de boucle d'événements bloquée dans le comptage des lignes, plus de 300 s si la cellule contient une espace.
+
+### Cause racine
+- La garde imitait le parseur de SheetJS au lieu de lui donner une entrée canonique : chaque écart entre les deux lectures du zip (taille locale, data descriptor) était une porte.
+- Chaque passe était dimensionnée sur un fichier moyen, pas sur l'entrée la plus défavorable : `cells.some(...)` parcourt une ligne dense jusqu'à sa `length`, et une cellule en XFD en fait un tableau creux de 16 384. Le refus au-delà de 5000 lignes ne venait qu'après la boucle, et les lignes blanches n'étaient jamais comptées. Classification : coût proportionnel à une valeur déclarée (largeur, hauteur, taille) au lieu du contenu présent.
+
+### Résolution
+- `canonicalWorkbookArchive` (`server/lib/xlsx-import-guard.ts`) décompresse réellement chaque entrée sous un budget (15 Mo) et reconstruit une archive neuve : SheetJS ne lit jamais le tampon téléversé.
+- `compactImportSheet` (`server/lib/supplier-invoice-import-sheet.ts`) : hauteur contrôlée en O(1) (`length` du tableau dense), lignes présentes parcourues sans plafond (8 accès par ligne au plus : 0,27 s sur 1 048 575 lignes à cellule en XFD ; un plafond refusait les modèles à formules tirées sans rien gagner), en-tête lu par `for…in` (cellules présentes seulement), lignes de données lues par accès direct aux 8 colonnes attendues, `sheet_to_json` appliqué à une feuille compacte (en-tête + lignes retenues, colonnes attendues).
+
+### Prévention (vérifiable)
+- `tests/contract/supplier-invoice-import-hardening.contract.test.ts` : `xfd` et `xfdblank` (40 000 lignes d'une cellule en XFD, générées en mémoire) sous un en-tête, traités en moins de 2 s (rien à importer) ; data descriptor et ZIP64 avec bornes mémoire ; `<dimension>` large ou absente.
+- `tests/unit/server/supplier-invoice-import-sheet.test.ts` : ligne au-delà de 1 048 576, lignes larges en temps borné, modèle à formules tirées (20 000 lignes calculées vides) accepté, colonne obligatoire absente de l'en-tête nommée dans le refus.
+- `tests/unit/server/xlsx-import-guard.test.ts` : archive de sortie sans bit 3 ni extra, tailles locales = tailles réelles.
+
+### Règle Projet (obligatoire)
+- Un analyseur de fichier téléversé donne à la bibliothèque une entrée canonique reconstruite, jamais l'octet reçu. Chaque passe sur ce fichier est mesurée sur son entrée la plus défavorable (largeur, hauteur, creux, valeurs blanches) et porte un test de borne de temps ou de mémoire, rouge sur le code précédent.
