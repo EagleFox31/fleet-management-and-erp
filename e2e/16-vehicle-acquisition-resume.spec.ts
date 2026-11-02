@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import { db } from "../server/db";
-import { vehicleAcquisitionWorkflows, vehicles } from "../shared/schema";
+import { activityLogs, vehicleAcquisitionWorkflows, vehicles, workOrders } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
@@ -131,7 +131,14 @@ test.afterAll(async () => {
     await db.delete(vehicleAcquisitionWorkflows).where(eq(vehicleAcquisitionWorkflows.sessionId, sessionId));
   }
   for (const registration of registrations) {
-    await db.delete(vehicles).where(eq(vehicles.registrationNumber, registration));
+    const [vehicle] = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.registrationNumber, registration));
+    if (!vehicle) continue;
+    // L'activation écrit dans work_orders (clé étrangère sans cascade : il retient le
+    // véhicule), vehicle_documents et status_history (cascade) et activity_logs
+    // (lien sans clé étrangère, à retirer ici).
+    await db.delete(activityLogs).where(and(eq(activityLogs.entityType, "vehicle"), eq(activityLogs.entityId, vehicle.id)));
+    await db.delete(workOrders).where(eq(workOrders.vehicleId, vehicle.id));
+    await db.delete(vehicles).where(eq(vehicles.id, vehicle.id));
   }
   await cleanupCreated(ids);
 });
@@ -244,22 +251,17 @@ test.describe("VEH3 - acquisition de véhicule", () => {
       })
       .toEqual({ status: "completed", finished: true });
 
-    // DEFAUT PRODUIT (VEH3-UI-2), gelé tel quel : activateVehicle() appelle
-    // updateData({ activated: true }), dont l'enregistrement différé de 500 ms
-    // (client/src/hooks/use-workflow-persistence.ts:171, setTimeout saveWorkflow)
-    // part APRES completeWorkflow(). Le PATCH ne trouve plus de brouillon
-    // en cours (404), le repli POST en recrée un, de même sessionId, en
-    // "in_progress" : une acquisition terminée réapparaît dans « Workflows en cours ».
-    // Le contrat ne le voit pas (il n'envoie pas cet enregistrement tardif).
-    // Quand le défaut est corrigé, remplacer par : serverDraft(...) === null.
-    await expect
-      .poll(async () => (await serverDraft(page, seed.sessionId))?.status ?? null, { timeout: 20_000 })
-      .toBe('in_progress');
+    // VEH3-UI-2 (corrige) : l'enregistrement differe de 500 ms declenche par
+    // updateData({ activated: true }) ne doit plus recreer de brouillon une fois
+    // la session completed (use-workflow-persistence : sessionClosed).
+    // On attend largement plus que ce delai avant de constater l'absence.
+    await page.waitForTimeout(2_500);
+    expect(await serverDraft(page, seed.sessionId)).toBeNull();
     const rows = await db
       .select()
       .from(vehicleAcquisitionWorkflows)
       .where(eq(vehicleAcquisitionWorkflows.sessionId, seed.sessionId));
-    expect(rows.map((r) => r.status).sort()).toEqual(['completed', 'in_progress']);
+    expect(rows.map((r) => r.status)).toEqual(["completed"]);
   });
 
   test("fin abandoned : l'abandon retire le brouillon du bandeau et de la reprise", async ({ page }) => {
@@ -285,23 +287,23 @@ test.describe("VEH3 - acquisition de véhicule", () => {
     expect(row.status).toBe("abandoned");
   });
 
-  // DEFAUT PRODUIT (VEH3-UI-1) : aucun écran n'offre l'abandon. Le bouton
-  // « Abandonner » n'existe que dans le mode complet de `WorkflowReminders`
-  // (client/src/components/workflows/workflow-reminders.tsx, bouton du mode non
-  // compact), or le seul montage est `<WorkflowReminders compact />`
-  // (client/src/pages/vehicles/index.tsx:119), dont le bandeau n'a que
-  // « Continuer ». Le wizard déstructure `abandonWorkflow` sans jamais l'appeler
-  // (client/src/pages/workflows/vehicle-acquisition.tsx:102). Un brouillon
-  // laissé en route ne peut donc pas être abandonné depuis l'interface.
-  // `test.fail` : rouge attendu ; si le défaut est corrigé le test passe et
-  // Playwright signale l'inversion, il suffit alors de retirer `test.fail`.
-  test("DEFAUT PRODUIT : l'écran propose d'abandonner un brouillon en cours", async ({ page }) => {
-    test.fail(true, "VEH3-UI-1 : aucun bouton Abandonner n'est monté (bandeau compact)");
+  // VEH3-UI-1 (corrige) : le bandeau compact de `WorkflowReminders`
+  // (client/src/pages/vehicles/index.tsx) offre « Abandonner » ; le clic passe la
+  // session en abandoned et la retire du bandeau et de la reprise.
+  test("l'ecran propose d'abandonner un brouillon en cours, et l'abandon est effectif", async ({ page }) => {
     const seed = newSeed();
     await seedDraft(page, seed, 2);
 
     await page.goto("/vehicles", { waitUntil: "domcontentloaded" });
     await expect(page.getByText(seed.registration)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Abandonner/ })).toBeVisible({ timeout: 3_000 });
+    await page.getByRole("button", { name: `Abandonner l'acquisition ${seed.registration}` }).click();
+
+    await expect(page.getByText(seed.registration)).toHaveCount(0, { timeout: STEP_TIMEOUT });
+    expect(await serverDraft(page, seed.sessionId)).toBeNull();
+    const [row] = await db
+      .select()
+      .from(vehicleAcquisitionWorkflows)
+      .where(eq(vehicleAcquisitionWorkflows.sessionId, seed.sessionId));
+    expect(row.status).toBe("abandoned");
   });
 });
