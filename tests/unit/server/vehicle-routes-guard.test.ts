@@ -23,9 +23,6 @@ const KNOWN_AUTHENTICATE_ONLY = [
   "get /api/vehicles/:id",
   // Contrôle de rôle fait dans le handler (lecture de l'utilisateur).
   "get /api/maintenance-schedules/vehicle/:vehicleId",
-  // Routeur monté sous `isStaff` (server/api/index.ts) : le garde est au montage.
-  "get /vehicle/:vehicleId/stats",
-  "get /vehicle/:vehicleId/anomalies",
   // Export tabulaire et pneus montés : écrans du personnel, cloison à poser.
   "get /api/exports/vehicles",
   "get /api/vehicle-tires",
@@ -36,15 +33,37 @@ const KNOWN_AUTHENTICATE_ONLY = [
   "patch /api/workflows/vehicle-acquisition/:sessionId",
   "patch /api/workflows/vehicle-acquisition/:sessionId/complete",
   "patch /api/workflows/vehicle-acquisition/:sessionId/abandon",
-  "post /workflows/vehicle-acquisition",
-  "patch /workflows/vehicle-acquisition/:sessionId",
 ];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
-const SOURCES = ["routes.ts", ...readdirSync(join(serverDir, "api")).filter((f) => f.endsWith(".ts")).map((f) => `api/${f}`)];
+const SOURCES = ["routes.ts", ...readdirSync(join(serverDir, "api")).filter((f) => f.endsWith(".ts") && f !== "index.ts").map((f) => `api/${f}`)];
+
+/**
+ * Préfixe de montage de chaque routeur de `server/api` (`apiRouter.use("/vehicles", vehiclesRoutes)`
+ * sous `/api`) : un chemin déclaré `/:id/x` dans `vehicles.routes.ts` est `/api/vehicles/:id/x`.
+ * Sans lui, une route déclarée relativement échappait à `touchesVehicle`.
+ */
+export function mountPrefixes(indexSource: string): Map<string, { prefix: string; guarded: boolean }> {
+  const fileOf = new Map<string, string>();
+  for (const m of indexSource.matchAll(/import\s+(\w+)\s+from\s+"\.\/([\w.-]+)"/g)) fileOf.set(m[1], `api/${m[2]}.ts`);
+  const prefixes = new Map<string, { prefix: string; guarded: boolean }>();
+  for (const m of indexSource.matchAll(/apiRouter\.use\(([^;]*?)\);/gs)) {
+    const args = m[1];
+    const prefix = args.match(/^\s*"([^"]*)"/)?.[1] ?? "";
+    for (const name of args.match(/\b\w+Routes\b/g) ?? []) {
+      const file = fileOf.get(name);
+      if (!file) continue;
+      // Un garde de rôle au montage (`apiRouter.use("/x", isStaff, xRoutes)`) couvre tout le routeur.
+      const before = args.slice(0, args.indexOf(name)).split(",").map((n) => n.trim()).filter((n) => n && !n.startsWith('"'));
+      prefixes.set(file, { prefix: `/api${prefix}`, guarded: before.some((n) => n !== "authenticate") });
+    }
+  }
+  return prefixes;
+}
+const PREFIXES = mountPrefixes(readFileSync(join(serverDir, "api", "index.ts"), "utf8"));
 
 const DECLARATION =
-  /\b(?:app|router|apiRouter)\.(get|post|put|patch|delete)\(\s*"([^"]+)"\s*,\s*([^()]*?)\s*(?:async\b|\(\s*req|\()/g;
+  /\b\w*(?:app|[rR]outer|Routes)\.(get|post|put|patch|delete)\(\s*"([^"]+)"\s*,\s*([^()]*?)\s*(?:async\b|\(\s*req|\()/g;
 
 /** Vrai si la route lit ou écrit un véhicule (chemin `/vehicles...` ou `.../vehicle/...`). */
 export function touchesVehicle(path: string): boolean {
@@ -52,10 +71,12 @@ export function touchesVehicle(path: string): boolean {
 }
 
 /** Routes d'un source dont les middlewares ne contiennent que `authenticate` (ou rien). */
-export function authenticateOnlyRoutes(source: string): string[] {
+export function authenticateOnlyRoutes(source: string, prefix = "", mountGuarded = false): string[] {
+  if (mountGuarded) return [];
   const found: string[] = [];
   for (const m of source.matchAll(DECLARATION)) {
-    const [, method, path, middlewares] = m;
+    const [, method, declared, middlewares] = m;
+    const path = declared.startsWith("/api/") ? declared : `${prefix}${declared}`;
     if (!touchesVehicle(path)) continue;
     const names = middlewares.split(",").map((n) => n.trim()).filter(Boolean);
     const guarded = names.some((n) => n !== "authenticate");
@@ -76,13 +97,24 @@ describe("garde de rôle sur les routes qui lisent un véhicule", () => {
     expect(authenticateOnlyRoutes(other)).toEqual([]);
   });
 
+  it("un chemin relatif d'un routeur monté sous /vehicles est résolu avec son préfixe", () => {
+    const index = `import vehiclesRoutes from "./vehicles.routes";\nimport fuelCardRoutes from "./fuel-card.routes";\n` +
+      `apiRouter.use("/vehicles", vehiclesRoutes);\napiRouter.use("/fuel-card", isStaff, fuelCardRoutes);`;
+    const prefixes = mountPrefixes(index);
+    expect(prefixes.get("api/vehicles.routes.ts")).toEqual({ prefix: "/api/vehicles", guarded: false });
+    expect(prefixes.get("api/fuel-card.routes.ts")).toEqual({ prefix: "/api/fuel-card", guarded: true });
+    const leak = `router.get("/:id/leak", authenticate, async (req, res) => {});`;
+    expect(authenticateOnlyRoutes(leak)).toEqual([]);
+    expect(authenticateOnlyRoutes(leak, "/api/vehicles")).toEqual(["get /api/vehicles/:id/leak"]);
+  });
+
   it("la détection voit bien les déclarations des sources", () => {
-    const all = SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8")));
+    const all = SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"), PREFIXES.get(f)?.prefix ?? "", PREFIXES.get(f)?.guarded ?? false));
     expect(all.length).toBeGreaterThan(5);
   });
 
   it("aucune nouvelle route véhicule n'est gardée par authenticate seul", () => {
-    const all = [...new Set(SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"))))];
+    const all = [...new Set(SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"), PREFIXES.get(f)?.prefix ?? "", PREFIXES.get(f)?.guarded ?? false)))];
     const fresh = all.filter((r) => !KNOWN_AUTHENTICATE_ONLY.includes(r));
     expect(
       fresh,
@@ -93,7 +125,7 @@ describe("garde de rôle sur les routes qui lisent un véhicule", () => {
   });
 
   it("la liste gelée ne contient que des routes qui existent encore", () => {
-    const all = new Set(SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"))));
+    const all = new Set(SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"), PREFIXES.get(f)?.prefix ?? "", PREFIXES.get(f)?.guarded ?? false)));
     const stale = KNOWN_AUTHENTICATE_ONLY.filter((r) => !all.has(r));
     expect(
       stale,

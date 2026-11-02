@@ -1024,8 +1024,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(200).json({ exists: false });
       }
 
+      // Hors périmètre : même réponse qu'une plaque inconnue, pour ne pas révéler
+      // qu'elle existe chez un autre client.
       if (!(await canAccessOwned(req.user, async () => vehicle.ownerId))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return res.status(200).json({ exists: false });
       }
       
       return res.status(200).json({ 
@@ -1226,7 +1228,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const vehicle = await storage.getVehicle(id);
       
-      if (!vehicle) {
+      // Déjà retiré de la flotte (suppression douce) : rien à refaire.
+      if (!vehicle || vehicle.deletedAt) {
         return res.status(404).json({ message: "Véhicule non trouvé" });
       }
       
@@ -1273,36 +1276,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Restore vehicle error:", error);
       return res.status(500).json({ 
         message: "Erreur lors de la restauration du véhicule",
-        error: error instanceof Error ? error.message : "Erreur serveur"
-      });
-    }
-  });
-
-  // Route pour lister les véhicules archivés
-  app.get("/api/vehicles/archived", isAdmin, async (req, res) => {
-    try {
-      const { db } = await import('./db');
-      const { sql } = await import('drizzle-orm');
-      
-      const result = await db.execute(sql`
-        SELECT 
-          original_vehicle_id as id,
-          registration_number,
-          brand,
-          model,
-          status,
-          archived_at,
-          archive_reason,
-          notes
-        FROM vehicle_archived
-        ORDER BY archived_at DESC
-      `);
-      
-      return res.status(200).json(result.rows);
-    } catch (error) {
-      console.error("Get archived vehicles error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la récupération des véhicules archivés",
         error: error instanceof Error ? error.message : "Erreur serveur"
       });
     }
@@ -4155,123 +4128,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Système d'alertes pour les entretiens et documents
-  app.get("/api/vehicles/check-alerts", isAnyUser, async (req, res) => {
-    try {
-      const ownerScope = ownerScopeOf(req.user);
-      const allVehicles = await storage.getVehicles();
-      const vehicles = {
-        ...allVehicles,
-        vehicles: allVehicles.vehicles.filter((v: any) => ownerScope === null || v.ownerId === ownerScope),
-      };
-      const alerts: any[] = [];
-      const now = new Date();
-      
-      // Pour chaque véhicule, vérifier les dates d'expiration
-      for (const vehicle of vehicles.vehicles) {
-        // Vérifier la date du prochain entretien
-        if (vehicle.nextMaintenanceDate) {
-          const maintenanceDate = new Date(vehicle.nextMaintenanceDate);
-          const daysDiff = Math.ceil((maintenanceDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-          
-          if (daysDiff <= 0) {
-            alerts.push({
-              vehicleId: vehicle.id,
-              registrationNumber: vehicle.registrationNumber,
-              type: 'maintenance_overdue',
-              message: `L'entretien du véhicule ${vehicle.registrationNumber} est en retard de ${Math.abs(daysDiff)} jours.`,
-              priority: 'high',
-            });
-          } else if (daysDiff <= 7) {
-            alerts.push({
-              vehicleId: vehicle.id,
-              registrationNumber: vehicle.registrationNumber,
-              type: 'maintenance_due',
-              message: `L'entretien du véhicule ${vehicle.registrationNumber} doit être effectué dans ${daysDiff} jours.`,
-              priority: 'medium',
-            });
-          }
-        }
-        
-        // Vérifier le kilométrage pour l'entretien
-        if (vehicle.nextMaintenanceMileage && vehicle.mileage) {
-          const mileageDiff = vehicle.nextMaintenanceMileage - vehicle.mileage;
-          
-          if (mileageDiff <= 0) {
-            alerts.push({
-              vehicleId: vehicle.id,
-              registrationNumber: vehicle.registrationNumber,
-              type: 'maintenance_mileage_exceeded',
-              message: `Le kilométrage du véhicule ${vehicle.registrationNumber} a dépassé la limite pour l'entretien de ${Math.abs(mileageDiff)} km.`,
-              priority: 'high',
-            });
-          } else if (mileageDiff <= 500) {
-            alerts.push({
-              vehicleId: vehicle.id,
-              registrationNumber: vehicle.registrationNumber,
-              type: 'maintenance_mileage_approaching',
-              message: `Le kilométrage du véhicule ${vehicle.registrationNumber} approche la limite pour l'entretien (${mileageDiff} km restants).`,
-              priority: 'medium',
-            });
-          }
-        }
-        
-        // Vérifier les dates d'expiration des documents
-        const documents = await storage.getVehicleDocuments(vehicle.id);
-        
-        for (const doc of documents) {
-          if (doc.expiryDate) {
-            const expiryDate = new Date(doc.expiryDate);
-            const daysDiff = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            
-            let documentType = '';
-            switch (doc.type) {
-              case 'carte_grise':
-                documentType = 'Carte grise';
-                break;
-              case 'assurance':
-                documentType = 'Assurance';
-                break;
-              case 'visite_technique':
-                documentType = 'Visite technique';
-                break;
-              case 'taxe':
-                documentType = 'Taxe';
-                break;
-              default:
-                documentType = doc.name;
-            }
-            
-            if (daysDiff <= 0) {
-              alerts.push({
-                vehicleId: vehicle.id,
-                registrationNumber: vehicle.registrationNumber,
-                documentId: doc.id,
-                type: 'document_expired',
-                message: `Le document "${documentType}" du véhicule ${vehicle.registrationNumber} est expiré depuis ${Math.abs(daysDiff)} jours.`,
-                priority: 'critical',
-              });
-            } else if (daysDiff <= 30) {
-              alerts.push({
-                vehicleId: vehicle.id,
-                registrationNumber: vehicle.registrationNumber,
-                documentId: doc.id,
-                type: 'document_expiring',
-                message: `Le document "${documentType}" du véhicule ${vehicle.registrationNumber} expire dans ${daysDiff} jours.`,
-                priority: daysDiff <= 7 ? 'high' : 'medium',
-              });
-            }
-          }
-        }
-      }
-      
-      return res.status(200).json(alerts);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "contrôle des alertes véhicules en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Alert Routes
   app.get("/api/alerts", authenticate, async (req: Request, res) => {
     try {

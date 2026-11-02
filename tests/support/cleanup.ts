@@ -16,6 +16,7 @@ import {
   supplierInvoices,
   suppliers,
   tireRotations,
+  vehicleAcquisitionWorkflows,
   users,
   vehicles,
   workOrders,
@@ -80,6 +81,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       await db.delete(alerts).where(inArray(alerts.userId, ids.userIds));
       await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
+      await db.delete(vehicleAcquisitionWorkflows).where(inArray(vehicleAcquisitionWorkflows.userId, ids.userIds));
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -168,6 +170,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testUsers = db.select({ id: users.id }).from(users).where(orphan(users.username, users.createdAt));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
+  // Brouillons d'acquisition d'un compte de test : bloquaient la suppression du compte (FK).
+  await db.delete(vehicleAcquisitionWorkflows).where(inArray(vehicleAcquisitionWorkflows.userId, testUsers));
   // Centre de renouvellement créé par un compte de test (renouvellement rapide) : bloquait la
   // suppression du compte (FK document_renewal_centers_created_by_fkey) et faisait échouer le
   // hook global de tous les fichiers de contrat.

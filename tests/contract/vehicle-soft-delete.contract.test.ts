@@ -231,4 +231,11 @@ describe("VEH2 : DELETE /api/vehicles/:id", { timeout: 60000 }, () => {
     const [row] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
     expect(row?.deletedAt).not.toBeNull();
   });
+
+  it("un second DELETE sur un véhicule déjà retiré répond 404 sans le modifier", async () => {
+    const [before] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
+    expect((await call("DELETE", `/api/vehicles/${historyVehicleId}`)).status).toBe(404);
+    const [after] = await db.select().from(vehicles).where(eq(vehicles.id, historyVehicleId));
+    expect(after.deletedAt?.getTime()).toBe(before.deletedAt?.getTime());
+  });
 });

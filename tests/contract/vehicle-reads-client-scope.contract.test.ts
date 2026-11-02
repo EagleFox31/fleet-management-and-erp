@@ -1,4 +1,7 @@
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../../server/db";
+import { vehicles } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -35,6 +38,8 @@ beforeAll(async () => {
   ids.vehicleIds.push(a.id, b.id);
   own = { id: a.id, registrationNumber: a.registrationNumber };
   foreign = { id: b.id, registrationNumber: b.registrationNumber };
+  // Un entretien en retard sur chacun : les deux produisent une alerte.
+  await db.update(vehicles).set({ nextMaintenanceDate: "2020-01-01" }).where(inArray(vehicles.id, [a.id, b.id]));
 }, 60000);
 
 afterAll(async () => {
@@ -58,28 +63,37 @@ describe("cloison client sur les lectures d'un véhicule", { timeout: 60000 }, (
     }
   });
 
-  it("GET /api/vehicles/check/:immatriculation : client sur le sien 200, sur un autre 403, personnel 200", async () => {
+  it("GET /api/vehicles/check/:immatriculation : le client voit le sien, une plaque d'un autre client lui répond comme une plaque inconnue", async () => {
     const mine = await session.call("GET", `/api/vehicles/check/${own.registrationNumber}`, { actor: "client" });
     expect(mine.status).toBe(200);
     expect(mine.body.exists).toBe(true);
     const theirs = await session.call("GET", `/api/vehicles/check/${foreign.registrationNumber}`, { actor: "client" });
-    expect(theirs.status).toBe(403);
+    expect(theirs.status).toBe(200);
+    expect(theirs.body.exists).toBe(false);
     expect(JSON.stringify(theirs.body)).not.toContain(String(foreign.id));
+    const unknown = await session.call("GET", `/api/vehicles/check/${token}-inconnue`, { actor: "client" });
+    expect(unknown.body).toEqual(theirs.body);
     const staff = await session.call("GET", `/api/vehicles/check/${foreign.registrationNumber}`, { actor: "admin" });
     expect(staff.status).toBe(200);
     expect(staff.body.id).toBe(foreign.id);
     expect((await session.call("GET", `/api/vehicles/check/${own.registrationNumber}`, {})).status).toBe(401);
   });
 
-  it("GET /api/vehicles/check-alerts : le client ne voit que des alertes de ses véhicules", async () => {
+  it("GET /api/vehicles/check-alerts : 200, le client ne voit que les alertes de ses véhicules", async () => {
     const res = await session.call("GET", "/api/vehicles/check-alerts", { actor: "client" });
-    // Aujourd'hui masquée par GET /api/vehicles/:id (404) : le garde de la route reste posé au cas où
-    // elle serait remontée devant `:id`.
-    expect([200, 403, 404]).toContain(res.status);
-    if (res.status === 200) {
-      const list: any[] = Array.isArray(res.body) ? res.body : res.body?.alerts ?? [];
-      expect(list.some((a) => a.vehicleId === foreign.id)).toBe(false);
-    }
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.some((a: any) => a.vehicleId === own.id && a.type === "maintenance_overdue")).toBe(true);
+    expect(res.body.some((a: any) => a.vehicleId === foreign.id)).toBe(false);
+    const staff = await session.call("GET", "/api/vehicles/check-alerts", { actor: "admin" });
+    expect(staff.status).toBe(200);
+    expect(staff.body.some((a: any) => a.vehicleId === foreign.id)).toBe(true);
     expect((await session.call("GET", "/api/vehicles/check-alerts", {})).status).toBe(401);
+  });
+
+  it("GET /api/vehicles/archived : administrateur 200, client 403, anonyme 401", async () => {
+    expect((await session.call("GET", "/api/vehicles/archived", { actor: "admin" })).status).toBe(200);
+    expect((await session.call("GET", "/api/vehicles/archived", { actor: "client" })).status).toBe(403);
+    expect((await session.call("GET", "/api/vehicles/archived", {})).status).toBe(401);
   });
 });

@@ -144,5 +144,15 @@ describe("CAT1 : catalogue de main-d'oeuvre", { timeout: 60000 }, () => {
       expect((await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { isActive: "non" } })).status).toBe(400);
       expect((await session.call("PATCH", "/api/labor-catalog/abc", { actor: "manager", body: {} })).status).toBe(400);
     });
+
+    it("heures standard invalides (texte, négatives) : 400, valeur inchangée", async () => {
+      const [before] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
+      for (const standardHours of ["abc", -3, "1,5h"]) {
+        const res = await session.call("PATCH", `/api/labor-catalog/${entryToPatchId}`, { actor: "manager", body: { standardHours } });
+        expect(res.status, String(standardHours)).toBe(400);
+      }
+      const [after] = await db.select().from(laborCatalog).where(eq(laborCatalog.id, entryToPatchId));
+      expect(after.standardHours).toBe(before.standardHours);
+    });
   });
 });

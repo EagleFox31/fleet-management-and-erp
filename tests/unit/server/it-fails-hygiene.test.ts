@@ -196,6 +196,10 @@ describe("it.fails : pas de mise en place dans le corps", () => {
     expect(setupReasonsIn(cases[3].body)).toEqual([]);
   });
 
+  it("le balayage lit bien des fichiers de test", () => {
+    expect(scannedFiles().length).toBeGreaterThan(0);
+  });
+
   it("aucun nouvel it.fails ne porte sa mise en place", () => {
     const fresh = offendersOnDisk().filter((k) => !KNOWN_SETUP_IN_IT_FAILS.includes(k));
     expect(

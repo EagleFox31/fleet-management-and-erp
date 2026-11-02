@@ -3,6 +3,10 @@ import { maintenanceSchedules, workOrders, vehicles, type MaintenanceSchedule, t
 import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { vehicleStatusService } from "./vehicle-status-service";
 import { describeStatusChange } from "@shared/constants/vehicle-status";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("preventive-maintenance");
+const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -206,7 +210,7 @@ export class PreventiveMaintenanceService {
         }
 
         // Échéance d'un plan actif (hors kilométrage) dans la fenêtre d'alerte,
-        // ou dépassée : un OT lié au plan, jamais deux en attente pour le même plan.
+        // ou dépassée : un OT lié au plan, jamais deux pour la même échéance.
         const plansEchus = await db
           .select()
           .from(maintenanceSchedules)
@@ -217,16 +221,24 @@ export class PreventiveMaintenanceService {
           ));
         for (const plan of plansEchus) {
           if (plan.frequency === 'mileage' || !plan.scheduledDate) continue;
-          const [dejaEnAttente] = await db
-            .select({ id: workOrders.id })
-            .from(workOrders)
-            .where(and(
-              eq(workOrders.maintenanceScheduleId, plan.id),
-              eq(workOrders.status, 'pending'),
-            ))
-            .limit(1);
-          if (dejaEnAttente) continue;
-          generatedWorkOrders.push(await this.generateWorkOrderFromSchedule(plan));
+          try {
+            // Un OT ouvert bloque (en attente, démarré, en attente de pièces). Un OT
+            // clôturé bloque aussi tant que l'échéance du plan n'a pas avancé : il
+            // porte l'échéance qu'il a traitée dans `startDate`.
+            const echeance = new Date(plan.scheduledDate);
+            const dejaTraite = (await db
+              .select({ id: workOrders.id, status: workOrders.status, startDate: workOrders.startDate })
+              .from(workOrders)
+              .where(eq(workOrders.maintenanceScheduleId, plan.id)))
+              .some((ot) =>
+                (OPEN_WORK_ORDER_STATUSES as readonly string[]).includes(ot.status) ||
+                (ot.status !== 'cancelled' && ot.startDate != null && new Date(ot.startDate) >= echeance));
+            if (dejaTraite) continue;
+            generatedWorkOrders.push(await this.generateWorkOrderFromSchedule(plan));
+          } catch (error) {
+            // Un plan en échec ne doit pas empêcher les autres.
+            log.error({ err: error, scheduleId: plan.id, vehicleId: vehicle.id }, "Plan préventif : OT non généré");
+          }
         }
 
         // Immobilisation du véhicule: passer par `vehicleStatusService`, jamais

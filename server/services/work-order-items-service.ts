@@ -146,6 +146,11 @@ export class WorkOrderItemsService {
       set.label = label;
     }
     if (fourni("standardHours")) {
+      const brut = payload.standardHours;
+      const vide = brut === null || (typeof brut === "string" && brut.trim() === "");
+      if (!vide && parseHours(brut) === null) {
+        return { success: false, error: "Les heures standard doivent être un nombre positif ou nul." };
+      }
       set.standardHours = toNumericColumn(payload.standardHours as number | string | null);
     }
     if (fourni("isActive")) {

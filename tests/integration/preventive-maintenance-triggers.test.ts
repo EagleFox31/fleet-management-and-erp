@@ -124,6 +124,30 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
       await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId);
       expect(await pendingFor(scheduleId)).toHaveLength(1);
     });
+
+    it("OT démarré, second passage : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "in_progress" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("OT en attente de pièces, second passage : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "awaiting_parts" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("OT clôturé, même échéance : 0 OT", async () => {
+      await db.update(workOrders).set({ status: "completed" }).where(eq(workOrders.maintenanceScheduleId, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(0);
+      expect(await pendingFor(scheduleId)).toHaveLength(1);
+    });
+
+    it("échéance avancée après clôture : un nouvel OT", async () => {
+      await db.update(maintenanceSchedules).set({ scheduledDate: inDays(8) }).where(eq(maintenanceSchedules.id, scheduleId));
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicleId)).toHaveLength(1);
+      expect(await pendingFor(scheduleId)).toHaveLength(2);
+    });
   });
 });
 

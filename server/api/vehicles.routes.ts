@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { authenticate, isAnyUser, isStaff } from "../middleware/auth";
+import { authenticate, isAdmin, isAnyUser, isStaff } from "../middleware/auth";
 import { vehicleDocumentationService } from "../services/vehicle-documentation-service";
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { ownerScopeOf } from "../lib/client-scope";
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
@@ -113,6 +113,100 @@ router.get("/expired-docs", isAnyUser, async (req, res, next) => {
     if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "lecture des documents expirés en échec");
     return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+/**
+ * GET /api/vehicles/check-alerts
+ * Alertes d'entretien et d'expiration de documents, limitées au périmètre du client.
+ * Déclarée avant `/:id` : la version de routes.ts était masquée par `/api/vehicles/:id`.
+ */
+router.get("/check-alerts", isAnyUser, async (req, res, next) => {
+  try {
+    const ownerScope = ownerScopeOf(req.user);
+    const fleet = await db
+      .select()
+      .from(vehicles)
+      .where(ownerScope === null ? isNull(vehicles.deletedAt) : and(isNull(vehicles.deletedAt), eq(vehicles.ownerId, ownerScope)));
+    const documents = fleet.length === 0
+      ? []
+      : await db.select().from(vehicleDocuments).where(inArray(vehicleDocuments.vehicleId, fleet.map((v) => v.id)));
+    const alerts: Array<Record<string, unknown>> = [];
+    const now = new Date();
+    const daysUntil = (date: string | Date) => Math.ceil((new Date(date).getTime() - now.getTime()) / 86_400_000);
+    const documentLabels: Record<string, string> = {
+      carte_grise: "Carte grise",
+      assurance: "Assurance",
+      visite_technique: "Visite technique",
+      taxe: "Taxe",
+    };
+
+    for (const vehicle of fleet) {
+      const plate = vehicle.registrationNumber;
+      if (vehicle.nextMaintenanceDate) {
+        const days = daysUntil(vehicle.nextMaintenanceDate);
+        if (days <= 0) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, type: "maintenance_overdue", priority: "high",
+            message: `L'entretien du véhicule ${plate} est en retard de ${Math.abs(days)} jours.` });
+        } else if (days <= 7) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, type: "maintenance_due", priority: "medium",
+            message: `L'entretien du véhicule ${plate} doit être effectué dans ${days} jours.` });
+        }
+      }
+      if (vehicle.nextMaintenanceMileage && vehicle.mileage) {
+        const remaining = vehicle.nextMaintenanceMileage - vehicle.mileage;
+        if (remaining <= 0) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, type: "maintenance_mileage_exceeded", priority: "high",
+            message: `Le kilométrage du véhicule ${plate} a dépassé la limite pour l'entretien de ${Math.abs(remaining)} km.` });
+        } else if (remaining <= 500) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, type: "maintenance_mileage_approaching", priority: "medium",
+            message: `Le kilométrage du véhicule ${plate} approche la limite pour l'entretien (${remaining} km restants).` });
+        }
+      }
+      for (const doc of documents.filter((d) => d.vehicleId === vehicle.id && d.expiryDate)) {
+        const days = daysUntil(doc.expiryDate as string);
+        const label = documentLabels[doc.type] ?? doc.name;
+        if (days <= 0) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, documentId: doc.id, type: "document_expired", priority: "critical",
+            message: `Le document "${label}" du véhicule ${plate} est expiré depuis ${Math.abs(days)} jours.` });
+        } else if (days <= 30) {
+          alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, documentId: doc.id, type: "document_expiring",
+            priority: days <= 7 ? "high" : "medium",
+            message: `Le document "${label}" du véhicule ${plate} expire dans ${days} jours.` });
+        }
+      }
+    }
+    return res.status(200).json(alerts);
+  } catch (error) {
+    log.error({ err: error, requestId: req.requestId }, "contrôle des alertes véhicules en échec");
+    return next(new AppError(500, "Impossible de calculer les alertes des véhicules.", { cause: error }));
+  }
+});
+
+/**
+ * GET /api/vehicles/archived
+ * Véhicules archivés (administrateur). Même raison de placement que `check-alerts`.
+ */
+router.get("/archived", isAdmin, async (req, res, next) => {
+  try {
+    // La table `vehicle_archived` n'existe dans aucune migration : un véhicule retiré de la
+    // flotte est un véhicule dont `deleted_at` est renseigné (suppression douce).
+    const rows = await db
+      .select({
+        id: vehicles.id,
+        registration_number: vehicles.registrationNumber,
+        brand: vehicles.brand,
+        model: vehicles.model,
+        status: vehicles.status,
+        archived_at: vehicles.deletedAt,
+      })
+      .from(vehicles)
+      .where(isNotNull(vehicles.deletedAt))
+      .orderBy(desc(vehicles.deletedAt));
+    return res.status(200).json(rows);
+  } catch (error) {
+    log.error({ err: error, requestId: req.requestId }, "lecture des véhicules archivés en échec");
+    return next(new AppError(500, "Impossible de lire les véhicules archivés.", { cause: error }));
   }
 });
 

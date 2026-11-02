@@ -822,6 +822,36 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Un TODO « temporairement » ou « pour l'instant » sur un accès se traite comme un défaut ouvert : il se corrige ou il se consigne comme résidu daté dans le journal, jamais en commentaire seul.
 - Ce qui doit être cloisonné ne se liste pas à la main : la prévention cible la classe (routes d'un objet possédé), pas une liste de chemins.
 
+### Seconde récidive (2026-11-02) : lectures véhicule, pleins et routes masquées
+
+#### Constat
+- `GET /api/vehicles/:id/mileage`, `.../mileage/history`, `.../status-history`, `.../tires` et `GET /api/fuel-records/vehicle/:id` étaient gardés par `authenticate` seul : un client lisait le kilométrage, l'historique de statut, les pneus et les pleins de n'importe quel véhicule.
+- `GET /api/vehicles/check/:registrationNumber` répondait 403 à un client pour la plaque d'un autre client : le 403 révélait l'existence du véhicule. Désormais `exists: false`, comme pour une plaque inconnue.
+- `GET /api/vehicles/check-alerts` et `GET /api/vehicles/archived`, déclarées dans `server/routes.ts`, étaient mortes : `/api/vehicles/:id`, déclarée avant elles, les masquait. Elles sont déplacées dans `server/api/vehicles.routes.ts` (lignes 124 et 190), avant `/:id`.
+
+#### Cause racine
+- Même cause que le 30 octobre : `authenticate` ne charge pas le rôle, et la cloison reposait sur une convention écrite à la main sur chaque route (`isAnyUser` ou `isStaff`), pas sur un refus par défaut.
+- La garde statique censée détecter ce cas avait un angle mort : `tests/unit/server/vehicle-routes-guard.test.ts` ignorait le préfixe de montage des routeurs de `server/api/`. Un `router.get("/:id/leak", authenticate)` dans `vehicles.routes.ts` (monté sous `/api/vehicles`) était lu hors périmètre, donc passait.
+- Le test de garde n'avait pas été éprouvé par mutation : son existence ne prouvait pas qu'il échoue.
+- Classification : contrôle d'accès horizontal manquant (IDOR), récidive ; faux négatif de la garde statique.
+
+#### Résolution
+- Routes passées en `isAnyUser` avec `canAccessOwned` / `ownerScopeOf` ; `check/:registrationNumber` répond `exists: false` au client pour une plaque d'un autre.
+- Garde statique corrigée : préfixes de montage résolus depuis `server/api/index.ts` (`mountPrefixes`). Prouvé par mutation temporaire (rapporté par la session source, non rejoué lors de cette passe).
+- Commit `57ff6bf` (branche `fix/lot2-cloison-itfails`, PR #80).
+
+#### Prévention (vérifiable)
+- `tests/unit/server/vehicle-routes-guard.test.ts` (présent dans `57ff6bf`) : test « un chemin relatif d'un routeur monté sous /vehicles est résolu avec son préfixe » (lignes 100-108) et « aucune nouvelle route véhicule n'est gardée par authenticate seul » (ligne 116).
+- Limite : `KNOWN_AUTHENTICATE_ONLY` (ligne 19) tolère encore `get /api/vehicles/:id` au motif d'un contrôle « fait dans le handler ». La garde ne vérifie pas ce contrôle.
+- `tests/contract/vehicle-reads-client-scope.contract.test.ts` (présent dans `57ff6bf`, version de la branche modifiée et non commitée à la date de cette entrée) : HTTP réel sur les lectures listées ci-dessus, avec client sur le sien 200, sur un autre 403, personnel 200, anonyme 401 ; `check` (`exists` à `false`), `check-alerts` et `archived` (admin 200, client 403).
+- Rouge avant correctif : non vérifié lors de cette passe.
+- La prévention manquante du 2026-11-01 (ligne 817) est partiellement produite par le test statique. Elle reste à compléter : une route véhicule gardée par `authenticate` seul doit échouer aussi en HTTP. À produire par fleet-testeur.
+
+#### Règle Projet (obligatoire)
+- Une garde statique ne compte comme prévention qu'après une mutation qui la fait échouer (route volontairement mal gardée, test rouge, puis retrait). Une garde non mutée est une hypothèse.
+- Une route déclarée après une route paramétrée (`/:id`) se teste en HTTP : la lecture statique la voit verte alors qu'elle ne répond jamais.
+- Une liste gelée de routes tolérées porte un motif daté et un contrôle nommé dans un test HTTP ; un contrôle « fait dans le handler » sans test HTTP est un résidu à consigner.
+
 ## 2026-10-31 - Écran ouvert à un rôle que son API refuse
 
 ### Constat
