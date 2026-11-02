@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   assertNotProductionDatabase,
+  assertTestDatabaseNotProduction,
   databaseUrlFromDotenv,
   hostOf,
   matchProductionMarker,
@@ -74,5 +75,34 @@ describe("production-guard (e2e)", () => {
 
   it("playwright.config.ts appelle le garde-fou", () => {
     expect(readFileSync("playwright.config.ts", "utf8")).toMatch(/assertNotProductionDatabase\(\)/);
+  });
+});
+
+describe("production-guard (vitest intégration et contrat)", () => {
+  it("refuse DATABASE_URL_TEST qui vise la production, sans en citer l'URL", () => {
+    let message = "";
+    try {
+      assertTestDatabaseNotProduction(PROD, env({}));
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("ep-bitter-term-ai6i3ey4");
+    expect(message).not.toContain("p%40ss");
+    expect(message).not.toContain("postgresql://");
+  });
+
+  it("laisse passer une branche de test ou une URL absente", () => {
+    expect(() => assertTestDatabaseNotProduction(TEST, env({}))).not.toThrow();
+    expect(() => assertTestDatabaseNotProduction(undefined, env({}))).not.toThrow();
+  });
+
+  it("respecte E2E_PRODUCTION_DB_MARKERS", () => {
+    expect(() => assertTestDatabaseNotProduction(TEST, env({ E2E_PRODUCTION_DB_MARKERS: "ep-plain-lake" }))).toThrow();
+  });
+
+  it("est branché dans tests/support/setup-db.ts avant la redirection de DATABASE_URL", () => {
+    const src = readFileSync("tests/support/setup-db.ts", "utf8");
+    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeGreaterThan(-1);
+    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeLessThan(src.indexOf("process.env.DATABASE_URL = testUrl"));
   });
 });

@@ -81,3 +81,24 @@ export function assertNotProductionDatabase(
     ].join("\n"),
   );
 }
+
+/**
+ * Même refus pour vitest intégration et contrat : `setup-db.ts` redirige `DATABASE_URL` vers
+ * `DATABASE_URL_TEST`, et ces suites écrivent. L'URL effective ne doit pas viser la production.
+ */
+export function assertTestDatabaseNotProduction(
+  testUrl: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const marker = matchProductionMarker(testUrl, productionMarkers(env));
+  if (!marker) return;
+  throw new Error(
+    [
+      `Tests d'intégration et de contrat refusés : DATABASE_URL_TEST vise la base de production (hôte contenant « ${marker} »).`,
+      "Ces suites créent et suppriment des données : jamais sur la production.",
+      "Pointez DATABASE_URL_TEST vers une branche Neon de test, en variable d'environnement au lancement",
+      "(sans modifier .env), puis relancez.",
+      "Autre environnement protégé : ajoutez son hôte à E2E_PRODUCTION_DB_MARKERS (liste séparée par des virgules).",
+    ].join("\n"),
+  );
+}
