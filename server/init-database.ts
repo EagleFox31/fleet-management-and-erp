@@ -280,6 +280,30 @@ END $$`,
 ];
 
 /**
+ * FUEL3 : capacité totale des réservoirs du véhicule, en litres. Nullable (véhicules existants à vide,
+ * règle tank-overflow muette). CHECK vehicles_tank_capacity_l_positive : > 0 et fini (refuse 0, négatif,
+ * NaN et Infinity, que `real` accepte sinon). Doit rester identique à
+ * server/db/migrations/20261102_vehicles_tank_capacity.sql : tests/unit/server/vehicles-tank-capacity-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const VEHICLE_TANK_CAPACITY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tank_capacity_l real;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'vehicles'::regclass AND conname = 'vehicles_tank_capacity_l_positive'
+  ) THEN
+    ALTER TABLE vehicles ADD CONSTRAINT vehicles_tank_capacity_l_positive
+      CHECK (tank_capacity_l IS NULL OR (tank_capacity_l > 0 AND tank_capacity_l < 'Infinity'::real));
+  END IF;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'vehicles_tank_capacity_l_positive non posée : capacités nulles ou négatives existantes dans vehicles';
+END $$;`;
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -677,6 +701,8 @@ export async function initializeDatabase() {
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
     // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
     await applyWorkOrderVehicleStatusTriggers();
+    // Capacité des réservoirs (FUEL3) — jumelle de server/db/migrations/20261102_vehicles_tank_capacity.sql.
+    await pool.query(VEHICLE_TANK_CAPACITY_SQL);
     await applyPerformanceIndexes();
     await applyMigrationSqlFiles();
     await applyBootstrapSqlFiles();
