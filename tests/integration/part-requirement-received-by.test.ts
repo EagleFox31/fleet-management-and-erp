@@ -61,6 +61,9 @@ describe("entrée en stock par commande fournisseur : receivedBy (PRT6)", { time
         supplierId: supplier.id,
         orderDate: "2026-10-30",
         status: "confirmed",
+        // Totaux cohérents avec la ligne : la livraison crée la facture fournisseur, qui refuse un montant nul.
+        totalAmountHT: "2000.00",
+        totalAmountTTC: "2000.00",
       })
       .returning();
     orderIds.push(order.id);
