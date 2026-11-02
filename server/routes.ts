@@ -5100,6 +5100,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return next(new AppError(400, "Type de document inconnu."));
       }
 
+      // Un identifiant non entier finissait en erreur SQL (500).
+      const workflowIdNumber = Number(workflowId);
+      if (!Number.isSafeInteger(workflowIdNumber) || workflowIdNumber <= 0) {
+        return next(new AppError(400, "Identifiant de workflow invalide."));
+      }
+
       // Le client alimente sa propre session d'acquisition, jamais celle d'un autre.
       // Le personnel autorisé : admin, secrétariat, logistique, chef d'atelier.
       if (req.user?.role === "client") {
@@ -5107,7 +5113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .select({ id: vehicleAcquisitionWorkflows.id })
           .from(vehicleAcquisitionWorkflows)
           .where(and(
-            eq(vehicleAcquisitionWorkflows.id, parseInt(workflowId)),
+            eq(vehicleAcquisitionWorkflows.id, workflowIdNumber),
             eq(vehicleAcquisitionWorkflows.sessionId, sessionId),
             eq(vehicleAcquisitionWorkflows.userId, userId),
           ));
@@ -5115,7 +5121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const documentData = {
-        workflowId: parseInt(workflowId),
+        workflowId: workflowIdNumber,
         sessionId: sessionId,
         documentType: documentType,
         originalName: req.file.originalname,

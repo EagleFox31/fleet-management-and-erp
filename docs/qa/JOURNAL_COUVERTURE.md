@@ -1848,6 +1848,24 @@ soumission sans doublon.
 **Pourquoi**
 - Cause non élucidée (serveur de développement lancé hors `npm run dev`). Le correctif de la spec reste donc **non prouvé** ; `tsc` global est à 0 erreur. À rejouer : `E2E_CHANNEL=msedge` sur la branche Neon de test, port 5000 libre, sous `db-lock`.
 
+## Bilan après la pile #81 à #86
+
+**Quoi**
+- `PLAN_COUVERTURE_MODULES.md` : T6, WO1, WO6, WO7, DIR2 passent OK (lignes encore en « Partiel » ou en `it.fails` après #86).
+- `couverture-tests.html` : 62 testés, 7 partiels, 2 non testés (ADM2, DRV2), 2 à construire (DOC1, FUEL3), sur 73 ; PR #82 à #86 ajoutées, « Ce qui reste » et « Points ouverts » réécrits.
+
+**Comment**
+- Plus aucun `it.fails(` ni `test.fail(` sous `tests/` et `e2e/` sur `main` (hors le test d'hygiène qui les décrit).
+
+**Preuve**
+- Décompte du tableau `mods` de la page : `{ OK: 62, P: 7, F: 2, X: 2 }`.
+
+## Réserve #86 : workflowId non entier sur le téléversement de document d'acquisition
+
+- **Quoi** : `POST /api/workflows/:sessionId/documents` renvoyait 500 quand `workflowId` n'était pas un entier positif (`parseInt("abc")` = NaN passé à la requête SQL). Il renvoie désormais 400 « Identifiant de workflow invalide. », pour le personnel comme pour le client, sans rien écrire.
+- **Comment** : validation `Number.isSafeInteger(n) && n > 0` avant la vérification d'appartenance et l'écriture (`server/routes.ts`). Cas ajouté dans `tests/contract/role-guards-pistes-def.contract.test.ts` (`abc`, `1.5`, `-3`, `0`, admin et client) : rouge prouvé sur l'ancien code (500), 16/16 vert après.
+- **Pourquoi** : règle AGENTS.md §10, une entrée invalide donne un 400 lisible, jamais une erreur SQL en 500.
+
 ## VEH3 : e2e acquisition de véhicule
 
 - **Quoi** : `e2e/16-vehicle-acquisition-resume.spec.ts`, 5 tests : reprise de l'étape en cours depuis le bandeau « Workflows en cours » puis après rechargement (état venu du serveur) ; documents obligatoires refusés tant qu'il en manque, puis téléversés et vérifiés en base ; fin `completed` (véhicule créé) ; fin `abandoned` (brouillon retiré du bandeau et de la reprise). Résultat sur la base de test tests-piste-c : **5 passed (6,1 min)**, Edge (`E2E_CHANNEL=msedge`).
