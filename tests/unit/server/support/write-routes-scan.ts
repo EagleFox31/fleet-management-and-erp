@@ -26,6 +26,8 @@ export interface WriteRoute {
   body: string;
   /** Source complète du fichier (pour retrouver un schéma local). */
   fileSource: string;
+  /** Fichier de la déclaration servie (`routes.ts`, `api/x.routes.ts`), renseigné par `allWriteRoutes`. */
+  file?: string;
 }
 
 /**
@@ -121,21 +123,61 @@ export function writeRoutesOf(
   return routes;
 }
 
+/**
+ * Fichiers de routeurs dans l'ordre de montage de `server/api/index.ts` (`apiRouter.use`), le
+ * premier montage de chaque fichier. Express sert dans cet ordre.
+ */
+export function mountOrder(indexSource: string): string[] {
+  const fileOf = new Map<string, string>();
+  for (const m of indexSource.matchAll(/import\s+(\w+)\s+from\s+"\.\/([\w.-]+)"/g)) fileOf.set(m[1], `api/${m[2]}.ts`);
+  const order: string[] = [];
+  for (const m of indexSource.matchAll(/apiRouter\.use\(([^;]*?)\);/gs)) {
+    for (const name of m[1].match(/\b\w+Routes\b/g) ?? []) {
+      const file = fileOf.get(name);
+      if (file && !order.includes(file)) order.push(file);
+    }
+  }
+  return order;
+}
+
+/**
+ * Déclaration qui ne sert pas la requête : un garde posé avant la vraie route, qui rend la main
+ * par `next()` sans jamais répondre (`admin-users-guard.routes.ts`). Elle ne masque pas la
+ * déclaration suivante ; ses middlewares (`isAdmin`...) s'ajoutent à celle-ci.
+ */
+export function isPassThrough(r: WriteRoute): boolean {
+  return /\bnext\s*\(/.test(r.body) && !/(?<![\w_])res\.(?:json|status|send|end|sendStatus|redirect|download|sendFile)\b/.test(r.body);
+}
+
+/**
+ * Routes d'écriture telles que l'application les sert. `server/app.ts` monte `apiRouter` AVANT
+ * `registerRoutes` (`server/routes.ts`), et `apiRouter` sert ses routeurs dans l'ordre de
+ * `server/api/index.ts` : à clé égale, la première déclaration dans cet ordre gagne, les suivantes
+ * ne sont jamais atteintes.
+ */
 export function allWriteRoutes(): WriteRoute[] {
-  const prefixes = mountPrefixes(readFileSync(join(serverDir, "api", "index.ts"), "utf8"));
+  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+  const prefixes = mountPrefixes(indexSource);
+  const mounted = mountOrder(indexSource);
+  const apiFiles = readdirSync(join(serverDir, "api"))
+    .filter((f) => f.endsWith(".ts") && f !== "index.ts")
+    .map((f) => `api/${f}`);
   const files = [
+    ...mounted.filter((f) => apiFiles.includes(f)),
+    ...apiFiles.filter((f) => !mounted.includes(f)),
     "routes.ts",
-    ...readdirSync(join(serverDir, "api"))
-      .filter((f) => f.endsWith(".ts") && f !== "index.ts")
-      .map((f) => `api/${f}`),
   ];
   const byKey = new Map<string, WriteRoute>();
+  const guardsOf = new Map<string, string[]>();
   for (const f of files) {
     const src = readFileSync(join(serverDir, f), "utf8");
-    const mounts = (v: string) => prefixes.get(v) ?? prefixes.get(f) ?? (f === "routes.ts" ? { prefix: "", guarded: false } : { prefix: "", guarded: false });
+    const mounts = (v: string) => prefixes.get(v) ?? prefixes.get(f) ?? { prefix: "", guarded: false };
     for (const r of writeRoutesOf(src, mounts)) {
-      // Express sert la première déclaration : les doublons suivants sont ignorés.
-      if (!byKey.has(r.key)) byKey.set(r.key, r);
+      if (isPassThrough(r)) {
+        guardsOf.set(r.key, [...(guardsOf.get(r.key) ?? []), ...r.middlewares]);
+      } else if (!byKey.has(r.key)) {
+        byKey.set(r.key, { ...r, file: f, middlewares: [...(guardsOf.get(r.key) ?? []), ...r.middlewares] });
+      }
     }
   }
   return [...byKey.values()];
