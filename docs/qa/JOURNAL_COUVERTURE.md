@@ -2039,6 +2039,13 @@ soumission sans doublon.
 - **Décision (utilisateur, 3 novembre 2026)** : `/missions/:id/costs` reste refusé au chauffeur, même pour sa propre mission. L'amortissement est tiré du prix d'achat du véhicule, et les agrégats couvrent toute la flotte. D'où le masquage de `purchasePrice` dans les listes.
 - **Preuves** : contrat `operations-driver-scope` 9/9 sur fleet_test ; mutation (service remis à la version précédente) : « mission réaffectée » rouge, 8/9. Erreurs contrôlées par `apiErrorProblems` (`tests/support/api-error.ts`, #146). tsc 0, unit 1633/1633.
 
+## 2026-11-03 13:18 — Cloison client sur les sous-ressources d'un OT (IDOR)
+
+- **Quoi** : `GET /api/work-orders/:id/parts`, `/:id/items` et `/:id/pending-part-requirements` n'exigeaient qu'une session. Un client énumérait les ids et lisait prix unitaires et heures des OT d'un autre client. Elles passent à `isAnyUser` puis à `assertWorkOrderReadable` : 404 si l'OT n'existe pas (avant la cloison), 403 si le véhicule n'est pas au client. Le personnel est inchangé ; un client lit toujours le coût de son propre OT (décision du commanditaire).
+- **Comment** : helper `server/lib/work-order-scope.ts`, qui réutilise `storage.getWorkOrder`, `storage.getVehicle` et `canAccessOwned` (même lecture du propriétaire que `GET /api/work-orders/:id`). Les `catch` des trois handlers relaient une `AppError` au gestionnaire central. Seuls les GET sont touchés ; `server/routes.ts` : le handler existant, sans nouvelle route.
+- **Pourquoi** : AGENTS.md §11. Un OT dont le véhicule n'a pas de propriétaire n'est lisible que par le personnel.
+- **Preuves** : `tests/contract/work-order-detail-client-scope.contract.test.ts`, 15 cas (3 routes x 5). Rouge sur main : 9 échecs / 6 verts (les 6 verts sont personnel et propriétaire). Vert après : 15/15 sur fleet_test. Contrats voisins (work-order*, vehicle-documents-client-scope, part-requirements-chain, api-role-guard) 104/104. tsc 0, unit 1658/1658.
+
 ## 2026-11-03 12:55 — Portée temps réel fermée par défaut
 
 - **Quoi** : une portée WebSocket absente, vide ou invalide n'envoie plus rien (avant : broadcast à tous, clients compris, cause commune de #53, #127 et #151). Le broadcast n'existe que si `type: "broadcast"` est écrit.
@@ -2053,3 +2060,9 @@ soumission sans doublon.
 - **Pourquoi** : `getByText` sans `exact` cherche une sous-chaîne ; l'annonce passagère « Notification Problème signalé… » la contient. Défaut du test, pas du produit.
 - **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
 - **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
+
+## 2026-11-03 14:05 — Cloison OT : logs migrés, commentaire du helper (suite de 51dfdef)
+
+- **Quoi** : dans les catch des GET touchés, les `console.*` passent à `moduleLogger` sans rien supprimer. `GET /api/work-orders/:id/parts` : le `console.log` du contenu des lignes devient un `log.debug` (`workOrderId`, `count`, `requestId`, sans le contenu), et le `console.error` un `log.error({ err, requestId })`. `GET /:id/items` : `console.error` migré vers `log.error`. Le commentaire de `assertWorkOrderReadable` dit qu'il applique la cloison client seulement ; l'écart technicien (OT d'un autre technicien, bloqué par `GET /api/work-orders/:id`) est noté comme connu.
+- **Pourquoi** : AGENTS.md §10, un log se migre, il ne se supprime pas. Le contenu des lignes (prix) n'a pas à finir dans les journaux.
+- **Preuves** : tsc 0, unitaires 1687/1687 ; contrats `work-order*` et `vehicle-documents-client-scope` 67/67 sur 10 fichiers, lancés sans `.env` ni `DATABASE_URL` (seulement `DATABASE_URL_TEST` et `DATABASE_WS_PROXY`).
