@@ -32,7 +32,11 @@ import { scopeOf } from "./alert-emission-scan";
  *     (`existingUploadedFile(p)?.slice(1)`), le résultat est jugé borné à tort ;
  *   - les écritures (`writeFile*`, `appendFile*`, `createWriteStream`, `mkdir*`) ne figurent pas dans
  *     `ACCESS_CALLS` : non couvertes, à suivre en dette ;
- *   - un chemin passé à une autre fonction est jugé dans la portée de celle-ci, sans suivre l'appelant.
+ *   - un chemin passé à une autre fonction est jugé dans la portée de celle-ci, sans suivre l'appelant ;
+ *   - racine `uploads` : seul un `..` littéral passé directement à join/resolve après `uploads` est
+ *     refusé. Trois formes passent encore pour bornées : `path.join("uploads", path.join("..", ".."))`
+ *     (`..` imbriqué), `const UP = ".."; path.join("uploads", UP)` (`..` par constante) et
+ *     `path.resolve("uploads", "/etc")` (un absolu remplace la racine).
  */
 
 export type FileAccessSite = { file: string; scope: string; call: string; line: number; bounded: boolean };
