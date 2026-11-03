@@ -10,6 +10,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # ready_for_review : un brouillon passé en revue déclenche un run complet.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -29,6 +31,9 @@ env:
 
 jobs:
   impact:
+    # Pas de CI sur une PR brouillon (décision du 3 novembre 2026) : tous les jobs dépendent
+    # de celui-ci et sont sautés avec lui. Push sur main et dispatch manuel inchangés.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     uses: EagleFox31/appfactory-project-automation/.github/workflows/reusable-impact-analysis.yml@0523510a8e42290df3bae5749d034b1637569af5
     with:
       appfactory_ref: 0523510a8e42290df3bae5749d034b1637569af5
