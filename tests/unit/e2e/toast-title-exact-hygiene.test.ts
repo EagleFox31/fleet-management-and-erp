@@ -1,7 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "fs";
-import { join, relative } from "path";
-import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
+import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../../support/repo-files";
 
 /**
  * Un e2e qui affirme le titre d'un toast le cherche avec `{ exact: true }`.
@@ -14,41 +12,30 @@ import { describe, expect, it } from "vitest";
  * Heuristique : titres littéraux passés à `toast({ title: "…" })` dans `client/src`,
  * puis tout `getByText("<titre>")` sans second argument dans `e2e/`.
  */
-const root = join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
-
-function files(dir: string, ext: RegExp): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name === "node_modules" ? [] : files(path, ext);
-    return ext.test(name) ? [path] : [];
-  });
-}
-
-function toastTitles(): Set<string> {
+async function toastTitles(): Promise<Set<string>> {
   const titles = new Set<string>();
   const pattern = /toast\(\s*\{[^}]*?\btitle:\s*(["'`])([^"'`]+)\1/g;
-  for (const file of files(join(root, "client/src"), /\.tsx?$/)) {
-    for (const match of readFileSync(file, "utf8").matchAll(pattern)) titles.add(match[2]);
+  for (const [, text] of await readRepoFiles(repoFiles({ under: ["client/src"], match: /\.tsx?$/ }))) {
+    for (const match of text.matchAll(pattern)) titles.add(match[2]);
   }
   return titles;
 }
 
 describe("titres de toast affirmés dans les e2e", () => {
-  it("trouve des titres de toast (garde contre une heuristique devenue muette)", () => {
-    expect(toastTitles().has("Problème signalé")).toBe(true);
-  });
+  it("trouve des titres de toast (garde contre une heuristique devenue muette)", async () => {
+    expect((await toastTitles()).has("Problème signalé")).toBe(true);
+  }, REPO_SCAN_TIMEOUT_MS);
 
-  it("chaque getByText d'un titre de toast porte { exact: true }", () => {
-    const titles = toastTitles();
+  it("chaque getByText d'un titre de toast porte { exact: true }", async () => {
+    const titles = await toastTitles();
     const offenders: string[] = [];
-    for (const file of files(join(root, "e2e"), /\.ts$/)) {
-      const source = readFileSync(file, "utf8");
+    for (const [file, source] of await readRepoFiles(repoFiles({ under: ["e2e"], match: /\.ts$/ }))) {
       for (const match of source.matchAll(/getByText\(\s*(["'`])([^"'`]+)\1\s*\)/g)) {
         if (!titles.has(match[2])) continue;
         const line = source.slice(0, match.index).split("\n").length;
-        offenders.push(`${relative(root, file).replace(/\\/g, "/")}:${line} getByText("${match[2]}")`);
+        offenders.push(`${file}:${line} getByText("${match[2]}")`);
       }
     }
     expect(offenders, "ajouter { exact: true } : le Toast Radix duplique le titre dans un span aria-live").toEqual([]);
-  });
+  }, REPO_SCAN_TIMEOUT_MS);
 });

@@ -1493,3 +1493,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Tout contrôle de solde ou de stock suivi d'une écriture se fait dans une transaction avec un verrou (ligne, ou verrou consultatif si la valeur est un agrégat). Pour la carte carburant : toute écriture touchant `debit_amount` / `credit_amount`, suppression comprise, prend `lockFuelCard` dans sa transaction (restent hors verrou au 3/11 : `DELETE /api/fuel-records/:id` de `server/routes.ts`, `fuel-service.ts` (create, update, delete d'un plein), `fuel-voucher-service.ts` (update) et la régularisation de mission, suivis à part). Un test de concurrence en est la preuve. Il ouvre les connexions du pool d'avance, sinon l'ouverture de connexion étale les appels et masque la course.
+
+## 2026-11-03 — Tests d'hygiène rouges par intermittence sous charge
+
+### Contexte
+- `conflict-markers`, `role-labels`, `toast-title-exact-hygiene` et `part-requirement-labels-hygiene` échouaient par intermittence dans `npm test` complet et passaient seuls (constat aa).
+
+### Cause racine
+- Lectures synchrones de 700 à 1 800 fichiers, chacun avec son propre parcours (`readdirSync` et `statSync` par entrée). Certains fichiers relisaient les mêmes sources deux fois. Sur une machine chargée (suite parallèle, antivirus, autres sessions), ce test prenait de 1,3 à 10,9 s, même lancé seul, contre un timeout Vitest de 5 s par défaut.
+- Classification : test lié au temps, pas un défaut du produit.
+
+### Résolution
+- `tests/support/repo-files.ts` : une seule liste `git ls-files` par worker (fichiers suivis et non suivis non ignorés, donc ni `node_modules` ni jonctions), des lectures asynchrones mémorisées, et `REPO_SCAN_TIMEOUT_MS` (60 s) explicite et justifié. Les quatre tests passent par ce module.
+
+### Prévention (vérifiable)
+- `npm test` complet ×5 : 1687/1687 à chaque passe. Gardes toujours actifs : un fichier non suivi planté (marqueur de conflit, `getRoleLabel`, libellé interdit, `getByText` de toast) fait échouer les cinq tests concernés.
+
+### Règle Projet (obligatoire)
+- Un test qui lit le dépôt passe par `tests/support/repo-files.ts` et déclare `REPO_SCAN_TIMEOUT_MS`. Pas de `readdirSync` récursif dans un test.
