@@ -70,6 +70,12 @@ docker compose --profile vps logs -f app-prod
 
 Au premier démarrage, `schema-recette` et `schema-prod` créent le schéma Drizzle si la base est vide (`scripts/db-bootstrap.ts`), sans rien faire ensuite. Puis `init-database` ajoute colonnes, triggers et migrations sans rien détruire (idempotent). Vérifier `https://<domaine>/api/health`.
 
+`PROD_TAG` est obligatoire : un tag daté, jamais `latest`. Sans lui, le pull échoue sur le tag `definir-PROD_TAG-date`.
+
+### Premier administrateur
+
+Sur une base vide, aucun compte `admin` / `admin123` n'est créé hors développement. Avant le premier `up`, mettre dans `.env.prod` (et `.env.recette`) `ADMIN_INITIAL_PASSWORD=<12 caractères minimum>` (`openssl rand -base64 18`). Le compte `admin` est créé avec ce mot de passe, jamais journalisé. Sans la variable, l'application démarre sans administrateur et l'écrit dans les logs : la définir puis `docker compose --profile vps up -d app-prod`. Après la première connexion, retirer la variable et changer le mot de passe depuis l'application.
+
 ## 4. Mise à jour
 
 Recette : `git pull && docker compose --profile recette build app-recette && docker compose --profile recette up -d app-recette`.
@@ -84,6 +90,8 @@ Remettre `PROD_TAG` sur le tag précédent et `docker compose --profile vps up -
 Chaque nuit, par cron sur l'hôte, puis copie hors du VPS (restic ou rclone vers OVH Object Storage) :
 
 ```bash
+# crontab : 30 2 * * * cd /chemin/vers/fleet-management-and-erp/deploy && <commande ci-dessous>
+# (docker compose lit docker-compose.yml et .env du dossier courant ; % s'échappe en \% dans une crontab)
 docker compose --profile vps exec -T db-prod pg_dump -U fleet -Fc fleet > prod-$(date +%F).dump   # bash : redirection binaire sûre
 ```
 
@@ -111,4 +119,4 @@ Tester une restauration au moins une fois. Activer aussi les sauvegardes automat
 
 - Instance unique par environnement : pas de mise à l'échelle horizontale (WebSocket et uploads locaux).
 - L'APK Android et la PWA pointent sur l'URL de prod : ne pas changer ce domaine sans republier l'APK.
-- Déploiement par SSH vers la recette : `.github/workflows/deploy-recette.yml` (actif seulement si les secrets `RECETTE_SSH_HOST`, `RECETTE_SSH_USER`, `RECETTE_SSH_KEY` existent).
+- Déploiement par SSH vers la recette : `.github/workflows/deploy-recette.yml` (actif seulement si les secrets `RECETTE_SSH_HOST`, `RECETTE_SSH_USER`, `RECETTE_SSH_KEY` existent). `RECETTE_SSH_KNOWN_HOSTS` est alors obligatoire (sortie de `ssh-keyscan <hôte>` vérifiée à la main) : le workflow échoue sans lui, il ne fait jamais confiance à la première clé vue.

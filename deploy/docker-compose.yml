@@ -61,7 +61,7 @@ services:
     profiles: [site]
     environment:
       POSTGRES_USER: fleet
-      POSTGRES_PASSWORD: ${SITE_DB_PASSWORD:-fleet-site}
+      POSTGRES_PASSWORD: ${SITE_DB_PASSWORD:-}  # vide : Postgres refuse de démarrer
       POSTGRES_DB: fleet
     volumes:
       - pgdata-site:/var/lib/postgresql/data
@@ -70,7 +70,8 @@ services:
   site-secret:
     <<: *tools
     profiles: [site]
-    command: ["node", "-e", "const fs=require('fs'),f='/run/site/session_secret';if(!fs.existsSync(f)){fs.writeFileSync(f,require('crypto').randomBytes(32).toString('hex'),{mode:0o644});console.info('Secret de session créé.')}else console.info('Secret de session déjà présent.')"]
+    # 0600, propriétaire node (uid 1000, celui de l'image runtime) ; droits réappliqués à chaque démarrage.
+    command: ["node", "-e", "const fs=require('fs'),f='/run/site/session_secret';if(!fs.existsSync(f)){fs.writeFileSync(f,require('crypto').randomBytes(32).toString('hex'),{mode:0o600});console.info('Secret de session créé.')}else console.info('Secret de session déjà présent.');fs.chownSync(f,1000,1000);fs.chmodSync(f,0o600)"]
     volumes:
       - site-secret:/run/site
 
@@ -79,7 +80,7 @@ services:
     profiles: [site]
     command: ["npx", "tsx", "scripts/db-bootstrap.ts"]
     environment: &site-db-env
-      DATABASE_URL: postgres://fleet:${SITE_DB_PASSWORD:-fleet-site}@db-site:5432/fleet
+      DATABASE_URL: postgres://fleet:${SITE_DB_PASSWORD:-}@db-site:5432/fleet
       DATABASE_WS_PROXY: wsproxy:80/v1
     depends_on:
       db-site: { condition: service_healthy }
@@ -114,7 +115,7 @@ services:
       <<: *site-db-env
       APP_ENV: recette
       RECETTE_DB_HOST_ALLOW: db-site
-      RECETTE_PASSWORD: ${SITE_DEMO_PASSWORD:-Demo-Site-2026!}
+      RECETTE_PASSWORD: ${SITE_DEMO_PASSWORD:-}  # vide ou < 12 caractères : le seed refuse
     depends_on:
       app-site: { condition: service_healthy }
 
@@ -174,8 +175,9 @@ services:
 
   app-prod:
     <<: *app
-    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${PROD_TAG:-latest}
-    # Image déjà construite et taguée (retour arrière par PROD_TAG) : jamais reconstruite ici.
+    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${PROD_TAG:-definir-PROD_TAG-date}
+    # Image déjà construite, tag daté obligatoire (jamais latest, retour arrière par PROD_TAG) : jamais reconstruite ici.
+    # Sans PROD_TAG, le pull échoue sur le tag « definir-PROD_TAG-date », qui dit quoi faire.
     build: !reset null
     profiles: [vps]
     env_file: .env.prod

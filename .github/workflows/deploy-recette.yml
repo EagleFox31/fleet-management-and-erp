@@ -35,6 +35,11 @@ jobs:
         id: gate
         run: |
           if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KEY" ]; then
+            # Empreinte de l'hôte obligatoire : pas de ssh-keyscan (confiance au premier contact).
+            if [ -z "$SSH_KNOWN_HOSTS" ]; then
+              echo "::error::Secret RECETTE_SSH_KNOWN_HOSTS absent : y mettre la ligne known_hosts de l'hôte, vérifiée hors bande."
+              exit 1
+            fi
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "Secrets RECETTE_SSH_* absents : déploiement ignoré."
@@ -46,11 +51,7 @@ jobs:
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
-          if [ -n "$SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -H "$SSH_HOST" > ~/.ssh/known_hosts
-          fi
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           DIR="${DEPLOY_DIR:-fleet-management-and-erp}"
-          ssh -i ~/.ssh/id_deploy "$SSH_USER@$SSH_HOST" \
+          ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_deploy "$SSH_USER@$SSH_HOST" \
             "cd '$DIR' && git pull --ff-only && cd deploy && docker compose --profile recette build app-recette && docker compose --profile recette up -d app-recette"

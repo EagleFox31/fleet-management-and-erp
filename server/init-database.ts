@@ -1,10 +1,12 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { db, pool } from './db';
 import { users } from '../shared/schema';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
+import { listMigrationFiles } from './lib/migration-files';
+import { planInitialAdmin } from './lib/initial-admin';
 
 const initLog = moduleLogger('init-database');
 
@@ -30,16 +32,8 @@ async function applyBootstrapSqlFiles() {
 /** Migrations idempotentes rejouées à chaque démarrage (pas de table de suivi). */
 async function applyMigrationSqlFiles() {
   const migrationsDir = path.resolve(process.cwd(), 'server', 'db', 'migrations');
-  let files: string[];
-  try {
-    files = (await readdir(migrationsDir))
-      .filter((file) => file.endsWith('.sql'))
-      .sort();
-  } catch (error) {
-    // Dossier absent (image Docker incomplète) : échouer au démarrage plutôt que de servir une base
-    // à laquelle il manque migrations et triggers sans le savoir (LESSONS_LEARNED, 4 novembre 2026).
-    throw new Error(`Migrations introuvables (${migrationsDir}) : le démarrage est interrompu.`, { cause: error });
-  }
+  // Dossier absent : lève, le démarrage échoue (server/lib/migration-files.ts).
+  const files = await listMigrationFiles(migrationsDir);
 
   for (const file of files) {
     const absolutePath = path.join(migrationsDir, file);
@@ -1265,19 +1259,28 @@ export async function initializeDatabase() {
 
     // Créer un utilisateur administrateur par défaut
     console.log('👥 Création de l\'utilisateur administrateur...');
-    const adminPassword = await bcrypt.hash('admin123', 10);
+    // Administrateur initial : jamais admin/admin123 hors développement et test (server/lib/initial-admin.ts).
+    const adminPlan = planInitialAdmin(process.env);
+    if (!adminPlan.create) {
+      initLog.warn(adminPlan.reason);
+      return;
+    }
 
     await db.insert(users).values({
-      username: 'admin',
+      username: adminPlan.username,
       email: 'admin@fleet.com',
       name: 'Administrateur Système',
-      password: adminPassword,
+      password: await bcrypt.hash(adminPlan.password, 10),
       role: 'admin'
     });
 
-    console.log('✅ Utilisateur administrateur créé !');
-    console.log('👤 Connexion: admin / admin123');
-    console.log('📧 Email: admin@fleet.com');
+    if (adminPlan.source === 'dev-default') {
+      // Développement et test seulement : le mot de passe par défaut est public, le rappeler est sans risque.
+      initLog.info({ username: adminPlan.username }, 'Administrateur de développement créé (mot de passe par défaut admin123)');
+    } else {
+      // Le mot de passe vient de l'environnement : jamais journalisé.
+      initLog.info({ username: adminPlan.username }, 'Administrateur initial créé avec ADMIN_INITIAL_PASSWORD');
+    }
 
   } catch (error) {
     console.error('❌ Erreur lors de l\'initialisation:', error);

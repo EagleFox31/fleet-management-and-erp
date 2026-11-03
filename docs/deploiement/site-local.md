@@ -5,7 +5,17 @@ Un PC portable Windows fait tourner FleetOS. Les autres PC et les téléphones b
 ## 1. Installation (une fois)
 
 1. Installez [Docker Desktop](https://www.docker.com/products/docker-desktop/) et démarrez-le. Attendez que la baleine indique « Running ».
-2. Récupérez le projet (`git clone`, ou une archive décompressée), puis ouvrez PowerShell dans son dossier `deploy` :
+2. Récupérez le projet (`git clone`, ou une archive décompressée), puis ouvrez PowerShell dans son dossier `deploy`.
+3. Créez le fichier `deploy\.env`, qui n'est jamais versionné, avec deux mots de passe **choisis par vous** (12 caractères minimum, sans `$`). Sans eux, le lancement s'arrête :
+
+```
+SITE_DB_PASSWORD=<mot de passe de la base>
+SITE_DEMO_PASSWORD=<mot de passe des comptes de démonstration>
+```
+
+Ils sont lus au **premier** lancement. Les changer ensuite ne modifie ni la base ni les comptes déjà créés.
+
+4. Lancez :
 
 ```powershell
 cd C:\chemin\vers\fleet-management-and-erp\deploy
@@ -27,7 +37,9 @@ L'application est prête quand `docker compose --profile site ps` affiche `app-s
 
 Toutes les données sont fictives : véhicules RCT-001 à RCT-012. Il y a un compte par profil : `recette_admin`, `recette_chef_atelier`, `recette_technicien_1`, `recette_magasinier`, `recette_chauffeur`, `recette_client_1`, etc.
 
-Le mot de passe est `Demo-Site-2026!`. Changez-le **avant le premier lancement** : `$env:SITE_DEMO_PASSWORD="..."` (12 caractères minimum).
+Tous ces comptes ont le mot de passe `SITE_DEMO_PASSWORD` défini à l'étape 3. Le compte `recette_admin` a tous les droits : ne communiquez ce mot de passe qu'aux participants de la démonstration.
+
+Premier administrateur : sur le serveur de site, c'est `recette_admin`. Aucun compte `admin` / `admin123` n'est créé (le serveur tourne en production). Pour un compte `admin` en plus, ajouter `ADMIN_INITIAL_PASSWORD` (12 caractères minimum) à l'environnement de `app-site` avant le premier lancement.
 
 ## 3. Trouver l'adresse IP du PC
 
@@ -83,6 +95,17 @@ Testez une restauration au moins une fois avant d'en avoir besoin. Les fichiers 
 ```powershell
 docker run --rm -v deploy_uploads-site:/data:ro -v "${PWD}:/out" alpine tar czf /out/uploads-site.tgz -C /data .
 ```
+
+## 7. Mise à jour
+
+Sauvegardez d'abord (section 6), puis, dans le dossier `deploy` :
+
+```powershell
+git pull
+docker compose --profile site up -d --build
+```
+
+Les données sont conservées : la base n'est jamais recréée, `init-database` n'ajoute que ce qui manque. Vérifiez ensuite `http://localhost:<SITE_PORT>/api/health`.
 
 ## Points d'attention
 

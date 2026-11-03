@@ -8,6 +8,13 @@ import { resolveSessionSecret } from "../lib/session-secret";
 const PgSession = connectPgSimple(session);
 
 const cookieFlags = sessionCookieFlags();
+if (process.env.NODE_ENV === "production" && !cookieFlags.secure) {
+  // Voulu pour le serveur de site sur un LAN en http:// ; anormal derrière un domaine public.
+  moduleLogger("session").warn(
+    { appUrl: process.env.APP_URL },
+    "Cookie de session non secure en production (APP_URL en http://) : réservé à un réseau local de confiance.",
+  );
+}
 
 /**
  * Shared session middleware instance with PostgreSQL storage
