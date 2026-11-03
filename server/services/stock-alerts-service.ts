@@ -5,6 +5,8 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("stock-alerts-service");
+/** Borne de la colonne `integer` : au-delà, Postgres lèverait une erreur rendue en 500. */
+const MAX_STOCK = 2147483647;
 
 /**
  * Service Stock & Alertes
@@ -175,7 +177,7 @@ export class StockAlertsService {
   }) {
     log.debug({ partId: data.partId, type: data.type, quantity: data.quantity }, "mouvement de stock demandé");
 
-    if (!Number.isInteger(data.quantity) || data.quantity <= 0) {
+    if (!Number.isInteger(data.quantity) || data.quantity <= 0 || data.quantity > MAX_STOCK) {
       throw new AppError(400, "La quantité doit être un entier strictement positif.");
     }
 
@@ -200,6 +202,9 @@ export class StockAlertsService {
         );
       }
       const newStock = data.type === 'in' ? previousStock + data.quantity : previousStock - data.quantity;
+      if (newStock > MAX_STOCK) {
+        throw new AppError(400, "Entrée impossible : le stock dépasserait la capacité enregistrable.");
+      }
 
       const [movement] = await tx
         .insert(partsStockMovements)

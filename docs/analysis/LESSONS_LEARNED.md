@@ -1721,7 +1721,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - La route transmet les erreurs au gestionnaire central (`next`) et ne renvoie plus `error.message`.
 
 ### Prévention (vérifiable)
-- `tests/contract/warehouse-stock-movement.contract.test.ts` : 409 avec stock et journal intacts, 404, 400, trois sorties concurrentes (deux 201, un 409, chaîne previous → new continue), entrées concurrentes additionnées. Rouge 5 sur 5 sur main.
+- `tests/contract/warehouse-stock-movement.contract.test.ts` : 409 avec stock et journal intacts, 404, 400 (décimal, hors entier SQL, débordement), trois sorties concurrentes (deux 201, un 409, chaîne previous → new continue), entrées concurrentes additionnées, trame en portée personnel. Rouge sur main sur chaque cas.
 - À venir (backlog b7) : recenser tout écrivain de `parts.quantity` hors transaction verrouillée.
 
 ### Règle Projet (obligatoire)

@@ -13,7 +13,7 @@ import { leakText } from "../support/api-error";
  * - Sortie au-delà du stock -> 409 lisible, stock et journal intacts.
  *   Avant : stock ramené à 0 en silence, mouvement journalisé avec un `newStock` faux.
  * - Pièce inexistante -> 404 lisible. Avant : 500 portant le message brut.
- * - Quantité décimale -> 400 lisible, rien n'est écrit.
+ * - Quantité décimale, hors entier SQL, ou entrée qui déborderait -> 400 lisible, rien n'est écrit.
  * - Sorties concurrentes : jamais plus que le stock, chaîne previous -> new continue.
  *   Avant : lecture hors transaction, chaque sortie partait du même stock initial.
  * - Trame `warehouse_stock_movement_recorded` (§2, §11) : personnel lisant le stock, ni chauffeur
@@ -145,9 +145,13 @@ describe("Mouvement de stock magasin : contrat", { timeout: 120000 }, () => {
     expectErrorContract(res, "NOT_FOUND");
   });
 
-  it("quantité décimale -> 400 lisible, rien n'est écrit", async () => {
+  it.each([
+    ["quantité décimale", 1.5],
+    ["quantité au-delà d'un entier SQL", 3_000_000_000],
+    ["entrée qui ferait déborder le stock", 2_147_483_647],
+  ])("%s -> 400 lisible, rien n'est écrit", async (_label, quantity) => {
     const part = await newPart(5);
-    const res = await move(part.id, "in", 1.5);
+    const res = await move(part.id, "in", quantity);
     expect(res.status).toBe(400);
     expectErrorContract(res, "VALIDATION");
     const state = await stateOf(part.id);

@@ -138,3 +138,9 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : `warehouse_stock_movement_recorded` est envoyée aux rôles `PART_CATALOG_EVENT_ROLES` (personnel sauf chauffeur), plus en broadcast. L'entrée `warehouse.routes.ts` sort de la liste gelée de `broadcast-hygiene`.
 - **Comment** : un cas de contrat vérifie que la trame atteint admin, magasinier et technicien, et pas le chauffeur ni le client. Il vérifie aussi qu'un 409 n'émet aucune trame. Rouge sans le correctif de la route.
 - **Pourquoi** : AGENTS.md §11, demande de 0a sur #188. Le stock et les prix ne regardent pas un client.
+
+## 2026-11-03T17:00:51+01:00 — Réserves de relecture sur #188
+
+- **Quoi** : une quantité au-delà de 2^31-1, ou une entrée qui ferait déborder le stock, est refusée en 400 au lieu d'un 500 Postgres. Le compte de cas est corrigé dans LESSONS.
+- **Comment** : deux cas de contrat, rouges sans la borne. Total 8/8.
+- **Pourquoi** : réserves de fleet-securite et fleet-relecteur.
