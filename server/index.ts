@@ -7,6 +7,8 @@ import { listenerPool, pool } from "./db";
 import type { PoolClient } from "@neondatabase/serverless";
 import { WebSocketServer, WebSocket } from 'ws';
 import { sessionMiddleware } from "./middleware/session";
+import { findActiveSessionUser } from "./services/session-user";
+import { moduleLogger } from "./lib/logger";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
 import { dbAuditSink } from "./lib/audit-db-sink";
@@ -34,7 +36,6 @@ import { dbAuditSink } from "./lib/audit-db-sink";
   interface WsSessionRequest extends IncomingMessage {
     session?: {
       userId?: number;
-      role?: string;
     };
     wsMeta?: WsConnectionMeta;
   }
@@ -72,7 +73,7 @@ import { dbAuditSink } from "./lib/audit-db-sink";
 
     sessionMiddleware(request as any, mockResponse as any, (sessionError?: unknown) => {
       if (sessionError) {
-        console.error("Erreur session sur upgrade WebSocket:", sessionError);
+        moduleLogger("websocket").error({ err: sessionError }, "Erreur session sur upgrade WebSocket");
         socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -86,17 +87,30 @@ import { dbAuditSink } from "./lib/audit-db-sink";
         return;
       }
 
-      sessionRequest.wsMeta = {
-        userId: sessionUserId,
-        role:
-          typeof sessionRequest.session?.role === "string"
-            ? sessionRequest.session.role
-            : null,
-      };
+      // Le rôle est relu en base, comme dans `authenticate` : celui de la session
+      // est figé à la connexion et survivrait à un changement de rôle (ADM2-3).
+      findActiveSessionUser(sessionUserId)
+        .then((user) => {
+          if (!user) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+            socket.destroy();
+            return;
+          }
 
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
+          sessionRequest.wsMeta = {
+            userId: sessionUserId,
+            role: typeof user.role === "string" ? user.role : null,
+          };
+
+          wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request);
+          });
+        })
+        .catch((err: unknown) => {
+          moduleLogger("websocket").error({ err, userId: sessionUserId }, "Relecture du compte impossible sur upgrade WebSocket");
+          socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+        });
     });
   });
 

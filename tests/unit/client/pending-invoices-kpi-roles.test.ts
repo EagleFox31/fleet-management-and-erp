@@ -14,10 +14,11 @@ describe("montant des factures en attente", () => {
 });
 
 describe("garde de rôle des tuiles KPI", () => {
-  it("admin et management seulement", () => {
-    expect([...KPI_VIEWER_ROLES].sort()).toEqual(["admin", "management"]);
+  it("direction, administrateur et chef d'atelier seulement (CDC #7)", () => {
+    const expected = ["admin", "management", "workshop_manager"];
+    expect([...KPI_VIEWER_ROLES].sort()).toEqual(expected);
     for (const role of ALL_APP_ROLES) {
-      expect(canViewKpi(role)).toBe(role === "admin" || role === "management");
+      expect(canViewKpi(role)).toBe(expected.includes(role));
     }
   });
   it("rôle absent ou inconnu : refusé", () => {

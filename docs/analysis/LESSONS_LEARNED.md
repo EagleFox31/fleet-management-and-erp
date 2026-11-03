@@ -995,3 +995,234 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
+
+## 2026-11-02 - Période KPI démesurée : plusieurs secondes de calcul puis 500
+
+### Constat
+- `GET /api/kpi/*` et `GET /api/exports/kpi-report` acceptaient `to=9999-12-30` ou `2026-02-31`. Le calcul des mois de la période bouclait plusieurs secondes avant une 500.
+
+### Cause racine
+- `isoDateSchema` ne contrôle que la forme `AAAA-MM-JJ`, pas la date ni son étendue. La boucle `monthKeysBetween` (`server/lib/kpi-rules.ts`) est linéaire en nombre de mois. Classification : entrée utilisateur non bornée qui pilote un coût de calcul.
+
+### Résolution
+- `shared/contracts/kpi-period.ts` : date réelle du calendrier, années 2000-2100, 36 mois civils au plus ; réponse 400 lisible.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/kpi-period.test.ts` : les quatre schémas refusent période démesurée, date inexistante et années hors bornes.
+- `tests/contract/kpi-cdc.contract.test.ts` : 400 sans détail technique sur ces cas, pour les KPI et le rapport.
+
+### Règle Projet (obligatoire)
+- Tout paramètre de requête qui fixe la taille d'un calcul (période, pagination, profondeur) est borné dans son schéma Zod partagé ; `isoDateSchema` seul ne suffit pas pour une période.
+
+### Suite (relecture de #108) : borne implicite et fuseau
+- Constat : (1) `from` seul laissait le serveur compléter `to` par aujourd'hui, donc `from=2001-01-01` contournait le plafond de 36 mois ; (2) le contrôle ajouté pour cela lisait « aujourd'hui » en UTC alors que le serveur le lit à Douala : entre 00:00 et 01:00 à Douala, `?from=<jour de Douala>` sans `to` donnait un 400 (`from > to`).
+- Cause racine : une borne complétée par le serveur n'était pas contrôlée avec la même valeur que celle qu'il utilise ; le jour courant était calculé à deux endroits, dans deux fuseaux. Classification : règle dupliquée entre contrat et serveur.
+- Résolution : `kpiPeriodIssue` contrôle la période réelle (`to` = jour courant) ; `KPI_TIME_ZONE` et `isoDateInZone` vivent dans `shared/contracts/kpi-period.ts`, `server/lib/kpi-rules.ts` les importe, plus aucune redéclaration.
+- Prévention (vérifiable) : `tests/unit/shared/kpi-period.test.ts` (`from` seul au-delà de 36 mois refusé ; à 00:30 Douala, soit 23:30 UTC la veille, `from` = jour de Douala accepté, lendemain refusé).
+- Règle : une valeur par défaut complétée côté serveur se contrôle avec la même fonction, importée du contrat, et un jour métier se calcule une seule fois, dans un fuseau nommé.
+
+## 2026-11-02 - Brouillon d'acquisition recréé après la clôture, abandon qui touchait l'acquisition terminée
+
+### Constat
+- Après l'activation d'un véhicule, la base contenait deux lignes sous le même `sessionId` : `completed` et `in_progress`. Le bandeau « Workflows en cours » affichait un brouillon fantôme. Le bouton « Abandonner » appelait `PATCH /api/workflows/active/:sessionId/abandon`, dont le service ne filtrait pas sur `in_progress` : il passait aussi l'acquisition terminée à `abandoned`.
+
+### Cause racine
+- Client : `updateData` programme un enregistrement à 500 ms. Si ce minuteur ou un PATCH déjà en route arrive après `completeWorkflow()`, le repli POST de la mutation recrée un brouillon. `sessionClosed` ne bloquait que les futurs appels de `saveWorkflow`.
+- Serveur : `workflowReminderService.abandonWorkflow` filtrait sur `userId` + `sessionId` seulement, alors que la route jumelle `workflowService.abandonWorkflow` filtre déjà sur `in_progress`. Deux services pour la même transition, un seul gardait l'invariant.
+
+### Résolution
+- Minuteurs d'enregistrement annulés à la clôture, mutation qui ne PATCH ni ne POST plus une fois la session close ; le bandeau appelle la route `vehicle-acquisition` ; filtre `in_progress` ajouté au service des rappels.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-abandon-pair.test.ts` : paire `completed` + `in_progress`, l'abandon ne change que la seconde, sur les deux services (rouge avant le filtre sur le service des rappels, vert après).
+- `e2e/16-vehicle-acquisition-resume.spec.ts` : après activation, aucun brouillon `in_progress` ne subsiste pour la session.
+
+### Règle Projet (obligatoire)
+- Toute transition de statut qui cible un `sessionId` ou un identifiant partagé filtre sur le statut d'origine attendu, dans chaque service qui l'expose. Une clôture annule les écritures différées en attente, pas seulement les futures.
+
+## 2026-11-02 - Rôle de session lu dans des décisions d'autorisation
+
+### Constat
+- Après correction d'ADM2-3 (`/api/purchase-orders`), la même lecture `req.session.role` décidait encore des accès dans les renouvellements de documents (5 routes), les missions (4 handlers) et les besoins en pièces : un compte rétrogradé gardait ses droits jusqu'à la déconnexion.
+
+### Cause racine
+- Le rôle de session est figé à la connexion ; `authenticate` seul ne pose pas `req.user`, donc les handlers lisaient la session par commodité. Le défaut avait été corrigé là où il était signalé, sans balayer les routeurs voisins.
+
+### Résolution
+- Routeurs montés sous `isAnyUser` / `isStaff` (rôle relu en base) et handlers lisant `req.user.role`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-role-guard.test.ts` : aucune lecture de `session.role` dans tout `server/` (portée étendue le 2 novembre 2026, voir l'entrée « WebSocket : rôle figé en session ») hors liste gelée (étiquettes d'audit `actorRole`, écriture à la connexion PIN) ; la liste ne peut que diminuer.
+
+### Règle Projet (obligatoire)
+- Une décision d'accès lit `req.user.role`, posé par `authorize` / `isAnyUser` / `isStaff`. Corriger un défaut de classe impose de balayer tout le dépôt, pas seulement la route signalée.
+
+## 2026-11-02 - Import Excel des factures : trois contournements successifs de la même garde
+
+### Constat
+- `POST /api/supplier-invoices/import` (SheetJS 0.20.3) a été contourné trois fois en relecture, à chaque fois sous les plafonds annoncés (5 Mo téléversés, 5000 lignes) :
+  1. tailles du zip sous-déclarées (répertoire central = 1, en-tête local = 0) : SheetJS décompressait sans limite ;
+  2. bit 3 (data descriptor) avec une taille locale de 300 Mo : 6 Ko téléversés, 1,4 Go de RSS ;
+  3. une seule cellule en colonne XFD sur chacune de 302 478 lignes (1,3 Mo téléversés, feuille de 15 Mo) : 147,6 s de boucle d'événements bloquée dans le comptage des lignes, plus de 300 s si la cellule contient une espace.
+
+### Cause racine
+- La garde imitait le parseur de SheetJS au lieu de lui donner une entrée canonique : chaque écart entre les deux lectures du zip (taille locale, data descriptor) était une porte.
+- Chaque passe était dimensionnée sur un fichier moyen, pas sur l'entrée la plus défavorable : `cells.some(...)` parcourt une ligne dense jusqu'à sa `length`, et une cellule en XFD en fait un tableau creux de 16 384. Le refus au-delà de 5000 lignes ne venait qu'après la boucle, et les lignes blanches n'étaient jamais comptées. Classification : coût proportionnel à une valeur déclarée (largeur, hauteur, taille) au lieu du contenu présent.
+
+### Résolution
+- `canonicalWorkbookArchive` (`server/lib/xlsx-import-guard.ts`) décompresse réellement chaque entrée sous un budget (15 Mo) et reconstruit une archive neuve : SheetJS ne lit jamais le tampon téléversé.
+- `compactImportSheet` (`server/lib/supplier-invoice-import-sheet.ts`) : hauteur contrôlée en O(1) (`length` du tableau dense), lignes présentes parcourues sans plafond (8 accès par ligne au plus : 0,27 s sur 1 048 575 lignes à cellule en XFD ; un plafond refusait les modèles à formules tirées sans rien gagner), en-tête lu par `for…in` (cellules présentes seulement), lignes de données lues par accès direct aux 8 colonnes attendues, `sheet_to_json` appliqué à une feuille compacte (en-tête + lignes retenues, colonnes attendues).
+
+### Prévention (vérifiable)
+- `tests/contract/supplier-invoice-import-hardening.contract.test.ts` : `xfd` et `xfdblank` (40 000 lignes d'une cellule en XFD, générées en mémoire) sous un en-tête, traités en moins de 2 s (rien à importer) ; data descriptor et ZIP64 avec bornes mémoire ; `<dimension>` large ou absente.
+- `tests/unit/server/supplier-invoice-import-sheet.test.ts` : ligne au-delà de 1 048 576, lignes larges en temps borné, modèle à formules tirées (20 000 lignes calculées vides) accepté, colonne obligatoire absente de l'en-tête nommée dans le refus.
+- `tests/unit/server/xlsx-import-guard.test.ts` : archive de sortie sans bit 3 ni extra, tailles locales = tailles réelles.
+
+### Règle Projet (obligatoire)
+- Un analyseur de fichier téléversé donne à la bibliothèque une entrée canonique reconstruite, jamais l'octet reçu. Chaque passe sur ce fichier est mesurée sur son entrée la plus défavorable (largeur, hauteur, creux, valeurs blanches) et porte un test de borne de temps ou de mémoire, rouge sur le code précédent.
+## 2026-11-02 - Postgres local pour intégration et contrat : le bootstrap n'était pas « from scratch »
+
+### Constat
+- Mise en place d'un Postgres Docker (`docker-compose.test.yml`) et d'une CI (`.github/workflows/ci.yml`) pour sortir les suites intégration et contrat de la latence Neon. Premier passage : 34 fichiers d'intégration en échec dès `setupFiles`, `relation "users" does not exist`.
+- Second near miss : wsproxy refusait toute connexion, `address postgres:5432postgres:5432: too many colons`.
+- Trois tests échouent en local : `part-requirement-received-by` (régression produit, pas infra : `ensureAutoSupplierInvoiceFromOrder` lève « montant HT > 0 » sur une commande dont `totalAmountHT` reste à 0, contrôle ajouté par c3f3260 après le test c06fa45) ; `management-dashboard-service` ×2 dans le passage complet, verts seuls (déjà noté flaky le 2026-10-30, journal de couverture l.171). Note du 2026-11-02 : les deux sont
+  résolus depuis, `received-by` par #110 sur `main`, le tableau de bord par a7aabc1/6db199a (voir l'entrée
+  « test classé instable qui dépendait de la date du jour »).
+
+### Cause racine
+- `initializeDatabase()` (`server/init-database.ts`) ne crée aucune table : il suppose un `drizzle-kit push` initial jamais rejoué, et n'avait jamais tourné sur une base vide. L'idempotence (`IF NOT EXISTS`) masquait l'absence de création.
+- `APPEND_PORT` de wsproxy est concaténé tel quel à `address=` ; le driver Neon envoie déjà `host:port`.
+- La branche Neon de test porte 6 tables absentes de `shared/schema.ts` (`destination_rates`, `idempotency_keys`, `import_batches`, `operation_costs`…) : écritures d'autres branches sur une base partagée. Triggers identiques (7/7).
+
+### Résolution
+- `npm run test:db:schema` (`drizzle-kit push --force` sur le port TCP direct 54320) avant la première suite, appelé par `test:db:up` et par chaque job CI.
+- `APPEND_PORT` retiré, `ALLOW_ADDR_REGEX` restreint à `^postgres:5432$`.
+- `server/db.ts` : `DATABASE_WS_PROXY` (sans protocole) bascule le driver sur un proxy en clair ; absent = Neon, inchangé.
+
+### Prévention (vérifiable)
+- La CI part d'une base vide à chaque job : toute dépendance à un état Neon préexistant (table hors schéma, ligne de référence) casse en CI avant de casser ailleurs.
+- Les 6 tables hors schéma ne sont pas reproduites en local : un test qui en dépend échouera en CI, c'est voulu. Les porter dans `shared/schema.ts` + `init-database.ts` (AGENTS.md §5) ou les retirer.
+- Durées mesurées le 2026-11-02 : intégration 53 s en local (34 fichiers) ; contrat et référence Neon dans `docs/plans/ci-postgres-local.md`.
+
+### Règle Projet (obligatoire)
+- Toute table ou colonne existe dans `shared/schema.ts` **et** se crée par `test:db:schema` + `initializeDatabase()` sur une base vide. Une base Neon partagée n'est pas une source de vérité de schéma.
+
+
+## 2026-11-02 - WebSocket : rôle figé en session (3e réapparition d'ADM2-3)
+
+### Constat
+- Après la correction des routeurs HTTP (#102), l'upgrade WebSocket (`server/index.ts`) lisait encore `session.role` : un utilisateur dont le rôle change garde l'ancien sur sa connexion temps réel.
+
+### Cause racine
+- La garde `session-role-guard` ne balayait que `server/api/` ; `server/index.ts` était hors portée. Son motif d'exception acceptait aussi une comparaison (`session.role === "admin"`).
+
+### Résolution
+- L'upgrade relit le compte par `findActiveSessionUser` (même fonction qu'`authenticate`) : compte supprimé → 401, panne de base → 500 sans détail, journalisée par `moduleLogger("websocket")`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-role-guard.test.ts` balaie tout `server/` ; les formes d'exception refusent `===` (`=(?!=)`), une nouvelle décision d'accès dans un fichier gelé échoue.
+
+### Règle Projet (obligatoire)
+- Un défaut de classe se corrige sur tous les points d'entrée (HTTP, WebSocket, tâches planifiées), et la garde couvre tout `server/`.
+
+
+## 2026-11-02 - Test « instable » qui dépendait de la date du jour
+
+### Constat
+- `tests/integration/management-dashboard-service.test.ts` (2 cas) échouait en CI et était classé « flaky connu » : delta attendu 250 000, reçu 0.
+
+### Cause racine
+- La période `month` va du 1er à aujourd'hui (`invoiceDate <= endIso`). Le test datait ses factures au 15 et au 16 : hors période du 1er au 14 de chaque mois. Second défaut masqué : `toBe` sur une différence de totaux flottants (249999.99999999977).
+
+### Résolution
+- Jour borné à la date du jour (`Math.min(day, now.getDate())`), deltas monétaires en `toBeCloseTo(x, 2)`. CI de #109 verte (6db199a).
+
+### Prévention (vérifiable)
+- Le job `integration` de la CI tourne sur chaque PR : un test dépendant de la date réapparaît dans la première quinzaine du mois au lieu d'être noyé dans Neon.
+
+### Règle Projet (obligatoire)
+- Avant de classer un test « flaky », vérifier s'il dépend de la date, de l'heure ou du fuseau. Une donnée de test datée doit tomber dans la période testée quel que soit le jour d'exécution ; un montant calculé se compare au centime, jamais par `toBe`.
+
+## 2026-11-02 - Supprimer une panne ou une pièce liée répondait 500 (clé étrangère sans onDelete)
+
+### Constat
+- `fault_catalog_parts` référençait `fault_catalog` et `parts` sans `onDelete` : supprimer une panne qui avait des pièces associées, ou une pièce citée par une panne, levait une violation de clé étrangère (23503) devenue une 500 « Erreur serveur ». Les routes d'association (variantes, spécifications, pièces de panne) n'existaient pas non plus.
+
+### Cause racine
+- Table créée par `drizzle-kit push` à partir d'un schéma sans règle de suppression, jamais exercée par un test : la suppression d'un parent ayant des enfants n'avait aucun cas de contrat. Premier correctif trop large : tout passer en CASCADE aurait permis à la suppression d'une pièce d'effacer silencieusement une partie du catalogue de pannes, et un dédoublonnage groupé sur (panne, pièce) seul aurait supprimé des lignes de quantité ou d'option différentes.
+
+### Résolution
+- Panne parent : CASCADE (supprimer une panne emporte ses lignes). Pièce : RESTRICT, et `deletePart` répond 409 « Pièce utilisée dans le catalogue de pannes » avant toute écriture. Dédoublonnage limité aux lignes strictement identiques (panne, pièce, quantité, optionnel) ; si des lignes divergentes subsistent, l'index unique n'est pas posé et un WARNING le dit.
+
+### Prévention (vérifiable)
+- `tests/contract/fault-catalog-lifecycle.contract.test.ts` : suppression d'une panne avec pièces (204, liens supprimés), suppression d'une pièce liée (409, rien supprimé).
+- `tests/integration/parts-catalog-children-migration.test.ts` : cas 1/false, 4/true, 1/false (divergence conservée, index non posé, WARNING) et cas de doublons identiques.
+- `tests/unit/server/parts-catalog-children-schema.test.ts` : la migration et sa réplique dans `init-database.ts` restent identiques.
+
+### Règle Projet (obligatoire)
+- Toute clé étrangère déclare son `onDelete` en choisissant explicitement entre CASCADE (l'enfant n'a pas de sens sans le parent) et RESTRICT (le parent est une donnée de référence), avec un test de suppression du parent portant des enfants. Une migration qui supprime des lignes ne supprime que ce qu'elle peut prouver redondant.
+
+## 2026-11-02 - vi.mock inopérant dans les contrats selon l'ordre des shards
+
+### Constat
+- CI de #117 (tests seuls, sans rapport) : `document-renewal-centers.contract.test.ts` échoue sur le shard contract 4, « un 409 levé par le résolveur reste un 409 », 201 reçu au lieu de 409. main verte, même code.
+
+### Cause racine
+- Le test forçait le 409 par `vi.mock` du résolveur. `vitest.contract.config.ts` tourne en `isolate: false` + un worker (volontaire, #109) : le cache de modules est partagé entre fichiers. Si un fichier précédent du shard a déjà chargé les routes, elles gardent le vrai résolveur, le mock ne s'applique pas, le centre est créé. #117 ajoutait des fichiers, la répartition des shards a changé.
+
+### Classification
+- Défaut de test (isolation), pas défaut produit : l'unicité normalisée et la course réelle étaient couvertes par d'autres cas, verts.
+
+### Résolution
+- Panne provoquée en base : trigger `BEFORE INSERT` temporaire levant `23505` pour le seul nom du test, supprimé dans le `finally`. Le vrai résolveur prend son chemin de course (`isUniqueViolation` → AppError 409). Le test vérifie aussi qu'aucun centre n'est créé.
+
+### Prévention (vérifiable)
+- `tests/unit/server/contract-no-vi-mock.test.ts` échoue sur tout `vi.mock` / `vi.doMock` sous `tests/contract`. Règle dans `tests/README.md` § Pattern.
+
+### Règle Projet (obligatoire)
+- Un mock de module suppose un cache de modules isolé par fichier. Avant d'en écrire un, vérifier `isolate` dans la config de la suite ; sinon simuler la panne au niveau de la ressource (base, réseau) ou injecter la dépendance.
+
+## 2026-11-03 - Contraintes CDC posées en SQL seulement, absentes après drizzle-kit push
+
+### Constat
+- CI de #119 sur 8ee48b2 : jobs integration et contract (1) rouges (`cdc-schema-idempotence`, `kpi-cdc` : « ok » ou 500 reçus au lieu de 23514 / 23505 / 409). La PR annonçait pourtant des contrats verts : la preuve venait d'une base locale préparée autrement, la CI n'avait pas été relue.
+
+### Cause racine
+- Les CHECK de `workshop_labor_rates`, `import_batches`, `idempotency_keys`, l'UNIQUE `(user_id, key)` et `work_orders_due_mileage_check` n'étaient déclarés que dans `20261101_cdc_ecarts.sql`. La recette des tests et de la CI fait `drizzle-kit push` puis `initializeDatabase()` : les tables existent déjà, `CREATE TABLE IF NOT EXISTS` et `ADD COLUMN IF NOT EXISTS` sont sautés avec leurs contraintes. Drizzle nommait en outre l'unique de date `..._effective_from_unique`, alors que le service attend `..._effective_from_key` pour répondre 409.
+
+### Classification
+- Dérive de schéma entre Drizzle et SQL, plus défaut de preuve (CI non vérifiée avant de l'annoncer).
+
+### Résolution
+- 0ed84c5 : CHECK et UNIQUE déclarés aussi dans `shared/schema.ts` sous le nom que Postgres leur donne. `work_orders` étant déclarée deux fois dans le schéma, `work_orders_due_mileage_check` est réconciliée par un bloc DO idempotent (`pg_constraint`, `NOT VALID`) dans la migration et `init-database.ts`. CI 8/8.
+
+### Prévention (vérifiable)
+- Les jobs CI integration et contract partent d'un `drizzle-kit push` sur base neuve : toute contrainte absente de Drizzle fait échouer `cdc-schema-idempotence.test.ts` (cas refusés 23514 / 23505).
+- `tests/unit/server/cdc-schema-drift.test.ts` garde la migration et `CDC_SCHEMA_STATEMENTS` identiques.
+- Fermé (condition C1 du go/no-go) : une base déjà poussée avec un schéma antérieur à 0ed84c5 n'avait pas ces contraintes. Le démarrage les repose (#122, réserves de relecture dans le lot suivant) : CHECK `NOT VALID` puis validés, UNIQUE dans l'ordre de colonnes du schéma. Un écart restant (doublons, valeurs hors contrainte) est journalisé en `warn` par `reportCdcConstraintGaps` (`moduleLogger("init-database")`) : un `RAISE WARNING` seul n'atteint pas les logs applicatifs. Test : `tests/integration/cdc-schema-idempotence.test.ts`, « réconciliation des contraintes ».
+- Règle : un signal émis en SQL (`RAISE WARNING`, `NOTICE`) n'est pas un log. Ce qui doit être vu en production est relu côté application et journalisé par `moduleLogger`.
+
+### Règle Projet (obligatoire)
+- Une contrainte écrite en SQL est aussi déclarée dans Drizzle, sous le même nom, ou réconciliée par un bloc DO idempotent. Une PR n'annonce « CI verte » qu'après `gh pr checks` sur sa tête.
+
+## 2026-11-03 - Second drizzle-kit push en échec (index colonne puis expression)
+
+### Constat
+- Signalé par la session CDC : sur une base déjà poussée, `drizzle-kit push` plante en ZodError (« Expected string, received null »). Reproduit sur origin/main seul : le premier push sur base neuve passe, le second échoue. La CI ne le voyait pas (un seul push par base neuve) ; le push d'une base existante (Neon, dev) était cassé depuis #116.
+
+### Cause racine
+- `ux_part_specifications_part_name` sur `(part_id, lower(specification_name))`. drizzle-kit 0.30.6 relit les index en découpant `pg_get_expr(indexprs)` en tableau et l'indexe par la position de la colonne dans l'index : l'expression en position 2 lit l'élément 2 d'un tableau qui n'en a qu'un, donc null. De plus, `is_expression` vaut pour tout l'index : une colonne simple mêlée à une expression, même placée après, est relue comme expression et ne correspond jamais au schéma. Une virgule, un guillemet ou une accolade dans une expression casserait aussi ce découpage.
+
+### Classification
+- Défaut d'outillage (bug drizzle-kit) révélé par un choix de schéma ; aucun effet sur les données ni sur l'API.
+
+### Résolution
+- Index remplacé par `ux_part_specifications_name_part` sur `(lower(specification_name), part_id)`, les deux éléments déclarés en `sql` (`sql\`${table.partId}\``) : même unicité, `idx_part_specifications_part_id` sert déjà les lectures par pièce. La migration rejouée pose le nouvel index puis retire l'ancien (pas de fenêtre sans unicité).
+- Near miss en relecture : une première version mettait l'expression en tête mais gardait `table.partId` en colonne. Le ZodError disparaissait et les push étaient verts, mais chaque push DROP puis recréait l'index (OID changé), d'où une fenêtre sans unicité. « Push vert » n'était pas une preuve de convergence.
+- Vérifié : OID de l'index identique après push successifs (base neuve et base portant l'ancien index), contrat `parts-catalog-crud` (homonyme insensible à la casse → 409) vert.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/schema-index-introspection.test.ts` parcourt tous les index de `shared/schema.ts` et échoue sur un index mêlant colonne simple et expression, ou sur une virgule, un guillemet ou une accolade dans une expression ; vérifié rouge sur l'ancien index et sur la première version du correctif.
+
+### Règle Projet (obligatoire)
+- Dans un index qui contient une expression, toutes les colonnes s'écrivent `sql\`${table.col}\``. Une convergence de schéma se prouve par l'absence d'écriture au second passage (OID stable ou « No changes »), pas par un passage vert. Le garde-fou sera retiré quand drizzle-kit corrigera son introspection, preuve par un double push à l'appui.

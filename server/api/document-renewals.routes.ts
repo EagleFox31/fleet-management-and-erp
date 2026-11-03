@@ -1,18 +1,23 @@
-import { Router, type Request, type Response } from "express";
-import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { db } from "../db";
-import { authenticate, isDocumentRenewalWriter } from "../middleware/auth";
+import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
+import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
 import {
   DOCUMENT_RENEWAL_REQUEST_STATUSES,
   documentRenewalTransitionRefusal,
   isDocumentRenewalRequestStatus,
 } from "@shared/constants/document-renewal-statuses";
+import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
+import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
   documentRenewalCenters,
@@ -23,12 +28,18 @@ import {
   vehicles,
 } from "@shared/schema";
 
+const log = moduleLogger("document-renewals");
 const router = Router();
-router.use(authenticate);
+router.use(isAnyUser);
 
-const CREATE_ROLES = new Set(["admin", "secretary", "logistics", "workshop_manager"]);
-const VIEW_ROLES = new Set(["admin", "secretary", "logistics", "workshop_manager", "technician"]);
+const CREATE_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_WRITER_ROLES);
+const VIEW_ROLES: Set<string> = new Set(DOCUMENT_RENEWAL_VIEWER_ROLES);
 const REQUESTABLE_DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"] as const;
+
+/** Nom de centre facultatif : vide devient null, sinon mêmes bornes que le contrat des centres. */
+const centerNameField = optionalText(150).pipe(
+  z.union([z.null(), nameSchema]),
+);
 
 const ASSIGNED_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const;
 const ESCORT_ROLES = ["driver", "technician"] as const;
@@ -254,7 +265,7 @@ const syncVehicleMasterDocumentExpiry = async (
 
 router.get("/centers", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -263,6 +274,12 @@ router.get("/centers", async (req, res) => {
     const isTyped =
       documentTypeRaw.length > 0 &&
       (REQUESTABLE_DOCUMENT_TYPES as readonly string[]).includes(documentTypeRaw);
+
+    // Écran de gestion (DOC1) : centres désactivés visibles des seuls rôles écrivains, 403 sinon.
+    const includeInactive = req.query.includeInactive === "1";
+    if (includeInactive && !hasRole(role, CREATE_ROLES)) {
+      return res.status(403).json({ message: "Accès non autorisé" });
+    }
 
     const rows = await db
       .select({
@@ -278,10 +295,12 @@ router.get("/centers", async (req, res) => {
       .where(
         isTyped
           ? and(
-              eq(documentRenewalCenters.isActive, true),
+              includeInactive ? undefined : eq(documentRenewalCenters.isActive, true),
               sql`(${documentRenewalCenters.documentType} is null or ${documentRenewalCenters.documentType} = ${documentTypeRaw})`,
             )
-          : eq(documentRenewalCenters.isActive, true),
+          : includeInactive
+            ? undefined
+            : eq(documentRenewalCenters.isActive, true),
       )
       .orderBy(documentRenewalCenters.name);
 
@@ -292,14 +311,14 @@ router.get("/centers", async (req, res) => {
       })),
     );
   } catch (error) {
-    console.error("Get document renewal centers error:", error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des centres de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 router.get("/requests", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -349,7 +368,7 @@ router.get("/requests", async (req, res) => {
 
     return res.status(200).json(rows);
   } catch (error) {
-    console.error("Get document renewal requests error:", error);
+    log.error({ err: error, requestId: req.requestId }, "lecture des demandes de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -375,42 +394,10 @@ const createRequestPayloadSchema = z.object({
       message: "Date cible invalide (YYYY-MM-DD).",
     }),
   centerId: z.number().int().positive().optional().nullable(),
-  centerName: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerAddress: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerContact: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerAccreditationNumber: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
+  centerName: centerNameField,
+  centerAddress: optionalText(300),
+  centerContact: optionalText(200),
+  centerAccreditationNumber: optionalText(80),
   escortRole: z.enum(ESCORT_ROLES).optional().nullable(),
   escortUserId: z.number().int().positive().optional().nullable(),
   inspectorName: z
@@ -456,42 +443,10 @@ const quickRenewPayloadSchema = z.object({
     (value) => (value === undefined || value === null || value === "" ? null : value),
     z.coerce.number().int().positive().nullable().optional(),
   ),
-  centerName: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerAddress: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerContact: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
-  centerAccreditationNumber: z
-    .string()
-    .optional()
-    .nullable()
-    .transform((value) => {
-      if (!value) return null;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }),
+  centerName: centerNameField,
+  centerAddress: optionalText(300),
+  centerContact: optionalText(200),
+  centerAccreditationNumber: optionalText(80),
   visitReference: z
     .string()
     .optional()
@@ -536,9 +491,9 @@ const quickRenewPayloadSchema = z.object({
     }),
 });
 
-router.post("/requests", async (req, res) => {
+router.post("/requests", async (req, res, next) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, CREATE_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -636,58 +591,22 @@ router.post("/requests", async (req, res) => {
     let centerNameSnapshot: string | null = null;
     let centerAccreditationSnapshot: string | null = null;
 
-    if (centerId) {
-      const [existingCenter] = await db
-        .select({
-          id: documentRenewalCenters.id,
-          name: documentRenewalCenters.name,
-          accreditationNumber: documentRenewalCenters.accreditationNumber,
-        })
-        .from(documentRenewalCenters)
-        .where(eq(documentRenewalCenters.id, centerId))
-        .limit(1);
-
-      if (!existingCenter) {
-        return res.status(404).json({ message: "Centre agréé introuvable." });
-      }
-      centerNameSnapshot = existingCenter.name;
-      centerAccreditationSnapshot = resolveCenterAccreditation(existingCenter);
-    } else if (payload.centerName) {
-      const [foundCenter] = await db
-        .select({
-          id: documentRenewalCenters.id,
-          name: documentRenewalCenters.name,
-          accreditationNumber: documentRenewalCenters.accreditationNumber,
-        })
-        .from(documentRenewalCenters)
-        .where(ilike(documentRenewalCenters.name, payload.centerName))
-        .limit(1);
-
-      if (foundCenter) {
-        centerId = foundCenter.id;
-        centerNameSnapshot = foundCenter.name;
-        centerAccreditationSnapshot = resolveCenterAccreditation(foundCenter);
-      } else {
-        const [createdCenter] = await db
-          .insert(documentRenewalCenters)
-          .values({
-            name: payload.centerName,
-            documentType: documentRow.documentType as any,
-            accreditationNumber: payload.centerAccreditationNumber ?? null,
-            address: payload.centerAddress ?? null,
-            contact: payload.centerContact ?? null,
-            createdBy: actorUserId,
-          })
-          .returning({
-            id: documentRenewalCenters.id,
-            name: documentRenewalCenters.name,
-            accreditationNumber: documentRenewalCenters.accreditationNumber,
-          });
-
-        centerId = createdCenter.id;
-        centerNameSnapshot = createdCenter.name;
-        centerAccreditationSnapshot = resolveCenterAccreditation(createdCenter);
-      }
+    const resolvedCenter = await resolveRenewalCenter({
+      centerId,
+      centerName: payload.centerName,
+      centerAddress: payload.centerAddress,
+      centerContact: payload.centerContact,
+      centerAccreditationNumber: payload.centerAccreditationNumber,
+      documentType: documentRow.documentType,
+      actorUserId,
+    });
+    if (resolvedCenter && !resolvedCenter.ok) {
+      return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
+    }
+    if (resolvedCenter) {
+      centerId = resolvedCenter.id;
+      centerNameSnapshot = resolvedCenter.name;
+      centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
     }
 
     const [createdRequest] = await db
@@ -775,7 +694,8 @@ router.post("/requests", async (req, res) => {
       request: createdRequest,
     });
   } catch (error) {
-    console.error("Create document renewal request error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "création d'une demande de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -786,7 +706,7 @@ router.post("/requests", async (req, res) => {
  */
 router.patch("/requests/:id/status", async (req, res) => {
   try {
-    const role = normalizeRole(req.session?.role);
+    const role = normalizeRole(req.user?.role);
     if (!hasRole(role, CREATE_ROLES)) {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
@@ -853,12 +773,12 @@ router.patch("/requests/:id/status", async (req, res) => {
 
     return res.status(200).json(updated);
   } catch (error) {
-    console.error("Update renewal request status error:", error);
+    log.error({ err: error, requestId: req.requestId }, "changement de statut d'une demande de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response) => {
+router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response, next: NextFunction) => {
   uploadRenewalProof(req, res, async (uploadError) => {
     try {
       if (uploadError) {
@@ -868,7 +788,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         });
       }
 
-      const role = normalizeRole(req.session?.role);
+      const role = normalizeRole(req.user?.role);
       if (!hasRole(role, CREATE_ROLES)) {
         return res.status(403).json({ message: "Accès non autorisé" });
       }
@@ -909,7 +829,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           try {
             fs.unlinkSync(req.file.path);
           } catch (unlinkError) {
-            console.error("Erreur suppression justificatif après payload invalide:", unlinkError);
+            log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après payload invalide impossible");
           }
         }
         return res.status(400).json({
@@ -924,61 +844,36 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       let centerNameSnapshot: string | null = null;
       let centerAccreditationSnapshot: string | null = null;
 
-      if (centerId) {
-        const [existingCenter] = await db
-          .select({
-            id: documentRenewalCenters.id,
-            name: documentRenewalCenters.name,
-            accreditationNumber: documentRenewalCenters.accreditationNumber,
-          })
-          .from(documentRenewalCenters)
-          .where(eq(documentRenewalCenters.id, centerId))
-          .limit(1);
-
-        if (!existingCenter) {
-          return res.status(404).json({ message: "Centre agréé introuvable." });
+      const removeUploadedProof = () => {
+        if (req.file?.path && fs.existsSync(req.file.path)) {
+          try {
+            fs.unlinkSync(req.file.path);
+          } catch (unlinkError) {
+            log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après refus du centre impossible");
+          }
         }
-        centerNameSnapshot = existingCenter.name;
-        centerAccreditationSnapshot = resolveCenterAccreditation(existingCenter);
-      } else if (payload.centerName) {
-        const [foundCenter] = await db
-          .select({
-            id: documentRenewalCenters.id,
-            name: documentRenewalCenters.name,
-            accreditationNumber: documentRenewalCenters.accreditationNumber,
-          })
-          .from(documentRenewalCenters)
-          .where(ilike(documentRenewalCenters.name, payload.centerName))
-          .limit(1);
+      };
 
-        if (foundCenter) {
-          centerId = foundCenter.id;
-          centerNameSnapshot = foundCenter.name;
-          centerAccreditationSnapshot = resolveCenterAccreditation(foundCenter);
-        } else {
-          const [createdCenter] = await db
-            .insert(documentRenewalCenters)
-            .values({
-              name: payload.centerName,
-              documentType: null,
-              accreditationNumber: payload.centerAccreditationNumber ?? null,
-              address: payload.centerAddress ?? null,
-              contact: payload.centerContact ?? null,
-              createdBy: actorUserId,
-            })
-            .returning({
-              id: documentRenewalCenters.id,
-              name: documentRenewalCenters.name,
-              accreditationNumber: documentRenewalCenters.accreditationNumber,
-            });
-
-          centerId = createdCenter.id;
-          centerNameSnapshot = createdCenter.name;
-          centerAccreditationSnapshot = resolveCenterAccreditation(createdCenter);
-        }
-      } else {
+      const resolvedCenter = await resolveRenewalCenter({
+        centerId,
+        centerName: payload.centerName,
+        centerAddress: payload.centerAddress,
+        centerContact: payload.centerContact,
+        centerAccreditationNumber: payload.centerAccreditationNumber,
+        documentType: null,
+        actorUserId,
+      });
+      if (!resolvedCenter) {
+        removeUploadedProof();
         return res.status(400).json({ message: "Centre agréé obligatoire." });
       }
+      if (!resolvedCenter.ok) {
+        removeUploadedProof();
+        return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
+      }
+      centerId = resolvedCenter.id;
+      centerNameSnapshot = resolvedCenter.name;
+      centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
 
       const [documentRow] = await db
         .select({
@@ -1257,10 +1152,11 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         try {
           fs.unlinkSync(req.file.path);
         } catch (unlinkError) {
-          console.error("Erreur suppression justificatif après échec quick renew:", unlinkError);
+          log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après échec du renouvellement rapide impossible");
         }
       }
-      console.error("Quick renew document error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "renouvellement rapide d'un document");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

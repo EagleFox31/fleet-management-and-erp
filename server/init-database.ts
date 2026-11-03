@@ -4,6 +4,9 @@ import { db, pool } from './db';
 import { users } from '../shared/schema';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
+import { moduleLogger } from './lib/logger';
+
+const initLog = moduleLogger('init-database');
 
 const BOOTSTRAP_SQL_FILES = [
   'work-orders-realtime-triggers.sql',
@@ -280,6 +283,147 @@ END $$`,
 ];
 
 /**
+ * FUEL3 : capacité totale des réservoirs du véhicule, en litres. Nullable (véhicules existants à vide,
+ * règle tank-overflow muette). CHECK vehicles_tank_capacity_l_positive : > 0 et fini (refuse 0, négatif,
+ * NaN et Infinity, que `real` accepte sinon). Doit rester identique à
+ * server/db/migrations/20261102_vehicles_tank_capacity.sql : tests/unit/server/vehicles-tank-capacity-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const VEHICLE_TANK_CAPACITY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tank_capacity_l real;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'vehicles'::regclass AND conname = 'vehicles_tank_capacity_l_positive'
+  ) THEN
+    ALTER TABLE vehicles ADD CONSTRAINT vehicles_tank_capacity_l_positive
+      CHECK (tank_capacity_l IS NULL OR (tank_capacity_l > 0 AND tank_capacity_l < 'Infinity'::real));
+  END IF;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'vehicles_tank_capacity_l_positive non posée : capacités nulles ou négatives existantes dans vehicles';
+END $$;`;
+
+/**
+ * PRT1 / CAT2 : spécifications et variantes de pièce, pièces associées à une panne (FK en cascade, unicité du
+ * couple panne/pièce après dédoublonnage). Doit rester identique à
+ * server/db/migrations/20261102_parts_catalog_children.sql : tests/unit/server/parts-catalog-children-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const PARTS_CATALOG_CHILDREN_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS part_specifications (
+  id serial PRIMARY KEY,
+  part_id integer,
+  specification_name text NOT NULL,
+  specification_value text NOT NULL,
+  unit text,
+  created_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT part_specifications_part_id_parts_id_fk FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS part_variants (
+  id serial PRIMARY KEY,
+  part_id integer,
+  variant_name text NOT NULL,
+  variant_code text NOT NULL UNIQUE,
+  additional_price numeric(10,2) DEFAULT '0',
+  is_available boolean NOT NULL DEFAULT true,
+  created_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT part_variants_part_id_parts_id_fk FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS fault_catalog (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  description text NOT NULL,
+  category text NOT NULL,
+  vehicle_brand text,
+  symptoms text[],
+  diagnostic_steps text[],
+  repair_steps text[],
+  estimated_duration integer,
+  minimum_cost real,
+  maximum_cost real,
+  created_by integer,
+  validated_by integer,
+  status text NOT NULL DEFAULT 'draft',
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT fault_catalog_created_by_users_id_fk FOREIGN KEY (created_by) REFERENCES users(id),
+  CONSTRAINT fault_catalog_validated_by_users_id_fk FOREIGN KEY (validated_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS fault_catalog_parts (
+  id serial PRIMARY KEY,
+  fault_catalog_id integer NOT NULL,
+  part_id integer NOT NULL,
+  quantity integer DEFAULT 1,
+  is_optional boolean DEFAULT false,
+  created_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT fault_catalog_parts_fault_catalog_id_fault_catalog_id_fk FOREIGN KEY (fault_catalog_id) REFERENCES fault_catalog(id) ON DELETE CASCADE,
+  CONSTRAINT fault_catalog_parts_part_id_parts_id_fk FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_specifications_part_id ON part_specifications (part_id);
+
+CREATE INDEX IF NOT EXISTS idx_part_variants_part_id ON part_variants (part_id);
+
+CREATE INDEX IF NOT EXISTS idx_fault_catalog_parts_part_id ON fault_catalog_parts (part_id);
+
+DO $$
+DECLARE
+  fk record;
+BEGIN
+  FOR fk IN
+    SELECT c.conname, a.attname
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+    WHERE c.conrelid = 'fault_catalog_parts'::regclass AND c.contype = 'f'
+      AND ((a.attname = 'fault_catalog_id' AND c.confdeltype <> 'c')
+        OR (a.attname = 'part_id' AND c.confdeltype <> 'r'))
+  LOOP
+    EXECUTE format('ALTER TABLE fault_catalog_parts DROP CONSTRAINT %I', fk.conname);
+    IF fk.attname = 'fault_catalog_id' THEN
+      ALTER TABLE fault_catalog_parts ADD CONSTRAINT fault_catalog_parts_fault_catalog_id_fault_catalog_id_fk
+        FOREIGN KEY (fault_catalog_id) REFERENCES fault_catalog(id) ON DELETE CASCADE;
+    ELSE
+      ALTER TABLE fault_catalog_parts ADD CONSTRAINT fault_catalog_parts_part_id_parts_id_fk
+        FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT;
+    END IF;
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  removed integer;
+BEGIN
+  DELETE FROM fault_catalog_parts
+  WHERE id NOT IN (
+    SELECT min(id) FROM fault_catalog_parts GROUP BY fault_catalog_id, part_id, quantity, is_optional
+  );
+  GET DIAGNOSTICS removed = ROW_COUNT;
+  IF removed > 0 THEN
+    RAISE NOTICE 'fault_catalog_parts : % doublon(s) identique(s) (panne, pièce, quantité, optionnel) supprimé(s), ligne la plus ancienne conservée', removed;
+  END IF;
+  IF EXISTS (SELECT 1 FROM fault_catalog_parts GROUP BY fault_catalog_id, part_id HAVING count(*) > 1) THEN
+    RAISE WARNING 'ux_fault_catalog_parts_fault_part non posé : lignes divergentes (quantité ou optionnel) pour un même couple (panne, pièce)';
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_fault_catalog_parts_fault_part ON fault_catalog_parts (fault_catalog_id, part_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_part_specifications_name_part ON part_specifications (lower(specification_name), part_id);
+EXCEPTION WHEN unique_violation THEN
+  RAISE WARNING 'ux_part_specifications_name_part non posé : spécifications homonymes existantes pour une même pièce';
+END $$;
+DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -440,6 +584,214 @@ async function applyWorkOrderVehicleStatusTriggers() {
 
 async function applyLotRecetteSchema() {
   await pool.query(LOT_RECETTE_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
+}
+
+/**
+ * Schéma additif du chantier CDC (écarts du cahier des charges #3, #7, #9, #10). Doit rester
+ * identique à server/db/migrations/20261101_cdc_ecarts.sql (AGENTS.md §5) : le test
+ * tests/unit/server/cdc-schema-drift.test.ts compare les deux. Même protocole que le lot
+ * recette : un seul envoi = une transaction, verrou consultatif en tête.
+ */
+export const CDC_SCHEMA_STATEMENTS: readonly string[] = [
+  `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'))`,
+  `CREATE INDEX IF NOT EXISTS parts_reference_key_idx ON parts (upper(btrim(reference)))`,
+  `DO $$
+DECLARE
+  realtime_on boolean;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'work_orders' AND column_name = 'due_date'
+  ) THEN
+    RETURN;
+  END IF;
+  ALTER TABLE work_orders ADD COLUMN due_date date;
+  SELECT tgenabled = 'O' INTO realtime_on FROM pg_trigger
+  WHERE tgrelid = 'work_orders'::regclass AND tgname = 'trigger_work_orders_realtime_notify';
+  IF realtime_on THEN
+    ALTER TABLE work_orders DISABLE TRIGGER trigger_work_orders_realtime_notify;
+  END IF;
+  PERFORM set_config('fleetos.suppress_side_effects', 'on', true);
+  UPDATE work_orders SET due_date = start_date::date
+  WHERE is_preventive AND start_date IS NOT NULL;
+  PERFORM set_config('fleetos.suppress_side_effects', '', true);
+  IF realtime_on THEN
+    ALTER TABLE work_orders ENABLE TRIGGER trigger_work_orders_realtime_notify;
+  END IF;
+END $$`,
+  `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_mileage integer CONSTRAINT work_orders_due_mileage_check CHECK (due_mileage IS NULL OR due_mileage >= 0)`,
+  `DO $$
+BEGIN
+  -- Base créée par drizzle-kit push : la colonne existe déjà, l'ADD COLUMN ci-dessus n'a pas posé le CHECK.
+  -- NOT VALID : les lignes existantes ne bloquent pas le démarrage, les écritures suivantes sont contrôlées.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'work_orders'::regclass AND conname = 'work_orders_due_mileage_check'
+  ) THEN
+    ALTER TABLE work_orders ADD CONSTRAINT work_orders_due_mileage_check CHECK (due_mileage IS NULL OR due_mileage >= 0) NOT VALID;
+  END IF;
+END $$`,
+  `CREATE INDEX IF NOT EXISTS work_orders_preventive_due_idx ON work_orders (due_date) WHERE is_preventive`,
+  `CREATE TABLE IF NOT EXISTS workshop_labor_rates (
+  id serial PRIMARY KEY,
+  effective_from date NOT NULL UNIQUE,
+  hourly_rate_ht numeric(15,2) NOT NULL CHECK (hourly_rate_ht >= 0),
+  created_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now()
+)`,
+  `CREATE TABLE IF NOT EXISTS import_batches (
+  id serial PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('vehicles', 'interventions')),
+  file_name text,
+  file_sha256 text NOT NULL,
+  status text NOT NULL DEFAULT 'applied' CHECK (status IN ('applied', 'failed')),
+  summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now()
+)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS import_batches_applied_file_uidx ON import_batches (kind, file_sha256) WHERE status = 'applied'`,
+  `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS origin text`,
+  `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_ref text`,
+  `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS import_fingerprint text`,
+  `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS import_batch_id integer REFERENCES import_batches(id) ON DELETE SET NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS work_orders_external_ref_uidx ON work_orders (external_ref) WHERE external_ref IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS work_orders_import_fingerprint_uidx ON work_orders (import_fingerprint) WHERE import_fingerprint IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS work_orders_import_batch_idx ON work_orders (import_batch_id) WHERE import_batch_id IS NOT NULL`,
+  `ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS import_batch_id integer REFERENCES import_batches(id) ON DELETE SET NULL`,
+  `CREATE INDEX IF NOT EXISTS vehicles_import_batch_idx ON vehicles (import_batch_id) WHERE import_batch_id IS NOT NULL`,
+  `DO $$
+DECLARE
+  has_deleted_at boolean;
+  scope text;
+  duplicates integer;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'vehicles' AND column_name = 'deleted_at'
+  ) INTO has_deleted_at;
+  scope := CASE WHEN has_deleted_at THEN ' WHERE deleted_at IS NULL' ELSE '' END;
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'vehicles_registration_key_idx') THEN
+    IF NOT has_deleted_at THEN
+      RAISE WARNING 'vehicles.deleted_at absente : vehicles_registration_key_idx couvre tous les véhicules';
+    END IF;
+    EXECUTE 'CREATE INDEX vehicles_registration_key_idx ON vehicles (upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')))' || scope;
+  END IF;
+  EXECUTE 'SELECT count(*) FROM (SELECT 1 FROM vehicles' || scope
+    || ' GROUP BY upper(regexp_replace(registration_number, ''[^A-Za-z0-9]'', '''', ''g'')) HAVING count(*) > 1) d'
+    INTO duplicates;
+  IF duplicates > 0 THEN
+    RAISE WARNING 'vehicles : % immatriculation(s) en double après normalisation', duplicates;
+  END IF;
+END $$`,
+  `CREATE TABLE IF NOT EXISTS idempotency_keys (
+  id serial PRIMARY KEY,
+  user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key text NOT NULL,
+  method text NOT NULL,
+  path text NOT NULL,
+  request_hash text NOT NULL,
+  state text NOT NULL DEFAULT 'in_progress' CHECK (state IN ('in_progress', 'completed')),
+  response_status integer,
+  response_body jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
+  UNIQUE (user_id, key)
+)`,
+  `CREATE INDEX IF NOT EXISTS idempotency_keys_expires_at_idx ON idempotency_keys (expires_at)`,
+  `DO $$
+DECLARE
+  c record;
+  existing text;
+  duplicates integer;
+BEGIN
+  -- Base dont les tables CDC ont été créées par drizzle-kit push avant que Drizzle déclare
+  -- ces contraintes : CREATE TABLE IF NOT EXISTS a été sauté, elles manquent. Rien à faire sinon.
+  -- CHECK posé en NOT VALID puis validé : une ligne non conforme laisse un WARNING, pas un démarrage bloqué.
+  FOR c IN SELECT * FROM (VALUES
+    ('workshop_labor_rates', 'workshop_labor_rates_hourly_rate_ht_check', 'CHECK (hourly_rate_ht >= 0)'),
+    ('import_batches', 'import_batches_kind_check', 'CHECK (kind IN (''vehicles'', ''interventions''))'),
+    ('import_batches', 'import_batches_status_check', 'CHECK (status IN (''applied'', ''failed''))'),
+    ('idempotency_keys', 'idempotency_keys_state_check', 'CHECK (state IN (''in_progress'', ''completed''))')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- UNIQUE sous le nom attendu par les services (409 sur conflit), colonnes dans l'ordre déclaré
+  -- par Drizzle : une unicité posée sous un autre nom sur les mêmes colonnes est renommée ; des
+  -- doublons existants laissent la base en l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  -- Un index UNIQUE seul, sans contrainte, n'est pas reconnu : une seconde unicité serait posée à côté.
+  FOR c IN SELECT * FROM (VALUES
+    ('workshop_labor_rates', 'workshop_labor_rates_effective_from_key', ARRAY['effective_from']),
+    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['user_id', 'key'])
+  ) AS v(tbl, name, cols) LOOP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      CONTINUE;
+    END IF;
+    existing := NULL;
+    SELECT k.conname INTO existing FROM pg_constraint k
+    WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
+      AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey))
+        = (SELECT array_agg(x ORDER BY x) FROM unnest(c.cols) AS x)
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
+      CONTINUE;
+    END IF;
+    EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM %I GROUP BY %s HAVING count(*) > 1) d',
+      c.tbl, array_to_string(c.cols, ', ')) INTO duplicates;
+    IF duplicates > 0 THEN
+      RAISE WARNING '% : % doublon(s), contrainte % non posée', c.tbl, duplicates, c.name;
+    ELSE
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I UNIQUE (%s)', c.tbl, c.name, array_to_string(c.cols, ', '));
+    END IF;
+  END LOOP;
+END $$`,
+];
+
+// Contraintes CDC réconciliées au démarrage. Le RAISE WARNING du bloc n'atteint pas les logs
+// applicatifs (aucun écouteur de notice) : l'écart restant est relu ici et journalisé.
+export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
+  'workshop_labor_rates_hourly_rate_ht_check',
+  'import_batches_kind_check',
+  'import_batches_status_check',
+  'idempotency_keys_state_check',
+  'workshop_labor_rates_effective_from_key',
+  'idempotency_keys_user_id_key_key',
+];
+
+type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+type WarnLogger = { warn: (obj: object, msg: string) => void };
+
+/** Contraintes absentes ou laissées NOT VALID (lignes non conformes ou doublons), journalisées en warn. */
+export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows } = await client.query(
+    `SELECT conname, convalidated FROM pg_constraint WHERE conname = ANY($1)`,
+    [CDC_RECONCILED_CONSTRAINTS],
+  );
+  const found = new Map(rows.map((r) => [r.conname as string, r.convalidated as boolean]));
+  const missing = CDC_RECONCILED_CONSTRAINTS.filter((name) => !found.has(name));
+  const notValidated = CDC_RECONCILED_CONSTRAINTS.filter((name) => found.get(name) === false);
+  if (missing.length || notValidated.length) {
+    log.warn(
+      { missing, notValidated },
+      'Contraintes CDC incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
+    );
+  }
+  return { missing, notValidated };
+}
+
+async function applyCdcSchema() {
+  await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
+  await reportCdcConstraintGaps(pool);
 }
 
 export async function initializeDatabase() {
@@ -603,6 +955,23 @@ export async function initializeDatabase() {
       DROP CONSTRAINT IF EXISTS document_renewal_requests_escort_user_id_users_id_fk
     `);
     await db.execute(sql`ALTER TABLE document_renewal_centers ADD COLUMN IF NOT EXISTS accreditation_number text`);
+    // Unicité du nom normalisé, seulement s'il n'y a aucun doublon (miroir de
+    // server/db/migrations/20261102_document_renewal_centers_unique_name.sql, AGENTS.md §5).
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+        IF NOT EXISTS (
+          SELECT 1
+          FROM document_renewal_centers
+          GROUP BY regexp_replace(lower(btrim(name)), '\\s+', ' ', 'g')
+          HAVING count(*) > 1
+        ) THEN
+          CREATE UNIQUE INDEX IF NOT EXISTS uq_document_renewal_centers_name_normalized
+            ON document_renewal_centers ((regexp_replace(lower(btrim(name)), '\\s+', ' ', 'g')));
+        END IF;
+      END $$
+    `);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS renewal_reference text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS renewal_visit_date date`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS center_accreditation_snapshot text`);
@@ -674,12 +1043,17 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
     await applyLotRecetteSchema();
+    await applyCdcSchema();
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
     // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
     await applyWorkOrderVehicleStatusTriggers();
+    // Capacité des réservoirs (FUEL3) — jumelle de server/db/migrations/20261102_vehicles_tank_capacity.sql.
+    await pool.query(VEHICLE_TANK_CAPACITY_SQL);
     await applyPerformanceIndexes();
     await applyMigrationSqlFiles();
     await applyBootstrapSqlFiles();
+    // Enfants du catalogue de pièces et pièces de panne (PRT1/CAT2) — jumelle de server/db/migrations/20261102_parts_catalog_children.sql.
+    await pool.query(PARTS_CATALOG_CHILDREN_SQL);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

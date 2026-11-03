@@ -3,7 +3,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
-import { REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
+import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
 
 /** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 function invalidateCatalogEvent(name: RealtimeEventName): void {
@@ -95,6 +95,7 @@ const CRITICAL_RESYNC_KEYS: string[] = [
   "/api/fuel-card/history",
   "/api/fuel-vouchers",
   "/api/fuel-card/anomalies",
+  "/api/fuel-card/anomalies/summary",
   // Pneus: écran partagé magasin/atelier, sans `refetchInterval` propre.
   // Sans ces clés, une coupure du WebSocket laissait la page figée jusqu'au
   // rechargement manuel.
@@ -745,6 +746,10 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/technician-stats"] });
       // Satellites du lot : tuiles KPI, historique et contrôle qualité de l'OT.
       queryClient.invalidateQueries({ queryKey: ["/api/kpi"] });
+      // `["/api/kpi"]` ne couvre que la clé exacte ; chaque tuile porte sa propre clé.
+      for (const key of KPI_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: [key] });
+      // Avis de maintenance rattachés aux missions (CDC) : l'état de l'OT les fait évoluer.
+      queryClient.invalidateQueries({ queryKey: ["/api/mission-advisories"] });
       if (currentUserId) {
         queryClient.invalidateQueries({
           queryKey: ["/api/technician/work-orders", currentUserId],
@@ -910,6 +915,12 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "fuel_record_validated":
       invalidateCatalogEvent("fuel_record_validated");
       break;
+    case "fuel_record_changed":
+      invalidateCatalogEvent("fuel_record_changed");
+      break;
+    case "vehicle_tank_capacity_changed":
+      invalidateCatalogEvent("vehicle_tank_capacity_changed");
+      break;
     case "fuel_anomaly_resolved":
       invalidateCatalogEvent("fuel_anomaly_resolved");
       break;
@@ -918,6 +929,13 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       break;
     case "time_tracking_updated":
       invalidateCatalogEvent("time_tracking_updated");
+      break;
+    case "workshop_labor_rate_created":
+      invalidateCatalogEvent("workshop_labor_rate_created");
+      // Taux d'un OT ouvert : la clé porte l'identifiant (`/api/work-orders/:id/labor-rate`).
+      queryClient.invalidateQueries({
+        predicate: (query) => typeof query.queryKey[0] === "string" && query.queryKey[0].endsWith("/labor-rate"),
+      });
       break;
     case "vehicle_document_type_changed":
       invalidateCatalogEvent("vehicle_document_type_changed");
@@ -930,8 +948,29 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       invalidateAlertQueries();
       break;
 
+    // Écarts du cahier des charges (CDC-0b) : couche 3 seulement, l'émetteur vient du lot fonctionnel.
+    case "part_sale_validated":
+      invalidateCatalogEvent("part_sale_validated");
+      break;
+    case "part_sale_cancelled":
+      invalidateCatalogEvent("part_sale_cancelled");
+      break;
+    case "part_sale_invoiced":
+      invalidateCatalogEvent("part_sale_invoiced");
+      break;
+    case "vehicle_position_updated":
+      invalidateCatalogEvent("vehicle_position_updated");
+      break;
+    case "import_batch_applied":
+      // Aucun toast : un import touche des centaines de lignes.
+      invalidateCatalogEvent("import_batch_applied");
+      break;
     case "alerts_read":
       invalidateCatalogEvent("alerts_read");
+      break;
+
+    case "document_renewal_center_changed":
+      invalidateCatalogEvent("document_renewal_center_changed");
       break;
 
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des

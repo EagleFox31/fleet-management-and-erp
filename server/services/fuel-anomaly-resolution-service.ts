@@ -12,6 +12,26 @@ import { AppError } from "../lib/app-error";
 import type { FuelAnomaly, FuelAnomalyResolution, UpdateFuelAnomalyRequest } from "@shared/contracts/fuel-anomalies";
 import { fuelAnomalyKeySchema } from "@shared/contracts/fuel-anomalies";
 
+/**
+ * Tolérance de la règle `tank-overflow`, en pour cent au-dessus de la capacité (jauge, pleins en
+ * dépassement légitimes). Valeur provisoire à confirmer par le client : un seul endroit à changer.
+ */
+export const TANK_OVERFLOW_TOLERANCE_PERCENT = 5;
+
+/**
+ * Constante du module, jamais une saisie : insérée telle quelle en littéral numérique, décimales comprises
+ * (Postgres type `5` en entier et `5.5` en numeric, la comparaison reste exacte dans les deux cas).
+ */
+export function toleranceSqlLiteral(percent: number): string {
+  if (!Number.isFinite(percent) || percent < 0) throw new Error(`Tolérance tank-overflow invalide : ${percent}`);
+  return String(percent);
+}
+const TOLERANCE_SQL = sql.raw(toleranceSqlLiteral(TANK_OVERFLOW_TOLERANCE_PERCENT));
+
+/** Véhicule actif, non électrique, sans capacité : `tank-overflow` y est muette. Compteur et liste partagent ce filtre. */
+const MISSING_TANK_CAPACITY = sql`tank_capacity_l IS NULL AND deleted_at IS NULL AND fuel_type IS DISTINCT FROM 'electric'`;
+export const MISSING_TANK_CAPACITY_LIST_LIMIT = 100;
+
 type Row = {
   anomaly_key: string;
   fuel_record_id: number;
@@ -66,8 +86,16 @@ export const fuelAnomalyResolutionService = {
   },
 
   /**
-   * Anomalies calculées (règle `consumption-gap`, voir le contrat), avec la dernière décision.
-   * Même critère que `fuelCardService.detectAnomalies`, sur toute la flotte. Lecture seule.
+   * Anomalies calculées, avec la dernière décision. Trois règles, lecture seule, toute la flotte :
+   * - `consumption-gap` : même critère que `fuelCardService.detectAnomalies` (au moins trois pleins
+   *   débités). Elle ne regarde PAS `full_tank` : la quantité servie est comparée à la moyenne des
+   *   quantités, plein complet ou partiel.
+   * - `tank-overflow` : quantité servie supérieure à la capacité du véhicule majorée de la tolérance ;
+   *   muette sans capacité renseignée.
+   * - `odometer-regression` : kilométrage inférieur à celui du plein précédent du même véhicule
+   *   (ordre date puis id) ; kilométrage nul ou 0 = absent (le « précédent » est le dernier plein à
+   *   kilométrage connu), premier plein = rien à comparer, plein sans date exclu.
+   * Les deux dernières ignorent les pleins sans véhicule (recharges de la carte) et `electric`.
    */
   async list(): Promise<FuelAnomaly[]> {
     const res = await db.execute(sql`
@@ -77,35 +105,122 @@ export const fuelAnomalyResolutionService = {
           FROM fuel_records fr
          WHERE fr.vehicle_id IS NOT NULL AND fr.debit_amount > 0
         WINDOW w AS (PARTITION BY fr.vehicle_id)
+      ),
+      gap AS (
+        SELECT 'consumption-gap'::text AS rule, b.id, b.vehicle_id, b.date, b.quantity,
+               b.avg_q::numeric AS reference, (b.avg_q + 2 * b.sd_q)::numeric AS threshold,
+               NULL::integer AS mileage, NULL::integer AS previous_mileage, NULL::real AS tank_capacity_l,
+               NULL::integer AS next_mileage
+          FROM base b
+         WHERE b.n >= 3 AND b.quantity > b.avg_q + 2 * b.sd_q
+      ),
+      overflow AS (
+        -- Comparaison en numérique, sans flottant : quantité * 100 > capacité * (100 + tolérance).
+        SELECT 'tank-overflow'::text AS rule, fr.id, fr.vehicle_id, fr.date, fr.quantity,
+               v.tank_capacity_l::numeric AS reference,
+               v.tank_capacity_l::numeric * (100 + ${TOLERANCE_SQL}) / 100 AS threshold,
+               NULL::integer AS mileage, NULL::integer AS previous_mileage, v.tank_capacity_l AS tank_capacity_l,
+               NULL::integer AS next_mileage
+          FROM fuel_records fr
+          JOIN vehicles v ON v.id = fr.vehicle_id
+         WHERE fr.vehicle_id IS NOT NULL
+           AND fr.fuel_type IS DISTINCT FROM 'electric'
+           AND v.tank_capacity_l IS NOT NULL
+           AND fr.quantity::numeric * 100 > v.tank_capacity_l::numeric * (100 + ${TOLERANCE_SQL})
+      ),
+      readings AS (
+        SELECT fr.id, fr.vehicle_id, fr.date, fr.quantity, fr.mileage,
+               LAG(fr.mileage) OVER o AS previous_mileage,
+               LAG(fr.mileage, 2) OVER o AS before_previous_mileage,
+               LAG(fr.id) OVER o AS previous_id,
+               LAG(fr.date) OVER o AS previous_date,
+               LAG(fr.quantity) OVER o AS previous_quantity
+          FROM fuel_records fr
+         WHERE fr.vehicle_id IS NOT NULL
+           AND fr.date IS NOT NULL
+           AND fr.fuel_type IS DISTINCT FROM 'electric'
+           AND fr.mileage > 0
+        WINDOW o AS (PARTITION BY fr.vehicle_id ORDER BY fr.date, fr.id)
+      ),
+      drops AS (
+        -- Pic isolé : le plein courant retrouve au moins le kilométrage d'avant le précédent, c'est donc
+        -- le précédent qui est faux (1000, 99999, 1100 marque 99999). Sinon le plein courant est le fautif.
+        SELECT rd.*, (rd.before_previous_mileage IS NOT NULL AND rd.mileage >= rd.before_previous_mileage) AS spike
+          FROM readings rd
+         WHERE rd.mileage < rd.previous_mileage
+      ),
+      regression AS (
+        SELECT 'odometer-regression'::text AS rule,
+               CASE WHEN d.spike THEN d.previous_id ELSE d.id END AS id,
+               d.vehicle_id,
+               CASE WHEN d.spike THEN d.previous_date ELSE d.date END AS date,
+               CASE WHEN d.spike THEN d.previous_quantity ELSE d.quantity END AS quantity,
+               (CASE WHEN d.spike THEN d.before_previous_mileage ELSE d.previous_mileage END)::numeric AS reference,
+               (CASE WHEN d.spike THEN d.mileage ELSE d.previous_mileage END)::numeric AS threshold,
+               CASE WHEN d.spike THEN d.previous_mileage ELSE d.mileage END AS mileage,
+               CASE WHEN d.spike THEN d.before_previous_mileage ELSE d.previous_mileage END AS previous_mileage,
+               NULL::real AS tank_capacity_l,
+               CASE WHEN d.spike THEN d.mileage END AS next_mileage
+          FROM drops d
+      ),
+      found AS (
+        SELECT * FROM gap UNION ALL SELECT * FROM overflow UNION ALL SELECT * FROM regression
       )
-      SELECT b.id, b.vehicle_id, to_char(b.date, 'YYYY-MM-DD') AS day, b.quantity, b.avg_q,
-             b.avg_q + 2 * b.sd_q AS threshold, v.registration_number AS vehicle_label,
+      SELECT f.rule, f.id, f.vehicle_id, to_char(f.date, 'YYYY-MM-DD') AS day, f.quantity, f.reference, f.threshold,
+             f.mileage, f.previous_mileage, f.next_mileage, f.tank_capacity_l, v.registration_number AS vehicle_label,
              r.status, r.comment, to_char(r.resolved_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS iso
-        FROM base b
-        LEFT JOIN vehicles v ON v.id = b.vehicle_id
-        LEFT JOIN fuel_anomaly_resolutions r ON r.anomaly_key = 'consumption-gap:' || b.id
-       WHERE b.n >= 3 AND b.quantity > b.avg_q + 2 * b.sd_q
-       ORDER BY b.date DESC NULLS LAST, b.id DESC
+        FROM found f
+        LEFT JOIN vehicles v ON v.id = f.vehicle_id
+        LEFT JOIN fuel_anomaly_resolutions r ON r.anomaly_key = f.rule || ':' || f.id
+       ORDER BY f.date DESC NULLS LAST, f.id DESC, f.rule
        LIMIT 500`);
     type ListRow = {
-      id: number; vehicle_id: number; day: string | null; quantity: number; avg_q: string | number;
-      threshold: string | number; vehicle_label: string | null; status: FuelAnomaly["status"] | null;
-      comment: string | null; iso: string | null;
+      rule: FuelAnomaly["rule"]; id: number; vehicle_id: number; day: string | null; quantity: number;
+      reference: string | number; threshold: string | number; mileage: number | null;
+      previous_mileage: number | null; next_mileage: number | null; tank_capacity_l: number | null; vehicle_label: string | null;
+      status: FuelAnomaly["status"] | null; comment: string | null; iso: string | null;
     };
     return rowsOf<ListRow>(res).map((r) => ({
-      anomalyKey: `consumption-gap:${r.id}`,
-      rule: "consumption-gap",
+      anomalyKey: `${r.rule}:${r.id}`,
+      rule: r.rule,
       fuelRecordId: Number(r.id),
       date: r.day,
       vehicleId: Number(r.vehicle_id),
       vehicleLabel: r.vehicle_label,
       quantity: Number(r.quantity),
-      averageQuantity: Math.round(Number(r.avg_q)),
+      // Valeur de référence : moyenne (consumption-gap), capacité (tank-overflow), kilométrage précédent (odometer-regression).
+      averageQuantity: Math.round(Number(r.reference)),
+      // Seuil franchi : moyenne + 2 écarts-types, capacité + tolérance, kilométrage précédent.
       threshold: Math.round(Number(r.threshold)),
+      ...(r.rule === "odometer-regression"
+        ? {
+            mileage: r.mileage == null ? null : Number(r.mileage),
+            previousMileage: r.previous_mileage == null ? null : Number(r.previous_mileage),
+            ...(r.next_mileage == null ? {} : { nextMileage: Number(r.next_mileage) }),
+          }
+        : {}),
+      ...(r.rule === "tank-overflow"
+        ? { tankCapacityL: r.tank_capacity_l == null ? null : Number(r.tank_capacity_l) }
+        : {}),
       status: r.status ?? "open",
       comment: r.comment,
       resolvedAt: r.iso,
     }));
+  },
+
+  /** Véhicules (hors retirés) sans capacité de réservoir : la règle `tank-overflow` y est muette. */
+  async vehiclesWithoutTankCapacity(): Promise<number> {
+    const res = await db.execute(sql`
+      SELECT count(*) FILTER (WHERE ${MISSING_TANK_CAPACITY}) AS n FROM vehicles`);
+    return Number(rowsOf<{ n: string | number }>(res)[0]?.n ?? 0);
+  },
+
+  /** Les mêmes véhicules, à compléter depuis l'écran (au plus `limit`, par immatriculation). */
+  async listVehiclesWithoutTankCapacity(limit = MISSING_TANK_CAPACITY_LIST_LIMIT): Promise<{ id: number; label: string }[]> {
+    const res = await db.execute(sql`
+      SELECT id, registration_number AS label FROM vehicles
+      WHERE ${MISSING_TANK_CAPACITY} ORDER BY registration_number, id LIMIT ${limit}`);
+    return rowsOf<{ id: number; label: string | null }>(res).map((r) => ({ id: Number(r.id), label: r.label ?? `#${r.id}` }));
   },
 
   /** Clés à retirer de la liste active : les anomalies justifiées. */

@@ -1,14 +1,18 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
-import { faultCatalog } from "@shared/schema";
+import { faultCatalog, insertFaultCatalogPartSchema, updateFaultCatalogPartSchema } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { moduleLogger } from "../lib/logger";
-import { isWorkshopManager } from "../middleware/auth";
+import { idParam, makeFailWith } from "../lib/route-helpers";
+import { isStaff, isWorkshopManager } from "../middleware/auth";
+import { faultCatalogService } from "../services/fault-catalog-service";
 
 const log = moduleLogger("fault-catalog");
 const router = Router();
+
+const failWith = makeFailWith(log);
 
 /**
  * Modification d'une fiche du catalogue de pannes. Montée avant le PATCH
@@ -53,6 +57,51 @@ router.patch("/fault-catalog/:id", isWorkshopManager, async (req, res, next) => 
     if (err instanceof AppError) return next(err);
     log.error({ err, requestId: req.requestId }, "Échec de la modification de la fiche du catalogue de pannes");
     return next(new AppError(500, "Erreur serveur", { cause: err }));
+  }
+});
+
+/**
+ * Pièces associées à une panne (CAT2). Lecture : tout le personnel ; écriture : admin et chef d'atelier.
+ * Règles métier (panne archivée figée, lien d'une autre panne, doublon) dans FaultCatalogService.
+ */
+router.get("/fault-catalog/:id([0-9]+)/parts", isStaff, async (req, res, next) => {
+  try {
+    return res.json(await faultCatalogService.listParts(idParam(req.params.id, "Identifiant de panne")));
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la lecture des pièces de la panne");
+  }
+});
+
+router.post("/fault-catalog/:id([0-9]+)/parts", isWorkshopManager, async (req, res, next) => {
+  try {
+    const data = insertFaultCatalogPartSchema.parse(req.body ?? {});
+    const link = await faultCatalogService.addPart(idParam(req.params.id, "Identifiant de panne"), data);
+    return res.status(201).json(link);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de l'ajout d'une pièce à la panne");
+  }
+});
+
+router.patch("/fault-catalog/:id([0-9]+)/parts/:linkId([0-9]+)", isWorkshopManager, async (req, res, next) => {
+  try {
+    const data = updateFaultCatalogPartSchema.parse(req.body ?? {});
+    const link = await faultCatalogService.updatePart(
+      idParam(req.params.id, "Identifiant de panne"),
+      idParam(req.params.linkId, "Identifiant de lien"),
+      data,
+    );
+    return res.json(link);
+  } catch (err) {
+    return failWith(err, req, next, "Échec de la modification d'une pièce de la panne");
+  }
+});
+
+router.delete("/fault-catalog/:id([0-9]+)/parts/:linkId([0-9]+)", isWorkshopManager, async (req, res, next) => {
+  try {
+    await faultCatalogService.removePart(idParam(req.params.id, "Identifiant de panne"), idParam(req.params.linkId, "Identifiant de lien"));
+    return res.status(204).send();
+  } catch (err) {
+    return failWith(err, req, next, "Échec du retrait d'une pièce de la panne");
   }
 });
 

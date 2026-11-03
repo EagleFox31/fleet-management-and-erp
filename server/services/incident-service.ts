@@ -13,7 +13,7 @@
  * `createIncident(user, body)` et `listIncidents(user, query)`.
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { assignments, drivers, incidents, users } from "@shared/schema";
+import { assignments, drivers, incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { AppError } from "../lib/app-error";
@@ -120,10 +120,21 @@ function toIncident(row: typeof incidents.$inferSelect, reportedByName: string |
   };
 }
 
+export interface CreateIncidentOptions {
+  /**
+   * Ouvre dans la même transaction un OT `pending` lié à la déclaration (`incidents.work_order_id`)
+   * et émet `work_order_created`. Faux par défaut : la route historique `/api/incidents` ne crée pas d'OT.
+   */
+  openWorkOrder?: boolean;
+}
+
+const WORK_ORDER_PRIORITY = { low: "low", medium: "medium", high: "high" } as const;
+
 export async function createIncident(
   actor: IncidentActor | undefined,
   input: CreateIncidentRequest,
   deps?: IncidentDeps,
+  options: CreateIncidentOptions = {},
 ): Promise<Incident> {
   const d = deps ?? (await defaultDeps());
   const assigned = actor?.role === "driver" ? await d.assignedVehicleIds(actor) : [];
@@ -132,11 +143,45 @@ export async function createIncident(
   const user = actor as IncidentActor;
 
   const now = (d.now ?? (() => new Date()))();
+  let workOrder: WorkOrder | null = null;
   const row = await d.db.transaction(async (tx: any) => {
+    if (options.openWorkOrder) {
+      const [vehicle] = await tx
+        .select({
+          id: vehicles.id,
+          registrationNumber: vehicles.registrationNumber,
+          brand: vehicles.brand,
+          model: vehicles.model,
+          deletedAt: vehicles.deletedAt,
+        })
+        .from(vehicles)
+        .where(eq(vehicles.id, input.vehicleId))
+        .limit(1);
+      if (!vehicle || vehicle.deletedAt) throw new AppError(404, "Véhicule introuvable.");
+      const [order] = await tx
+        .insert(workOrders)
+        .values({
+          vehicleId: vehicle.id,
+          vehicleRegistration: vehicle.registrationNumber,
+          vehicleBrand: vehicle.brand,
+          vehicleModel: vehicle.model,
+          title: `Panne déclarée : ${vehicle.registrationNumber}`,
+          description: input.description,
+          status: "pending",
+          priority: WORK_ORDER_PRIORITY[input.severity],
+          createdBy: user.id,
+          updatedBy: user.id,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      workOrder = order as WorkOrder;
+    }
     const [created] = await tx
       .insert(incidents)
       .values({
         vehicleId: input.vehicleId,
+        workOrderId: (workOrder as WorkOrder | null)?.id ?? null,
         reportedBy: user.id,
         description: input.description,
         severity: input.severity,
@@ -168,6 +213,21 @@ export async function createIncident(
     payload: { id: row.id, vehicleId: row.vehicleId, severity: row.severity },
     scope: { type: "roles", roles: ["workshop_manager", "admin"] },
   });
+
+  if (workOrder) {
+    const opened = workOrder as WorkOrder;
+    d.broadcast("work_order_created", {
+      entity: "work_order",
+      entityId: opened.id,
+      workOrderId: opened.id,
+      workOrder: opened,
+      source: "driver_breakdown",
+      incidentId: row.id,
+      triggeredBy: user.id,
+      actor: { userId: user.id },
+      scope: { type: "broadcast" },
+    });
+  }
 
   return toIncident(row, null);
 }

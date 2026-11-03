@@ -2,18 +2,30 @@
  * Lecture des codes d'erreur Postgres. Drizzle enveloppe parfois l'erreur du
  * pilote dans `cause` : on regarde les deux niveaux.
  */
-function pgCodeOf(error: unknown): string | undefined {
+function pgFieldOf(error: unknown, field: "code" | "constraint"): string | undefined {
   for (let current: unknown = error, depth = 0; current && typeof current === "object" && depth < 3; depth++) {
-    const code = (current as { code?: unknown }).code;
-    if (typeof code === "string") return code;
+    const value = (current as Record<string, unknown>)[field];
+    if (typeof value === "string") return value;
     current = (current as { cause?: unknown }).cause;
   }
   return undefined;
 }
 
+const pgCodeOf = (error: unknown) => pgFieldOf(error, "code");
+
+/** Nom de la contrainte violée (erreur du pilote ou sa `cause`). */
+export function pgConstraintOf(error: unknown): string | undefined {
+  return pgFieldOf(error, "constraint");
+}
+
 /** Violation d'une contrainte UNIQUE (23505). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505";
+}
+
+/** Violation d'une clé étrangère (23503) : référence absente à l'écriture, ou ligne encore référencée à la suppression. */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return pgCodeOf(error) === "23503";
 }
 
 /** Violation d'une contrainte CHECK (23514). */

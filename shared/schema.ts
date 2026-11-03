@@ -1,5 +1,5 @@
-import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
@@ -86,6 +86,9 @@ export const vehicles = pgTable("vehicles", {
   ownerId: integer("owner_id").references(() => users.id), // Propriétaire du véhicule (pour les clients)
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche véhicule
   tonnage: real("tonnage"), // Capacité de charge en tonnes
+  // Capacité totale des réservoirs en litres (FUEL3, règle tank-overflow). NULL = inconnue, règle muette.
+  // CHECK vehicles_tank_capacity_l_positive en base (server/init-database.ts) : > 0 et fini.
+  tankCapacityL: real("tank_capacity_l"),
   axleCount: integer("axle_count"), // Nombre d'essieux
   engineSpec: text("engine_spec"), // Spécifications du moteur
   vin: text("vin"), // Vehicle Identification Number
@@ -138,6 +141,29 @@ export const workflowDocuments = pgTable("workflow_documents", {
   isTransferred: boolean("is_transferred").notNull().default(false), // Si transféré vers vehicle_documents
 });
 
+/** Bornes de saisie de la capacité des réservoirs (FUEL3). La base n'impose que > 0 : la borne haute est une règle de saisie. */
+export const VEHICLE_TANK_CAPACITY_MIN_L = 1;
+export const VEHICLE_TANK_CAPACITY_MAX_L = 2000;
+export const VEHICLE_TANK_CAPACITY_MESSAGE =
+  `La capacité totale des réservoirs doit être comprise entre ${VEHICLE_TANK_CAPACITY_MIN_L} et ${VEHICLE_TANK_CAPACITY_MAX_L} litres. Laisser le champ vide si elle est inconnue.`;
+
+/**
+ * Capacité des réservoirs en litres, réutilisable par la création et la modification d'un véhicule.
+ * Absent = inchangé ; null ou "" = inconnue (vidée) ; sinon nombre entre les bornes.
+ */
+export const vehicleTankCapacitySchema = z
+  .union([z.string(), z.number(), z.null()])
+  .optional()
+  .transform((val) => {
+    if (val === undefined) return undefined;
+    if (val === null || (typeof val === "string" && val.trim() === "")) return null;
+    return Number(val);
+  })
+  .refine(
+    (n) => n === undefined || n === null || (Number.isFinite(n) && n >= VEHICLE_TANK_CAPACITY_MIN_L && n <= VEHICLE_TANK_CAPACITY_MAX_L),
+    VEHICLE_TANK_CAPACITY_MESSAGE,
+  );
+
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   id: true,
   createdBy: true,
@@ -155,6 +181,7 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   mileage: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
   year: z.union([z.string(), z.number()]).transform((val) => Number(val)).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
   nextMaintenanceMileage: z.union([z.string(), z.number()]).optional().transform((val) => val ? Number(val) : undefined).refine((n) => n === undefined || Number.isFinite(n), "Nombre invalide"),
+  tankCapacityL: vehicleTankCapacitySchema,
 });
 
 // Documents attachés aux véhicules
@@ -594,7 +621,11 @@ export const partSpecifications = pgTable("part_specifications", {
   specificationValue: text("specification_value").notNull(),
   unit: text("unit"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_part_specifications_part_id").on(table.partId),
+  // Colonnes écrites en sql`` dans un index à expression : voir tests/unit/shared/schema-index-introspection.test.ts.
+  uniqueIndex("ux_part_specifications_name_part").on(sql`lower(${table.specificationName})`, sql`${table.partId}`),
+]);
 
 // Variantes de pièces
 export const partVariants = pgTable("part_variants", {
@@ -605,22 +636,48 @@ export const partVariants = pgTable("part_variants", {
   additionalPrice: numeric("additional_price", { precision: 10, scale: 2 }).default("0"),
   isAvailable: boolean("is_available").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_part_variants_part_id").on(table.partId),
+]);
 
 export const insertPartCategorySchema = createInsertSchema(partCategories).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertPartSpecificationSchema = createInsertSchema(partSpecifications).omit({
-  id: true,
-  createdAt: true,
-});
+// `partId` vient de l'URL (/parts/:id/...) : omis, donc ignoré s'il figure dans le corps.
+export const insertPartSpecificationSchema = createInsertSchema(partSpecifications)
+  .omit({ id: true, createdAt: true, partId: true })
+  .extend({
+    specificationName: z.string().trim().min(1, "Le nom de la spécification est obligatoire."),
+    specificationValue: z.string().trim().min(1, "La valeur de la spécification est obligatoire."),
+    // Champ vide = pas d'unité : "" devient null (le client envoie "" quand la case est vidée).
+    unit: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().nullish(),
+    ),
+  });
 
-export const insertPartVariantSchema = createInsertSchema(partVariants).omit({
-  id: true,
-  createdAt: true,
-});
+export const updatePartSpecificationSchema = insertPartSpecificationSchema.partial();
+
+// Supplément de prix : nombre positif ou nul (numeric(10,2)), accepté en nombre ou en chaîne, stocké en chaîne.
+const additionalPriceSchema = z.preprocess(
+  (value) => (typeof value === "number" && Number.isFinite(value) ? String(value) : value),
+  z
+    .string({ invalid_type_error: "Le supplément de prix doit être un nombre positif ou nul." })
+    .trim()
+    .regex(/^\d{1,8}(\.\d{1,2})?$/, "Le supplément de prix doit être un nombre positif ou nul."),
+);
+
+export const insertPartVariantSchema = createInsertSchema(partVariants)
+  .omit({ id: true, createdAt: true, partId: true })
+  .extend({
+    variantName: z.string().trim().min(1, "Le nom de la variante est obligatoire."),
+    variantCode: z.string().trim().min(1, "Le code de la variante est obligatoire."),
+    additionalPrice: additionalPriceSchema.optional().default("0"),
+  });
+
+export const updatePartVariantSchema = insertPartVariantSchema.partial();
 
 // Type exports pour les nouvelles tables
 export type PartCategory = typeof partCategories.$inferSelect;
@@ -629,8 +686,11 @@ export type InsertPartCategory = z.infer<typeof insertPartCategorySchema>;
 export type PartSpecification = typeof partSpecifications.$inferSelect;
 export type InsertPartSpecification = z.infer<typeof insertPartSpecificationSchema>;
 
+export type UpdatePartSpecification = z.infer<typeof updatePartSpecificationSchema>;
+
 export type PartVariant = typeof partVariants.$inferSelect;
 export type InsertPartVariant = z.infer<typeof insertPartVariantSchema>;
+export type UpdatePartVariant = z.infer<typeof updatePartVariantSchema>;
 
 // Type exports
 export type User = typeof users.$inferSelect;
@@ -716,6 +776,7 @@ export const faultCatalog = pgTable("fault_catalog", {
 
 export const insertFaultCatalogSchema = createInsertSchema(faultCatalog).omit({
   id: true,
+  validatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -723,16 +784,35 @@ export const insertFaultCatalogSchema = createInsertSchema(faultCatalog).omit({
 // Pièces souvent utilisées pour chaque type de panne
 export const faultCatalogParts = pgTable("fault_catalog_parts", {
   id: serial("id").primaryKey(),
-  faultCatalogId: integer("fault_catalog_id").references(() => faultCatalog.id).notNull(),
-  partId: integer("part_id").references(() => parts.id).notNull(),
+  faultCatalogId: integer("fault_catalog_id").references(() => faultCatalog.id, { onDelete: "cascade" }).notNull(),
+  partId: integer("part_id").references(() => parts.id, { onDelete: "restrict" }).notNull(),
   quantity: integer("quantity").default(1),
   isOptional: boolean("is_optional").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("ux_fault_catalog_parts_fault_part").on(table.faultCatalogId, table.partId),
+  index("idx_fault_catalog_parts_part_id").on(table.partId),
+]);
 
-export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts).omit({
-  id: true,
-  createdAt: true,
+// `faultCatalogId` vient de l'URL (/fault-catalog/:id/parts) : omis, donc ignoré s'il figure dans le corps.
+const faultPartQuantitySchema = z
+  .number({ invalid_type_error: "La quantité doit être un entier d'au moins 1." })
+  .int("La quantité doit être un entier d'au moins 1.")
+  .min(1, "La quantité doit être un entier d'au moins 1.");
+const faultPartOptionalSchema = z.boolean({ invalid_type_error: "Le caractère optionnel doit être vrai ou faux." });
+
+export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts)
+  .omit({ id: true, createdAt: true, faultCatalogId: true })
+  .extend({
+    partId: z.number({ invalid_type_error: "La pièce est obligatoire." }).int("La pièce est invalide.").positive("La pièce est invalide."),
+    quantity: faultPartQuantitySchema.optional().default(1),
+    isOptional: faultPartOptionalSchema.optional().default(false),
+  });
+
+// La pièce d'un lien n'est pas modifiable : supprimer puis recréer.
+export const updateFaultCatalogPartSchema = z.object({
+  quantity: faultPartQuantitySchema.optional(),
+  isOptional: faultPartOptionalSchema.optional(),
 });
 
 export type FaultCatalog = typeof faultCatalog.$inferSelect;
@@ -740,6 +820,7 @@ export type InsertFaultCatalog = z.infer<typeof insertFaultCatalogSchema>;
 
 export type FaultCatalogPart = typeof faultCatalogParts.$inferSelect;
 export type InsertFaultCatalogPart = z.infer<typeof insertFaultCatalogPartSchema>;
+export type UpdateFaultCatalogPart = z.infer<typeof updateFaultCatalogPartSchema>;
 
 // ===== MODULE LOGS D'ACTIVITÉ =====
 
@@ -1770,3 +1851,99 @@ export const partRequirementReceipts = pgTable("part_requirements", {
   receivedBy: integer("received_by").references(() => users.id),
   receivedAt: timestamp("received_at"), // P-16 : posé dans onTransition(tx)
 });
+
+// --- Chantier CDC (écarts du cahier des charges) ------------------------------------------
+// SQL : server/db/migrations/20261101_cdc_ecarts.sql et CDC_SCHEMA_STATEMENTS
+// (server/init-database.ts). Index partiels posés en SQL seulement ; CHECK et UNIQUE sont
+// aussi déclarés ici, sous le nom que Postgres leur donne, pour qu'un `drizzle-kit push`
+// (recette des tests et de la CI) crée le même schéma que la migration.
+
+// Taux horaire atelier daté (CDC #7). Aucune valeur semée : le taux en vigueur à une date est
+// la ligne au plus grand `effective_from` inférieur ou égal à cette date.
+export const workshopLaborRates = pgTable("workshop_labor_rates", {
+  id: serial("id").primaryKey(),
+  effectiveFrom: date("effective_from").notNull(),
+  hourlyRateHt: numeric("hourly_rate_ht", { precision: 15, scale: 2 }).notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("workshop_labor_rates_effective_from_key").on(table.effectiveFrom),
+  check("workshop_labor_rates_hourly_rate_ht_check", sql`${table.hourlyRateHt} >= 0`),
+]);
+
+export const insertWorkshopLaborRateSchema = createInsertSchema(workshopLaborRates).omit({
+  id: true,
+  createdBy: true,
+  createdAt: true,
+});
+
+export const IMPORT_BATCH_KINDS = ["vehicles", "interventions"] as const;
+export const IMPORT_BATCH_STATUSES = ["applied", "failed"] as const;
+
+// Lot d'import (CDC #9). Index unique partiel import_batches_applied_file_uidx :
+// un même fichier (kind, file_sha256) n'est appliqué qu'une fois.
+export const importBatches = pgTable("import_batches", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: IMPORT_BATCH_KINDS }).notNull(),
+  fileName: text("file_name"),
+  fileSha256: text("file_sha256").notNull(),
+  status: text("status", { enum: IMPORT_BATCH_STATUSES }).notNull().default("applied"),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  check("import_batches_kind_check", sql`${table.kind} IN ('vehicles', 'interventions')`),
+  check("import_batches_status_check", sql`${table.status} IN ('applied', 'failed')`),
+]);
+
+export const IDEMPOTENCY_KEY_STATES = ["in_progress", "completed"] as const;
+
+// Clés d'idempotence des écritures (CDC #10), écrites par le serveur seulement.
+// Unicité (user_id, key) ; purge sur `expires_at` (index idempotency_keys_expires_at_idx).
+export const idempotencyKeys = pgTable("idempotency_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+  requestHash: text("request_hash").notNull(),
+  state: text("state", { enum: IDEMPOTENCY_KEY_STATES }).notNull().default("in_progress"),
+  responseStatus: integer("response_status"),
+  responseBody: jsonb("response_body"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`(now() + interval '7 days')`),
+}, (table) => [
+  unique("idempotency_keys_user_id_key_key").on(table.userId, table.key),
+  check("idempotency_keys_state_check", sql`${table.state} IN ('in_progress', 'completed')`),
+]);
+
+// Colonnes CDC ajoutées à work_orders et vehicles, déclarées à part comme `workOrderQuality` :
+// `WorkOrder` est construit à la main dans server/storage.ts, et ces colonnes ne doivent pas
+// entrer dans `insertWorkOrderSchema` / `insertVehicleSchema` (écrites par le serveur).
+// `origin` : NULL = saisie dans l'application, 'history_import' = reprise d'historique.
+export const WORK_ORDER_ORIGINS = ["history_import"] as const;
+
+export const workOrderPlanning = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  dueDate: date("due_date"), // CDC #7, index partiel work_orders_preventive_due_idx
+  dueMileage: integer("due_mileage"), // CHECK work_orders_due_mileage_check, posé en SQL (work_orders est déclarée deux fois)
+  origin: text("origin", { enum: WORK_ORDER_ORIGINS }),
+  externalRef: text("external_ref"), // unique si non nul (work_orders_external_ref_uidx)
+  importFingerprint: text("import_fingerprint"), // unique si non nul (work_orders_import_fingerprint_uidx)
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export const vehicleImports = pgTable("vehicles", {
+  id: serial("id").primaryKey(),
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export type WorkshopLaborRateRow = typeof workshopLaborRates.$inferSelect;
+export type InsertWorkshopLaborRate = z.infer<typeof insertWorkshopLaborRateSchema>;
+export type ImportBatchRow = typeof importBatches.$inferSelect;
+export type NewImportBatch = typeof importBatches.$inferInsert;
+export type ImportBatchKind = (typeof IMPORT_BATCH_KINDS)[number];
+export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
+export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
+export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
+export type VehicleImportRow = typeof vehicleImports.$inferSelect;

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { userMessageOf } from "@/lib/api-error";
 
 import {
   Form,
@@ -51,6 +52,10 @@ const userFormSchema = z.object({
   role: z.enum(userRoles),
 });
 
+// En édition, un mot de passe vide signifie « ne pas le changer » : `partial()`
+// laisserait `min(6)` rejeter la chaîne vide.
+const passwordWhenEditing = userFormSchema.shape.password.optional().or(z.literal(""));
+
 // Type pour les valeurs du formulaire
 type UserFormValues = z.infer<typeof userFormSchema>;
 
@@ -72,7 +77,7 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
   const form = useForm<UserFormValues>({
     resolver: zodResolver(
       isEdit 
-        ? userFormSchema.partial({ password: true }) // Mot de passe optionnel en mode édition
+        ? userFormSchema.extend({ password: passwordWhenEditing }) // Mot de passe optionnel en mode édition
         : userFormSchema
     ),
     defaultValues: {
@@ -107,7 +112,9 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
     onSuccess: () => {
       // Invalider la requête pour forcer le rechargement des utilisateurs
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
+
       toast({
         title: isEdit ? "Utilisateur mis à jour" : "Utilisateur créé",
         description: isEdit
@@ -125,7 +132,7 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: error.message || `Erreur lors de ${isEdit ? "la mise à jour" : "la création"} de l'utilisateur`,
+        description: userMessageOf(error, `Erreur lors de ${isEdit ? "la mise à jour" : "la création"} de l'utilisateur`),
       });
     },
   });

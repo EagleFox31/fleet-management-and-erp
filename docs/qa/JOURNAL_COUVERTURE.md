@@ -1847,3 +1847,106 @@ soumission sans doublon.
 
 **Pourquoi**
 - Cause non élucidée (serveur de développement lancé hors `npm run dev`). Le correctif de la spec reste donc **non prouvé** ; `tsc` global est à 0 erreur. À rejouer : `E2E_CHANNEL=msedge` sur la branche Neon de test, port 5000 libre, sous `db-lock`.
+
+## Bilan après la pile #81 à #86
+
+**Quoi**
+- `PLAN_COUVERTURE_MODULES.md` : T6, WO1, WO6, WO7, DIR2 passent OK (lignes encore en « Partiel » ou en `it.fails` après #86).
+- `couverture-tests.html` : 62 testés, 7 partiels, 2 non testés (ADM2, DRV2), 2 à construire (DOC1, FUEL3), sur 73 ; PR #82 à #86 ajoutées, « Ce qui reste » et « Points ouverts » réécrits.
+
+**Comment**
+- Plus aucun `it.fails(` ni `test.fail(` sous `tests/` et `e2e/` sur `main` (hors le test d'hygiène qui les décrit).
+
+**Preuve**
+- Décompte du tableau `mods` de la page : `{ OK: 62, P: 7, F: 2, X: 2 }`.
+
+## Réserve #86 : workflowId non entier sur le téléversement de document d'acquisition
+
+- **Quoi** : `POST /api/workflows/:sessionId/documents` renvoyait 500 quand `workflowId` n'était pas un entier positif (`parseInt("abc")` = NaN passé à la requête SQL). Il renvoie désormais 400 « Identifiant de workflow invalide. », pour le personnel comme pour le client, sans rien écrire.
+- **Comment** : validation `Number.isSafeInteger(n) && n > 0` avant la vérification d'appartenance et l'écriture (`server/routes.ts`). Cas ajouté dans `tests/contract/role-guards-pistes-def.contract.test.ts` (`abc`, `1.5`, `-3`, `0`, admin et client) : rouge prouvé sur l'ancien code (500), 16/16 vert après.
+- **Pourquoi** : règle AGENTS.md §10, une entrée invalide donne un 400 lisible, jamais une erreur SQL en 500.
+
+## VEH3 : e2e acquisition de véhicule
+
+- **Quoi** : `e2e/16-vehicle-acquisition-resume.spec.ts`, 5 tests : reprise de l'étape en cours depuis le bandeau « Workflows en cours » puis après rechargement (état venu du serveur) ; documents obligatoires refusés tant qu'il en manque, puis téléversés et vérifiés en base ; fin `completed` (véhicule créé) ; fin `abandoned` (brouillon retiré du bandeau et de la reprise). Résultat sur la base de test tests-piste-c : **5 passed (6,1 min)**, Edge (`E2E_CHANNEL=msedge`).
+- **Défauts produit figés** (non corrigés ici) :
+  - VEH3-UI-1 : aucun écran ne propose d'abandonner un brouillon. Le bouton n'existe que dans le mode complet de `WorkflowReminders`, or le seul montage est compact (`client/src/pages/vehicles/index.tsx:119`) ; le wizard ne fait jamais appel à `abandonWorkflow` (`client/src/pages/workflows/vehicle-acquisition.tsx:102`). Test en `test.fail`.
+  - VEH3-UI-2 : après l'activation, l'enregistrement différé de 500 ms (`client/src/hooks/use-workflow-persistence.ts:171`) part après `completeWorkflow()` ; le PATCH tombe en 404 et le repli POST recrée un brouillon `in_progress` de même sessionId : l'acquisition terminée réapparaît dans « Workflows en cours ». Comportement actuel asserté, avec la consigne de bascule une fois corrigé.
+- **Comment** : chaque test crée son propre compte et ses données préfixées `E2E-VEH3` ; nettoyage par sacs d'identifiants, aucun nettoyage global (base partagée).
+- **Pourquoi** : le contrat ne voit pas VEH3-UI-2 (il n'envoie pas l'enregistrement tardif du navigateur) ; seul le parcours écran le révèle.
+- **Piège** : le port 5000 du poste est pris par Docker Desktop. Lancer le serveur sur un autre port (`PORT=5055`), puis `E2E_BASE_URL=http://127.0.0.1:5055 node --env-file=.env node_modules/@playwright/test/cli.js test ...` (le `--env-file` est requis : la spec importe `server/db`).
+
+## VEH3 : e2e acquisition de véhicule, résultat d'exécution
+
+- **Quoi** : `e2e/16-vehicle-acquisition-resume.spec.ts` rejoué en entier : 5 passed (6,2 min), un worker, `E2E_CHANNEL=msedge`, serveur sur le port 5057, base Neon de test (`tests-piste-c`), sous `db-lock`. `tsc` global : 0 erreur.
+- **Preuve rouge/vert** : VEH3-UI-2 était rouge à la première exécution (brouillon `in_progress` recréé après `completed`), puis figé tel quel ; VEH3-UI-1 est un `test.fail` (passe tant que le bouton Abandonner n'existe pas, devient rouge dès qu'il est monté).
+- **Piège** : un verrou `db-test.lock` périmé laissé par une exécution tuée bloque l'attente d'environ 17 min avant d'être repris ; la sortie reste vide pendant ce temps.
+
+## Réserves de relecture de #86 : cloison, doublon de rôles, export stock
+
+- **Quoi** :
+  - Le téléversement `POST /api/workflows/:sessionId/documents` n'écrit plus sa requête d'appartenance : il passe par `canAccessOwned` (`server/lib/client-scope.ts`), avec `WorkflowDocumentService.getWorkflowOwnerId(workflowId, sessionId)`. Le message 403 est inchangé.
+  - `DOCUMENT_RENEWAL_WRITER_ROLES` (`shared/constants/roles.ts`) devient la source unique de `isDocumentRenewalWriter` et de `CREATE_ROLES` dans `document-renewals.routes.ts`.
+  - Colonne `realStock` de l'export stock : déjà absente de `excel-export-service.ts` (une seule colonne « Stock », lue sur `quantity`) et de `export-service.ts`. Rien à retirer ; le contrat DIR3 fige ce comportement en posant `realStock: 6` sans qu'il apparaisse. Les autres usages de `realStock` (alertes de stock, facturation TVA, écran entrepôt) ne passent pas par l'export.
+- **Comment** : `npm run check` 0 erreur ; `npm test` 84 fichiers, 917 tests verts ; contrats `document-renewal-status`, `vehicle-acquisition-workflow`, `workflow-vehicle-acquisition`, `vehicle-documents-client-scope`, `lot-exports-roles`, `exports-inventory-content` : 232 verts sur la base `tests-piste-c`, sous `db-lock`.
+- **Pourquoi** : une seule règle de cloison et une seule liste de rôles, pour qu'une correction ne soit pas faite à un seul endroit.
+- **Complément après relecture** : `role-guards-pistes-def.contract.test.ts` (seul contrat du `POST /api/workflows/:sessionId/documents`) rejoué : 17 verts. Cas ajouté : un client qui envoie son propre `workflowId` avec le `sessionId` d'un autre est refusé (403, rien écrit), ce qui protège la clause `sessionId` de `getWorkflowOwnerId`. Liste en dur restantes, hors mission : `VIEW_ROLES` (`document-renewals.routes.ts`) et `isWorkflowDocumentWriter` (`auth.ts`).
+
+## MIS1 / P2 : e2e cycle de vie d'une mission (2026-11-02 13:40)
+
+- **Quoi** : `e2e/17-mission-lifecycle.spec.ts`, 5 tests. (1) Une logistique crée la mission (API, statut « planned » comme l'écran), l'affecte (véhicule + chauffeur par « Modifier »), la lance (dialogue de budgets), la livre, la clôture (déclaration sans plein, FDR 0) et génère la facture (HT 250 000, TTC 298 125) ; un administrateur sur un second navigateur reçoit les trames `mission_status_changed` (in_progress, delivered) puis `mission_completed` et son écran suit sans rechargement (la page mission n'a pas de `refetchInterval`). (2) Lancement refusé, message lisible et mission inchangée : assurance expirée, CPC révoqué après l'affectation. (3) Après régularisation du document, le même lancement aboutit. (4) Défaut figé en `test.fail`. Contrat `tests/contract/mission-assignment-eligibility.contract.test.ts` : POST refuse un véhicule en maintenance (vert), PATCH l'accepte (`it.fails`).
+- **Défauts produit figés** (non corrigés ici) :
+  - MIS1-UI-1 : `extractApiError` (`client/src/pages/missions/[id].tsx` ~l.131-141) lit `payload.details`, or `PUT /api/missions/:id/status` renvoie les motifs dans `message` + `errors` : `launchBlockedDocumentTypes` reste vide, « Créer demande de renouvellement » n'apparaît jamais sur un lancement bloqué par un document. Reste à corriger côté front.
+  - MIS1-API-1 : `PATCH /api/missions/:id` (`server/api/missions.routes.ts`, bloc d'affectation, ~l.1861 et suivantes) ne passe pas par `getMissionEligibility` : un véhicule en maintenance (ou assurance échue) est affecté, alors que `POST` le refuse. Le lancement le rattrape plus tard. A corriger côté API.
+  - Observation : une mission créée par l'API sans statut reste en « Brouillon » et l'écran n'offre aucune action pour la planifier ; seul l'écran de création envoie « planned ».
+- **Comment** : données préfixées `E2E-MIS1-`, purgées à l'ouverture et à la fermeture (factures, affectations, missions, chauffeurs, puis sacs d'identifiants) ; crédit de carte carburant de test pour franchir la garde de solde. Serveur sur le port 5056 (5000 et 5055 pris), `E2E_CHANNEL=msedge`, sous `db-lock`.
+- **Pourquoi** : MIS1 n'était couvert qu'à moitié (la spec 13 posait « livrée » en base) ; le lancement et ses gardes sont le point où le métier refuse.
+- **Piège** : des `ETIMEDOUT` vers Neon depuis le runner (réseau) font échouer un run au hasard ; rejouer.
+
+## 2026-11-02 15:24 — ADM2 et DRV2 : e2e changement de rôle et espace chauffeur
+
+- **Quoi** : `e2e/18-admin-role-change.spec.ts` (8 tests) et `e2e/19-driver-space.spec.ts` (9 tests), dont un témoin par bloc de défauts. Run complet sur la base de test `tests-piste-c`, sous `db-lock`, Edge, un worker, port 5056 : **17 passed (17,3 min)**.
+- **Vert** :
+  - ADM2 : un admin passe un magasinier en technicien au navigateur ; après reconnexion, « Mes interventions » apparaît, « Inventaire des pièces » disparaît, `GET /api/purchase-orders` répond 403 et `GET /api/technician/work-orders/:selfId` 200.
+  - ADM2, session ouverte avant le changement : les gardes de `server/middleware/auth.ts` (l.79, 106, 152) relisent le rôle en base à chaque requête, la session suit le nouveau rôle sans reconnexion.
+  - DRV2 : chaque chauffeur voit sa mission sur son tableau de bord, pas celle de l'autre (`/api/drivers/me`).
+- **Défauts figés** (`test.fail`, non corrigés ici) :
+  - ADM2-1 : sur `/admin/users`, « Modifier » n'affiche que « bientôt » (`client/src/pages/admin/users.tsx:327`) ; le seul formulaire d'édition est sur `/users`, sans entrée de menu.
+  - ADM2-2 : sur `/users`, changer le rôle sans retaper le mot de passe est refusé par le formulaire (`client/src/components/users/user-form.tsx:48` et `:75`, `partial` ne fait pas tomber `min(6)` sur une chaîne vide).
+  - ADM2-3 : `server/api/purchase-orders.routes.ts:101` réécrit `req.user.role` depuis la session : un magasinier passé logistique garde sur sa session ouverte les suggestions de regroupement (l.201) et la réception des livraisons (l.367).
+  - DRV2-1 : la déclaration de panne envoie `POST /api/alerts` (`client/src/pages/driver/dashboard.tsx:241`), réservé à `isWorkshopManager` (`server/routes.ts:4286`) : 403 et toast « Impossible d'envoyer le signalement ».
+  - DRV2-2 : aucune voie ne crée d'OT à la panne ; `POST /api/incidents` est derrière le drapeau `incidents` désactivé (`shared/feature-flags.ts:34`) et ne crée pas d'OT (`server/services/incident-service.ts:135-151`).
+  - DRV2-3 : `GET /api/missions`, `GET /api/missions/:id` (`server/api/missions.routes.ts:589`, `:692`) et `GET /api/drivers/:id/missions` (`drivers-management.routes.ts:164`) ne filtrent pas pour le rôle `driver` : un chauffeur lit les missions des autres (AGENTS.md §11).
+- **Comment** : comptes et données préfixés `E2E-ADM2-` / `E2E-DRV2-`, supprimés en fin de spec et à l'ouverture si un run a planté. Mise en place hors des `test.fail` (garde `it-fails-hygiene`). Chaque défaut a été rejoué en `test` simple pour vérifier qu'il échoue sur l'assertion visée et non sur la mise en place. Un `test.fail` passe aussi quand son hook échoue (vu ici sur des coupures Neon, WebSocket 1006) : chaque bloc de défauts a donc un test ordinaire témoin qui partage ses hooks. DRV2-2 reconnaît la trame à son `vehicleId` (format des payloads `work_order_created`), pas à l'immatriculation.
+- **Pourquoi** : ADM2 et DRV2 étaient « À faire ». DRV2 reste partiel : il n'existe pas de vue « missions du jour » (le tableau de bord n'affiche que la mission active), et la panne → OT n'existe pas encore côté produit.
+- **Hors périmètre** : la boîte « Signaler un problème » affiche des emojis (`client/src/pages/driver/dashboard.tsx:103-106`), contraire à AGENTS.md §4.
+
+## 2026-11-02 21:40 — ADM2, DRV2, MIS1 : défauts front corrigés, marqueurs retournés
+
+- **Quoi** : correctifs front ADM2-1 (« Modifier » ouvre le formulaire sur `/admin/users`), ADM2-2 (mot de passe vide accepté en édition), DRV2-1/2 (panne envoyée sur `POST /api/driver/breakdowns`, véhicule requis), MIS1-UI-1 (motifs de refus lus dans `errors[]`, demande de renouvellement proposée). Tous les `test.fail` / `it.fails` correspondants deviennent des tests ordinaires : e2e 17:433, 18 (ADM2-1/2/3), 19 (DRV2-1/2/3), contrat `mission-assignment-eligibility`.
+- **Preuves** : `npm run check` 0, `npm test` 932/932 ; contrat 3/3 ; e2e 17 5/5 ; e2e 18+19 16/17, le 17e (premier test de la spec 18, délai de 180 s) passé isolé en 3,4 min, délai porté à 300 s. Base de test ep-plain-lake, port 5058, sous `db-lock`.
+- **Comment** : la purge de la spec 19 supprime désormais les `incidents` créés par la panne avant les véhicules (`incidents_vehicle_id_fkey`).
+- **Pourquoi** : clore les défauts figés par #96 et #101 ; le serveur avait été corrigé par #102.
+- **Pièges** : deux runs Playwright dans le même worktree s'écrasent leurs traces (`test-results`) ; un seul run à la fois par worktree. Le témoin PATCH du contrat créait ses données dans le `it` : délai explicite de 60 s.
+
+## 2026-11-02 21:51 — DRV2 : seuls une panne ou un accident ouvrent un OT
+
+- **Quoi** : `POST /api/driver/breakdowns` accepte `type` (`breakdown`, `accident`, `delay`, `other`, défaut `breakdown`). Seuls une panne et un accident ouvrent un OT. Un retard ou un autre signalement reste un incident qui alerte le chef d'atelier et l'admin.
+- **Comment** : `driverReportRequestSchema` et `driverReportOpensWorkOrder` (`shared/contracts/incidents.ts`) sont partagés par la route et par l'écran chauffeur. L'écran envoie le type choisi et explique pourquoi le bouton est désactivé quand la mission n'a pas de véhicule.
+- **Pourquoi** : la relecture de #107 a relevé qu'un « Retard prévu » ouvrait un OT à l'atelier. L'utilisateur a choisi qu'un OT ne s'ouvre que pour une panne ou un accident.
+- **Preuves** : contrat `adm2-drv2-mis1-server-defects` 21/21 sur le Postgres local (accident → OT ; delay/other → incident sans OT ; type inconnu → 400). `tsc` : 0 erreur. `tests/unit` : 1010/1010.
+
+## 2026-11-02 22:47 — PRT1 et CAT2 : routes enfants du catalogue pièces et pannes
+
+- **Quoi** : routes `/api/parts/:id/specifications|variants` (PRT1) et `/api/fault-catalog/:id/parts` (CAT2), qui n'existaient pas ; l'écran base de pièces appelait des URL inexistantes. Lignes PRT1 et CAT2 du plan mises à jour.
+- **Comment** : migration `20261102_parts_catalog_children.sql` (tables idempotentes, clés étrangères en cascade, dédoublonnage de `fault_catalog_parts`, index uniques), schémas Zod partagés, services `part-catalog-children-service` et `fault-catalog-service`, tests de contrat étendus.
+- **Pourquoi** : fermer les derniers « Partiel » de ces deux modules (variantes, spécifications, pièces associées).
+- **Preuves** : contrats `parts-catalog-crud` et `fault-catalog-lifecycle` : 68 tests, sur le Postgres local ; test unitaire de dérive migration / constante.
+
+## 2026-11-02 22:55 — DIR3 et P3 : exports d'exploitation en cellules exactes, cycle de vie du plan préventif
+
+- **Quoi** : DIR3 passe à OK pour les exports XLSX et ZIP (missions clients, rapport mensuel, véhicules, OT, utilisateurs, export complet). P3 reste Partiel : alerte à l'échéance, clôture de l'OT → véhicule opérationnel et recalcul de l'échéance sont couverts, deux règles ne sont pas câblées dans le produit.
+- **Comment** : `tests/contract/exports-operations-content.contract.test.ts` (22 tests, en-têtes et cellules exactes, filtre, 400, ZIP relu par `tests/support/zip-read.ts`) et `tests/integration/preventive-maintenance-lifecycle.test.ts` (14 tests : balayage d'alertes borné à un véhicule par `getVehicles` espionné, clôture d'un puis de deux OT, `completeMaintenanceAndScheduleNext` mensuel/trimestriel/annuel/kilométrique, seuil kilométrique). Défauts figés en `it.fails`, mise en place en `beforeAll` (garde `it-fails-hygiene`) : DIR3-1 rôles magasinier, secrétaire, logistique, direction exportés bruts ; DIR3-2 `awaiting_parts` brut ; DIR3-3 priorité `critical` brute ; P3-1 clôturer l'OT n'avance pas l'échéance du plan (rien n'appelle `completeMaintenanceAndScheduleNext`, donc le plan ne redéclenche plus) ; P3-2 un OT issu d'un plan échu n'immobilise pas le véhicule (seule `vehicles.nextMaintenanceDate` le fait, `preventive-maintenance-service.ts` `declencheur`).
+- **Pourquoi** : DIR3 et P3 étaient « Partiel » ; l'export est ce que la direction lit, le plan préventif ne doit pas s'éteindre en silence.
+- **Preuves** : rouge avant : mutation temporaire des libellés et colonnes des services d'export, 6 échecs sur 22 ; trimestre compté 2 mois et destinataires d'alerte réduits à l'admin, 2 échecs sur 14 ; mutations retirées. La remise en exploitation est faite par un déclencheur de base (`20261102_work_orders_release_vehicle.sql`) : désactiver l'appel de `storage.updateWorkOrder` ne fait pas rougir le test, qui prouve le comportement du système, pas la ligne TypeScript. Vert après : contrat 22/22 et intégration 14/14 sur le Postgres local ; `tsc` 0 erreur ; `npm test` sans échec une fois la garde `it-fails-hygiene` respectée.
+- **Pièges** : `createTestVehicle` ignore `nextMaintenanceDate` (la poser par `db.update`) ; `getVehicles` renvoie `{ vehicles, total }` ; les dates sont formatées dans le fuseau du serveur, d'où des dates à midi UTC ; les rôles, statuts et priorités non traduits sont figés plutôt que corrigés.

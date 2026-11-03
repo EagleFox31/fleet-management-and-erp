@@ -110,6 +110,35 @@ describe("POST /api/workflows/:sessionId/documents", { timeout: 60000 }, () => {
     expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
   });
 
+  it("un client qui envoie son propre workflowId avec le sessionId d'un autre est refusé (403, rien écrit)", async () => {
+    const otherSessionId = `TEST-wfdoc-other-${Date.now()}`;
+    const [own] = await db
+      .insert(vehicleAcquisitionWorkflows)
+      .values({ userId: session.userId("client2"), sessionId: otherSessionId, workflowData: {} })
+      .returning({ id: vehicleAcquisitionWorkflows.id });
+    try {
+      // client2 est bien propriétaire de `own`, mais le chemin vise la session d'un autre.
+      const res = await upload("client2", own.id);
+      expect(res.status).toBe(403);
+      expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
+    } finally {
+      await db.delete(vehicleAcquisitionWorkflows).where(eq(vehicleAcquisitionWorkflows.id, own.id));
+    }
+  });
+
+  it.each(["admin", "client"] as const)("workflowId non entier : 400 lisible, rien écrit (%s)", async (actor) => {
+    for (const bad of ["abc", "1.5", "-3", "0"]) {
+      const form = new FormData();
+      form.append("workflowId", bad);
+      form.append("documentType", "carte_grise");
+      form.append("document", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-doc.pdf");
+      const res = await session.raw("POST", `/api/workflows/${sessionId}/documents`, actor, form);
+      expect(res.status, bad).toBe(400);
+      expect(JSON.stringify(await res.json())).not.toMatch(/sql|syntax|NaN/i);
+    }
+    expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
+  });
+
   it("le client propriétaire alimente sa session (201)", async () => {
     const res = await upload("client");
     expect(res.status).toBe(201);

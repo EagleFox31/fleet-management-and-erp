@@ -48,6 +48,23 @@ export type AppRole = NonNullable<typeof users.$inferSelect>["role"];
 export const ALL_APP_ROLES = users.role.enumValues as readonly AppRole[];
 
 /**
+ * Libellés français des rôles : source unique (UI et exports).
+ * `Record<AppRole, string>` : un rôle ajouté au schéma sans libellé casse `tsc`.
+ */
+export const ROLE_LABELS: Record<AppRole, string> = {
+  admin: "Administrateur",
+  workshop_manager: "Chef d'atelier",
+  technician: "Technicien",
+  secretary: "Secrétaire",
+  logistics: "Logisticien",
+  warehouse: "Magasinier",
+  management: "Direction",
+  client: "Client",
+  driver: "Chauffeur",
+  user: "Utilisateur",
+};
+
+/**
  * Approvisionnement — fournisseurs, commandes, factures fournisseur.
  *
  * Le chef d'atelier et le technicien en sont exclus: ils **demandent** des
@@ -76,10 +93,11 @@ export function canAccessProcurement(role: string | null | undefined): boolean {
 }
 
 /**
- * Indicateurs de pilotage (`/api/kpi/*`) : direction et administrateur.
- * Doit rester aligné sur `isManagementOrAdmin` (server/middleware/auth.ts).
+ * Indicateurs de pilotage (`/api/kpi/*`) : direction, administrateur et chef d'atelier
+ * (le cahier des charges lui donne les pannes, le préventif et les coûts de son atelier).
+ * La garde de `server/api/kpi.routes.ts` et celle de l'export `kpi-report` en dérivent.
  */
-export const KPI_VIEWER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+export const KPI_VIEWER_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
 export function canViewKpi(role: string | null | undefined): boolean {
   return (KPI_VIEWER_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -131,6 +149,34 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
+/**
+ * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
+ * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
+ * des contrôles de `server/api/document-renewals.routes.ts`.
+ */
+export const DOCUMENT_RENEWAL_WRITER_ROLES = ["admin", "secretary", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/**
+ * Lecture des centres et des demandes de renouvellement (`GET /centers`, `GET /requests`) :
+ * les écrivains plus le technicien. Source unique du routeur et de l'événement temps réel
+ * `document_renewal_center_changed`.
+ */
+export const DOCUMENT_RENEWAL_VIEWER_ROLES = [...DOCUMENT_RENEWAL_WRITER_ROLES, "technician"] as const satisfies readonly AppRole[];
+
+/**
+ * Modification d'un véhicule (`PATCH /api/vehicles/:id`) : l'administrateur et le chef
+ * d'atelier modifient toute la fiche. La logistique ne saisit que la capacité des
+ * réservoirs (`tankCapacityL`, FUEL3, décision du 2 novembre 2026), aucun autre champ.
+ */
+export const VEHICLE_EDIT_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
+export const VEHICLE_TANK_CAPACITY_ONLY_ROLES = ["logistics"] as const satisfies readonly AppRole[];
+export const VEHICLE_PATCH_ROLES = [...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as const satisfies readonly AppRole[];
+
+/** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
+export function canEditTankCapacity(role: string | null | undefined): boolean {
+  return (VEHICLE_PATCH_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 
@@ -155,3 +201,51 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+
+/**
+ * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel
+ * sauf le chauffeur, qui n'a pas à connaître les coûts d'atelier.
+ */
+export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+export function canReadWorkOrderCost(role: string | null | undefined): boolean {
+  return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Écarts du cahier des charges (chantier CDC, lot CDC-0a). Groupes lus par le montage
+ * de `server/api/index.ts` et, plus tard, par les écrans : ne pas les recopier.
+ */
+
+/** Impression des étiquettes QR des pièces. */
+export const PART_LABEL_ROLES = ["admin", "warehouse"] as const satisfies readonly AppRole[];
+
+/** Scan d'une pièce (`/api/part-scans`) : magasin et atelier. */
+export const PART_SCAN_ROLES = ["admin", "warehouse", "workshop_manager", "technician"] as const satisfies readonly AppRole[];
+
+/**
+ * Vente de pièces, écriture. Provisoire, décision utilisateur #4 : le groupe
+ * définitif n'est pas arrêté.
+ */
+export const PART_SALE_ROLES = ["admin", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+
+/**
+ * Vente de pièces, lecture : les rôles d'écriture, plus la direction (lecture seule).
+ * Provisoire, décision utilisateur #4.
+ */
+export const PART_SALE_READ_ROLES = [...PART_SALE_ROLES, "management"] as const satisfies readonly AppRole[];
+
+/** Positions GPS des véhicules (`/api/vehicle-positions`). Pas de vue client prévue à ce stade. */
+export const GPS_VIEW_ROLES = ["admin", "logistics", "management", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Import Excel, tous types sauf les interventions. */
+export const IMPORT_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+/** Import Excel des interventions : le chef d'atelier s'ajoute à l'administrateur. */
+export const IMPORT_INTERVENTION_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Rapport de maintenance (`/api/maintenance-reports`). */
+export const MAINTENANCE_REPORT_ROLES = ["admin", "workshop_manager", "management"] as const satisfies readonly AppRole[];
+
+/** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
+export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];

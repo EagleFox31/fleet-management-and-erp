@@ -1,17 +1,5 @@
+import { ROLE_LABELS } from "@shared/constants/roles";
 import type { AppRole } from "./types";
-
-const ROLE_LABELS: Record<AppRole, string> = {
-  admin: "Administrateur",
-  workshop_manager: "Chef d'atelier",
-  technician: "Technicien",
-  secretary: "Secrétaire",
-  logistics: "Logisticien",
-  warehouse: "Magasinier",
-  management: "Direction",
-  client: "Client",
-  driver: "Chauffeur",
-  user: "Utilisateur",
-};
 
 const ROLE_ALIASES: Record<string, AppRole> = {
   administrateur: "admin",

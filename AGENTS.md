@@ -278,6 +278,25 @@ npm run test:e2e           # Playwright (voir e2e/README.md)
 
 Arborescence et règles : `tests/README.md`. Ne pas colocaliser de `*.test.ts` dans `client/`, `server/` ou `shared/`.
 
+### Base de test : Postgres local par défaut
+
+Les suites **intégration** et **contrat** tournent sur le Postgres local Docker,
+pas sur Neon :
+
+```bash
+npm run test:db:up      # conteneurs + schéma Drizzle (port 54320)
+DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:5433/v1 npm run test:contract   # ou test:integration
+npm run test:db:down    # supprime aussi le volume
+```
+
+- **Neon seulement pour les e2e** (Playwright), qui ont besoin d'un serveur
+  complet sur une base réelle, et jamais contre la production.
+- La CI fait de même sur toute PR vers `main`.
+- Les conteneurs sont partagés entre sessions : ne pas lancer `test:db:down` sur
+  une base qu'une autre session utilise.
+- Sous PowerShell, utiliser la variante `$env:` donnée dans `tests/README.md`.
+- Détails et pièges : `tests/README.md`, section « Postgres local (plus rapide que Neon) ».
+
 Notes :
 
 - Lancer **`npm run check` sur tout le projet** — ne pas filtrer la sortie sur ses
@@ -293,10 +312,13 @@ Notes :
 
 ## 9. Dette connue à ne pas aggraver
 
-- `server/routes.ts` (~5 700 lignes) contient des routes dupliquées. Ne rien y
-  ajouter : créer un routeur dans `server/api/` et le monter dans `server/api/index.ts`.
-  Express sert la **première** déclaration : avant de corriger une route, chercher
-  son double. Liste gelée dans `tests/unit/server/routes-hygiene.test.ts`.
+- `server/routes.ts` (~5 700 lignes) est gelé. Ne rien y ajouter : créer un routeur
+  dans `server/api/` et le monter dans `server/api/index.ts`. Express sert la
+  **première** déclaration d'un chemin : les six routes qui y étaient déclarées deux
+  fois ont été dédoublonnées le 3 novembre 2026, et `tests/unit/server/routes-hygiene.test.ts`
+  échoue désormais sur tout nouveau doublon (liste gelée vide). Un routeur de
+  `server/api/` monté avant `registerRoutes` masque aussi toute déclaration du même
+  chemin dans `routes.ts` (cas `/api/warehouse/*`).
 - `server/storage.ts` contient des méthodes bouchons (`{ return undefined; }`,
   `{ return { items: [], total: 0 }; }`). Aucune n'est appelée depuis le
   30 octobre 2026 : la liste gelée de `tests/unit/server/storage-stubs.test.ts`

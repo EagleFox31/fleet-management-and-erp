@@ -33,6 +33,8 @@ DECLARE
     days_overdue INTEGER;
     days_until INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Maintenance en retard
     IF NEW.next_maintenance_date IS NOT NULL AND NEW.next_maintenance_date < CURRENT_DATE THEN
         days_overdue := CURRENT_DATE - NEW.next_maintenance_date;
@@ -78,6 +80,8 @@ CREATE OR REPLACE FUNCTION check_vehicle_maintenance_mileage() RETURNS TRIGGER A
 DECLARE
     remaining_km INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     IF NEW.next_maintenance_mileage IS NOT NULL AND NEW.mileage IS NOT NULL THEN
         remaining_km := NEW.next_maintenance_mileage - NEW.mileage;
         
@@ -121,6 +125,8 @@ DECLARE
     days_until_technical INTEGER;
     days_until_license INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Assurance
     IF NEW.insurance_expiry IS NOT NULL THEN
         days_until_insurance := NEW.insurance_expiry - CURRENT_DATE;

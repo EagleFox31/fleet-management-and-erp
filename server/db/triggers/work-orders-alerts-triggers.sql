@@ -7,6 +7,8 @@ CREATE OR REPLACE FUNCTION check_work_order_overdue() RETURNS TRIGGER AS $$
 DECLARE
     days_past INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Ordres en retard (pending ou in_progress avec start_date dépassée)
     IF (NEW.status = 'pending' OR NEW.status = 'in_progress') 
        AND NEW.start_date IS NOT NULL 
@@ -39,6 +41,8 @@ CREATE OR REPLACE FUNCTION check_critical_pending_work_order() RETURNS TRIGGER A
 DECLARE
     hours_waiting INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Ordres critiques en attente
     IF NEW.status = 'pending' AND NEW.priority = 'critical' THEN
         hours_waiting := EXTRACT(EPOCH FROM (NOW() - NEW.created_at)) / 3600;

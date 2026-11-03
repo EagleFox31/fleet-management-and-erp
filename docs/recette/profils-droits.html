@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Droits par profil FleetMaster</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Concept : une bande de sélection de compte en haut, une carte mentale du profil, puis une carte par fonctionnalité qui se recolore selon le compte actif. */
+:root{
+  --bg:#f2f4f1; --surface:#ffffff; --fg:#17201e; --muted:#586763; --line:#d3dad6;
+  --accent:#14506b; --on-accent:#ffffff;
+  --ok:#1d7a4c; --ok-bg:#e0f1e7;
+  --warn:#9c5f08; --warn-bg:#fbeed3;
+  --block:#9b2f2f; --block-bg:#f9e1df;
+  --later:#66707c; --later-bg:#eceef1;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Barlow",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11181a; --surface:#192225; --fg:#e6eeeb; --muted:#9aa9a4; --line:#2c3a3d;
+  --accent:#6dbada; --on-accent:#0d1a20;
+  --ok:#62d19b; --ok-bg:#16322a;
+  --warn:#e3a94f; --warn-bg:#352a10;
+  --block:#f08c88; --block-bg:#3a1e1e;
+  --later:#a4acb6; --later-bg:#232a2e; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#11181a; --surface:#192225; --fg:#e6eeeb; --muted:#9aa9a4; --line:#2c3a3d;
+  --accent:#6dbada; --on-accent:#0d1a20;
+  --ok:#62d19b; --ok-bg:#16322a;
+  --warn:#e3a94f; --warn-bg:#352a10;
+  --block:#f08c88; --block-bg:#3a1e1e;
+  --later:#a4acb6; --later-bg:#232a2e; color-scheme:dark;}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:400 15px/1.5 var(--f-body);margin:0;
+  padding-block:0 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1100px;margin:0 auto}
+header.top{padding-top:28px}
+h1{font:700 40px/1.05 var(--f-display);letter-spacing:.01em;margin:0 0 8px;text-wrap:balance}
+.lead{color:var(--muted);max-width:68ch;margin:0}
+.src{margin-top:14px;padding:10px 14px;border:1px solid var(--line);background:var(--surface);border-radius:6px;font-size:13.5px;color:var(--muted)}
+.src b{color:var(--fg)}
+
+.switch{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding:14px 0 12px;margin-top:18px;border-bottom:1px solid var(--line)}
+.switch-label{font:600 12px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);
+  font:500 14px var(--f-body);padding:7px 12px 7px 8px;border-radius:999px;cursor:pointer}
+.tab .code{font:600 11px var(--f-mono);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--muted)}
+.tab[aria-selected="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.tab[aria-selected="true"] .code{background:transparent;color:var(--on-accent);border-color:currentColor}
+.tab:focus-visible,.leaf:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+.who{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-end;justify-content:space-between;margin:26px 0 6px}
+.who h2{font:700 30px/1.1 var(--f-display);margin:0}
+.who p{margin:4px 0 0;color:var(--muted);max-width:60ch}
+.counts{display:flex;gap:10px;flex-wrap:wrap}
+.count{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;min-width:116px}
+.count strong{display:block;font:700 28px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.count span{font-size:12.5px;color:var(--muted)}
+.count.ok strong{color:var(--ok)} .count.warn strong{color:var(--warn)} .count.later strong{color:var(--later)}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted);margin:14px 0 10px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:3px;border:1.5px solid;vertical-align:-2px;margin-right:6px}
+.lg-ok i{background:var(--ok-bg);border-color:var(--ok)} .lg-warn i{background:var(--warn-bg);border-color:var(--warn)}
+.lg-later i{background:var(--later-bg);border-color:var(--later);border-style:dashed} .lg-block i{background:var(--block-bg);border-color:var(--block)}
+.lg-dim i{background:transparent;border-color:var(--line)}
+
+.mapbox{border:1px solid var(--line);background:var(--surface);border-radius:10px;overflow-x:auto;padding:12px}
+.mapbox svg{display:block;width:100%;min-width:760px;height:auto}
+.hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+
+h2.sec{font:700 30px/1.1 var(--f-display);margin:48px 0 4px}
+.sec-lead{color:var(--muted);margin:0 0 6px;max-width:70ch}
+.feat{margin-top:30px;scroll-margin-top:150px}
+.feat-head{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+.feat h3{font:700 24px/1.1 var(--f-display);margin:0}
+.feat .desc{color:var(--muted);font-size:14px;flex-basis:100%;margin:0}
+.chip{font:600 12px var(--f-mono);border:1px solid var(--line);border-radius:999px;padding:2px 10px;background:var(--surface);color:var(--muted);white-space:nowrap}
+.flash .mapbox{outline:3px solid var(--accent);outline-offset:2px}
+
+.roles-key{margin-top:34px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:14px 16px}
+.roles-key h3{font:700 20px var(--f-display);margin:0 0 8px}
+.roles-key dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 20px;margin:0}
+.roles-key dt{font:600 12px var(--f-mono);color:var(--accent);display:inline}
+.roles-key dd{margin:0 0 0 6px;display:inline;font-size:14px}
+.roles-key div{min-width:0}
+.foot{margin-top:22px;font-size:13px;color:var(--muted);max-width:80ch}
+
+/* SVG */
+.edge{fill:none;stroke:var(--line);stroke-width:1.8}
+.edge.e-ok{stroke:var(--ok)} .edge.e-warn{stroke:var(--warn)} .edge.e-later{stroke:var(--later);stroke-dasharray:5 4} .edge.e-block{stroke:var(--block)}
+.center rect{fill:var(--accent)} .center text{fill:var(--on-accent)}
+.c1{font:700 19px var(--f-display)} .c2{font:500 11.5px var(--f-body);opacity:.9}
+.br rect{fill:var(--surface);stroke-width:2}
+.br.b-ok rect{stroke:var(--ok)} .br.b-warn rect{stroke:var(--warn)} .br.b-later rect{stroke:var(--later);stroke-dasharray:5 4} .br.b-block rect{stroke:var(--block)} .br.b-n rect{stroke:var(--accent)}
+.br text{fill:var(--fg)} .b1{font:700 15px var(--f-display);letter-spacing:.02em} .b2{font:500 11.5px var(--f-body);fill:var(--muted)!important}
+.leaf rect{fill:var(--surface);stroke:var(--line);stroke-width:1.3}
+.leaf.go{cursor:pointer}
+.leaf.go:hover rect{stroke-width:2.2}
+.t1{font:600 13px var(--f-body);fill:var(--fg)} .t2{font:500 11px var(--f-mono);fill:var(--muted)} .t3{font:400 11.5px var(--f-body);fill:var(--muted)}
+.t2 .me{font-weight:700;fill:var(--fg)}
+.st-ok rect{fill:var(--ok-bg);stroke:var(--ok)}
+.st-warn rect{fill:var(--warn-bg);stroke:var(--warn)}
+.st-later rect{fill:var(--later-bg);stroke:var(--later);stroke-dasharray:5 4}
+.st-block rect{fill:var(--block-bg);stroke:var(--block)}
+.st-dim rect{fill:transparent}
+.st-dim .t1{fill:var(--muted);font-weight:500}
+@media (max-width:640px){
+  h1{font-size:32px}
+  .switch{position:static}
+}
+@media (prefers-reduced-motion:no-preference){ .flash .mapbox{transition:outline-color .3s} }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <h1>Droits par profil</h1>
+  <p class="lead">Choisissez un compte : la carte du haut montre ce que ce profil peut faire, ce qui est encore en essai ou pas livré, et ce qui lui est refusé. Les cartes plus bas détaillent chaque fonctionnalité et se recolorent selon le compte actif.</p>
+  <div class="src"><b>Source et limites.</b> Lecture du code de la branche principale (commit bbdb0dd, 2 novembre 2026), des menus par profil et des PR ouvertes #53 et #54. Rien n'a été rejoué en recette pour produire cette page. Les fonctions « en essai » sont coupées tant que le drapeau n'est pas activé sur l'environnement.</div>
+</header>
+
+<nav class="switch" aria-label="Changer de compte">
+  <p class="switch-label">Compte actif</p>
+  <div class="tabs" id="tabs" role="tablist"></div>
+</nav>
+
+<section aria-live="polite">
+  <div class="who" id="who"></div>
+  <div class="legend">
+    <span class="lg-ok"><i></i>Disponible</span>
+    <span class="lg-warn"><i></i>En essai ou correctif en attente</span>
+    <span class="lg-later"><i></i>Pas encore livré</span>
+    <span class="lg-block"><i></i>Refusé à ce profil</span>
+    <span class="lg-dim"><i></i>Hors périmètre du compte actif</span>
+  </div>
+  <div class="mapbox" id="profile-map"></div>
+  <p class="hint">Cliquez sur un module de la carte pour aller à sa carte détaillée.</p>
+</section>
+
+<h2 class="sec">Une carte par fonctionnalité</h2>
+<p class="sec-lead">Pour chaque fonctionnalité : créer, consulter, modifier, supprimer et traitements. Sous chaque action, les profils autorisés ; le compte actif est en gras.</p>
+<div id="features"></div>
+
+<div class="roles-key"><h3>Codes des profils</h3><dl id="rolekey"></dl></div>
+<p class="foot">« Disponible » signifie que le garde de rôle du code l'autorise et que l'écran existe. « En essai » désigne une fonction livrée mais derrière un drapeau coupé par défaut. « Correctif en attente » désigne un défaut connu dont la correction n'est pas encore fusionnée. Les actions rangées sous « Supprimer » ne figurent que si une suppression existe réellement.</p>
+</div>
+
+<script>
+(function(){
+var ROLES=[
+ {id:'adm',code:'ADM',name:'Administrateur',memo:"L'administrateur débloque, il ne fait pas tout : supervision, sécurité, sauvegardes, secours des autres métiers."},
+ {id:'wm',code:'CHA',name:"Chef d'atelier",memo:"Le chef d'atelier valide le technique : ordres de travail, planning, demandes de pièces, pneus montés."},
+ {id:'tec',code:'TEC',name:'Technicien',memo:"Exécute ses interventions, demande des pièces et inspecte les pneus. Il ne sort pas de stock."},
+ {id:'sec',code:'SEC',name:'Secrétaire',memo:"La secrétaire verrouille l'administratif : documents, fournisseurs, factures, paiements, carte carburant."},
+ {id:'mag',code:'MAG',name:'Magasinier',memo:"Le magasinier a les clés du magasin : catalogue des pièces et pneus, entrée et sortie de stock."},
+ {id:'log',code:'LOG',name:'Logisticien',memo:"Le logisticien conduit les missions : véhicules, chauffeurs, carburant, facturation client."},
+ {id:'dir',code:'DIR',name:'Direction',memo:"Vue exécutive : indicateurs, corridors, rapports. Elle consulte, elle n'agit pas sur les opérations."},
+ {id:'drv',code:'CHF',name:'Chauffeur',memo:"Interface mobile dédiée : ses missions, son CPC, la déclaration de panne."},
+ {id:'cli',code:'CLI',name:'Client',memo:"Ne voit que ses propres véhicules et leurs documents. Aucun export de masse."}
+];
+var BY={};ROLES.forEach(function(r){BY[r.id]=r;});
+var STAFF=['adm','wm','tec','sec','mag','log','dir','drv'];
+var ALL=STAFF.concat(['cli']);
+var P=['adm','sec','log','mag'];
+var KINDS=[['C','Créer'],['R','Consulter'],['U','Modifier'],['D','Supprimer'],['T','Traitements']];
+
+/* op = [type, libellé, profils, statut (live|flag|reserve|later), note] */
+var F=[
+ {id:'veh',name:'Véhicules et documents',desc:"Parc, acquisition, documents réglementaires et alertes avant échéance.",ops:[
+  ['R','Lister et consulter les véhicules',STAFF,'live','Le client voit les siens seulement'],
+  ['C','Acquérir un véhicule, joindre ses documents',['adm','log','sec','wm','cli'],'live','Le client voit ses dossiers seulement'],
+  ['C','Créer et modifier les 9 types de document',['adm'],'live'],
+  ['U','Saisir kilométrage et position',STAFF,'live','Le client consulte, il ne saisit pas'],
+  ['T','Renouveler un document (alerte à 30 jours)',['adm','sec','log','wm'],'live'],
+  ['R','Coût cumulé d’un véhicule',['adm','dir','wm','log'],'flag','Drapeau : coût d’un véhicule']
+ ]},
+ {id:'drv',name:'Chauffeurs et pointage',desc:"Dossier de conformité du chauffeur, accès mobile et pointage mensuel.",ops:[
+  ['R','Consulter les fiches chauffeurs',['adm','sec','log'],'live'],
+  ['C','Créer un chauffeur (CNI, permis, CPC)',['adm','log','sec'],'live'],
+  ['U','Modifier et activer un chauffeur',['adm','log','sec'],'live'],
+  ['R','Voir ses missions et son CPC',['drv'],'reserve','Correctif en attente : #53'],
+  ['T','Déclarer une panne depuis le mobile',['drv','adm'],'flag','Drapeau : déclaration de panne'],
+  ['C','Saisir le pointage mensuel',['adm','log'],'flag','Drapeau : pointage'],
+  ['R','Consulter le pointage',['adm','log','sec','dir'],'flag','Drapeau : pointage'],
+  ['R','Performance des chauffeurs',['dir'],'live']
+ ]},
+ {id:'fuel',name:'Carburant',desc:"Carte carburant, pleins, bons, anomalies de consommation et prix du litre.",ops:[
+  ['R','Consulter la carte et les pleins',['adm','wm','sec','log'],'live'],
+  ['C','Recharger la carte carburant',['adm','log','sec'],'live'],
+  ['C','Saisir un plein',['adm','wm','sec','log'],'live'],
+  ['R','Consulter bons, anomalies et prix du jour',['adm','log','sec','wm','dir'],'flag','Drapeaux : bons, anomalies, prix'],
+  ['T','Valider un bon de carburant',['adm','log','sec'],'flag','Drapeau : bons de carburant'],
+  ['T','Traiter une anomalie de consommation',['adm','log','sec'],'flag','Drapeau : anomalies carburant'],
+  ['U','Fixer le prix du litre (828 FCFA par défaut)',['adm','log'],'flag','Drapeau : prix du carburant']
+ ]},
+ {id:'wo',name:'Ordres de travail et atelier',desc:"Du planning d'atelier à la clôture de l'ordre de travail, avec export Word.",ops:[
+  ['C','Créer un OT et affecter un technicien',['adm','wm'],'live'],
+  ['R','Planning et calendrier d’atelier',['adm','wm'],'live'],
+  ['R','Voir ses interventions',['tec'],'live'],
+  ['R','Suivre l’équipe de techniciens',['wm'],'live'],
+  ['U','Planifier le préventif',['adm','wm'],'live'],
+  ['T','Refuser une double affectation (créneau)',['adm','wm'],'live'],
+  ['T','Démarrer et avancer ses interventions',['tec'],'live','Transitions limitées au technicien'],
+  ['T','Exporter l’OT et le bon de sortie en Word',['adm','wm','tec','sec','mag','log','dir'],'live','Droits selon le document'],
+  ['R','Historique d’un ordre de travail',STAFF,'flag','Drapeau : historique d’OT'],
+  ['T','Contrôle qualité avant clôture',['adm','wm'],'flag','Drapeau : contrôle qualité'],
+  ['R','Pannes déclarées, création de l’OT',['adm','wm'],'flag','Drapeau : déclaration de panne'],
+  ['U','Intervalles de vidange préremplis',['adm','wm'],'flag','Drapeau : vidange préremplie']
+ ]},
+ {id:'parts',name:'Pièces et stock',desc:"Catalogue, niveaux de stock, alertes de stock bas et rapport d'inventaire.",ops:[
+  ['R','Consulter l’inventaire des pièces',['adm','wm','sec','mag'],'live'],
+  ['C','Créer une fiche pièce',['adm','mag'],'live'],
+  ['U','Modifier une fiche pièce',['adm','mag'],'live'],
+  ['U','Ajuster le stock, sortir une pièce',['adm','mag','wm'],'live'],
+  ['D','Supprimer une pièce',['adm'],'live'],
+  ['R','Alertes de stock bas',['mag'],'live'],
+  ['R','Rapport d’inventaire',['adm','dir','wm','mag','sec'],'live']
+ ]},
+ {id:'req',name:'Demandes de pièces',desc:"En attente, Approuvée, Commandée, Entrée en stock, Sortie du stock.",ops:[
+  ['C','Créer une demande de pièce',['adm','wm','tec','mag'],'live'],
+  ['R','Suivre les demandes et leur statut',['adm','wm','tec','sec','mag'],'live'],
+  ['T','Approuver ou rejeter une demande',['adm','wm','sec'],'live'],
+  ['T','Commander la pièce au fournisseur',['adm','mag','sec','log'],'live','Logisticien à retirer du flux pièces'],
+  ['T','Entrée en stock à la réception',['adm','mag','sec'],'live','Le réceptionnaire est tracé'],
+  ['T','Sortie du stock vers l’atelier',['adm','mag','wm'],'live','Le technicien ne sort pas de stock'],
+  ['T','Réception signée des pièces',['adm','mag'],'flag','Drapeau : réception signée']
+ ]},
+ {id:'tires',name:'Pneus',desc:"Le magasinier entre le pneu au stock, l'atelier le sort vers un véhicule.",ops:[
+  ['R','Consulter l’inventaire des pneus',STAFF,'live'],
+  ['C','Créer une fiche pneu en stock',['adm','mag'],'live'],
+  ['U','Modifier une fiche pneu',['adm','mag'],'live'],
+  ['D','Supprimer une fiche pneu',['adm'],'live'],
+  ['T','Monter, démonter, faire une rotation',['adm','wm'],'live'],
+  ['T','Inspecter un pneu',['adm','wm','tec'],'live'],
+  ['R','Journal des mouvements de pneus',['adm','dir','wm','mag','tec'],'flag','Drapeau : mouvements de pneus']
+ ]},
+ {id:'proc',name:'Fournisseurs, commandes, factures fournisseur',desc:"Du bon de commande au paiement, avec rapprochement à trois voies.",ops:[
+  ['R','Consulter les fournisseurs',['adm','sec','log','mag','wm'],'live'],
+  ['C','Créer un fournisseur',P,'live'],
+  ['U','Modifier, évaluer, désactiver un fournisseur',P,'live'],
+  ['C','Créer un bon de commande',P,'live'],
+  ['T','Réceptionner une commande',P,'live'],
+  ['C','Enregistrer une facture fournisseur',P,'live'],
+  ['T','Solde initial TTC, doublon de numéro refusé',P,'reserve','Correctif en attente : #54'],
+  ['T','Rapprochement à 3 voies (écart de 5 %)',['adm','sec'],'live','Scénario de recette R-09'],
+  ['T','Paiement idempotent, trop-perçu refusé',['adm','sec'],'live']
+ ]},
+ {id:'ops',name:'Missions et facturation client',desc:"Planification des missions, contrôle de lancement, factures et encaissements.",ops:[
+  ['R','Consulter les missions',['log'],'live'],
+  ['C','Créer une mission',['log'],'live'],
+  ['U','Modifier une mission et son statut',['log'],'live'],
+  ['T','Contrôler le lancement d’une mission',['log'],'live'],
+  ['C','Établir une facture client',['adm','sec','log'],'live'],
+  ['T','Enregistrer un paiement partiel puis total',['adm','sec','log'],'live'],
+  ['R','Factures en attente, par ancienneté',['adm','dir','sec','log'],'flag','Drapeau : factures en attente']
+ ]},
+ {id:'dir',name:'Pilotage direction',desc:"Indicateurs du cahier des charges, corridors, équipe et rapports de direction.",ops:[
+  ['R','Tableau de bord et 3 indicateurs du cahier',['adm','dir'],'live','Incidents, conformité préventive, coût moyen'],
+  ['R','Carte des corridors CEMAC',['dir'],'live'],
+  ['R','Mon équipe',['dir'],'live'],
+  ['R','Board pack et audit flotte (TCO)',['dir'],'live'],
+  ['R','Performance des techniciens',['adm','dir','wm'],'live'],
+  ['R','Trésorerie et recouvrement',['dir'],'later','Hors cahier : formules à valider'],
+  ['T','Envoi automatique des rapports',['dir'],'later','Prochain lot']
+ ]},
+ {id:'admin',name:'Administration et sécurité',desc:"Comptes, verrouillage, journal d'audit, sauvegardes et notifications.",ops:[
+  ['C','Créer et gérer les utilisateurs',['adm'],'live'],
+  ['T','Déverrouiller un compte (5 échecs, 15 min)',['adm'],'live'],
+  ['R','Journal d’audit : qui a fait quoi',['adm'],'live'],
+  ['R','Sauvegardes : état et lancement manuel',['adm'],'live','Conservation 12 mois'],
+  ['U','Workflows et paramètres',['adm'],'live'],
+  ['U','Régler ses notifications dans l’application',ALL,'live'],
+  ['T','Alertes par e-mail',ALL,'later','Serveur d’envoi attendu (Q-09)'],
+  ['T','SMS et notifications mobiles',ALL,'later','Fournisseur à choisir'],
+  ['T','Connexion unique Microsoft ou Google',ALL,'later','Fournisseur à choisir'],
+  ['T','Restauration en un clic',['adm'],'later','Exercice de restauration d’abord']
+ ]},
+ {id:'cli',name:'Espace client',desc:"Cloison stricte : le client ne voit que ce qui lui appartient.",ops:[
+  ['R','Voir ses véhicules et leurs documents',['cli'],'live','Cloison par propriétaire'],
+  ['R','Tableau de bord client',['cli'],'live'],
+  ['T','Exporter ses propres données',['cli'],'later','Besoin à confirmer']
+ ]},
+ {id:'next',name:'Prochains lots',desc:"Hors périmètre de la recette : aucune date promise tant que les réponses du client manquent.",ops:[
+  ['R','Suivi GPS des véhicules',['adm','log','dir'],'later','Fournisseur de balises à choisir'],
+  ['R','Tarifs et rentabilité par opération',['adm','dir','log'],'later','Formule retenue attendue'],
+  ['R','QHSE',['adm','dir'],'later','Hors cahier : périmètre à confirmer']
+ ]}
+];
+
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function tr(s,n){return s.length>n?s.slice(0,n-1)+'…':s;}
+function has(op,p){return op[2].indexOf(p)>-1;}
+function plural(n,w){return n+' '+w+(n>1?'s':'');}
+
+/* Rendu générique d'une carte mentale horizontale */
+function mapSVG(o){
+  var LW=o.leafW,LH=o.leafH,G=10,BG=18,BH=46,BW=190,CW=176,CH=70;
+  var bx=250,lx=bx+BW+60,W=lx+LW+10,y=10,blocks=[];
+  o.branches.forEach(function(b){
+    var n=b.leaves.length,h=n*LH+(n-1)*G;
+    blocks.push({b:b,y:y,h:h,cy:y+h/2});y+=h+BG;
+  });
+  var H=y-BG+10,cy=H/2,out=[];
+  out.push('<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(o.aria)+'" xmlns="http://www.w3.org/2000/svg">');
+  blocks.forEach(function(k){
+    out.push('<path class="edge e-'+k.b.tone+'" d="M'+(10+CW)+','+cy+' C'+(10+CW+36)+','+cy+' '+(bx-36)+','+k.cy+' '+bx+','+k.cy+'"/>');
+    k.b.leaves.forEach(function(l,i){
+      var ly=k.y+i*(LH+G)+LH/2;
+      out.push('<path class="edge e-'+k.b.tone+'" d="M'+(bx+BW)+','+k.cy+' C'+(bx+BW+30)+','+k.cy+' '+(lx-30)+','+ly+' '+lx+','+ly+'"/>');
+    });
+  });
+  out.push('<g class="center"><rect x="10" y="'+(cy-CH/2)+'" width="'+CW+'" height="'+CH+'" rx="10"/><text class="c1" x="'+(10+CW/2)+'" y="'+(cy-3)+'" text-anchor="middle">'+esc(o.center)+'</text><text class="c2" x="'+(10+CW/2)+'" y="'+(cy+16)+'" text-anchor="middle">'+esc(o.centerSub||'')+'</text></g>');
+  blocks.forEach(function(k){
+    out.push('<g class="br b-'+k.b.tone+'"><rect x="'+bx+'" y="'+(k.cy-BH/2)+'" width="'+BW+'" height="'+BH+'" rx="8"/><text class="b1" x="'+(bx+12)+'" y="'+(k.cy-3)+'">'+esc(k.b.label)+'</text><text class="b2" x="'+(bx+12)+'" y="'+(k.cy+14)+'">'+esc(k.b.sub||'')+'</text></g>');
+    k.b.leaves.forEach(function(l,i){
+      var ly=k.y+i*(LH+G);
+      var go=l.go?' go" data-go="'+l.go+'" tabindex="0" role="link" aria-label="'+esc(l.l1+' '+(l.l2||''))+'':'';
+      out.push('<g class="leaf '+l.cls+(go?go:'')+'"'+(go?'':'')+'>');
+      out.push('<rect x="'+lx+'" y="'+ly+'" width="'+LW+'" height="'+LH+'" rx="7"/>');
+      out.push('<text class="t1" x="'+(lx+12)+'" y="'+(ly+19)+'">'+esc(l.l1)+'</text>');
+      if(l.l2h){out.push('<text class="t2" x="'+(lx+12)+'" y="'+(ly+35)+'">'+l.l2h+'</text>');}
+      else if(l.l2){out.push('<text class="t3" x="'+(lx+12)+'" y="'+(ly+36)+'">'+esc(l.l2)+'</text>');}
+      if(l.l3){out.push('<text class="t3" x="'+(lx+12)+'" y="'+(ly+49)+'">'+esc(l.l3)+'</text>');}
+      out.push('</g>');
+    });
+  });
+  out.push('</svg>');
+  return out.join('');
+}
+
+function statFor(op,p){
+  var a=has(op,p),s=op[3];
+  if(s==='later') return a?'later':'dim';
+  if(!a) return 'dim';
+  return s==='live'?'ok':'warn';
+}
+
+/* Carte du profil */
+function profileMap(p){
+  var ok=[],warn=[],later=[],block=[];
+  F.forEach(function(f){
+    var liveA=0,liveD=0,any=0;
+    f.ops.forEach(function(op){
+      var a=has(op,p);
+      if(op[3]==='live'){ if(a){liveA++;any++;} else liveD++; }
+      else if(a){ any++;
+        var item={cls:op[3]==='later'?'st-later':'st-warn',l1:tr(op[1],44),l2:tr(op[4]||'',48),go:f.id};
+        (op[3]==='later'?later:warn).push(item);
+      }
+    });
+    if(liveA) ok.push({cls:'st-ok',l1:tr(f.name,40),l2:plural(liveA,'action'),go:f.id});
+    if(!any){ block.push({cls:'st-block',l1:tr(f.name,40),l2:'Module fermé à ce profil',go:f.id}); }
+    else if(liveD){ block.push({cls:'st-block',l1:tr(f.name,40),l2:plural(liveD,'autre action')+' refusée'+(liveD>1?'s':''),go:f.id}); }
+  });
+  function cap(arr,n){ if(arr.length<=n) return arr; var extra=arr.length-(n-1); var r=arr.slice(0,n-1); r.push({cls:arr[0].cls,l1:'+ '+extra+' autres',l2:'Voir les cartes détaillées'}); return r; }
+  var br=[];
+  if(ok.length) br.push({tone:'ok',label:'Peut faire',sub:plural(ok.length,'module'),leaves:ok});
+  if(warn.length) br.push({tone:'warn',label:'En essai ou correctif',sub:plural(warn.length,'fonction'),leaves:cap(warn,9)});
+  if(later.length) br.push({tone:'later',label:'Pas encore livré',sub:plural(later.length,'fonction'),leaves:cap(later,8)});
+  if(block.length) br.push({tone:'block',label:'Refusé à ce profil',sub:plural(block.length,'module'),leaves:cap(block,9)});
+  return mapSVG({center:BY[p].name,centerSub:'Compte actif',branches:br,leafW:330,leafH:44,aria:'Carte des droits du profil '+BY[p].name});
+}
+
+/* Carte d'une fonctionnalité */
+function featureMap(f,p){
+  var br=[];
+  KINDS.forEach(function(k){
+    var ops=f.ops.filter(function(o){return o[0]===k[0];});
+    if(!ops.length) return;
+    var leaves=ops.map(function(op){
+      var st=statFor(op,p);
+      var roles=op[2];
+      var codes;
+      if(roles.length>=STAFF.length && roles.indexOf('drv')>-1){
+        codes = roles.indexOf('cli')>-1 ? '<tspan'+(has(op,p)?' class="me"':'')+'>TOUS LES PROFILS</tspan>' : '<tspan'+(has(op,p)?' class="me"':'')+'>TOUT LE PERSONNEL</tspan>';
+      } else {
+        codes=roles.map(function(r){return '<tspan'+(r===p?' class="me"':'')+'>'+BY[r].code+'</tspan>';}).join(' · ');
+      }
+      var tag = op[3]==='flag'?'  [essai]':op[3]==='reserve'?'  [correctif]':op[3]==='later'?'  [à venir]':'';
+      return {cls:'st-'+st,l1:op[1],l2h:codes+esc(tag),l3:op[4]?tr(op[4],62):''};
+    });
+    br.push({tone:'n',label:k[1],sub:plural(ops.length,'action'),leaves:leaves});
+  });
+  return mapSVG({center:f.name,centerSub:'Fonctionnalité',branches:br,leafW:440,leafH:56,aria:'Carte de la fonctionnalité '+f.name});
+}
+
+function counts(p){
+  var ok=0,w=0,l=0;
+  F.forEach(function(f){f.ops.forEach(function(op){ if(!has(op,p)) return; if(op[3]==='live') ok++; else if(op[3]==='later') l++; else w++; });});
+  return {ok:ok,w:w,l:l};
+}
+
+var current='log';
+function render(){
+  var r=BY[current],c=counts(current);
+  document.getElementById('who').innerHTML=
+    '<div><h2>'+esc(r.name)+'</h2><p>'+esc(r.memo)+'</p></div>'+
+    '<div class="counts"><div class="count ok"><strong>'+c.ok+'</strong><span>actions disponibles</span></div>'+
+    '<div class="count warn"><strong>'+c.w+'</strong><span>en essai ou correctif</span></div>'+
+    '<div class="count later"><strong>'+c.l+'</strong><span>pas encore livrées</span></div></div>';
+  document.getElementById('profile-map').innerHTML=profileMap(current);
+  var h='';
+  F.forEach(function(f){
+    var a=0;f.ops.forEach(function(op){ if(has(op,current)&&op[3]!=='later') a++; });
+    h+='<section class="feat" id="f-'+f.id+'"><div class="feat-head"><h3>'+esc(f.name)+'</h3><span class="chip">'+esc(r.name)+' : '+a+' sur '+f.ops.length+' actions</span><p class="desc">'+esc(f.desc)+'</p></div><div class="mapbox">'+featureMap(f,current)+'</div></section>';
+  });
+  document.getElementById('features').innerHTML=h;
+  var tabs=document.querySelectorAll('.tab');
+  for(var i=0;i<tabs.length;i++){ tabs[i].setAttribute('aria-selected',tabs[i].dataset.id===current?'true':'false'); }
+}
+
+function select(id,fromHash){
+  if(!BY[id]) return;
+  current=id;
+  try{ localStorage.setItem('fm-profil',id); }catch(e){}
+  if(!fromHash){ try{ history.replaceState(null,'','#p-'+id); }catch(e){} }
+  render();
+}
+
+(function init(){
+  var t=document.getElementById('tabs'),h='';
+  ROLES.forEach(function(r){ h+='<button class="tab" role="tab" type="button" data-id="'+r.id+'" aria-selected="false"><span class="code">'+r.code+'</span>'+esc(r.name)+'</button>'; });
+  t.innerHTML=h;
+  t.addEventListener('click',function(e){ var b=e.target.closest('.tab'); if(b) select(b.dataset.id); });
+  var k='';
+  ROLES.forEach(function(r){ k+='<div><dt>'+r.code+'</dt><dd>'+esc(r.name)+'</dd></div>'; });
+  document.getElementById('rolekey').innerHTML=k;
+  document.addEventListener('click',function(e){ go(e.target.closest('[data-go]')); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Enter'){ go(e.target.closest&&e.target.closest('[data-go]')); } });
+  window.addEventListener('hashchange',function(){ var m=/^#p-([a-z]+)$/.exec(location.hash); if(m&&m[1]!==current) select(m[1],true); });
+  var start=null,m=/^#p-([a-z]+)$/.exec(location.hash);
+  if(m&&BY[m[1]]) start=m[1];
+  if(!start){ try{ var s=localStorage.getItem('fm-profil'); if(s&&BY[s]) start=s; }catch(e){} }
+  select(start||'log',true);
+})();
+
+function go(el){
+  if(!el) return;
+  var target=document.getElementById('f-'+el.getAttribute('data-go'));
+  if(!target) return;
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'});
+  target.classList.add('flash');
+  setTimeout(function(){ target.classList.remove('flash'); },1400);
+}
+})();
+</script>
+
+</html>
