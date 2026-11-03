@@ -1890,3 +1890,11 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un service qui écrit un fichier avant une ligne en base supprime ce fichier si l'écriture en base échoue. Les autres cas déjà couverts : documents véhicule, récépissé de renouvellement, preuves de règlement fournisseur.
+
+### Carte grise : la check-list de lancement contredisait le lancement (2026-11-03)
+
+- **Contexte** : `GET /api/missions/:id/launch-readiness` déclarait « Carte grise conforme » dès qu’un document existait. Le lancement (`PUT /status` → `in_progress`) refusait pourtant une carte grise expirée. La check-list affichait donc « prêt » pour une mission que le lancement rejetait.
+- **Cause racine** : deux règles pour le même papier. `isDocumentTypeValid("carte_grise")` renvoyait `true` sans lire l’échéance ni le récépissé.
+- **Résolution** : la check-list applique la règle du lancement. Une carte grise sans date ne bloque pas. Datée, elle bloque dès le jour de l’échéance (jour UTC). Le récépissé « plaque » lève l’échéance dépassée, et le détail le nomme. Les demandes de renouvellement depuis la mission, qui passent par la même fonction, proposent désormais une carte grise expirée.
+- **Prévention vérifiable** : `tests/contract/mission-renewal-receipt.contract.test.ts`, bloc « carte grise : préparation alignée sur le lancement ». Sans le correctif, quatre cas passent au rouge.
+- **Leçon** : un écran de préparation qui annonce un résultat doit appeler la même règle que l’action qu’il prépare. Reste à aligner : les colonnes miroir de `vehicles`, que le lancement contrôle par `getMissionEligibility` et que la check-list ignore encore.

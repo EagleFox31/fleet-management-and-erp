@@ -45,7 +45,7 @@ async function driver() {
   return d;
 }
 
-async function addDoc(vehicleId: number, type: "carte_grise" | "assurance" | "visite_technique", expiryDate: string) {
+async function addDoc(vehicleId: number, type: "carte_grise" | "assurance" | "visite_technique", expiryDate: string | null) {
   const [doc] = await db
     .insert(vehicleDocuments)
     .values({ vehicleId, name: `TEST ${type}`, type, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf", expiryDate })
@@ -56,7 +56,7 @@ async function addDoc(vehicleId: number, type: "carte_grise" | "assurance" | "vi
 async function addReceipt(
   vehicleId: number,
   vehicleDocumentId: number,
-  documentType: "assurance" | "visite_technique",
+  documentType: "carte_grise" | "assurance" | "visite_technique",
   validUntil: string,
 ) {
   await db.insert(documentRenewalRequests).values({
@@ -213,3 +213,54 @@ describe("récépissé provisoire : préparation et lancement", { timeout: 60000
   });
 });
 
+describe("carte grise : préparation alignée sur le lancement", { timeout: 60000 }, () => {
+  /** Véhicule aux papiers valides, sauf la carte grise (échéance donnée, ou sans date). */
+  async function vehicleWithCarteGrise(expiryDate: string | null) {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const carteGrise = await addDoc(vehicle.id, "carte_grise", expiryDate);
+    await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    return { vehicle, carteGrise };
+  }
+
+  it("carte grise expirée : item bloquant à faux, comme le lancement qui la refuse", async () => {
+    const { vehicle } = await vehicleWithCarteGrise(inDays(-3));
+    const missionId = await assignedMission(vehicle.id);
+    const check = await readinessCheck(missionId, "doc_carte_grise");
+    expect(check).toMatchObject({ passed: false, blocking: true, detail: "Carte grise expirée." });
+    const launched = await launch(missionId);
+    expect(launched.status).toBe(400);
+    expect(JSON.stringify(launched.body)).toContain("Carte grise expirée.");
+  });
+
+  it("le jour de l'échéance bloque, comme au lancement", async () => {
+    const { vehicle } = await vehicleWithCarteGrise(inDays(0));
+    const missionId = await assignedMission(vehicle.id);
+    expect((await readinessCheck(missionId, "doc_carte_grise")).passed).toBe(false);
+  });
+
+  it("récépissé valable : item vrai, qui nomme le récépissé", async () => {
+    const { vehicle, carteGrise } = await vehicleWithCarteGrise(inDays(-3));
+    const missionId = await assignedMission(vehicle.id);
+    await addReceipt(vehicle.id, carteGrise.id, "carte_grise", inDays(10));
+    const check = await readinessCheck(missionId, "doc_carte_grise");
+    expect(check.passed).toBe(true);
+    expect(check.detail).toContain("récépissé provisoire");
+  });
+
+  it("carte grise sans date (papier permanent) ou à échéance future : item vrai", async () => {
+    for (const expiry of [null, inDays(30)]) {
+      const { vehicle } = await vehicleWithCarteGrise(expiry);
+      const missionId = await assignedMission(vehicle.id);
+      expect(await readinessCheck(missionId, "doc_carte_grise")).toMatchObject({ passed: true, detail: "Carte grise valide." });
+    }
+  });
+
+  it("carte grise absente : item faux, « manquante »", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const missionId = await assignedMission(vehicle.id);
+    expect(await readinessCheck(missionId, "doc_carte_grise")).toMatchObject({ passed: false, detail: "Carte grise manquante." });
+  });
+});
