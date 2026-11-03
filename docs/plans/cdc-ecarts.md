@@ -81,3 +81,16 @@ Base d'intégration `lot/int/CDC-0-base` : fusion de DB-1 et CDC-0a, créée par
 - **#56** : reprise locale (d406368 pour le service worker seul, 0180483 pour le reste), non poussée. Le force push a été refusé par les permissions ; décision de l'utilisateur en attente. Une leçon dans `LESSONS_LEARNED.md` est à écrire ensuite.
 - **Vague B lancée** : CDC-0b socle client (`lot/fe/CDC-0-socle-ui`) et #7 KPI serveur (`lot/api/CDC-7-kpi`), tous deux sur la branche d'intégration `lot/int/CDC-0-base` (#57 et #55).
 - **Décisions ajoutées** : 11 (force push de #56 ou nouvelle branche), 12 (correctif du service worker d406368 avant la recette, par dérogation au gel), 13 (amendement par la session de tests des tests existants que #7 rend rouges).
+
+## Lot #10c — périmètre obligatoire hérité de la relecture de #56 (2026-11-03)
+
+Réserves d'aa (fleet-relecteur + fleet-securite) sur CDC-10a, à livrer avant la mise en production du hors ligne :
+
+- **R2, déconnexion interrompue** : purger le stockage local avant l'appel réseau `POST /api/auth/logout`, ou dans la branche « pending » de `session-resume.ts`. Un onglet fermé pendant l'appel ne doit rien laisser de lisible.
+- **S1, onglets** : diffuser la déconnexion par `BroadcastChannel` (ou l'événement `storage`) ; avant de rejouer la file, vérifier par `/api/auth/me` que le compte connecté en est bien le propriétaire.
+- **Perte de la file à la déconnexion volontaire** : décision utilisateur en attente (analyse fleet-produit), au minimum avertir avant de détruire des écritures non synchronisées.
+- **Tests** : `session-resume` quand `/me` renvoie un autre utilisateur, et sur un appel concurrent ; `sw.js` sur une requête d'une autre origine.
+- **Déconnexion différée** : repère sans expiration, et un 403 renvoyé par `/logout` laisse l'attente sans fin. Il faut une durée de vie et un traitement explicite.
+- **Recette** : consigne « ouvrir une fois l'application en ligne » avant tout usage hors ligne, puisque la PR a retiré le démarrage hors ligne authentifié.
+- **Données en clair dans IndexedDB** : risque résiduel sur appareil partagé, à documenter ou à chiffrer.
+- **Clé globale `currentVehicleRegistration`** (`form-draft-storage.ts`) : à cloisonner par compte.
