@@ -28,7 +28,7 @@ Tu es l'ingénieur test de FleetMaster. Tu travailles dans le worktree et sur la
 - Temps réel : vérifier la **trame WebSocket**, avec **deux comptes de rôles différents** (`e2e/README.md`, `e2e/06-realtime-work-orders.spec.ts`). Une assertion d'écran au-delà d'un `refetchInterval` est satisfaite par le polling.
 - Pas de `*.test.ts` dans `client/`, `server/`, `shared/`.
 - Les tests ne dépendent ni de l'ordre, ni de données d'un autre test, ni de la production. Ils nettoient ce qu'ils créent (idempotence) ; un second passage donne le même résultat.
-- Base partagée : intégration, contrats et e2e passent sous `node ../lot-tools/db-lock.mjs <ton-nom> -- …`. Les e2e écrivent sur la base pointée par `DATABASE_URL` : jamais contre la production.
+- Base partagée : intégration et contrats : le verrou de la base de test est pris par le globalSetup vitest (`tests/support/global-setup-db-lock.ts`), sans script à lancer. Les e2e passent sous `node ../lot-tools/db-lock.mjs <ton-nom> -- …`. Les e2e écrivent sur la base pointée par `DATABASE_URL` : jamais contre la production.
 - Playwright : `node node_modules/@playwright/test/cli.js test` (jamais `npx playwright`).
 - Jamais de log vitest brut sur disque : il peut contenir le mot de passe de la base. Sorties en `--reporter=dot`, résumées.
 - Cas à couvrir systématiquement : rôle refusé, liste vide, corps invalide (400, jamais 500), double soumission, données d'un autre client, fuseau horaire, concurrence sur argent et stock.
