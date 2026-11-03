@@ -1432,3 +1432,44 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une règle d'échéance et la date du jour passent par `shared/constants/expiry-day.ts`. Jamais de `new Date().toISOString().slice(0, 10)` ni d'accesseur local (`getDate`, `getFullYear`) pour comparer une échéance.
+
+## 2026-11-03 - Portée temps réel fermée par défaut
+
+### Constat
+- Trois fuites de diffusion WebSocket vers des clients, corrigées une à une : #53, #127, et #151 (renouvellement de documents, pas encore fusionnée). Chaque fois, un événement destiné à une portée rôle ou nominative atteignait tous les comptes connectés, clients compris.
+
+### Cause racine
+- `normalizeScope` (`server/index.ts`) retombait en `broadcast` global dès que la portée était invalide : `userIds` vide ou contenant `null`, `roles` vide, objet sans cible, portée absente sans 3e argument. Une portée calculée qui se retrouvait vide (compte sans id, liste de rôles filtrée) partait donc à tout le monde. Le défaut était ouvert ; chaque appelant devait penser à fermer.
+- Classification : défaut de sécurité par défaut ouvert (échec silencieux vers le plus permissif), répété trois fois.
+
+### Résolution
+- Règle extraite dans `server/lib/realtime-scope.ts` (module pur : `normalizeScope`, `resolveRecipients`). Portée absente ou invalide : aucun destinataire, avertissement `moduleLogger("websocket")` avec l'événement, l'entité et la forme de la portée, sans identifiant ni rôle. Le broadcast ne part que par `scope: { type: "broadcast" }`.
+- Les 22 appels sans portée, soit 20 points d'émission (OT, demandes de pièce, lignes de travail, réception de pièces) reposaient sur le repli : rendus explicites à l'identique (broadcast), donc listés et justifiés dans le test d'hygiène. Restreindre ces événements est une décision produit à part.
+
+### Prévention (vérifiable)
+- `tests/unit/server/realtime-scope.test.ts` : rôle, userId, combinaison, portée invalide sans destinataire (15 formes), broadcast explicite, client tiers jamais atteint. Rouge démontré sur la règle copiée de main (16 échecs sur 23).
+- `tests/unit/server/broadcast-hygiene.test.ts` : gèle les `type: "broadcast"` de `server/` (fichier et nombre, justification par entrée). Échoue sur tout ajout (« utiliser une portée rôle/user ; un broadcast doit être ajouté à la liste avec justification ») et sur toute entrée devenue fausse : la liste ne peut que rétrécir.
+
+### Règle Projet (obligatoire)
+- Fermé par défaut pour toute diffusion : une cible absente, vide ou invalide n'envoie rien et se journalise ; l'ouverture à tous se demande par écrit. Un événement multi-profils choisit une portée rôle ou nominative ; un nouveau broadcast s'ajoute à la liste gelée avec sa justification.
+
+## 2026-11-03 - e2e intermittent : titre de toast dupliqué par l'annonce aria-live (DRV2-1)
+
+### Constat
+- `e2e/19-driver-space.spec.ts`, DRV2-1 (« la déclaration de panne du chauffeur est acceptée ») : rouge une fois sur trois environ, vert au rejeu isolé. Classé « instable » le 3/11 sans cause, rouge non reproduit sur 14 passages.
+- Reproduit avec trace sur Postgres local : le POST de la panne rend 201, le toast est affiché, puis `strict mode violation: getByText('Problème signalé') resolved to 2 elements`.
+
+### Cause racine
+- Le Toast Radix annonce son contenu dans un `<span role="status" aria-live>` passager (« Notification Problème signalé… »). Si l'assertion tombe dans cette fenêtre, `getByText` sans `exact` (correspondance par sous-chaîne) trouve le titre et l'annonce.
+- Classification : localisateur de test ambigu, dépendant du temps. Pas un défaut du produit.
+- Near miss pendant le diagnostic : `response.text()` sur une réponse passée par le service worker PWA ne rend jamais la main (test bloqué jusqu'au timeout de 180 s, sur un 201).
+
+### Résolution
+- `getByText("Problème signalé", { exact: true })`. Le corps de la réponse n'est lu qu'en échec, borné à 5 s, et figure dans le message d'assertion.
+
+### Prévention (vérifiable)
+- `tests/unit/e2e/toast-title-exact-hygiene.test.ts` : tout `getByText("<titre>")` d'un e2e dont le texte est un titre littéral de `toast({ title })` du client doit porter `{ exact: true }`. Rouge démontré sur la spec 19 d'origine.
+
+### Règle Projet (obligatoire)
+- Un e2e affirme le titre d'un toast avec `{ exact: true }` (ou par rôle dans la région « Notifications »). Un rouge intermittent se qualifie avec une trace (`--repeat-each`, `trace: retain-on-failure`) avant d'être classé « instable ».
+- Ne jamais lire `response.text()` / `body()` sans borne dans un e2e : l'app a un service worker.

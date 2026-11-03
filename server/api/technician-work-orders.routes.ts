@@ -115,6 +115,7 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
     const broadcast = (global as any).broadcastUpdate;
     if (typeof broadcast === "function") {
       broadcast("work_order_updated", {
+        scope: { type: "broadcast" },
         workOrderId,
         updates: updateData,
         workOrder: updatedOrder,

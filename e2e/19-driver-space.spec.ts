@@ -126,15 +126,30 @@ async function showDashboard(page: Page, crew: Crew): Promise<void> {
   await expect(page.getByText(`#${crew.orderNumber}`)).toBeVisible({ timeout: 60_000 });
 }
 
-/** Déclare une panne depuis le tableau de bord ; renvoie le statut HTTP de l'envoi. */
-async function declareBreakdown(page: Page): Promise<number> {
+/**
+ * Déclare une panne depuis le tableau de bord ; renvoie le statut HTTP de l'envoi et son corps.
+ * Le corps sert au message d'échec : DRV2-1 a été rouge une fois sans trace (non reproduit en 14 passages),
+ * un prochain rouge doit dire seul s'il vient du produit (4xx/5xx motivé) ou des données (véhicule purgé).
+ */
+async function declareBreakdown(page: Page): Promise<{ status: number; body: string }> {
   await page.getByRole("button", { name: "Signaler un problème" }).click();
   await page.getByRole("button", { name: /Panne véhicule/ }).click();
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === "POST" && /\/api\/(alerts|incidents|driver\/breakdowns)/.test(r.url())),
     page.getByRole("button", { name: "Envoyer le signalement" }).click(),
   ]);
-  return response.status();
+  const status = response.status();
+  // Corps lu seulement en échec, et borné : `response.text()` ne rend jamais la main sur une réponse
+  // passée par le service worker PWA (constaté sur un 201, le test restait bloqué jusqu'au timeout).
+  if (status < 300) return { status, body: "" };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const body = await Promise.race([
+    response.text().catch(() => "(corps illisible)"),
+    new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve("(corps non lu en 5 s)"), 5_000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  return { status, body };
 }
 
 /** Trame `work_order_created` dont le payload vise ce véhicule (les payloads portent `vehicleId`, pas l'immatriculation, quelle que soit leur enveloppe). */
@@ -191,9 +206,11 @@ test.describe("DRV2 : espace chauffeur", () => {
     test("DRV2-1 : mise en place réussie (témoin)", () => {});
 
     test("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
-      const status = await declareBreakdown(page);
-      expect(status, "POST de la panne").toBeLessThan(300);
-      await expect(page.getByText("Problème signalé")).toBeVisible();
+      const { status, body } = await declareBreakdown(page);
+      expect(status, `POST de la panne : ${body.slice(0, 300)}`).toBeLessThan(300);
+      // `exact` : le Toast Radix annonce aussi le titre dans un <span aria-live> passager
+      // (« Notification Problème signalé… ») ; sans lui, le mode strict trouve 2 éléments par intermittence.
+      await expect(page.getByText("Problème signalé", { exact: true })).toBeVisible();
     });
   });
 

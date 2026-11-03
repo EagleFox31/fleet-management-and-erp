@@ -48,7 +48,7 @@ async function refusPourCetteOT(workOrderId: number, user: Express.Request["user
 function diffuser(event: string, payload: Record<string, unknown>) {
   const broadcast = (global as any).broadcastUpdate;
   if (typeof broadcast === "function") {
-    broadcast(event, payload);
+    broadcast(event, { ...payload, scope: { type: "broadcast" } });
   }
 }
 

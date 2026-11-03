@@ -276,6 +276,7 @@ export class TechnicianWorkOrdersService {
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('work_order_status_changed', {
+          scope: { type: "broadcast" },
           workOrderId,
           technicianId,
           oldStatus: existingOrder[0].status,

@@ -12,6 +12,7 @@ import { moduleLogger } from "./lib/logger";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
 import { dbAuditSink } from "./lib/audit-db-sink";
+import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/realtime-scope";
 
 (async () => {
   const { app, server } = await createApp();
@@ -22,11 +23,6 @@ import { dbAuditSink } from "./lib/audit-db-sink";
   // Configuration WebSocket pour données temps réel
   // noServer: true pour ne pas intercepter les upgrades du HMR Vite
   const wss = new WebSocketServer({ noServer: true });
-
-  type WsScope =
-    | { type: "broadcast" }
-    | { type: "user"; userIds: number[] }
-    | { type: "roles"; roles: string[] };
 
   interface WsConnectionMeta {
     userId: number;
@@ -128,43 +124,6 @@ import { dbAuditSink } from "./lib/audit-db-sink";
     return "system";
   };
 
-  const normalizeScope = (scopeCandidate: unknown, targetUserId: number | null): WsScope => {
-    if (scopeCandidate && typeof scopeCandidate === "object" && !Array.isArray(scopeCandidate)) {
-      const scopeRecord = scopeCandidate as Record<string, unknown>;
-
-      if (scopeRecord.type === "broadcast") {
-        return { type: "broadcast" };
-      }
-
-      if (scopeRecord.type === "user" && Array.isArray(scopeRecord.userIds)) {
-        const userIds = scopeRecord.userIds
-          .map((candidate) => toPositiveInteger(candidate))
-          .filter((candidate): candidate is number => candidate !== null);
-
-        if (userIds.length > 0) {
-          return { type: "user", userIds };
-        }
-      }
-
-      if (scopeRecord.type === "roles" && Array.isArray(scopeRecord.roles)) {
-        const roles = scopeRecord.roles
-          .filter((candidate): candidate is string => typeof candidate === "string")
-          .map((candidate) => candidate.trim().toLowerCase())
-          .filter((candidate) => candidate.length > 0);
-
-        if (roles.length > 0) {
-          return { type: "roles", roles };
-        }
-      }
-    }
-
-    if (targetUserId) {
-      return { type: "user", userIds: [targetUserId] };
-    }
-
-    return { type: "broadcast" };
-  };
-
   // Stockage des connexions actives (multi-onglets supportés)
   const activeConnections = new Map<number, Set<WebSocket>>();
   const activeRoleConnections = new Map<string, Set<WebSocket>>();
@@ -213,14 +172,6 @@ import { dbAuditSink } from "./lib/audit-db-sink";
     }
 
     connectionMeta.delete(ws);
-  };
-
-  const collectAllConnections = (): Set<WebSocket> => {
-    const recipients = new Set<WebSocket>();
-    activeConnections.forEach((sockets) => {
-      sockets.forEach((ws) => recipients.add(ws));
-    });
-    return recipients;
   };
 
   const isUserOnline = (userId: number): boolean => {
@@ -365,6 +316,14 @@ import { dbAuditSink } from "./lib/audit-db-sink";
       payloadFallback.alertId ??
       null;
     const scope = normalizeScope(scopeOverride, userId);
+    if (!scope) {
+      // Fermé par défaut : sans portée valide, l'événement ne part à personne.
+      moduleLogger("websocket").warn(
+        { event, entity, scope: describeInvalidScope(scopeOverride) },
+        "Événement temps réel ignoré : portée absente ou invalide (un broadcast doit être demandé explicitement)",
+      );
+      return;
+    }
     const actor =
       actorOverride ??
       (payloadFallback.triggeredBy
@@ -388,20 +347,7 @@ import { dbAuditSink } from "./lib/audit-db-sink";
       timestamp: emittedAt,
     });
 
-    const recipients = new Set<WebSocket>();
-    if (scope.type === "broadcast") {
-      collectAllConnections().forEach((ws) => recipients.add(ws));
-    } else if (scope.type === "user") {
-      scope.userIds.forEach((targetUserId) => {
-        const userSockets = activeConnections.get(targetUserId);
-        userSockets?.forEach((ws) => recipients.add(ws));
-      });
-    } else if (scope.type === "roles") {
-      scope.roles.forEach((role) => {
-        const roleSockets = activeRoleConnections.get(role.trim().toLowerCase());
-        roleSockets?.forEach((ws) => recipients.add(ws));
-      });
-    }
+    const recipients = resolveRecipients(scope, { byUser: activeConnections, byRole: activeRoleConnections });
 
     recipients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
