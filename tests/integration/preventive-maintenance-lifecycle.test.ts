@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { alerts, maintenanceSchedules, vehicles, workOrders } from "../../shared/schema";
+import { alerts, maintenanceSchedules, vehicles, workOrderPlanning, workOrders } from "../../shared/schema";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
 import { alertService } from "../../server/services/alert-service";
@@ -333,7 +333,15 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
         const ids = [stuck.plan.id, km.plan.id, open.id];
 
         const preview = mine(ids, await preventiveMaintenanceService.planScheduleCatchUp());
-        expect(preview).toEqual([{ scheduleId: stuck.plan.id, workOrderId: stuck.wo.id, currentDate: "2026-01-15", targetDate: "2026-02-15" }]);
+        expect(preview).toHaveLength(1);
+        expect(preview[0]).toMatchObject({
+          scheduleId: stuck.plan.id,
+          workOrderId: stuck.wo.id,
+          title: stuck.plan.title,
+          currentDate: "2026-01-15",
+          targetDate: "2026-02-15",
+        });
+        expect(preview[0].registrationNumber).toBeTruthy();
         expect((await scheduleRow(stuck.plan.id)).scheduledDate).toBe("2026-01-15");
 
         expect(mine(ids, await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(1);
@@ -348,6 +356,25 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       it("plan déjà avancé par la clôture : absent de l'aperçu", async () => {
         const { plan } = await closedPlan("p3-1-done", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
         expect(mine([plan.id], await preventiveMaintenanceService.planScheduleCatchUp())).toHaveLength(0);
+      });
+
+      it("plan désactivé : absent de l'aperçu, jamais avancé", async () => {
+        const { plan } = await stuckPlan("p3-1-inactive", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+        await db.update(maintenanceSchedules).set({ isActive: false }).where(eq(maintenanceSchedules.id, plan.id));
+        expect(mine([plan.id], await preventiveMaintenanceService.planScheduleCatchUp())).toHaveLength(0);
+        expect(mine([plan.id], await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(0);
+        expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-01-15");
+      });
+
+      // Sans échéance traitée connue, la base retomberait sur la date du plan : chaque apply le repousserait.
+      it("OT clos sans due_date ni start_date : écarté, second apply = aucune écriture", async () => {
+        const { plan, wo } = await stuckPlan("p3-1-undated", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+        await db.update(workOrderPlanning).set({ dueDate: null }).where(eq(workOrderPlanning.id, wo.id));
+        await db.update(workOrders).set({ startDate: null }).where(eq(workOrders.id, wo.id));
+        expect(mine([plan.id], await preventiveMaintenanceService.planScheduleCatchUp())).toHaveLength(0);
+        expect(mine([plan.id], await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(0);
+        expect(mine([plan.id], await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(0);
+        expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-01-15");
       });
     });
   });

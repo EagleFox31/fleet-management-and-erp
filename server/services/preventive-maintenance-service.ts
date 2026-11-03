@@ -11,6 +11,8 @@ const log = moduleLogger("preventive-maintenance");
 export interface ScheduleCatchUp {
   scheduleId: number;
   workOrderId: number;
+  registrationNumber: string;
+  title: string;
   currentDate: string;
   targetDate: string;
 }
@@ -534,7 +536,9 @@ export class PreventiveMaintenanceService {
   }
 
   /** Plan calendaire d'un OT préventif, échéance traitée (`base`) et échéance suivante (`next`). */
-  private async nextScheduleStep(workOrderId: number): Promise<{ plan: MaintenanceSchedule; base: string; next: string } | null> {
+  private async nextScheduleStep(
+    workOrderId: number,
+  ): Promise<{ plan: MaintenanceSchedule; base: string; next: string; datedWorkOrder: boolean } | null> {
     const [wo] = await db
       .select({
         isPreventive: workOrders.isPreventive,
@@ -555,21 +559,32 @@ export class PreventiveMaintenanceService {
 
     const base = planning?.dueDate ?? wo.startDate ?? plan.scheduledDate;
     const next = toDay(this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue));
-    return { plan, base: toDay(base), next };
+    return { plan, base: toDay(base), next, datedWorkOrder: Boolean(planning?.dueDate ?? wo.startDate) };
   }
 
   /**
    * Rattrapage P3-1, lecture seule : plans calendaires dont le dernier OT préventif est clos
    * et dont l'échéance n'a pas dépassé celle que cet OT a traitée (clôtures antérieures à P3-1).
+   * - Plans actifs seulement, comme le reste du service.
+   * - OT sans `due_date` ni `start_date` écarté : sans échéance traitée connue, la base retomberait
+   *   sur la date du plan et chaque apply le repousserait d'une période.
+   * - Un plan très en retard n'avance que d'une période : le balayage génère aussitôt l'OT suivant.
    */
   async planScheduleCatchUp(): Promise<ScheduleCatchUp[]> {
     const plans = await db
-      .select({ id: maintenanceSchedules.id })
+      .select({ id: maintenanceSchedules.id, title: maintenanceSchedules.title, registrationNumber: vehicles.registrationNumber })
       .from(maintenanceSchedules)
-      .where(and(ne(maintenanceSchedules.frequency, 'mileage'), isNotNull(maintenanceSchedules.scheduledDate)))
+      .innerJoin(vehicles, eq(vehicles.id, maintenanceSchedules.vehicleId))
+      .where(
+        and(
+          eq(maintenanceSchedules.isActive, true),
+          ne(maintenanceSchedules.frequency, 'mileage'),
+          isNotNull(maintenanceSchedules.scheduledDate),
+        ),
+      )
       .orderBy(asc(maintenanceSchedules.id));
     const out: ScheduleCatchUp[] = [];
-    for (const { id } of plans) {
+    for (const { id, title, registrationNumber } of plans) {
       const [last] = await db
         .select({ id: workOrders.id, status: workOrders.status })
         .from(workOrders)
@@ -578,8 +593,15 @@ export class PreventiveMaintenanceService {
         .limit(1);
       if (last?.status !== 'completed') continue;
       const step = await this.nextScheduleStep(last.id);
-      if (!step || toDay(step.plan.scheduledDate!) > step.base) continue;
-      out.push({ scheduleId: id, workOrderId: last.id, currentDate: toDay(step.plan.scheduledDate!), targetDate: step.next });
+      if (!step || !step.datedWorkOrder || toDay(step.plan.scheduledDate!) > step.base) continue;
+      out.push({
+        scheduleId: id,
+        workOrderId: last.id,
+        registrationNumber,
+        title,
+        currentDate: toDay(step.plan.scheduledDate!),
+        targetDate: step.next,
+      });
     }
     log.info({ count: out.length }, "Rattrapage P3-1 : plans préventifs bloqués (aperçu)");
     return out;
