@@ -79,7 +79,6 @@ export const T4_WITHOUT_SERVER_FIELD_PROTECTION: readonly string[] = [
   "post /api/maintenance-schedules",
   "post /api/missions/:id/fuel-records",
   "post /api/missions/:id/fuel-records/declare-no-refuel",
-  "post /api/parts/:id/update-stock",
   "post /api/supplier-invoices",
   "post /api/supplier-invoices/:id/settlements",
   "post /api/test-date-maintenance",
