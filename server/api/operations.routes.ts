@@ -5,9 +5,22 @@ import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
+import { driverScopeOf } from "../lib/driver-scope";
 
 const log = moduleLogger("operations");
 const router = Router();
+
+/**
+ * Cloison chauffeur (AGENTS §11) : coûts, rapprochement par client et statistiques couvrent
+ * toute l'exploitation (carburant, prix d'achat du véhicule, chiffre d'affaires). Le chauffeur
+ * n'y a pas accès, même pour sa propre mission ; ses missions se lisent par les listes
+ * filtrées et par /api/missions/:id.
+ */
+const OPERATIONS_COSTS_DRIVER_MESSAGE = "Accès refusé : les coûts et statistiques d'exploitation sont réservés au personnel de gestion.";
+const refuseDriver = (req: Request, _res: Response, next: NextFunction) => {
+  if (req.user?.role === "driver") return next(new AppError(403, OPERATIONS_COSTS_DRIVER_MESSAGE));
+  next();
+};
 
 const broadcastOperationMissionUpdate = (
   eventType: string,
@@ -119,7 +132,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
  */
 router.get("/missions/upcoming", authenticate, async (req: Request, res: Response) => {
   try {
-    const missions = await operationsService.getUpcomingMissions();
+    const missions = await operationsService.getUpcomingMissions(await driverScopeOf(req.user));
     res.json(missions);
   } catch (error: any) {
     log.error({ err: error, requestId: req.requestId }, "Error fetching upcoming missions:");
@@ -133,7 +146,7 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
  */
 router.get("/missions/active", authenticate, async (req: Request, res: Response) => {
   try {
-    const missions = await operationsService.getActiveMissions();
+    const missions = await operationsService.getActiveMissions(await driverScopeOf(req.user));
     res.json(missions);
   } catch (error: any) {
     log.error({ err: error, requestId: req.requestId }, "Error fetching active missions:");
@@ -156,7 +169,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response) => {
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
 
-    const missions = await operationsService.getAllMissions(filters);
+    const missions = await operationsService.getAllMissions(filters, await driverScopeOf(req.user));
 
     res.json(missions);
   } catch (error: any) {
@@ -169,7 +182,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response) => {
  * GET /api/operations/missions/by-client/:clientName
  * Récupérer missions et statistiques pour un client spécifique
  */
-router.get("/missions/by-client/:clientName", authenticate, async (req: Request, res: Response) => {
+router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async (req: Request, res: Response) => {
   try {
     const { clientName } = req.params;
     const { status, startDate, endDate } = req.query;
@@ -192,7 +205,7 @@ router.get("/missions/by-client/:clientName", authenticate, async (req: Request,
  * GET /api/operations/stats/by-client
  * Statistiques globales par client (MAERSK, CNPCC, AGL, SODECOTON)
  */
-router.get("/stats/by-client", authenticate, async (req: Request, res: Response) => {
+router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response) => {
   try {
     const stats = await operationsService.getStatsByClient();
     res.json(stats);
@@ -206,7 +219,7 @@ router.get("/stats/by-client", authenticate, async (req: Request, res: Response)
  * GET /api/operations/stats/by-destination
  * Statistiques par destination (NDJAMENA, DLA-NDERE, TOUBORO)
  */
-router.get("/stats/by-destination", authenticate, async (req: Request, res: Response) => {
+router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Request, res: Response) => {
   try {
     const stats = await operationsService.getStatsByDestination();
     res.json(stats);
@@ -220,7 +233,7 @@ router.get("/stats/by-destination", authenticate, async (req: Request, res: Resp
  * GET /api/operations/missions/:id/costs
  * Calculer les coûts détaillés d'une mission
  */
-router.get("/missions/:id/costs", authenticate, async (req: Request, res: Response) => {
+router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const costs = await operationsService.calculateMissionCosts(parseInt(id));

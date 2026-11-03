@@ -22,6 +22,14 @@ import { AppError } from "../lib/app-error";
  * - Statistiques par client (MAERSK, CNPCC, AGL, SODECOTON)
  * - Statistiques par destination (NDJAMENA, DLA-NDERE, TOUBORO)
  */
+/** Missions où l'un de ces chauffeurs est affecté (cloison chauffeur, server/lib/driver-scope.ts). */
+function missionsOfDrivers(driverIds: number[]) {
+  return inArray(
+    missions.id,
+    db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverIds)),
+  );
+}
+
 export class OperationsService {
   
   /**
@@ -284,10 +292,12 @@ export class OperationsService {
     clientId?: number;
     startDate?: Date;
     endDate?: Date;
-  }) {
+  }, driverScope?: number[]) {
     console.log("Fetching all missions with filters:", filters);
 
     const conditions: any[] = [];
+
+    if (driverScope) conditions.push(missionsOfDrivers(driverScope));
 
     if (filters?.status) {
       conditions.push(sql`${missions.status} = ${filters.status}`);
@@ -336,7 +346,7 @@ export class OperationsService {
   /**
    * Missions à venir : planned + assigned (pas encore démarrées)
    */
-  async getUpcomingMissions() {
+  async getUpcomingMissions(driverScope?: number[]) {
     const results = await db
       .select({
         id: missions.id,
@@ -355,7 +365,11 @@ export class OperationsService {
       .leftJoin(assignments, eq(missions.id, assignments.missionId))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
-      .where(inArray(missions.status, ["planned", "assigned"]))
+      .where(
+        driverScope
+          ? and(inArray(missions.status, ["planned", "assigned"]), missionsOfDrivers(driverScope))
+          : inArray(missions.status, ["planned", "assigned"]),
+      )
       .orderBy(missions.pickupDate);
 
     return results;
@@ -364,7 +378,7 @@ export class OperationsService {
   /**
    * Missions actives : in_progress
    */
-  async getActiveMissions() {
+  async getActiveMissions(driverScope?: number[]) {
     const results = await db
       .select({
         id: missions.id,
@@ -384,7 +398,11 @@ export class OperationsService {
       .leftJoin(assignments, eq(missions.id, assignments.missionId))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
-      .where(eq(missions.status, "in_progress"))
+      .where(
+        driverScope
+          ? and(eq(missions.status, "in_progress"), missionsOfDrivers(driverScope))
+          : eq(missions.status, "in_progress"),
+      )
       .orderBy(missions.deliveryDate);
 
     return results;
