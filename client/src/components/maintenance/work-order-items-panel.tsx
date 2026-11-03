@@ -135,8 +135,8 @@ export function WorkOrderItemsPanel({ workOrderId, userId, canEdit, defaultTechn
     queryKey: itemsKey,
     enabled: !!workOrderId,
   });
-  const { data: catalog = [] } = useQuery<LaborCatalogEntry[]>({ queryKey: ["/api/labor-catalog"] });
-  const { data: technicians = [] } = useQuery<Technician[]>({ queryKey: ["/api/users/technicians"] });
+  const { data: catalog = [] } = useQuery<LaborCatalogEntry[]>({ queryKey: ["/api/labor-catalog"], enabled: canEdit });
+  const { data: technicians = [] } = useQuery<Technician[]>({ queryKey: ["/api/users/technicians"], enabled: canEdit });
 
   const items = data?.items ?? [];
   const totals = data?.totals;

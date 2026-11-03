@@ -1592,3 +1592,25 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+## 2026-11-03 — Écriture de stock jugée suffisante sous `isStaff` au montage (lot A5)
+
+### Contexte
+- `POST /api/warehouse/stock-movement` (`server/api/warehouse.routes.ts`) écrit un mouvement d'entrée ou de sortie et met à jour `parts.quantity`. Le routeur est monté sous `isStaff` (`server/api/index.ts`) et la route ne portait que `authenticate` : chauffeur, technicien, secrétaire pouvaient l'appeler. Sa réponse 500 renvoyait `error.message`. Le doublon de `routes.ts` (`isInventoryManager`) était masqué par le routeur monté avant, donc la garde voulue n'était jamais servie.
+- Même audit : `GET /api/dashboard/technician-stats` (toute la flotte), `GET /api/users/technicians` (noms du personnel) et `GET /labor-catalog` (barème) ouverts à un client ; `GET /api/vehicles/:id/tires` en 500 sur un id hors plage ; `GET /api/work-orders/:id` avec un contrôle de rôle recopié au lieu du helper `assertWorkOrderReadable`.
+
+### Cause racine
+- Classification : garde de rôle métier remplacée par une garde générique de montage. `isStaff` répond « est-ce du personnel », pas « est-ce le magasin » ; elle est posée au niveau du préfixe, donc une route d'écriture ajoutée dessous paraît protégée sans l'être.
+- Le doublon masqué de `routes.ts` a entretenu l'illusion : le code lisible portait la bonne garde, le code servi non.
+
+### Résolution
+- `isPartsCatalogManager` (admin, warehouse) sur le mouvement de stock. Pas `isStockIssuer` : le chef d'atelier ne sort une pièce que par `POST /api/work-orders/:id/part-requirements/:id/issue` (dérogation motivée, décidée dans le service) ; le technicien demande, le magasinier sort. Aucun écran n'appelle cette route aujourd'hui. Données validées (`assertValidDbId`, quantité finie et positive), erreurs par `AppError`, pièce inconnue en 404, logs migrés vers `moduleLogger`.
+- `isTechnician` sur `technician-stats` (aucun écran ne l'appelle), `isStaff` sur `/users/technicians` et `/labor-catalog` (les écrans client désactivent ces requêtes), `assertValidDbId` sur les pneus d'un véhicule, `assertWorkOrderReadable` sur le détail d'OT. Handlers morts `GET /api/vehicles` et `/all` de `routes.ts` supprimés après comparaison avec le routeur qui les masque.
+
+### Prévention (vérifiable)
+- `tests/contract/a5-role-guards.contract.test.ts` (45 cas, 19 rouges sur `main`) : refus 403 de chaque rôle non magasin avec stock inchangé, 400 sur données invalides, rôles autorisés en 201/200.
+- Liste gelée des lectures ouvertes (`routes-hygiene.test.ts`) réduite de 6 entrées, `KNOWN_AUTHENTICATE_ONLY` de 2, `write-route-guards.frozen.ts` de 1.
+
+### Règle Projet (obligatoire)
+- Une écriture d'argent ou de stock porte une garde de rôle métier explicite sur la route (`isPartsCatalogManager`, `isStockIssuer`, `isInventoryManager`…), jamais `isStaff` ou `authenticate` seuls, même si le montage du routeur en pose déjà une.
+- Une route déclarée à la fois dans un routeur `server/api/` et dans `routes.ts` : seule la première est servie ; vérifier laquelle porte la garde avant de la juger.
