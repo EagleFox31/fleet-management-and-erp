@@ -120,3 +120,5 @@ par fleet-db d'abord, puis fleet-api.
 
 - **Lot 1 livré** : PR #126 (alertes avant échéance, blocage à l'expiration, source `vehicle_documents`, miroir `vehicles.*`, alerte au chef de parc en cours de mission).
 - **Lot 2b** : tous les points **récépissé** (point 3 des décisions, colonnes du récépissé provisoire, éligibilité qui reconnaît un récépissé valide, blocage à sa date de validité) sont renvoyés au lot 2b. Le lot 1 ne les traite pas.
+- **Limite connue** : supprimer le seul document daté d'un type laisse la date sur le véhicule (elle peut venir d'une saisie directe). Corriger la date sur la fiche véhicule. Supprimer un document qui ne fixait pas la date (autre document ou saisie directe plus lointains) ne la change pas non plus.
+- **Backlog** : déplacer `PATCH /api/documents/:id` (`server/routes.ts`, gelé) dans `server/api/vehicle-documents.routes.ts` et appeler `recomputeVehicleDocumentMirror` après l'écriture : aujourd'hui il écrit la date dans le miroir sans tenir compte d'un autre document plus lointain.

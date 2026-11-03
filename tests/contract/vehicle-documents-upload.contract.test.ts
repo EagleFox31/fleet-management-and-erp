@@ -293,4 +293,27 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
     expect(String(row.licensePlateExpiry)).toContain("2061-01-01");
   });
+
+  it("P3-2 R2 : supprimer un document qui ne fixait pas le miroir n'y touche pas (saisie directe plus lointaine)", async () => {
+    await db.delete(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    await db.update(vehicles).set({ insuranceExpiry: "2060-06-30" }).where(eq(vehicles.id, vehicleId));
+    const base = { vehicleId, type: "assurance", filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" };
+    const [older] = await db.insert(vehicleDocuments).values({ ...base, name: "TEST assurance 2045", expiryDate: "2045-01-01" }).returning();
+    await db.insert(vehicleDocuments).values({ ...base, name: "TEST assurance 2046", expiryDate: "2046-01-01" });
+    const res = await fetch(`${baseUrl}/api/documents/${older.id}`, { method: "DELETE", headers: { Cookie: cookies.get("workshop_manager")! } });
+    expect(res.status).toBe(204);
+    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    expect(String(row.insuranceExpiry)).toContain("2060-06-30");
+  });
+
+  it("P3-2 R2 : si le recalcul du miroir echoue apres la suppression, la reponse reste 204 (la suppression a eu lieu)", async () => {
+    const [doc] = await db
+      .insert(vehicleDocuments)
+      .values({ vehicleId, name: "TEST recalcul en echec", type: "assurance", filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf", expiryDate: "2044-01-01" })
+      .returning();
+    vi.spyOn(mirrorLib, "recomputeVehicleDocumentMirror").mockRejectedValueOnce(new Error("SQL secret"));
+    const res = await fetch(`${baseUrl}/api/documents/${doc.id}`, { method: "DELETE", headers: { Cookie: cookies.get("workshop_manager")! } });
+    expect(res.status).toBe(204);
+    expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.id, doc.id))).toHaveLength(0);
+  });
 });

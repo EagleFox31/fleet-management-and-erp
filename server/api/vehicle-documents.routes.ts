@@ -139,10 +139,11 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
 });
 
 /**
- * Suppression d'un document véhicule (déplacée de `server/routes.ts`, qui reste gelé : ce
- * routeur est monté avant et masque l'ancien handler). Mêmes droits, même réponse 204/404.
- * En plus : le miroir `vehicles.*` est recalé sur les documents restants du type, car le
- * dépôt ne le fait qu'avancer ; un document saisi par erreur ne laisse plus le véhicule éligible.
+ * Suppression d'un document véhicule (déplacée de `server/routes.ts`, gelé, où l'ancien
+ * handler a été retiré). Mêmes droits, même réponse 204/404.
+ * En plus : le miroir `vehicles.*` est recalé sur les documents restants du type quand le
+ * document supprimé le fixait, car le dépôt ne le fait qu'avancer ; un document saisi par
+ * erreur ne laisse plus le véhicule éligible.
  */
 router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
   try {
@@ -154,12 +155,13 @@ router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
     const deleted = await storage.deleteVehicleDocument(id);
     if (!deleted) throw new AppError(404, "Document non trouvé");
 
+    // La suppression a eu lieu : un échec du recalcul ne doit pas la faire passer pour ratée
+    // (un 5xx devient un message générique, et un nouvel essai répondrait 404). On le journalise.
     let mirrorChanged = false;
     try {
-      mirrorChanged = await recomputeVehicleDocumentMirror(document.vehicleId, document.type);
+      mirrorChanged = await recomputeVehicleDocumentMirror(document.vehicleId, document.type, document.expiryDate);
     } catch (err) {
       log.error({ err, requestId: req.requestId, documentId: id, vehicleId: document.vehicleId }, "recalcul du miroir après suppression en échec");
-      throw new AppError(500, "Le document est supprimé mais les échéances du véhicule n'ont pas pu être recalculées. Signalez-le à un administrateur.", { cause: err });
     }
 
     // `documentId` dans un `vehicle_updated` : le client resynchronise la liste des

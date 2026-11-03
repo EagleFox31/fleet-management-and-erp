@@ -69,14 +69,22 @@ export async function syncVehicleDocumentMirror(
  * documents restants du même type (alias de type compris). Le dépôt ne fait qu'avancer
  * (GREATEST), donc sans ce recalcul un document saisi par erreur (2062) puis supprimé
  * laisserait le véhicule éligible.
- * Choix : s'il ne reste aucun document daté de ce type, la colonne n'est pas touchée. Elle
- * peut porter une valeur saisie directement sur le véhicule, sans document, et rien ne
- * permet de savoir laquelle était la bonne. Renvoie `true` si la colonne a changé.
+ * Choix : la colonne n'est recalée que si elle porte exactement la date du document supprimé,
+ * c'est-à-dire si c'est lui qui la fixait. Sinon elle vient d'un autre document ou d'une
+ * saisie directe sur le véhicule, et on n'y touche pas. De même s'il ne reste aucun document
+ * daté de ce type : rien ne permet de savoir quelle valeur était la bonne (limite connue,
+ * corriger la date sur la fiche véhicule). La condition est portée par l'UPDATE lui-même, donc
+ * un dépôt concurrent qui a déjà avancé la colonne n'est pas écrasé.
+ * Renvoie `true` si la colonne a changé.
  */
 export async function recomputeVehicleDocumentMirror(
   vehicleId: number,
   documentType: string | null | undefined,
+  removedExpiryDate: string | Date | null | undefined,
 ): Promise<boolean> {
+  if (!removedExpiryDate) return false;
+  const removed =
+    removedExpiryDate instanceof Date ? removedExpiryDate.toISOString().slice(0, 10) : String(removedExpiryDate).slice(0, 10);
   const type = normalizeVehicleDocumentType(documentType);
   if (!(type in MIRROR_COLUMNS)) return false;
   const { column, key } = MIRROR_COLUMNS[type as keyof typeof MIRROR_COLUMNS];
@@ -92,7 +100,13 @@ export async function recomputeVehicleDocumentMirror(
   const changed = await db
     .update(vehicles)
     .set({ [key]: latest })
-    .where(and(eq(vehicles.id, vehicleId), or(isNull(column), sql`${column} <> ${latest}::date`)))
+    .where(
+      and(
+        eq(vehicles.id, vehicleId),
+        sql`${column} = ${removed}::date`,
+        sql`${column} <> ${latest}::date`,
+      ),
+    )
     .returning({ id: vehicles.id });
   return changed.length > 0;
 }
