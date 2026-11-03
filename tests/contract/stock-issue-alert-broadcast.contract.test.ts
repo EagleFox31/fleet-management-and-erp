@@ -9,8 +9,8 @@ import { createTestPart, createTestUser, createTestVehicle, TEST_USER_PASSWORD }
 
 /**
  * Sortie de stock (POST /api/work-orders/:id/part-requirements/:id/issue) qui fait passer la
- * pièce sous son minimum : l'alerte de stock bas est écrite dans la transaction de la sortie
- * et sa trame `alert_created` part après le commit. Écrit en base ; tout est supprimé.
+ * pièce sous son minimum : après le commit, chaque admin et magasinier reçoit une alerte et
+ * une trame `alert_created` nominatives (décision du 3 novembre 2026). Écrit en base ; tout est supprimé.
  */
 
 let server: Server;
@@ -45,10 +45,13 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
-describe("sortie de stock sous le minimum : trame alert_created", { timeout: 120000 }, () => {
-  it("le magasinier sort 2 pièces sur 6 (minimum 5) : alerte en base et trame diffusée", async () => {
+describe("sortie de stock sous le minimum : alerte aux admins et magasiniers", { timeout: 120000 }, () => {
+  it("un autre magasinier reçoit l'alerte et sa trame ; un technicien et un client non", async () => {
     const warehouse = await createTestUser({ role: "warehouse" });
-    ids.userIds.push(warehouse.id);
+    const otherWarehouse = await createTestUser({ role: "warehouse" });
+    const technician = await createTestUser({ role: "technician" });
+    const client = await createTestUser({ role: "client" });
+    ids.userIds.push(warehouse.id, otherWarehouse.id, technician.id, client.id);
     const login = await fetch(baseUrl + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -89,9 +92,18 @@ describe("sortie de stock sous le minimum : trame alert_created", { timeout: 120
     expect(res.status).toBe(200);
 
     const stored = await db.select().from(alerts).where(eq(alerts.link, `/warehouse/parts/${part.id}`));
-    expect(stored).toHaveLength(1);
+    const recipients = stored.map((alert) => alert.userId);
+    expect(recipients).toContain(otherWarehouse.id);
+    expect(recipients).not.toContain(technician.id);
+    expect(recipients).not.toContain(client.id);
+    expect(new Set(recipients).size).toBe(recipients.length);
+
     const frames = spy.mock.calls.filter(([event]) => event === "alert_created").map(([, frame]) => frame);
-    expect(frames.map((frame) => frame.entityId)).toEqual([stored[0].id]);
-    expect(frames[0].scope).toEqual({ type: "user", userIds: [stored[0].userId] });
+    const forOther = stored.find((alert) => alert.userId === otherWarehouse.id)!;
+    const frame = frames.find((f) => f.entityId === forOther.id);
+    expect(frame?.scope).toEqual({ type: "user", userIds: [otherWarehouse.id] });
+    const notified = frames.flatMap((f) => f.scope.userIds);
+    expect(notified).not.toContain(technician.id);
+    expect(notified).not.toContain(client.id);
   });
 });

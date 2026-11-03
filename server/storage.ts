@@ -4,7 +4,6 @@ import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
-import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
@@ -39,7 +38,7 @@ export type StockWriteOptions = {
    * Avec `executor` : reçoit les effets à jouer après le commit (trame `alert_created`).
    * Sans lui, une alerte écrite dans la transaction n'est pas diffusée (elle pourrait être annulée).
    */
-  afterCommit?: (effect: () => void) => void;
+  afterCommit?: (effect: () => void | Promise<void>) => void;
 };
 type FleetStatsSnapshot = {
   operational: number;
@@ -2052,8 +2051,7 @@ export class DatabaseStorage implements IStorage {
     previousStock: number,
     options: StockWriteOptions = {},
   ): Promise<void> {
-    // L'alerte suit le mouvement : écrite dans sa transaction, annulée avec lui.
-    const executor = options.executor ?? db;
+    // L'alerte suit le mouvement : créée après son commit, jamais pour un mouvement annulé.
     try {
       const minThreshold = part.minQuantity;
       const alertThreshold = Math.ceil(minThreshold * 1.2); // Seuil d'alerte à 20% au-dessus du minimum
@@ -2093,38 +2091,26 @@ export class DatabaseStorage implements IStorage {
 
       // Créer l'alerte si nécessaire
       if (alertMessage) {
-        // Vérifier si une alerte similaire n'existe pas déjà récemment
-        const existingAlerts = await executor
-          .select()
-          .from(alerts)
-          .where(
-            and(
-              ilike(alerts.message, `%${part.name}%`),
-              eq(alerts.isRead, false),
-              gte(alerts.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)) // Dernières 24h
-            )
-          );
-
-        // Ne créer l'alerte que si il n'y en a pas de similaire récente non lue
-        if (existingAlerts.length === 0) {
-          const [created] = await executor.insert(alerts).values({
-            userId: 1, // Admin par défaut - à adapter selon le contexte
-            title: `Stock ${alertPriority === 'critical' ? 'Critique' : 'Bas'}`,
-            message: alertMessage,
-            type: 'inventory',
-            priority: alertPriority,
-            isRead: false,
-            link: `/warehouse/parts/${partId}`
-          }).returning();
-
-          storageLog.info({ partId, alertId: created.id, priority: alertPriority }, `Alerte créée: ${alertMessage}`);
-
-          // Couche 2 : la cloche des autres profils, après le commit de l'alerte.
-          const emit = () => broadcastAlertCreated(created);
-          if (!options.executor) emit();
-          else if (options.afterCommit) options.afterCommit(emit);
-          else storageLog.warn({ partId, alertId: created.id }, "alerte de stock écrite en transaction sans afterCommit : non diffusée");
-        }
+        // Destinataires : tous les admins et magasiniers, une alerte et une trame chacun
+        // (décision du 3 novembre 2026). Écrite hors de la transaction du mouvement, après
+        // son commit : un échec de l'alerte ne peut pas annuler la sortie de stock, et une
+        // sortie annulée n'emporte aucune alerte.
+        const notify = async () => {
+          try {
+            const { alertService } = await import("./services/alert-service");
+            await alertService.notifyLowStock({
+              partId,
+              title: `Stock ${alertPriority === 'critical' ? 'Critique' : 'Bas'}`,
+              message: alertMessage,
+              priority: alertPriority,
+            });
+          } catch (error) {
+            storageLog.error({ err: error, partId }, "alerte de stock non créée");
+          }
+        };
+        if (!options.executor) await notify();
+        else if (options.afterCommit) options.afterCommit(notify);
+        else storageLog.warn({ partId }, "mouvement en transaction sans afterCommit : alerte de stock non créée");
       }
     } catch (error) {
       storageLog.error({ err: error, partId }, "alerte de stock non créée");

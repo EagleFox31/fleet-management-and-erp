@@ -2285,3 +2285,5 @@ soumission sans doublon.
   - contrats de la sortie : 19/19 ;
   - unitaires : 1868/1868 ;
   - tsc : 0.
+
+- Suite de relecture (#202) : l'alerte de stock bas ne s'écrit plus dans la transaction du mouvement mais après son commit, par `alertService.notifyLowStock`. Un échec de l'alerte (insert refusé) n'annulait pas seulement l'alerte : Postgres annulait toute la sortie. Destinataires : tous les admins et magasiniers (décision du 3 novembre 2026), une alerte et une trame nominatives chacun, anti-doublon par destinataire. Preuves : intégration 5/5 (4 rouges sur l'état précédent, dont l'échec d'insert forcé par déclencheur), contrat 1/1 rouge sur l'état précédent (magasinier tiers servi, technicien et client exclus).

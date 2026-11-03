@@ -363,7 +363,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
     // devenu insuffisant entre-temps annule la transition.
     let stockError: unknown = null;
     // Trames dues par la sortie (alerte de stock bas), jouées une fois la transaction validée.
-    const afterCommit: Array<() => void> = [];
+    const afterCommit: Array<() => void | Promise<void>> = [];
     const issueResult = await partRequirementsService.updatePartRequirement(
       requirementId,
       { status: "issued", notes: nextNotes },
@@ -395,7 +395,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
       return res.status(status).json({ message: issueResult.error });
     }
 
-    for (const effect of afterCommit) effect();
+    for (const effect of afterCommit) await effect();
 
     const updatedRequirement = issueResult.data;
 
