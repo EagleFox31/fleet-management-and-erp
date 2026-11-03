@@ -245,6 +245,13 @@ export class FuelCardService {
    * transaction, sous le verrou : si elle échoue, le débit est annulé avec elle.
    */
   withinTransaction?: (tx: DbExecutor, consumption: FuelRecord, cost: number) => Promise<void>,
+  options?: {
+    /**
+     * Rejeu d'une écriture déjà faite (clé de requête), lu sous le verrou avant tout débit :
+     * s'il renvoie un plein, aucun débit n'est écrit et ce plein est renvoyé (`replayed`).
+     */
+    replay?: (tx: DbExecutor) => Promise<FuelRecord | null>;
+  },
   ) {
     log.info({ vehicleId: data.vehicleId, quantity: data.quantity, userId: data.userId }, "consommation de carburant");
 
@@ -282,9 +289,13 @@ export class FuelCardService {
 
     // Contrôle du solde et débit atomiques : deux pleins simultanés ne peuvent
     // plus lire le même solde et passer tous deux sous zéro.
-    const { consumption, currentBalance, newBalance } = await db.transaction(async (tx) => {
+    const { consumption, currentBalance, newBalance, replayed } = await db.transaction(async (tx) => {
       await lockFuelCard(tx);
+      const replayedRecord = options?.replay ? await options.replay(tx) : null;
       const currentBalance = await this.getCurrentBalance(tx);
+      if (replayedRecord) {
+        return { consumption: replayedRecord, currentBalance, newBalance: currentBalance.balance, replayed: true };
+      }
     
       if (cost > currentBalance.balance) {
         throw this.createServiceError(
@@ -319,8 +330,19 @@ export class FuelCardService {
         })
         .returning();
       if (withinTransaction) await withinTransaction(tx, consumption, cost);
-      return { consumption, currentBalance, newBalance };
+      return { consumption, currentBalance, newBalance, replayed: false };
     });
+
+    if (replayed) {
+      log.info({ vehicleId: data.vehicleId, fuelRecordId: consumption.id }, "consommation déjà enregistrée, rejouée sans débit");
+      return {
+        consumption,
+        previousBalance: currentBalance.balance,
+        newBalance,
+        cost: Number(consumption.debitAmount ?? 0),
+        replayed,
+      };
+    }
 
     log.info({ vehicleId: data.vehicleId, cost, newBalance }, "consommation de carburant enregistrée");
     
@@ -328,7 +350,8 @@ export class FuelCardService {
       consumption,
       previousBalance: currentBalance.balance,
       newBalance: newBalance,
-      cost: cost
+      cost: cost,
+      replayed,
     };
   }
 
@@ -406,8 +429,8 @@ export class FuelCardService {
     };
   }
 
-  async hasFuelRecordsForMission(missionId: number): Promise<boolean> {
-    const [result] = await db
+  async hasFuelRecordsForMission(missionId: number, executor: DbExecutor = db): Promise<boolean> {
+    const [result] = await executor
       .select({
         count: sql<string>`COUNT(*)`,
       })
