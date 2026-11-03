@@ -4,7 +4,7 @@ import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
 import { eq, and, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
-import { FuelCardService } from "../services/fuel-card-service";
+import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
 import { z } from "zod";
 import {
@@ -179,19 +179,6 @@ const MISSION_FUEL_ALLOWED_STATUSES = ["planned", "assigned", "in_progress", "de
 const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
-
-/**
- * Erreur d'un plein de mission en réponse lisible (AGENTS §10). Le message du service porte le
- * solde de la carte et le montant calculé : il reste dans les logs (`cause`), jamais dans la réponse.
- * 422 conservé pour le solde insuffisant (contrat existant de ces deux routes).
- */
-function toMissionFuelAppError(error: unknown): AppError {
-  if (error instanceof AppError) return error;
-  if ((error as { code?: string } | null)?.code === "INSUFFICIENT_BALANCE") {
-    return new AppError(422, "Solde de la carte carburant insuffisant.", { cause: error });
-  }
-  return new AppError(500, "Erreur serveur", { cause: error });
-}
 
 const ALERT_TITLE_TO_DOCUMENT_TYPE = Object.fromEntries(
   Object.entries(DOCUMENT_ALERT_TITLES).map(([documentType, alertTitle]) => [alertTitle, documentType]),
@@ -746,7 +733,7 @@ router.get("/", async (req, res) => {
 
     return res.json(missionsWithAssignments);
   } catch (error) {
-    console.error("Get missions error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get missions error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -856,7 +843,7 @@ router.get("/:id", async (req, res) => {
       assignment: assignment || null,
     });
   } catch (error) {
-    console.error("Get mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -909,7 +896,7 @@ router.get("/:id/fuel-records", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get mission fuel records error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission fuel records error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -1054,7 +1041,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
-    next(toMissionFuelAppError(error));
+    next(toFuelCardAppError(error));
   }
 });
 
@@ -1222,7 +1209,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
-    next(toMissionFuelAppError(error));
+    next(toFuelCardAppError(error));
   }
 });
 
@@ -1328,7 +1315,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
       declaration,
     });
   } catch (error) {
-    console.error("Declare mission no-refuel error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -1483,7 +1470,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       fuelUnitPriceSource = source === "real" ? "real" : "fallback";
     } catch (fuelBalanceError) {
       fuelBalanceUnavailable = true;
-      console.error("Mission launch-readiness fuel balance error:", fuelBalanceError);
+      log.error({ err: fuelBalanceError, requestId: req.requestId }, "Mission launch-readiness fuel balance error");
     }
 
     const fuelOk = hasFuelBudget && !fuelBalanceUnavailable && fuelBalanceValue >= Number(fuelBudgetValue || 0);
@@ -1745,7 +1732,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       openRenewalRequests,
     });
   } catch (error) {
-    console.error("Get mission launch readiness error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission launch readiness error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -2287,7 +2274,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 
     return res.json(updatedMission);
   } catch (error) {
-    console.error("Update mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update mission error");
     return res.status(500).json({ message: "Erreur lors de la mise à jour de la mission" });
   }
 });
@@ -2838,7 +2825,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
 
     return res.status(200).json(legacyOpen);
   } catch (error) {
-    console.error("Get mission document renewal requests error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get mission document renewal requests error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -3106,7 +3093,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
       targetDocumentTypes: targetDocTypes,
     });
   } catch (error) {
-    console.error("Create mission document renewal request error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
