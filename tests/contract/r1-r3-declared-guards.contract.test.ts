@@ -1,4 +1,9 @@
+import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../../server/db";
+import { workOrders } from "../../shared/schema";
+import { createTestVehicle } from "../support/factories";
+import { uniqueTestToken } from "../support/ids";
 import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 
@@ -9,7 +14,7 @@ import { startContractSession } from "../support/contract-session";
  *    la garde : la réponse n'est pas un 403, quel que soit le verdict du handler.
  *  - R1 : un corps invalide reçoit 400, code VALIDATION, `errors[]` par champ, sans détail technique.
  */
-let session: Awaited<ReturnType<typeof startContractSession<"technician" | "manager" | "client" | "secretary">>>;
+let session: Awaited<ReturnType<typeof startContractSession<"technician" | "manager" | "client" | "secretary" | "admin">>>;
 
 // `POST /api/incidents` est derrière le drapeau `incidents` : éteint, la route répond 404 avant la garde.
 const previousFlags = process.env.FEATURE_FLAGS;
@@ -21,6 +26,7 @@ beforeAll(async () => {
     manager: "workshop_manager",
     client: "client",
     secretary: "secretary",
+    admin: "admin",
   });
 }, 120000);
 
@@ -54,6 +60,48 @@ describe("R3 : garde déclarée, 403 pour un rôle hors périmètre", { timeout:
   it("POST /api/invoices/calculate-vat n'existe plus", async () => {
     const res = await session.call("POST", "/api/invoices/calculate-vat", { actor: "secretary", body: {} });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("Statut d'OT par la route technicien : comportement de main inchangé", { timeout: 120000 }, () => {
+  // Le handler exige déjà `role === "technician"` (lu en base) puis l'affectation à l'OT : la garde
+  // déclarée ne retire aucun droit. Un admin ou un chef inscrit comme technicianId était déjà refusé.
+  const created: number[] = [];
+  let vehicleId: number;
+  const workOrderFor = async (technicianId: number | null) => {
+    const [row] = await db
+      .insert(workOrders)
+      .values({ vehicleId, technicianId, title: uniqueTestToken("ot-r3"), status: "pending", priority: "medium" })
+      .returning();
+    created.push(row.id);
+    return row.id;
+  };
+
+  beforeAll(async () => {
+    const vehicle = await createTestVehicle();
+    session.ids.vehicleIds.push(vehicle.id);
+    vehicleId = vehicle.id;
+  });
+
+  afterAll(async () => {
+    if (created.length > 0) await db.delete(workOrders).where(inArray(workOrders.id, created));
+  });
+
+  it("technicien affecté : passe ; technicien non affecté : 403", async () => {
+    const own = await workOrderFor(session.userId("technician"));
+    const other = await workOrderFor(session.userId("manager"));
+    const ok = await session.call("PATCH", `/api/technician/work-orders/${own}/status`, { actor: "technician", body: { status: "in_progress" } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const refused = await session.call("PATCH", `/api/technician/work-orders/${other}/status`, { actor: "technician", body: { status: "in_progress" } });
+    expect(refused.status).toBe(403);
+  });
+
+  it("chef d'atelier ou admin inscrit comme technicianId : 403, comme sur main", async () => {
+    for (const actor of ["manager", "admin"] as const) {
+      const wo = await workOrderFor(session.userId(actor));
+      const res = await session.call("PATCH", `/api/technician/work-orders/${wo}/status`, { actor, body: { status: "in_progress" } });
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(403);
+    }
   });
 });
 
