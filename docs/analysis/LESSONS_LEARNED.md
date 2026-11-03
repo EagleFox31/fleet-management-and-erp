@@ -1873,3 +1873,20 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
 - Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
 - En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
+
+## 2026-11-03 — Fichier de workflow orphelin quand l'enregistrement en base échoue
+
+### Contexte
+- `WorkflowDocumentService.saveWorkflowDocument` écrivait le fichier sous `uploads/workflows/<session>/` puis insérait la ligne `workflow_documents`. Un INSERT refusé (workflow supprimé entre-temps, contrainte) laissait le fichier sans ligne.
+
+### Cause racine
+- Classification : effet de bord non compensé. Deux écritures (disque, base) sans transaction commune, et aucune compensation de la première quand la seconde échoue.
+
+### Résolution
+- L'INSERT échoué supprime le fichier écrit (`fs.rmSync`, `force`), puis l'erreur d'origine remonte. Un échec du ménage est journalisé en `warn`, il ne masque pas l'erreur.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-document-orphan.test.ts` : workflow inexistant -> rejet et dossier de session vide. Rouge sans le correctif.
+
+### Règle Projet (obligatoire)
+- Un service qui écrit un fichier avant une ligne en base supprime ce fichier si l'écriture en base échoue. Les autres cas déjà couverts : documents véhicule, récépissé de renouvellement, preuves de règlement fournisseur.
