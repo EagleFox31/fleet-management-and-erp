@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
 import { db } from "../db";
 import { alerts, missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
-import { and, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
+import { and, desc, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
 import { moduleLogger } from "../lib/logger";
 
@@ -38,6 +38,11 @@ export class AlertService {
 
   private readonly fuelRecipients: AlertRecipientRole[] = [
     "admin",
+    "logistics",
+  ];
+
+  // Chef de parc : le rôle `logistics` (planification des missions, cf. shared/schema.ts).
+  private readonly fleetChiefRecipients: AlertRecipientRole[] = [
     "logistics",
   ];
 
@@ -500,6 +505,7 @@ export class AlertService {
 
       const expiry = new Date(expiryDate);
       const daysUntilExpiry = Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
 
       // Document expiré
       if (expiry < today) {
@@ -510,10 +516,30 @@ export class AlertService {
           title: 'Document expiré',
           message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jours`,
           priority: 'critical',
+          link: renewalLink,
           entityType: 'vehicle_document',
           entityId: vehicle.id,
           targetRoles: this.maintenanceRecipients
         });
+
+        // Papier expiré pendant une mission en cours : le chef de parc (logistique)
+        // est prévenu. La mission n'est pas interrompue ; c'est l'éligibilité qui
+        // refuse toute nouvelle affectation ou tout nouveau lancement.
+        const missionEnCours = await this.findInProgressMission(vehicle.id);
+        if (missionEnCours) {
+          await this.createAlertIfNotExists({
+            remindDaily: true,
+            vehicleId: vehicle.id,
+            type: 'mission',
+            title: 'Papier expiré en cours de mission',
+            message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée pendant la mission ${missionEnCours.orderNumber ?? `#${missionEnCours.id}`}. La mission se poursuit ; aucune nouvelle mission avant régularisation.`,
+            priority: 'critical',
+            link: renewalLink,
+            entityType: 'mission',
+            entityId: missionEnCours.id,
+            targetRoles: this.fleetChiefRecipients
+          });
+        }
       }
       // Document expire dans les 30 jours
       else if (expiry <= thirtyDaysFromNow) {
@@ -524,12 +550,40 @@ export class AlertService {
           title: 'Document expire bientôt',
           message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire dans ${daysUntilExpiry} jours`,
           priority: daysUntilExpiry <= 7 ? 'high' : 'medium',
+          link: renewalLink,
           entityType: 'vehicle_document',
           entityId: vehicle.id,
           targetRoles: this.maintenanceRecipients
         });
       }
     }
+  }
+
+  /** Mission `in_progress` portée par une affectation de ce véhicule, s'il y en a une. */
+  private async findInProgressMission(vehicleId: number): Promise<{ id: number; orderNumber: string | null } | null> {
+    const [row] = await db
+      .select({ id: missions.id, orderNumber: missions.orderNumber })
+      .from(assignments)
+      .innerJoin(missions, eq(assignments.missionId, missions.id))
+      .where(and(eq(assignments.vehicleId, vehicleId), eq(missions.status, "in_progress")))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Lien de l'alerte vers la demande de renouvellement du document le plus récent
+   * du type ; à défaut de document, la fiche véhicule.
+   */
+  private async documentRenewalLink(vehicleId: number, documentType: string): Promise<string> {
+    const [doc] = await db
+      .select({ id: vehicleDocuments.id })
+      .from(vehicleDocuments)
+      .where(and(eq(vehicleDocuments.vehicleId, vehicleId), eq(vehicleDocuments.type, documentType as never)))
+      .orderBy(desc(vehicleDocuments.id))
+      .limit(1);
+    return doc
+      ? `/vehicles/documents/renew?vehicleId=${vehicleId}&documentId=${doc.id}&source=alert`
+      : `/vehicles/${vehicleId}`;
   }
 
   /**

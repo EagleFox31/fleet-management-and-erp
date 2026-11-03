@@ -1,8 +1,6 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
 import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
-import { vehicleStatusService } from "./vehicle-status-service";
-import { describeStatusChange } from "@shared/constants/vehicle-status";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
@@ -139,10 +137,6 @@ export class PreventiveMaintenanceService {
       const generatedWorkOrders: WorkOrder[] = [];
 
       for (const vehicle of vehiclesToCheck) {
-        // On garde l'OT declencheur, pas juste un booleen: l'historique de
-        // statut doit pouvoir nommer la cause de l'immobilisation.
-        let declencheur: WorkOrder | null = null;
-
         // Vérifier nextMaintenanceDate (seulement si alertType absent ou === 'maintenance')
         if (!alertType || alertType === 'maintenance') {
           if (vehicle.nextMaintenanceDate) {
@@ -156,64 +150,15 @@ export class PreventiveMaintenanceService {
                 createdBy,
                 maintenanceDate
               );
-              if (workOrder) { generatedWorkOrders.push(workOrder); declencheur = declencheur ?? workOrder; }
-            }
-          }
-        }
-
-        // Vérifier assurance
-        if (!alertType || alertType === 'insurance') {
-          if (vehicle.insuranceExpiry) {
-            const insuranceDate = new Date(vehicle.insuranceExpiry);
-            if (insuranceDate <= alertDate) {
-              const workOrder = await this.createDateBasedWorkOrder(
-                vehicle,
-                'Renouvellement assurance',
-                `Assurance du véhicule ${vehicle.registrationNumber} expire le ${insuranceDate.toLocaleDateString()}. Renouvellement requis.`,
-                'insurance',
-                createdBy,
-                insuranceDate
-              );
               if (workOrder) generatedWorkOrders.push(workOrder);
             }
           }
         }
 
-        // Vérifier contrôle technique
-        if (!alertType || alertType === 'inspection') {
-          if (vehicle.technicalInspectionDate) {
-            const inspectionDate = new Date(vehicle.technicalInspectionDate);
-            if (inspectionDate <= alertDate) {
-              const workOrder = await this.createDateBasedWorkOrder(
-                vehicle,
-                'Contrôle technique',
-                `Contrôle technique du véhicule ${vehicle.registrationNumber} expire le ${inspectionDate.toLocaleDateString()}. Inspection requise.`,
-                'inspection',
-                createdBy,
-                inspectionDate
-              );
-              if (workOrder) generatedWorkOrders.push(workOrder);
-            }
-          }
-        }
-
-        // Vérifier plaque d'immatriculation
-        if (!alertType || alertType === 'license') {
-          if (vehicle.licensePlateExpiry) {
-            const licensePlateDate = new Date(vehicle.licensePlateExpiry);
-            if (licensePlateDate <= alertDate) {
-              const workOrder = await this.createDateBasedWorkOrder(
-                vehicle,
-                'Renouvellement plaque d\'immatriculation',
-                `Plaque d'immatriculation du véhicule ${vehicle.registrationNumber} expire le ${licensePlateDate.toLocaleDateString()}. Renouvellement requis.`,
-                'license',
-                createdBy,
-                licensePlateDate
-              );
-              if (workOrder) generatedWorkOrders.push(workOrder);
-            }
-          }
-        }
+        // Papiers (assurance, contrôle technique, plaque / carte grise) : plus
+        // d'OT atelier. Un papier n'est pas un travail d'atelier ; les alertes
+        // passent par alert-service (30 jours avant, puis expiré) et le blocage
+        // par l'éligibilité (shared/constants/vehicle-eligibility.ts).
 
         // Échéance d'un plan actif (hors kilométrage) dans la fenêtre d'alerte,
         // ou dépassée : un OT lié au plan, jamais deux pour la même échéance.
@@ -245,20 +190,6 @@ export class PreventiveMaintenanceService {
             // Un plan en échec ne doit pas empêcher les autres.
             log.error({ err: error, scheduleId: plan.id, vehicleId: vehicle.id }, "Plan préventif : OT non généré");
           }
-        }
-
-        // Immobilisation du véhicule: passer par `vehicleStatusService`, jamais
-        // par un `db.update` direct. Le service historise le changement dans
-        // `status_history` avec sa cause; l'écriture directe ne laissait qu'une
-        // ligne de log serveur, donc un véhicule en maintenance sans trace
-        // consultable ni OT visible à l'écran.
-        if (declencheur && vehicle.status === 'operational') {
-          await vehicleStatusService.setVehicleToMaintenance(
-            vehicle.id,
-            declencheur.id,
-            createdBy,
-            `${describeStatusChange("preventive", "maintenance", vehicle.status)} — OT #${declencheur.id} généré automatiquement`,
-          );
         }
       }
 

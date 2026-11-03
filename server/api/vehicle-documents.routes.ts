@@ -8,6 +8,7 @@ import { moduleLogger } from "../lib/logger";
 import { isWorkshopManager } from "../middleware/auth";
 import { deleteFile, uploadVehicleDocument } from "../middleware/upload";
 import { storage } from "../storage";
+import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 
 const log = moduleLogger("vehicle-documents");
 const router = Router();
@@ -70,6 +71,8 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
           filePath: file.path,
           uploadedBy: req.user?.id || null,
         });
+        // vehicle_documents fait foi : la colonne miroir de vehicles suit le dépôt.
+        await syncVehicleDocumentMirror(vehicleId, document.type, document.expiryDate);
         return res.status(201).json(document);
       } catch (inner) {
         await removeUploaded(file.path, req.requestId);
