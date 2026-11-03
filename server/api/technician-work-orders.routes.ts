@@ -1,3 +1,4 @@
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import {
@@ -115,7 +116,7 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
     const broadcast = (global as any).broadcastUpdate;
     if (typeof broadcast === "function") {
       broadcast("work_order_updated", {
-        scope: { type: "broadcast" },
+        scope: workOrderCostScope(),
         workOrderId,
         updates: updateData,
         workOrder: updatedOrder,

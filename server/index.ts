@@ -1,4 +1,5 @@
 import os from 'os';
+import { workOrderStaffScope } from "./lib/work-order-realtime-scope";
 import type { IncomingMessage } from "http";
 import { randomUUID } from "crypto";
 import { setupVite, serveStatic } from "./vite";
@@ -448,7 +449,10 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
           entity: typeof parsed.entity === "string" ? parsed.entity : inferEntityFromEvent(parsed.eventType),
           entityId,
           payload,
-          scope: { type: "broadcast" },
+          // Les triggers de `fleet_events` ne relaient que des changements d'OT (work_order_* et le
+          // statut du véhicule immobilisé par un OT) : titre, technicien, statut, aucun montant.
+          // Personnel seulement ; un client n'en reçoit aucun (§11).
+          scope: workOrderStaffScope(),
           actor: null,
           emittedAt:
             typeof parsed.emittedAt === "string"

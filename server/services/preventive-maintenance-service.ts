@@ -1,3 +1,4 @@
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
 import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
@@ -41,7 +42,7 @@ function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   }
 
   broadcastUpdate("work_order_created", {
-    scope: { type: "broadcast" },
+    scope: workOrderCostScope(),
     workOrderId: workOrder.id,
     workOrder,
     source,

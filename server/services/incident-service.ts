@@ -12,6 +12,7 @@
  * Le routeur (`server/api/incidents.routes.ts`) est à l'API : il appelle
  * `createIncident(user, body)` et `listIncidents(user, query)`.
  */
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { and, desc, eq } from "drizzle-orm";
 import { incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
@@ -222,7 +223,7 @@ export async function createIncident(
       incidentId: row.id,
       triggeredBy: user.id,
       actor: { userId: user.id },
-      scope: { type: "broadcast" },
+      scope: workOrderCostScope(),
     });
   }
 

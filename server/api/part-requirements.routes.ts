@@ -1,3 +1,4 @@
+import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { Router } from "express";
 import {
   authenticate,
@@ -102,7 +103,7 @@ router.post("/", isPartRequester, async (req, res, next) => {
 
     if ((global as any).broadcastUpdate) {
       (global as any).broadcastUpdate("part_requirement_created", {
-        scope: { type: "broadcast" },
+        scope: workOrderCostScope(),
         requirementId: requirement.id,
         workOrderId: requirement.workOrderId ?? null,
         partId: requirement.partId ?? null,
@@ -170,7 +171,7 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
 
     if ((global as any).broadcastUpdate && result.data) {
       (global as any).broadcastUpdate("part_requirement_updated", {
-        scope: { type: "broadcast" },
+        scope: workOrderCostScope(),
         requirementId: result.data.id,
         workOrderId: result.data.workOrderId ?? null,
         partId: result.data.partId ?? null,
@@ -211,7 +212,7 @@ router.delete("/:id", isWorkshopManager, async (req, res) => {
 
     if ((global as any).broadcastUpdate) {
       (global as any).broadcastUpdate("part_requirement_deleted", {
-        scope: { type: "broadcast" },
+        scope: workOrderStaffScope(),
         requirementId: requirement.id,
         workOrderId: requirement.workOrderId ?? null,
         partId: requirement.partId ?? null,

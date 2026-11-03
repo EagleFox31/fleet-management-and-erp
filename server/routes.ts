@@ -1,3 +1,4 @@
+import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
@@ -1895,7 +1896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate("work_order_created", {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId: workOrder.id,
           workOrder,
           source: "manual_work_order",
@@ -2036,7 +2037,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((global as any).broadcastUpdate) {
         const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
         (global as any).broadcastUpdate('work_order_updated', {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId: id,
           updates: updatedData,
           workOrder: updatedWorkOrder,
@@ -2121,7 +2122,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if ((global as any).broadcastUpdate) {
             (global as any).broadcastUpdate('work_order_deleted', {
-              scope: { type: "broadcast" },
+              scope: workOrderStaffScope(),
               workOrderId: wo.id,
               vehicleId: wo.vehicleId,
               source: "bulk_pending_unassigned_delete",
@@ -2214,7 +2215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('work_order_deleted', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           workOrderId: id,
           vehicleId: workOrder.vehicleId,
           source: "manual_work_order_delete",
@@ -2422,7 +2423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('part_used_removed', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           partUsedId: id
         });
       }

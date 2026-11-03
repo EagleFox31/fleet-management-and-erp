@@ -1745,3 +1745,21 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
+
+## 2026-11-03 — Événements d'ordre de travail diffusés à tous les comptes, clients compris
+
+### Contexte
+- Les trames d'OT (OT, pièces, demandes de pièce, pont des triggers Postgres) partaient en `scope: { type: "broadcast" }`, rendu explicite lors du passage à la portée fermée. Un client recevait titre, coûts et pièces de l'OT du véhicule d'un autre client.
+
+### Cause racine
+- Classification : dette de portée héritée. Le test d'hygiène gelait le comportement (« OT = historique ») sans le corriger ; aucun test ne jouait deux clients propriétaires.
+
+### Résolution
+- Portées `workOrderStaffScope` / `workOrderCostScope` (`server/lib/work-order-realtime-scope.ts`) ; le pont LISTEN/NOTIFY, qui ne relaie que des changements d'OT, passe au personnel. Aucune trame vers un client : aucun écran client n'écoute ces événements.
+
+### Prévention (vérifiable)
+- `tests/contract/lotB-work-order-scope.contract.test.ts` : deux clients, un chauffeur, du personnel ; rouge 5/5 sur main, vert 5/5 après.
+- `broadcast-hygiene.test.ts` : égalité stricte, les entrées d'OT sont retirées ; tout retour en broadcast échoue.
+
+### Règle Projet (obligatoire)
+- Un événement qui concerne un objet d'un véhicule part au personnel ; un client ne reçoit une trame que si un écran client l'écoute, réduite aux identifiants et au statut.

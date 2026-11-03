@@ -1,3 +1,4 @@
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { Router } from "express";
 import { authenticate, isAnyUser, isStaff, isTechnician } from "../middleware/auth";
 import { assertWorkOrderReadable } from "../lib/work-order-scope";
@@ -51,7 +52,7 @@ async function refusPourCetteOT(workOrderId: number, user: Express.Request["user
 function diffuser(event: string, payload: Record<string, unknown>) {
   const broadcast = (global as any).broadcastUpdate;
   if (typeof broadcast === "function") {
-    broadcast(event, { ...payload, scope: { type: "broadcast" } });
+    broadcast(event, { ...payload, scope: workOrderStaffScope() });
   }
 }
 
