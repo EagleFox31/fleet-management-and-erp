@@ -9,7 +9,6 @@ import { tiresService } from "./services/tires-service-simplified";
 import { FuelService } from "./services/fuel-service";
 import { mileageService } from "./services/mileage-service";
 import { escapeLike } from "./lib/sql-like";
-import { toFuelCardAppError } from "./services/fuel-card-service";
 import { vehicleStatusService } from "./services/vehicle-status-service";
 import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
