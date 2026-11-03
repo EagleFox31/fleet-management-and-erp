@@ -205,3 +205,9 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `lt(updatedAt, cutoff)` dans le `where`, `now` et le délai injectables. Aucun job branché : la décision de rétention revient au produit.
 - Pourquoi : la clause n'était qu'un commentaire, et un workflow abandonné la veille perdait ses documents. La fonction n'a aucun appelant : le piège était armé, mais n'avait pas encore servi (constat de fleet-securite pendant la revue de #210).
 - Preuve : `tests/integration/workflow-cleanup-retention.test.ts` (1 jour gardé, 8 jours purgé, en cours intact), rouge sans la clause.
+## 2026-11-03T18:34:35+01:00 — Factures fournisseurs : erreurs relayées au gestionnaire central (§10)
+
+- Quoi : les 9 `catch` de `server/api/supplier-invoices.routes.ts` qui répondaient `500 { error, details: error.message }`, et celui de `checkAuth`, relaient par `next(withLogContext(…, { event }))` (motif de #172). Le justificatif de règlement refusé renvoyait `details: err.message` de multer : 400 lisible (format ou 8 Mo). `POST /api/admin/import-backup` ne renvoie plus `availableFiles` (listage du dossier backup/) dans sa 404, ligne modifiée dans le handler existant.
+- Comment : `supplier-invoices` ajouté aux routeurs de `error-500-relay-hygiene`, plus une garde sur `availableFiles`. Contrat `supplier-invoice-error-details`.
+- Pourquoi : un log par erreur, une AppError d'un service (validate, approve) garde son statut au lieu de devenir 500. La garde de sortie réécrivait déjà les 5xx : la fuite réelle était sur le 400 multer.
+- Preuve : hygiène rouge 4/25 sans le correctif ; contrat 400 rouge sans le correctif, 500 vert avant comme après (non-régression) ; 9 contrats fournisseurs 87/87 ; tsc 0 ; unitaires 1891.
