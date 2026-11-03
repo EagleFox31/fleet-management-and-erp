@@ -332,7 +332,7 @@ export class AlertService {
     console.log("🔍 Vérification des alertes véhicules...");
     
     // Récupérer tous les véhicules
-    const { vehicles } = await storage.getVehicles();
+    const { vehicles } = await storage.listAllVehicles();
     const activeVehicles = vehicles.filter((v: Vehicle) => v.status !== 'out_of_service');
 
     for (const vehicle of activeVehicles) {
@@ -398,7 +398,7 @@ export class AlertService {
   async checkMaintenanceScheduleAlerts(): Promise<void> {
     console.log("🔍 Vérification des alertes planification maintenance...");
     
-    const { vehicles } = await storage.getVehicles();
+    const { vehicles } = await storage.listAllVehicles();
     const today = new Date().toISOString().split('T')[0];
     
     for (const vehicle of vehicles) {
@@ -704,7 +704,7 @@ export class AlertService {
   async checkFuelConsumptionAlerts(): Promise<void> {
     console.log("🔍 Vérification des alertes consommation carburant...");
 
-    const { vehicles } = await storage.getVehicles();
+    const { vehicles } = await storage.listAllVehicles();
 
     for (const vehicle of vehicles) {
       const fuelHistory = await storage.getFuelRecordsByVehicleId(vehicle.id);

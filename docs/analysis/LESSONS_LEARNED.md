@@ -1592,3 +1592,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+## 2026-11-03 — Parc tronqué à 10 véhicules dans les totaux du personnel
+
+### Contexte
+- `storage.getVehicles()` pagine avec `limit = 10` par défaut. Sept appels sans argument l'employaient pour « tout le parc » :
+  - pleins (`GET /api/fuel-records`), statistiques carburant, historique de consommation, statistiques technicien ;
+  - trois contrôles d'alertes (`alert-service` : véhicules, plans de maintenance, consommation).
+- Au-delà de 10 véhicules, les totaux du personnel et les alertes ignoraient en silence les plus anciens. Le côté client (`getVehiclesByOwner`) n'était pas touché.
+
+### Cause racine
+- Classification : valeur par défaut de pagination reprise par des appelants qui voulaient l'ensemble, sans erreur ni signal.
+
+### Résolution
+- `storage.listAllVehicles()` : tout le parc non supprimé, sans pagination, sans repli silencieux sur une liste vide. Les sept appels y passent.
+- `getVehicles` garde son contrat paginé pour `GET /api/vehicles`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/vehicles-unbounded-hygiene.test.ts` : aucun `getVehicles()` sans argument dans `server/`.
+- `tests/integration/storage-list-all-vehicles.test.ts` : le véhicule hors première page est rendu, le supprimé exclu.
+- `tests/contract/fuel-staff-whole-fleet.contract.test.ts` : le plein et les statistiques d'un véhicule hors des 10 plus récents sont présents.
+- Mutant (retour à `getVehicles()`) : contrat 2/2 rouge, hygiène rouge.
+
+### Règle Projet
+- Une lecture « de tout le parc » appelle une méthode sans pagination nommée comme telle, jamais une méthode paginée sans argument.
