@@ -20,7 +20,7 @@ import { uniqueTestToken } from "../support/ids";
  *   uploads/) ; les deux téléchargements servaient un chemin stocké quelconque.
  */
 
-const ROLES: TestUserRole[] = ["admin", "technician", "logistics", "warehouse", "client"];
+const ROLES: TestUserRole[] = ["admin", "technician", "logistics", "warehouse", "client", "workshop_manager"];
 
 let server: Server;
 let baseUrl = "";
@@ -153,6 +153,37 @@ describe("T1 carburant : modification d'un plein", { timeout: 60000 }, () => {
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("admin"), body: { quantity: 43 } });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("DELETE /api/fuel-records/:id (server/api, sous verrou carte)", { timeout: 60000 }, () => {
+  it("chef d'atelier : 204, plein supprimé", async () => {
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("admin") });
+    ids.fuelRecordIds.push(record.id);
+    const res = await call("DELETE", "/api/fuel-records/" + record.id, { cookie: cookies.get("workshop_manager") });
+    expect(res.status).toBe(204);
+    expect(await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id))).toHaveLength(0);
+  });
+
+  it("logisticien -> 403 au contrat, plein conservé", async () => {
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
+    ids.fuelRecordIds.push(record.id);
+    const res = await call("DELETE", "/api/fuel-records/" + record.id, { cookie: cookies.get("logistics") });
+    expect(res.status).toBe(403);
+    expectErrorContract(res, "FORBIDDEN");
+    expect(await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id))).toHaveLength(1);
+  });
+
+  it("id inconnu -> 404 au contrat", async () => {
+    const res = await call("DELETE", "/api/fuel-records/2147483000", { cookie: cookies.get("admin") });
+    expect(res.status).toBe(404);
+    expectErrorContract(res, "NOT_FOUND");
+  });
+
+  it("id illisible -> 400 au contrat", async () => {
+    const res = await call("DELETE", "/api/fuel-records/abc", { cookie: cookies.get("admin") });
+    expect(res.status).toBe(400);
+    expectErrorContract(res, "VALIDATION");
   });
 });
 
