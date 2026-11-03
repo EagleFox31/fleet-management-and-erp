@@ -30,6 +30,7 @@ import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
 import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
+import { broadcastAlertCreated as broadcastSharedAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
   documentRenewalCenters,
@@ -153,30 +154,9 @@ const broadcastVehicleDocumentEvent = (
 };
 
 /** Exporté pour le contrat de portée (repli personnel d'une alerte sans destinataire). */
-export const broadcastAlertCreated = (alert: {
-  id: number;
-  userId: number | null;
-  title: string;
-  type: string;
-  priority: string;
-  link: string | null;
-  message: string;
-}) => {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate("alert_created", {
-    version: 1,
-    entity: "alert",
-    entityId: alert.id,
-    payload: { alert },
-    // Une alerte sans destinataire reste au personnel (§11), jamais en broadcast.
-    scope: alert.userId ? { type: "user", userIds: [alert.userId] } : { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
-    emittedAt: new Date().toISOString(),
-  });
-};
+// Une alerte sans destinataire reste au personnel (§11), jamais en broadcast.
+export const broadcastAlertCreated = (alert: BroadcastableAlert) =>
+  broadcastSharedAlertCreated(alert, VEHICLE_DOCUMENT_EVENT_ROLES);
 
 const renewalProofUploadDir = path.join(
   process.cwd(),
@@ -982,29 +962,6 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
 
       const payload = parsedPayload.data;
 
-      let centerId: number | null = payload.centerId ?? null;
-      let centerNameSnapshot: string | null = null;
-      let centerAccreditationSnapshot: string | null = null;
-
-      const resolvedCenter = await resolveRenewalCenter({
-        centerId,
-        centerName: payload.centerName,
-        centerAddress: payload.centerAddress,
-        centerContact: payload.centerContact,
-        centerAccreditationNumber: payload.centerAccreditationNumber,
-        documentType: null,
-        actorUserId,
-      });
-      if (!resolvedCenter) {
-        return res.status(400).json({ message: "Centre agréé obligatoire." });
-      }
-      if (!resolvedCenter.ok) {
-        return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
-      }
-      centerId = resolvedCenter.id;
-      centerNameSnapshot = resolvedCenter.name;
-      centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
-
       const [documentRow] = await db
         .select({
           documentId: vehicleDocuments.id,
@@ -1074,6 +1031,26 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           return res.status(400).json({ message: "La demande ne correspond pas au document ciblé." });
         }
       }
+
+      // Le centre est résolu (et créé au besoin) après les contrôles : un refus ne laisse pas de centre en base.
+      const resolvedCenter = await resolveRenewalCenter({
+        centerId: payload.centerId ?? null,
+        centerName: payload.centerName,
+        centerAddress: payload.centerAddress,
+        centerContact: payload.centerContact,
+        centerAccreditationNumber: payload.centerAccreditationNumber,
+        documentType: null,
+        actorUserId,
+      });
+      if (!resolvedCenter) {
+        return res.status(400).json({ message: "Centre agréé obligatoire." });
+      }
+      if (!resolvedCenter.ok) {
+        return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
+      }
+      const centerId = resolvedCenter.id;
+      const centerNameSnapshot = resolvedCenter.name;
+      const centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
 
       const proofFileName = req.file.originalname;
       const proofFilePath = `/uploads/document-renewals/proofs/${req.file.filename}`;

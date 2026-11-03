@@ -8,6 +8,7 @@ import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * P3-2 lot 2b, M2 et M3 : refus d'un téléversement. Le message est une phrase utilisateur
@@ -64,7 +65,7 @@ describe("POST /api/vehicles/:id/documents : refus de fichier", { timeout: 12000
     const res = await upload("virus.exe", "application/pdf");
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/extension/i);
-    expect(JSON.stringify(res.body)).not.toMatch(/EACCES|ENOSPC|stack|\.exe'/);
+    expect(leakText(res.body)).not.toMatch(/EACCES|ENOSPC|stack|\.exe'/);
     expect(filesOnDisk()).toEqual([]);
     expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId))).toHaveLength(0);
   });
@@ -83,7 +84,7 @@ describe("POST /api/vehicles/:id/documents : refus de fichier", { timeout: 12000
     const res = await upload("gros.pdf", "application/pdf", 10 * 1024 * 1024 + 1024);
     expect(res.status).toBe(400);
     expect(res.body.message).toBe("Le fichier dépasse la taille maximale autorisée.");
-    expect(JSON.stringify(res.body)).not.toMatch(/LIMIT_FILE_SIZE|MulterError/);
+    expect(leakText(res.body)).not.toMatch(/LIMIT_FILE_SIZE|MulterError/);
   });
 
   it("M2 : corps multipart tronqué (erreur brute de la librairie) : 400 générique, rien de technique", async () => {

@@ -6,6 +6,7 @@ import { alerts, parts, partsStockMovements, purchaseOrderLines, purchaseOrders 
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestSupplier, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * Commande fournisseur : les montants et les quantités reçues sont ceux du
@@ -134,7 +135,7 @@ describe("Commande fournisseur : montants calculés par le serveur", { timeout: 
         discountPercentage,
       });
       expect(res.status, String(discountPercentage)).toBe(400);
-      expect(JSON.stringify(res.body)).not.toMatch(/ZodError|stack|at Object/);
+      expect(leakText(res.body)).not.toMatch(/ZodError|stack|at Object/);
     }
     const created = await db.select().from(purchaseOrders).where(eq(purchaseOrders.supplierId, supplier.id));
     expect(created).toHaveLength(0);

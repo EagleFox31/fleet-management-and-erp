@@ -19,6 +19,8 @@ import {
 import { eq, and, desc, sql, inArray, gte, lte, or } from "drizzle-orm";
 import { threeWayMatchingService } from "./three-way-matching-service";
 import { AppError } from "../lib/app-error";
+import { broadcastAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
+import { moduleLogger } from "../lib/logger";
 import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
 
 /**
@@ -26,6 +28,8 @@ import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared
  * Optimise les coûts via regroupement automatique et remises volume
  * Objectif : 5-10% d'économies sur les achats
  */
+const log = moduleLogger("procurement-service");
+
 export class ProcurementService {
   private readonly VAT_RATE = 19.25; // TVA au Cameroun
   private readonly ROLE_LABELS: Record<string, string> = {
@@ -1199,7 +1203,7 @@ export class ProcurementService {
       throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
     }
 
-    console.log(`📦 Ligne commande #${lineId} mise à jour`);
+    log.info({ lineId }, "ligne de commande mise à jour");
 
     const newReceived = updated.quantityReceived || 0;
     const receivedDelta = Math.max(0, newReceived - previousReceived);
@@ -1227,7 +1231,7 @@ export class ProcurementService {
    */
   private async notifyDeliveryReceived(orderId: number): Promise<void> {
     try {
-      console.log(`🔔 Notification de livraison pour commande #${orderId}`);
+      log.debug({ orderId }, "notification de livraison");
 
       // Récupérer uniquement les lignes réellement livrées (avec quantité reçue > 0)
       const orderLines = await db
@@ -1257,7 +1261,7 @@ export class ProcurementService {
         .filter((id): id is number => id !== null);
 
       if (deliveredPartIds.length === 0) {
-        console.log(`   Aucune pièce à notifier`);
+        log.debug({ orderId }, "aucune pièce à notifier");
         return;
       }
 
@@ -1265,7 +1269,7 @@ export class ProcurementService {
       const affectedWorkOrders = await this.findWorkOrdersAwaitingParts(deliveredPartIds);
 
       if (affectedWorkOrders.length === 0) {
-        console.log(`   Aucune OT en attente de ces pièces`);
+        log.debug({ orderId }, "aucune OT en attente de ces pièces");
         return;
       }
 
@@ -1291,17 +1295,19 @@ export class ProcurementService {
         }
       });
 
+      const created: BroadcastableAlert[] = [];
+
       // Créer l'alerte pour le chef d'atelier
       for (const manager of workshopManagers) {
-        await db.insert(alerts).values({
+        const [alert] = await db.insert(alerts).values({
           userId: manager.id,
-          title: '📦 Livraison reçue - Pièces disponibles',
+          title: 'Livraison reçue - Pièces disponibles',
           message: `Les pièces suivantes ont été livrées et sont maintenant disponibles: ${partsNames}. ${affectedWorkOrders.length} ordre(s) de travail en attente peu(ven)t être repris.`,
           type: 'inventory',
           priority: 'high',
           link: `/procurement/orders/${orderId}`,
-        });
-        console.log(`   ✅ Alerte envoyée au chef d'atelier: ${manager.name}`);
+        }).returning();
+        created.push(alert);
       }
 
       // Créer l'alerte pour chaque technicien concerné
@@ -1309,16 +1315,20 @@ export class ProcurementService {
         const techWorkOrders = affectedWorkOrders.filter(wo => wo.technicianId === techId);
         const woTitles = techWorkOrders.map(wo => wo.title).join(', ');
 
-        await db.insert(alerts).values({
+        const [alert] = await db.insert(alerts).values({
           userId: techId,
-          title: '📦 Pièces disponibles pour vos OT',
+          title: 'Pièces disponibles pour vos OT',
           message: `Les pièces attendues pour vos ordres de travail sont arrivées: ${woTitles}. Vous pouvez reprendre le travail.`,
           type: 'work_order',
           priority: 'high',
           link: `/maintenance/work-orders/${techWorkOrders[0].id}`,
-        });
-        console.log(`   ✅ Alerte envoyée au technicien ID: ${techId}`);
+        }).returning();
+        created.push(alert);
       }
+
+      // Couche 2 : sans cette trame, la cloche et le toast ne bougeaient pas.
+      for (const alert of created) broadcastAlertCreated(alert);
+      log.info({ orderId, alerts: created.length }, "livraison notifiée");
 
       // Diffuser via WebSocket pour mise à jour temps réel
       if ((global as any).broadcastUpdate) {
@@ -1328,11 +1338,11 @@ export class ProcurementService {
           partIds: deliveredPartIds,
           affectedWorkOrderIds: affectedWorkOrders.map(wo => wo.id),
         });
-        console.log(`   📡 Notification WebSocket diffusée`);
+        log.debug({ orderId }, "parts_delivered diffusé");
       }
 
     } catch (error) {
-      console.error('❌ Erreur lors de la notification de livraison:', error);
+      log.error({ err: error, orderId }, "notification de livraison");
     }
   }
 
@@ -1343,13 +1353,13 @@ export class ProcurementService {
     if (!partId) return;
 
     try {
-      console.log(`🔔 Notification de réception pièce #${partId} (qté: ${quantityReceived})`);
+      log.debug({ lineId, partId, quantityReceived }, "notification de réception pièce");
 
       // Trouver les OT en attente de cette pièce
       const affectedWorkOrders = await this.findWorkOrdersAwaitingParts([partId]);
 
       if (affectedWorkOrders.length === 0) {
-        console.log(`   Aucune OT en attente de cette pièce`);
+        log.debug({ partId }, "aucune OT en attente de cette pièce");
         return;
       }
 
@@ -1375,29 +1385,36 @@ export class ProcurementService {
         }
       });
 
+      const created: BroadcastableAlert[] = [];
+
       // Créer l'alerte pour le chef d'atelier
       for (const manager of workshopManagers) {
-        await db.insert(alerts).values({
+        const [alert] = await db.insert(alerts).values({
           userId: manager.id,
-          title: '📦 Pièce reçue',
+          title: 'Pièce reçue',
           message: `${quantityReceived} unité(s) de "${partInfo.name}" (${partInfo.reference || 'N/A'}) ont été reçues. ${affectedWorkOrders.length} OT en attente.`,
           type: 'inventory',
           priority: 'medium',
           link: `/inventory/parts`,
-        });
+        }).returning();
+        created.push(alert);
       }
 
       // Créer l'alerte pour chaque technicien concerné
       for (const techId of Array.from(technicianIds)) {
-        await db.insert(alerts).values({
+        const [alert] = await db.insert(alerts).values({
           userId: techId,
-          title: '📦 Pièce disponible',
+          title: 'Pièce disponible',
           message: `La pièce "${partInfo.name}" est maintenant disponible. Vous pouvez reprendre votre ordre de travail.`,
           type: 'work_order',
           priority: 'medium',
           link: `/maintenance/work-orders`,
-        });
+        }).returning();
+        created.push(alert);
       }
+
+      // Couche 2 : sans cette trame, la cloche et le toast ne bougeaient pas.
+      for (const alert of created) broadcastAlertCreated(alert);
 
       // Diffuser via WebSocket
       if ((global as any).broadcastUpdate) {
@@ -1409,10 +1426,10 @@ export class ProcurementService {
         });
       }
 
-      console.log(`   ✅ ${workshopManagers.length + technicianIds.size} notification(s) envoyée(s)`);
+      log.info({ partId, alerts: created.length }, "réception pièce notifiée");
 
     } catch (error) {
-      console.error('❌ Erreur lors de la notification de réception pièce:', error);
+      log.error({ err: error, lineId, partId }, "notification de réception pièce");
     }
   }
 

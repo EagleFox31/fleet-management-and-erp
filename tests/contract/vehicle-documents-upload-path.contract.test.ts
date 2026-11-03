@@ -8,6 +8,7 @@ import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * #130 : l'identifiant de véhicule de l'URL devient un dossier disque dans la destination multer.
@@ -30,7 +31,7 @@ function expectApiError400(res: { status: number; body: any }) {
   expect(res.body.message).toBe("ID de véhicule invalide");
   expect(res.body.code).toBeTruthy();
   expect(res.body.requestId).toBeTruthy();
-  expect(JSON.stringify(res.body)).not.toMatch(/stack|ENOENT|EACCES|uploads|\.\.\//i);
+  expect(leakText(res.body)).not.toMatch(/stack|ENOENT|EACCES|uploads|\.\.\//i);
 }
 
 async function post(rawVehicleId: string) {
@@ -104,6 +105,6 @@ describe("POST /api/vehicles/:vehicleId/documents — échec disque à la créat
     expect(res.status).toBe(500);
     expect(res.body.message).toContain(`Référence : ${res.body.requestId}`);
     expect(res.body.code).toBeTruthy();
-    expect(JSON.stringify(res.body)).not.toMatch(/EACCES|uploads|mkdir|stack/i);
+    expect(leakText(res.body)).not.toMatch(/EACCES|uploads|mkdir|stack/i);
   });
 });

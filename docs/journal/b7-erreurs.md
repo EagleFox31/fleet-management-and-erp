@@ -92,3 +92,31 @@ Modèle et règles : `docs/journal/README.md`.
   - M4 n'a pas de test de concurrence (condition SQL seule) ;
   - M5 : une coupure après COMMIT non acquitté supprime un fichier référencé (cas théorique accepté) ;
   - le centre créé avant les contrôles reste un point produit, à trancher par 0a.
+
+## 2026-11-03T15:16:28+01:00 — Réception de pièces : alert_created vers l'atelier
+
+- **Agent** : b7 · **Branche** : `fix/procurement-alert-created`
+- **Statut** : fait, PR brouillon.
+- **Quoi** :
+  - Les alertes de livraison (`parts_delivered`) et de réception partielle (`part_received`) étaient écrites sans trame `alert_created` : la cloche et le toast du chef d'atelier et du technicien ne bougeaient pas. Signalé par de (audit temps réel de 0a).
+  - En plus : le renouvellement de document émettait une charge imbriquée (`{ alert }`), alors que le client lit une charge à plat. Le toast affichait donc « Nouvelle alerte », sans message ni lien.
+- **Comment** :
+  - Émetteur partagé `server/lib/alert-broadcast.ts`, avec une charge à plat comme `alert-service`.
+  - `procurement-service` émet la trame après l'écriture de chaque alerte. Le renouvellement passe par le même émetteur.
+  - missions.routes.ts n'est pas touché (verrou c7).
+- **Pourquoi** : règle des 3 couches (AGENTS.md §2), couche 2.
+- **Comment tester (QA)** : contrat `procurement-alert-realtime`, 3 cas. Les trames sont reçues par deux rôles (chef d'atelier, technicien) et le magasinier n'en reçoit aucune. Sans le correctif, 3 échecs sur 3.
+- **Reste** : migrer `missions.routes.ts:139` sur l'émetteur partagé après la PR de c7.
+
+## 2026-11-03T15:24:48+01:00 — Suivis de #178 et de #180
+
+- **Quoi** :
+  - quick-renew résout le centre agréé après les contrôles, sans centre orphelin en cas de refus ;
+  - le toast de document-renew passe par userMessageOf ;
+  - broadcastAlertCreated ne lève plus, avec un échec journalisé par alerte ;
+  - un console.log de procurement-service est migré ;
+  - deux entrées LESSONS_LEARNED.
+- **Comment** :
+  - test de contrat quick-renew : les cas 404 et 409 vérifient l'absence de centre (rouge 2 sans le correctif) ;
+  - test de contrat procurement-alert-realtime : portée user sur toute trame, et un cas « envoi raté » (rouge 1 sur 4 sans le try/catch).
+- **Pourquoi** : réserves du relecteur sur #178 et #180, transmises par 0a.

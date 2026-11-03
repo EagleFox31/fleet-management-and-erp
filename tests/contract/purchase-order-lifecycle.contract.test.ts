@@ -14,6 +14,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestSupplier, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, PO1 : cycle de vie d'une commande fournisseur, par les rôles réels.
@@ -179,7 +180,7 @@ describe("PO1 création d'une commande", { timeout: 120000 }, () => {
   it("sans ligne ni demande : 400 lisible", async () => {
     const res = await call("admin", "POST", "/api/purchase-orders", { supplierId });
     expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).not.toMatch(/stack|SQLSTATE|violates/);
+    expect(leakText(res.body)).not.toMatch(/stack|SQLSTATE|violates/);
   });
 });
 

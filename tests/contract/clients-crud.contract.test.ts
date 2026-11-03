@@ -5,6 +5,7 @@ import { clients } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, CLI1 : CRUD client et désactivation.
@@ -78,7 +79,7 @@ describe("CLI1 : création", { timeout: 60000 }, () => {
     expect(empty.status).toBe(400);
     const wrong = await call("POST", "/api/clients", { actor: "admin", body: { name: 12 } });
     expect(wrong.status).toBe(400);
-    expect(JSON.stringify(wrong.body)).not.toMatch(/SQLSTATE|violates|stack/);
+    expect(leakText(wrong.body)).not.toMatch(/SQLSTATE|violates|stack/);
   });
 
   it("nom déjà pris : 409", async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { STATUS_MESSAGES, describeIssue, looksTechnical } from "../../../shared/errors";
 import { AppError, errorHandler, errorResponseGuard, normalizeErrorBody, toHttpError } from "../../../server/middleware/error-handler";
+import { leakText } from "../../support/api-error";
 
 /** Gestion d'erreurs centralisée, niveau U : contrat de réponse et absence de fuite. */
 
@@ -109,6 +110,6 @@ describe("toHttpError / errorHandler", () => {
     errorResponseGuard(req, res as never, vi.fn());
     errorHandler(new Error("boom: secret connection string"), req, res as never, vi.fn());
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).not.toMatch(/boom|secret/);
+    expect(leakText(res.body)).not.toMatch(/boom|secret/);
   });
 });

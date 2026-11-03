@@ -12,6 +12,7 @@ import { startContractActors } from "../support/contract-actors";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
 import { resolveRenewalCenter } from "../../server/lib/document-renewal-center-resolver";
+import { leakText } from "../support/api-error";
 
 /** DOC1 : gestion des centres de renouvellement (écriture, désactivation, garde des demandes). */
 const ids = createIdBag();
@@ -115,7 +116,7 @@ describe("centres de renouvellement : écriture", { timeout: 180000 }, () => {
     expect(first.status).toBe(201);
     const same = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `test DOUBLON ${SUFFIX}`, documentType: "taxe" });
     expect(same.status).toBe(409);
-    expect(JSON.stringify(same.body)).not.toMatch(/duplicate|constraint|sql/i);
+    expect(leakText(same.body)).not.toMatch(/duplicate|constraint|sql/i);
     // L'unicité SQL porte sur le nom seul : même nom sous un autre type = 409 aussi (voir rapport).
     const otherType = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `TEST doublon ${SUFFIX}`, documentType: "assurance" });
     expect(otherType.status).toBe(409);
@@ -127,7 +128,7 @@ describe("centres de renouvellement : écriture", { timeout: 180000 }, () => {
     const second = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `TEST nom ${SUFFIX}`, documentType: "assurance" });
     expect(second.status).toBe(409);
     expect(second.body.message).not.toMatch(/type/i);
-    expect(JSON.stringify(second.body)).not.toMatch(/duplicate|constraint|sql/i);
+    expect(leakText(second.body)).not.toMatch(/duplicate|constraint|sql/i);
     const patched = await createCenter(`TEST autre ${SUFFIX}`, "assurance");
     const clash = await call("PATCH", documentRenewalCenterPath(patched.body.id), "admin", { name: `TEST NOM ${SUFFIX}` });
     expect(clash.status).toBe(409);
