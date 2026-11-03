@@ -1765,7 +1765,8 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Côté client, `sendWithSubmissionKey` (`client/src/lib/submission-key.ts`) et la portée `partStockKeyScope(id, delta)` :
   - le réessai de la même intention renvoie la même clé ;
   - une nouvelle intention (autre pièce, autre quantité, succès ou refus connu) en prend une nouvelle.
-- Les deux écrans d'ajustement (fiche pièce, liste des pièces) envoient l'en-tête.
+- Les deux écrans d'ajustement (fiche pièce, liste des pièces) envoient l'en-tête. Leurs envois passent par `useSingleFlightMutate`, donc un double clic ne peut pas envoyer deux fois la même clé en vol. Leurs toasts d'erreur affichent `userMessageOf`, c'est-à-dire le texte du 409.
+- Compromis assumé, le même que pour le plein carburant : le 409 « vérifiez le stock » est une issue connue, donc il libère la clé côté client. Si la personne passe outre le message et renvoie le même delta, l'envoi part avec une nouvelle clé et ajuste le stock. La clé restée « en cours » côté serveur ne sert plus et n'est jamais purgée avant son expiration : une ligne par incident, sans risque.
 
 ### Prévention (vérifiable)
 - `tests/contract/parts-update-stock-idempotency.contract.test.ts` :
