@@ -2507,6 +2507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       // Le service signale ces deux cas par message : les traduire en statut
       // plutôt que de renvoyer le texte de l'erreur au client.
+      if (error instanceof AppError) return next(error);
       const message = error instanceof Error ? error.message : "";
       if (message === "Pièce non trouvée") {
         return next(new AppError(404, "Cette pièce n'existe plus.", { cause: error }));

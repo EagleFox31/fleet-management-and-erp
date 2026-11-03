@@ -750,6 +750,14 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       for (const key of KPI_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: [key] });
       // Avis de maintenance rattachés aux missions (CDC) : l'état de l'OT les fait évoluer.
       queryClient.invalidateQueries({ queryKey: ["/api/mission-advisories"] });
+      // P3-1 : la clôture d'un OT préventif avance l'échéance de son plan (aucun événement propre au plan).
+      // Toutes les clés qui commencent par la route des plans, y compris `/api/maintenance-schedules/vehicle/${id}`
+      // (fiche véhicule, page immatriculation, score de santé).
+      queryClient.invalidateQueries({
+        predicate: (q) => typeof q.queryKey[0] === "string" && q.queryKey[0].startsWith("/api/maintenance-schedules"),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/date-alerts"] });
       if (currentUserId) {
         queryClient.invalidateQueries({
           queryKey: ["/api/technician/work-orders", currentUserId],
@@ -972,6 +980,19 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
     case "document_renewal_center_changed":
       invalidateCatalogEvent("document_renewal_center_changed");
       break;
+
+    // Récépissé déposé : demande, papier du véhicule, éligibilité des missions et alertes.
+    case "document_renewal_receipt_uploaded": {
+      invalidateCatalogEvent("document_renewal_receipt_uploaded");
+      const receiptVehicleId = toNumericId(asRecord(payloadRecord)?.vehicleId);
+      if (receiptVehicleId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${receiptVehicleId}`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${receiptVehicleId}/documents`] });
+      }
+      invalidateMissionDerivedQueries(null);
+      invalidateAlertQueries();
+      break;
+    }
 
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
     // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).

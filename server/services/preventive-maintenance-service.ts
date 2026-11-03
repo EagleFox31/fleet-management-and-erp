@@ -1,11 +1,24 @@
 import { db } from "../db";
-import { maintenanceSchedules, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
-import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
+import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
+import { eq, and, gte, lte, lt, desc, asc } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 const log = moduleLogger("preventive-maintenance");
+
+/**
+ * Ajoute des mois en UTC (décision D4) en bornant au dernier jour du mois cible :
+ * 31/01 + 1 mois = 28/02 (ou 29/02), et non 03/03 comme `setMonth`.
+ */
+export function addMonthsUtc(date: Date, months: number): Date {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + months;
+  const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const out = new Date(date);
+  out.setUTCFullYear(y, m, Math.min(date.getUTCDate(), lastDay));
+  return out;
+}
 const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
@@ -88,21 +101,23 @@ export class PreventiveMaintenanceService {
     const nextDate = new Date(baseDate);
     
     switch (frequencyType) {
+      case 'daily':
+        nextDate.setUTCDate(nextDate.getUTCDate() + frequencyValue);
+        break;
+      case 'weekly':
+        nextDate.setUTCDate(nextDate.getUTCDate() + frequencyValue * 7);
+        break;
       case 'monthly':
-        nextDate.setMonth(nextDate.getMonth() + frequencyValue);
-        break;
+        return addMonthsUtc(baseDate, frequencyValue);
       case 'quarterly':
-        nextDate.setMonth(nextDate.getMonth() + (frequencyValue * 3));
-        break;
+        return addMonthsUtc(baseDate, frequencyValue * 3);
       case 'yearly':
-        nextDate.setFullYear(nextDate.getFullYear() + frequencyValue);
-        break;
+        return addMonthsUtc(baseDate, frequencyValue * 12);
       case 'mileage':
         // Pour le kilométrage, on estime une date basée sur l'usage moyen
         // (ex: 1000km/mois en moyenne)
         const estimatedMonths = Math.ceil(frequencyValue / 1000);
-        nextDate.setMonth(nextDate.getMonth() + estimatedMonths);
-        break;
+        return addMonthsUtc(baseDate, estimatedMonths);
       default:
         throw new Error(`Type de fréquence non supporté: ${frequencyType}`);
     }
@@ -481,6 +496,58 @@ export class PreventiveMaintenanceService {
     if (diffDays <= 7) return 'high';
     if (diffDays <= 14) return 'medium';
     return 'low';
+  }
+
+  /**
+   * P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
+   * - Base = échéance traitée par l'OT (`due_date`, sinon `start_date`), pas la date de clôture :
+   *   planning fixe, un OT clos en retard ne fait pas dériver le plan.
+   * - N'avance que si la date du plan est antérieure à la nouvelle échéance : une seconde clôture
+   *   du même OT (refus qualité puis reprise) ne la repousse pas deux fois.
+   * - Plans kilométriques exclus : leur seuil avance déjà à la génération de l'OT.
+   * - Aucun OT généré d'avance : le balayage le crée à l'approche de l'échéance.
+   * Renvoie la nouvelle date, ou `null` si rien n'a changé.
+   */
+  async advanceScheduleAfterCompletion(workOrderId: number): Promise<string | null> {
+    const [wo] = await db
+      .select({
+        isPreventive: workOrders.isPreventive,
+        scheduleId: workOrders.maintenanceScheduleId,
+        startDate: workOrders.startDate,
+      })
+      .from(workOrders)
+      .where(eq(workOrders.id, workOrderId));
+    if (!wo?.isPreventive || !wo.scheduleId) return null;
+    // `due_date` est porté par la table compagnon (même table SQL, voir lib/preventive-due.ts).
+    const [planning] = await db
+      .select({ dueDate: workOrderPlanning.dueDate })
+      .from(workOrderPlanning)
+      .where(eq(workOrderPlanning.id, workOrderId));
+
+    const [plan] = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.id, wo.scheduleId));
+    if (!plan || plan.frequency === 'mileage' || !plan.scheduledDate) return null;
+
+    const base = planning?.dueDate ?? wo.startDate ?? plan.scheduledDate;
+    const next = this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue).toISOString().slice(0, 10);
+    const [updated] = await db
+      .update(maintenanceSchedules)
+      .set({ scheduledDate: next })
+      .where(and(eq(maintenanceSchedules.id, plan.id), lt(maintenanceSchedules.scheduledDate, next)))
+      .returning({ scheduledDate: maintenanceSchedules.scheduledDate });
+    if (!updated) return null;
+    log.info({ workOrderId, scheduleId: plan.id, from: plan.scheduledDate, to: next }, "Plan préventif : échéance avancée après clôture de l'OT");
+    return next;
+  }
+
+  /**
+   * Clôture d'un OT : avance le plan sans jamais faire échouer la clôture (l'échec est journalisé).
+   */
+  async onWorkOrderCompleted(workOrderId: number): Promise<void> {
+    try {
+      await this.advanceScheduleAfterCompletion(workOrderId);
+    } catch (err) {
+      log.error({ err, workOrderId }, "Plan préventif : échéance non avancée après clôture de l'OT");
+    }
   }
 
   /**

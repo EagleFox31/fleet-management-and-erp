@@ -1966,6 +1966,14 @@ soumission sans doublon.
 - **Pourquoi** : réserves 1 à 4 de fleet-relecteur, mineurs M1 et M4 de fleet-securite. M2 (`err.message` multer et `looksTechnical` sans `EACCES`) et M3 (extension non confrontée au type MIME) sont antérieurs à la PR : suite à part.
 - **Preuves** : garde-fou rouge sur l'ancien `upload.ts`, vert après ; contrats `vehicle-documents-upload-path` 7/7 et `vehicle-documents-upload` 16/16 sur le Postgres local ; unitaires `upload-vehicle-directory` et `multer-storage-hygiene` verts.
 
+
+## 2026-11-03 — P3-2 lot 2b (A) : récépissé provisoire de renouvellement
+
+- **Quoi** : dépôt du récépissé (`POST /api/document-renewals/requests/:id/receipt`) et prise en compte dans `getMissionEligibility` : papier échu éligible jusqu'à `receipt_valid_until` inclus, puis bloqué.
+- **Comment** : `tests/contract/document-renewal-receipt.contract.test.ts` (8 cas : 201 et événement en rôles, 403 technicien/chauffeur/client, remplacement, 400 date passée/illisible/fichier absent/format, jour J, 404, 409 clôturée, chemin hors `uploads/`, CHECK 23514), `tests/contract/vehicle-renewal-receipt-eligibility.contract.test.ts` (6 cas, horloge injectée) et `tests/unit/shared/vehicle-eligibility-receipt.test.ts` (5 cas).
+- **Pourquoi** : décision 3 du plan P3-2 ; une règle, une source (la date du récépissé entre dans `getMissionEligibility`).
+- **Reste** : le branchement dans `missions.routes.ts` (autre session) ; sans lui, le récépissé n'est pas encore lu à l'affectation ni au lancement.
+
 ## 2026-11-03 09:58 — P3-2 : garde-fous du jour J, du miroir et du PATCH /api/documents/:id
 
 - **Quoi** : trois garde-fous sur les échéances de documents véhicule. (1) Une règle, une source au jour J : éligibilité mission, `isDateExpired` de `vehicle-documentation-service.ts` et `classifyDocumentExpiry` doivent rendre le même verdict. (2) Hygiène : aucune écriture d'une colonne miroir de `vehicles` hors de `server/lib/vehicle-document-mirror.ts`, sauf liste gelée. (3) Contrat du PATCH `/api/documents/:id`.
@@ -1995,3 +2003,17 @@ soumission sans doublon.
 - **Pourquoi** : les erreurs de la fiche pièce n'étaient vérifiées que par statut ; AGENTS.md §10 exige le contrat unique. Il n'existe pas de CRUD de catégorie : `parts.category` est un texte libre.
 - **Défauts figés (non corrigés)** : (1) `PATCH /api/parts/:id` accepte `quantity: -3` (200) alors que la création refuse (400) ; (2) `DELETE /api/parts/:id` d'une pièce citée par `part_requirements` : `deletePart` ne contrôle que le catalogue de pannes, la FK échoue et la route (`server/routes.ts`, catch du DELETE) renvoie 500 avec `error.message` brut. Correctif à fleet-api.
 - **Preuves** : contrats `fuel-anomaly-rules`, `parts-catalog-crud`, `parts-catalog-access-errors` 78/78 et intégration `fuel-anomaly-rules` 20/20 sur `fleet_test_cov` ; `npm test` 1585/1585 ; `tsc` 0 erreur. Les deux `it.fails` sont rouges sur le produit actuel (le premier observé en 200, vérifié par sonde) et passeront en échec dès le correctif, signal pour les retirer.
+
+## 2026-11-03 10:40 — DRV2 et P2 : espace chauffeur, état de la facture sur la mission, rôles du paiement (niveau E)
+
+- **Quoi** : DRV2 reste Partiel, avec un défaut produit de plus figé : DRV2-4, aucune vue « missions du jour » (le tableau de bord ne garde que `allMissions.find(assigned | in_progress)`, alors que `/api/drivers/me` renvoie les deux missions). Ajouts : périmètre de la déclaration de panne (véhicule d'un autre 403, corps invalide 400, atelier 403, aucun OT créé). P2 : l'onglet Factures de la mission suit en attente, partielle, payée par la trame `client_invoice_payment_recorded` reçue par la logistique ; paiement refusé en 403 à la logistique, au technicien et au chauffeur ; trop-perçu et facture soldée en 409 ; montant négatif, non numérique ou mode inconnu en 400.
+- **Comment** : `e2e/19-driver-space.spec.ts` (chauffeur C à deux missions, chauffeur D, `test.fail` DRV2-4 avec témoin en `beforeEach`) et second describe de `e2e/13-mission-invoice-payment.spec.ts` (une mission et une facture par test, deux sessions de rôles différents). Aucun fichier serveur ni autre spec touché.
+- **Pourquoi** : les niveaux U, I et C de ces règles existent déjà (`client-invoice-payments`, `adm2-drv2-mis1-server-defects`) ; il manquait la preuve au navigateur et sur la trame.
+- **Preuves** : 19 e2e verts sur le Postgres local `fleet_test_cov` (serveur sur le port 5177, navigateur msedge). Rouge avant : garde de rôle du paiement élargie à la logistique, le test des rôles échoue (200 au lieu de 403), mutation retirée. DRV2-4 est rouge par construction (`test.fail`). `tsc` 0 erreur, `npm test` 1585/1585.
+- **Pièges** : les paiements clients prennent `bank_transfer` (pas `virement`) ; le port 5000 était occupé par un autre projet ; un OT ouvert par un test précédent sur le même véhicule impose de comparer avant et après.
+
+## 2026-11-03 11:34 — DRV2 et P2 : réserves de relecture de #139
+
+- **Quoi** : spec 13, le passage à « Payée » est prouvé par une seconde trame `client_invoice_payment_recorded` pour la même facture (compte exact 1 puis 2), plus seulement à l'écran ; les 403 du paiement (logistique, technicien, chauffeur) et les trois 400 (montant négatif, non numérique, mode inconnu) vérifient le contrat `ApiErrorBody` (code = `codeForStatus`, message non vide, aucun détail technique, même filtre que PRT1).
+- **Pourquoi** : réserves a et b de b7 ; une assertion d'écran au-delà du `refetchInterval` est satisfaite par le polling (AGENTS.md §3), un statut seul ne prouve pas le contrat d'erreur (§10).
+- **Preuves** : e2e 13 et 19 sur `fleet_test_cov` (serveur port 5177, msedge) : 18/19 au premier passage, DRV2-1 vert au rejeu isolé (2/2), instable, sans lien avec le delta ; tsc 0.

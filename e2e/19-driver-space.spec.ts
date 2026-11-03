@@ -16,6 +16,12 @@ import { loginWithSession, type E2ECredentials } from "./helpers/auth";
  * - DRV2-2 : la panne crée un OT ; le chef d'atelier reçoit la trame `work_order_created` (jouée à deux rôles) ;
  * - DRV2-3 : cloison chauffeur sur GET /api/missions, /api/missions/:id et /api/drivers/:id/missions.
  *
+ * - DRV2-4 (défaut produit, figé en `test.fail`) : aucune vue « missions du jour ». Le tableau de bord ne garde que
+ *   `allMissions.find(assigned | in_progress)` (client/src/pages/driver/dashboard.tsx) : un chauffeur qui a deux
+ *   missions à faire n'en voit qu'une, alors que /api/drivers/me les renvoie toutes les deux ;
+ * - DRV2-5 : la déclaration de panne reste dans le périmètre du chauffeur (autre véhicule : 403, corps invalide : 400,
+ *   rôle atelier : 403), sans OT créé à tort.
+ *
  * Données préfixées E2E-DRV2-, supprimées en fin de spec (et à l'ouverture si un run a planté).
  */
 
@@ -26,6 +32,9 @@ let stamp = 0;
 type Crew = { user: E2ECredentials & { id: number }; driverId: number; vehicleId: number; registration: string; missionId: number; orderNumber: string };
 let crewA: Crew;
 let crewB: Crew;
+let crewC: Crew;
+let crewCSecond: { missionId: number; orderNumber: string };
+let crewD: Crew;
 let workshop: E2ECredentials & { id: number };
 
 const token = (label: string) => `${PREFIX}${label}-${Date.now().toString(36)}-${++stamp}`;
@@ -79,6 +88,19 @@ async function createCrew(label: string, clientId: number): Promise<Crew> {
   return { user, driverId: driver.id, vehicleId: vehicle.id, registration: vehicle.registrationNumber, missionId: mission.id, orderNumber };
 }
 
+/** Une seconde mission à faire pour le même chauffeur, sur un autre véhicule. */
+async function addSecondMission(crew: Crew, clientId: number): Promise<{ missionId: number; orderNumber: string }> {
+  const orderNumber = token("MIS2");
+  const [mission] = await db
+    .insert(missions)
+    .values({ clientId, orderNumber, status: "assigned", pickupAddress: "Bafoussam", deliveryAddress: "Garoua" })
+    .returning();
+  const vehicle = await createTestVehicle({ registrationNumber: `${PREFIX}C2${Date.now().toString(36)}`.slice(0, 32) });
+  ids.vehicleIds.push(vehicle.id);
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId: vehicle.id, driverId: crew.driverId, status: "accepted" });
+  return { missionId: mission.id, orderNumber };
+}
+
 async function openSession(browser: Browser, credentials: E2ECredentials, before?: (page: Page) => void): Promise<Page> {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -126,6 +148,9 @@ test.beforeAll(async () => {
   ids.clientIds.push(client.id);
   crewA = await createCrew("A", client.id);
   crewB = await createCrew("B", client.id);
+  crewC = await createCrew("C", client.id);
+  crewCSecond = await addSecondMission(crewC, client.id);
+  crewD = await createCrew("D", client.id);
   workshop = await createAccount("workshop_manager", "ATELIER");
 });
 
@@ -240,6 +265,72 @@ test.describe("DRV2 : espace chauffeur", () => {
     test("DRV2-3 : GET /api/drivers/:id/missions d'un autre chauffeur est refusé (403)", async ({ page }) => {
       const res = await page.request.get(`/api/drivers/${crewB.driverId}/missions`);
       expect(res.status()).toBe(403);
+    });
+  });
+
+  test.describe("DRV2-4 : vue des missions du jour", () => {
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, crewC.user);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "Signaler un problème" })).toBeVisible({ timeout: 60_000 });
+    });
+
+    // Témoin : un `test.fail` passe aussi quand sa mise en place échoue (coupure Neon, connexion refusée).
+    // Ce test ordinaire partage les mêmes hooks et vire au rouge dans ce cas.
+    test("DRV2-4 : mise en place réussie (témoin)", async ({ page }) => {
+      // L'API fournit bien les deux missions : le défaut est dans l'écran.
+      const me = (await (await page.request.get("/api/drivers/me")).json()) as { missions: { id: number }[] };
+      expect(me.missions.map((m) => m.id).sort()).toEqual([crewC.missionId, crewCSecond.missionId].sort());
+      // L'écran en montre au moins une.
+      const shown = [crewC.orderNumber, crewCSecond.orderNumber].filter(Boolean);
+      await expect(page.getByText(new RegExp(shown.join("|"))).first()).toBeVisible();
+    });
+
+    // Défaut produit (DRV2-4) : le tableau de bord n'affiche que la première mission `assigned` ou `in_progress`.
+    test.fail("DRV2-4 : les deux missions à faire sont visibles sur le tableau de bord", async ({ page }) => {
+      await expect(page.getByText(`#${crewC.orderNumber}`)).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(`#${crewCSecond.orderNumber}`)).toBeVisible({ timeout: 5_000 });
+    });
+  });
+
+  test.describe("DRV2-5 : périmètre de la déclaration de panne", () => {
+    const workOrdersOf = (vehicleId: number) => db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.vehicleId, vehicleId));
+
+    test.beforeEach(async ({ page }) => {
+      await loginWithSession(page, crewD.user);
+    });
+
+    test("DRV2-5 : mise en place réussie (témoin)", async ({ page }) => {
+      expect((await page.request.get("/api/drivers/me")).status()).toBe(200);
+    });
+
+    test("DRV2-5 : un véhicule hors de ses affectations est refusé, sans OT", async ({ page }) => {
+      // Les autres tests de la spec ouvrent déjà un OT sur ce véhicule : on compare avant et après.
+      const before = (await workOrdersOf(crewA.vehicleId)).length;
+      const res = await page.request.post("/api/driver/breakdowns", {
+        data: { type: "breakdown", vehicleId: crewA.vehicleId, description: "Panne sur le véhicule d'un autre", severity: "high" },
+      });
+      expect(res.status()).toBe(403);
+      expect(await workOrdersOf(crewA.vehicleId)).toHaveLength(before);
+    });
+
+    test("DRV2-5 : un corps invalide donne 400, jamais 500", async ({ page }) => {
+      const res = await page.request.post("/api/driver/breakdowns", { data: { type: "breakdown" } });
+      expect(res.status()).toBe(400);
+      expect(await workOrdersOf(crewD.vehicleId)).toHaveLength(0);
+    });
+
+    test("DRV2-5 : le chef d'atelier n'a pas accès à la déclaration chauffeur", async ({ browser }) => {
+      const page = await openSession(browser, workshop);
+      try {
+        const res = await page.request.post("/api/driver/breakdowns", {
+          data: { type: "breakdown", vehicleId: crewD.vehicleId, description: "Déclaration par l'atelier", severity: "high" },
+        });
+        expect(res.status()).toBe(403);
+        expect(await workOrdersOf(crewD.vehicleId)).toHaveLength(0);
+      } finally {
+        await page.context().close();
+      }
     });
   });
 });

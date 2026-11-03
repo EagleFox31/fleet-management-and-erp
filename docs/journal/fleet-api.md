@@ -113,3 +113,19 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : une règle, une source ; décisions produit D2 et D4. Décalage accepté : 00:00-01:00 à Douala, le jour J est encore la veille.
 - **Preuve** : rouges démontrés (7 unitaires D1/D2/D4, 16 unitaires et 4 contrats M2/M3/D3) ; `tsc` 0 ; unitaires 1629/1629 ; contrats voisins 83/83 sur fleet_test_p32c.
 - **RAIDER** : Durable (chemin, rôles et réponse du PATCH inchangés), Idempotent (recalage du miroir rejouable), Retroactive (aucune donnée migrée).
+## 2026-11-03 — P3-2 lot 2b (A) : récépissé provisoire
+- **Agent** : fleet-api · **Branche** : `feat/p3-2-lot2b-recepisse` · **Commit** : voir l'historique de la branche
+- **Statut** : fait côté serveur, branchement missions à faire (autre session)
+- **Quoi** : `POST /api/document-renewals/requests/:id/receipt` ; `getMissionEligibility` accepte `receipts` ; `loadOpenRenewalReceipts` ; événement `document_renewal_receipt_uploaded` (personnel hors chauffeur) et invalidation client.
+- **Comment** : multer sur dossier fixe `uploads/document-renewals/receipts`, ancien fichier retiré par `uploadedFileCandidates`, 23514 traduit en `AppError` 400, écriture conditionnelle sur statut ouvert, jour calendaire Africa/Douala.
+- **Pourquoi** : décision 3 du plan P3-2 ; rôles = `DOCUMENT_RENEWAL_WRITER_ROLES`, ceux qui créent et suivent déjà les demandes du routeur.
+- **Comment tester (QA)** : déposer un récépissé daté sur une demande ouverte d'un véhicule à assurance échue ; attendu : le véhicule n'est plus refusé jusqu'à la date incluse (une fois `missions.routes.ts` branché).
+- **RAIDER** : couvert une règle une source, rétroactif (aucune migration), non-régression (`receipts` optionnel) ; sans objet : schéma.
+- **Reste / risques** : `missions.routes.ts` et l'écran de création de mission ne lisent pas encore les récépissés.
+
+## 2026-11-03 — P3-2 lot 2b (A) : durcissement après audit et relecture de #138
+- **Agent** : fleet-api · **Branche** : `feat/p3-2-lot2b-recepisse`
+- **Quoi** : `withoutDiskPaths` sur toutes les réponses et diffusions du routeur (le PATCH status renvoyait `receiptFilePath` et `proofFilePath` à tous les clients connectés) ; portée par défaut du routeur et de `document_renewal_receipt_uploaded` = `DOCUMENT_RENEWAL_VIEWER_ROLES` ; plafond de 90 jours (`RENEWAL_RECEIPT_MAX_VALIDITY_DAYS`) ; jour UTC unique (`shared/lib/utc-day.ts`) ; diffusion du dépôt au mieux ; extension tirée du MIME ; ancien chemin lu sous `SELECT … FOR UPDATE`.
+- **Comment** : `tests/contract/document-renewal-receipt-hardening.contract.test.ts`, `tests/unit/shared/document-renewal-event-scope.test.ts`, `tests/unit/shared/vehicle-eligibility-receipt-utc.test.ts` ; chaque règle démontrée rouge par mutation.
+- **Pourquoi** : fuite de chemins disque vers des rôles non autorisés (audit), deux calculs du jour qui divergeaient (Douala contre local), diffusion en échec qui supprimait un fichier référencé.
+- **Reste / risques** : `GET /requests` ne renvoie plus `proofFilePath` (aucun consommateur client) ; branchement de `missions.routes.ts` à venir (b7).
