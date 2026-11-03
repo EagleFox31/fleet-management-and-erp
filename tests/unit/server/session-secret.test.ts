@@ -40,8 +40,15 @@ describe("resolveSessionSecret : production", () => {
   });
 });
 
-describe("resolveSessionSecret : hors production", () => {
-  it.each(["development", "test", undefined])("NODE_ENV=%s, secret absent : repli de développement et avertissement", (nodeEnv) => {
+describe("resolveSessionSecret : NODE_ENV hors liste d'autorisation = production", () => {
+  it.each([["Production"], ["staging"], ["absent"], [""]])("NODE_ENV=%s sans secret : démarrage refusé", (nodeEnv) => {
+    const env = nodeEnv === "absent" ? {} : { NODE_ENV: nodeEnv };
+    expect(() => resolveSessionSecret(env, vi.fn())).toThrow(SessionSecretError);
+  });
+});
+
+describe("resolveSessionSecret : développement et test", () => {
+  it.each(["development", "test"])("NODE_ENV=%s, secret absent : repli de développement et avertissement", (nodeEnv) => {
     const warn = vi.fn();
     expect(resolveSessionSecret({ NODE_ENV: nodeEnv }, warn)).toBe(DEV_FALLBACK_SESSION_SECRET);
     expect(warn).toHaveBeenCalledOnce();

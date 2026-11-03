@@ -3,9 +3,14 @@
  *
  * Quiconque connaît le secret peut forger un cookie de session valide. En production, le serveur
  * refuse donc de démarrer sans un secret propre : absent, trop court ou égal à une valeur publique
- * (repli historique du code, exemple de `.env.example`). Hors production, le repli reste possible
- * pour ne pas bloquer le développement local, avec un avertissement.
+ * (repli historique du code, exemple de `.env.example`). Le repli n'est permis que pour un
+ * `NODE_ENV` explicitement de développement ou de test (liste d'autorisation) : Express sert le build
+ * de production dès que `NODE_ENV` n'est pas `development` (`server/index.ts`), donc `Production`,
+ * `staging` ou une variable absente sont traités comme la production.
  */
+
+/** Seuls environnements où le repli de développement est permis. Comparaison exacte. */
+export const SESSION_SECRET_FALLBACK_ENVS: readonly string[] = ["development", "test"];
 
 export const SESSION_SECRET_MIN_LENGTH = 32;
 
@@ -35,7 +40,7 @@ const HOW_TO_FIX =
  */
 export function resolveSessionSecret(env: Env, warn: Warn): string {
   const secret = env.SESSION_SECRET?.trim() ?? "";
-  const isProduction = env.NODE_ENV === "production";
+  const isProduction = !SESSION_SECRET_FALLBACK_ENVS.includes(env.NODE_ENV ?? "");
 
   let problem: string | null = null;
   if (secret === "") problem = "SESSION_SECRET est absent";
@@ -46,7 +51,9 @@ export function resolveSessionSecret(env: Env, warn: Warn): string {
   if (problem === null) return secret;
 
   if (isProduction) {
-    throw new SessionSecretError(`Démarrage refusé en production : ${problem}. ${HOW_TO_FIX}.`);
+    throw new SessionSecretError(
+      `Démarrage refusé (NODE_ENV=${env.NODE_ENV ?? "absent"}, traité comme la production) : ${problem}. ${HOW_TO_FIX}.`,
+    );
   }
 
   if (secret === "") {
