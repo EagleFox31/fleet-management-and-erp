@@ -35,6 +35,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
+import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
@@ -2852,6 +2853,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Convertir les données du formulaire au bon format ; champ absent = inchangé
       const input = fuelRecordBodySchema.partial().parse(req.body ?? {});
+      // Plein qui a mouvementé la carte : montants, véhicule et date figés (409).
+      assertFuelRecordLedgerEditable(fuelRecord, input);
       const updateData = {
         vehicleId: input.vehicleId ?? fuelRecord.vehicleId,
         date: input.date ?? fuelRecord.date,
@@ -2907,7 +2910,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       broadcastFuelRecordChanged(id, req.requestId);
       return res.status(200).json(updatedFuelRecord);
     } catch (error) {
-      if (error instanceof z.ZodError) return next(error);
+      if (error instanceof z.ZodError || isAppError(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update fuel record error");
       return res.status(500).json({ message: "Erreur lors de la mise à jour du plein" });
     }

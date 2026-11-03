@@ -1863,3 +1863,24 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
 - Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
 - En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
+
+## 2026-11-03 — Plein débité de la carte, montants réécrits sans contrepartie
+
+### Contexte
+- `PATCH /api/fuel-records/:id` permettait à l'auteur ou à l'admin de changer la quantité, le coût, le véhicule ou la date d'un plein qui avait déjà débité la carte carburant.
+- Le solde (somme des `creditAmount` et `debitAmount`) et les litres (somme des `quantity` débitées) ne suivaient pas le coût. La ligne et la carte divergeaient alors en silence.
+
+### Cause racine
+- Classification : invariant métier non gardé côté serveur.
+- La route était héritée d'un écran de saisie manuelle, qui ne mouvemente pas la carte. Elle n'a pas été revue quand les débits de carte ont été écrits dans la même table.
+
+### Résolution
+- `server/lib/fuel-record-ledger-lock.ts` : si `debitAmount` ou `creditAmount` est non nul, un changement réel de ces 4 champs renvoie 409. Le message indique de passer par une régularisation, ou d'annuler le plein puis d'en saisir un nouveau.
+- Notes, kilométrage et « plein complet » restent libres.
+- Une ré-sauvegarde à l'identique passe : les valeurs sont normalisées, et la date se compare au jour.
+
+### Prévention (vérifiable)
+- `tests/unit/server/fuel-record-ledger-lock.test.ts` et le bloc « montants figés » de `tests/contract/fuel-records-and-document-paths.contract.test.ts`. Sans le verrou, 4 cas passent au rouge.
+
+### Règle Projet (obligatoire)
+- Une ligne qui entre dans un solde (carte, stock, facture) ne se corrige pas par un PATCH de ses montants. On passe par une écriture de contrepartie, ou par une annulation suivie d'une nouvelle saisie.
