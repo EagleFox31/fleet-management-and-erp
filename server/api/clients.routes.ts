@@ -5,7 +5,9 @@ import { eq, inArray } from "drizzle-orm";
 import { insertClientSchema } from "@shared/schema";
 import { authenticate, authorize } from "../middleware/auth";
 import { ZodError } from "zod";
+import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("clients");
 const router = Router();
@@ -129,7 +131,7 @@ async function getClientWithCreator(clientId: number): Promise<ClientWithCreator
 }
 
 // GET /api/clients - Liste tous les clients
-router.get("/", async (req, res) => {
+router.get("/", async (req, res, next) => {
   try {
     const allClients = await db
       .select()
@@ -141,13 +143,12 @@ router.get("/", async (req, res) => {
 
     return res.json(clientsWithCreator);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get clients error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get clients error" }));
   }
 });
 
 // GET /api/clients/all - Liste active + archivée (réservée profils gestion client)
-router.get("/all", authorize([...MANAGER_ROLES]), async (req, res) => {
+router.get("/all", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const allClients = await db
       .select()
@@ -157,13 +158,12 @@ router.get("/all", authorize([...MANAGER_ROLES]), async (req, res) => {
     const clientsWithCreator = await withCreatorNames(allClients);
     return res.json(clientsWithCreator);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get all clients error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get all clients error" }));
   }
 });
 
 // GET /api/clients/:id - Détails d'un client
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
     if (!clientId) {
@@ -177,8 +177,7 @@ router.get("/:id", async (req, res) => {
 
     return res.json(client);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get client error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get client error" }));
   }
 });
 
@@ -215,8 +214,7 @@ router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res
         message: "Un client avec ce nom existe déjà",
       });
     }
-    log.error({ err: error, requestId: req.requestId }, "Create client error");
-    return res.status(500).json({ message: "Erreur lors de la création du client" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la création du client", { cause: error }), { event: "Create client error" }));
   }
 });
 
@@ -261,13 +259,12 @@ router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
         message: "Un client avec ce nom existe déjà",
       });
     }
-    log.error({ err: error, requestId: req.requestId }, "Update client error");
-    return res.status(500).json({ message: "Erreur lors de la mise à jour du client" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la mise à jour du client", { cause: error }), { event: "Update client error" }));
   }
 });
 
 // DELETE /api/clients/:id - Archivage logique
-router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res) => {
+router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
     if (!clientId) {
@@ -295,13 +292,12 @@ router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res) => {
     broadcastClientUpdate("client_deleted", hydratedClient);
     return res.json(hydratedClient);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Archive client error");
-    return res.status(500).json({ message: "Erreur lors de l'archivage du client" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de l'archivage du client", { cause: error }), { event: "Archive client error" }));
   }
 });
 
 // PATCH /api/clients/:id/restore - Restaurer client archivé
-router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res) => {
+router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
     if (!clientId) {
@@ -329,8 +325,7 @@ router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res) => 
     broadcastClientUpdate("client_updated", hydratedClient);
     return res.json(hydratedClient);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Restore client error");
-    return res.status(500).json({ message: "Erreur lors de la restauration du client" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la restauration du client", { cause: error }), { event: "Restore client error" }));
   }
 });
 

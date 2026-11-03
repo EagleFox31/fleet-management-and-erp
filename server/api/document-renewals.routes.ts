@@ -284,7 +284,7 @@ const resolveCenterAccreditation = (center: { id: number; accreditationNumber?: 
   return raw && raw.length > 0 ? raw : buildCenterAccreditationFallback(center.id);
 };
 
-router.get("/centers", async (req, res) => {
+router.get("/centers", async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
@@ -332,12 +332,11 @@ router.get("/centers", async (req, res) => {
       })),
     );
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "lecture des centres de renouvellement");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des centres de renouvellement" }));
   }
 });
 
-router.get("/requests", async (req, res) => {
+router.get("/requests", async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
     if (!hasRole(role, VIEW_ROLES)) {
@@ -388,8 +387,7 @@ router.get("/requests", async (req, res) => {
 
     return res.status(200).json(rows);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "lecture des demandes de renouvellement");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des demandes de renouvellement" }));
   }
 });
 
@@ -715,8 +713,7 @@ router.post("/requests", async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "création d'une demande de renouvellement");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "création d'une demande de renouvellement" }));
   }
 });
 
@@ -724,7 +721,7 @@ router.post("/requests", async (req, res, next) => {
  * PATCH /api/document-renewals/requests/:id/status
  * Mettre à jour le statut d'une demande (ex: marquer comme traité)
  */
-router.patch("/requests/:id/status", async (req, res) => {
+router.patch("/requests/:id/status", async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
     if (!hasRole(role, CREATE_ROLES)) {
@@ -798,8 +795,7 @@ router.patch("/requests/:id/status", async (req, res) => {
 
     return res.status(200).json(withoutDiskPaths(updated));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "changement de statut d'une demande de renouvellement");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "changement de statut d'une demande de renouvellement" }));
   }
 });
 
@@ -1304,8 +1300,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         }
       }
       if (error instanceof AppError) return next(error);
-      log.error({ err: error, requestId: req.requestId }, "renouvellement rapide d'un document");
-      return res.status(500).json({ message: "Erreur serveur" });
+      return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "renouvellement rapide d'un document" }));
     }
   });
 });
