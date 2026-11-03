@@ -330,4 +330,31 @@ describe("POST /api/missions/:id/fuel-records : plusieurs chauffeurs par mission
     const active = await session.call("GET", "/api/operations/missions/active", { actor: "logistics" });
     expect(active.body.filter((m: any) => m.id === missionId)).toHaveLength(1);
   });
+
+  // Décision du 3 novembre 2026 : un plein appartient à la mission et au camion, pas au chauffeur.
+  // Les co-chauffeurs se relaient : chacun lit tous les pleins de la mission.
+  it("GET /api/missions/:id/fuel-records : B lit le plein saisi par A sur la même mission", async () => {
+    const { missionId, vehicleA } = await twoDriverMission();
+    const resA = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "driver", body: fill(vehicleA) });
+    expect(resA.status, JSON.stringify(resA.body)).toBe(201);
+    const asB = await session.call("GET", `/api/missions/${missionId}/fuel-records`, { actor: "otherDriver" });
+    expect(asB.status, JSON.stringify(asB.body)).toBe(200);
+    expect(asB.body.records.map((r: any) => r.vehicleId)).toContain(vehicleA);
+  });
+
+  it("relais sur le même camion : B saisit après un plein de A, 201, et la mission porte les deux pleins", async () => {
+    const a = await missionOfDriver("driver");
+    await db
+      .insert(assignments)
+      .values({ missionId: a.missionId, vehicleId: a.vehicleId, driverId: await driverFiche("otherDriver"), status: "accepted" } as any);
+    const before = await balance(a.vehicleId);
+    for (const actor of ["driver", "otherDriver"] as const) {
+      const res = await session.call("POST", `/api/missions/${a.missionId}/fuel-records`, { actor, body: fill(a.vehicleId) });
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
+    }
+    expect(await recordsOf(a.missionId)).toBe(2);
+    expect(await balance(a.vehicleId)).toBeLessThan(before);
+    const asB = await session.call("GET", `/api/missions/${a.missionId}/fuel-records`, { actor: "otherDriver" });
+    expect(asB.body.records).toHaveLength(2);
+  });
 });
