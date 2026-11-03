@@ -128,7 +128,7 @@ test.describe("FUEL-DBL : plein de mission sans réponse", () => {
     await openFuelSheet(page);
     await page.getByRole("button", { name: "Valider le plein" }).click();
     await expect.poll(async () => (await missionDebits()).length, { message: "premier plein écrit en base" }).toBe(1);
-    await expect(page.getByText("Erreur carburant").first()).toBeVisible();
+    await expect(page.getByText("Erreur carburant", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(page.getByRole("heading", { name: "Enregistrer un plein" })).toHaveCount(0);
