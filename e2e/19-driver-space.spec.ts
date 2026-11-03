@@ -16,9 +16,10 @@ import { loginWithSession, type E2ECredentials } from "./helpers/auth";
  * - DRV2-2 : la panne crée un OT ; le chef d'atelier reçoit la trame `work_order_created` (jouée à deux rôles) ;
  * - DRV2-3 : cloison chauffeur sur GET /api/missions, /api/missions/:id et /api/drivers/:id/missions.
  *
- * - DRV2-4 (défaut produit, figé en `test.fail`) : aucune vue « missions du jour ». Le tableau de bord ne garde que
+ * - DRV2-4 (corrigé) : aucune vue « missions du jour ». Le tableau de bord ne gardait que
  *   `allMissions.find(assigned | in_progress)` (client/src/pages/driver/dashboard.tsx) : un chauffeur qui a deux
- *   missions à faire n'en voit qu'une, alors que /api/drivers/me les renvoie toutes les deux ;
+ *   missions à faire n'en voyait qu'une, alors que /api/drivers/me les renvoie toutes les deux. Les suivantes
+ *   sont désormais listées sous la mission active (`splitDriverMissions`, client/src/lib/driver-missions.ts) ;
  * - DRV2-5 : la déclaration de panne reste dans le périmètre du chauffeur (autre véhicule : 403, corps invalide : 400,
  *   rôle atelier : 403), sans OT créé à tort.
  *
@@ -303,8 +304,8 @@ test.describe("DRV2 : espace chauffeur", () => {
       await expect(page.getByText(new RegExp(shown.join("|"))).first()).toBeVisible();
     });
 
-    // Défaut produit (DRV2-4) : le tableau de bord n'affiche que la première mission `assigned` ou `in_progress`.
-    test.fail("DRV2-4 : les deux missions à faire sont visibles sur le tableau de bord", async ({ page }) => {
+    // DRV2-4 corrigé : la première mission à faire est la mission active, les suivantes sont listées sous elle.
+    test("DRV2-4 : les deux missions à faire sont visibles sur le tableau de bord", async ({ page }) => {
       await expect(page.getByText(`#${crewC.orderNumber}`)).toBeVisible({ timeout: 5_000 });
       await expect(page.getByText(`#${crewCSecond.orderNumber}`)).toBeVisible({ timeout: 5_000 });
     });

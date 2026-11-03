@@ -3,6 +3,7 @@ import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { uploadedFileCandidates } from "../../server/lib/uploaded-file";
 import { WorkflowDocumentService } from "../../server/services/workflow-document-service";
 import { vehicleAcquisitionWorkflows, vehicleDocuments, workflowDocuments } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -93,6 +94,30 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
     expect(readdirSync(vehicleDir)).toEqual([`carte_grise_${evilName}`]);
     const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/carte_grise_${evilName}`);
+  });
+
+  it("fichier source disparu : ce document n'est ni copié ni marqué transféré, les autres le sont", async () => {
+    const { sessionId, vehicleId, document: kept } = await workflowWithDocument("present.pdf");
+    const [workflow] = await db.select().from(vehicleAcquisitionWorkflows).where(eq(vehicleAcquisitionWorkflows.sessionId, sessionId));
+    const lost = await WorkflowDocumentService.saveWorkflowDocument({
+      workflowId: workflow.id,
+      sessionId,
+      documentType: "factur_achat",
+      originalName: "disparu.pdf",
+      fileBuffer: Buffer.from("TEST"),
+      mimeType: "application/pdf",
+      uploadedBy: workflow.userId,
+    });
+    for (const candidate of uploadedFileCandidates(lost.filePath)) rmSync(candidate, { force: true });
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["present.pdf"]);
+    const sources = await db.select().from(workflowDocuments).where(eq(workflowDocuments.sessionId, sessionId));
+    const byId = new Map(sources.map((row) => [row.id, row]));
+    expect(byId.get(kept.id)).toMatchObject({ isTransferred: true, vehicleId });
+    expect(byId.get(lost.id)).toMatchObject({ isTransferred: false, vehicleId: null });
   });
 
   it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {

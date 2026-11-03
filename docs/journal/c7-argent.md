@@ -33,3 +33,40 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **RAIDER** :
   - R : règle unique réutilisée ;
   - D : contrat `checks[]` inchangé.
+
+## 2026-11-03T19:03:17+01:00 — P2 : règlement de facture rejoué depuis une mission livrée par le parcours
+
+- **Agent** : c7 · **Branche** : `test/p2-delivered-by-journey` · **Commit** : voir `git log` de la branche
+- **Statut** : fait, en relecture
+- **Quoi** : `e2e/13-mission-invoice-payment` n'écrit plus `missions.status = delivered`.
+  - Test 1 : affectation, lancement et livraison à l'écran.
+  - Tests 2 à 4 : mêmes routes par l'API (PATCH affectation, PATCH budgets, PUT status).
+  - P2 passe à « Fait » dans `docs/qa/PLAN_COUVERTURE_MODULES.md`.
+- **Comment** : nouveau `e2e/helpers/mission-journey.ts`, extrait de la spec 17 (véhicule aux papiers valides, chauffeur FORMÉ, crédit carte, parcours navigateur et API, nettoyage). La spec 17 l'importe désormais.
+- **Pourquoi** : le paiement était testé sur un état posé en base, qui ne prouvait pas que le parcours réel y mène.
+- **Comment tester** : `node node_modules/@playwright/test/cli.js test e2e/13-mission-invoice-payment.spec.ts e2e/17-mission-lifecycle.spec.ts` sur une base de test (jamais la prod).
+- **Preuve automatisée** : spec 13 4/4, spec 17 5/5, sur une base locale dédiée (`fleet_test_c7e2e`).
+- **RAIDER** :
+  - R : helper partagé par les deux specs ;
+  - D : la spec 17 reste verte ;
+  - I : données préfixées, supprimées en fin de spec.
+
+## 2026-11-03T19:22:06+01:00 — P2, suites de relecture : purge par préfixe, budget exigé, driverIds retiré
+
+- **Agent** : c7 · **Branche** : `test/p2-minors` · **Commit** : voir `git log` de la branche
+- **Statut** : fait, en relecture
+- **Quoi** : les trois mineurs de la relecture de #230.
+  - La spec 13 purge les lignes `E2E-P2-` en `beforeAll`.
+  - Un champ budget absent fait échouer le parcours navigateur au lieu d'être sauté.
+  - La spec 17 n'a plus de `driverIds` inutilisé.
+- **Comment** : la `purge()` de la spec 17 devient `purgeJourneyRows(prefix)` dans `e2e/helpers/mission-journey.ts`, que les deux specs appellent. `createLaunchableDriver(lastName, employeeNumber, { cpcStatus, track })` : suivre l'id devient facultatif.
+- **Pourquoi** :
+  - un run interrompu laissait des restes que le run suivant ne voyait pas ;
+  - un champ budget sauté aurait laissé lancer la mission sans ce budget, en silence.
+- **Comment tester** : `node node_modules/@playwright/test/cli.js test e2e/13-mission-invoice-payment.spec.ts e2e/17-mission-lifecycle.spec.ts` sur une base de test (jamais la prod).
+- **Preuve automatisée** : 9/9 sur `fleet_test_c7e2e`, puis 0 ligne `E2E-P2-` ou `E2E-MIS1-` restante. `npm run check` n'inclut pas e2e/ : tsc ciblé (tsconfig temporaire étendant la racine, include e2e/, shared/, server/, tests/support/) sans erreur dans les fichiers touchés, les 2 erreurs restantes (e2e/22, tests/support/alert-emission-scan.ts) existent déjà sur main.
+- **Garde** : `purgeJourneyRows` refuse tout préfixe hors `E2E-<SPEC>-` (un `""` ferait `LIKE '%'`).
+- **RAIDER** :
+  - R : purge partagée ;
+  - I : la purge par préfixe rend le run rejouable après un plantage ;
+  - D : signatures internes aux e2e, tous les appelants sont mis à jour.

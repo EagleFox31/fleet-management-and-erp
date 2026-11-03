@@ -1,18 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../server/db";
-import {
-  assignments,
-  clientInvoices,
-  drivers,
-  missions,
-  vehicleDocuments,
-  vehicles,
-} from "../shared/schema";
+import { assignments, clientInvoices, drivers, missions, vehicleDocuments } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
-import { createTestClient, createTestFuelRecord, createTestVehicle } from "../tests/support/factories";
+import { createTestClient } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import {
+  createLaunchableDriver,
+  createLaunchableVehicle,
+  creditFuelCard,
+  FAR,
+  purgeJourneyRows,
+} from "./helpers/mission-journey";
 
 /**
  * MIS1, niveau E : le cycle de vie d'une mission rejoué au navigateur, sans écrire
@@ -32,7 +32,6 @@ import { createE2EUser } from "./helpers/test-data";
  */
 
 const PREFIX = "E2E-MIS1-";
-const FAR = "2099-12-31";
 const HT = 250000;
 const TTC = 298125; // TVA 19,25 %
 
@@ -44,61 +43,17 @@ let stamp = 0;
 
 const token = (label: string) => `${PREFIX}${label}-${Date.now().toString(36)}-${++stamp}`;
 
-async function purge(): Promise<void> {
-  const rows = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${PREFIX}%`));
-  const missionIds = rows.map((row) => row.id);
-  if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
-    await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
-    await db.delete(missions).where(inArray(missions.id, missionIds));
-  }
-  const vehicleRows = await db
-    .select({ id: vehicles.id })
-    .from(vehicles)
-    .where(like(vehicles.registrationNumber, `${PREFIX}%`));
-  const vehicleIds = vehicleRows.map((row) => row.id);
-  if (vehicleIds.length > 0) {
-    await db.delete(assignments).where(inArray(assignments.vehicleId, vehicleIds));
-    // Un run interrompu (réseau) peut laisser des véhicules : les documents partent en cascade.
-    await db.delete(vehicles).where(inArray(vehicles.id, vehicleIds));
-  }
-  await db.delete(drivers).where(like(drivers.lastName, `${PREFIX}%`));
+function purge(): Promise<void> {
+  return purgeJourneyRows(PREFIX);
 }
 
-async function createVehicle(overrides: { insuranceDoc?: string } = {}) {
-  const vehicle = await createTestVehicle({ registrationNumber: token("V") });
-  ids.vehicleIds.push(vehicle.id);
-  const doc = (type: "carte_grise" | "assurance" | "visite_technique", expiryDate: string) => ({
-    vehicleId: vehicle.id,
-    name: `${PREFIX}${type}`,
-    type,
-    filename: `${type}.pdf`,
-    filesize: 1,
-    fileType: "application/pdf",
-    filePath: `uploads/${PREFIX}${type}.pdf`,
-    expiryDate,
-  });
-  await db.insert(vehicleDocuments).values([
-    doc("carte_grise", FAR),
-    doc("assurance", overrides.insuranceDoc ?? FAR),
-    doc("visite_technique", FAR),
-  ]);
-  return vehicle;
+function createVehicle(overrides: { insuranceDoc?: string } = {}) {
+  return createLaunchableVehicle(ids, token("V"), overrides);
 }
 
-async function createDriver(cpcStatus = "FORMÉ") {
-  const [driver] = await db
-    .insert(drivers)
-    .values({
-      firstName: "Chauffeur",
-      lastName: token("D"),
-      employeeNumber: token("EMP"),
-      cpcStatus,
-      licenseExpiry: FAR,
-      isActive: true,
-    })
-    .returning();
-  return driver;
+/** Chauffeur au préfixe de la spec : purge() le retrouve, nul besoin de suivre son id. */
+function createDriver(cpcStatus = "FORMÉ") {
+  return createLaunchableDriver(token("D"), token("EMP"), { cpcStatus });
 }
 
 async function missionRow(id: number) {
@@ -137,14 +92,7 @@ test.beforeAll(async () => {
   ids.clientIds.push(client.id);
   clientId = client.id;
   // Le lancement exige un solde de carte carburant au moins égal au budget carburant.
-  const credit = await createTestFuelRecord({
-    creditAmount: "5000000",
-    debitAmount: "0",
-    quantity: 1,
-    cost: "0",
-    stationName: "APPROVISIONNEMENT",
-  });
-  ids.fuelRecordIds.push(credit.id);
+  await creditFuelCard(ids);
 });
 
 test.afterAll(async () => {
