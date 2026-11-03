@@ -96,7 +96,7 @@ router.get("/expiring-docs", isAnyUser, async (req, res, next) => {
     return res.status(200).json(docs);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirant bientôt en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirant bientôt en échec" }));
   }
 });
 
@@ -110,7 +110,7 @@ router.get("/expired-docs", isAnyUser, async (req, res, next) => {
     return res.status(200).json(docs);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirés en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirés en échec" }));
   }
 });
 
@@ -253,7 +253,7 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
     return res.status(200).json(docs);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de tous les documents en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de tous les documents en échec" }));
   }
 });
 
@@ -301,7 +301,7 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
     return res.status(200).json(vehicle);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour du kilométrage en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour du kilométrage en échec" }));
   }
 });
 
@@ -344,7 +344,7 @@ router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
     return res.status(200).json(vehicle);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour de la position maintenance en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour de la position maintenance en échec" }));
   }
 });
 
@@ -358,7 +358,7 @@ router.get("/document-stats", isAnyUser, async (req, res, next) => {
     return res.status(200).json(stats);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "statistiques documents en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "statistiques documents en échec" }));
   }
 });
 
@@ -372,7 +372,7 @@ router.get("/all-with-status", isAnyUser, async (req, res, next) => {
     return res.status(200).json(vehicles);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des véhicules avec statut documents en échec" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des véhicules avec statut documents en échec" }));
   }
 });
 
