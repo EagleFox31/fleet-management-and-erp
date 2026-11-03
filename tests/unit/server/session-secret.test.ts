@@ -40,6 +40,18 @@ describe("resolveSessionSecret : production", () => {
   });
 });
 
+describe("resolveSessionSecret : valeur brute", () => {
+  it("un secret entouré d'espaces signe avec sa valeur brute (les sessions en cours restent valides)", () => {
+    const padded = `  ${STRONG}  `;
+    expect(resolveSessionSecret({ NODE_ENV: "production", SESSION_SECRET: padded }, vi.fn())).toBe(padded);
+  });
+
+  it("des espaces ne comptent pas dans la longueur minimale", () => {
+    const short = `${"k".repeat(SESSION_SECRET_MIN_LENGTH - 1)}          `;
+    expect(() => resolveSessionSecret({ NODE_ENV: "production", SESSION_SECRET: short }, vi.fn())).toThrow(SessionSecretError);
+  });
+});
+
 describe("resolveSessionSecret : NODE_ENV hors liste d'autorisation = production", () => {
   it.each([["Production"], ["staging"], ["absent"], [""]])("NODE_ENV=%s sans secret : démarrage refusé", (nodeEnv) => {
     const env = nodeEnv === "absent" ? {} : { NODE_ENV: nodeEnv };

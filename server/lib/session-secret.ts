@@ -39,7 +39,10 @@ const HOW_TO_FIX =
  * les sessions. Le message ne contient jamais la valeur du secret.
  */
 export function resolveSessionSecret(env: Env, warn: Warn): string {
-  const secret = env.SESSION_SECRET?.trim() ?? "";
+  // Le secret signe avec sa valeur brute : la rogner changerait la clé d'un secret actuel qui contient
+  // des espaces et invaliderait toutes les sessions en cours. Le rognage ne sert qu'à le mesurer.
+  const raw = env.SESSION_SECRET ?? "";
+  const secret = raw.trim();
   const isProduction = !SESSION_SECRET_FALLBACK_ENVS.includes(env.NODE_ENV ?? "");
 
   let problem: string | null = null;
@@ -48,7 +51,7 @@ export function resolveSessionSecret(env: Env, warn: Warn): string {
   else if (secret.length < SESSION_SECRET_MIN_LENGTH)
     problem = `SESSION_SECRET est trop court (${secret.length} caractères, minimum ${SESSION_SECRET_MIN_LENGTH})`;
 
-  if (problem === null) return secret;
+  if (problem === null) return raw;
 
   if (isProduction) {
     throw new SessionSecretError(
@@ -61,5 +64,5 @@ export function resolveSessionSecret(env: Env, warn: Warn): string {
     return DEV_FALLBACK_SESSION_SECRET;
   }
   warn(`${problem} : accepté hors production seulement. ${HOW_TO_FIX}.`);
-  return secret;
+  return raw;
 }

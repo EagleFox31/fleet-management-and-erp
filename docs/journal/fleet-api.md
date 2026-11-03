@@ -206,3 +206,14 @@ Règles : `docs/journal/README.md`.
 - **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 22 tests, 9 rouges sur la base d'avant (rôles et corps) ; passe de correction : 8 rouges sur la version précédente (dont l'ordre des contrôles), 22 verts. Le contrôle de chauffeur est déjà doublé en amont par `router.param("id")` ; seul le cas d'une seconde affectation distingue l'ordre.
 - **RAIDER** : couvert non-régression, liste gelée réduite, failure memory ; sans objet : migration.
 - **Reste / risques** : `/regularize` et `/declare-no-refuel` gardés dans le handler, pas en garde de route ; DELETE /fuel-records/:id et idempotence de /consumption hors périmètre.
+
+## 2026-11-03 — SESSION_SECRET : refus de démarrer en production sans secret propre (#243)
+- **Agent** : fleet-api · **Branche** : `fix/session-secret-production`
+- **Statut** : fait, en relecture
+- **Quoi** : le serveur refuse de démarrer hors `development`/`test` si `SESSION_SECRET` est absent, fait moins de 32 caractères ou vaut une valeur publique du dépôt.
+- **Comment** : `resolveSessionSecret(env, warn)` dans `server/lib/session-secret.ts`, appelé par `server/middleware/session.ts`. Liste d'autorisation `SESSION_SECRET_FALLBACK_ENVS` ; la signature utilise la valeur brute (le rognage sert seulement à mesurer, pour ne pas invalider les sessions d'un secret actuel entouré d'espaces).
+- **Pourquoi** : le repli `"YaroFleetOSSecretKey"` est public ; un déploiement sans secret permettait de forger un cookie de session.
+- **Comment tester (QA)** : `NODE_ENV=production` sans `SESSION_SECRET` → le serveur s'arrête avec un message qui dit comment générer un secret ; avec 48 octets aléatoires en base64 → démarrage normal.
+- **Preuve automatisée** : `tests/unit/server/session-secret.test.ts`, 17 tests dont la garde statique sur `session.ts`.
+- **RAIDER** : couvert durable (dev et test inchangés), failure memory (LESSONS_LEARNED), erreur actionnable sans secret journalisé ; sans objet : migration.
+- **Reste / risques** : la démo Replit (`npm run start`) doit avoir `SESSION_SECRET` dans ses Secrets avant le déploiement. `sameSite: "none"` en production (APK Capacitor) suivi à part.
