@@ -1247,3 +1247,4 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une garantie de sécurité se teste sur son point d'entrée réel, pas seulement sur la fonction qui la porte. Après toute fusion de main dans une branche de sécurité, relire les fichiers en conflit résolu côté main et rejouer l'e2e concerné.
+- Toute purge locale liée à l'identité a pour pendant une révocation serveur garantie (déconnexion différée rejouée avant toute reprise de session). L'identité gardée en mémoire se synchronise entre onglets (réserves R2 et S1, lot #10c).
