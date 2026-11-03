@@ -1,6 +1,9 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { selfScoped } from "./middleware/owned-by";
+import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -830,21 +833,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, async (req, res) => {
+  app.post("/api/users/change-password", authenticate, selfScoped, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
         return res.status(401).json({ message: "Non authentifié" });
       }
+      // Présence et longueur vérifiées par `changePasswordRequestSchema`.
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Mot de passe actuel et nouveau mot de passe requis" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 6 caractères" });
-      }
 
       const user = await storage.getUser(userId);
       if (!user) {
@@ -3209,25 +3205,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Calculer TVA pour un montant HT
-  app.post("/api/invoices/calculate-vat", authenticate, async (req, res) => {
-    try {
-      const { amountHT } = req.body;
-      
-      if (!amountHT || isNaN(parseFloat(amountHT))) {
-        return res.status(400).json({ message: "Montant HT invalide" });
-      }
-      
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const result = vatBillingService.calculateVAT(parseFloat(amountHT));
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error("Calculate VAT error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Pièces extraites d'une facture
   app.get("/api/invoices/:id/parts", isStaff, async (req, res) => {
     try {
@@ -4765,7 +4742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, selfScoped, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4791,7 +4768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, selfScoped, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4816,7 +4793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, selfScoped, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;

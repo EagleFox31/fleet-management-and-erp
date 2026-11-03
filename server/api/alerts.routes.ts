@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { ALERT_READ_ALL_PATH, alertPath } from "@shared/contracts/alerts";
 import { AppError } from "../lib/app-error";
 import { isAnyUser } from "../middleware/auth";
+import { selfScoped } from "../middleware/owned-by";
 import { alertInboxService } from "../services/alert-inbox-service";
 
 /**
@@ -66,7 +67,9 @@ const router = Router();
 // Déclarée avant `/:id/...` : « read-all » n'est pas un identifiant.
 // Chemins relatifs au montage `/api` (server/app.ts).
 const relative = (path: string) => path.replace(/^\/api/, "");
-router.post(relative(ALERT_READ_ALL_PATH), isAnyUser, markAllRead);
+router.post(relative(ALERT_READ_ALL_PATH), selfScoped, markAllRead);
+// `:id` : selfScoped ne s'applique pas (identifiant pris dans l'URL). Le service filtre sur le compte de
+// session ; preuve : tests/contract/alerts-inbox.contract.test.ts (« alerte d'un autre compte : 404 »).
 router.patch(`${relative(alertPath(":id"))}/read`, isAnyUser, markRead);
 router.delete(relative(alertPath(":id")), isAnyUser, removeAlert);
 
