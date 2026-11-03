@@ -61,16 +61,16 @@ const pendingFor = (scheduleId: number) =>
   db.select().from(workOrders).where(eq(workOrders.maintenanceScheduleId, scheduleId));
 
 describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
-  it("une échéance de maintenance dans la fenêtre crée un OT préventif et immobilise le véhicule, une fois", async () => {
+  it("une échéance de maintenance dans la fenêtre crée un OT préventif sans immobiliser le véhicule, une fois", async () => {
     const vehicle = await vehicleWith({ nextMaintenanceDate: inDays(10) });
     const first = await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id, "maintenance");
     expect(first).toHaveLength(1);
     expect(first[0]).toMatchObject({ vehicleId: vehicle.id, isPreventive: true, status: "pending" });
 
     const [after] = await db.select().from(vehicles).where(eq(vehicles.id, vehicle.id));
-    expect(after.status).toBe("maintenance");
+    expect(after.status).toBe("operational");
     const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, vehicle.id));
-    expect(history.length).toBeGreaterThan(0);
+    expect(history).toHaveLength(0);
 
     // Rejeu : l'OT en attente de même titre bloque un doublon.
     const second = await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id, "maintenance");
@@ -91,11 +91,18 @@ describe("MNT2 : déclenchement par date", { timeout: 120000 }, () => {
     }
   });
 
-  it("une échéance dépassée déclenche aussi, et un type donné ne regarde que sa propre échéance", async () => {
-    const vehicle = await vehicleWith({ insuranceExpiry: inDays(-5), nextMaintenanceDate: inDays(5) });
-    const onlyInsurance = await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id, "insurance");
-    expect(onlyInsurance).toHaveLength(1);
-    expect(onlyInsurance[0]).toMatchObject({ title: "Renouvellement assurance", priority: "high" });
+  it("une échéance de maintenance dépassée déclenche aussi ; un papier échu ne crée plus d'OT atelier", async () => {
+    const vehicle = await vehicleWith({
+      insuranceExpiry: inDays(-5),
+      technicalInspectionDate: inDays(-2),
+      licensePlateExpiry: inDays(3),
+      nextMaintenanceDate: inDays(-5),
+    });
+    for (const type of ["insurance", "inspection", "license"] as const) {
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id, type)).toHaveLength(0);
+    }
+    const overdue = await preventiveMaintenanceService.checkDateBasedMaintenance(vehicle.id, "maintenance");
+    expect(overdue).toHaveLength(1);
     const [after] = await db.select().from(vehicles).where(eq(vehicles.id, vehicle.id));
     expect(after.status).toBe("operational");
   });

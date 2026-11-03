@@ -66,3 +66,42 @@ Règles : `docs/journal/README.md`.
 - **Comment tester (QA)** : aucun changement visible ; dashboards magasin, historique de flotte, plans de maintenance et vérification globale répondent comme avant.
 - **Preuve** : `tests/contract/fleet-history`, `part-usage-history`, `check-all-maintenance` (nouveaux) ; `npm run check` 0 erreur ; unitaires 1033/1033 ; contrats 1063/1063 ; CI #120 8/8.
 - **RAIDER** : Durable (comportement servi figé par contrat avant suppression, liste gelée en égalité stricte), Idempotent (rejouable), Retroactive (aucune donnée touchée). Écarts : le garde-fou d'hygiène ne détecte pas un routeur de `server/api/` qui masque `routes.ts` (documenté AGENTS.md §9, test à ajouter) ; `check-all-maintenance` laisse en base de test les échéances avancées et statuts réconciliés (seuls les OT créés sont supprimés).
+
+## 2026-11-03T09:00:00+01:00 — Échéances (P3-2, lot 1) : prévenir avant, bloquer à l'expiration
+
+- **Quoi** : (1) le service préventif n'immobilise plus le véhicule à la génération de l'OT (bloc `declencheur` supprimé) ; le passage en `maintenance` reste à `in_progress` (`storage.updateWorkOrder`). (2) Plus d'OT atelier pour assurance, visite technique, plaque ; `alert-service` ajoute le lien vers la demande de renouvellement (`/vehicles/documents/renew?...`). (3) Lancement de mission : carte grise expirée refusée, et `getMissionEligibility` appelée comme à l'affectation. (5) Papier expiré pendant une mission `in_progress` : alerte critique au rôle `logistics` (chef de parc), mission non interrompue, nouvelle affectation/lancement refusés par l'éligibilité. Dépôt d'un document neuf : la colonne miroir `vehicles.*` suit (`server/lib/vehicle-document-mirror.ts`, appelé par `POST /api/vehicles/:id/documents`).
+- **Comment** : aucun changement de schéma ; routes.ts non touché ; erreurs et logs inchangés (`AppError`, `moduleLogger`).
+- **Pourquoi** : un papier n'est pas un travail d'atelier, un OT papier `in_progress` immobilisait à tort ; décision utilisateur du 2026-11-03 (`docs/plans/p3-2-echeances.md`).
+- **Comment tester (QA)** : véhicule avec visite technique à J+10 : alerte, aucun OT, statut `operational`. Visite expirée : affectation et lancement refusés. Mission en cours + assurance expirée : le logisticien reçoit l'alerte, la mission continue.
+- **Preuve** : `tests/contract/mission-document-expiry.contract.test.ts` (6), `vehicle-documents-upload` (miroir), `preventive-maintenance-lifecycle` (marqueur P3-2 devenu vert, MNT1/MNT2 réécrits), `preventive-maintenance-triggers`.
+- **RAIDER** : Durable (contrats d'éligibilité inchangés), Idempotent (OT unique par échéance, alertes dédoublonnées), Retroactive (0 OT papier en base réelle, rien à reprendre). Hors lot : récépissé (colonne, lot 2), OT correctif.
+
+## 2026-11-03T14:00:00+01:00 — Échéances (P3-2, lot 1) : corrections de relecture de #126
+
+- **Quoi** : (1) lancement de mission : par type, le document à échéance la plus lointaine est retenu (une vieille carte grise échue ne masque plus la valide). (2) une seule règle de date : le jour J bloque, comme `getMissionEligibility`. (3) le miroir `vehicles.*` ne recule pas au dépôt (`GREATEST`) ; un renouvellement ou une correction de date écrit en direct (mode `set`). (4) `document-renewals.routes.ts` utilise la lib `vehicle-document-mirror` (copies supprimées) ; `routes.ts` intact, équivalence avec son PATCH figée par un test. (5) échec de synchro après création : la ligne document est retirée, le fichier aussi, 500 lisible. (6) dépôt : événements `vehicle_document_updated` et `vehicle_updated` (couche 2). (8) lien de renouvellement calculé seulement à l emission. Décision utilisateur : les alertes papier (30 jours, expiré) vont aussi à `logistics`, sans doublon multi-rôles.
+- **Comment** : aucun changement de schéma ; `syncVehicleDocumentMirror(..., mode)` ; `documentAlertRecipients` dans `alert-service`.
+- **Pourquoi** : réserves de la relecture de #126.
+- **Comment tester (QA)** : carte grise périmée + nouvelle valide : le lancement ne cite plus la carte grise ; assurance expirant aujourd hui : lancement refusé ; dépôt d une assurance plus ancienne : date du véhicule inchangée ; un logisticien reçoit l alerte à 30 jours.
+- **Preuve** : `mission-document-expiry` (10), `vehicle-documents-upload` (équivalence PATCH, pas de recul), test de renommage `vehicleInMaintenance`. Front à faire : `vehicle-documents.tsx` n invalide que la liste des documents au dépôt (la synchro temps réel `vehicle_updated` existe).
+- **RAIDER** : Durable (contrats inchangés), Idempotent (deux passages = une alerte), Retroactive (aucune donnée touchée).
+
+## 2026-11-03T09:02:00+01:00 — Correction de l'entrée de 14:00 (P3-2, lot 1)
+
+- **Quoi** : l'entrée « Échéances (P3-2, lot 1) : corrections de relecture de #126 » (14:00, seconde) indique « Front à faire » pour `vehicle-documents.tsx`. C'est fait depuis le commit 87b8d3d.
+- **Pourquoi** : une info devenue fausse se corrige par une nouvelle entrée, pas en effaçant l'ancienne.
+
+## 2026-11-03T09:05:00+01:00 — Échéances (P3-2, lot 1) : réserves de sécurité R1 et R2 de #126
+
+- **Quoi** : (R1) `vehicle_document_updated` et `vehicle_updated` du dépôt ne sont plus en `broadcast` : scope `roles` limité à `VEHICLE_DOCUMENT_EVENT_ROLES` (personnel hors chauffeur, `shared/constants/roles.ts`). (R2) `DELETE /api/documents/:id` déménage dans `server/api/vehicle-documents.routes.ts` (monté avant `routes.ts`, qui reste gelé et garde un handler masqué) et recale le miroir `vehicles.*` sur la plus lointaine échéance des documents restants du type (`recomputeVehicleDocumentMirror`) ; `vehicle_updated` en scope personnel. Mineurs : date d'échéance invalide au dépôt en 400 lisible (Zod), `AlertRecipientRole` dérivé d'un tableau `satisfies AppRole`.
+- **Comment** : le dépôt garde GREATEST. Sans autre document daté du type, le miroir n'est pas touché (peut porter une saisie directe sur le véhicule, rien ne permet de savoir la bonne valeur). Le `PATCH /api/documents/:id` (routes.ts) écrit déjà la valeur patchée directement : non modifié.
+- **Pourquoi** : le dépôt diffusait véhicule, type, échéance et acteur aux clients et chauffeurs (cloison §11) ; un document saisi en 2062 puis supprimé laissait le véhicule éligible.
+- **Comment tester (QA)** : déposer une visite technique en 2062, la supprimer : l'échéance du véhicule revient à celle du document restant, l'affectation d'une mission est refusée si elle est échue.
+- **Preuve** : `vehicle-documents-upload` et `mission-document-expiry` (rouges démontrés avant correctif).
+- **RAIDER** : Durable (204/404 de la suppression inchangés), Idempotent (second dépôt à la même date : aucune écriture ni événement, testé), Retroactive (aucune donnée migrée).
+
+## 2026-11-03T09:11:00+01:00 — Échéances (P3-2, lot 1) : réserves de relecture du delta R1/R2 de #126
+
+- **Quoi** : (1) la suppression d'un document ne recale le miroir `vehicles.*` que si elle retire le document qui le fixait (colonne égale à sa date) ; une saisie directe ou un autre document plus lointain n'est plus écrasé. (2) Un échec du recalcul après la suppression est journalisé et la réponse reste 204 : la suppression a eu lieu, un 5xx générique la faisait passer pour ratée et un nouvel essai répondait 404. (3) L'ancien `DELETE /api/documents/:id` de `server/routes.ts` est retiré (code mort masqué ; on retire du fichier gelé, on n'y ajoute rien). (4) Plan P3-2 : limite connue et backlog du `PATCH /api/documents/:id`.
+- **Comment** : la condition est portée par l'UPDATE (`colonne = date supprimée AND colonne <> nouvelle date`), ce qui ferme aussi la course avec un dépôt concurrent qui aurait déjà avancé la colonne.
+- **Pourquoi** : réserves « avant fusion » de la relecture du delta c6d3c0c..092f983 ; retrait du code mort demandé par l'orchestrateur.
+- **Preuve** : 2 tests de contrat ajoutés dans `vehicle-documents-upload`, rouges sur 092f983 ; contrats `vehicle-documents-upload`, `mission-document-expiry`, `former-storage-stubs`, `vehicle-documents-client-scope` 57/57 ; tsc 0 ; unitaires 1537/1537 (dont `routes-hygiene`).

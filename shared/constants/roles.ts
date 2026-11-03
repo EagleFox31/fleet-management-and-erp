@@ -222,6 +222,13 @@ export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => ro
  */
 export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
+/**
+ * Destinataires des événements temps réel sur les papiers d'un véhicule (dépôt, suppression) :
+ * ils portent véhicule, type, échéance et acteur de toute la flotte. Le personnel hors
+ * chauffeur ; ni client ni chauffeur (cloison, AGENTS.md §11).
+ */
+export const VEHICLE_DOCUMENT_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }

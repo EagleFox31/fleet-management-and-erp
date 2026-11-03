@@ -1489,56 +1489,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/documents/:id", isWorkshopManager, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de document invalide" });
-      }
-      
-      const document = await storage.getVehicleDocument(id);
-      
-      if (!document) {
-        return res.status(404).json({ message: "Document non trouvé" });
-      }
-      
-      // Faux si un autre utilisateur l'a supprimé entre la lecture et la suppression.
-      const deleted = await storage.deleteVehicleDocument(id);
-      if (!deleted) {
-        return res.status(404).json({ message: "Document non trouvé" });
-      }
-
-      // `documentId` dans un `vehicle_updated` : le client resynchronise la liste
-      // des documents, les KPI conformité et les alertes d'échéance.
-      const broadcastUpdate = (global as any).broadcastUpdate;
-      if (typeof broadcastUpdate === "function") {
-        broadcastUpdate("vehicle_updated", {
-          version: 1,
-          entity: "vehicle",
-          entityId: document.vehicleId,
-          payload: {
-            vehicleId: document.vehicleId,
-            documentId: document.id,
-            documentType: document.type,
-            source: "document_deleted",
-          },
-          scope: { type: "broadcast" },
-          actor: {
-            userId: (req as any).user?.id || req.session?.userId || null,
-            role: (req as any).user?.role || req.session?.role || null,
-          },
-          emittedAt: new Date().toISOString(),
-        });
-      }
-
-      return res.status(204).send();
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Delete vehicle document error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Maintenance Schedule Routes
   app.get("/api/maintenance-schedules", authenticate, async (req, res) => {
     try {
