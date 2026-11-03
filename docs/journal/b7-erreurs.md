@@ -178,3 +178,15 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `tests/support/file-access-scan.ts` (AST, portée partagée avec `alert-emission-scan`), `tests/unit/server/stored-path-hygiene.test.ts` (14 exceptions : multer, fichiers livrés, sauvegardes, vite), `tests/unit/server/upload-delete-file.test.ts`.
 - Pourquoi : dette §9. La revue montre que tous les chemins lus en base sont déjà bornés, sauf la primitive `deleteFile`, appelée avec une valeur brute par `services/documentStorage.ts` (code mort, laissé en place).
 - Preuve : deleteFile 6/6 (3 rouges sans correctif), hygiène 6/6 (2 rouges sans correctif), tsc 0, unitaires 1898.
+
+## 2026-11-03T18:12:22+01:00 — Réserves fleet-securite sur #210 (garde des accès disque)
+
+- Quoi : la garde ne cherche plus une borne dans le texte de la portée. Elle exige que l'argument de l'appel disque soit relié à une borne. Une exception couvre un seul appel. Les imports renommés d'un appel disque sont refusés. Appels ajoutés : open, cp, rename, rmdir. deleteFile suit la même règle que uploadedFileCandidates (forme /uploads/… acceptée).
+- Comment : AST, avec trois formes reconnues :
+  - l'argument contient la borne ;
+  - l'argument est déclaré (en chaîne, ou par for…of) depuis une borne ;
+  - l'argument est gardé par un appel de borne.
+  Ni les noms de propriété ni path, fs et process ne comptent.
+- Pourquoi : près-accident relevé par fleet-securite. Une borne posée sur une autre variable, écrite en commentaire, ou placée dans registerRoutes autour d'un rappel anonyme rendait la garde verte à tort.
+- Preuve : quatre cas unitaires de contournement, tous rouges avec l'ancienne règle. Hygiène + deleteFile : 19/19, et 3 rouges sans le correctif. tsc : 0 erreur ; 1905 tests unitaires après fusion de main.
+- Hors périmètre, non traité : un lien symbolique placé dans uploads/ (multer n'en crée pas).
