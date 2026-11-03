@@ -35,3 +35,60 @@ Modèle et règles : `docs/journal/README.md`.
   - les 404 et 400 en 1032, 1037-1047, 1092 et 1098 laissent le fichier orphelin ;
   - 1092 et 1098 arrivent après la mise à jour de l'échéance, hors transaction ;
   - un échec de `createAlert` supprime un justificatif déjà référencé par la demande.
+
+## 2026-11-03T14:54:56+01:00 — Renouvellement rapide : cycle de vie du justificatif
+
+- **Agent** : b7 · **Branche** : `fix/quick-renewal-proof-lifecycle`
+- **Statut** : fait (audit fleet-securite en cours)
+- **Quoi** : sur `POST /api/document-renewals/quick-renew`, un justificatif téléversé n'est conservé que s'il est référencé par la demande enregistrée. Un refus après lecture du document ne fait plus avancer l'échéance. Un échec de notification ne renvoie plus 500 et ne supprime plus le justificatif.
+- **Comment** :
+  - `server/api/document-renewals.routes.ts` : drapeau `proofRecorded` et suppression dans `finally` tant qu'il est faux. Tous les refus et échecs passent par ce point, 401 et 403 inclus.
+  - Le contrôle de la demande ciblée (404, 400) passe avant toute écriture.
+  - Une seule transaction couvre l'échéance, le miroir véhicule, la levée des alertes et la demande.
+  - Les alertes sont envoyées au mieux, comme la diffusion WebSocket.
+  - `syncVehicleDocumentMirror` et `clearDocumentExpiryAlerts` reçoivent un `executor` optionnel (`DbExecutor`, par défaut `db`), sans changement pour les autres appelants.
+- **Pourquoi** : réserves de relecture sur #173 :
+  - les 404 et 400 en 1032, 1037-1047, 1092 et 1098 laissaient le fichier orphelin ;
+  - 1092 et 1098 arrivaient après la mise à jour de l'échéance ;
+  - un échec de `createAlert` supprimait un justificatif déjà référencé.
+- **Comment tester (QA)** :
+  - Prérequis : un compte secrétaire, un véhicule avec un document assurance.
+  - Étapes :
+    1. Renouveler avec un `requestId` inexistant.
+    2. Vérifier `uploads/document-renewals/proofs`.
+  - Attendu :
+    - réponse 404 ;
+    - aucun nouveau fichier ;
+    - échéance du document inchangée.
+  - Preuve automatisée : `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts` → `5 passed`. Sans le correctif : 5 échecs.
+- **RAIDER** :
+  - couvert :
+    - D : contrats existants verts (169) ;
+    - I : tout ou rien, plus d'état partiel ;
+    - E ;
+    - failure memory : contrat par cas.
+  - ne s'applique pas : A.
+- **Reste / risques** :
+  - le centre agréé est créé par `resolveRenewalCenter` avant les contrôles du document, donc il persiste même en cas de refus (comportement existant, à trancher) ;
+  - `details: uploadError.message` à la ligne 920 renvoie le message de multer.
+
+## 2026-11-03T15:00:56+01:00 — Renouvellement rapide : réserves de l'audit fleet-securite
+
+- **Agent** : b7 · **Branche** : `fix/quick-renewal-proof-lifecycle`
+- **Statut** : fait. Verdict de l'audit : OK sous réserve, aucun bloquant.
+- **Quoi** :
+  - M1 : contrat d'échec en transaction (500, fichier supprimé, échéance, miroir et demande inchangés).
+  - M2 : le refus de multer donne un message lisible (taille, format), sans `details`.
+  - M3 : un `requestId` qui vise une demande close est refusé en 409, et la preuve d'origine est conservée.
+  - M4 : l'UPDATE de la demande porte la condition de statut ouvert, et 409 si 0 ligne (deux onglets).
+- **Comment** :
+  - `server/api/document-renewals.routes.ts`.
+  - Contrat `document-quick-renew-proof-lifecycle` : 8 cas.
+  - Garde-fou `error-500-relay-hygiene` : il interdit aussi `details: x.message`.
+- **Comment tester (QA)** :
+  - Contrat → `8 passed`. Sans le correctif, M2 et M3 échouent (M1 passait déjà, ce qui prouve le tout ou rien).
+  - Garde-fou : 1 échec sur la version précédente, 20/20 ensuite.
+- **Reste / risques** :
+  - M4 n'a pas de test de concurrence (condition SQL seule) ;
+  - M5 : une coupure après COMMIT non acquitté supprime un fichier référencé (cas théorique accepté) ;
+  - le centre créé avant les contrôles reste un point produit, à trancher par 0a.

@@ -1,6 +1,6 @@
 import { and, eq, like, or } from "drizzle-orm";
 import { alerts, type Alert } from "@shared/schema";
-import { db } from "../db";
+import { db, type DbExecutor } from "../db";
 import { AppError } from "../lib/app-error";
 import { documentExpiryDedupeKeyPrefixes } from "./document-expiry-rule";
 
@@ -44,8 +44,8 @@ export const alertInboxService = {
    * DOC3 : levée système, pour tous les destinataires, des alertes d'échéance
    * d'un document renouvelé (toutes échéances confondues). Renvoie le nombre supprimé.
    */
-  async clearDocumentExpiryAlerts(documentId: number): Promise<number> {
-    const rows = await db
+  async clearDocumentExpiryAlerts(documentId: number, executor: DbExecutor = db): Promise<number> {
+    const rows = await executor
       .delete(alerts)
       .where(or(...documentExpiryDedupeKeyPrefixes(documentId).map((prefix) => like(alerts.dedupeKey, `${prefix}%`))))
       .returning({ id: alerts.id });

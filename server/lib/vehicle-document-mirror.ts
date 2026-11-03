@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { vehicleDocuments, vehicles } from "@shared/schema";
-import { db } from "../db";
+import { db, type DbExecutor } from "../db";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
 
 /** Normalise les anciens codes de type de document vers ceux de `vehicle_documents`. */
@@ -46,6 +46,7 @@ export async function syncVehicleDocumentMirror(
   documentType: string | null | undefined,
   expiryDate: string | Date | null | undefined,
   mode: MirrorMode,
+  executor: DbExecutor = db,
 ): Promise<boolean> {
   if (!expiryDate) return false;
   const value = expiryDate instanceof Date ? expiryDate.toISOString().slice(0, 10) : expiryDate;
@@ -53,11 +54,11 @@ export async function syncVehicleDocumentMirror(
   if (!(type in MIRROR_COLUMNS)) return false;
   const { column, key } = MIRROR_COLUMNS[type as keyof typeof MIRROR_COLUMNS];
   if (mode === "set") {
-    await db.update(vehicles).set({ [key]: value }).where(eq(vehicles.id, vehicleId));
+    await executor.update(vehicles).set({ [key]: value }).where(eq(vehicles.id, vehicleId));
     return true;
   }
   // Dépôt : la colonne n'avance que si la date est plus récente (équivalent de GREATEST).
-  const advanced = await db
+  const advanced = await executor
     .update(vehicles)
     .set({ [key]: value })
     .where(and(eq(vehicles.id, vehicleId), or(isNull(column), sql`${column} < ${value}::date`)))
