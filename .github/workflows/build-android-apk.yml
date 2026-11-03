@@ -12,6 +12,8 @@ on:
       - 'package.json'
       - '.github/workflows/build-android-apk.yml'
   pull_request:
+    # ready_for_review : un brouillon passé en revue déclenche le build.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'client/**'
       - 'shared/**'
@@ -26,6 +28,8 @@ permissions:
 
 jobs:
   build-android:
+    # Pas de build sur une PR brouillon (décision du 3 novembre 2026), comme ci.yml.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: 📱 Compiler l'APK Android
     runs-on: ubuntu-latest
 
