@@ -20,7 +20,7 @@ import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColu
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
-import { isApiError } from "@/lib/api-error";
+import { isApiError, userMessageOf } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
@@ -696,7 +696,7 @@ export default function MissionDetailsPage() {
       setLocation(`/operations/invoices/${data.invoice.id}`);
     },
     onError: (error: Error) => {
-      setErrorModal({ title: "Erreur facturation", description: error.message });
+      setErrorModal({ title: "Erreur facturation", description: userMessageOf(error, "La facturation de la mission a échoué.") });
     },
   });
   // Un double clic créait deux factures pour la même saisie.
