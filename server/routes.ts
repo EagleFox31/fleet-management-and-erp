@@ -3215,29 +3215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/fuel-records/:id", isWorkshopManager, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'enregistrement de carburant invalide" });
-      }
-      
-      const fuelRecord = await fuelService.getFuelRecord(id);
-      
-      if (!fuelRecord) {
-        return res.status(404).json({ message: "Enregistrement de carburant non trouvé" });
-      }
-      
-      await fuelService.deleteFuelRecord(id);
-
-      broadcastFuelRecordChanged(id, req.requestId);
-      return res.status(204).send();
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Delete fuel record error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // DELETE /api/fuel-records/:id : server/api/fuel-records.routes.ts (verrou carte carburant).
 
   // Récupérer tous les enregistrements de carburant
   app.get("/api/fuel-records", authenticate, async (req, res) => {

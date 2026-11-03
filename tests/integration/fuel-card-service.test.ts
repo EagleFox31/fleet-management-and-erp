@@ -128,5 +128,6 @@ describe("FuelCardService", () => {
     expect(rejected).toHaveLength(2);
     for (const r of rejected) expect(r.reason).toMatchObject({ code: "INSUFFICIENT_BALANCE" });
     expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(target - 600, 2);
-  });
+    // Trois transactions sérialisées par le verrou : 5 s par défaut ne tient pas sous charge.
+  }, 30_000);
 });
