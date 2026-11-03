@@ -1915,3 +1915,29 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un nouveau workflow déclenché par `pull_request` porte les mêmes `types` et la même condition sur son job d'entrée. Un job qui ne dépend pas du job d'entrée doit porter la condition lui-même.
+
+## 2026-11-03 — Le verrou de base de test était facultatif et nommé d'après l'URL
+
+### Contexte
+- `fuel-card-routes` (solde global de la carte) échouait par intermittence, même lancé seul sous `lot-tools/db-lock.mjs` : 3 échecs sur 7. Le solde prenait +10 000 entre deux appels, y compris autour d'un 403 qui n'écrit rien.
+
+### Cause racine
+- Classification : exclusion mutuelle contournable.
+  - `db-lock.mjs` nommait son verrou d'après l'hôte de l'URL : `localhost:54320` et `postgres:5432`, qui désignent la même base locale, prenaient deux verrous différents.
+  - Surtout, le verrou était opt-in : toute session qui lançait vitest directement écrivait sans s'exclure.
+
+### Résolution
+- `db-lock.mjs`, hors dépôt : clé normalisée par base.
+- Dans le dépôt : verrou en base, `pg_advisory_lock(hashtext('fleet-test:' || current_database()))`, pris dans le `globalSetup` des suites intégration et contrat et tenu par une connexion dédiée jusqu'au teardown.
+  - Même base, même verrou, sans dépendre de l'URL ni d'un script à penser à lancer.
+  - Un crash libère le verrou.
+
+### Prévention (vérifiable)
+- `tests/integration/test-db-lock.test.ts` :
+  - le passage en cours tient le verrou réel, et une seconde prise expire en nommant le détenteur ;
+  - deux prises s'enchaînent ;
+  - le délai est configurable.
+- Deux passages lancés en même temps : le second affiche « en attente du verrou de test (pid …) » et ne démarre qu'à la fin du premier.
+
+### Règle Projet (obligatoire)
+- Une exclusion entre écrivains d'une ressource partagée vit dans la ressource elle-même (verrou en base), pas dans une convention d'appel que chacun doit penser à suivre.
