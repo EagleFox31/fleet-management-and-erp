@@ -21,7 +21,10 @@ describe.each(ROUTERS)("server/api/%s.routes.ts relaie ses 500", (name) => {
   const lines = sourceOf(name).split(/\r?\n/);
 
   it("ne répond jamais 500 lui-même", () => {
-    const hits = lines.flatMap((l, i) => (/\.status\(500\)/.test(l) ? [`${i + 1}: ${l.trim()}`] : []));
+    // \s couvre aussi un appel coupé sur plusieurs lignes : `.status(\n 500)`.
+    const hits = [...sourceOf(name).matchAll(/\.(?:status|sendStatus)\s*\(\s*500\s*\)/g)].map(
+      (m) => `${sourceOf(name).slice(0, m.index).split("\n").length}: ${m[0]}`,
+    );
     expect(hits).toEqual([]);
   });
 
