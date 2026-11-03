@@ -1,7 +1,8 @@
 import { Router, type Request } from "express";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
-import { authenticate, isTechnician, isStockIssuer } from "../middleware/auth";
+import { authenticate, isAnyUser, isTechnician, isStockIssuer } from "../middleware/auth";
+import { assertWorkOrderReadable } from "../lib/work-order-scope";
 import {
   getPartRequirementStatusLabel,
   getPartRequirementProgressLabel,
@@ -28,13 +29,15 @@ const router = Router();
 
 const openRequirementStatuses = OPEN_REQUIREMENT_STATUSES;
 
-router.get("/:workOrderId/pending-part-requirements", authenticate, async (req, res) => {
+router.get("/:workOrderId/pending-part-requirements", isAnyUser, async (req, res, next) => {
   try {
     const workOrderId = parseInt(req.params.workOrderId);
 
     if (isNaN(workOrderId)) {
       return res.status(400).json({ message: "ID d'ordre de travail invalide" });
     }
+
+    await assertWorkOrderReadable(req.user, workOrderId);
 
     const requirements = await db
       .select({
@@ -104,6 +107,7 @@ router.get("/:workOrderId/pending-part-requirements", authenticate, async (req, 
 
     return res.status(200).json(response);
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Get pending part requirements for work order error");
     return res.status(500).json({ message: "Erreur serveur" });
   }

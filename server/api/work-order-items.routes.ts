@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { authenticate, isTechnician } from "../middleware/auth";
+import { authenticate, isAnyUser, isTechnician } from "../middleware/auth";
+import { assertWorkOrderReadable } from "../lib/work-order-scope";
 import { storage } from "../storage";
-import { AppError } from "../lib/app-error";
+import { AppError, isAppError } from "../lib/app-error";
 import { workOrderItemsService } from "../services/work-order-items-service";
 
 /**
@@ -55,15 +56,17 @@ function diffuser(event: string, payload: Record<string, unknown>) {
 
 export const workOrderItemsRoutes = Router();
 
-workOrderItemsRoutes.get("/:workOrderId/items", authenticate, async (req, res) => {
+workOrderItemsRoutes.get("/:workOrderId/items", isAnyUser, async (req, res, next) => {
   try {
     const workOrderId = Number.parseInt(req.params.workOrderId, 10);
     if (Number.isNaN(workOrderId)) {
       return res.status(400).json({ message: "ID d'ordre de travail invalide" });
     }
 
+    await assertWorkOrderReadable(req.user, workOrderId);
     return res.status(200).json(await workOrderItemsService.getItemsForWorkOrder(workOrderId));
   } catch (error) {
+    if (isAppError(error)) return next(error);
     console.error("Get work order items error:", error);
     return res.status(500).json({ message: "Erreur serveur" });
   }
