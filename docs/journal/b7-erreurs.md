@@ -126,3 +126,17 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : 62 sites dans 42 fichiers client affichaient `error.message` brut (dont `instanceof Error ? error.message` et les gabarits `${error.message}`). Ils passent désormais par `userMessageOf(error, repli)`.
 - **Comment** : garde `tests/unit/client/toast-error-message-hygiene.test.ts`, compte par fichier à égalité stricte. Rouge sur main. Deux sites restent gelés, chez c7 (#181) : driver/dashboard.tsx et missions/[id].tsx.
 - **Pourquoi** : AGENTS.md §10. Le message brut peut être technique (réseau, JSON, exception JS) et n'a ni repli ni référence.
+
+## 2026-11-03T17:16:45+01:00 — Idempotence de l'ajustement de stock (update-stock)
+
+- **Quoi** :
+  - `POST /api/parts/:id/update-stock` est protégé par une clé d'idempotence, même drapeau coupé ;
+  - une issue incertaine (enregistrement raté, 5xx, fin sans JSON) garde la clé, et le réessai reçoit un 409 « vérifiez le stock » ;
+  - les deux écrans d'ajustement envoient la clé.
+- **Comment** :
+  - options par route (`keepKeyOnUncertainOutcome`, `staleSeconds: null`, `ignoreFeatureFlag`, `inProgressMessage`) ;
+  - `sendWithSubmissionKey` + `partStockKeyScope(id, delta)` côté client ;
+  - contrat rouge 2 sur 4 sans le correctif serveur.
+- **Pourquoi** :
+  - un réessai après coupure ajustait deux fois ;
+  - réserves de 0a (option de route, 409 lisible, nouvelle clé par intention) et de c7 (une 5xx après le commit garde la clé).

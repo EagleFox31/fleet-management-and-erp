@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api-error";
-import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope } from "@/lib/submission-key";
+import { createSubmissionKeyStore, IDEMPOTENCY_HEADER, isIndeterminateOutcome, missionFuelKeyScope, partStockKeyScope, sendWithSubmissionKey } from "@/lib/submission-key";
 
 /**
  * Clé d'un envoi qui débite la carte carburant (LESSONS_LEARNED, 3 novembre 2026) :
@@ -108,5 +108,46 @@ describe("createSubmissionKeyStore", () => {
     expect(typeof key).toBe("string");
     store.settle(networkError);
     expect(store.take()).toBe(key);
+  });
+});
+
+describe("sendWithSubmissionKey (ajustement de stock)", () => {
+  it("l'en-tête client est celui que lit la garde serveur", async () => {
+    const server = await import("../../../server/lib/idempotency-config");
+    expect(IDEMPOTENCY_HEADER).toBe(server.IDEMPOTENCY_HEADER);
+  });
+
+  it("issue inconnue : le réessai de la même intention renvoie la même clé", async () => {
+    const storage = fakeStorage();
+    const scope = partStockKeyScope(7, 3);
+    const keys: string[] = [];
+    await expect(sendWithSubmissionKey(scope, async (k) => { keys.push(k); throw serverError; }, storage)).rejects.toBe(serverError);
+    await expect(sendWithSubmissionKey(scope, async (k) => { keys.push(k); throw networkError; }, storage)).rejects.toBe(networkError);
+    await sendWithSubmissionKey(scope, async (k) => { keys.push(k); return "ok"; }, storage);
+    expect(new Set(keys).size).toBe(1);
+    expect(storage.map.size).toBe(0);
+  });
+
+  it("nouvelle intention : nouvelle clé (après succès, autre quantité, autre pièce, refus 4xx)", async () => {
+    const storage = fakeStorage();
+    const keys: string[] = [];
+    const record = async (k: string) => { keys.push(k); return k; };
+    await sendWithSubmissionKey(partStockKeyScope(7, 3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(7, 3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(7, -3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(8, 3), record, storage);
+    await expect(sendWithSubmissionKey(partStockKeyScope(9, 1), async (k) => { keys.push(k); throw conflict; }, storage)).rejects.toBe(conflict);
+    await sendWithSubmissionKey(partStockKeyScope(9, 1), record, storage);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("une intention en suspens ne bloque pas une autre intention", async () => {
+    const storage = fakeStorage();
+    const stuck = partStockKeyScope(7, 3);
+    let stuckKey = "";
+    await expect(sendWithSubmissionKey(stuck, async (k) => { stuckKey = k; throw serverError; }, storage)).rejects.toBe(serverError);
+    const other = await sendWithSubmissionKey(partStockKeyScope(7, 5), async (k) => k, storage);
+    expect(other).not.toBe(stuckKey);
+    expect(createSubmissionKeyStore(stuck, storage).hasUncertainSubmission()).toBe(true);
   });
 });

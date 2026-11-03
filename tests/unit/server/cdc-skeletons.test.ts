@@ -31,11 +31,18 @@ describe("journal d'audit des ressources CDC", () => {
 });
 
 describe("garde d'idempotence (socle)", () => {
-  it("lot #10b : périmètre chauffeur seulement (statut de mission, kilométrage)", () => {
+  it("lot #10b (statut de mission, kilométrage) + ajustement de stock, qui garde sa clé", () => {
     expect(IDEMPOTENCY_ROUTES.map((r) => `${r.method} ${r.pattern.source}`)).toEqual([
       "PUT ^\\/missions\\/\\d+\\/status$",
       "PUT ^\\/vehicles\\/\\d+\\/mileage$",
+      "POST ^\\/parts\\/\\d+\\/update-stock$",
     ]);
+    for (const route of IDEMPOTENCY_ROUTES.slice(0, 2)) {
+      expect(route.staleSeconds).toBeUndefined();
+      expect(route.keepKeyOnUncertainOutcome).toBeUndefined();
+      expect(route.ignoreFeatureFlag).toBeUndefined();
+    }
+    expect(IDEMPOTENCY_ROUTES[2]).toMatchObject({ staleSeconds: null, keepKeyOnUncertainOutcome: true, ignoreFeatureFlag: true });
   });
 
   it("transmet une route non listée, drapeau coupé ou allumé", () => {
