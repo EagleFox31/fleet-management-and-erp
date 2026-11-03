@@ -78,8 +78,7 @@ const checkWritePermission = async (req: Request & { session: any }, res: Respon
 
     next();
   } catch (error) {
-    console.error('Error in checkWritePermission middleware:', error);
-    return res.status(500).json({ error: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Error in checkWritePermission middleware" }));
   }
 };
 
@@ -127,8 +126,7 @@ const checkEvaluationPermission = async (req: Request & { session: any }, res: R
 
     next();
   } catch (error) {
-    console.error('Error in checkEvaluationPermission middleware:', error);
-    return res.status(500).json({ error: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Error in checkEvaluationPermission middleware" }));
   }
 };
 
@@ -198,22 +196,18 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // GET /api/suppliers/top - Récupérer le top des fournisseurs par volume
-router.get("/top", async (req: Request, res: Response) => {
+router.get("/top", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 5;
     const topSuppliers = await supplierManagementService.getTopSuppliersByVolume(limit);
     res.json(topSuppliers);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération du top fournisseurs:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération du top fournisseurs",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération du top fournisseurs", { cause: error }), { event: "Erreur lors de la récupération du top fournisseurs" }));
   }
 });
 
 // GET /api/suppliers/search - Rechercher des fournisseurs
-router.get("/search", async (req: Request, res: Response) => {
+router.get("/search", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const searchTerm = req.query.q as string;
     
@@ -224,16 +218,12 @@ router.get("/search", async (req: Request, res: Response) => {
     const results = await supplierManagementService.searchSuppliers(searchTerm);
     res.json(results);
   } catch (error) {
-    console.error("❌ Erreur lors de la recherche de fournisseurs:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la recherche de fournisseurs",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la recherche de fournisseurs", { cause: error }), { event: "Erreur lors de la recherche de fournisseurs" }));
   }
 });
 
 // GET /api/suppliers/:id - Récupérer un fournisseur par ID avec statistiques
-router.get("/:id", async (req: Request, res: Response) => {
+router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -249,16 +239,12 @@ router.get("/:id", async (req: Request, res: Response) => {
 
     res.json(supplier);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération du fournisseur:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération du fournisseur",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération du fournisseur", { cause: error }), { event: "Erreur lors de la récupération du fournisseur" }));
   }
 });
 
 // GET /api/suppliers/:id/performance - Récupérer les performances d'un fournisseur
-router.get("/:id/performance", async (req: Request, res: Response) => {
+router.get("/:id/performance", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -274,11 +260,7 @@ router.get("/:id/performance", async (req: Request, res: Response) => {
 
     res.json(performance);
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération des performances:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des performances",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des performances", { cause: error }), { event: "Erreur lors de la récupération des performances" }));
   }
 });
 
@@ -319,8 +301,7 @@ const checkSupplierCreatePermission = async (
     req.user = { id: user.id, username: user.username, role: normalizedRole };
     next();
   } catch (error) {
-    console.error("Error in checkSupplierCreatePermission middleware:", error);
-    return res.status(500).json({ error: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Error in checkSupplierCreatePermission middleware" }));
   }
 };
 
@@ -348,7 +329,7 @@ router.post("/", checkSupplierCreatePermission, async (req: Request, res: Respon
       void alertService
         .notifyIncompleteSupplierCreated(supplier, req.user?.username)
         .catch((error) =>
-          console.error("Alerte fiche fournisseur incomplète non émise:", error),
+          supplierLog.error({ err: error, requestId: req.requestId }, "Alerte fiche fournisseur incomplète non émise"),
         );
     }
 
@@ -374,11 +355,7 @@ router.post("/", checkSupplierCreatePermission, async (req: Request, res: Respon
       return next(new AppError(409, "Un fournisseur porte déjà ce nom", { cause: error }));
     }
 
-    console.error("❌ Erreur lors de la création du fournisseur:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la création du fournisseur",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la création du fournisseur", { cause: error }), { event: "Erreur lors de la création du fournisseur" }));
   }
 });
 
@@ -423,16 +400,12 @@ router.patch("/:id", checkWritePermission, async (req: Request, res: Response, n
       return next(new AppError(409, "Un fournisseur porte déjà ce nom", { cause: error }));
     }
 
-    console.error("❌ Erreur lors de la mise à jour du fournisseur:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la mise à jour du fournisseur",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la mise à jour du fournisseur", { cause: error }), { event: "Erreur lors de la mise à jour du fournisseur" }));
   }
 });
 
 // PATCH /api/suppliers/:id/rating - Mettre à jour les évaluations d'un fournisseur (droits par métrique)
-router.patch("/:id/rating", checkEvaluationPermission, async (req: Request, res: Response) => {
+router.patch("/:id/rating", checkEvaluationPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -510,16 +483,12 @@ router.patch("/:id/rating", checkEvaluationPermission, async (req: Request, res:
       });
     }
     
-    console.error("❌ Erreur lors de la mise à jour des évaluations:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la mise à jour des évaluations",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la mise à jour des évaluations", { cause: error }), { event: "Erreur lors de la mise à jour des évaluations" }));
   }
 });
 
 // POST /api/suppliers/:id/calculate-ratings - Calculer automatiquement les évaluations (admin uniquement)
-router.post("/:id/calculate-ratings", checkEvaluationPermission, async (req: Request, res: Response) => {
+router.post("/:id/calculate-ratings", checkEvaluationPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -562,16 +531,12 @@ router.post("/:id/calculate-ratings", checkEvaluationPermission, async (req: Req
       supplier: updatedSupplier
     });
   } catch (error) {
-    console.error("❌ Erreur lors du calcul des évaluations:", error);
-    res.status(500).json({ 
-      error: "Erreur lors du calcul des évaluations",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors du calcul des évaluations", { cause: error }), { event: "Erreur lors du calcul des évaluations" }));
   }
 });
 
 // DELETE /api/suppliers/:id - Désactiver un fournisseur (soft delete) (admin, secretary et logistics)
-router.delete("/:id", checkWritePermission, async (req: Request, res: Response) => {
+router.delete("/:id", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -598,16 +563,12 @@ router.delete("/:id", checkWritePermission, async (req: Request, res: Response) 
     );
     res.json({ message: "Fournisseur désactivé avec succès" });
   } catch (error) {
-    console.error("❌ Erreur lors de la désactivation du fournisseur:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la désactivation du fournisseur",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la désactivation du fournisseur", { cause: error }), { event: "Erreur lors de la désactivation du fournisseur" }));
   }
 });
 
 // PATCH /api/suppliers/:id/reactivate - Réactiver un fournisseur (admin, secretary et logistics)
-router.patch("/:id/reactivate", checkWritePermission, async (req: Request, res: Response) => {
+router.patch("/:id/reactivate", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id);
     
@@ -634,11 +595,7 @@ router.patch("/:id/reactivate", checkWritePermission, async (req: Request, res: 
     );
     res.json({ message: "Fournisseur réactivé avec succès" });
   } catch (error) {
-    console.error("❌ Erreur lors de la réactivation du fournisseur:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la réactivation du fournisseur",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la réactivation du fournisseur", { cause: error }), { event: "Erreur lors de la réactivation du fournisseur" }));
   }
 });
 

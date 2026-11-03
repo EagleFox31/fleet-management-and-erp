@@ -1,5 +1,6 @@
 import { getFuelPriceAt } from "./fuel-price-service";
 import { AppError } from "../lib/app-error";
+import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
 import { moduleLogger } from "../lib/logger";
 import { db } from "../db";
 import { fuelRecords, users, vehicles, type FuelRecord } from "@shared/schema";
@@ -7,18 +8,6 @@ import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 
 type FuelCardServiceErrorCode = "INSUFFICIENT_BALANCE" | "INVALID_INPUT" | "VEHICLE_NOT_FOUND";
 
-/** Exécuteur Drizzle : la base, ou une transaction en cours. */
-type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * Verrou transactionnel de la carte carburant. La carte est unique et son solde
- * est une somme sur fuel_records : aucune ligne à verrouiller par FOR UPDATE.
- * Ce verrou sérialise contrôle du solde et écriture (débit comme crédit) ; il
- * est relâché au COMMIT ou au ROLLBACK.
- */
-async function lockFuelCard(tx: DbExecutor): Promise<void> {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fleetmaster_fuel_card'))`);
-}
 
 const log = moduleLogger("fuel-card-service");
 
@@ -250,7 +239,13 @@ export class FuelCardService {
     missionId?: number;
     isPreDeparture?: boolean;
     userId: number;
-  }) {
+  },
+  /**
+   * Écriture liée au débit (ex. journal de régularisation d'une mission), jouée dans la même
+   * transaction, sous le verrou : si elle échoue, le débit est annulé avec elle.
+   */
+  withinTransaction?: (tx: DbExecutor, consumption: FuelRecord, cost: number) => Promise<void>,
+  ) {
     log.info({ vehicleId: data.vehicleId, quantity: data.quantity, userId: data.userId }, "consommation de carburant");
 
     if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
@@ -323,6 +318,7 @@ export class FuelCardService {
           createdBy: data.userId
         })
         .returning();
+      if (withinTransaction) await withinTransaction(tx, consumption, cost);
       return { consumption, currentBalance, newBalance };
     });
 
