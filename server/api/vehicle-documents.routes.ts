@@ -8,7 +8,7 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isWorkshopManager } from "../middleware/auth";
-import { deleteFile, uploadVehicleDocument } from "../middleware/upload";
+import { deleteFile, isVehicleIdSegment, uploadVehicleDocument } from "../middleware/upload";
 import { storage } from "../storage";
 import { recomputeVehicleDocumentMirror, syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 
@@ -67,11 +67,13 @@ function emitDocumentDeposited(
  * hors liste restent lisibles (aucune migration).
  */
 router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next) => {
-  const vehicleId = parseInt(req.params.vehicleId);
-  if (isNaN(vehicleId)) return next(new AppError(400, "ID de véhicule invalide"));
+  // Chiffres seuls : multer fait de ce paramètre un dossier disque, `parseInt` laisserait passer `1../../x` (#130).
+  if (!isVehicleIdSegment(req.params.vehicleId)) return next(new AppError(400, "ID de véhicule invalide"));
+  const vehicleId = Number(req.params.vehicleId);
 
   uploadVehicleDocument(req, res, async (err: unknown) => {
     try {
+      if (err instanceof AppError) throw err;
       if (err) {
         const message =
           err instanceof multer.MulterError

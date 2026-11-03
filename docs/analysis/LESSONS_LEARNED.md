@@ -1312,3 +1312,30 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une garde d'idempotence ne libère une clé que sur une réponse connue (5xx, 401, 403, 408, 429, ou fin sans réponse enregistrée), jamais sur une perte de connexion.
+
+## 2026-11-03 - Valider une valeur, en employer une autre (#130)
+
+### Contexte
+- `POST /api/vehicles/:vehicleId/documents` validait `parseInt(req.params.vehicleId)`. La destination multer construisait le dossier avec la chaîne brute : `path.join("./uploads/documents", "vehicle-" + brut)`.
+- `1..%2F..%2F..%2F..%2Fx` (Express décode `%2F`) passait `parseInt` (1) et créait `x` à la racine du dépôt. Relevé par la relecture sécurité de #126, hors de son périmètre.
+
+### Cause racine
+- La validation et l'usage ne portaient pas sur la même valeur. `parseInt` n'est pas une validation : il tronque.
+- La règle existait déjà (AGENTS.md §9, `isSafePathSegment`) mais aucun contrôle automatique ne la faisait respecter dans les stockages multer.
+
+### Classification
+- Near miss, sécurité (traversée de chemin), route réservée au personnel (`isWorkshopManager`).
+
+### Résolution (#133)
+- `isVehicleIdSegment` (entier positif sans zéro en tête, borné à l'int Postgres) valide avant multer : 400 « ID de véhicule invalide ».
+- La destination multer revalide par `vehicleDocumentDirectory`, qui vérifie le confinement par `isInsideDirectory` (`server/lib/uploaded-file.ts`, partagé avec `uploadedFileCandidates`).
+- Une erreur disque à la création du dossier devient une `AppError` 500 générique, sans chemin.
+
+### Prévention (vérifiable)
+- `tests/unit/server/multer-storage-hygiene.test.ts` : dans les options de tout `multer.diskStorage` de `server/`, une ligne qui lit `req.params|body|query|headers` doit passer la valeur à un validateur de segment. Rouge démontré sur l'ancien `upload.ts`.
+- `tests/contract/vehicle-documents-upload-path.contract.test.ts` : 3 profondeurs de remontée, `12abc`, `007`, identifiant hors int → 400 `ApiErrorBody`, aucun dossier créé ; échec disque → 500 générique. Rouge démontré avant correctif (dossier `pwn130-*` à la racine, 500).
+- `tests/unit/server/upload-vehicle-directory.test.ts` : bornes de l'identifiant et `isInsideDirectory` (`uploads/documents-x` refusé).
+
+### Règle Projet (obligatoire)
+- Un paramètre qui devient un segment de chemin se valide par une expression complète (ou `isSafePathSegment`), jamais par `parseInt`/`Number`, et **la valeur validée est celle qui sert**.
+- Le confinement se vérifie par `isInsideDirectory` sur des chemins résolus, jamais par préfixe de chaîne.
