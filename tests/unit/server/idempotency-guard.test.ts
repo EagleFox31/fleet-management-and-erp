@@ -58,6 +58,28 @@ function fakeRes() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** Compte de session factice : présent par défaut, `undefined` = compte supprimé. */
+const guard = (store: IdempotencyStore, findUser: (id: number) => Promise<unknown> = async (id) => ({ id })) =>
+  idempotencyGuard(ROUTES, store, findUser);
+
+/** Stockage en mémoire : réserver, enregistrer et rejouer réellement (une seule clé suffit ici). */
+function memoryStore() {
+  const calls: string[] = [];
+  let saved: { status: number; body: unknown } | "pending" | undefined;
+  const store: IdempotencyStore = {
+    reserve: vi.fn(async () => {
+      calls.push("reserve");
+      if (saved === undefined) return (saved = "pending"), { kind: "reserved" } as const;
+      if (saved === "pending") return { kind: "in_progress" } as const;
+      return { kind: "replay", status: saved.status, body: saved.body } as const;
+    }),
+    complete: vi.fn(async (_u, _k, status, body) => void (calls.push(`complete:${status}`), (saved = { status, body }))),
+    release: vi.fn(async () => void (calls.push("release"), (saved = undefined))),
+    purgeExpired: vi.fn(async () => 0),
+  };
+  return { store, calls };
+}
+
 beforeEach(() => {
   process.env.FEATURE_FLAGS = "offline-writes=on";
 });
@@ -75,21 +97,21 @@ describe("garde d'idempotence : conditions d'entrée", () => {
     if ("flags" in over) process.env.FEATURE_FLAGS = over.flags;
     const { store } = fakeStore();
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, store)(fakeReq(over as never), fakeRes() as never, next);
+    await guard(store)(fakeReq(over as never), fakeRes() as never, next);
     expect(next).toHaveBeenCalledWith();
     expect(store.reserve).not.toHaveBeenCalled();
   });
 
   it("clé invalide : 400", async () => {
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, fakeStore().store)(fakeReq({ key: "a b" }), fakeRes() as never, next);
+    await guard(fakeStore().store)(fakeReq({ key: "a b" }), fakeRes() as never, next);
     expect(next.mock.calls[0][0]).toBeInstanceOf(AppError);
     expect((next.mock.calls[0][0] as AppError).status).toBe(400);
   });
 
   it("chemin normalisé (casse, encodage) avant comparaison et empreinte", async () => {
     const { store } = fakeStore();
-    await idempotencyGuard(ROUTES, store)(fakeReq({ url: "/api/Missions/%37/STATUS/" }), fakeRes() as never, vi.fn());
+    await guard(store)(fakeReq({ url: "/api/Missions/%37/STATUS/" }), fakeRes() as never, vi.fn());
     expect(store.reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: 3, key: "k-1", method: "PUT", path: "/missions/7/status" }));
   });
 });
@@ -99,7 +121,7 @@ describe("garde d'idempotence : décisions", () => {
     const { store } = fakeStore({ kind: "replay", status: 200, body: { id: 7, status: "in_progress" } });
     const res = fakeRes();
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), res as never, next);
+    await guard(store)(fakeReq(), res as never, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(200);
     expect(res.sent).toEqual([{ id: 7, status: "in_progress" }]);
@@ -111,7 +133,7 @@ describe("garde d'idempotence : décisions", () => {
     ["mismatch", 422],
   ] as const)("%s : %i", async (kind, status) => {
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, fakeStore({ kind }).store)(fakeReq(), fakeRes() as never, next);
+    await guard(fakeStore({ kind }).store)(fakeReq(), fakeRes() as never, next);
     expect((next.mock.calls[0][0] as AppError).status).toBe(status);
   });
 
@@ -121,7 +143,7 @@ describe("garde d'idempotence : décisions", () => {
       throw new Error("db down");
     });
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), fakeRes() as never, next);
+    await guard(store)(fakeReq(), fakeRes() as never, next);
     expect((next.mock.calls[0][0] as AppError).status).toBe(503);
   });
 
@@ -129,7 +151,7 @@ describe("garde d'idempotence : décisions", () => {
     const { store, calls } = fakeStore();
     const res = fakeRes();
     const next = vi.fn();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), res as never, next);
+    await guard(store)(fakeReq(), res as never, next);
     expect(next).toHaveBeenCalledWith();
     res.status(200).json({ ok: true });
     expect(res.sent).toEqual([]);
@@ -141,21 +163,75 @@ describe("garde d'idempotence : décisions", () => {
   it.each([500, 401, 403, 429])("réservée puis %i : clé libérée", async (status) => {
     const { store, calls } = fakeStore();
     const res = fakeRes();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), res as never, vi.fn());
+    await guard(store)(fakeReq(), res as never, vi.fn());
     res.status(status).json({ message: "x" });
     await flush();
     expect(calls).toEqual(["reserve", "release"]);
     expect(res.sent).toHaveLength(1);
   });
 
-  it("connexion fermée sans réponse JSON : clé libérée une seule fois", async () => {
+  // B1 (relecture de #131) : libérer sur `close` laissait passer la réponse sans l'enregistrer,
+  // et le réessai réexécutait l'écriture.
+  it("connexion coupée puis réponse 200 : réponse enregistrée, le réessai rejoue sans réécrire", async () => {
+    const { store, calls } = memoryStore();
+    const res = fakeRes();
+    const run = vi.fn();
+    await guard(store)(fakeReq(), res as never, run);
+    res.emit("close");
+    res.status(200).json({ ok: true });
+    await flush();
+    expect(calls).toEqual(["reserve", "complete:200"]);
+
+    const retry = fakeRes();
+    const runAgain = vi.fn();
+    await guard(store)(fakeReq(), retry as never, runAgain);
+    expect(runAgain).not.toHaveBeenCalled();
+    expect(retry.sent).toEqual([{ ok: true }]);
+    expect(retry.headers["Idempotent-Replayed"]).toBe("true");
+  });
+
+  it("réponse terminée sans JSON : clé libérée une seule fois", async () => {
     const { store, calls } = fakeStore();
     const res = fakeRes();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), res as never, vi.fn());
-    res.emit("close");
-    res.emit("close");
+    await guard(store)(fakeReq(), res as never, vi.fn());
+    res.emit("finish");
+    res.emit("finish");
     await flush();
     expect(calls).toEqual(["reserve", "release"]);
+  });
+
+  it("finish après une réponse JSON enregistrée : rien n'est libéré", async () => {
+    const { store, calls } = fakeStore();
+    const res = fakeRes();
+    await guard(store)(fakeReq(), res as never, vi.fn());
+    res.status(201).json({ id: 1 });
+    await flush();
+    res.emit("finish");
+    await flush();
+    expect(calls).toEqual(["reserve", "complete:201"]);
+  });
+
+  // B3 : un compte supprimé n'a rien à réserver (sa clé étrangère ferait un 503).
+  it("compte supprimé : 401, aucune réservation, la route ne s'exécute pas", async () => {
+    const { store } = fakeStore();
+    const next = vi.fn();
+    await guard(store, async () => undefined)(fakeReq(), fakeRes() as never, next);
+    expect((next.mock.calls[0][0] as AppError).status).toBe(401);
+    expect(store.reserve).not.toHaveBeenCalled();
+  });
+
+  // M1 : un envoi en échec après l'enregistrement est journalisé, sans rejet non géré.
+  it("envoi de la réponse en échec : erreur journalisée, aucun rejet non géré", async () => {
+    const { store, calls } = fakeStore();
+    const res = fakeRes();
+    res.json = () => {
+      throw new Error("headers already sent");
+    };
+    await guard(store)(fakeReq(), res as never, vi.fn());
+    res.status(200).json({ ok: true });
+    await flush();
+    await flush();
+    expect(calls).toEqual(["reserve", "complete:200"]);
   });
 
   it("enregistrement en échec : clé libérée, la réponse part quand même", async () => {
@@ -164,7 +240,7 @@ describe("garde d'idempotence : décisions", () => {
       throw new Error("write failed");
     });
     const res = fakeRes();
-    await idempotencyGuard(ROUTES, store)(fakeReq(), res as never, vi.fn());
+    await guard(store)(fakeReq(), res as never, vi.fn());
     res.status(200).json({ ok: true });
     await flush();
     expect(calls).toEqual(["reserve", "release"]);

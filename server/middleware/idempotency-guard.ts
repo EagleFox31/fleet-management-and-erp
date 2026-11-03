@@ -13,6 +13,9 @@ import {
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
 import { moduleLogger } from "../lib/logger";
 
+/** Chargé à l'appel : importer la base au chargement casserait les tests unitaires sans base. */
+const findActiveSessionUser = async (id: number) => (await import("../services/session-user")).findActiveSessionUser(id);
+
 const log = moduleLogger("idempotency-guard");
 
 /** Chemin normalisé comme Express et le journal d'audit : sans casse, décodé, sans `/` final. */
@@ -40,12 +43,17 @@ export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: s
  * - première requête : la clé est réservée, la route s'exécute, sa réponse est enregistrée ;
  * - même clé, même requête, déjà traitée : la réponse enregistrée est rejouée, sans réécrire ;
  * - même clé encore en cours : 409 ; même clé pour une autre requête : 422 ;
- * - 5xx, 401, 403, 408, 429 ou réponse interrompue : la clé est libérée, le client réessaie.
- * Sans en-tête, la requête passe comme avant. Stockage indisponible : 503, rien n'est écrit.
+ * - 5xx, 401, 403, 408, 429 : la clé est libérée, le client réessaie ;
+ * - réponse terminée sans JSON : la clé est libérée ;
+ * - connexion coupée : rien n'est libéré, la route peut encore répondre et sa réponse est
+ *   enregistrée ; si elle ne répond jamais, la réservation expire (arrêt du serveur compris).
+ * Compte supprimé : 401 avant toute réservation. Sans en-tête, la requête passe comme avant.
+ * Stockage indisponible : 503, rien n'est écrit.
  */
 export function idempotencyGuard(
   routes: readonly IdempotencyRoute[] = IDEMPOTENCY_ROUTES,
   store: IdempotencyStore = idempotencyStore,
+  findUser: (id: number) => Promise<unknown> = findActiveSessionUser,
 ): RequestHandler {
   return async (req, res, next) => {
     if (routes.length === 0 || !isFeatureEnabled(IDEMPOTENCY_FLAG)) return next();
@@ -66,6 +74,9 @@ export function idempotencyGuard(
     const requestHash = hashRequest(method, path, req.body);
     let outcome;
     try {
+      // Compte supprimé : 401 comme la route, et pas de réservation sur un compte disparu
+      // (sa clé étrangère ferait un 503).
+      if (!(await findUser(userId))) return next(new AppError(401, "Session expirée, reconnectez-vous."));
       outcome = await store.reserve({ userId, key, method, path, requestHash });
     } catch (err) {
       return next(new AppError(503, "Service momentanément indisponible, réessayez.", { cause: err }));
@@ -98,12 +109,16 @@ export function idempotencyGuard(
           })
         : release();
       // La réponse part une fois la clé tranchée : un rejeu immédiat voit l'état final.
-      void persist.finally(() => originalJson(body));
+      void persist
+        .finally(() => originalJson(body))
+        .catch((err) => log.error({ err, requestId: req.requestId }, "envoi de la réponse idempotente en échec"));
       return res;
     }) as typeof res.json;
 
-    // Réponse sans JSON ou connexion coupée avant la réponse : la clé ne doit pas rester bloquée.
-    res.on("close", () => {
+    // Réponse terminée sans JSON : rien n'a été enregistré, la clé est libérée. Une connexion
+    // coupée (`close`) ne libère rien : la route peut encore répondre, et libérer ici ferait
+    // réexécuter l'écriture au réessai.
+    res.on("finish", () => {
       if (settled) return;
       settled = true;
       void release();

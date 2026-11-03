@@ -31,3 +31,14 @@ Branche `lot/api/CDC-10-idempotence`. Une entrée par commit : quoi, comment, po
   autrement. Vérifié rouge en désactivant le rejeu dans le garde (3 échecs), puis restauré.
 - **Pourquoi** : un test qui rappelle seulement la route deux fois passerait aussi sans garde quand
   la route est déjà idempotente par nature.
+
+## 2026-11-03T09:31:49+0100 — #10b — Réserves de relecture B1, M1, B3
+
+- **Agent** : c7 · **Branche** : `lot/api/CDC-10-idempotence` · **Commit** : voir `git log` de la branche
+- **Statut** : fait
+- **Quoi** : B1 la clé n'est plus libérée sur une connexion coupée (le réessai rejouait l'écriture) ; M1 l'envoi différé de la réponse a son `.catch` journalisé ; B3 un compte supprimé reçoit 401 avant toute réservation (plus de 503 par clé étrangère).
+- **Comment** : libération sur `finish` seulement si rien n'est enregistré ; expiration de la réservation pour une route qui ne répond jamais ; `findActiveSessionUser` injecté (chargé à l'appel, unitaires sans base).
+- **Pourquoi** : relecture de aa, décision 0a.
+- **Rejeu** : sans recontrôle des droits, limité à sa propre réponse (clé cloisonnée par compte), conservée 7 jours ; à revoir si #10c expose une réponse plus large.
+- **Preuve automatisée** : `tests/unit/server/idempotency-guard.test.ts` 23/23 (B1, B3 et M1 rouges avec la garde précédente) ; intégration `idempotency-store` 9/9 ; contrats idempotence 24/24.
+- **RAIDER** : D (contrats verts), E (aucune libération sur état inconnu, erreurs journalisées), failure memory (leçon dans LESSONS_LEARNED).
