@@ -2933,7 +2933,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Note: Dans une application réelle, il faudrait paginer les résultats
         // Cloison client : un client ne lit que les pleins de ses propres véhicules.
         const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
@@ -3034,7 +3034,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Cloison client : les statistiques d'un client ne portent que sur ses véhicules.
       const ownerScope = ownerScopeOf(req.user);
-      const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+      const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
       log.debug({ vehicleCount: vehicles.vehicles.length, requestId: req.requestId }, "véhicules retenus pour les statistiques carburant");
       
       let totalFuel = 0;
@@ -3168,7 +3168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Récupérer pour tous les véhicules (un client : les siens seulement)
         const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         for (const vehicle of vehicles.vehicles) {
           const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
@@ -3961,7 +3961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Statistiques des véhicules - utilise les données existantes
-      const vehiclesData = await storage.getVehicles();
+      const vehiclesData = await storage.listAllVehicles();
       const vehicles = vehiclesData.vehicles || [];
       const vehicleStats = {
         total: vehicles.length,
