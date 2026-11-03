@@ -10,7 +10,9 @@ import { z } from "zod";
 import {
   getMissionEligibility,
   formatEligibilityRefusal,
+  isRenewalReceiptValid,
 } from "@shared/constants/vehicle-eligibility";
+import { loadOpenRenewalReceipts } from "../lib/renewal-receipts";
 import {
   extractMissionActualRoadExpensesHT,
   mergeMissionActualFdrCost,
@@ -579,6 +581,7 @@ function computeMissionBudgetSuggestion({
 function isDocumentTypeValid(
   documentType: VehicleDocumentRequirementType,
   docs: Array<{ expiryDate: Date | string | null }>,
+  receiptCovers = false,
 ): boolean {
   if (!docs.length) return false;
 
@@ -586,7 +589,8 @@ function isDocumentTypeValid(
     return true;
   }
 
-  return docs.some((doc) => !isDateExpired(doc.expiryDate));
+  // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier.
+  return receiptCovers || docs.some((doc) => !isDateExpired(doc.expiryDate));
 }
 
 function broadcastDocumentRenewalCreatedFromMission(
@@ -1414,9 +1418,25 @@ router.get("/:id/launch-readiness", async (req, res) => {
       docsByType.set(typed, bucket);
     }
 
+    const readinessReceipts = missionAssignment?.vehicleId
+      ? await loadOpenRenewalReceipts(missionAssignment.vehicleId)
+      : {};
     const carteGriseValid = hasVehicle && isDocumentTypeValid("carte_grise", docsByType.get("carte_grise") || []);
-    const assuranceValid = hasVehicle && isDocumentTypeValid("assurance", docsByType.get("assurance") || []);
-    const visiteTechniqueValid = hasVehicle && isDocumentTypeValid("visite_technique", docsByType.get("visite_technique") || []);
+    const assuranceDocs = docsByType.get("assurance") || [];
+    const visiteDocs = docsByType.get("visite_technique") || [];
+    const assuranceValid = hasVehicle && isDocumentTypeValid(
+      "assurance",
+      assuranceDocs,
+      isRenewalReceiptValid(readinessReceipts, "insurance"),
+    );
+    const visiteTechniqueValid = hasVehicle && isDocumentTypeValid(
+      "visite_technique",
+      visiteDocs,
+      isRenewalReceiptValid(readinessReceipts, "technical_inspection"),
+    );
+    // Valide grâce au seul récépissé : le dire, plutôt que « valide ».
+    const assuranceParRecepisse = assuranceValid && !isDocumentTypeValid("assurance", assuranceDocs);
+    const visiteParRecepisse = visiteTechniqueValid && !isDocumentTypeValid("visite_technique", visiteDocs);
     const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDateExpired(missionAssignment?.driverLicenseExpiry);
     const cpcValid = hasDriver && normalizeCpcStatus(missionAssignment?.driverCpcStatus) === "FORME";
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
@@ -1603,14 +1623,18 @@ router.get("/:id/launch-readiness", async (req, res) => {
         label: "Assurance conforme",
         passed: assuranceValid,
         blocking: true,
-        detail: assuranceValid ? "Assurance valide." : "Assurance manquante ou expirée.",
+        detail: assuranceParRecepisse
+          ? "Assurance couverte par un récépissé provisoire."
+          : assuranceValid ? "Assurance valide." : "Assurance manquante ou expirée.",
       },
       {
         key: "doc_visite_technique",
         label: "Visite technique conforme",
         passed: visiteTechniqueValid,
         blocking: true,
-        detail: visiteTechniqueValid ? "Visite technique valide." : "Visite technique manquante ou expirée.",
+        detail: visiteParRecepisse
+          ? "Visite technique couverte par un récépissé provisoire."
+          : visiteTechniqueValid ? "Visite technique valide." : "Visite technique manquante ou expirée.",
       },
       {
         key: "budget_fuel",
@@ -1823,7 +1847,10 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
       // compris un camion à l'atelier ou sans assurance valide. Le refus vit
       // ici, et nomme chaque motif — « à l'atelier » et « plus d'assurance »
       // n'appellent pas la même action du logisticien.
-      const eligibilite = getMissionEligibility(selectedVehicle);
+      const eligibilite = getMissionEligibility({
+        ...selectedVehicle,
+        receipts: await loadOpenRenewalReceipts(selectedVehicle.id),
+      });
       if (!eligibilite.eligible) {
         return res.status(400).json({
           message: formatEligibilityRefusal(
@@ -2177,7 +2204,10 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 
         // Même règle que la création (POST /) : un véhicule à l'atelier ou en défaut
         // d'assurance, de visite technique ou de plaque ne s'affecte pas non plus par PATCH.
-        const eligibilite = getMissionEligibility(selectedVehicle);
+        const eligibilite = getMissionEligibility({
+          ...selectedVehicle,
+          receipts: await loadOpenRenewalReceipts(selectedVehicle.id),
+        });
         if (!eligibilite.eligible) {
           return res.status(400).json({
             message: formatEligibilityRefusal(selectedVehicle.registrationNumber, eligibilite.blockers),
@@ -2273,7 +2303,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 });
 
 // PUT /api/missions/:id/status - Mettre à jour le statut d'une mission
-router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res) => {
+router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id);
     const { status, actualFdrCost: actualFdrCostBody } = req.body || {};
@@ -2289,8 +2319,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res)
 
     // Le chauffeur affecté démarre et livre ; clôture et annulation restent aux gestionnaires.
     if (!canRoleSetMissionStatus(req.user?.role, targetStatus)) {
-      // Réponse directe : le catch du handler transformerait une exception en 500.
-      return res.status(403).json({ message: "Seul un gestionnaire peut clôturer ou annuler une mission." });
+      throw new AppError(403, "Seul un gestionnaire peut clôturer ou annuler une mission.");
     }
 
     const [mission] = await db
@@ -2408,20 +2437,28 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res)
 
         // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
         // comme dans getMissionEligibility).
+        // Récépissé provisoire valable : il lève l'échéance dépassée d'un papier présent,
+        // jamais un papier manquant (même règle que getMissionEligibility).
+        const receipts = await loadOpenRenewalReceipts(missionAssignment.vehicleId);
+        const expiredWithoutReceipt = (
+          expiryDate: Date | string,
+          code: "insurance" | "technical_inspection" | "license_plate",
+        ) => isExpiredOnOrBeforeToday(expiryDate) && !isRenewalReceiptValid(receipts, code);
+
         let carteGriseErreur = false;
         if (!carteGrise) {
           launchErrors.push("Carte grise manquante.");
-        } else if (carteGrise.expiryDate && isExpiredOnOrBeforeToday(carteGrise.expiryDate)) {
+        } else if (carteGrise.expiryDate && expiredWithoutReceipt(carteGrise.expiryDate, "license_plate")) {
           launchErrors.push("Carte grise expirée.");
           carteGriseErreur = true;
         }
 
-        const assuranceErreur = !assurance || !assurance.expiryDate || isExpiredOnOrBeforeToday(assurance.expiryDate);
+        const assuranceErreur = !assurance || !assurance.expiryDate || expiredWithoutReceipt(assurance.expiryDate, "insurance");
         if (assuranceErreur) {
           launchErrors.push("Assurance manquante ou expirée.");
         }
 
-        const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || isExpiredOnOrBeforeToday(visiteTechnique.expiryDate);
+        const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || expiredWithoutReceipt(visiteTechnique.expiryDate, "technical_inspection");
         if (visiteErreur) {
           launchErrors.push("Visite technique manquante ou expirée.");
         }
@@ -2435,6 +2472,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res)
           insuranceExpiry: missionAssignment.vehicleInsuranceExpiry,
           technicalInspectionDate: missionAssignment.vehicleTechnicalInspectionDate,
           licensePlateExpiry: missionAssignment.vehicleLicensePlateExpiry,
+          receipts,
         });
         for (const blocker of eligibilite.blockers) {
           if (blocker.kind !== "compliance") continue;
@@ -2672,7 +2710,8 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res)
       warnings,
     });
   } catch (error) {
-    console.error("Update mission status error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Update mission status error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
