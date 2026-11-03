@@ -6,16 +6,35 @@ import { join } from "path";
  * (`tests/unit/server/routes-hygiene.test.ts`, AGENTS.md §11).
  *
  * Une lecture est « ouverte à un client sans cloison » quand elle porte une garde de session
- * (`authenticate`, `isAnyUser`, `authorize([... 'client' ...])`, `isWorkflowDocumentWriter`...)
  * mais aucune garde qui exclut le client, et que son corps ne contrôle ni le propriétaire ni
  * l'OT AVANT d'envoyer la donnée.
  *
- * Portée réelle : seuls sont jugés les GET portant une garde reconnue (`authenticate`, `is*`,
- * `guardBy*`, `garde*`, `authorize([...])` en ligne). Limites connues, durcissement en échec fermé
- * prévu au lot A4 : une garde locale à un fichier ou nommée autrement (`readers`, `canAccessBilling`,
- * `requireSession`) n'est pas classée et la route est vue comme publique ; un `authorize([...])`
- * posé au montage n'est pas lu ; un spread en ligne non résolu est présumé restrictif ; le contrôle
- * « avant l'envoi » est une position textuelle, pas un flux.
+ * Échec fermé (lot A4, 3 novembre 2026). Chaque argument de l'en-tête d'une route est classé :
+ * - « restrictive » : exclut le client. Seules sont crues les gardes classées d'après leur SOURCE :
+ *   `server/middleware/auth.ts`, les `const X = authorize([...])` (ou `authorize(CONSTANTE)`) du
+ *   fichier lui-même et de `server/api/index.ts`, les `authorize([...])` en ligne, les tableaux de
+ *   gardes (`...exportsGuard`). Les rôles viennent de `shared/constants/roles.ts` ; un rôle ou un
+ *   spread non résolu rend la garde permissive.
+ * - « neutral » : ne protège rien et n'ouvre rien (`requireFeature(...)`, liste blanche explicite).
+ * - « permissive » : tout le reste, y compris tout identifiant inconnu (`requireSession`,
+ *   `guardByX`, `gardeX`, une garde passée par une variable). Aucun nom n'est cru sur parole.
+ * Une route dont un argument au moins est restrictif est saine ; sans argument de session elle est
+ * publique (hors de ce contrôle) ; sinon elle doit contrôler le propriétaire ou l'OT avant l'envoi.
+ *
+ * Les gardes posées au montage (`apiRouter.use("/p", garde, routeur)`, spreads et `authorize` compris)
+ * couvrent les routes du routeur ET toute route servie plus tard sur le même préfixe, `routes.ts`
+ * compris (le routeur de `server/api/` est monté avant `registerRoutes`). Une garde montée APRÈS le
+ * routeur qui sert la route ne la couvre pas.
+ *
+ * Une déclaration que le scan ne sait pas lire (`.get(` sans chemin littéral, chemin en tableau ou
+ * en gabarit, `router.route()`) est rapportée à part (`unanalysable`) et doit être vide ou gelée.
+ *
+ * Limites connues, à ne pas prendre pour une preuve : le contrôle « avant l'envoi » est une
+ * position textuelle, pas un flux. Un contrôle de VALEUR (un `ownerScopeOf` calculé puis non utilisé,
+ * un filtre qui ne filtre pas) échappe à toute analyse statique ; un envoi par une aide
+ * (`sendJson(res, ...)`) n'est pas vu ; une garde posée par `router.use("/chemin", garde)` ou par un
+ * `app.all` n'est pas lue. Les contrats HTTP (`tests/contract/client-read-scope*.contract.test.ts`)
+ * font foi pour le comportement ; ce scan ne garantit que la présence d'une garde ou d'un contrôle.
  */
 
 /** Retire les commentaires de ligne et de bloc hors chaînes : un commentaire ne vaut ni garde ni contrôle. */
@@ -54,7 +73,189 @@ export function stripComments(source: string): string {
   return out;
 }
 
-export type GuardKinds = { restrictive: Set<string>; permissive: Set<string> };
+export type Kind = "restrictive" | "permissive" | "neutral";
+export type RoleConstants = Record<string, readonly string[] | undefined>;
+
+export type GuardKinds = {
+  restrictive: Set<string>;
+  permissive: Set<string>;
+  neutral: Set<string>;
+  /** `const NOM = [a, b(), c]` : éléments, pour résoudre `...NOM`. */
+  arrays: Map<string, string[]>;
+  roles: RoleConstants;
+};
+
+/** Jetons posés par `parseMounts` : la garde de montage est déjà classée dans le contexte de `index.ts`. */
+const TOKEN: Record<Kind, string> = { restrictive: "__restrictive__", permissive: "__permissive__", neutral: "__neutral__" };
+
+/**
+ * Appels qui ne protègent rien et n'ouvrent rien : liste blanche explicite.
+ * `requireFeature` coupe en 404 derrière un drapeau, il ne lit pas la session.
+ */
+const NEUTRAL_CALLEES = new Set(["requireFeature"]);
+
+/**
+ * Gardes écrites à la main (corps non classable d'après des rôles) dont l'effet restrictif est prouvé
+ * par un contrat. Liste blanche explicite, par fichier : un homonyme ailleurs n'est pas cru.
+ * - `matrixCheck` (middleware/exports-guard.ts) refuse tout rôle absent de EXPORT_ROLE_MATRIX, donc le
+ *   client, partout (tests/contract/client-read-scope-tires.contract.test.ts, cas exports).
+ * - `guardByDoc` (api/work-order-export.routes.ts) répartit entre isStockIssuer et isTechnician, deux
+ *   gardes sans client (tests/contract/work-order-export.contract.test.ts : client 403).
+ */
+export const RESTRICTIVE_ALLOWLIST: Record<string, string[]> = {
+  "server/middleware/exports-guard.ts": ["matrixCheck"],
+  "server/api/work-order-export.routes.ts": ["guardByDoc"],
+};
+
+const OPENERS: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
+
+/** Index de la parenthèse fermante qui répond à l'ouvrante `open` (chaînes ignorées), -1 si absente. */
+export function matchingClose(source: string, open: number): number {
+  const stack: string[] = [];
+  let quote: string | null = null;
+  for (let i = open; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (OPENERS[c]) stack.push(OPENERS[c]);
+    else if (c === ")" || c === "]" || c === "}") {
+      if (stack.pop() !== c) return -1;
+      if (stack.length === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Découpe aux virgules de premier niveau (parenthèses, crochets, accolades et chaînes respectés). */
+export function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+/** Vrai si `authorize(<expr>)` exclut le client : tableau ou constante entièrement résolus, sans `client`. */
+function rolesExcludeClient(expr: string, roles: RoleConstants): boolean {
+  const text = expr.trim();
+  const items: string[] = text.startsWith("[") && text.endsWith("]") ? splitTopLevel(text.slice(1, -1)) : [`...${text}`];
+  const resolved = new Set<string>();
+  for (const item of items) {
+    const literal = item.match(/^["'](\w+)["']$/);
+    const spread = item.match(/^\.\.\.\s*(\w+)$/);
+    if (literal) resolved.add(literal[1]);
+    else if (spread && roles[spread[1]]) for (const r of roles[spread[1]]!) resolved.add(r);
+    else return false; // non résolu : permissif
+  }
+  return resolved.size > 0 && !resolved.has("client");
+}
+
+function emptyKinds(roles: RoleConstants): GuardKinds {
+  return { restrictive: new Set(), permissive: new Set(), neutral: new Set(), arrays: new Map(), roles };
+}
+
+/** Ajoute à `base` (copie) les `const NOM = ...` gardes, constantes neutres et tableaux de gardes de `rawSource`. */
+export function extendKinds(base: GuardKinds, rawSource: string): GuardKinds {
+  const kinds: GuardKinds = {
+    restrictive: new Set(base.restrictive),
+    permissive: new Set(base.permissive),
+    neutral: new Set(base.neutral),
+    arrays: new Map(base.arrays),
+    roles: base.roles,
+  };
+  const src = stripComments(rawSource);
+  for (const m of src.matchAll(/(?:^|[\s;])(?:export\s+)?const\s+(\w+)\s*(?::[^=\n]+)?=\s*/g)) {
+    const name = m[1];
+    const at = m.index! + m[0].length;
+    const call = src.slice(at).match(/^([\w.]+)\s*\(/);
+    if (call) {
+      const open = at + call[0].length - 1;
+      const close = matchingClose(src, open);
+      if (close === -1) continue;
+      const inner = src.slice(open + 1, close);
+      if (call[1] === "authorize") (rolesExcludeClient(inner, kinds.roles) ? kinds.restrictive : kinds.permissive).add(name);
+      else if (NEUTRAL_CALLEES.has(call[1])) kinds.neutral.add(name);
+      else if (call[1] === "sessionGuard") {
+        const kind = classifyDispatcher(inner, kinds);
+        if (kind) kinds[kind].add(name);
+      }
+    } else if (src[at] === "[") {
+      const close = matchingClose(src, at);
+      if (close !== -1) kinds.arrays.set(name, splitTopLevel(src.slice(at + 1, close)));
+    }
+  }
+  return kinds;
+}
+
+/** Garde de session dont le corps répartit entre gardes connues : restrictive si toutes celles qu'il cite le sont. */
+function classifyDispatcher(inner: string, kinds: GuardKinds): "restrictive" | "permissive" | null {
+  const cited = [...new Set(inner.match(/\b\w+\b/g) ?? [])].filter((w) => kinds.restrictive.has(w) || kinds.permissive.has(w));
+  if (cited.length === 0) return null;
+  return cited.every((w) => kinds.restrictive.has(w)) ? "restrictive" : "permissive";
+}
+
+/**
+ * Classe un argument d'en-tête de route ou de montage. Tout ce qui n'est pas reconnu est permissif.
+ */
+export function classifyArg(rawArg: string, kinds: GuardKinds, seen: Set<string> = new Set()): Kind {
+  const arg = rawArg.trim();
+  for (const kind of Object.keys(TOKEN) as Kind[]) if (arg === TOKEN[kind]) return kind;
+
+  const authorizeCall = arg.match(/^authorize\s*\(([\s\S]*)\)$/);
+  if (authorizeCall) return rolesExcludeClient(authorizeCall[1], kinds.roles) ? "restrictive" : "permissive";
+
+  const sessionCall = arg.match(/^sessionGuard\s*\(([\s\S]*)\)$/);
+  if (sessionCall) return classifyDispatcher(sessionCall[1], kinds) ?? "permissive";
+
+  const spread = arg.match(/^\.\.\.\s*(\w+)$/);
+  const list = arg.startsWith("[") && arg.endsWith("]") ? splitTopLevel(arg.slice(1, -1)) : spread ? kinds.arrays.get(spread[1]) : undefined;
+  if (spread || list) {
+    if (!list || (spread && seen.has(spread[1]))) return "permissive";
+    if (spread) seen = new Set(seen).add(spread[1]);
+    const members = list.map((item) => classifyArg(item, kinds, seen));
+    if (members.includes("restrictive")) return "restrictive";
+    return members.every((k) => k === "neutral") ? "neutral" : "permissive";
+  }
+
+  const name = arg.match(/^(\w+)$/);
+  if (name) {
+    if (kinds.restrictive.has(name[1])) return "restrictive";
+    if (kinds.neutral.has(name[1])) return "neutral";
+    return "permissive"; // garde connue permissive, ou identifiant inconnu : même verdict
+  }
+
+  const callee = arg.match(/^([\w.]+)\s*\(/);
+  if (callee && NEUTRAL_CALLEES.has(callee[1])) return "neutral";
+  return "permissive";
+}
+
+/** Un ensemble de gardes : exclut-il le client ? y a-t-il une garde de session (ou présumée telle) ? */
+export function classifyChain(args: string[], kinds: GuardKinds): { restrictive: boolean; session: boolean } {
+  const kindsOf = args.map((a) => classifyArg(a, kinds));
+  return { restrictive: kindsOf.includes("restrictive"), session: kindsOf.some((k) => k !== "neutral") };
+}
+
+export type GuardKindSets = GuardKinds;
 
 /**
  * Classe les gardes exportées par `server/middleware/auth.ts` : « restrictive » = exclut le client,
@@ -62,33 +263,34 @@ export type GuardKinds = { restrictive: Set<string>; permissive: Set<string> };
  * `client` ajouté à une garde la fait basculer. Un tableau de rôles non résolu est permissif
  * (échec fermé).
  */
-export function classifyAuthGuards(authSource: string, roleConstants: Record<string, readonly string[] | undefined>): GuardKinds {
-  const src = stripComments(authSource);
-  const restrictive = new Set<string>(["isAdmin"]);
-  const permissive = new Set<string>(["authenticate"]);
-  for (const m of src.matchAll(/export const (\w+)\s*=\s*authorize\(\s*\[([^\]]*)\]\s*\)/g)) {
-    const [, name, list] = m;
-    const roles = new Set<string>();
-    let resolved = true;
-    for (const item of list.split(",").map((s) => s.trim()).filter(Boolean)) {
-      const literal = item.match(/^["'](\w+)["']$/);
-      const spread = item.match(/^\.\.\.(\w+)$/);
-      if (literal) roles.add(literal[1]);
-      else if (spread && roleConstants[spread[1]]) for (const r of roleConstants[spread[1]]!) roles.add(r);
-      else resolved = false;
-    }
-    (resolved && !roles.has("client") ? restrictive : permissive).add(name);
-  }
-  return { restrictive, permissive };
+export function classifyAuthGuards(authSource: string, roleConstants: RoleConstants): GuardKinds {
+  const base = emptyKinds(roleConstants);
+  base.restrictive.add("isAdmin");
+  base.permissive.add("authenticate");
+  return extendKinds(base, authSource);
 }
 
 /** Contrôles de cloison reconnus (propriétaire, OT lisible). */
 const SCOPE_MARKERS = [/\bassertWorkOrderReadable\b/, /\bcanAccessOwned\b/, /\bownerScopeOf\b/, /\brole\s*[!=]==?\s*["']client["']/];
 const WORK_ORDER_MARKER = /\bassertWorkOrderReadable\b/;
-/** Premier envoi de donnée : `res.json(`, `res.status(2xx).json(`, `res.send(`... (une erreur 4xx/5xx n'en est pas un). */
-const DATA_SEND = /\bres\s*\.\s*(?:status\(\s*[23]\d\d\s*\)\s*\.\s*)?(?:json|send|end|sendFile|download)\s*\(/;
 const HANDLER_START = /\basync\b|\bfunction\b|\(\s*_?req\b|\(\s*_?request\b|=>/;
-const NEXT_DECLARATION = /\n\s*\w+\s*\.\s*(?:get|post|patch|put|delete|use|all)\s*\(/;
+
+/**
+ * Position du premier envoi de donnée dans `body`, -1 si aucun. Est un envoi : `res.json/send/end/
+ * sendFile/download/write(...)`, `x.pipe(res)`, et `res.status(<autre chose qu'un 4xx/5xx littéral>)`
+ * (`res.status(code).json(...)` : le code est inconnu, la réponse peut porter la donnée).
+ */
+export function firstDataSend(body: string): number {
+  for (const m of body.matchAll(/\bres\s*\.\s*(status|json|send|end|sendFile|download|write)\s*\(/g)) {
+    if (m[1] !== "status") return m.index!;
+    const open = m.index! + m[0].length - 1;
+    const close = matchingClose(body, open);
+    const code = close === -1 ? "" : body.slice(open + 1, close).trim();
+    if (!/^[45]\d\d$/.test(code)) return m.index!;
+  }
+  const pipe = body.search(/\.\s*pipe\(\s*res\b/);
+  return pipe;
+}
 
 export type GetRoute = {
   file: string;
@@ -96,27 +298,33 @@ export type GetRoute = {
   key: string;
   header: string;
   body: string;
-  guards: string[];
-  inlineAuthorizeRoles: string[][];
+  /** Arguments de l'en-tête (gardes), poignée finale retirée quand elle n'est pas écrite en ligne. */
+  headerArgs: string[];
   mountPrefix: string;
   routerVar: string;
 };
+
+function routerVarsOf(source: string): Set<string> {
+  const vars = new Set<string>(["app", "apiRouter", "router"]);
+  for (const m of source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:express\s*\.\s*)?Router\s*\(/g)) vars.add(m[1]);
+  return vars;
+}
 
 /** Routes GET d'un fichier (commentaires retirés). `mounts` : variable de routeur -> préfixe de montage. */
 export function extractGetRoutes(file: string, rawSource: string, mounts: Map<string, string> = new Map()): GetRoute[] {
   const source = stripComments(rawSource);
   const out: GetRoute[] = [];
   for (const m of source.matchAll(/\b(\w+)\s*\.\s*get\(\s*(["'`])([^"'`]*)\2/g)) {
-    const rest = source.slice(m.index! + m[0].length);
-    const end = rest.search(NEXT_DECLARATION);
-    const whole = end === -1 ? rest : rest.slice(0, end);
-    const cut = whole.search(HANDLER_START);
-    const header = cut === -1 ? whole : whole.slice(0, cut);
-    const body = cut === -1 ? "" : whole.slice(cut);
-    const inlineAuthorizeRoles = [...header.matchAll(/authorize\(\s*\[([^\]]*)\]\s*\)/g)].map((a) =>
-      [...a[1].matchAll(/["'](\w+)["']/g)].map((r) => r[1]),
-    );
-    const guards = [...header.replace(/authorize\(\s*\[[^\]]*\]\s*\)/g, " ").matchAll(/\b(authenticate|is[A-Z]\w*|guardBy\w+|garde\w*)\b/g)].map((g) => g[1]);
+    if (m[2] === "`" && m[3].includes("${")) continue; // rapporté par findUnanalysable
+    const open = source.indexOf("(", m.index! + m[1].length);
+    const close = matchingClose(source, open);
+    // appel illisible : en-tête présumé permissif et corps vide, donc refusé (échec fermé)
+    const args = close === -1 ? [m[3], "__unreadable__", "__handler__"] : splitTopLevel(source.slice(open + 1, close));
+    const last = args[args.length - 1] ?? "";
+    // le dernier argument est la poignée : son texte est le corps s'il est écrit en ligne, sinon une référence nommée
+    const body = args.length > 1 && HANDLER_START.test(last.slice(0, 80)) ? last : "";
+    const headerArgs = args.slice(1, -1);
+    const header = headerArgs.join(", ");
     const mountPrefix = mounts.get(m[1]) ?? "";
     out.push({
       file,
@@ -124,11 +332,31 @@ export function extractGetRoutes(file: string, rawSource: string, mounts: Map<st
       key: `${file} GET ${mountPrefix}${m[3]}`,
       header,
       body,
-      guards,
-      inlineAuthorizeRoles,
+      headerArgs,
       mountPrefix,
       routerVar: m[1],
     });
+  }
+  return out;
+}
+
+/**
+ * Déclarations de lecture que le scan ne sait pas lire : `.get(` d'un routeur sans chemin littéral
+ * (variable, tableau, gabarit à `${}`) et `router.route(...)`. À rapporter, jamais à ignorer.
+ */
+export function findUnanalysable(file: string, rawSource: string): string[] {
+  const source = stripComments(rawSource);
+  const routers = routerVarsOf(source);
+  const out: string[] = [];
+  for (const m of source.matchAll(/\b(\w+)\s*\.\s*(get|route)\s*\(/g)) {
+    if (!routers.has(m[1])) continue;
+    const open = m.index! + m[0].length - 1;
+    const close = matchingClose(source, open);
+    const first = close === -1 ? "" : (splitTopLevel(source.slice(open + 1, close))[0] ?? "");
+    const literal = /^(["'`])[^"'`]*\1$/.test(first);
+    const isTemplateWithExpr = first.startsWith("`") && first.includes("${");
+    if (m[2] === "get" && literal && !isTemplateWithExpr) continue;
+    out.push(`${file} ${m[1]}.${m[2]}(${first.replace(/\s+/g, " ").slice(0, 60)}`);
   }
   return out;
 }
@@ -141,7 +369,7 @@ export function isWorkOrderRead(route: Pick<GetRoute, "path" | "mountPrefix">): 
 
 /** Le contrôle de cloison apparaît-il avant le premier envoi de donnée ? */
 export function scopeCheckedBeforeSend(body: string, markers: RegExp[]): boolean {
-  const sendAt = body.search(DATA_SEND);
+  const sendAt = firstDataSend(body);
   return markers.some((marker) => {
     const at = body.search(marker);
     return at !== -1 && (sendAt === -1 || at < sendAt);
@@ -149,17 +377,13 @@ export function scopeCheckedBeforeSend(body: string, markers: RegExp[]): boolean
 }
 
 /**
- * Verdict sur une lecture. `fileGuards` : gardes posées sur tout le routeur (`router.use(guard)`)
- * ou à son montage. Une route sans aucune garde de session (publique) n'est pas jugée ici.
+ * Verdict sur une lecture. `fileGuards` : gardes posées sur tout le routeur (`router.use(garde)`)
+ * ou à son montage (expressions ou jetons de `parseMounts`).
  */
 export function judgeGetRoute(route: GetRoute, kinds: GuardKinds, fileGuards: string[] = []): Verdict {
-  const guards = [...fileGuards, ...route.guards];
-  const excludesClient =
-    guards.some((g) => kinds.restrictive.has(g) || (!kinds.permissive.has(g) && !/^is[A-Z]/.test(g))) ||
-    route.inlineAuthorizeRoles.some((roles) => !roles.includes("client"));
-  if (excludesClient) return { ok: true };
-  const sessionOnly = guards.length > 0 || route.inlineAuthorizeRoles.length > 0;
-  if (!sessionOnly) return { ok: true };
+  const { restrictive, session } = classifyChain([...fileGuards, ...route.headerArgs], kinds);
+  if (restrictive) return { ok: true };
+  if (!session) return { ok: true }; // aucune garde de session : route publique, hors de ce contrôle
   const markers = isWorkOrderRead(route) ? [WORK_ORDER_MARKER] : SCOPE_MARKERS;
   if (scopeCheckedBeforeSend(route.body, markers)) return { ok: true };
   return { ok: false, reason: "session seule : aucun contrôle de cloison avant l'envoi de la donnée" };
@@ -174,55 +398,98 @@ export function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Gardes posées sur tout un routeur par `router.use(guard)` (sans chemin). */
-export function routerLevelGuards(rawSource: string): Map<string, string[]> {
+/**
+ * Gardes posées sur tout un routeur par `router.use(garde)` (sans chemin) : identifiants nus,
+ * `authorize(...)`, `sessionGuard(...)` et spreads. Les autres appels (`express.json()`) sont du bruit.
+ */
+export function routerLevelGuards(rawSource: string, kinds: GuardKinds): Map<string, string[]> {
+  // un identifiant nu n'est lu que s'il est une garde connue : `use(sessionMiddleware)`, `use(unRouteur)` sont du bruit
+  const known = (a: string) => !/^\w+$/.test(a) || kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
   const source = stripComments(rawSource);
   const out = new Map<string, string[]>();
-  for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(\s*((?:(?:is[A-Z]\w*|authenticate|garde\w*)\s*,?\s*)+)\)/g)) {
-    out.set(m[1], [...(out.get(m[1]) ?? []), ...[...m[2].matchAll(/[\w]+/g)].map((g) => g[0])]);
+  for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(/g)) {
+    const open = m.index! + m[0].length - 1;
+    const close = matchingClose(source, open);
+    if (close === -1) continue;
+    const args = splitTopLevel(source.slice(open + 1, close));
+    if (args.length === 0 || /^["'`]/.test(args[0])) continue;
+    const guards = args.filter((a) => /^(\w+|authorize\s*\(.*\)|sessionGuard\s*\(.*\)|\.\.\.\s*\w+)$/s.test(a) && known(a));
+    if (guards.length > 0) out.set(m[1], [...(out.get(m[1]) ?? []), ...guards]);
   }
   return out;
 }
 
-/** Montages de `server/api/index.ts` : variable importée -> { préfixe, gardes au montage, fichier }. */
-export function parseMounts(indexSource: string): Array<{ variable: string; prefix: string; guards: string[]; file: string | null }> {
+export type Mount = { variable: string; prefix: string; guards: string[]; file: string | null; order: number };
+
+/**
+ * Montages de `server/api/index.ts` : variable importée -> { préfixe, gardes au montage (déjà classées,
+ * en jetons), fichier, rang }. `kinds` doit connaître les gardes locales de `index.ts` et des middlewares
+ * qu'il importe (voir `scanOpenGetReads`).
+ */
+export function parseMounts(indexSource: string, kinds: GuardKinds): Mount[] {
   const source = stripComments(indexSource);
   const importedFrom = new Map<string, string>();
   for (const m of source.matchAll(/import\s+(?:(\w+)|\{([^}]*)\})\s+from\s+["']\.\/([\w.-]+)["']/g)) {
     const names = m[1] ? [m[1]] : m[2].split(",").map((s) => s.trim().split(/\s+as\s+/).pop()!).filter(Boolean);
     for (const name of names) importedFrom.set(name, m[3]);
   }
-  const out: Array<{ variable: string; prefix: string; guards: string[]; file: string | null }> = [];
-  for (const m of source.matchAll(/\bapiRouter\s*\.\s*use\(\s*["']([^"']+)["']\s*,([^;]*?)\)\s*;/gs)) {
-    const parts = m[2].split(",").map((s) => s.trim()).filter(Boolean);
-    const variable = parts[parts.length - 1];
-    if (!/^\w+$/.test(variable)) continue;
-    const guards = parts.slice(0, -1).flatMap((p) => [...p.matchAll(/\b(is[A-Z]\w*|authenticate|garde\w*)\b/g)].map((g) => g[1]));
-    out.push({ variable, prefix: m[1], guards, file: importedFrom.get(variable) ?? null });
+  const mounts: Mount[] = [];
+  for (const m of source.matchAll(/\bapiRouter\s*\.\s*use\(/g)) {
+    const open = m.index! + m[0].length - 1;
+    const close = matchingClose(source, open);
+    if (close === -1) continue;
+    const args = splitTopLevel(source.slice(open + 1, close));
+    const prefixLiteral = args[0]?.match(/^["']([^"']+)["']$/);
+    const rest = prefixLiteral ? args.slice(1) : args;
+    const variable = rest[rest.length - 1];
+    if (!variable || !/^\w+$/.test(variable)) continue;
+    const guards = rest.slice(0, -1).map((g) => TOKEN[classifyArg(g, kinds)]);
+    mounts.push({ variable, prefix: prefixLiteral?.[1] ?? "", guards, file: importedFrom.get(variable) ?? null, order: mounts.length });
   }
-  return out;
+  return mounts;
 }
 
-/** Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`). */
-export function scanOpenGetReads(serverDir: string, roleConstants: Record<string, readonly string[] | undefined>) {
-  const kinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
-  const mounts = parseMounts(readFileSync(join(serverDir, "api", "index.ts"), "utf8"));
+const fullPathOf = (file: string, prefix: string, path: string) => (file === "server/routes.ts" ? path : `/api${prefix}${path}`);
+const underPrefix = (fullPath: string, prefix: string) => fullPath === `/api${prefix}` || fullPath.startsWith(`/api${prefix}/`);
+
+/**
+ * Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`),
+ * les déclarations illisibles et les routes vues.
+ */
+export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants) {
+  const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
+  // gardes locales de index.ts et des middlewares qu'il importe (ex. `exportsGuard`)
+  let indexKinds = extendKinds(baseKinds, "");
+  for (const name of RESTRICTIVE_ALLOWLIST["server/middleware/exports-guard.ts"]) indexKinds.restrictive.add(name);
+  for (const path of sourceFiles(join(serverDir, "middleware"))) indexKinds = extendKinds(indexKinds, readFileSync(path, "utf8"));
+  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+  indexKinds = extendKinds(indexKinds, indexSource);
+  const mounts = parseMounts(indexSource, indexKinds);
+
   const offenders: string[] = [];
+  const unanalysable: string[] = [];
   const seen = new Set<string>();
   for (const path of sourceFiles(serverDir)) {
     const file = `server/${path.slice(serverDir.length + 1).replace(/\\/g, "/")}`;
     const raw = readFileSync(path, "utf8");
+    unanalysable.push(...findUnanalysable(file, raw));
+    const kinds = extendKinds(baseKinds, raw);
+    for (const name of RESTRICTIVE_ALLOWLIST[file] ?? []) kinds.restrictive.add(name);
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
-    const routerGuards = routerLevelGuards(raw);
+    const routerGuards = routerLevelGuards(raw, kinds);
     for (const route of extractGetRoutes(file, raw)) {
       // un fichier peut exporter plusieurs routeurs : on rattache par variable, sinon au seul montage connu
-      const mount = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
-      const prefix = mount?.prefix ?? "";
+      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      const prefix = own?.prefix ?? "";
       const full = { ...route, mountPrefix: prefix, key: `${file} GET ${prefix}${route.path}` };
       seen.add(full.key);
-      const verdict = judgeGetRoute(full, kinds, [...(mount?.guards ?? []), ...(routerGuards.get(route.routerVar) ?? [])]);
+      // montages gardés posés AVANT le routeur qui sert la route (routes.ts : tous) sur un préfixe qui la couvre
+      const fullPath = fullPathOf(file, prefix, route.path);
+      const servedAt = file === "server/routes.ts" ? Number.POSITIVE_INFINITY : (own?.order ?? Number.POSITIVE_INFINITY);
+      const masking = mounts.filter((m) => m.prefix && m.order <= servedAt && underPrefix(fullPath, m.prefix) && m !== own).flatMap((m) => m.guards);
+      const verdict = judgeGetRoute(full, kinds, [...masking, ...(own?.guards ?? []), ...(routerGuards.get(route.routerVar) ?? [])]);
       if (!verdict.ok) offenders.push(full.key);
     }
   }
-  return { offenders: offenders.sort(), seen };
+  return { offenders: offenders.sort(), unanalysable: unanalysable.sort(), seen };
 }
