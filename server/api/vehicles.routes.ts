@@ -6,6 +6,7 @@ import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { ownerScopeOf } from "../lib/client-scope";
+import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from "../lib/driver-scope";
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
 
@@ -274,7 +275,12 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
     if (isNaN(vehicleId)) {
       return res.status(400).json({ message: "ID de véhicule invalide" });
     }
-    
+
+    // Un chauffeur ne saisit que le véhicule de son affectation active (option A : avant clôture).
+    if (!(await canWriteVehicleMileage(req.user, vehicleId))) {
+      throw new AppError(403, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE);
+    }
+
     if (!kilometers || isNaN(kilometers) || kilometers < 0) {
       return res.status(400).json({ message: "Kilométrage invalide" });
     }
