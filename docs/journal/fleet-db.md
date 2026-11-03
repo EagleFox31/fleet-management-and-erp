@@ -16,3 +16,33 @@ Règles : `docs/journal/README.md`.
   - Preuve automatisée : `tests/unit/server/vehicles-tank-capacity-schema.test.ts` et, sous `db-lock`, `tests/integration/vehicles-tank-capacity.test.ts`.
 - **RAIDER** : couvert : Idempotent (second init sans changement de catalogue ni de lignes), Retroactive (existant à NULL, aucun backfill), Durable (champ facultatif, contrats inchangés). Ne s'applique pas : seed.
 - **Reste / risques** : la route PATCH véhicule ne passe pas par Zod (`prepareColumnUpdate`) : sans validation par fleet-api, une capacité 0 y produit l'erreur base `23514` au lieu d'un 400 lisible.
+
+## 2026-11-03T08:01:08+01:00 — P3-2 lot 2a — Colonnes du récépissé de renouvellement
+
+- **Agent** : fleet-db · **Branche** : `fix/p3-2-receipt-columns` · **Commit** : voir `git log`
+- **Statut** : fait (partie base ; route de dépôt, éligibilité et écran restent à fleet-api et fleet-fe)
+- **Quoi** : `document_renewal_requests.receipt_valid_until`, `receipt_file_name`, `receipt_file_path`, `receipt_uploaded_at`, `receipt_uploaded_by` (→ `users.id`), toutes nullable ; CHECK `document_renewal_requests_receipt_complete` (date et fichier ensemble). Le schéma Zod d'insertion omet fichier et traçabilité.
+- **Comment** : `DOCUMENT_RENEWAL_RECEIPT_SQL` dans `server/init-database.ts`, jumelle de `server/db/migrations/20261103_document_renewal_receipt.sql`, hors CDC ; contraintes posées seulement si absentes, sous verrou consultatif. Détail : `docs/analysis/P3-2_RECEPISSE_RENOUVELLEMENT.md`.
+- **Pourquoi** : décision utilisateur 3 (P3-2) ; `proof_file_*` est la preuve de clôture, pas un récépissé provisoire.
+- **Comment tester (QA)** :
+  - Prérequis : base de test dédiée (conteneur `fleetmaster20-main-postgres-1`), schéma poussé.
+  - Étapes : 1. démarrer deux fois ; 2. insérer une demande avec date sans fichier.
+  - Attendu : colonnes présentes, refus `23514` `document_renewal_requests_receipt_complete`, second démarrage sans écriture.
+  - Preuve automatisée : `tests/unit/server/document-renewal-receipt-schema.test.ts`, `tests/integration/document-renewal-receipt.test.ts`.
+- **RAIDER** : Idempotent (migration rejouée = NOTICE skipping, init rejoué sans changement de catalogue ni de lignes, second `drizzle-kit push` sans ordre sur ces objets, OID stables) ; Retroactive (7 demandes réelles toutes `completed`, colonnes à NULL, aucune reprise) ; Durable (insertion sans récépissé inchangée).
+- **Reste / risques** : le second `drizzle-kit push` rejoue encore des ordres préexistants (FK aux noms tronqués à 63 caractères, défaut `idempotency_keys.expires_at`), sans lien avec ce lot.
+
+## 2026-11-03T08:19:23+01:00 — P3-2 lot 2a — Réserves de relecture #125
+
+- **Agent** : fleet-db · **Branche** : `fix/p3-2-receipt-columns` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la CHECK `document_renewal_requests_receipt_complete` couvre les quatre champs du récépissé (date, chemin, nom, date de dépôt : tous NULL ou tous renseignés) ; `receipt_uploaded_by` reste hors CHECK. Une CHECK de même nom à l'ancienne définition est remplacée.
+- **Comment** : `SET LOCAL lock_timeout = '5s'` ; trois blocs `DO` (colonnes, FK, CHECK) ; contraintes posées `NOT VALID` puis validées dans un sous-bloc qui ne piège que la violation (patron #124) ; `reportDocumentRenewalReceiptGaps` relit `pg_constraint` et journalise par `moduleLogger` toute contrainte absente, non validée ou périmée, citée par son nom. Migration et init restent identiques (test unitaire).
+- **Pourquoi** : un `RAISE WARNING` n'atteint pas les logs ; un seul bloc piégé annulait FK et CHECK ensemble ; un verrou de table tenu bloquait le démarrage.
+- **Comment tester (QA)** :
+  - Prérequis : base de test dédiée, schéma poussé.
+  - Étapes : supprimer FK et CHECK, insérer une demande hors CHECK (ou un auteur inexistant), redémarrer.
+  - Attendu : seule la contrainte violée reste `NOT VALID`, l'autre est validée, un avertissement `init-database` la nomme.
+  - Preuve automatisée : `tests/integration/document-renewal-receipt.test.ts` (4 échecs avec le SQL de 77b4700, 7/7 avec le correctif).
+- **RAIDER** : Idempotent (second démarrage sans changement, double `drizzle-kit push` sans ordre receipt, OID stables) ; Durable (insertion sans récépissé inchangée) ; failure memory (le patron #124 est repris, pas réinventé).
+- **Reste / risques** : avec `lock_timeout` atteint, colonnes ou contraintes peuvent manquer jusqu'au démarrage suivant ; le journal le signale.

@@ -1928,9 +1928,12 @@ export default function MissionDetailsPage() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Missions
             </Button>
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
-                <FileText className="h-3.5 w-3.5" /> Modifier
-              </Button>
+              {/* Le chauffeur exécute la mission (statut, carburant, incidents) mais ne la modifie pas. */}
+              {user?.role !== "driver" && (
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
+                  <FileText className="h-3.5 w-3.5" /> Modifier
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
