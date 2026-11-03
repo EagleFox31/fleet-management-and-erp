@@ -1769,3 +1769,27 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
+
+## 2026-11-03 — Mouvement de stock magasin : sortie ramenée à 0 et course de lecture (récidive)
+
+### Contexte
+- `POST /api/warehouse/stock-movement` (`stockAlertsService.recordStockMovement`) lisait la pièce hors transaction, puis écrivait le mouvement et le stock dans deux requêtes séparées.
+- Une sortie supérieure au stock était ramenée à 0 par `Math.max(0, …)`, et le journal gardait un `newStock` qui ne correspondait pas à la quantité sortie.
+- Trois sorties concurrentes de 4 sur un stock de 10 réussissaient toutes, et chacune partait de 10.
+- Ce n'est pas la première fois : `POST /api/parts/:id/update-stock` avait le même défaut, corrigé par `partsService.updateStock`.
+
+### Cause racine
+- Classification : invariant métier non porté par la base ni par une transaction.
+- La correction de `updateStock` n'avait pas été étendue aux autres écrivains de `parts.quantity`.
+
+### Résolution
+- Lecture `FOR UPDATE`, insertion du mouvement et mise à jour du stock dans une seule transaction.
+- Sortie au-delà du stock : 409 lisible, rien n'est écrit. Pièce absente : 404. Quantité non entière ou nulle : 400.
+- La route transmet les erreurs au gestionnaire central (`next`) et ne renvoie plus `error.message`.
+
+### Prévention (vérifiable)
+- `tests/contract/warehouse-stock-movement.contract.test.ts` : 409 avec stock et journal intacts, 404, 400 (décimal, hors entier SQL, débordement), trois sorties concurrentes (deux 201, un 409, chaîne previous → new continue), entrées concurrentes additionnées, trame en portée personnel. Rouge sur main sur chaque cas.
+- À venir (backlog b7) : recenser tout écrivain de `parts.quantity` hors transaction verrouillée.
+
+### Règle Projet (obligatoire)
+- Toute écriture de `parts.quantity` relit la pièce `FOR UPDATE` dans la transaction qui écrit, et refuse en 409 un stock insuffisant. Ne jamais ramener un stock à 0 en silence.
