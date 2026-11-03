@@ -179,6 +179,19 @@ const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] 
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
 
+/**
+ * Erreur d'un plein de mission en réponse lisible (AGENTS §10). Le message du service porte le
+ * solde de la carte et le montant calculé : il reste dans les logs (`cause`), jamais dans la réponse.
+ * 422 conservé pour le solde insuffisant (contrat existant de ces deux routes).
+ */
+function toMissionFuelAppError(error: unknown): AppError {
+  if (error instanceof AppError) return error;
+  if ((error as { code?: string } | null)?.code === "INSUFFICIENT_BALANCE") {
+    return new AppError(422, "Solde de la carte carburant insuffisant.", { cause: error });
+  }
+  return new AppError(500, "Erreur serveur", { cause: error });
+}
+
 const ALERT_TITLE_TO_DOCUMENT_TYPE = Object.fromEntries(
   Object.entries(DOCUMENT_ALERT_TITLES).map(([documentType, alertTitle]) => [alertTitle, documentType]),
 ) as Record<string, VehicleDocumentRequirementType>;
@@ -905,7 +918,7 @@ router.get("/:id/fuel-records", async (req, res) => {
 });
 
 // POST /api/missions/:id/fuel-records - Enregistrer un plein lié à une mission
-router.post("/:id/fuel-records", async (req, res) => {
+router.post("/:id/fuel-records", async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {
@@ -1043,23 +1056,13 @@ router.post("/:id/fuel-records", async (req, res) => {
       mission: updatedMission || null,
     });
   } catch (error) {
-    console.error("Create mission fuel record error:", error);
-
-    if (error instanceof Error && (error as Error & { code?: string }).code === "INSUFFICIENT_BALANCE") {
-      return res.status(422).json({
-        message: error.message,
-        code: "INSUFFICIENT_BALANCE",
-      });
-    }
-
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur",
-    });
+    log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
+    next(toMissionFuelAppError(error));
   }
 });
 
 // POST /api/missions/:id/fuel-records/regularize - Régulariser un plein oublié après clôture/livraison
-router.post("/:id/fuel-records/regularize", async (req, res) => {
+router.post("/:id/fuel-records/regularize", async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {
@@ -1221,18 +1224,8 @@ router.post("/:id/fuel-records/regularize", async (req, res) => {
       regularization: regularizationEntry,
     });
   } catch (error) {
-    console.error("Regularize mission fuel record error:", error);
-
-    if (error instanceof Error && (error as Error & { code?: string }).code === "INSUFFICIENT_BALANCE") {
-      return res.status(422).json({
-        message: error.message,
-        code: "INSUFFICIENT_BALANCE",
-      });
-    }
-
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur",
-    });
+    log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
+    next(toMissionFuelAppError(error));
   }
 });
 
