@@ -268,17 +268,13 @@ test.describe("P6 - stock bas -> réapprovisionnement (navigateur)", () => {
   });
 
   /**
-   * DÉFAUT PRODUIT (non corrigé ici) : la réception émet `purchase_order_status_updated`, mais le gestionnaire
-   * client de cette trame (client/src/hooks/useRealTimeSync.ts, case "purchase_order_status_updated", ~l.1135)
-   * n'invalide que les requêtes /api/purchase-orders*. Ni `/api/warehouse/reorder-alerts` ni `/api/parts*`
-   * (couche 3 de AGENTS.md §2) : l'alerte reste affichée chez les autres profils jusqu'à un rechargement.
-   * L'alerte affichée vient de /api/warehouse/reorder-alerts, /api/parts/low-on-stock et /api/part-requirements
-   * (client/src/hooks/useWarehouse.ts). Preuve du correctif : ajouter ces trois invalidations dans ce case fait
-   * passer ce test au vert (échec « Expected to fail, but passed »). Quand le correctif sera livré ce test passera au vert, donc échouera en
-   * test.fail : retirer alors le `.fail`.
+   * Couche 3 (AGENTS.md §2) : la réception émet `purchase_order_status_updated`, dont le gestionnaire client
+   * (client/src/hooks/useRealTimeSync.ts) invalide /api/warehouse/reorder-alerts, /api/parts/low-on-stock,
+   * /api/part-requirements et /api/parts. Sans ces invalidations l'alerte restait affichée chez les autres
+   * profils jusqu'à un rechargement (défaut corrigé, ce test était en test.fail).
    * Mise en place : beforeAll ci-dessus ; ce test ne contient que l'attente de la levée, sans rechargement.
    */
-  test.fail("l'alerte se lève chez le chef d'atelier sans rechargement, après la trame de réception", async () => {
+  test("l'alerte se lève chez le chef d'atelier sans rechargement, après la trame de réception", async () => {
     await expect.poll(() => observerAlertCount(observerPage), { timeout: 8_000 }).toBe(seen.baseline);
   });
 
