@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../server/db";
+import { codeForStatus } from "../shared/errors";
 import { clientInvoices, clientPayments, missions } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient } from "../tests/support/factories";
@@ -29,6 +30,19 @@ import { createE2EUser } from "./helpers/test-data";
 const HT = 100000;
 const TTC = 119250; // TVA 19,25 %
 const ids = createIdBag();
+
+/** Détail technique interdit dans une réponse d'erreur (AGENTS.md §10, même filtre que PRT1). */
+const TECHNICAL = /SQLSTATE|violates|duplicate key|invalid input syntax|foreign key|constraint|at \S+:\d+|ZodError|"path":|\binvalid_type\b/i;
+
+/** Corps conforme à ApiErrorBody : statut attendu, code du statut, message lisible, rien de technique. */
+function expectApiError(status: number, text: string, expected: number, label: string) {
+  expect(status, `${label} : ${text}`).toBe(expected);
+  const body = JSON.parse(text) as { message?: unknown; code?: unknown };
+  expect(typeof body.message, label).toBe("string");
+  expect(String(body.message).length, label).toBeGreaterThan(0);
+  expect(body.code, label).toBe(codeForStatus(expected));
+  expect(text, label).not.toMatch(TECHNICAL);
+}
 const missionIds: number[] = [];
 let logistics: E2ECredentials;
 let secretary: E2ECredentials;
@@ -190,12 +204,10 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       const partial = await secretarySession.page.request.post(`/api/billing/invoices/${invoiceId}/payments`, payment(50000, { reference: uniqueTestToken("ref") }));
       expect(partial.status(), await partial.text()).toBe(200);
       const frameOfInvoice = new RegExp(String.raw`"invoiceId"\s*:\s*${invoiceId}(?!\d)`);
+      const framesOfInvoice = () => frames.filter((f) => f.includes("client_invoice_payment_recorded") && frameOfInvoice.test(f)).length;
       await expect
-        .poll(() => frames.some((f) => f.includes("client_invoice_payment_recorded") && frameOfInvoice.test(f)), {
-          message: "trame client_invoice_payment_recorded absente côté logistique",
-          timeout: 15_000,
-        })
-        .toBe(true);
+        .poll(framesOfInvoice, { message: "trame client_invoice_payment_recorded absente côté logistique", timeout: 15_000 })
+        .toBe(1);
       await expect(card).toContainText("Partiel");
       let state = await balanceOf(invoiceId);
       expect(Number(state.row.balance)).toBe(TTC - 50000);
@@ -203,6 +215,10 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       // Solde : la facture passe à « Payée ».
       const rest = await secretarySession.page.request.post(`/api/billing/invoices/${invoiceId}/payments`, payment(TTC - 50000, { reference: uniqueTestToken("ref") }));
       expect(rest.status(), await rest.text()).toBe(200);
+      // Seconde trame pour la même facture : sans elle, « Payée » pourrait venir du polling (AGENTS.md §3).
+      await expect
+        .poll(framesOfInvoice, { message: "seconde trame client_invoice_payment_recorded absente côté logistique", timeout: 15_000 })
+        .toBe(2);
       await expect(card).toContainText("Payée");
       state = await balanceOf(invoiceId);
       expect(state.row.status).toBe("paid");
@@ -223,7 +239,7 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       const { invoiceId } = await deliveredMissionWithInvoice(logisticsSession.page.request);
       const attempt = async (api: APIRequestContext, label: string) => {
         const res = await api.post(`/api/billing/invoices/${invoiceId}/payments`, payment(1000));
-        expect(res.status(), `rôle ${label}`).toBe(403);
+        expectApiError(res.status(), await res.text(), 403, `rôle ${label}`);
       };
       await attempt(logisticsSession.page.request, "logistics");
       for (const credentials of [technician, driver]) {
@@ -254,9 +270,15 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
 
       const over = await pay({ ...base, amount: TTC + 1 });
       expect(over.status(), over.text).toBe(409);
-      expect((await pay({ ...base, amount: -5 })).status()).toBe(400);
-      expect((await pay({ ...base, amount: "abc" })).status()).toBe(400);
-      expect((await pay({ ...base, amount: 1000, paymentMethod: "troc" })).status()).toBe(400);
+      const invalid = [
+        { label: "montant négatif", body: { ...base, amount: -5 } },
+        { label: "montant non numérique", body: { ...base, amount: "abc" } },
+        { label: "mode de paiement inconnu", body: { ...base, amount: 1000, paymentMethod: "troc" } },
+      ];
+      for (const { label, body } of invalid) {
+        const res = await pay(body);
+        expectApiError(res.status(), res.text, 400, label);
+      }
 
       const state = await balanceOf(invoiceId);
       expect(state.payments).toBe(0);

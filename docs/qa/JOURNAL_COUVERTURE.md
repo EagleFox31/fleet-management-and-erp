@@ -1996,3 +1996,9 @@ soumission sans doublon.
 - **Pourquoi** : les niveaux U, I et C de ces règles existent déjà (`client-invoice-payments`, `adm2-drv2-mis1-server-defects`) ; il manquait la preuve au navigateur et sur la trame.
 - **Preuves** : 19 e2e verts sur le Postgres local `fleet_test_cov` (serveur sur le port 5177, navigateur msedge). Rouge avant : garde de rôle du paiement élargie à la logistique, le test des rôles échoue (200 au lieu de 403), mutation retirée. DRV2-4 est rouge par construction (`test.fail`). `tsc` 0 erreur, `npm test` 1585/1585.
 - **Pièges** : les paiements clients prennent `bank_transfer` (pas `virement`) ; le port 5000 était occupé par un autre projet ; un OT ouvert par un test précédent sur le même véhicule impose de comparer avant et après.
+
+## 2026-11-03 11:34 — DRV2 et P2 : réserves de relecture de #139
+
+- **Quoi** : spec 13, le passage à « Payée » est prouvé par une seconde trame `client_invoice_payment_recorded` pour la même facture (compte exact 1 puis 2), plus seulement à l'écran ; les 403 du paiement (logistique, technicien, chauffeur) et les trois 400 (montant négatif, non numérique, mode inconnu) vérifient le contrat `ApiErrorBody` (code = `codeForStatus`, message non vide, aucun détail technique, même filtre que PRT1).
+- **Pourquoi** : réserves a et b de b7 ; une assertion d'écran au-delà du `refetchInterval` est satisfaite par le polling (AGENTS.md §3), un statut seul ne prouve pas le contrat d'erreur (§10).
+- **Preuves** : e2e 13 et 19 sur `fleet_test_cov` (serveur port 5177, msedge) : 18/19 au premier passage, DRV2-1 vert au rejeu isolé (2/2), instable, sans lien avec le delta ; tsc 0.
