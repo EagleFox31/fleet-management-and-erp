@@ -2039,6 +2039,21 @@ soumission sans doublon.
 - **Décision (utilisateur, 3 novembre 2026)** : `/missions/:id/costs` reste refusé au chauffeur, même pour sa propre mission. L'amortissement est tiré du prix d'achat du véhicule, et les agrégats couvrent toute la flotte. D'où le masquage de `purchasePrice` dans les listes.
 - **Preuves** : contrat `operations-driver-scope` 9/9 sur fleet_test ; mutation (service remis à la version précédente) : « mission réaffectée » rouge, 8/9. Erreurs contrôlées par `apiErrorProblems` (`tests/support/api-error.ts`, #146). tsc 0, unit 1633/1633.
 
+## 2026-11-03 12:55 — Portée temps réel fermée par défaut
+
+- **Quoi** : une portée WebSocket absente, vide ou invalide n'envoie plus rien (avant : broadcast à tous, clients compris, cause commune de #53, #127 et #151). Le broadcast n'existe que si `type: "broadcast"` est écrit.
+- **Comment** : `normalizeScope` et le choix des destinataires sortent de `server/index.ts` vers `server/lib/realtime-scope.ts` (module pur, index de connexions injecté). Les appels sans portée (20 points d'émission) (OT, demandes de pièce, réception) sont rendus explicitement broadcast ; l'inventaire des appels est dans la PR.
+- **Pourquoi** : le défaut ouvert transformait toute portée calculée vide en fuite ; fermer à la source vaut mieux que corriger appelant par appelant.
+- **Preuves** : `tests/unit/server/realtime-scope.test.ts` (23 cas), rouge sur la règle copiée de main (16 échecs), vert sur la nouvelle ; `tests/unit/server/broadcast-hygiene.test.ts` (3 cas), rouge démontré par l'ajout d'un `type: "broadcast"`. Liste gelée : 41 occurrences dans 25 fichiers.
+
+## 2026-11-03 13:20 — DRV2-1 qualifié : localisateur de toast ambigu
+
+- **Quoi** : DRV2-1 (spec 19) n'est plus instable. `getByText("Problème signalé", { exact: true })` ; le corps de la réponse figure dans le message d'échec (lu seulement en échec, borné à 5 s). Nouveau garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts`.
+- **Comment** : base locale dédiée `fleet_test_c7`, serveur sur le port 5177, msedge. Rejeux spec 19 ×5 puis 13 + 19 ×3 : 147 verts, rouge non reproduit. Reproduit ensuite 1 fois sur 3 avec trace : POST 201, toast affiché, `strict mode violation` (titre + `<span aria-live>` du Toast Radix).
+- **Pourquoi** : `getByText` sans `exact` cherche une sous-chaîne ; l'annonce passagère « Notification Problème signalé… » la contient. Défaut du test, pas du produit.
+- **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
+- **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
+
 ## 2026-11-03 13:19 — apiErrorProblems vérifie le requestId
 
 - **Quoi** : `apiErrorProblems` (`tests/support/api-error.ts`) exige maintenant un `requestId` non vide dans le corps d'erreur. Si l'appelant fournit l'en-tête `X-Request-Id` de la réponse, il doit être identique (`null` = en-tête absent, c'est un écart). Les trois contrats consommateurs (parts-catalog-access-errors, operations-driver-scope, mission-fuel-errors) et l'e2e 13 passent l'en-tête.
