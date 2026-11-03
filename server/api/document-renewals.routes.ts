@@ -115,6 +115,8 @@ const broadcastVehicleDocumentEvent = (
   options?: {
     actorUserId?: number | null;
     actorRole?: string | null;
+    /** Propriétaire du véhicule (`vehicles.ownerId`) : seul client à recevoir la trame. */
+    ownerId?: number | null;
   },
 ) => {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -122,27 +124,35 @@ const broadcastVehicleDocumentEvent = (
     return;
   }
 
-  broadcastUpdate("vehicle_updated", {
-    version: 1,
-    entity: "vehicle",
-    entityId: payload.vehicleId,
-    payload: {
-      vehicleId: payload.vehicleId,
-      documentId: payload.documentId,
-      documentType: payload.documentType,
-      newExpiryDate: payload.newExpiryDate,
-      source: "document_renewal",
-    },
-    scope: { type: "broadcast" },
-    actor: {
-      userId: options?.actorUserId ?? null,
-      role: options?.actorRole ?? null,
-    },
-    emittedAt: new Date().toISOString(),
-  });
+  // Cloison (AGENTS.md §11) : la trame porte véhicule, papier et échéance. Le personnel la
+  // reçoit, et parmi les clients seul le propriétaire du véhicule ; jamais en broadcast.
+  const scopes: RealtimeScope[] = [{ type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] }];
+  if (options?.ownerId) scopes.push({ type: "user", userIds: [options.ownerId] });
+
+  for (const scope of scopes) {
+    broadcastUpdate("vehicle_updated", {
+      version: 1,
+      entity: "vehicle",
+      entityId: payload.vehicleId,
+      payload: {
+        vehicleId: payload.vehicleId,
+        documentId: payload.documentId,
+        documentType: payload.documentType,
+        newExpiryDate: payload.newExpiryDate,
+        source: "document_renewal",
+      },
+      scope,
+      actor: {
+        userId: options?.actorUserId ?? null,
+        role: options?.actorRole ?? null,
+      },
+      emittedAt: new Date().toISOString(),
+    });
+  }
 };
 
-const broadcastAlertCreated = (alert: {
+/** Exporté pour le contrat de portée (repli personnel d'une alerte sans destinataire). */
+export const broadcastAlertCreated = (alert: {
   id: number;
   userId: number | null;
   title: string;
@@ -161,7 +171,8 @@ const broadcastAlertCreated = (alert: {
     entity: "alert",
     entityId: alert.id,
     payload: { alert },
-    scope: alert.userId ? { type: "user", userIds: [alert.userId] } : { type: "broadcast" },
+    // Une alerte sans destinataire reste au personnel (§11), jamais en broadcast.
+    scope: alert.userId ? { type: "user", userIds: [alert.userId] } : { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
     emittedAt: new Date().toISOString(),
   });
 };
@@ -242,7 +253,7 @@ const uploadRenewalReceipt = multer({
     },
   }),
   fileFilter: (_req, file, cb) => {
-    cb(null, file.mimetype in RECEIPT_EXTENSION_BY_MIME);
+    cb(null, Object.hasOwn(RECEIPT_EXTENSION_BY_MIME, file.mimetype));
   },
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
 }).single("receiptFile");
@@ -767,17 +778,22 @@ router.patch("/requests/:id/status", async (req, res) => {
       return res.status(409).json({ message: "Cette demande vient d'être modifiée. Rechargez la page." });
     }
 
-    broadcastDocumentRenewalEvent(
-      "document_renewal_request_status_updated",
-      {
-        requestId: id,
-        status,
-        request: withoutDiskPaths(updated),
-        vehicleId: updated.vehicleId,
-        documentId: updated.vehicleDocumentId,
-      },
-      { requestId: id, actorUserId: req.session?.userId ?? null, actorRole: role },
-    );
+    // Diffusion au mieux : l'écriture est faite, un échec d'envoi ne la transforme pas en 500.
+    try {
+      broadcastDocumentRenewalEvent(
+        "document_renewal_request_status_updated",
+        {
+          requestId: id,
+          status,
+          request: withoutDiskPaths(updated),
+          vehicleId: updated.vehicleId,
+          documentId: updated.vehicleDocumentId,
+        },
+        { requestId: id, actorUserId: req.session?.userId ?? null, actorRole: role },
+      );
+    } catch (broadcastError) {
+      log.error({ err: broadcastError, requestId: req.requestId }, "diffusion du changement de statut d'une demande de renouvellement");
+    }
 
     return res.status(200).json(withoutDiskPaths(updated));
   } catch (error) {
@@ -1006,6 +1022,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           previousExpiryDate: vehicleDocuments.expiryDate,
           vehicleId: vehicleDocuments.vehicleId,
           vehicleRegistration: vehicles.registrationNumber,
+          vehicleOwnerId: vehicles.ownerId,
         })
         .from(vehicleDocuments)
         .leftJoin(vehicles, eq(vehicleDocuments.vehicleId, vehicles.id))
@@ -1224,49 +1241,56 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         });
       }
 
-      broadcastDocumentRenewalEvent(
-        "document_renewal_quick_completed",
-        {
-          request: withoutDiskPaths(finalizedRequest),
-          document: withoutDiskPaths(updatedDocument),
-          previousExpiryDate: documentRow.previousExpiryDate ?? null,
-        },
-        {
-          requestId: finalizedRequest.id,
-          actorUserId,
-          actorRole: role,
-        },
-      );
+      // Diffusion au mieux : document et demande sont écrits ; un échec d'envoi ne renvoie pas 500
+      // et ne supprime pas le justificatif enregistré (catch ci-dessous).
+      try {
+        broadcastDocumentRenewalEvent(
+          "document_renewal_quick_completed",
+          {
+            request: withoutDiskPaths(finalizedRequest),
+            document: withoutDiskPaths(updatedDocument),
+            previousExpiryDate: documentRow.previousExpiryDate ?? null,
+          },
+          {
+            requestId: finalizedRequest.id,
+            actorUserId,
+            actorRole: role,
+          },
+        );
 
-      broadcastDocumentRenewalEvent(
-        "vehicle_document_updated",
-        {
-          documentId: updatedDocument.id,
-          vehicleId: updatedDocument.vehicleId,
-          documentType: updatedDocument.type,
-          newExpiryDate: updatedDocument.expiryDate,
-        },
-        {
-          requestId: finalizedRequest.id,
-          actorUserId,
-          actorRole: role,
-          // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
-          scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
-        },
-      );
+        broadcastDocumentRenewalEvent(
+          "vehicle_document_updated",
+          {
+            documentId: updatedDocument.id,
+            vehicleId: updatedDocument.vehicleId,
+            documentType: updatedDocument.type,
+            newExpiryDate: updatedDocument.expiryDate,
+          },
+          {
+            requestId: finalizedRequest.id,
+            actorUserId,
+            actorRole: role,
+            // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
+            scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
+          },
+        );
 
-      broadcastVehicleDocumentEvent(
-        {
-          vehicleId: updatedDocument.vehicleId,
-          documentId: updatedDocument.id,
-          documentType: String(updatedDocument.type || documentRow.documentType || ""),
-          newExpiryDate: updatedDocument.expiryDate ?? null,
-        },
-        {
-          actorUserId,
-          actorRole: role,
-        },
-      );
+        broadcastVehicleDocumentEvent(
+          {
+            vehicleId: updatedDocument.vehicleId,
+            documentId: updatedDocument.id,
+            documentType: String(updatedDocument.type || documentRow.documentType || ""),
+            newExpiryDate: updatedDocument.expiryDate ?? null,
+          },
+          {
+            actorUserId,
+            actorRole: role,
+            ownerId: documentRow.vehicleOwnerId ?? null,
+          },
+        );
+      } catch (broadcastError) {
+        log.error({ err: broadcastError, requestId: req.requestId }, "diffusion du renouvellement rapide");
+      }
 
       return res.status(200).json({
         message: "Renouvellement enregistré et document mis à jour.",
