@@ -2053,3 +2053,10 @@ soumission sans doublon.
 - **Pourquoi** : `getByText` sans `exact` cherche une sous-chaîne ; l'annonce passagère « Notification Problème signalé… » la contient. Défaut du test, pas du produit.
 - **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
 - **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
+
+## 2026-11-03 13:40 — PRT1 en e2e : catalogue de pièces et trame WebSocket absente
+
+- **Quoi** : `e2e/21-parts-catalog.spec.ts`. Parcours navigateur du magasinier (création par le formulaire avec catégorie libre, recherche dans le tableau, modification catégorie et prix, `createdBy`/`updatedBy` relus en base, corbeille absente et DELETE 403), suppression par l'admin à l'écran avec cascade des variante et spécification. Cas temps réel figé en `test.fail` : un second profil (chef d'atelier) sur `/inventory/parts` ne reçoit aucune trame de pièce.
+- **Comment** : comptes créés par `createE2EUser` (warehouse, workshop_manager, admin), références `TEST-prt1-*`, nettoyage par `cleanupCreated`. Variante et spécification par l'API dans la session du magasinier : `parts-database.tsx`, seul écran qui les porte, n'est montée par aucune route. Base locale `fleet_test_de_rid`, serveur port 5137, msedge.
+- **Pourquoi** : le contrat couvre les routes ; restait ce que l'écran affirme et la règle des 3 couches. `POST/PATCH/DELETE /api/parts` (`server/routes.ts`, gelé) n'émettent aucun événement et `useRealTimeSync.ts` n'invalide `/api/parts` que sur `part_used_*` et `part_requirement_*`.
+- **Preuves** : le cas temps réel, sans `test.fail`, échoue sur « aucune trame WebSocket de pièce reçue par le profil observateur » (`auth_success` reçu, création 201 et modification 200 vérifiées avant) : cause bien l'absence de trame, pas un sélecteur. Trois passages consécutifs verts (voir PR). tsc et unit : voir PR.
