@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { authenticate, isAnyUser, isTechnician } from "../middleware/auth";
 import { assertWorkOrderReadable } from "../lib/work-order-scope";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("work-order-items");
 import { storage } from "../storage";
 import { AppError, isAppError } from "../lib/app-error";
 import { workOrderItemsService } from "../services/work-order-items-service";
@@ -67,7 +70,7 @@ workOrderItemsRoutes.get("/:workOrderId/items", isAnyUser, async (req, res, next
     return res.status(200).json(await workOrderItemsService.getItemsForWorkOrder(workOrderId));
   } catch (error) {
     if (isAppError(error)) return next(error);
-    console.error("Get work order items error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get work order items error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

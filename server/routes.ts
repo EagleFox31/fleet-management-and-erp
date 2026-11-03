@@ -2570,7 +2570,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(partsUsed);
     } catch (error) {
       if (isAppError(error)) return next(error);
-      console.error("Get parts used error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get parts used error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
