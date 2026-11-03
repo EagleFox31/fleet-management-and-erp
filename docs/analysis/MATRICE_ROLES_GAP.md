@@ -98,3 +98,8 @@ renvoie 403 (`server/lib/vehicle-patch-guard.ts`). Rôles : `VEHICLE_PATCH_ROLES
 ## Sources utilisées
 - Code: `server/middleware/auth.ts`, `server/services/part-requirements-workflow.ts`, `server/routes.ts`, `server/api/purchase-orders.routes.ts`, `client/src/pages/inventory/requests.tsx`.
 - Documents: CDC signé + analyses Excel maintenance/fournisseurs + user stories.
+
+## Écart horizontal connu : technicien et OT d'un autre technicien (3 novembre 2026)
+- `GET /api/work-orders/:id` (`server/routes.ts` ~1851) refuse un technicien sur l'OT assigné à un autre technicien (403).
+- `assertWorkOrderReadable` (`server/lib/work-order-scope.ts`) n'applique que la cloison client : les sous-ressources `GET /api/work-orders/:id/parts`, `/items`, `/pending-part-requirements` et `/tire-rotations` restent lisibles par tout technicien, quel que soit l'OT.
+- Aucune règle changée : décision métier à prendre (aligner les sous-ressources sur le détail, ou assumer que l'atelier partage la lecture). Le garde `tests/unit/server/routes-hygiene.test.ts` exige seulement une cloison client ou une garde de rôle sur ces lectures.

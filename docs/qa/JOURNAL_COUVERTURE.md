@@ -2061,6 +2061,13 @@ soumission sans doublon.
 - **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
 - **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
 
+## 2026-11-03 13:40 — PRT1 en e2e : catalogue de pièces et trame WebSocket absente
+
+- **Quoi** : `e2e/21-parts-catalog.spec.ts`. Parcours navigateur du magasinier (création par le formulaire avec catégorie libre, recherche dans le tableau, modification catégorie et prix, `createdBy`/`updatedBy` relus en base, corbeille absente et DELETE 403), suppression par l'admin à l'écran avec cascade des variante et spécification. Cas temps réel figé en `test.fail` : un second profil (chef d'atelier) sur `/inventory/parts` ne reçoit aucune trame de pièce.
+- **Comment** : comptes créés par `createE2EUser` (warehouse, workshop_manager, admin), références `TEST-prt1-*`, nettoyage par `cleanupCreated`. Variante et spécification par l'API dans la session du magasinier : `parts-database.tsx`, seul écran qui les porte, n'est montée par aucune route. Base locale `fleet_test_de_rid`, serveur port 5137, msedge.
+- **Pourquoi** : le contrat couvre les routes ; restait ce que l'écran affirme et la règle des 3 couches. `POST/PATCH/DELETE /api/parts` (`server/routes.ts`, gelé) n'émettent aucun événement et `useRealTimeSync.ts` n'invalide `/api/parts` que sur `part_used_*` et `part_requirement_*`.
+- **Preuves** : le cas temps réel, sans `test.fail`, échoue sur « aucune trame WebSocket de pièce reçue par le profil observateur » (`auth_success` reçu, création 201 et modification 200 vérifiées avant) : cause bien l'absence de trame, pas un sélecteur. Mise en place hors du `test.fail` (garde `it-fails-hygiene`) : un témoin vérifie socket, création 201 et modification 200. Trois passages consécutifs verts (3/3 tests chaque fois), tsc 0, unit verts. Une PR corrective émet `part_catalog_changed` : la première des deux à fusionner laisse le `test.fail` en place, la seconde le retire.
+
 ## 2026-11-03 13:35 — Tests : refuser de démarrer sur une base de production
 
 - **Quoi** : intégration, contrat et unitaires refusent de démarrer si `DATABASE_URL` (ou `_LISTENER`, `_DIRECT`) diffère de `DATABASE_URL_TEST`, si celui-ci manque (plus de repli), ou si l'hôte est interdit (`TEST_DB_FORBIDDEN_HOSTS`, `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`).
@@ -2079,6 +2086,13 @@ soumission sans doublon.
 - **Pourquoi** : AGENTS.md §10, un log se migre, il ne se supprime pas. Le contenu des lignes (prix) n'a pas à finir dans les journaux.
 - **Preuves** : tsc 0, unitaires 1687/1687 ; contrats `work-order*` et `vehicle-documents-client-scope` 67/67 sur 10 fichiers, lancés sans `.env` ni `DATABASE_URL` (seulement `DATABASE_URL_TEST` et `DATABASE_WS_PROXY`).
 
+## 2026-11-03 15:10 — Lectures d'OT de flotte réservées au personnel (IDOR, suite)
+
+- **Quoi** : `GET /api/work-orders/:workOrderId/tire-rotations` passe à `isAnyUser` + `assertWorkOrderReadable` (le client propriétaire garde l'accès). `GET /api/work-orders/awaiting-parts`, `/api/work-orders/statistics`, `/api/statistics/work-orders`, `/api/parts/:id/work-orders` et `/api/parts/:id/usage-history` passent à `isStaff`. `GET /api/exports/work-orders` : `isStaff` ajouté en doublure ; le routeur `/api/exports` est déjà gardé par `EXPORT_ROLE_MATRIX` (admin, management, secrétaire, chef d'atelier), il n'y avait pas de fuite.
+- **Comment** : aucun écran client n'appelle ces routes (grep `client/src` : tableaux de bord et pages atelier, magasin, rapports, fiche pièce, tous du personnel), donc pas de filtre `ownerScopeOf`. Chauffeur et technicien sont dans `STAFF_ROLES` et gardent l'accès. `assertWorkOrderReadable` refuse un id hors 1..2147483647 par un 400 (`AppError`) : couvre aussi `/parts`, `/items` et `/pending-part-requirements` (avant : 500 générique). `console.*` des catch touchés migrés vers `moduleLogger` ; le `console.log` des statistiques devient un `log.info`.
+- **Pourquoi** : AGENTS.md §11. Un client lisait 100 OT de flotte avec véhicules, les statistiques d'atelier, l'historique d'usage des pièces et les rotations de pneus de tout OT. Écart horizontal technicien noté dans `docs/analysis/MATRICE_ROLES_GAP.md`.
+- **Preuves** : `tests/contract/work-order-reads-client-scope.contract.test.ts`, 15 cas (4 tire-rotations + 5 x 2 réservées au personnel + 1 export). Rouge sur main : 7 échecs / 8 verts ; vert après, 15/15. Garde d'hygiène `routes-hygiene` : rouge en remettant `authenticate` sur tire-rotations, vert après (une exception gelée : `GET /api/work-orders/:id`, cloison en ligne).
+
 ## 2026-11-03 13:50 — Garde-fou base de test : relecture de #159 (identifiants, unitaires, docs)
 
 - **Quoi** : `e2e/helpers/production-guard.ts` lit l'hôte par `new URL` (jamais d'extraction manuelle) et affiche « hôte illisible » au moindre doute (`#`, `/` ou `?` non encodé dans le mot de passe) ; une URL illisible est refusée. La garde unitaire (`assertUnitDatabaseNotProduction`) refuse aussi `*.neon.tech` hors `ALLOW_NEON_TEST_DB=1` et vérifie `DATABASE_URL_LISTENER` / `_DIRECT` (le placeholder `127.0.0.1:1` passe). Le message de refus donne `unset` et `Remove-Item Env:… -ErrorAction SilentlyContinue`. `assertTestDatabaseNotProduction` supprimée (plus aucun appelant hors son test, vérifié dans `e2e/`, `scripts/`, `tests/`). Docs corrigées : `tests/README.md`, `README.md`, `.env.example`, `.claude/agents/fleet-db.md`, `docs/analysis/controles-donnees-lot.md`. CI : `touch .env` et son commentaire retirés des jobs intégration et contrat.
@@ -2092,3 +2106,9 @@ soumission sans doublon.
 - **Comment** : cinquième paramètre optionnel `requestIdHeader`, signature existante inchangée. `contract-session.call` expose `headers` (ajout, même forme que `contract-actors`).
 - **Pourquoi** : contrat `ApiErrorBody` (`shared/errors.ts`). Le requestId est la référence que l'utilisateur donne au support (AGENTS.md §10), et rien ne le gardait.
 - **Preuves** : unitaire 6/6, rouge à 2/6 avec l'ancien contrôle. Mutation serveur (`normalizeErrorBody` sans requestId) : 17 tests de contrat rouges sur les 3 suites consommatrices, verts une fois le serveur rétabli. Contrats complets 1340/1340 sur fleet_test_de_rid. Unit 1660/1660, tsc 0. Aucune route sans requestId parmi celles qu'appellent ces suites.
+
+## 2026-11-03 14:05 — PRT1 : test.fail du temps réel levé après #165
+
+- **Quoi** : le cas deux profils de `e2e/21-parts-catalog.spec.ts` passe en `test` ordinaire ; la ligne PRT1 du plan note le défaut corrigé.
+- **Comment** : #165 émet `part_catalog_changed` sur POST, PATCH, DELETE et update-stock ; la reconnaissance de trame de la spec l'acceptait déjà.
+- **Pourquoi** : la PR qui fusionne en second lève le `test.fail` (Playwright signalerait sinon l'échec inverse).
