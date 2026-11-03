@@ -139,6 +139,14 @@ export function toHttpError(err: unknown): {
   return { status: status >= 400 && status < 600 ? status : 500 };
 }
 
+/**
+ * Monté sur /api après tous les routeurs : une route inconnue lève un 404 au contrat
+ * `ApiErrorBody` au lieu de tomber sur le repli SPA (HTML en 200, y compris en POST).
+ */
+export function apiNotFound(_req: Request, _res: Response, next: NextFunction) {
+  next(new AppError(404, "Cette adresse ne correspond à aucun service."));
+}
+
 /** Dernier middleware : erreurs levées (`throw`, `next(err)`) et non rattrapées. */
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
   if (res.headersSent) return next(err);
