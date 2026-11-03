@@ -1,7 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { fuelCardService } from "../../server/services/fuel-card-service";
+import { AppError } from "../../server/lib/app-error";
+import { FUEL_REQUEST_KEY_CONFLICT_MESSAGE, fuelCardService, toFuelCardAppError } from "../../server/services/fuel-card-service";
 import { FuelService } from "../../server/services/fuel-service";
 import { fuelRecords } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -152,6 +153,58 @@ describe("recordConsumption : écriture liée dans la même transaction", { time
     expect(result.cost).toBe(200);
     expect(hookCalled).toBe(false);
     expect(await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicle.id))).toHaveLength(1);
+    expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(balanceBefore, 2);
+  });
+});
+
+describe("recordConsumption : violation réelle de ux_fuel_records_request_key", { timeout: 30000 }, () => {
+  // Par HTTP, la recherche par clé précède toujours l'insertion sous le verrou de la carte : l'index
+  // n'est atteint que par un écrivain qui contourne le rejeu. On l'appelle donc sans `replay`.
+  it("même clé déjà en base : 409 lisible, sans détail SQL, sans débit", async () => {
+    const user = await createTestUser();
+    ids.userIds.push(user.id);
+    const vehicle = await newVehicle();
+    const requestKey = uniqueTestToken("ux-key");
+    const existing = await createTestFuelRecord({ vehicleId: vehicle.id, debitAmount: "100.00", cost: "100.00", quantity: 1 });
+    ids.fuelRecordIds.push(existing.id);
+    await db.update(fuelRecords).set({ requestKey }).where(eq(fuelRecords.id, existing.id));
+
+    const { balance: before } = await fuelCardService.getCurrentBalance();
+    const credit = await createTestFuelRecord({
+      createdBy: user.id,
+      creditAmount: (Math.max(0, -before) + 1_000).toFixed(2),
+      debitAmount: "0",
+      cost: "0",
+      quantity: 0,
+    });
+    ids.fuelRecordIds.push(credit.id);
+    const balanceBefore = (await fuelCardService.getCurrentBalance()).balance;
+
+    const error = await fuelCardService
+      .recordConsumption({
+        vehicleId: vehicle.id,
+        quantity: 1,
+        unitPrice: 100,
+        date: "2026-01-15",
+        stationName: "TEST-Station",
+        destination: "TEST-Index",
+        userId: user.id,
+        requestKey,
+      })
+      .then(
+        () => null,
+        (err: unknown) => err,
+      );
+
+    // Violation réelle de l’index (pas un 409 fabriqué en amont), puis la traduction que font les routes.
+    expect(error).toMatchObject({ code: "23505", constraint: "ux_fuel_records_request_key" });
+    const mapped = toFuelCardAppError(error);
+    expect(mapped).toBeInstanceOf(AppError);
+    expect(mapped.status).toBe(409);
+    expect(mapped.message).toBe(FUEL_REQUEST_KEY_CONFLICT_MESSAGE);
+    expect(mapped.message).not.toMatch(/ux_fuel_records|duplicate|constraint|23505|request_key/i);
+    const rows = await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicle.id));
+    expect(rows.map((r) => r.id)).toEqual([existing.id]);
     expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(balanceBefore, 2);
   });
 });
