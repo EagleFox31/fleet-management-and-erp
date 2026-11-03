@@ -1800,3 +1800,29 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute écriture de `parts.quantity` relit la pièce `FOR UPDATE` dans la transaction qui écrit, et refuse en 409 un stock insuffisant. Ne jamais ramener un stock à 0 en silence.
+
+## 2026-11-03 — Main rouge en unitaire après une PR e2e seule (#194)
+
+### Contexte
+- #194 n'ajoutait qu'une spec e2e. Elle contenait `getByText("Erreur carburant")` sans `{ exact: true }`, que refuse la garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts` (#155).
+- La CI de la PR, puis celle de main, étaient vertes. Toutes les PR suivantes ont échoué en unitaire.
+
+### Cause racine
+- Classification : carte d'impact incomplète (exécution ciblée).
+- Dans `.github/appfactory-impact.json`, les surfaces `e2e` et `scripts` n'activaient que `typecheck`. Or des gardes unitaires lisent ces répertoires :
+  - les gardes de `tests/unit/e2e/` ;
+  - les parcours `repoFiles` de `it-fails-hygiene` et de `leak-check-hygiene`.
+- Un changement limité à ces répertoires ne lançait donc pas les tests qui les contrôlent.
+- Facteur humain : l'auteur n'avait lancé que tsc, pas la suite unitaire, en se fiant au périmètre « e2e seul ».
+
+### Résolution
+- Spec corrigée dans #195 (`exact: true`).
+- Les surfaces `e2e` et `scripts` activent aussi `unit`.
+
+### Prévention (vérifiable)
+- Les surfaces `e2e` et `scripts` portent maintenant la porte `unit` dans la carte d'impact.
+
+### Règle Projet (obligatoire)
+- Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
+- Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
+- En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
