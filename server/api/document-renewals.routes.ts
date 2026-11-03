@@ -30,6 +30,7 @@ import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
 import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
+import { broadcastAlertCreated as broadcastSharedAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
   documentRenewalCenters,
@@ -153,30 +154,9 @@ const broadcastVehicleDocumentEvent = (
 };
 
 /** Exporté pour le contrat de portée (repli personnel d'une alerte sans destinataire). */
-export const broadcastAlertCreated = (alert: {
-  id: number;
-  userId: number | null;
-  title: string;
-  type: string;
-  priority: string;
-  link: string | null;
-  message: string;
-}) => {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate("alert_created", {
-    version: 1,
-    entity: "alert",
-    entityId: alert.id,
-    payload: { alert },
-    // Une alerte sans destinataire reste au personnel (§11), jamais en broadcast.
-    scope: alert.userId ? { type: "user", userIds: [alert.userId] } : { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
-    emittedAt: new Date().toISOString(),
-  });
-};
+// Une alerte sans destinataire reste au personnel (§11), jamais en broadcast.
+export const broadcastAlertCreated = (alert: BroadcastableAlert) =>
+  broadcastSharedAlertCreated(alert, VEHICLE_DOCUMENT_EVENT_ROLES);
 
 const renewalProofUploadDir = path.join(
   process.cwd(),
