@@ -1,17 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-
-// Le résolveur réel, sauf quand un test force un 409 levé en AppError (course perdue contre une création concurrente).
-const resolverControl = vi.hoisted(() => ({ forceConflict: false }));
-vi.mock("../../server/lib/document-renewal-center-resolver", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../server/lib/document-renewal-center-resolver")>();
-  const { AppError } = await import("../../server/lib/app-error");
-  return {
-    ...actual,
-    resolveRenewalCenter: (input: Parameters<typeof actual.resolveRenewalCenter>[0]) =>
-      resolverControl.forceConflict ? Promise.reject(new AppError(409, actual.DUPLICATE_CENTER_MESSAGE)) : actual.resolveRenewalCenter(input),
-  };
-});
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../server/db";
 import { documentRenewalCenters, documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
 import {
@@ -360,17 +348,32 @@ describe("centres de renouvellement : résolution unique (demande et renouvellem
 
   it("un 409 levé par le résolveur reste un 409 sur /requests et /quick-renew (pas un 500)", async () => {
     const before = await openRequestIds();
-    resolverControl.forceConflict = true;
+    // Course perdue simulée en base, pas par vi.mock (inopérant avec isolate:false, voir tests/README.md) :
+    // un trigger temporaire lève 23505 à l'insertion de ce seul nom, le vrai résolveur prend son chemin de course.
+    const conflictName = `TEST conflit ${SUFFIX}`;
+    const fn = `test_force_center_conflict_${SUFFIX}`;
+    await db.execute(sql.raw(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.name = '${conflictName}' THEN
+          RAISE unique_violation USING MESSAGE = 'conflit simulé';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER ${fn} BEFORE INSERT ON document_renewal_centers FOR EACH ROW EXECUTE FUNCTION ${fn}();
+    `));
     try {
-      const viaRequest = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: `TEST conflit ${SUFFIX}` });
+      const viaRequest = await call("POST", requestsPath, "secretary", { ...baseRequest(), centerName: conflictName });
       expect(viaRequest.status).toBe(409);
       expect(viaRequest.body.message).toBe("Un centre de ce nom existe déjà.");
-      const viaQuick = await quickRenew({ centerName: `TEST conflit ${SUFFIX}` });
+      const viaQuick = await quickRenew({ centerName: conflictName });
       expect(viaQuick.status).toBe(409);
       expect(viaQuick.body.message).toBe("Un centre de ce nom existe déjà.");
     } finally {
-      resolverControl.forceConflict = false;
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${fn} ON document_renewal_centers; DROP FUNCTION IF EXISTS ${fn}();`));
     }
+    const leaked = await db.select({ id: documentRenewalCenters.id }).from(documentRenewalCenters).where(eq(documentRenewalCenters.name, conflictName));
+    expect(leaked).toEqual([]);
     expect(await openRequestIds()).toEqual(before);
   });
 
