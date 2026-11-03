@@ -27,6 +27,10 @@ export interface WriteRoute {
   body: string;
   /** Source complète du fichier (pour retrouver un schéma local). */
   fileSource: string;
+  /** Handler écrit dans la déclaration (`async (req, res) => ...`), et non passé par référence. */
+  inline?: boolean;
+  /** Handler passé par référence : identifiant du dernier argument (`patchSettings`). */
+  handlerRef?: string;
   /** Fichier de la déclaration servie (`routes.ts`, `api/x.routes.ts`), renseigné par `allWriteRoutes`. */
   file?: string;
 }
@@ -74,6 +78,21 @@ function topLevelSplit(text: string): string[] {
   return out.filter(Boolean);
 }
 
+/** Début de chaque argument de premier niveau, jusqu'à la parenthèse qui ferme l'appel. */
+function topLevelStarts(text: string): number[] {
+  const starts = [0];
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if ("([{".includes(text[i])) depth++;
+    if (")]}".includes(text[i]) && --depth < 0) break;
+    if (text[i] === "," && depth === 0) starts.push(i + 1);
+  }
+  return starts;
+}
+
+/** Argument qui ouvre une fonction écrite sur place : `async (req...`, `(req, res) =>`, `function (`. */
+const INLINE_FN = /^\s*(?:async\b|function\b|\()/;
+
 /** Position de la parenthèse qui ferme l'appel en cours (profondeur 0 dépassée), -1 si absente. */
 function closingParen(text: string): number {
   let depth = 0;
@@ -102,17 +121,20 @@ export function writeRoutesOf(
     const start = (m.index ?? 0) + m[0].length;
     const end = i + 1 < heads.length ? (heads[i + 1].index ?? source.length) : source.length;
     const text = source.slice(start, end);
-    // Fin de l'en-tête : première fonction (`async`, `(req`, `(_req`) de la déclaration.
-    const fn = text.search(/\basync\b\s*(?:function\s*)?\(|\(\s*_?req\b|\(\s*request\b/);
-    // Fin de l'appel `router.post(...)` : si elle précède la première fonction inline, le handler
-    // est passé par référence et c'est le dernier élément de la liste.
+    // Fin de l'en-tête : premier ARGUMENT de premier niveau qui est une fonction écrite sur place.
+    // Une fonction à l'intérieur d'un argument (`ownedBy((req) => ...)`) ne coupe pas l'en-tête.
     const close = closingParen(text);
-    const byReference = close >= 0 && (fn < 0 || close < fn);
+    const fn = topLevelStarts(text).find((at) => (close < 0 || at < close) && INLINE_FN.test(text.slice(at))) ?? -1;
+    // Aucun argument inline avant la fin de l'appel : handler passé par référence, dernier élément.
+    const byReference = close >= 0 && fn < 0;
     const header = byReference ? text.slice(0, close) : fn >= 0 ? text.slice(0, fn) : "";
     const path = declared.startsWith("/api/") ? declared : `${prefix}${declared === "/" ? "" : declared}`;
     if (!path.startsWith("/api")) throw new Error(`Routeur non monté sous /api : ${method} ${path} (${m[1]}) ; compléter mountPrefixes.`);
+    const ref = byReference ? topLevelSplit(header).at(-1) : undefined;
     routes.push({
       key: `${method} ${path}`,
+      inline: !byReference && fn >= 0,
+      handlerRef: ref && /^\w+$/.test(ref) ? ref : undefined,
       method,
       path,
       middlewares: (byReference ? topLevelSplit(header).slice(0, -1) : topLevelSplit(header)).filter((x) => x !== "authenticate"),
@@ -194,19 +216,50 @@ export const PUBLIC_BY_DESIGN = new Set(["post /api/auth/login", "post /api/auth
  * le rôle, `isAnyUser` charge l'utilisateur sans le restreindre), drapeau de fonctionnalité,
  * téléversement.
  */
-const NOT_A_ROLE_GUARD = /^(?:authenticate|requireAuth|checkAuth|isAnyUser|feature|requireFeature\(|upload\b|validateBody\()/;
+const NOT_A_ROLE_GUARD = /^(?:\.\.\.)?(?:authenticate|requireAuth|checkAuth|isAnyUser|feature|requireFeature\(|upload\b|validateBody\(|ownedBy\()/;
+
+/**
+ * `selfScoped` admet tous les rôles. Il ne vaut garde que si le handler (inline, ou résolu dans le
+ * fichier quand il est passé par référence) n'agit que sur le compte de session : il lit
+ * `req.user.id` ou `req.session.userId`, et ne lit ni l'URL (`params`, `query`) ni un identifiant
+ * venu du corps (`req.body.userId`, `const { userId } = req.body`).
+ */
+const SELF_SCOPED = /^selfScoped$/;
+const SESSION_IDENTITY = /\breq\.user!?\.id\b|\breq\.session\??\.userId\b/;
+const FOREIGN_TARGET = [
+  /\bparams\b/,
+  /\bquery\b/,
+  /\breq\.body\??\.\w*(?:id|Id|ID)\b/,
+  /\breq\.body\s*\[/,
+  /\{[^}]*\b\w*(?:id|Id|ID)\b[^}]*\}\s*=\s*req\.body\b/,
+];
+
+/** Texte d'un handler passé par référence (`const nom ... = async (...) => {...}` ou `function nom`). */
+function referencedHandler(r: WriteRoute): string | undefined {
+  if (!r.handlerRef) return undefined;
+  const at = r.fileSource.search(new RegExp(`\\bconst\\s+${r.handlerRef}\\b[^=]*=|\\bfunction\\s+${r.handlerRef}\\s*\\(`));
+  if (at < 0) return undefined;
+  const rest = r.fileSource.slice(at);
+  const stop = rest.slice(1).search(/\n(?:const|let|function|export|router|app|async)\b/);
+  return stop >= 0 ? rest.slice(0, stop + 1) : rest;
+}
+
+/** `selfScoped` tient : handler connu, identité de session lue, aucune cible venue de la requête. */
+export function selfScopedHolds(r: WriteRoute): boolean {
+  // Identifiant dans le chemin : la cible vient de l'URL, quel que soit le handler.
+  if (r.path.includes(":")) return false;
+  const handler = r.inline ? r.body : referencedHandler(r);
+  if (!handler) return false;
+  return SESSION_IDENTITY.test(handler) && !FOREIGN_TARGET.some((re) => re.test(handler));
+}
 
 /** T1 : un garde de rôle ou de permission dans la déclaration, ou un garde au montage du routeur. */
-/** `selfScoped` : garde d'une route qui n'agit que sur l'utilisateur connecté, sans identifiant pris dans l'URL. */
-const SELF_SCOPED = /^selfScoped$/;
-const READS_PARAMS = /\breq\.params\b/;
-
 export function hasRoleGuard(r: WriteRoute): boolean {
   if (r.mountGuarded) return true;
   return r.middlewares.some((m) => {
     if (NOT_A_ROLE_GUARD.test(m)) return false;
     // `selfScoped` admet tous les rôles : il ne vaut garde que si la route n'agit pas sur un objet désigné par l'URL.
-    if (SELF_SCOPED.test(m)) return !READS_PARAMS.test(r.body);
+    if (SELF_SCOPED.test(m)) return selfScopedHolds(r);
     return true;
   });
 }
@@ -229,8 +282,25 @@ export function validatesBody(r: WriteRoute): boolean {
 
 /** Brique `validateBody(schema, options?)` de `server/middleware/validate-body.ts`. */
 const VALIDATE_BODY = /^validateBody\(/;
-/** Sans `keep:`, `validateBody` retire tous les `SERVER_FIELDS` ; avec `keep:`, le schéma est analysé comme ailleurs. */
+/** Avec `keep:`, le schéma passé est analysé comme ailleurs. */
 const VALIDATE_BODY_KEEP = /\bkeep\s*:/;
+/** Schéma permissif dans la déclaration : le retrait ne protège plus rien. */
+const PERMISSIVE = /\.passthrough\(|\.catchall\(|\bz\.(?:any|unknown|record)\(/;
+
+/**
+ * `validateBody(schéma)` vaut T4 seul quand le retrait est garanti : aucun `keep:`, options absentes
+ * ou écrites en littéral (`opts` variable : inconnu), schéma non permissif (y compris sa définition locale).
+ */
+function validateBodyVerdict(m: string, fileSource: string): "strips" | "analyse" | "unsafe" {
+  const args = topLevelSplit(m.slice(m.indexOf("(") + 1));
+  if (args.length === 0 || args.length > 2) return "unsafe";
+  if (args[1] !== undefined && !args[1].startsWith("{")) return "unsafe";
+  if (PERMISSIVE.test(m)) return "unsafe";
+  const local = /^([A-Za-z]\w*)/.exec(args[0])?.[1];
+  const def = local ? localSchemaDefinition(fileSource, local) : undefined;
+  if (def && PERMISSIVE.test(def)) return "unsafe";
+  return args[1] !== undefined && VALIDATE_BODY_KEEP.test(args[1]) ? "analyse" : "strips";
+}
 
 export { SERVER_FIELDS };
 const SERVER_FIELD_ALT = SERVER_FIELDS.join("|");
@@ -265,7 +335,9 @@ const SERVER_FIELD_KEY = new RegExp(`\\b(?:${SERVER_FIELD_ALT})\\s*:`);
  *  - ou la déclaration passe par `validateBody(schéma)` sans `keep:` (les champs serveur sont retirés).
  */
 export function protectsServerFields(r: WriteRoute): boolean {
-  if (r.middlewares.some((m) => VALIDATE_BODY.test(m) && !VALIDATE_BODY_KEEP.test(m))) return true;
+  const verdicts = r.middlewares.filter((m) => VALIDATE_BODY.test(m)).map((m) => validateBodyVerdict(m, r.fileSource));
+  if (verdicts.includes("unsafe")) return false;
+  if (verdicts.includes("strips")) return true;
   const declared = [...r.middlewares.filter((m) => VALIDATE_BODY.test(m)), r.body].join("\n");
   const names = [...new Set([...declared.matchAll(/\b([A-Za-z]\w*Schema)\b/g)].map((m) => m[1]))];
   for (const n of names) {

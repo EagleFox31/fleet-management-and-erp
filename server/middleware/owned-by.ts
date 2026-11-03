@@ -8,7 +8,11 @@ import { isAnyUser } from "./auth";
  * n'atteint que ses propres objets. `resolveOwner` lit le propriétaire (`vehicles.ownerId`...) ; il n'est
  * appelé que pour un client. Hors périmètre : 403.
  *
- * `router.patch("/:id", ...ownedBy((req) => ownerOfVehicle(Number(req.params.id))), validateBody(s), handler)`
+ * Sert aux LECTURES : `router.get("/:id", ...ownedBy((req) => ownerOfVehicle(Number(req.params.id))), handler)`.
+ * Le cliquet T1 ne le compte pas comme garde : une écriture porte une vraie garde de rôle (un client
+ * ne saisit rien sur son véhicule, AGENTS.md §11). `resolveOwner` et le handler lisent le même
+ * identifiant, à la même source (`req.params.id`) : sinon le contrôle porte sur un objet et l'action
+ * sur un autre.
  */
 export function ownedBy(
   resolveOwner: (req: Request) => Promise<number | null | undefined>,

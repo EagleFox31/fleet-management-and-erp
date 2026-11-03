@@ -152,6 +152,39 @@ router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (re
     expect([self, byId].map(hasRoleGuard)).toEqual([true, false]);
   });
 
+  it("B1 : ownedBy n'est pas une garde T1, et sa fonction interne ne coupe pas l'en-tête", () => {
+    const [owned] = src(
+      `router.patch("/:id", ...ownedBy((req) => ownerOf(Number(req.params.id))), validateBody(leakSchema, { keep: ["cost"] }), async (req, res) => { await save(req.body); });`,
+    );
+    expect(hasRoleGuard(owned)).toBe(false);
+    expect(owned.middlewares.map((m) => m.split("(")[0])).toEqual(["...ownedBy", "validateBody"]);
+    expect(owned.inline).toBe(true);
+  });
+
+  it("B2 : selfScoped refusé pour chaque contournement connu", () => {
+    const code = `const byRef = async (req, res) => { await update(req.user.id, req.body); };
+router.patch("/a", selfScoped, async (req, res) => { await update(req.body.userId, req.body); });
+router.patch("/b", selfScoped, async (req, res) => { await update(Number(req.query.userId), req.body); });
+router.patch("/c", selfScoped, async ({ params, body }, res) => { await update(Number(params.id), body); });
+router.patch("/d", selfScoped, async (req, res) => { const { userId, name } = req.body; await update(userId, name); });
+router.patch("/e", selfScoped, async (req, res) => { await update(42, req.body); });
+router.patch("/f/:id", selfScoped, byRef);
+router.patch("/g", selfScoped, byRef);
+router.patch("/h", selfScoped, missing);`;
+    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, true, false]);
+  });
+
+  it("T4 : validateBody avec schéma permissif ou options en variable ne vaut pas protection", () => {
+    const code = `const openSchema = z.object({ name: z.string() }).passthrough();
+const okSchema = z.object({ name: z.string() });
+router.post("/a", isAdmin, validateBody(openSchema), async (req, res) => { await save(req.body); });
+router.post("/b", isAdmin, validateBody(okSchema.passthrough()), async (req, res) => { await save(req.body); });
+router.post("/c", isAdmin, validateBody(okSchema, opts), async (req, res) => { await save(req.body); });
+router.post("/d", isAdmin, validateBody(okSchema, { serverFields: ["status"] }), async (req, res) => { await save(req.body); });`;
+    const routes = src(code);
+    expect(routes.map(protectsServerFields)).toEqual([false, false, false, true]);
+  });
+
   it("l'analyse voit bien les déclarations des sources", () => {
     expect(routes.length).toBeGreaterThan(100);
     expect(withBody.length).toBeGreaterThan(60);

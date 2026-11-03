@@ -57,6 +57,13 @@ describe("validateBody", () => {
     expect(req.body).toBe(body);
   });
 
+  it("schéma permissif refusé à la déclaration (passthrough, catchall, any, record)", () => {
+    for (const permissive of [schema.passthrough(), schema.catchall(z.string()), z.any(), z.record(z.string()), schema.passthrough().optional()]) {
+      expect(() => validateBody(permissive)).toThrow(/permissif/);
+    }
+    expect(() => validateBody(schema.strict())).not.toThrow();
+  });
+
   it("corps absent : validé comme objet vide", () => {
     const { passed } = run(undefined);
     expect((passed as AppError).status).toBe(400);
