@@ -1361,3 +1361,55 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une route d'écriture déclare ses rôles sur la route elle-même, même si le montage filtre déjà. Une garde de montage n'est qu'un plancher.
+
+## 2026-11-03 - Fusion poussée avec des marqueurs de conflit (#142)
+
+### Constat
+- La fusion de `main` dans la branche de #142 (95fcdfe) a été commitée puis poussée alors que `server/services/preventive-maintenance-service.ts` contenait encore des marqueurs `<<<<<<<` / `>>>>>>>`. De plus, le bloc de test « rattrapage » était tronqué par une résolution faite au `sed`.
+- Le défaut a été détecté localement, après le push : `tsc` (15 erreurs TS1185) et Vitest (« no tests »). Il a été corrigé par 4aec821, avant toute relecture ou fusion.
+
+### Cause racine
+- Seul le fichier signalé en premier (le test) a été résolu. Le second fichier en conflit n'a pas été vu : la sortie de `git status` était tronquée (`head -3`), et le commit de fusion a été fait avant le contrôle de compilation.
+- Classification : near miss, processus de fusion. Aucun impact sur `main`.
+
+### Résolution (4aec821)
+- Les deux fichiers reprennent leur version d'avant la fusion. Cette version égale celle de `main` (#140 squashée) plus le rattrapage, ce qui est vérifié par `git diff 0faba1e origin/main`.
+
+### Prévention (vérifiable)
+- Avant tout commit de fusion : `git diff --name-only --diff-filter=U` doit être vide, puis `npm run check` doit être à 0.
+- Gardes existantes :
+  - Le job CI `typecheck` attrape les marqueurs dans un `.ts` / `.tsx` (TS1185).
+  - Un `.json` mal formé casse l'installation ou le build.
+- Garde manquante :
+  - Aucun contrôle automatique pour un `.md`, un `.sql` ou un `.yml`. Un marqueur dans `docs/` ou dans une migration passerait la CI.
+  - Candidat backlog : un test unitaire d'hygiène qui refuse `^(<{7}|>{7}|={7})( |$)` dans les fichiers suivis (hors `node_modules`), sur le modèle de `routes-hygiene.test.ts`.
+
+### Règle Projet (obligatoire)
+- Pas de commit de fusion tant que `git diff --name-only --diff-filter=U` n'est pas vide de sortie.
+- Lire la liste complète des fichiers en conflit, jamais une sortie tronquée.
+
+## 2026-11-03 - Une garde de route ne remplace pas une matrice rôle × transition (#141)
+
+### Constat
+- Le lot 2 des missions (#141) ouvre `PUT /api/missions/:id/status` aux gestionnaires et au chauffeur affecté (`MISSION_STATUS_ROLES`).
+- La relecture a montré que le chauffeur pouvait **annuler** ou **clôturer** une mission. La garde vérifiait seulement que le rôle avait accès à la route, jamais la transition demandée.
+
+### Cause racine
+- Un même endpoint porte plusieurs transitions métier, et la garde de route répond à « ce rôle peut-il appeler la route ? ». La question réelle est « ce rôle peut-il faire **cette** transition ? ».
+- Le contrat de la PR testait les gestionnaires sur `assigned -> cancelled`, mais pas le chauffeur sur les transitions qui lui sont interdites.
+- Classification : contrôle d'accès vertical incomplet. C'est une variante de « garde au montage trop large » (#129), déplacée de la route vers la transition.
+
+### Résolution
+- Correctif sur #141 : 6c1c56f, fusionné dans `main` par 262b4a9.
+  - `shared/constants/roles.ts` reçoit `DRIVER_MISSION_STATUS_TARGETS` (`in_progress`, `delivered`) et `canRoleSetMissionStatus(role, targetStatus)`.
+  - La route consulte cette fonction pour chaque statut visé.
+  - Le chauffeur affecté peut démarrer et livrer. Clôturer (`completed`, qui écrit le coût réel) et annuler restent aux gestionnaires.
+  - Contrats ajoutés : `mission-lot2-roles` et `mission-from-fuel-roles`.
+
+### Prévention (vérifiable)
+- Un contrat par rôle et par transition interdite : pour chaque rôle de `MISSION_STATUS_ROLES` et chaque transition hors de sa liste, la réponse attendue est 403 `ApiErrorBody`, avec le statut en base inchangé.
+- Les cas sont dérivés de la matrice elle-même, pas d'une liste écrite à la main. Une transition ajoutée sera ainsi testée d'office.
+
+### Règle Projet (obligatoire)
+- Une route qui change un statut contrôle le couple (rôle, transition), pas seulement le rôle.
+- La matrice des transitions par rôle vit dans une constante partagée, consommée par le serveur et par le contrat.

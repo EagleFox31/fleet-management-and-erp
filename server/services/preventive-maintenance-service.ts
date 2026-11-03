@@ -1,11 +1,23 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
-import { eq, and, gte, lte, lt, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 const log = moduleLogger("preventive-maintenance");
+
+/** Rattrapage P3-1 : un plan calendaire resté bloqué derrière un OT préventif déjà clos. */
+export interface ScheduleCatchUp {
+  scheduleId: number;
+  workOrderId: number;
+  registrationNumber: string;
+  title: string;
+  currentDate: string;
+  targetDate: string;
+}
+
+const toDay = (d: string | Date): string => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
 
 /**
  * Ajoute des mois en UTC (décision D4) en bornant au dernier jour du mois cible :
@@ -19,6 +31,7 @@ export function addMonthsUtc(date: Date, months: number): Date {
   out.setUTCFullYear(y, m, Math.min(date.getUTCDate(), lastDay));
   return out;
 }
+
 const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
@@ -509,6 +522,23 @@ export class PreventiveMaintenanceService {
    * Renvoie la nouvelle date, ou `null` si rien n'a changé.
    */
   async advanceScheduleAfterCompletion(workOrderId: number): Promise<string | null> {
+    const step = await this.nextScheduleStep(workOrderId);
+    if (!step) return null;
+    const { plan, next } = step;
+    const [updated] = await db
+      .update(maintenanceSchedules)
+      .set({ scheduledDate: next })
+      .where(and(eq(maintenanceSchedules.id, plan.id), lt(maintenanceSchedules.scheduledDate, next)))
+      .returning({ scheduledDate: maintenanceSchedules.scheduledDate });
+    if (!updated) return null;
+    log.info({ workOrderId, scheduleId: plan.id, from: plan.scheduledDate, to: next }, "Plan préventif : échéance avancée après clôture de l'OT");
+    return next;
+  }
+
+  /** Plan calendaire d'un OT préventif, échéance traitée (`base`) et échéance suivante (`next`). */
+  private async nextScheduleStep(
+    workOrderId: number,
+  ): Promise<{ plan: MaintenanceSchedule; base: string; next: string; datedWorkOrder: boolean } | null> {
     const [wo] = await db
       .select({
         isPreventive: workOrders.isPreventive,
@@ -528,15 +558,63 @@ export class PreventiveMaintenanceService {
     if (!plan || plan.frequency === 'mileage' || !plan.scheduledDate) return null;
 
     const base = planning?.dueDate ?? wo.startDate ?? plan.scheduledDate;
-    const next = this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue).toISOString().slice(0, 10);
-    const [updated] = await db
-      .update(maintenanceSchedules)
-      .set({ scheduledDate: next })
-      .where(and(eq(maintenanceSchedules.id, plan.id), lt(maintenanceSchedules.scheduledDate, next)))
-      .returning({ scheduledDate: maintenanceSchedules.scheduledDate });
-    if (!updated) return null;
-    log.info({ workOrderId, scheduleId: plan.id, from: plan.scheduledDate, to: next }, "Plan préventif : échéance avancée après clôture de l'OT");
-    return next;
+    const next = toDay(this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue));
+    return { plan, base: toDay(base), next, datedWorkOrder: Boolean(planning?.dueDate ?? wo.startDate) };
+  }
+
+  /**
+   * Rattrapage P3-1, lecture seule : plans calendaires dont le dernier OT préventif est clos
+   * et dont l'échéance n'a pas dépassé celle que cet OT a traitée (clôtures antérieures à P3-1).
+   * - Plans actifs seulement, comme le reste du service.
+   * - OT sans `due_date` ni `start_date` écarté : sans échéance traitée connue, la base retomberait
+   *   sur la date du plan et chaque apply le repousserait d'une période.
+   * - Un plan très en retard n'avance que d'une période : le balayage génère aussitôt l'OT suivant.
+   */
+  async planScheduleCatchUp(): Promise<ScheduleCatchUp[]> {
+    const plans = await db
+      .select({ id: maintenanceSchedules.id, title: maintenanceSchedules.title, registrationNumber: vehicles.registrationNumber })
+      .from(maintenanceSchedules)
+      .innerJoin(vehicles, eq(vehicles.id, maintenanceSchedules.vehicleId))
+      .where(
+        and(
+          eq(maintenanceSchedules.isActive, true),
+          ne(maintenanceSchedules.frequency, 'mileage'),
+          isNotNull(maintenanceSchedules.scheduledDate),
+        ),
+      )
+      .orderBy(asc(maintenanceSchedules.id));
+    const out: ScheduleCatchUp[] = [];
+    for (const { id, title, registrationNumber } of plans) {
+      const [last] = await db
+        .select({ id: workOrders.id, status: workOrders.status })
+        .from(workOrders)
+        .where(and(eq(workOrders.maintenanceScheduleId, id), eq(workOrders.isPreventive, true)))
+        .orderBy(desc(workOrders.id))
+        .limit(1);
+      if (last?.status !== 'completed') continue;
+      const step = await this.nextScheduleStep(last.id);
+      if (!step || !step.datedWorkOrder || toDay(step.plan.scheduledDate!) > step.base) continue;
+      out.push({
+        scheduleId: id,
+        workOrderId: last.id,
+        registrationNumber,
+        title,
+        currentDate: toDay(step.plan.scheduledDate!),
+        targetDate: step.next,
+      });
+    }
+    log.info({ count: out.length }, "Rattrapage P3-1 : plans préventifs bloqués (aperçu)");
+    return out;
+  }
+
+  /** Rattrapage P3-1, écriture : même règle et même UPDATE conditionnel que la clôture. Idempotent. */
+  async applyScheduleCatchUp(): Promise<ScheduleCatchUp[]> {
+    const applied: ScheduleCatchUp[] = [];
+    for (const c of await this.planScheduleCatchUp()) {
+      if (await this.advanceScheduleAfterCompletion(c.workOrderId)) applied.push(c);
+    }
+    log.info({ count: applied.length }, "Rattrapage P3-1 : plans préventifs avancés");
+    return applied;
   }
 
   /**
