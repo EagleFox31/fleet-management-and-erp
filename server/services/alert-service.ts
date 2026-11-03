@@ -949,14 +949,15 @@ export class AlertService {
       );
 
     for (const mission of overdueAtDeparture) {
-      // Vérifier qu'aucune assignment n'a de startedAt (mission pas encore lancée)
-      const started = await db
+      // Mission pas encore lancée : aucune de ses affectations n'a de startedAt. Plusieurs chauffeurs
+      // possibles : un seul départ suffit pour la dire lancée (une autre affectation encore sans départ
+      // ne la rend pas en retard). Sans affectation, pas d'alerte non plus.
+      const assignmentStarts = await db
         .select({ startedAt: assignments.startedAt })
         .from(assignments)
-        .where(and(eq(assignments.missionId, mission.id), isNull(assignments.startedAt)))
-        .limit(1);
+        .where(eq(assignments.missionId, mission.id));
 
-      if (started.length === 0) continue; // mission déjà démarrée
+      if (assignmentStarts.length === 0 || assignmentStarts.some((a) => a.startedAt !== null)) continue; // déjà démarrée
 
       const pickupDate = mission.pickupDate!;
       const delayMs = now.getTime() - new Date(pickupDate).getTime();

@@ -206,3 +206,25 @@ Règles : `docs/journal/README.md`.
 - **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 22 tests, 9 rouges sur la base d'avant (rôles et corps) ; passe de correction : 8 rouges sur la version précédente (dont l'ordre des contrôles), 22 verts. Le contrôle de chauffeur est déjà doublé en amont par `router.param("id")` ; seul le cas d'une seconde affectation distingue l'ordre.
 - **RAIDER** : couvert non-régression, liste gelée réduite, failure memory ; sans objet : migration.
 - **Reste / risques** : `/regularize` et `/declare-no-refuel` gardés dans le handler, pas en garde de route ; DELETE /fuel-records/:id et idempotence de /consumption hors périmètre.
+
+## 2026-11-03 — Plusieurs chauffeurs par mission : autorisation et saisie carburant (#227)
+
+- **Quoi** : une mission peut avoir plusieurs affectations (un chauffeur chacune). `POST /api/missions/:id/fuel-records` accepte tout chauffeur ayant une affectation active (`ACTIVE_ASSIGNMENT_STATUSES`) et contrôle le véhicule de SA ligne ; une affectation annulée ou refusée ne donne aucun droit. `/regularize` accepte le véhicule de n'importe quelle affectation vivante. `GET /api/missions` et `/:id` gardent `assignment` (celle du chauffeur lecteur, sinon la plus ancienne vivante) et ajoutent `assignments` (un chauffeur ne voit que les siennes). Les listes d'opérations ne dupliquent plus une mission, l'alerte de retard au départ et le CA par véhicule tiennent compte de toutes les affectations.
+- **Comment** : règle factorisée dans `server/lib/driver-scope.ts` (`activeDriverAssignmentsOnMission`, `missionVehicleIdsForStaff`, `pickMissionAssignment`) ; lectures `limit(1)` restantes rendues déterministes (`orderBy assignments.id`) ; les listes d'opérations gardent une ligne par mission choisie par `pickMissionAssignment` (même affectation que le détail) ; statuts exclus partagés (`VOID_ASSIGNMENT_STATUSES`, `shared/constants/assignments.ts`).
+- **Pourquoi** : la table n'a aucune unicité sur `mission_id`, le code supposait une seule ligne (`limit(1)` sans ordre) : un chauffeur sur la seconde affectation recevait 403, et la mission figurait deux fois dans les listes.
+- **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 30 tests ; contre l'état d'origine, 6 rouges (second chauffeur refusé, B avec le véhicule de A, personnel sur le 2e véhicule, lecture du détail, doublon des listes d'opérations) ; contre le correctif, 30 verts. 25 fichiers de contrat voisins (missions, opérations, direction, alertes, carburant) : 330 verts.
+- **Décision (3 novembre 2026)** : le CA d'une mission à plusieurs affectations est réparti à parts égales entre ses véhicules distincts (`management-dashboard-service`), au lieu d'être crédité en entier à chacun. Les affectations annulées ou refusées (`VOID_ASSIGNMENT_STATUSES`) ne reçoivent aucune part ; une affectation terminée est comptée.
+- **Nouveaux contrats** : `fuel-card-write-guards.contract.test.ts` (plusieurs chauffeurs par mission : saisie, lecture, listes d'opérations, relais sur le même camion) ; `management-dashboard-kpis.contract.test.ts`, « partage du CA » (relais = une part, terminée comptée, annulée et refusée exclues), rouge quand l'exclusion est retirée. 16 fichiers de contrat voisins : 203 verts ; unitaires : 156 fichiers verts.
+- **RAIDER** : couvert non-régression (contrats voisins verts), réutilisation (`driver-scope.ts`, `ACTIVE_ASSIGNMENT_STATUSES`), failure memory (leçon ajoutée) ; sans objet : migration, aucune colonne.
+- **Reste** : voir le commentaire de suivi sur #227 (édition des affectations, contrôles de départ, documents véhicule, coût de mission, écrans client).
+
+## 2026-11-03 — SESSION_SECRET : refus de démarrer en production sans secret propre (#243)
+- **Agent** : fleet-api · **Branche** : `fix/session-secret-production`
+- **Statut** : fait, en relecture
+- **Quoi** : le serveur refuse de démarrer hors `development`/`test` si `SESSION_SECRET` est absent, fait moins de 32 caractères ou vaut une valeur publique du dépôt.
+- **Comment** : `resolveSessionSecret(env, warn)` dans `server/lib/session-secret.ts`, appelé par `server/middleware/session.ts`. Liste d'autorisation `SESSION_SECRET_FALLBACK_ENVS` ; la signature utilise la valeur brute (le rognage sert seulement à mesurer, pour ne pas invalider les sessions d'un secret actuel entouré d'espaces).
+- **Pourquoi** : le repli `"YaroFleetOSSecretKey"` est public ; un déploiement sans secret permettait de forger un cookie de session.
+- **Comment tester (QA)** : `NODE_ENV=production` sans `SESSION_SECRET` → le serveur s'arrête avec un message qui dit comment générer un secret ; avec 48 octets aléatoires en base64 → démarrage normal.
+- **Preuve automatisée** : `tests/unit/server/session-secret.test.ts`, 17 tests dont la garde statique sur `session.ts`.
+- **RAIDER** : couvert durable (dev et test inchangés), failure memory (LESSONS_LEARNED), erreur actionnable sans secret journalisé ; sans objet : migration.
+- **Reste / risques** : la démo Replit (`npm run start`) doit avoir `SESSION_SECRET` dans ses Secrets avant le déploiement. `sameSite: "none"` en production (APK Capacitor) suivi à part.
