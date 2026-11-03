@@ -962,29 +962,6 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
 
       const payload = parsedPayload.data;
 
-      let centerId: number | null = payload.centerId ?? null;
-      let centerNameSnapshot: string | null = null;
-      let centerAccreditationSnapshot: string | null = null;
-
-      const resolvedCenter = await resolveRenewalCenter({
-        centerId,
-        centerName: payload.centerName,
-        centerAddress: payload.centerAddress,
-        centerContact: payload.centerContact,
-        centerAccreditationNumber: payload.centerAccreditationNumber,
-        documentType: null,
-        actorUserId,
-      });
-      if (!resolvedCenter) {
-        return res.status(400).json({ message: "Centre agréé obligatoire." });
-      }
-      if (!resolvedCenter.ok) {
-        return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
-      }
-      centerId = resolvedCenter.id;
-      centerNameSnapshot = resolvedCenter.name;
-      centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
-
       const [documentRow] = await db
         .select({
           documentId: vehicleDocuments.id,
@@ -1054,6 +1031,26 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           return res.status(400).json({ message: "La demande ne correspond pas au document ciblé." });
         }
       }
+
+      // Le centre est résolu (et créé au besoin) après les contrôles : un refus ne laisse pas de centre en base.
+      const resolvedCenter = await resolveRenewalCenter({
+        centerId: payload.centerId ?? null,
+        centerName: payload.centerName,
+        centerAddress: payload.centerAddress,
+        centerContact: payload.centerContact,
+        centerAccreditationNumber: payload.centerAccreditationNumber,
+        documentType: null,
+        actorUserId,
+      });
+      if (!resolvedCenter) {
+        return res.status(400).json({ message: "Centre agréé obligatoire." });
+      }
+      if (!resolvedCenter.ok) {
+        return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
+      }
+      const centerId = resolvedCenter.id;
+      const centerNameSnapshot = resolvedCenter.name;
+      const centerAccreditationSnapshot = resolveCenterAccreditation(resolvedCenter);
 
       const proofFileName = req.file.originalname;
       const proofFilePath = `/uploads/document-renewals/proofs/${req.file.filename}`;

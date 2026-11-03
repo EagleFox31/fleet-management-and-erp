@@ -84,6 +84,12 @@ livrer les trois, sans exception :
 
 Oublier la couche 3 sur les écrans satellites est l'erreur la plus fréquente.
 
+Les écrans satellites se déclarent dans `client/src/lib/realtime-satellites.ts` : un événement
+porte des groupes (`stock`, `fuel`, `supplierMoney`…), jamais des clés une à une. Un nouvel écran
+de compteur ou de statistique s'ajoute à son groupe. Garde-fou :
+`tests/unit/client/realtime-satellites.test.ts` (événement de stock, d'argent ou de statut absent
+de la table, écran satellite non rafraîchi, clé sans écran).
+
 ### Le `QueryClient` est un singleton
 
 Toujours l'importer **par l'alias** :

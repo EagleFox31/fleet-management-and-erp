@@ -1616,3 +1616,89 @@ Test non déterministe (flake), sans défaut produit.
 
 ### Leçon généralisée
 Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
+
+## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
+
+### Contexte
+L'e2e P6 a montré que la réception d'une commande fournisseur laissait l'alerte stock bas affichée chez le chef d'atelier jusqu'au rechargement (#177). L'audit qui a suivi a trouvé quatorze autres écarts, dont sept hauts : stock, carburant, tableau de bord de gestion.
+
+### Cause racine
+Chaque `case` de `useRealTimeSync.ts` listait ses clés à la main. Un écran de compteur ajouté plus tard n'était rattaché à aucun événement, et `staleTime` (5 min, sans polling) le laissait périmé. Les clés TanStack se comparent élément par élément : `["/api/fuel-card"]` n'atteint pas `["/api/fuel-card/balance"]`.
+
+Classification : oubli de contrat, récidive de la règle des 3 couches (AGENTS.md §2).
+
+### Résolution
+`client/src/lib/realtime-satellites.ts` : des groupes d'écrans par fait métier, et une table événement -> groupes, appliquée avant le `switch`. `parts_delivered`, `part_received`, `vehicle_mileage_updated`, `vehicle_maintenance_position_updated` et `work_order_awaiting_parts` sont désormais rafraîchis. L'émission de `alert_created` par ces flux est côté serveur.
+
+### Prévention (vérifiable)
+`tests/unit/client/realtime-satellites.test.ts` échoue dans ces cas :
+- un événement de stock, d'argent ou de statut émis par le serveur est absent de la table ;
+- un événement de stock ou d'argent ne porte pas de groupe de sa famille ;
+- un écran satellite (compteur, statistique, tableau de bord) n'est rafraîchi par aucun événement ;
+- une clé de groupe n'est posée par aucun écran.
+
+Les listes gelées ne peuvent que diminuer. La preuve par mutation rend la suite rouge : entrée retirée ; groupe de stock remplacé.
+
+### Règle Projet
+Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-satellites.ts` dans la PR qui le crée.
+
+## 2026-11-03 — Renouvellement rapide : justificatif orphelin, ou supprimé alors que référencé
+
+### Contexte
+- `POST /api/document-renewals/quick-renew` reçoit un justificatif par multer, qui l'écrit dans `uploads/` avant le handler.
+- Sur main avant #178 :
+  - plusieurs refus (404 document, 400 visite technique, 404 et 400 demande) renvoyaient la réponse sans supprimer le fichier, qui restait orphelin ;
+  - à l'inverse, un échec de `createAlert` APRÈS l'enregistrement passait par le `catch`, qui supprimait le fichier alors que la demande le référençait déjà. La demande affichait alors une preuve introuvable ;
+  - les écritures (échéance, miroir véhicule, levée des alertes, demande) n'étaient pas en transaction : un échec au milieu laissait l'échéance avancée avec une réponse 500 ;
+  - le centre agréé était créé avant les contrôles et restait en base même en cas de refus.
+
+### Cause racine
+- Classification : cycle de vie d'une ressource externe (un fichier) non lié au commit qui la référence.
+- La suppression était écrite au cas par cas, refus par refus, au lieu de découler d'un seul fait : « une écriture validée référence-t-elle le fichier ? ».
+
+### Résolution
+- Drapeau `proofRecorded`, posé juste après le `db.transaction` qui écrit la demande. Le `finally` supprime le fichier tant qu'il est faux, quel que soit le chemin de sortie.
+- Contrôles de la demande, puis résolution du centre, avant toute écriture. Une seule transaction couvre l'échéance, le miroir, la levée des alertes et la demande (`executor` optionnel sur `syncVehicleDocumentMirror` et `clearDocumentExpiryAlerts`).
+- Alertes et diffusions au mieux après le commit : leur échec ne touche plus au fichier.
+
+### Exceptions nommées
+- Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
+- Les autres routes multer (récépissé, preuves) n'ont pas encore été revues selon ce patron.
+
+### Prévention (vérifiable)
+- `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
+- Copié sur main (3a7c0e3) : 8 rouges sur 8. Les deux assertions « aucun centre » échouent sans la résolution déplacée.
+
+### Règle Projet (obligatoire)
+- Un fichier téléversé n'est conservé qu'une fois qu'une écriture validée le référence. Supprimer dans un `finally` gardé par un drapeau posé après le commit, jamais refus par refus ; les effets de bord après le commit n'y touchent pas.
+
+## 2026-11-03 — Alertes écrites en base sans trame temps réel (couche 2 oubliée, récidive)
+
+### Contexte
+- À la réception de pièces, `procurement-service` (`notifyDeliveryReceived` et `notifyPartReceived`) insérait des alertes pour le chef d'atelier et le technicien, sans émettre `alert_created`. La cloche et le toast restaient muets jusqu'au rechargement.
+- Le renouvellement de document émettait bien la trame, mais avec une charge imbriquée `{ alert }` alors que `useRealTimeSync` lit une charge à plat : toast vide.
+- Ce n'est pas la première fois : la couche 2 des transitions (AGENTS.md §2) avait déjà été oubliée sur d'autres écrans.
+
+### Cause racine
+- Classification : contrat implicite non outillé.
+- Chaque site écrivait `db.insert(alerts)` puis construisait sa trame à la main, ou l'oubliait. Rien ne liait l'insertion à l'émission, et la forme attendue par le client n'était écrite nulle part côté serveur.
+- Un envoi qui levait au milieu de la boucle coupait aussi les trames suivantes et `parts_delivered`.
+
+### Résolution
+- Un helper unique, `server/lib/alert-broadcast.ts` (`broadcastAlertCreated`) :
+  - charge à plat ;
+  - portée nominative, ou repli sur des rôles explicites, jamais de broadcast ;
+  - ne lève jamais : un échec est journalisé par alerte.
+- Les sites de procurement et de renouvellement passent par lui, avec `.returning()` sur l'insertion.
+
+### Prévention (vérifiable)
+- `tests/contract/procurement-alert-realtime.contract.test.ts` vérifie quatre points :
+  - la trame est reçue par deux rôles distincts, et non par le magasinier ;
+  - toute trame `alert_created` a une portée `user` ;
+  - un envoi raté ne coupe pas la suite ;
+  - la charge du renouvellement est à plat.
+- Rouge sans le correctif : 3 sur 3 pour le lot initial (#180), puis 1 sur 4 pour le try/catch par alerte.
+- À venir (backlog de) : un garde d'hygiène qui échoue sur tout `insert(alerts)` d'un fichier qui n'appelle ni `broadcastAlertCreated` ni `alert-service`.
+
+### Règle Projet (obligatoire)
+- Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.

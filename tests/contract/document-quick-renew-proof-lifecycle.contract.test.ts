@@ -61,7 +61,7 @@ afterAll(async () => {
   if (ids.vehicleIds.length > 0) {
     await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleId, ids.vehicleIds));
   }
-  // Le centre est résolu (et créé au besoin) avant les contrôles du document : refus compris.
+  // Filet : le centre n'est créé qu'après les contrôles, mais un cas accepté en crée un.
   if (centerNames.length > 0) {
     await db.delete(documentRenewalCenters).where(inArray(documentRenewalCenters.name, centerNames));
   }
@@ -116,6 +116,11 @@ function baseFields(vehicleId: number, documentId: number) {
   };
 }
 
+/** Aucun centre créé sous ce nom : un refus ne laisse pas de centre en base. */
+async function centersNamed(name: string) {
+  return db.select({ id: documentRenewalCenters.id }).from(documentRenewalCenters).where(eq(documentRenewalCenters.name, name));
+}
+
 async function expiryOf(documentId: number) {
   const [row] = await db.select({ expiryDate: vehicleDocuments.expiryDate }).from(vehicleDocuments).where(eq(vehicleDocuments.id, documentId));
   return String(row.expiryDate).slice(0, 10);
@@ -124,9 +129,11 @@ async function expiryOf(documentId: number) {
 describe("renouvellement rapide : cycle de vie du justificatif", { timeout: 180000 }, () => {
   it("document introuvable : 404 et justificatif supprimé", async () => {
     const { vehicle, document, prefix } = await setup();
-    const response = await quickRenew({ ...baseFields(vehicle.id, document.id), vehicleDocumentId: "999999999" }, prefix);
+    const fields = baseFields(vehicle.id, document.id);
+    const response = await quickRenew({ ...fields, vehicleDocumentId: "999999999" }, prefix);
     expect(response.status).toBe(404);
     expect(proofFiles(prefix)).toEqual([]);
+    expect(await centersNamed(fields.centerName)).toEqual([]);
   });
 
   it("visite technique sans référence : 400 et justificatif supprimé", async () => {
@@ -204,9 +211,11 @@ describe("renouvellement rapide : cycle de vie du justificatif", { timeout: 1800
         proofFilePath: "/uploads/document-renewals/proofs/TEST-preuve-origine.pdf",
       })
       .returning();
-    const response = await quickRenew({ ...baseFields(vehicle.id, document.id), requestId: String(closed.id) }, prefix);
+    const fields = baseFields(vehicle.id, document.id);
+    const response = await quickRenew({ ...fields, requestId: String(closed.id) }, prefix);
     expect(response.status).toBe(409);
     expect(proofFiles(prefix)).toEqual([]);
+    expect(await centersNamed(fields.centerName)).toEqual([]);
     expect(await expiryOf(document.id)).toBe("2026-11-20");
     const [row] = await db.select({ proofFilePath: documentRenewalRequests.proofFilePath }).from(documentRenewalRequests).where(eq(documentRenewalRequests.id, closed.id));
     expect(row.proofFilePath).toBe("/uploads/document-renewals/proofs/TEST-preuve-origine.pdf");
