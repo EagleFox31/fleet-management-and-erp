@@ -8,6 +8,7 @@ import { moduleLogger } from "../lib/logger";
 import { idParam, makeFailWith } from "../lib/route-helpers";
 import { isStaff, isWorkshopManager } from "../middleware/auth";
 import { faultCatalogService } from "../services/fault-catalog-service";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("fault-catalog");
 const router = Router();
@@ -55,8 +56,7 @@ router.patch("/fault-catalog/:id", isWorkshopManager, async (req, res, next) => 
     return res.json(catalog);
   } catch (err) {
     if (err instanceof AppError) return next(err);
-    log.error({ err, requestId: req.requestId }, "Échec de la modification de la fiche du catalogue de pannes");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la modification de la fiche du catalogue de pannes" }));
   }
 });
 

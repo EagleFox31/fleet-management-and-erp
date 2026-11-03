@@ -5,6 +5,7 @@ import { AppError, isAppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("purchase-orders");
 
@@ -154,10 +155,7 @@ router.get("/", requireAuth, async (req: Request, res: Response, next: NextFunct
 
     res.json(orders);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "récupération des commandes");
-    }
-    next(error);
+    next(withLogContext(error, { event: "récupération des commandes" }));
   }
 });
 
@@ -175,10 +173,7 @@ router.get("/statistics", requireAuth, async (req: Request, res: Response, next:
 
     res.json(stats);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "calcul des statistiques");
-    }
-    next(error);
+    next(withLogContext(error, { event: "calcul des statistiques" }));
   }
 });
 
@@ -202,10 +197,7 @@ router.get("/group-suggestions", requireAuth, checkWritePermission, async (req: 
 
     res.json(suggestions);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "regroupement des demandes");
-    }
-    next(error);
+    next(withLogContext(error, { event: "regroupement des demandes" }));
   }
 });
 
@@ -221,10 +213,7 @@ router.post("/optimize-timing/:supplierId", requireAuth, checkWritePermission, a
 
     res.json(optimization);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "optimisation du timing");
-    }
-    next(error);
+    next(withLogContext(error, { event: "optimisation du timing" }));
   }
 });
 
@@ -241,10 +230,7 @@ router.get("/overdue", requireAuth, async (req: Request, res: Response, next: Ne
 
     res.json(overdueOrders);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "commandes en retard");
-    }
-    next(error);
+    next(withLogContext(error, { event: "commandes en retard" }));
   }
 });
 
@@ -262,10 +248,7 @@ router.get("/:id", requireAuth, async (req: Request, res: Response, next: NextFu
 
     res.json(orderDetails);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "récupération de la commande");
-    }
-    next(error);
+    next(withLogContext(error, { event: "récupération de la commande" }));
   }
 });
 
@@ -324,10 +307,7 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
     res.status(201).json(order);
   } catch (error) {
     // Erreurs normalisées par le gestionnaire central : jamais de détail technique.
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "création de commande");
-    }
-    next(error);
+    next(withLogContext(error, { event: "création de commande" }));
   }
 });
 
@@ -396,10 +376,7 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
     res.json(updated);
   } catch (error) {
     // ZodError -> 400 par champ, AppError -> son statut, le reste -> 500 générique avec référence.
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "mise à jour du statut");
-    }
-    next(error);
+    next(withLogContext(error, { event: "mise à jour du statut" }));
   }
 });
 
@@ -452,10 +429,7 @@ router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req
 
     res.json(updated);
   } catch (error) {
-    if (!(error instanceof z.ZodError) && !isAppError(error)) {
-      log.error({ err: error, requestId: req.requestId }, "mise à jour de ligne de commande");
-    }
-    next(error);
+    next(withLogContext(error, { event: "mise à jour de ligne de commande" }));
   }
 });
 

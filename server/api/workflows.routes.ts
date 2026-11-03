@@ -4,6 +4,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate } from "../middleware/auth";
 import { workflowService } from "../services/workflow-service";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("workflows");
 const router = Router();
@@ -38,8 +39,7 @@ router.post("/workflows/vehicle-acquisition", authenticate, async (req, res, nex
     return res.status(200).json(workflow);
   } catch (err) {
     if (err instanceof AppError || err instanceof z.ZodError) return next(err);
-    log.error({ err, requestId: req.requestId }, "Échec de la sauvegarde du workflow");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la sauvegarde du workflow" }));
   }
 });
 
@@ -53,8 +53,7 @@ router.patch("/workflows/vehicle-acquisition/:sessionId", authenticate, async (r
     return res.status(200).json(workflow);
   } catch (err) {
     if (err instanceof AppError || err instanceof z.ZodError) return next(err);
-    log.error({ err, requestId: req.requestId }, "Échec de la mise à jour du workflow");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la mise à jour du workflow" }));
   }
 });
 

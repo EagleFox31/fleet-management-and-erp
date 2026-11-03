@@ -13,6 +13,7 @@ import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
 import type { AppRole } from "@shared/constants/roles";
+import { withLogContext } from "../lib/error-log-context";
 
 const supplierLog = moduleLogger("suppliers");
 const router = Router();
@@ -192,10 +193,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const suppliers = await supplierManagementService.getSuppliers(filters);
     res.json(suppliers);
   } catch (error) {
-    if (!(error instanceof AppError)) {
-      supplierLog.error({ err: error, requestId: req.requestId }, "lecture de la liste des fournisseurs en échec");
-    }
-    next(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des fournisseurs.", { cause: error }));
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des fournisseurs.", { cause: error }), { event: "lecture de la liste des fournisseurs en échec" }));
   }
 });
 
