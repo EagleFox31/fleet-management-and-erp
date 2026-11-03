@@ -461,8 +461,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get technicians list - accessible to authenticated users
-  app.get("/api/users/technicians", authenticate, async (req, res) => {
+  // Get technicians list - personnel seulement : un client n'a pas à lire les noms du personnel
+  app.get("/api/users/technicians", isStaff, async (req, res) => {
     try {
       const allUsers = await storage.getAllUsers();
       const technicians = allUsers
@@ -476,7 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(technicians);
     } catch (error) {
-      console.error("Get technicians error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get technicians error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -931,63 +931,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle Routes
-  app.get("/api/vehicles", authenticate, async (req, res) => {
-    try {
-      const search = req.query.search as string | undefined;
-      const status = req.query.status as string | undefined;
-      const vehicleType = req.query.vehicle_type as string | undefined;
-      const limit = parseInt(req.query.limit as string || "10");
-      const offset = parseInt(req.query.offset as string || "0");
-      const sortBy = req.query.sort_by as string | undefined;
-      const sortOrder = (req.query.sort_order as string | undefined) === 'asc' ? 'asc' : 'desc';
-      
-      // Récupérer l'utilisateur connecté pour vérifier ses permissions
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
-        return res.status(401).json({ message: "Utilisateur non trouvé" });
-      }
-      
-      console.log("Requête reçue - Filtres:", { 
-        search, 
-        status, 
-        vehicle_type: vehicleType,
-        limit,
-        offset,
-        user_role: user.role,
-        query_params: req.query
-      });
-      
-      let result;
-      
-      // Temporairement, tous les utilisateurs voient tous les véhicules
-      // TODO: Implémenter getVehiclesByOwner pour les clients
-      console.log('🔍 About to call storage.getVehicles...');
-      result = await storage.getVehicles(search, status, vehicleType, limit, offset, sortBy, sortOrder);
-      console.log('🔍 Result from storage.getVehicles:', result);
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error("Get vehicles error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Route pour récupérer tous les véhicules (pour l'export)
-  app.get("/api/vehicles/all", authenticate, async (req, res) => {
-    try {
-      const result = await storage.getVehicles(undefined, undefined, undefined, 1000, 0);
-      return res.status(200).json(result.vehicles);
-    } catch (error) {
-      console.error("Get all vehicles error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Route pour vérifier si un véhicule existe par son immatriculation
   app.get("/api/vehicles/check/:registrationNumber", isAnyUser, async (req, res) => {
     try {
@@ -1816,50 +1759,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single work order by ID (MUST be before other specific routes)
-  app.get("/api/work-orders/:id", authenticate, async (req, res, next) => {
+  app.get("/api/work-orders/:id", isAnyUser, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
-
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
-      }
-      // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
-      assertValidDbId(id, "ID d'ordre de travail invalide.");
+      const id = Number(req.params.id);
+      // Cloison client + 400 (id invalide ou hors entier 32 bits) + 404 (OT inconnu) : helper commun.
+      await assertWorkOrderReadable(req.user, id);
 
       const workOrder = await storage.getWorkOrder(id);
-      // Pas de contenu dans le journal : l'accès n'est pas encore contrôlé ici.
-      log.debug({ workOrderId: id, found: Boolean(workOrder), requestId: req.requestId }, "Ordre de travail lu");
-      
       if (!workOrder) {
-        return res.status(404).json({ message: "Ordre de travail non trouvé" });
+        throw new AppError(404, "Ordre de travail non trouvé.");
       }
-      
-      // Vérifier les permissions d'accès selon le rôle
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
-        return res.status(401).json({ message: "Utilisateur non trouvé" });
-      }
-      
-      // Les clients ne peuvent voir que les ordres de travail de leurs véhicules
-      if (user.role === 'client') {
-        const vehicle = await storage.getVehicle(workOrder.vehicleId);
-        if (!vehicle || vehicle.ownerId !== user.id) {
-          return res.status(403).json({ message: "Accès refusé - Ce n'est pas votre véhicule" });
-        }
-      }
-      
+      // Pas de contenu dans le journal.
+      log.debug({ workOrderId: id, requestId: req.requestId }, "Ordre de travail lu");
+
       // Les techniciens ne peuvent voir que leurs ordres assignés ou les ordres non assignés
-      if (user.role === 'technician') {
-        if (workOrder.technicianId && workOrder.technicianId !== user.id) {
-          return res.status(403).json({ message: "Accès refusé - Ordre de travail assigné à un autre technicien" });
-        }
+      // (règle propre à cette route, que le helper ne porte pas).
+      if (req.user?.role === "technician" && workOrder.technicianId && workOrder.technicianId !== req.user.id) {
+        throw new AppError(403, "Accès refusé - Ordre de travail assigné à un autre technicien");
       }
-      
+
       return res.status(200).json(workOrder);
     } catch (error) {
       if (isAppError(error)) return next(error);
@@ -2787,32 +2705,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // === WAREHOUSE & STOCK ALERTS ROUTES (Sprint 1 - Phase 2) ===
-  
-  // Valeur totale de l'inventaire (94,4M FCFA de pièces)
-  app.get("/api/warehouse/inventory-value", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const inventoryValue = await stockAlertsService.getInventoryValue();
-      return res.status(200).json(inventoryValue);
-    } catch (error) {
-      console.error("Get inventory value error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Alertes de réapprovisionnement actives (38 alertes)
-  app.get("/api/warehouse/reorder-alerts", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const alerts = await stockAlertsService.getReorderAlerts();
-      return res.status(200).json(alerts);
-    } catch (error) {
-      console.error("Get reorder alerts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Stock réel d'une pièce avec historique mouvements
   app.get("/api/parts/:id/real-stock", isStaff, async (req, res) => {
     try {
@@ -2834,85 +2726,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Enregistrer un mouvement de stock (ENTRÉE/SORTIE)
-  app.post("/api/warehouse/stock-movement", authenticate, isInventoryManager, async (req, res) => {
-    try {
-      const { partId, type, quantity, reason, workOrderId, responsiblePerson, deliveryReceiptNumber } = req.body;
-      
-      if (!partId || !type || !quantity || !reason) {
-        return res.status(400).json({ message: "Données incomplètes" });
-      }
-      
-      if (!['in', 'out'].includes(type)) {
-        return res.status(400).json({ message: "Type de mouvement invalide (in/out)" });
-      }
-
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const movement = await stockAlertsService.recordStockMovement({
-        partId: parseInt(partId),
-        type: type as 'in' | 'out',
-        quantity: parseFloat(quantity),
-        reason,
-        workOrderId: workOrderId ? parseInt(workOrderId) : undefined,
-        responsiblePerson,
-        deliveryReceiptNumber,
-        userId
-      });
-      
-      return res.status(201).json(movement);
-    } catch (error) {
-      console.error("Record stock movement error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
-  
-  // Pièces les plus utilisées (top N)
-  app.get("/api/warehouse/most-used-parts", authenticate, async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 10;
-      
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const mostUsedParts = await stockAlertsService.getMostUsedParts(limit);
-      
-      return res.status(200).json(mostUsedParts);
-    } catch (error) {
-      console.error("Get most used parts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Statistiques globales du magasin
-  app.get("/api/warehouse/statistics", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const statistics = await stockAlertsService.getWarehouseStatistics();
-      
-      return res.status(200).json(statistics);
-    } catch (error) {
-      console.error("Get warehouse statistics error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Pièces par fournisseur avec valeur totale
-  app.get("/api/warehouse/parts-by-supplier", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const partsBySupplier = await stockAlertsService.getPartsBySupplier();
-      
-      return res.status(200).json(partsBySupplier);
-    } catch (error) {
-      console.error("Get parts by supplier error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
   
   // Fuel Records Routes
   app.get("/api/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res) => {
@@ -4136,9 +3949,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
 
   // Statistiques spécifiques pour les techniciens
-  app.get("/api/dashboard/technician-stats", authenticate, async (req, res) => {
+  // Rôles atelier seulement : la réponse porte toute la flotte (aucun filtre par propriétaire).
+  app.get("/api/dashboard/technician-stats", isTechnician, async (req, res) => {
     try {
-      console.log(`📊 [STATS] Génération des statistiques pour le technicien ID: ${req.session.userId}`);
+      log.debug({ userId: req.session.userId, requestId: req.requestId }, "Génération des statistiques technicien");
       
       const userId = req.session.userId;
       if (!userId) {
@@ -4222,15 +4036,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastUpdated: new Date().toISOString()
       };
 
-      console.log(`📈 [STATS] Statistiques générées pour technicien ID ${userId}:`, {
+      log.debug({
+        userId,
         vehiclesTotal: vehicleStats.total,
         workOrdersAssigned: workOrderStats.total,
-        upcomingMaintenance: upcomingMaintenance.length
-      });
+        upcomingMaintenance: upcomingMaintenance.length,
+        requestId: req.requestId,
+      }, "Statistiques technicien générées");
 
       res.json(stats);
     } catch (error) {
-      console.error(`❌ [STATS] Erreur lors de la génération des statistiques:`, error);
+      log.error({ err: error, requestId: req.requestId }, "Erreur lors de la génération des statistiques technicien");
       res.status(500).json({ message: "Erreur lors de la récupération des statistiques" });
     }
   });
@@ -4554,13 +4370,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle tire tracking routes
-  app.get("/api/vehicles/:vehicleId/tires", isAnyUser, async (req, res) => {
+  app.get("/api/vehicles/:vehicleId/tires", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
+      // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
+      assertValidDbId(vehicleId, "ID de véhicule invalide");
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
         return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
@@ -4568,6 +4383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicleTires = await tiresService.getVehicleTires(vehicleId);
       return res.status(200).json(vehicleTires);
     } catch (error) {
+      if (isAppError(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "lecture des pneus du véhicule en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
