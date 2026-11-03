@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, sql, type AnyColumn, type SQLWrapper } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql, type AnyColumn, type SQLWrapper } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
   activityLogs,
@@ -167,12 +167,16 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
   await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, orphanWorkOrders));
-  await db.delete(tireRotations).where(inArray(tireRotations.workOrderId, orphanWorkOrders));
   // Pneus montés, inspections et rotations d'un véhicule orphelin (client-read-scope-tires) : FK vers le véhicule.
+  // Les détails d'une rotation partent avant elle, qu'elle soit rattachée par le véhicule ou par l'OT.
   const orphanVehicleTires = db.select({ id: vehicleTires.id }).from(vehicleTires).where(inArray(vehicleTires.vehicleId, orphanVehicles));
-  const orphanRotations = db.select({ id: tireRotations.id }).from(tireRotations).where(inArray(tireRotations.vehicleId, orphanVehicles));
+  const orphanRotations = db
+    .select({ id: tireRotations.id })
+    .from(tireRotations)
+    .where(or(inArray(tireRotations.vehicleId, orphanVehicles), inArray(tireRotations.workOrderId, orphanWorkOrders)));
   await db.delete(tireRotationDetails).where(inArray(tireRotationDetails.rotationId, orphanRotations));
   await db.delete(tireRotationDetails).where(inArray(tireRotationDetails.vehicleTireId, orphanVehicleTires));
+  await db.delete(tireRotations).where(inArray(tireRotations.workOrderId, orphanWorkOrders));
   await db.delete(tireRotations).where(inArray(tireRotations.vehicleId, orphanVehicles));
   await db.delete(tireInspections).where(inArray(tireInspections.vehicleTireId, orphanVehicleTires));
   await db.delete(vehicleTires).where(inArray(vehicleTires.vehicleId, orphanVehicles));
