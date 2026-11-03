@@ -9,8 +9,10 @@ import {
   extractGetRoutes,
   findUnanalysable,
   judgeGetRoute,
+  routeSignature,
   routerLevelGuards,
   scanOpenGetReads,
+  scanShadowedRoutes,
   sourceFiles,
   stripComments,
 } from "../../support/route-guard-scan";
@@ -82,6 +84,31 @@ const OPEN_GET_READS_FROZEN: string[] = [
  */
 const UNANALYSABLE_FROZEN: string[] = ["server/api/exports.routes.ts router.get(path"];
 const KNOWN_DUPLICATE_ROUTES: string[] = [];
+/**
+ * Routes de `server/routes.ts` masquées par un routeur de `server/api/` (même méthode, même chemin,
+ * noms de paramètres ignorés). `apiRouter` est monté avant `registerRoutes` : la déclaration de
+ * `routes.ts` ne sert jamais, mais elle dort avec ses gardes et sa logique. Cas réel :
+ * `POST /api/fuel-card/consumption` y acceptait un prix unitaire client sous `authenticate` (#201).
+ * Liste gelée en égalité stricte (3 novembre 2026) : supprimer la déclaration de `routes.ts`
+ * retire la ligne ; toute nouvelle entrée est une régression.
+ */
+const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [
+  "GET /api/auth/drivers-list",
+  "GET /api/fuel-card/balance",
+  "GET /api/fuel-card/history",
+  "GET /api/fuel-card/monthly-stats",
+  "GET /api/fuel-card/stats-by-client",
+  "GET /api/fuel-card/vehicle/:p/anomalies",
+  "GET /api/fuel-card/vehicle/:p/stats",
+  "GET /api/suppliers/top",
+  "PATCH /api/admin/users/:p/toggle",
+  "PATCH /api/fault-catalog/:p",
+  "PATCH /api/workflows/vehicle-acquisition/:p",
+  "POST /api/auth/pin-login",
+  "POST /api/fuel-card/consumption",
+  "POST /api/fuel-card/recharge",
+  "POST /api/workflows/vehicle-acquisition",
+];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const roleConstants = roles as unknown as Record<string, readonly string[]>;
@@ -93,6 +120,19 @@ describe("hygiène des routes serveur", () => {
     expect(routes.length).toBeGreaterThan(0);
     const duplicates = [...new Set(routes.filter((route, index) => routes.indexOf(route) !== index))];
     expect(duplicates.sort()).toEqual([...KNOWN_DUPLICATE_ROUTES].sort());
+  });
+
+  it("aucune nouvelle route de routes.ts masquée par un routeur de server/api/ (liste gelée stricte)", () => {
+    const { shadowed, apiRouteCount, legacyRouteCount } = scanShadowedRoutes(serverDir);
+    // le scan n'est pas aveugle : il voit les deux côtés
+    expect(apiRouteCount).toBeGreaterThan(150);
+    expect(legacyRouteCount).toBeGreaterThan(100);
+    expect(shadowed).toEqual([...SHADOWED_LEGACY_ROUTES_FROZEN].sort());
+  });
+
+  it("signature de route : paramètres anonymisés, méthode en capitales, barre finale ignorée", () => {
+    expect(routeSignature("get", "/api/x/:id/y")).toBe(routeSignature("GET", "/api/x/:vehicleId/y/"));
+    expect(routeSignature("get", "/api/x/:id")).not.toBe(routeSignature("post", "/api/x/:id"));
   });
 
   it("aucun corps de requête journalisé par console.*", () => {
