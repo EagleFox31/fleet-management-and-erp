@@ -14,7 +14,6 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "document-renewals.routes.ts POST /requests",
   "drivers.routes.ts POST /:id/update-cpc",
   "drivers.routes.ts POST /sync-cpc-statuses",
-  "fuel-card.routes.ts POST /consumption",
   "incidents.routes.ts POST /incidents",
   "index.ts POST /auth/login (apiRouter)",
   "index.ts POST /auth/pin-login (apiRouter)",

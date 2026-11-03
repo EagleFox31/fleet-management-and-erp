@@ -156,3 +156,14 @@ Règles : `docs/journal/README.md`.
 - **Comment** : `warehouse.routes.ts`, `stock-alerts-service.ts`, `routes.ts`, contrat a5 (2 cas de plus).
 - **Pourquoi** : retours de fleet-securite et du relecteur sur #184 ; les 6 chemins retirés sont servis plus tôt par le routeur monté avant `registerRoutes`.
 - **Reste** : transaction et plancher `Math.max` du mouvement de stock au lot suivant.
+
+## 2026-11-03 — Garde de rôle sur le débit de la carte carburant
+- **Agent** : fleet-api · **Branche** : `fix/fuel-card-consumption-guard`
+- **Statut** : fait
+- **Quoi** : `POST /api/fuel-card/consumption` n'est plus ouvert à tout le personnel : `isFuelCardManager` (admin, logistics, secretary).
+- **Comment** : garde sur la route ; contrat étendu (workshop_manager et technician 403 solde inchangé, logistics et secretary 201) ; entrée retirée de la liste gelée `write-route-guards.frozen.ts`.
+- **Pourquoi** : écriture d'argent sous `isStaff` seul (leçon A5). Aucun écran n'appelle la route ; le chauffeur utilise `/api/missions/:id/fuel-records`.
+- **Comment tester (QA)** : se connecter en technicien, POST /api/fuel-card/consumption ; attendu 403, solde inchangé.
+- **Preuve automatisée** : contrat 44 tests, 2 rouges sur `main` puis verts ; voir PR.
+- **RAIDER** : couvert non-régression et liste gelée réduite ; sans objet : migration.
+- **Reste / risques** : `isFuelRecordWriter` (chef d'atelier) non retenu, aucun écran d'atelier n'appelle la route.
