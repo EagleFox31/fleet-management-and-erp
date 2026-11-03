@@ -545,7 +545,7 @@ export function AlertsPanel() {
       toast({
         title: "Échec de suppression",
         description:
-          error instanceof Error ? error.message : "Impossible de supprimer cette alerte.",
+          userMessageOf(error, "Impossible de supprimer cette alerte."),
         variant: "destructive",
       });
     } finally {

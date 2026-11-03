@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -278,7 +279,7 @@ export default function TechniciansIndex() {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Impossible d'ajouter l'utilisateur: ${error.message || "Erreur serveur"}`,
+        description: userMessageOf(error, "Impossible d'ajouter l'utilisateur."),
       });
     } finally {
       setIsProcessing(false);
@@ -301,7 +302,7 @@ export default function TechniciansIndex() {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Impossible de mettre à jour l'utilisateur: ${error.message || "Erreur serveur"}`,
+        description: userMessageOf(error, "Impossible de mettre à jour l'utilisateur."),
       });
     } finally {
       setIsProcessing(false);
@@ -326,7 +327,7 @@ export default function TechniciansIndex() {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Impossible de supprimer l'utilisateur: ${error.message || "Erreur serveur"}`,
+        description: userMessageOf(error, "Impossible de supprimer l'utilisateur."),
       });
     } finally {
       setIsProcessing(false);

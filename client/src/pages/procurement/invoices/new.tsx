@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -126,7 +127,7 @@ export default function NewSupplierInvoicePage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de créer la facture",
+        description: userMessageOf(error, "Impossible de créer la facture"),
         variant: "destructive",
       });
     },

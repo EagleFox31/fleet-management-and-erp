@@ -211,7 +211,7 @@ export function TireTable({ tires, isLoading = false, onRowClick, onEdit, onMoun
     onError: (error: Error) => {
       toast({
         title: "Erreur de suppression",
-        description: error.message || "Impossible de supprimer ce pneu.",
+        description: userMessageOf(error, "Impossible de supprimer ce pneu."),
         variant: "destructive",
       });
     },

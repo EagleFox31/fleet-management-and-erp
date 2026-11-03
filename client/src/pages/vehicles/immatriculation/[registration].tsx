@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -96,7 +97,7 @@ export default function VehicleDetailsByRegistration({ params }: { params: { reg
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression du véhicule: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression du véhicule."),
       });
     },
   });

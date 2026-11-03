@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -159,7 +160,7 @@ export default function InventoryIndex() {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de l'enregistrement: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de l'enregistrement."),
       });
     },
   });

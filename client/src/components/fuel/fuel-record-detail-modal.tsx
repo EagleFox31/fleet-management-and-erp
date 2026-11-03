@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -90,7 +91,7 @@ export function FuelRecordDetailModal({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression."),
       });
       setIsDeleteDialogOpen(false);
     },
