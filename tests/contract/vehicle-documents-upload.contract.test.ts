@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
-import { activityLogs, vehicleDocuments, vehicleDocumentTypes } from "../../shared/schema";
+import { activityLogs, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -78,6 +78,20 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ vehicleId, name: "Carte grise", type: "carte_grise", filename: "doc-test.pdf" });
     expect(filesOnDisk()).toHaveLength(1);
+  });
+
+  it("P3-2 : le depot d'un document neuf met a jour la colonne miroir de vehicles", async () => {
+    const cases = [
+      ["assurance", "insuranceExpiry", "2031-05-01"],
+      ["visite_technique", "technicalInspectionDate", "2031-06-02"],
+      ["carte_grise", "licensePlateExpiry", "2031-07-03"],
+    ] as const;
+    for (const [type, column, date] of cases) {
+      const res = await upload({ name: `Miroir ${type}`, type, expiryDate: date }, "workshop_manager");
+      expect(res.status).toBe(201);
+      const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+      expect(String(row[column])).toContain(date);
+    }
   });
 
   it("refuse un type inconnu ou inactif (400 lisible) et supprime le fichier", async () => {

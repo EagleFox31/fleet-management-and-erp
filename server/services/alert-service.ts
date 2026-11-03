@@ -493,10 +493,11 @@ export class AlertService {
     const documents: Array<{
       field: "insuranceExpiry" | "technicalInspectionDate" | "licensePlateExpiry";
       name: string;
+      documentType: "assurance" | "visite_technique" | "carte_grise";
     }> = [
-      { field: 'insuranceExpiry', name: 'Assurance' },
-      { field: 'technicalInspectionDate', name: 'Contrôle technique' },
-      { field: 'licensePlateExpiry', name: 'Plaque d\'immatriculation' }
+      { field: 'insuranceExpiry', name: 'Assurance', documentType: 'assurance' },
+      { field: 'technicalInspectionDate', name: 'Contrôle technique', documentType: 'visite_technique' },
+      { field: 'licensePlateExpiry', name: 'Plaque d\'immatriculation', documentType: 'carte_grise' }
     ];
 
     for (const doc of documents) {
