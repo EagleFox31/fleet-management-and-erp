@@ -255,29 +255,53 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
     expect(again).toHaveLength(0);
   });
 
-  // P3-1 : rien n'appelle completeMaintenanceAndScheduleNext. Cloturer un OT preventif ne fait
-  // pas avancer la date du plan, qui reste echue ; et comme le service ecarte les plans dont
-  // un OT clos a demarre apres `scheduledDate`, le plan ne declenche plus jamais d'OT.
+  // P3-1 : cloturer un OT preventif fait avancer l'echeance de son plan. Base = echeance traitee
+  // par l'OT (planning fixe) : un OT clos en retard ne fait pas deriver le plan.
   describe("P3-1", () => {
-    let planId = 0;
-    const from = daysFromNow(-1);
-    beforeAll(async () => {
-      const v = await newVehicle("p3-1");
-      const plan = await newSchedule(v.id, { scheduledDate: from });
-      planId = plan.id;
+    async function closedPlan(label: string, over: Partial<typeof maintenanceSchedules.$inferInsert> = {}) {
+      const v = await newVehicle(label);
+      const plan = await newSchedule(v.id, over);
       const wo = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
       await storage.updateWorkOrder(wo.id, { status: "in_progress" });
       await storage.updateWorkOrder(wo.id, { status: "completed" });
-    });
-    // Temoin : le plan existe et garde aujourd'hui sa date echue. Sans lui, un plan absent
-    // (scheduleRow -> undefined) ferait passer le marqueur. Casse quand P3-1 est corrige.
-    it("temoin P3-1 : apres cloture de l'OT, le plan garde sa date echue", async () => {
-      const row = await scheduleRow(planId);
+      return { plan, wo };
+    }
+
+    it("P3-1 : cloturer l'OT preventif fait avancer l'echeance du plan", async () => {
+      const from = daysFromNow(-1);
+      const { plan } = await closedPlan("p3-1", { scheduledDate: from });
+      const row = await scheduleRow(plan.id);
       expect(row).toBeDefined();
-      expect(row.scheduledDate).toBe(from);
+      expect(row.scheduledDate > from).toBe(true);
     });
-    it.fails("P3-1 : cloturer l'OT preventif fait avancer l'echeance du plan", async () => {
-      expect((await scheduleRow(planId)).scheduledDate).not.toBe(from);
+
+    it("cloture en retard : l'echeance suivante part de l'echeance de l'OT, pas de la date de cloture", async () => {
+      // Echeance du 15 janvier 2026, cloturee des mois plus tard : prochaine = 15 fevrier 2026.
+      const { plan } = await closedPlan("p3-1-late", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+      expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-02-15");
+    });
+
+    it("double cloture (refus qualite puis reprise) : l'echeance n'avance qu'une fois", async () => {
+      const { plan, wo } = await closedPlan("p3-1-twice", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+      await storage.updateWorkOrder(wo.id, { status: "in_progress" });
+      await storage.updateWorkOrder(wo.id, { status: "completed" });
+      expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-02-15");
+      expect(await preventiveMaintenanceService.advanceScheduleAfterCompletion(wo.id)).toBeNull();
+    });
+
+    it("plan kilometrique : la date n'est pas touchee (le seuil avance a la generation)", async () => {
+      const { plan } = await closedPlan("p3-1-km", { frequency: "mileage", frequencyValue: 10000, scheduledMileage: 110000, scheduledDate: "2026-01-15" });
+      expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-01-15");
+    });
+
+    it("plan hebdomadaire : avance de N semaines (frequence auparavant rejetee par le calcul)", async () => {
+      const { plan } = await closedPlan("p3-1-weekly", { frequency: "weekly", frequencyValue: 2, scheduledDate: "2026-01-15" });
+      expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-01-29");
+    });
+
+    it("le plan avance, le balayage ne regenere pas d'OT pour l'echeance traitee", async () => {
+      const { plan } = await closedPlan("p3-1-sweep", { frequency: "monthly", frequencyValue: 6, scheduledDate: daysFromNow(-1) });
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(plan.vehicleId)).toHaveLength(0);
     });
   });
 });
