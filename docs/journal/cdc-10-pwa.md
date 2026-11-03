@@ -51,3 +51,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Le registre des bases ne connaît que les comptes qui ont écrit après cette mise à jour ; sur un navigateur sans `indexedDB.databases()` (Firefox avant 126), un magasin plus ancien d'un autre compte n'est pas vidé par balayage (l'ancien format global, lui, l'est toujours).
   - Le `webServer` de `playwright.config.ts` reste déclaré quand `E2E_BASE_URL` est absent : lancer le spec avec cette variable, comme indiqué plus haut.
   - Une 401 reçue en cours de session par une autre requête que `/api/auth/me` ne passe pas par `expireOfflineSession` (seul `getCurrentUser` le fait).
+
+## 2026-11-03T08:00:44+01:00 — CDC-10a — Amorçage rebranché après la fusion de main, file des autres comptes gardée
+
+- Quoi : la fusion cc01c19 avait remplacé l'appel à `getCurrentUser` par `checkSession` dans `useAuth` (code de main 163a20a). Les garanties E1 (déconnexion différée avant `/me`), activation du magasin à la restauration et M3 (expiration sur 401) ne s'exécutaient plus. Les mentions de `getCurrentUser` plus haut décrivent l'état d'avant cette fusion.
+- Comment : `client/src/lib/session-resume.ts` compose ces étapes autour de `checkSession` (dépendances injectées) ; `auth.ts` expose `resumeSession`, `useAuth` l'appelle dans sa boucle de nouvelle tentative ; `getCurrentUser` supprimé.
+- Réserve de b7 : `purgeOthers` (connexion d'un autre compte sans déconnexion) ne supprime plus que le cache de lecture des autres comptes ; leur file d'écritures est gardée (illisible pour le compte connecté, `readQueue` exige le même userId). `purgeAll` renvoie et journalise le nombre d'écritures détruites à la déconnexion volontaire ; l'avertissement utilisateur reste au lot #10c (décision à prendre avant production).
+- sw.js : les requêtes d'une autre origine ne sont plus mises en cache.
+- Pourquoi : relecture NO-GO (fleet-relecteur, fleet-securite) ; leçon dans `docs/analysis/LESSONS_LEARNED.md`.
+- Preuve : tsc 0 erreur, unitaires 1521/1521 (118 fichiers), dont `session-resume.test.ts` (6). e2e 13 non rejoué (la base du `.env` est la production).

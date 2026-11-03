@@ -72,6 +72,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Autres origines (CDN, polices, tuiles) : laissées au navigateur, jamais en cache ici.
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {

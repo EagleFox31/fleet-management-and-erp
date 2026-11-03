@@ -92,7 +92,7 @@ export function activateOfflineUser(queryClient: QueryClient, userId: number): v
   void offlineScope.purgeLegacy();
   void offlineScope.purgeOthers(userId).then((count) => {
     if (count > 0) {
-      clientLogger.warn("Magasins hors ligne d'un autre compte vidés", { count });
+      clientLogger.warn("Cache de lecture hors ligne d'un autre compte supprimé (file gardée)", { count });
     }
   });
 }

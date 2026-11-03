@@ -1,8 +1,9 @@
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { activateOfflineUser, expireOfflineSession, purgeOfflineSession } from "@/lib/offline-storage";
 import { getActiveOfflineUserId } from "@/lib/offline-user-scope";
-import { clientLogger } from "@/lib/logger";
 import { pendingServerLogout } from "@/lib/pending-logout";
+import { checkSession } from "@/lib/session-check";
+import { createSessionResume } from "@/lib/session-resume";
 import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 
 export interface LoginCredentials {
@@ -88,51 +89,17 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function getCurrentUser(): Promise<User | null> {
-  // Une déconnexion faite hors ligne part avant tout : sinon /api/auth/me
-  // rouvrirait la session que l'utilisateur a fermée.
-  if ((await pendingServerLogout.flush()) === "pending") {
-    return null;
-  }
-
-  // Compte actif au départ de la requête : une réponse 401 tardive ne doit pas
-  // retirer un compte qui s'est connecté entre-temps.
-  const activeAtStart = getActiveOfflineUserId();
-  const { signal, clear } = createAuthTimeoutController(8_000);
-  try {
-    const response = await fetch("/api/auth/me", {
-      credentials: "include",
-      signal,
-    });
-
-    if (response.status === 401) {
-      // Session expirée : le cache TanStack et l'utilisateur actif sont vidés,
-      // la file d'écritures de ce compte reste pour sa prochaine connexion.
-      if (activeAtStart !== null) {
-        await expireOfflineSession(queryClient, activeAtStart);
-      }
-      return null;
-    }
-    
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`${response.status}: ${text}`);
-    }
-    
-    const user: User = await response.json();
-    rememberOfflineUser(user);
-    return user;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      clientLogger.warn("Auth check timeout: /api/auth/me");
-      return null;
-    }
-    clientLogger.error("Error getting current user", { err: error });
-    return null;
-  } finally {
-    clear();
-  }
-}
+/**
+ * Amorçage de session : déconnexion différée envoyée d'abord, puis /api/auth/me,
+ * puis activation ou expiration du magasin hors ligne. Voir `session-resume.ts`.
+ */
+export const resumeSession = createSessionResume({
+  flushPendingLogout: () => pendingServerLogout.flush(),
+  checkSession: () => checkSession(),
+  getActiveUserId: getActiveOfflineUserId,
+  activateUser: (userId) => activateOfflineUser(queryClient, userId),
+  expireUser: (userId) => expireOfflineSession(queryClient, userId),
+});
 
 export function isAdmin(user: User | null): boolean {
   return !!user && user.role === "admin";

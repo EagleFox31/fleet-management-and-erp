@@ -1226,3 +1226,24 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Dans un index qui contient une expression, toutes les colonnes s'écrivent `sql\`${table.col}\``. Une convergence de schéma se prouve par l'absence d'écriture au second passage (OID stable ou « No changes »), pas par un passage vert. Le garde-fou sera retiré quand drizzle-kit corrigera son introspection, preuve par un double push à l'appui.
+
+## 2026-11-03 - Fusion de main qui débranche le point d'entrée d'une branche de sécurité (#56)
+
+### Contexte
+- #56 (CDC-10a) cloisonne le cache PWA par utilisateur. Ses garanties de démarrage (déconnexion hors ligne envoyée avant `/api/auth/me`, magasin hors ligne activé à la restauration, expiration sur 401) vivaient dans `getCurrentUser()`.
+
+### Cause racine
+- main (163a20a) a remplacé l'amorçage de `useAuth` par `checkSession()`. La fusion de main dans #56 (cc01c19) a gardé la version de main : `getCurrentUser` est devenu du code mort, sans conflit Git ni test rouge, car les tests visaient la fonction et non le chemin d'appel.
+- Effet : une déconnexion faite hors ligne n'était plus envoyée au redémarrage ; le cookie de 30 jours reconnectait le compte précédent pour la personne suivante sur l'appareil (cloison §11 cassée). Détecté en relecture (fleet-relecteur, fleet-securite) avant fusion.
+
+### Classification
+- Near miss, sécurité (cloison entre comptes), introduit par une résolution de fusion.
+
+### Résolution
+- `client/src/lib/session-resume.ts` : composition injectable (déconnexion différée → `/me` → activation ou expiration), seul chemin d'amorçage, appelée par `useAuth` via `resumeSession`. `getCurrentUser` supprimé (un seul chemin).
+
+### Prévention (vérifiable)
+- `tests/unit/client/session-resume.test.ts` : ordre logout avant `/me`, aucune restauration si la déconnexion est en attente, activation et expiration ; et garde-fou textuel qui échoue si `useAuth` amorce par `checkSession` seul.
+
+### Règle Projet (obligatoire)
+- Une garantie de sécurité se teste sur son point d'entrée réel, pas seulement sur la fonction qui la porte. Après toute fusion de main dans une branche de sécurité, relire les fichiers en conflit résolu côté main et rejouer l'e2e concerné.

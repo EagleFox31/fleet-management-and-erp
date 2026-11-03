@@ -229,6 +229,25 @@ export function createOfflineScope(kv: OfflineKv) {
     }
   }
 
+  /** Supprime le seul cache de lecture d'un magasin ; une sauvegarde en cours s'annule. */
+  async function dropReadCache(db: string): Promise<void> {
+    epochs.set(db, epochOfDb(db) + 1);
+    try {
+      await kv.del(db, CACHE_RECORD_KEY);
+    } catch (err) {
+      clientLogger.warn("Échec de purge d'un cache hors ligne", { err, db });
+    }
+  }
+
+  async function countQueued(db: string): Promise<number> {
+    try {
+      const saved = await kv.get<QueueEnvelope<unknown>>(db, QUEUE_RECORD_KEY);
+      return saved && Array.isArray(saved.actions) ? saved.actions.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   async function listOfflineDbs(): Promise<string[] | null> {
     try {
       return (await kv.listDbs()).filter(isOfflineDbName);
@@ -318,19 +337,34 @@ export function createOfflineScope(kv: OfflineKv) {
       return true;
     },
 
-    /** Déconnexion : tous les magasins sont vidés, file comprise, ainsi que l'ancien format global. */
-    async purgeAll(activeUserId: number | null = getActiveOfflineUserId()): Promise<void> {
-      const targets = new Set((await listOfflineDbs()) ?? []);
-      if (activeUserId !== null) targets.add(offlineDbName(activeUserId));
-      await Promise.all(Array.from(targets).map(clearDb));
+    /**
+     * Déconnexion : tous les magasins sont vidés, file comprise, ainsi que l'ancien format global.
+     * Renvoie le nombre d'écritures non synchronisées détruites (journalisé ; avertissement : lot #10c).
+     */
+    async purgeAll(activeUserId: number | null = getActiveOfflineUserId()): Promise<number> {
+      const targets = Array.from(new Set([
+        ...((await listOfflineDbs()) ?? []),
+        ...(activeUserId !== null ? [offlineDbName(activeUserId)] : []),
+      ]));
+      const counts = await Promise.all(targets.map(countQueued));
+      await Promise.all(targets.map(clearDb));
       await purgeLegacy();
+      const lost = counts.reduce((a, b) => a + b, 0);
+      if (lost > 0) {
+        clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", { lost });
+      }
+      return lost;
     },
 
-    /** Changement d'utilisateur sans déconnexion : tous les magasins sauf le sien sont vidés. */
+    /**
+     * Changement d'utilisateur sans déconnexion (tablette partagée) : le cache de lecture
+     * des autres comptes est supprimé, leur file d'écritures est gardée pour leur
+     * prochaine connexion. Elle reste illisible ici : `readQueue` exige le même userId.
+     */
     async purgeOthers(keepUserId: number): Promise<number> {
       const keep = offlineDbName(keepUserId);
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== keep);
-      await Promise.all(others.map(clearDb));
+      await Promise.all(others.map(dropReadCache));
       return others.length;
     },
 

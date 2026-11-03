@@ -179,8 +179,8 @@ describe("cloison entre deux comptes sur le même appareil", () => {
     expect(await scope.readQueue(22)).toEqual([]);
   });
 
-  it("changement de compte sans déconnexion : les magasins des autres sont vidés, le sien reste", async () => {
-    const { kv, dump } = memoryKv();
+  it("changement de compte sans déconnexion : le cache de lecture des autres est supprimé, leur file est gardée", async () => {
+    const { kv } = memoryKv();
     const scope = createOfflineScope(kv);
     await scope.saveCache(11, [myWorkOrders({ id: 62, vehicleId: 13 })]);
     await scope.writeQueue(11, [{ id: "a" }], scope.epochOf(11));
@@ -188,10 +188,23 @@ describe("cloison entre deux comptes sur le même appareil", () => {
 
     expect(await scope.purgeOthers(22)).toBe(1);
 
+    // Tablette partagée : les saisies hors ligne du technicien 11 survivent à la connexion de 22.
     expect(await scope.loadCache(11)).toEqual([]);
-    expect(await scope.readQueue(11)).toEqual([]);
+    expect(await scope.readQueue(11)).toEqual([{ id: "a" }]);
+    // Le compte 22 ne peut pas lire la file de 11 (contrôle du userId).
+    expect(await scope.readQueue(22)).toEqual([]);
     expect((await scope.loadCache(22)).length).toBe(1);
-    expect(dump().dbs.every((r) => r.db === offlineDbName(22))).toBe(true);
+  });
+
+  it("déconnexion : renvoie le nombre d'écritures non synchronisées détruites", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }, { id: "b" }], scope.epochOf(11));
+    await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+
+    expect(await scope.purgeAll(11)).toBe(3);
+    expect(await scope.readQueue(11)).toEqual([]);
+    expect(await scope.readQueue(22)).toEqual([]);
   });
 
   it("une sauvegarde en cours pendant la déconnexion ne ressuscite pas le magasin", async () => {

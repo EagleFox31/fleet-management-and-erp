@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
-import { login as apiLogin, logout as apiLogout, User, LoginCredentials } from "@/lib/auth";
-import { checkSession, nextSessionRetryDelay } from "@/lib/session-check";
+import { login as apiLogin, logout as apiLogout, resumeSession, User, LoginCredentials } from "@/lib/auth";
+import { nextSessionRetryDelay } from "@/lib/session-check";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { loginFailureOf } from "@/lib/lockout-message";
@@ -55,7 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const checkUser = async () => {
       setIsLoading(true);
       for (let attempt = 1; ; attempt++) {
-        const result = await checkSession();
+        // Seul chemin d'amorçage : déconnexion différée, puis /me, puis magasin hors ligne.
+        const result = await resumeSession();
         if (isStale()) return;
         if (result.status !== "unreachable") {
           setUser(result.status === "authenticated" ? result.user : null);
