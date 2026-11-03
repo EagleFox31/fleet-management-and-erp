@@ -2159,3 +2159,21 @@ soumission sans doublon.
 - **Comment** : le texte contrôlé ne contient plus le `requestId`. FUEL3 mesure ses propres lignes et une sentinelle, que le test supprime à la fin.
 - **Pourquoi** : deux échecs aléatoires signalés par 0a. Le garde-fou a trouvé 7 contrôles de plus que le premier relevé.
 - **Preuves** : rouge par mutation sur les deux cas (ancien contrôle avec le requestId forcé ; `UPDATE vehicles SET brand = brand` au démarrage). tsc 0, unitaires 142/142 fichiers, contrats 127/127 fichiers, FUEL3 4/4.
+
+## 2026-11-03 16:00 — Couche 3 : table des écrans satellites et garde-fou
+
+- **Quoi** : `client/src/lib/realtime-satellites.ts`, avec 14 groupes d'écrans et une table événement -> groupes. `useRealTimeSync.ts` appelle `invalidateSatellites` avant le `switch`, et `part_used_*` rafraîchit en plus la fiche de l'OT. Nouveau test `tests/unit/client/realtime-satellites.test.ts` (11 cas).
+- **Comment** : le garde-fou balaie les émetteurs du serveur (premier argument littéral de `broadcast*`, `emit*` ou `diffuser`, et `'eventType'` SQL) et les `queryKey` du client, constantes `_PATH` des contrats comprises. Listes gelées :
+  - `UNCOVERED_SATELLITES` : `/api/invoices/monthly-stats`, appel sans route, et `/api/workflows/stats`, sans événement ;
+  - `TABLE_WITHOUT_EMITTER` : 4 événements.
+- **Pourquoi** : les 14 écarts de l'audit 0a du 3 novembre 2026. L'oubli d'un écran satellite était l'erreur la plus fréquente de la règle des 3 couches.
+- **Preuves** :
+  - rouge par mutation : retirer `parts_delivered` fait échouer le test de famille, et `warehouse_stock_movement_recorded` sans groupe stock fait échouer le test de groupe et celui de l'audit ;
+  - vert : unitaires 142 fichiers, tsc 0 ;
+  - e2e en local : 23 + 21 (10/10), 06 + 14 + 15 (4 verts, 1 skip préexistant de 06 : aucun véhicule en base).
+
+## 2026-11-03 15:31 — Couche 3 : réserves de relecture sur #179
+
+- **Quoi** : NOT_YET_IN_TABLE et UNCOVERED_SATELLITES sont figées par égalité stricte. Le groupe fuel couvre aussi `["/api/fuel-card/vehicle", id, …]` et le préfixe `/api/fuel-records/vehicle/` (fiche véhicule). La JSDoc de `invalidateCatalogEvent` est revenue au-dessus de sa fonction.
+- **Pourquoi** : réserve du relecteur. Les deux listes pouvaient grandir sans que le test échoue, ce qui contredisait leur nature de liste gelée.
+- **Preuves** : rouge si on ajoute une entrée à l'une ou l'autre liste (2 échecs). tsc 0, unitaires 142/142 fichiers.
