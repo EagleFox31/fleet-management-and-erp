@@ -713,7 +713,7 @@ router.post("/requests", async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "création d'une demande de renouvellement" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "création d'une demande de renouvellement" }));
   }
 });
 
@@ -1195,7 +1195,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       }
 
       if (!finalizedRequest) {
-        return res.status(500).json({ message: "Impossible de finaliser la demande de renouvellement." });
+        return next(new AppError(500, "Impossible de finaliser la demande de renouvellement."));
       }
 
       const documentLabel =
@@ -1300,7 +1300,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         }
       }
       if (error instanceof AppError) return next(error);
-      return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "renouvellement rapide d'un document" }));
+      return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "renouvellement rapide d'un document" }));
     }
   });
 });

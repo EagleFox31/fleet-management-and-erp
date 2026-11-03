@@ -123,7 +123,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
   } catch (error: any) {
     // Enregistrement carburant inconnu (404) : le gestionnaire central rend l'ApiErrorBody.
     if (error instanceof AppError) return next(error);
-    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error creating mission from fuel:" }));
+    return next(withLogContext(new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error creating mission from fuel:" }));
   }
 });
 

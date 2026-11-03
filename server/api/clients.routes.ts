@@ -201,7 +201,7 @@ router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res
 
     const createdClient = await getClientWithCreator(newClient.id);
     if (!createdClient) {
-      return res.status(500).json({ message: "Client créé mais introuvable" });
+      throw new AppError(500, "Client créé mais introuvable");
     }
 
     broadcastClientUpdate("client_created", createdClient);
@@ -247,7 +247,7 @@ router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
 
     const hydratedClient = await getClientWithCreator(updatedClient.id);
     if (!hydratedClient) {
-      return res.status(500).json({ message: "Client mis à jour mais introuvable" });
+      throw new AppError(500, "Client mis à jour mais introuvable");
     }
 
     broadcastClientUpdate("client_updated", hydratedClient);
@@ -286,7 +286,7 @@ router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
 
     const hydratedClient = await getClientWithCreator(archivedClient.id);
     if (!hydratedClient) {
-      return res.status(500).json({ message: "Client archivé mais introuvable" });
+      throw new AppError(500, "Client archivé mais introuvable");
     }
 
     broadcastClientUpdate("client_deleted", hydratedClient);
@@ -319,7 +319,7 @@ router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res, nex
 
     const hydratedClient = await getClientWithCreator(restoredClient.id);
     if (!hydratedClient) {
-      return res.status(500).json({ message: "Client restauré mais introuvable" });
+      throw new AppError(500, "Client restauré mais introuvable");
     }
 
     broadcastClientUpdate("client_updated", hydratedClient);
