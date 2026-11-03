@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { assignments, drivers } from "@shared/schema";
 import { canReadDriverPersonalData } from "@shared/constants/roles";
+import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 
 /**
  * Cloison des chauffeurs (AGENTS §11, pendant de `client-scope.ts`).
@@ -42,6 +43,30 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
     .where(and(eq(assignments.missionId, missionId), inArray(assignments.driverId, scope)))
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * Véhicules affectés au compte : affectation sur l'une de ses fiches chauffeur, encore active
+ * (`ACTIVE_ASSIGNMENT_STATUSES`). Une affectation terminée ou annulée n'en fait plus partie.
+ * Règle commune aux pannes et au kilométrage.
+ */
+export async function assignedVehicleIdsOf(reader: DriverScopeReader): Promise<number[]> {
+  const rows = await db
+    .select({ vehicleId: assignments.vehicleId })
+    .from(assignments)
+    .innerJoin(drivers, eq(assignments.driverId, drivers.id))
+    .where(and(eq(drivers.userId, reader.id), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])));
+  return rows.map((r) => r.vehicleId).filter((v): v is number => v !== null);
+}
+
+export const OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE =
+  "Vous ne pouvez saisir le kilométrage que du véhicule qui vous est affecté.";
+
+/** Vrai si `reader` peut saisir le kilométrage du véhicule : personnel libre, chauffeur sur son véhicule affecté. */
+export async function canWriteVehicleMileage(reader: DriverScopeReader | undefined, vehicleId: number): Promise<boolean> {
+  if (!reader) return false;
+  if (reader.role !== "driver") return true;
+  return (await assignedVehicleIdsOf(reader)).includes(vehicleId);
 }
 
 export const DRIVER_CPC_FORBIDDEN_MESSAGE = "Accès refusé : la certification CPC est saisie par l'exploitation.";

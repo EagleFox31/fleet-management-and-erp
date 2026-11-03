@@ -222,7 +222,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variantes et spécifications `/api/parts/:id/variants|specifications` : rôles, enfant d'une autre pièce 404, code dupliqué 409, supplément invalide 400, variante référencée 409, cascade) |
+| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variantes et spécifications `/api/parts/:id/variants|specifications` : rôles, enfant d'une autre pièce 404, code dupliqué 409, supplément invalide 400, variante référencée 409, cascade); accès et forme d'erreur (`parts-catalog-access-errors` : 401 anonyme sur toute écriture et sur les enfants, 403 client, technicien et magasinier selon l'action, corps `ApiErrorBody` sur 400/401/403/404/409, double création simultanée = une seule fiche, pièce citée par le catalogue de pannes 409). La catégorie est un texte libre de la fiche, sans route propre. Défauts figés en `it.fails` : PATCH acceptant un stock négatif (200) ; DELETE d'une pièce citée par une demande de pièce en 500 avec texte d'exception) |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » suit le stock (défaut corrigé) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
@@ -301,7 +301,7 @@ Tables : `fuelRecords`, cartes carburant.
 |---|---|---|---|
 | FUEL1 | CRUD plein et carte carburant | C | OK (`fuel-card-routes` : recharge et consommation 401/403/400, solde et crédits/débits par différence, historique filtré, statistiques mensuelles, liste et suppression des pleins ; 6 défauts corrigés par #80 : date et quantité illisibles 400, quantité négative 400, véhicule inconnu 404, solde insuffisant 409, cloison client) ; `fuel-card-service`, `secondary-routes-validation` |
 | FUEL2 | Consommation par véhicule | I | OK (contrat `fuel-vehicle-stats` : totaux, prix au litre, station, zéros, rôles, 400 ; véhicule inconnu 404, corrigé par #80) |
-| FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | À faire |
+| FUEL3 | Anomalies : volume > réservoir, kilométrage décroissant | I | OK (intégration `fuel-anomaly-rules` : tank-overflow égal à la capacité et à la tolérance 5 %, sans capacité, électrique, sans véhicule ; odometer-regression égal, premier plein, 0 = absent, hors ordre, même date, pic isolé, véhicules séparés ; décision par clé `<règle>:<id>`, compteur sans capacité, CHECK 23514. Contrat `fuel-anomaly-rules` : liste, résumé, capacité du réservoir par rôle, événements de resynchronisation) |
 
 ### 3.10 Clients, missions, facturation
 
