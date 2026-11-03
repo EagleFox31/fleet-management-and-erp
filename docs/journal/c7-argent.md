@@ -64,7 +64,8 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - un run interrompu laissait des restes que le run suivant ne voyait pas ;
   - un champ budget sauté aurait laissé lancer la mission sans ce budget, en silence.
 - **Comment tester** : `node node_modules/@playwright/test/cli.js test e2e/13-mission-invoice-payment.spec.ts e2e/17-mission-lifecycle.spec.ts` sur une base de test (jamais la prod).
-- **Preuve automatisée** : 9/9 sur `fleet_test_c7e2e`, puis 0 ligne `E2E-P2-` ou `E2E-MIS1-` restante. `npm run check` : 0 erreur. tsc sur e2e/ : aucune erreur dans les fichiers touchés.
+- **Preuve automatisée** : 9/9 sur `fleet_test_c7e2e`, puis 0 ligne `E2E-P2-` ou `E2E-MIS1-` restante. `npm run check` n'inclut pas e2e/ : tsc ciblé (tsconfig temporaire étendant la racine, include e2e/, shared/, server/, tests/support/) sans erreur dans les fichiers touchés, les 2 erreurs restantes (e2e/22, tests/support/alert-emission-scan.ts) existent déjà sur main.
+- **Garde** : `purgeJourneyRows` refuse tout préfixe hors `E2E-<SPEC>-` (un `""` ferait `LIKE '%'`).
 - **RAIDER** :
   - R : purge partagée ;
   - I : la purge par préfixe rend le run rejouable après un plantage ;

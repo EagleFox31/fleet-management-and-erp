@@ -85,6 +85,10 @@ export async function deleteJourneyRows(missionIds: number[], driverIds: number[
  * beforeAll comme en afterAll ; le préfixe doit être propre à la spec.
  */
 export async function purgeJourneyRows(prefix: string) {
+  // Un préfixe vide ou trop court (LIKE '%') viderait missions, véhicules et chauffeurs.
+  if (!/^E2E-[A-Z0-9]+-$/.test(prefix)) {
+    throw new Error(`purgeJourneyRows : préfixe refusé (${JSON.stringify(prefix)}), attendu E2E-<SPEC>-`);
+  }
   const rows = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${prefix}%`));
   const missionIds = rows.map((row) => row.id);
   if (missionIds.length > 0) {
