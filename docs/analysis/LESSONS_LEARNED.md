@@ -1203,3 +1203,25 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Une contrainte écrite en SQL est aussi déclarée dans Drizzle, sous le même nom, ou réconciliée par un bloc DO idempotent. Une PR n'annonce « CI verte » qu'après `gh pr checks` sur sa tête.
+
+## 2026-11-03 - Second drizzle-kit push en échec (index colonne puis expression)
+
+### Constat
+- Signalé par la session CDC : sur une base déjà poussée, `drizzle-kit push` plante en ZodError (« Expected string, received null »). Reproduit sur origin/main seul : le premier push sur base neuve passe, le second échoue. La CI ne le voyait pas (un seul push par base neuve) ; le push d'une base existante (Neon, dev) était cassé depuis #116.
+
+### Cause racine
+- `ux_part_specifications_part_name` sur `(part_id, lower(specification_name))`. drizzle-kit 0.30.6 relit les index en découpant `pg_get_expr(indexprs)` en tableau et l'indexe par la position de la colonne dans l'index : l'expression en position 2 lit l'élément 2 d'un tableau qui n'en a qu'un, donc null. De plus, `is_expression` vaut pour tout l'index : une colonne simple mêlée à une expression, même placée après, est relue comme expression et ne correspond jamais au schéma. Une virgule, un guillemet ou une accolade dans une expression casserait aussi ce découpage.
+
+### Classification
+- Défaut d'outillage (bug drizzle-kit) révélé par un choix de schéma ; aucun effet sur les données ni sur l'API.
+
+### Résolution
+- Index remplacé par `ux_part_specifications_name_part` sur `(lower(specification_name), part_id)`, les deux éléments déclarés en `sql` (`sql\`${table.partId}\``) : même unicité, `idx_part_specifications_part_id` sert déjà les lectures par pièce. La migration rejouée pose le nouvel index puis retire l'ancien (pas de fenêtre sans unicité).
+- Near miss en relecture : une première version mettait l'expression en tête mais gardait `table.partId` en colonne. Le ZodError disparaissait et les push étaient verts, mais chaque push DROP puis recréait l'index (OID changé), d'où une fenêtre sans unicité. « Push vert » n'était pas une preuve de convergence.
+- Vérifié : OID de l'index identique après push successifs (base neuve et base portant l'ancien index), contrat `parts-catalog-crud` (homonyme insensible à la casse → 409) vert.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/schema-index-introspection.test.ts` parcourt tous les index de `shared/schema.ts` et échoue sur un index mêlant colonne simple et expression, ou sur une virgule, un guillemet ou une accolade dans une expression ; vérifié rouge sur l'ancien index et sur la première version du correctif.
+
+### Règle Projet (obligatoire)
+- Dans un index qui contient une expression, toutes les colonnes s'écrivent `sql\`${table.col}\``. Une convergence de schéma se prouve par l'absence d'écriture au second passage (OID stable ou « No changes »), pas par un passage vert. Le garde-fou sera retiré quand drizzle-kit corrigera son introspection, preuve par un double push à l'appui.
