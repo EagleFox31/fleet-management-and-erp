@@ -44,6 +44,14 @@ avant la première suite. Elle est idempotente, la rejouer ne change rien.
 
 PowerShell : `$env:DATABASE_URL_TEST="postgres://fleet:fleet@postgres:5432/fleet_test"; $env:DATABASE_WS_PROXY="localhost:5433/v1"; npm run test:contract`.
 
+Avant intégration ou contrat : `unset DATABASE_URL` (PowerShell : `Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue`). `DATABASE_URL_TEST` s'exporte, il n'est plus lu depuis `.env`. Si on l'oublie :
+
+```
+Tests refusés : DATABASE_URL (hôte « <hôte> ») diffère de DATABASE_URL_TEST (hôte « postgres:5432 »).
+```
+ou, sans `DATABASE_URL_TEST` : `Tests refusés : DATABASE_URL_TEST est requis pour les suites d'intégration et de contrat.`
+Les e2e et les scripts `backfill:*` / `benchmark:*` ne passent pas par ce garde-fou (`playwright.config.ts:5` garde sa propre vérification).
+
 Plusieurs sessions ou agents en parallèle : une base dédiée chacun dans le même conteneur, jamais `fleet_test` partagée. Un `drizzle-kit push` d'une autre branche y change le schéma entre deux passages et fait échouer des tests sains (échec labor-catalog non reproduit, novembre 2026).
 
 ```bash
