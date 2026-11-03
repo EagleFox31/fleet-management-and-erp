@@ -479,25 +479,31 @@ export class ManagementDashboardService {
     const missionCountByVehicle = new Map<number, number>();
     let missionsWithoutRevenueAttribution = 0;
 
+    // Une mission peut avoir plusieurs affectations : son chiffre d'affaires est réparti à parts égales
+    // entre ses véhicules distincts (deux chauffeurs sur le même camion = un seul véhicule), et elle
+    // n'est comptée qu'une fois sans CA, sinon le CA et les compteurs seraient multipliés.
+    const vehiclesByMission = new Map<number, Set<number>>();
     for (const assignment of assignmentRows) {
       if (!periodMissionIds.has(assignment.missionId) || assignment.vehicleId == null) {
         continue;
       }
+      const set = vehiclesByMission.get(assignment.missionId) ?? new Set<number>();
+      set.add(assignment.vehicleId);
+      vehiclesByMission.set(assignment.missionId, set);
+    }
 
-      const revenue = revenueByMission.get(assignment.missionId) ?? 0;
+    for (const [missionId, vehicleIds] of vehiclesByMission) {
+      const revenue = revenueByMission.get(missionId) ?? 0;
       if (revenue <= 0) {
         missionsWithoutRevenueAttribution += 1;
         continue;
       }
 
-      revenueByVehicle.set(
-        assignment.vehicleId,
-        (revenueByVehicle.get(assignment.vehicleId) ?? 0) + revenue,
-      );
-      missionCountByVehicle.set(
-        assignment.vehicleId,
-        (missionCountByVehicle.get(assignment.vehicleId) ?? 0) + 1,
-      );
+      const share = revenue / vehicleIds.size;
+      for (const vehicleId of vehicleIds) {
+        revenueByVehicle.set(vehicleId, (revenueByVehicle.get(vehicleId) ?? 0) + share);
+        missionCountByVehicle.set(vehicleId, (missionCountByVehicle.get(vehicleId) ?? 0) + 1);
+      }
     }
 
     const fuelByVehicle = new Map<number, number>();

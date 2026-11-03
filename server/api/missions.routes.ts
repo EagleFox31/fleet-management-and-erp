@@ -3,7 +3,7 @@ import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
-import { eq, and, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -21,7 +21,14 @@ import {
 import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { toFieldErrors } from "@shared/errors";
-import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
+import {
+  activeDriverAssignmentsOnMission,
+  canAccessMissionAsDriver,
+  driverScopeOf,
+  missionVehicleIdsForStaff,
+  OUT_OF_DRIVER_SCOPE_MESSAGE,
+  pickMissionAssignment,
+} from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import {
@@ -829,7 +836,7 @@ router.get("/", async (req, res) => {
     // Get assignments for each mission
     const missionsWithAssignments = await Promise.all(
       allMissions.map(async (mission) => {
-        const [assignment] = await db
+        const assignmentRows = await db
           .select({
             id: assignments.id,
             missionId: assignments.missionId,
@@ -858,7 +865,11 @@ router.get("/", async (req, res) => {
           .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
-          .limit(1);
+          .orderBy(asc(assignments.id));
+        // Plusieurs chauffeurs possibles : `assignment` reste la valeur unique historique (celle du chauffeur
+        // lecteur, sinon la plus ancienne active), `assignments` liste toutes celles qu'il a le droit de voir.
+        const visibleAssignments = driverScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && driverScope.includes(a.driverId));
+        const assignment = pickMissionAssignment(assignmentRows, driverScope);
 
         const executionDates = extractMissionExecutionDates({
           workflowData: mission.workflowData,
@@ -873,6 +884,7 @@ router.get("/", async (req, res) => {
           ...mission,
           ...executionDates,
           assignment: assignment || null,
+          assignments: visibleAssignments,
         };
       })
     );
@@ -939,7 +951,7 @@ router.get("/:id", async (req, res) => {
     }
 
     // Get assignment
-    const [assignment] = await db
+    const assignmentRows = await db
       .select({
         id: assignments.id,
         missionId: assignments.missionId,
@@ -972,7 +984,11 @@ router.get("/:id", async (req, res) => {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
-      .limit(1);
+      .orderBy(asc(assignments.id));
+    // Plusieurs chauffeurs possibles (voir la liste) : un chauffeur ne lit que ses propres affectations.
+    const detailScope = await driverScopeOf(req.user);
+    const visibleAssignments = detailScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && detailScope.includes(a.driverId));
+    const assignment = pickMissionAssignment(assignmentRows, detailScope);
 
     const executionDates = extractMissionExecutionDates({
       workflowData: mission.workflowData,
@@ -987,6 +1003,7 @@ router.get("/:id", async (req, res) => {
       ...mission,
       ...executionDates,
       assignment: assignment || null,
+      assignments: visibleAssignments,
     });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get mission error");
@@ -1094,15 +1111,9 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
         status: missions.status,
         deliveryAddress: missions.deliveryAddress,
         clientName: clients.name,
-        assignmentId: assignments.id,
-        assignmentVehicleId: assignments.vehicleId,
-        assignmentDriverId: assignments.driverId,
-        assignmentDriverUserId: drivers.userId,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
-      .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(missions.id, missionId))
       .limit(1);
 
@@ -1110,24 +1121,28 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
-    // Périmètre d'abord : un chauffeur non affecté reçoit 403 quel que soit le véhicule envoyé, sans
-    // pouvoir distinguer 400 et 403 pour deviner le véhicule d'une mission hors de son périmètre.
+    // Plusieurs chauffeurs possibles par mission : le droit et le véhicule contrôlé se lisent sur
+    // l'ensemble des affectations, pas sur « la » première (#227).
+    // Périmètre d'abord : un chauffeur sans affectation active sur la mission reçoit 403 quel que soit le
+    // véhicule envoyé, sans pouvoir distinguer 400 et 403 pour deviner le véhicule d'une mission hors de
+    // son périmètre. Son véhicule est celui de SA affectation, jamais celui d'un autre chauffeur.
+    let allowedVehicleIds: number[];
     if (actorRole === "driver") {
-      if (!mission.assignmentDriverId || !mission.assignmentDriverUserId) {
-        throw new AppError(403, "Aucun chauffeur valide affecté à cette mission.");
+      const own = await activeDriverAssignmentsOnMission({ id: actorUserId, role: actorRole }, missionId);
+      if (own.length === 0) {
+        throw new AppError(403, "Accès refusé: seul un chauffeur affecté à cette mission peut enregistrer ce plein.");
       }
-
-      if (mission.assignmentDriverUserId !== actorUserId) {
-        throw new AppError(403, "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.");
-      }
+      allowedVehicleIds = own.map((a) => a.vehicleId).filter((v): v is number => v !== null);
+    } else {
+      allowedVehicleIds = await missionVehicleIdsForStaff(missionId);
     }
 
     // Statut : contrôlé sous le verrou de ligne, après le rejeu (assertMissionAcceptsFuel), pas ici.
-    if (!mission.assignmentId || !mission.assignmentVehicleId) {
+    if (allowedVehicleIds.length === 0) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
     }
 
-    if (payload.vehicleId !== mission.assignmentVehicleId) {
+    if (!allowedVehicleIds.includes(payload.vehicleId)) {
       return res.status(400).json({
         message: "Le véhicule renseigné ne correspond pas au véhicule affecté à la mission.",
       });
@@ -1268,12 +1283,9 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
         workflowData: missions.workflowData,
         deliveryAddress: missions.deliveryAddress,
         clientName: clients.name,
-        assignmentId: assignments.id,
-        assignmentVehicleId: assignments.vehicleId,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .where(eq(missions.id, missionId))
       .limit(1);
 
@@ -1291,11 +1303,13 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       });
     }
 
-    if (!mission.assignmentId || !mission.assignmentVehicleId) {
+    // Plusieurs chauffeurs, donc plusieurs véhicules possibles : on accepte celui de n'importe quelle affectation (#227).
+    const regularizableVehicleIds = await missionVehicleIdsForStaff(missionId);
+    if (regularizableVehicleIds.length === 0) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
     }
 
-    if (payload.vehicleId !== mission.assignmentVehicleId) {
+    if (!regularizableVehicleIds.includes(payload.vehicleId)) {
       return res.status(400).json({
         message: "Le véhicule renseigné ne correspond pas au véhicule affecté à la mission.",
       });
@@ -1608,6 +1622,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     const hasVehicle = Boolean(missionAssignment?.vehicleId);
@@ -2412,6 +2427,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
       })
       .from(assignments)
       .where(eq(assignments.missionId, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     const assignmentProvided = Object.prototype.hasOwnProperty.call(payload, "assignment");
@@ -2628,6 +2644,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     if (targetStatus === "assigned") {
@@ -3000,6 +3017,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
       .from(missions)
       .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .where(eq(missions.id, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     if (!mission) {
@@ -3163,6 +3181,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(eq(missions.id, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     if (!mission) {

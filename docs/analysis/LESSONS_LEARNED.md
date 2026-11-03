@@ -2035,3 +2035,21 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.
+
+## 2026-11-03 — Une table sans contrainte d'unicité, un code qui suppose « une seule ligne » (#227)
+
+### Contexte
+- `assignments` n'a aucune unicité sur `mission_id` : la base accepte plusieurs chauffeurs par mission. Le code, lui, lisait « l'» affectation par `limit(1)` sans ordre, par `leftJoin` ou par `one(assignments)`.
+
+### Cause racine
+- Hypothèse d'unicité écrite seulement dans le code, jamais dans le schéma ni dans un test : tant qu'aucune mission n'avait deux lignes, tout passait.
+- Conséquences observées dès qu'une seconde ligne existe : un chauffeur autorisé recevait 403 (le contrôle ne portait que sur la première ligne lue), une mission apparaissait deux fois dans les listes, le contrôle du véhicule dépendait de l'ordre de lecture.
+
+### Résolution
+- Règle d'autorisation lue sur l'ensemble des lignes, factorisée dans `server/lib/driver-scope.ts` ; lectures qui restent à valeur unique rendues déterministes (`orderBy`) ; jointures dédupliquées.
+
+### Prévention (vérifiable)
+- Contrat à deux chauffeurs sur une même mission (`fuel-card-write-guards.contract.test.ts`) : deux saisies acceptées, véhicule d'un autre chauffeur refusé, chauffeur hors mission et affectation annulée en 403, aucune mission dupliquée dans les listes d'opérations.
+
+### Règle Projet (obligatoire)
+- Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.

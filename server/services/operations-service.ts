@@ -9,7 +9,7 @@ import {
   type Mission,
   type Client,
 } from "@shared/schema";
-import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
+import { eq, asc, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 
 /**
@@ -28,6 +28,21 @@ function missionsOfDrivers(driverIds: number[]) {
     missions.id,
     db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverIds)),
   );
+}
+
+/**
+ * Une mission peut avoir plusieurs affectations (un chauffeur chacune) : la jointure `assignments` rend
+ * alors une ligne par affectation. Garde la première ligne de chaque mission (les lignes sont lues
+ * par ordre d'affectation), pour qu'une mission ne soit ni listée ni comptée deux fois.
+ */
+function firstRowPerMission<T>(rows: T[], missionIdOf: (row: T) => number): T[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => {
+    const id = missionIdOf(row);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /**
@@ -189,7 +204,7 @@ export class OperationsService {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(and(...conditions));
 
-    const results = await query;
+    const results = firstRowPerMission(await query.orderBy(asc(assignments.id)), (r) => r.mission.id);
     const missionsList = results.map(r => ({
       ...r.mission,
       vehicle: r.vehicle,
@@ -339,7 +354,10 @@ export class OperationsService {
       query = query.where(and(...conditions)) as any;
     }
 
-    const results = await query.orderBy(desc(missions.createdAt));
+    const results = firstRowPerMission(
+      await query.orderBy(desc(missions.createdAt), asc(assignments.id)),
+      (r) => r.mission.id,
+    );
 
     const missionsList = results.map(r => ({
       ...r.mission,
@@ -380,9 +398,9 @@ export class OperationsService {
           ? and(inArray(missions.status, ["planned", "assigned"]), missionsOfDrivers(driverScope))
           : inArray(missions.status, ["planned", "assigned"]),
       )
-      .orderBy(missions.pickupDate);
+      .orderBy(missions.pickupDate, asc(assignments.id));
 
-    return results;
+    return firstRowPerMission(results, (r) => r.id);
   }
 
   /**
@@ -413,9 +431,9 @@ export class OperationsService {
           ? and(eq(missions.status, "in_progress"), missionsOfDrivers(driverScope))
           : eq(missions.status, "in_progress"),
       )
-      .orderBy(missions.deliveryDate);
+      .orderBy(missions.deliveryDate, asc(assignments.id));
 
-    return results;
+    return firstRowPerMission(results, (r) => r.id);
   }
 
   /**

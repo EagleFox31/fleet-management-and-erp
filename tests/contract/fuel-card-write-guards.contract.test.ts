@@ -24,6 +24,7 @@ const ACTORS = {
   secretary: "secretary",
   driver: "driver",
   otherDriver: "driver",
+  thirdDriver: "driver",
   technician: "technician",
   workshop_manager: "workshop_manager",
   warehouse: "warehouse",
@@ -132,17 +133,17 @@ describe("POST /api/missions/:id/fuel-records : rôles", { timeout: 180000 }, ()
     expect(await recordsOf(missionId)).toBe(0);
   });
 
-  // router.param("id") refuse déjà un chauffeur sans affectation sur la mission : le cas ci-dessus est
-  // protégé en amont. Reste le chauffeur présent sur une seconde affectation, quand la première ligne lue
-  // par le handler est celle d'un autre chauffeur : avant l'inversion des contrôles, un véhicule faux
-  // donnait 400 (et trahissait le véhicule de la première ligne), désormais 403.
-  it("chauffeur sur une seconde affectation, première ligne d'un autre chauffeur : 403 et non 400", async () => {
+  // Une mission peut avoir plusieurs chauffeurs (#227) : le chauffeur présent sur une seconde affectation
+  // est autorisé, et son véhicule contrôlé est celui de SA ligne. Un véhicule faux est donc un 400 (il ne
+  // trahit aucun véhicule : l'appelant est affecté), et plus un 403 comme quand la première ligne lue
+  // décidait pour tous.
+  it("chauffeur sur une seconde affectation avec un vehicleId faux : 400, aucun débit", async () => {
     const { missionId } = await missionOfDriver("otherDriver");
     const second = await fundedVehicle();
     await db.insert(assignments).values({ missionId, vehicleId: second, driverId: await driverFiche("driver"), status: "accepted" } as any);
     const wrong = await fundedVehicle();
     const res = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "driver", body: fill(wrong) });
-    expect(apiErrorProblems(res.status, res.body, 403, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
     expect(await recordsOf(missionId)).toBe(0);
   });
 
@@ -234,5 +235,99 @@ describe("POST /api/fuel-card/consumption : corps invalide", { timeout: 180000 }
     const vehicleId = await fundedVehicle();
     const res = await session.call("POST", "/api/fuel-card/consumption", { actor: "logistics", body: { ...valid(vehicleId), quantity: "2" } });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
+  });
+});
+
+/** Mission à deux chauffeurs, un véhicule chacun : A = driver (1re ligne), B = otherDriver (2e ligne). */
+async function twoDriverMission() {
+  const a = await missionOfDriver("driver");
+  const vehicleB = await fundedVehicle();
+  const [rowB] = await db
+    .insert(assignments)
+    .values({ missionId: a.missionId, vehicleId: vehicleB, driverId: await driverFiche("otherDriver"), status: "accepted" } as any)
+    .returning();
+  return { missionId: a.missionId, vehicleA: a.vehicleId, vehicleB, assignmentB: rowB.id };
+}
+
+describe("POST /api/missions/:id/fuel-records : plusieurs chauffeurs par mission (#227)", { timeout: 180000 }, () => {
+  it("A et B saisissent chacun leur carburant : 201 pour les deux, débit sur leur propre véhicule", async () => {
+    const { missionId, vehicleA, vehicleB } = await twoDriverMission();
+    const beforeA = await balance(vehicleA);
+    const beforeB = await balance(vehicleB);
+
+    const resA = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "driver", body: fill(vehicleA) });
+    expect(resA.status, JSON.stringify(resA.body)).toBe(201);
+    const resB = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "otherDriver", body: fill(vehicleB) });
+    expect(resB.status, JSON.stringify(resB.body)).toBe(201);
+
+    expect(await recordsOf(missionId)).toBe(2);
+    expect(await balance(vehicleA)).toBeLessThan(beforeA);
+    expect(await balance(vehicleB)).toBeLessThan(beforeB);
+    const rows = await db.select().from(fuelRecords).where(eq(fuelRecords.missionId, missionId));
+    expect(rows.filter((r) => Number(r.debitAmount ?? 0) > 0).map((r) => r.vehicleId).sort()).toEqual([vehicleA, vehicleB].sort());
+  });
+
+  it("B envoie le vehicleId de A : 400, aucun débit (le véhicule contrôlé est celui de sa propre affectation)", async () => {
+    const { missionId, vehicleA, vehicleB } = await twoDriverMission();
+    const beforeA = await balance(vehicleA);
+    const beforeB = await balance(vehicleB);
+    const res = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "otherDriver", body: fill(vehicleA) });
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(await recordsOf(missionId)).toBe(0);
+    expect(await balance(vehicleA)).toBe(beforeA);
+    expect(await balance(vehicleB)).toBe(beforeB);
+  });
+
+  it("chauffeur C hors mission : 403, aucun débit", async () => {
+    const { missionId, vehicleA, vehicleB } = await twoDriverMission();
+    await driverFiche("thirdDriver");
+    for (const vehicleId of [vehicleA, vehicleB]) {
+      const res = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "thirdDriver", body: fill(vehicleId) });
+      expect(apiErrorProblems(res.status, res.body, 403, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    }
+    expect(await recordsOf(missionId)).toBe(0);
+  });
+
+  it.each(["cancelled", "rejected"] as const)("affectation %s : aucun droit, 403 sans débit (l'autre chauffeur reste accepté)", async (status) => {
+    const { missionId, vehicleB, assignmentB } = await twoDriverMission();
+    await db.update(assignments).set({ status } as any).where(eq(assignments.id, assignmentB));
+    const before = await balance(vehicleB);
+    const res = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "otherDriver", body: fill(vehicleB) });
+    expect(apiErrorProblems(res.status, res.body, 403, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(await recordsOf(missionId)).toBe(0);
+    expect(await balance(vehicleB)).toBe(before);
+  });
+
+  it("le personnel saisit pour n'importe lequel des véhicules de la mission, et la régularisation aussi", async () => {
+    const { missionId, vehicleA, vehicleB } = await twoDriverMission();
+    for (const vehicleId of [vehicleA, vehicleB]) {
+      const res = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "logistics", body: fill(vehicleId) });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+    }
+    const foreign = await fundedVehicle();
+    const refused = await session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "logistics", body: fill(foreign) });
+    expect(apiErrorProblems(refused.status, refused.body, 400, undefined, refused.headers.get("x-request-id"))).toEqual([]);
+    expect(await recordsOf(missionId)).toBe(2);
+  });
+
+  it("GET /api/missions/:id : le chauffeur B lit sa propre affectation, jamais celle de A ; le personnel lit les deux", async () => {
+    const { missionId, vehicleA, vehicleB } = await twoDriverMission();
+    const asB = await session.call("GET", `/api/missions/${missionId}`, { actor: "otherDriver" });
+    expect(asB.status, JSON.stringify(asB.body)).toBe(200);
+    expect(asB.body.assignment.vehicleId).toBe(vehicleB);
+    expect(asB.body.assignments.map((a: any) => a.vehicleId)).toEqual([vehicleB]);
+
+    const asStaff = await session.call("GET", `/api/missions/${missionId}`, { actor: "logistics" });
+    expect(asStaff.body.assignment.vehicleId).toBe(vehicleA);
+    expect(asStaff.body.assignments.map((a: any) => a.vehicleId)).toEqual([vehicleA, vehicleB]);
+  });
+
+  it("les listes d'opérations ne dupliquent pas une mission à deux affectations", async () => {
+    const { missionId } = await twoDriverMission();
+    const all = await session.call("GET", "/api/operations/missions?status=in_progress", { actor: "logistics" });
+    expect(all.status).toBe(200);
+    expect(all.body.filter((m: any) => m.id === missionId)).toHaveLength(1);
+    const active = await session.call("GET", "/api/operations/missions/active", { actor: "logistics" });
+    expect(active.body.filter((m: any) => m.id === missionId)).toHaveLength(1);
   });
 });
