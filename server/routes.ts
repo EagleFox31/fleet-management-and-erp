@@ -36,7 +36,7 @@ import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
-import { vehiclePatchRefusal, vehiclePriceWriteRefusal } from "./lib/vehicle-patch-guard";
+import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES } from "@shared/constants/roles";
@@ -1004,6 +1004,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/vehicles", isWorkshopManager, async (req, res, next) => {
+    // Valeur vide ou à 0 d'un rôle sans droit sur le prix : ignorée ; non nulle : 403.
+    req.body = withoutEmptyPurchasePrice(req.user?.role, req.body);
     const priceRefusal = vehiclePriceWriteRefusal(req.user?.role, req.body);
     if (priceRefusal) return next(priceRefusal);
     try {
@@ -1034,6 +1036,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Route pour activer un véhicule depuis un workflow complet
   app.post("/api/vehicles/activate-from-workflow", isWorkshopManager, async (req, res, next) => {
+    if (req.body?.vehicleData) req.body.vehicleData = withoutEmptyPurchasePrice(req.user?.role, req.body.vehicleData);
     const priceRefusal = vehiclePriceWriteRefusal(req.user?.role, req.body?.vehicleData);
     if (priceRefusal) return next(priceRefusal);
     try {
@@ -1095,6 +1098,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/vehicles/:id", isVehiclePatcher, async (req, res, next) => {
+    req.body = withoutEmptyPurchasePrice(req.user?.role, req.body);
     const refusal = vehiclePatchRefusal(req.user?.role, req.body) ?? vehiclePriceWriteRefusal(req.user?.role, req.body);
     if (refusal) return next(refusal);
     try {
@@ -1134,6 +1138,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (holder && holder.id !== id) {
           return next(new AppError(409, "Ce numéro d'immatriculation est déjà utilisé par un autre véhicule."));
         }
+      }
+
+      // Rien à modifier (par exemple un prix vide retiré pour un rôle sans droit) : fiche inchangée.
+      if (Object.keys(data).length === 0) {
+        return res.status(200).json(redactVehiclePrice(req.user, vehicle));
       }
 
       const updatedVehicle = await storage.updateVehicle(id, data, userId);

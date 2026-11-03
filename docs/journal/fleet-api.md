@@ -177,3 +177,10 @@ Règles : `docs/journal/README.md`.
 - **Comment** : `vehicle-price-scope.ts`, `vehicle-patch-guard.ts` (`vehiclePriceWriteRefusal`), `operations-service.ts`, `routes.ts` (en place), formulaire véhicule, test d'hygiène `vehicle-select-hygiene.test.ts` (liste gelée de 31 lectures justifiées), cas de contrat pneus, coûts, `acquisitionHT`, écriture.
 - **Pourquoi** : retours du relecteur et de fleet-securite sur la première livraison.
 - **Reste** : contrats et preuve RED sur 3fbf86e à rejouer ; fusion de origin/main et corps de la PR #214 à mettre à jour ; secretary n'atteint ni le PATCH ni le POST véhicule, donc « secretary 200 » non testable par route ; l'assistant d'acquisition (`vehicle-acquisition.tsx:411`) peut envoyer un prix depuis un rôle sans droit.
+
+
+## 2026-11-03 - PR 214 : PATCH véhicule ouvert à secretary et logistics sur le prix (partiel)
+
+- Quoi : le PATCH véhicule accepte secretary (purchasePrice seul) et logistics (tankCapacityL et purchasePrice) ; tout autre champ en 403. workshop_manager : purchasePrice non nul en 403, vide ou 0 retiré (PATCH, POST, activate-from-workflow). PATCH sans champ restant : 200 sans écriture.
+- Comment : `VEHICLE_RESTRICTED_PATCH_FIELDS` dans roles.ts, `withoutEmptyPurchasePrice` et `vehiclePatchRefusal` dans vehicle-patch-guard.ts, handlers existants de routes.ts uniquement.
+- Reste : côté client, l assistant d acquisition n envoie plus purchasePrice sans droit d écriture ; preuve rouge contre origin/main ; échec préexistant du contrat GET /api/vehicles/:id/tires (10 cas, déjà rouge sur ccc1156) à diagnostiquer ; fusion d origin/main ; corps de PR.

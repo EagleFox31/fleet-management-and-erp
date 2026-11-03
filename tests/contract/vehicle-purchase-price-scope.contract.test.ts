@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
@@ -264,6 +264,77 @@ describe("écriture du prix d'achat (PATCH /api/vehicles/:id)", () => {
     expect(res.status).toBe(200);
     expect(Number(res.body.purchasePrice)).toBe(16500000);
     await db.update(vehicles).set({ purchasePrice: PRICE }).where(inArray(vehicles.id, [vehicleId]));
+  });
+
+  const patch = (actor: Actor, body: Record<string, unknown>) => session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor, body });
+
+  it("secretary + { purchasePrice } : 200, prix enregistré", async () => {
+    const res = await patch("secretary", { purchasePrice: 16200000 });
+    expect(res.status).toBe(200);
+    expect(Number(res.body.purchasePrice)).toBe(16200000);
+    expect(Number((await priceInDb()).price)).toBe(16200000);
+  });
+
+  it("logistics + { purchasePrice } : 200, prix enregistré", async () => {
+    const res = await patch("logistics", { purchasePrice: 16300000 });
+    expect(res.status).toBe(200);
+    expect(Number((await priceInDb()).price)).toBe(16300000);
+  });
+
+  it.each([
+    ["secretary", { purchasePrice: 16400000, notes: "TESTsecretaire" }],
+    ["secretary", { notes: "TESTsecretaire" }],
+    ["logistics", { purchasePrice: 16400000, notes: "TESTlogistique" }],
+  ] as Array<[Actor, Record<string, unknown>]>)("%s + %j : 403, rien d'écrit", async (actor, body) => {
+    await db.update(vehicles).set({ purchasePrice: PRICE }).where(inArray(vehicles.id, [vehicleId]));
+    const before = await priceInDb();
+    const res = await patch(actor, body);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toMatch(/constraint|SQL|stack/i);
+    const after = await priceInDb();
+    expect(after).toEqual(before);
+    expect(Number(after.price)).toBe(Number(PRICE));
+    const [row] = await db.select({ notes: vehicles.notes }).from(vehicles).where(inArray(vehicles.id, [vehicleId]));
+    expect(row.notes ?? "").not.toMatch(/^TEST(secretaire|logistique)/);
+  });
+
+  it.each([[0], [""], [null], ["0"]])("workshop_manager + { purchasePrice: %j } : ignoré, le reste du PATCH passe", async (empty) => {
+    const note = `TESTvide${String(empty)}`;
+    const res = await patch("workshop_manager", { purchasePrice: empty, notes: note });
+    expect(res.status).toBe(200);
+    const [row] = await db.select({ price: vehicles.purchasePrice, notes: vehicles.notes }).from(vehicles).where(inArray(vehicles.id, [vehicleId]));
+    expect(row.notes).toBe(note);
+    expect(Number(row.price)).toBe(Number(PRICE));
+  });
+
+  it("workshop_manager + { purchasePrice: 0 } seul : ignoré, 200", async () => {
+    const res = await patch("workshop_manager", { purchasePrice: 0 });
+    expect(res.status).toBe(200);
+    expect(Number((await priceInDb()).price)).toBe(Number(PRICE));
+  });
+
+  it("workshop_manager + activate-from-workflow avec purchasePrice 0 : succès, prix non écrit", async () => {
+    const plate = uniqueTestToken("TSTW");
+    const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      actor: "workshop_manager",
+      body: { vehicleData: { registrationNumber: plate, brand: "TESTMarque", model: "TESTModele", year: 2024, mileage: 0, vehicleType: "porteur", status: "operational", purchasePrice: 0 }, workflowData: {} },
+    });
+    const [created] = await db.select({ id: vehicles.id, price: vehicles.purchasePrice }).from(vehicles).where(eq(vehicles.registrationNumber, plate));
+    try {
+      expect(res.status).toBeLessThan(300);
+      expect(created).toBeDefined();
+      expect(created.price ?? null).toBeNull();
+    } finally {
+      if (created) await db.delete(vehicles).where(inArray(vehicles.id, [created.id]));
+    }
+  });
+
+  it("workshop_manager + activate-from-workflow avec un prix non nul : 403", async () => {
+    const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      actor: "workshop_manager",
+      body: { vehicleData: { registrationNumber: uniqueTestToken("TSTX"), purchasePrice: 5000 }, workflowData: {} },
+    });
+    expect(res.status).toBe(403);
   });
 
   it("workshop_manager + purchasePrice à la création : 403", async () => {
