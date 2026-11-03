@@ -20,7 +20,10 @@ const ids = createIdBag();
 const cookies = new Map<string, string>();
 const INACTIVE = `zz_inactif_${Date.now().toString(36)}`;
 const vehicleDir = () => path.join("./uploads/documents", `vehicle-${vehicleId}`);
-const filesOnDisk = () => (fs.existsSync(vehicleDir()) ? fs.readdirSync(vehicleDir()) : []);
+// Le dépôt versionne des `.gitkeep` dans certains `uploads/documents/vehicle-<id>/` : selon la
+// séquence de la base, l'id du véhicule de test peut tomber dessus. Ils ne comptent pas et
+// ne doivent pas être supprimés.
+const filesOnDisk = () => (fs.existsSync(vehicleDir()) ? fs.readdirSync(vehicleDir()).filter((f) => f !== ".gitkeep") : []);
 
 async function login(role: TestUserRole) {
   const user = await createTestUser({ role });
@@ -64,7 +67,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   await db.delete(vehicleDocumentTypes).where(eq(vehicleDocumentTypes.code, INACTIVE));
-  fs.rmSync(vehicleDir(), { recursive: true, force: true });
+  for (const f of filesOnDisk()) fs.rmSync(path.join(vehicleDir(), f), { recursive: true, force: true });
+  if (fs.existsSync(vehicleDir()) && fs.readdirSync(vehicleDir()).length === 0) fs.rmdirSync(vehicleDir());
   // L'intercepteur d'audit journalise l'ecriture sur le vehicule : ces lignes bloquent la suppression des utilisateurs.
   if (ids.userIds.length) await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
   await cleanupCreated(ids);
