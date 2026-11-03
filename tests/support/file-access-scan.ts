@@ -6,13 +6,20 @@ import { scopeOf } from "./alert-emission-scan";
  * fichier (AGENTS.md §9) et dit si le chemin passé est borné à `uploads/`.
  *
  * Accès : appel dont le nom figure dans `ACCESS_CALLS` (`fs.x`, `res.x` ou import nommé).
- * Borné : le premier argument est relié à une borne (`uploadedFileCandidates`,
- * `existingUploadedFile`, `isInsideDirectory`) dans la même portée :
- *   - l'argument contient lui-même l'appel de borne ;
- *   - ou c'est un identifiant `x` déclaré depuis une expression qui appelle une borne ;
- *   - ou c'est un identifiant `x` passé en argument à un appel de borne (garde `if (!isInsideDirectory(dir, x))`).
- * La recherche se fait sur l'AST, pas sur le texte : un commentaire ou une borne appliquée à une
- * autre variable ne comptent pas.
+ * Borné : le chemin est relié à une borne (`uploadedFileCandidates`, `existingUploadedFile`,
+ * `isInsideDirectory`) dans la même portée, par la structure de l'expression (`isBoundExpression`) :
+ * résultat d'un appel de borne, accès ou méthode sur ce résultat, variable dont toutes les
+ * déclarations sont bornées, ou variable reçue directement par un appel de borne (garde).
+ * `a ?? b` n'est borné que si chaque branche l'est. Pour `copyFile`, `cp` et `rename`, la
+ * destination doit être bornée elle aussi. Les alias d'un appel disque sont refusés.
+ * La recherche se fait sur l'AST : un commentaire, ou une borne posée sur une autre variable
+ * (y compris un autre champ de `req`), ne comptent pas.
+ *
+ * Limites connues (garde statique, pas une preuve) :
+ *   - borne appelée mais résultat ignoré : `isInsideDirectory(dir, p); fs.unlinkSync(p)` est jugé
+ *     borné, que le `if` refuse ou non ;
+ *   - une réaffectation (`p = req.body.p` après une déclaration bornée) n'est pas suivie ;
+ *   - un chemin passé à une autre fonction est jugé dans la portée de celle-ci, sans suivre l'appelant.
  */
 
 export type FileAccessSite = { file: string; scope: string; call: string; line: number; bounded: boolean };
@@ -57,14 +64,17 @@ function boundCallsIn(node: ts.Node): ts.CallExpression[] {
   return found;
 }
 
-/** Identifiant qui désigne une valeur (pas le nom de propriété de `a.b`). */
-function isValueIdentifier(node: ts.Node): node is ts.Identifier {
-  return ts.isIdentifier(node) && !(node.parent && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node);
-}
-
-function mentions(node: ts.Node, name: string): boolean {
-  if (isValueIdentifier(node) && node.text === name) return true;
-  return ts.forEachChild(node, (child) => mentions(child, name) || undefined) ?? false;
+function unwrap(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAwaitExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isAsExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
 }
 
 function initializersOf(name: string, scope: ts.Node): ts.Expression[] {
@@ -84,46 +94,97 @@ function initializersOf(name: string, scope: ts.Node): ts.Expression[] {
   return found;
 }
 
-/** Espaces de noms de modules : `path.resolve(root, "uploads")` ne borne pas `path`. */
-const NAMESPACES = new Set(["path", "fs", "fsp", "process"]);
-
-function identifiersIn(node: ts.Node): Set<string> {
-  const names = new Set<string>();
-  const visit = (current: ts.Node) => {
-    if (isValueIdentifier(current) && !NAMESPACES.has(current.text)) names.add(current.text);
-    ts.forEachChild(current, visit);
-  };
-  visit(node);
-  return names;
-}
-
-/** `name` est borné : gardé par un appel de borne, ou déclaré (en chaîne) depuis une expression bornée. */
+/**
+ * `name` est borné :
+ *   - gardé : `isInsideDirectory` le reçoit **directement** en argument (`isInsideDirectory(dir, name)`) ;
+ *   - ou déclaré : toutes ses déclarations dans la portée sont des expressions bornées.
+ * Un paramètre ou `req` n'a pas de déclaration locale : il n'est borné que gardé directement.
+ */
 function isBoundName(name: string, scope: ts.Node, seen: Set<string>): boolean {
-  if (seen.has(name) || NAMESPACES.has(name)) return false;
+  if (seen.has(name)) return false;
   seen.add(name);
-  if (boundCallsIn(scope).some((call) => call.arguments.some((arg) => mentions(arg, name)))) return true;
-  return initializersOf(name, scope).some(
-    (init) => boundCallsIn(init).length > 0 || [...identifiersIn(init)].some((dep) => isBoundName(dep, scope, seen)),
+  // Seul isInsideDirectory est une garde : uploadedFileCandidates(p) borne son résultat, pas p.
+  const guarded = boundCallsIn(scope).some((call) =>
+    calleeName(call) === "isInsideDirectory" && call.arguments.some((arg) => {
+      const inner = unwrap(arg);
+      return ts.isIdentifier(inner) && inner.text === name;
+    }),
   );
+  if (guarded) return true;
+  const initializers = initializersOf(name, scope);
+  return initializers.length > 0 && initializers.every((init) => isBoundExpression(init, scope, seen));
 }
 
-function isBoundArgument(argument: ts.Expression | undefined, scope: ts.Node): boolean {
-  if (!argument) return false;
-  if (boundCallsIn(argument).length > 0) return true;
-  return ts.isIdentifier(argument) && isBoundName(argument.text, scope, new Set());
+/**
+ * Expression bornée, par sa structure :
+ *   - appel de borne (`uploadedFileCandidates(p)`) ;
+ *   - accès ou méthode sur une valeur bornée (`candidates[0]`, `candidates.find(…)`) ;
+ *   - identifiant borné (`isBoundName`) ;
+ *   - `a ?? b`, `a || b`, `c ? a : b` : **chaque** branche bornée (`candidates[0] ?? p` ne l'est pas).
+ */
+function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string>): boolean {
+  const expr = unwrap(node);
+  if (ts.isCallExpression(expr)) {
+    if (BOUND_CALLS.has(calleeName(expr) ?? "")) return true;
+    return ts.isPropertyAccessExpression(expr.expression) && isBoundExpression(expr.expression.expression, scope, seen);
+  }
+  if (ts.isElementAccessExpression(expr)) return isBoundExpression(expr.expression, scope, seen);
+  if (ts.isIdentifier(expr)) return isBoundName(expr.text, scope, seen);
+  if (ts.isBinaryExpression(expr)) {
+    const kind = expr.operatorToken.kind;
+    if (kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken) {
+      return isBoundExpression(expr.left, scope, new Set(seen)) && isBoundExpression(expr.right, scope, new Set(seen));
+    }
+    return false;
+  }
+  if (ts.isConditionalExpression(expr)) {
+    return isBoundExpression(expr.whenTrue, scope, new Set(seen)) && isBoundExpression(expr.whenFalse, scope, new Set(seen));
+  }
+  return false;
 }
 
-/** Imports renommés d'un appel disque (`import { unlink as del }`) : ils échapperaient au scan. */
+/** Appels qui écrivent à une destination : la destination doit être bornée elle aussi. */
+const TWO_PATH_CALLS = new Set(["copyFile", "copyFileSync", "cp", "cpSync", "rename", "renameSync"]);
+
+function isBoundAccess(node: ts.CallExpression, call: string, scope: ts.Node): boolean {
+  const [source, destination] = node.arguments;
+  if (!source || !isBoundExpression(source, scope, new Set())) return false;
+  if (!TWO_PATH_CALLS.has(call)) return true;
+  return !!destination && isBoundExpression(destination, scope, new Set());
+}
+
+/**
+ * Alias d'un appel disque, qui échapperaient au scan par nom :
+ * `import { unlink as del }`, `const { unlink: del } = fs`, `const del = fs.unlinkSync`.
+ */
 export function renamedAccessImports(file: string, text: string): string[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const renamed: string[] = [];
-  for (const statement of source.statements) {
-    const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : undefined;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
-    for (const element of bindings.elements) {
-      if (element.propertyName && ACCESS_CALLS.has(element.propertyName.text)) renamed.push(`${file}:${element.propertyName.text} as ${element.name.text}`);
+  const visit = (node: ts.Node) => {
+    if (ts.isImportSpecifier(node) && node.propertyName && ACCESS_CALLS.has(node.propertyName.text)) {
+      renamed.push(`${file}:${node.propertyName.text} as ${node.name.text}`);
     }
-  }
+    if (
+      ts.isBindingElement(node) &&
+      node.propertyName &&
+      ts.isIdentifier(node.propertyName) &&
+      ACCESS_CALLS.has(node.propertyName.text) &&
+      ts.isIdentifier(node.name)
+    ) {
+      renamed.push(`${file}:${node.propertyName.text} as ${node.name.text}`);
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isPropertyAccessExpression(node.initializer) &&
+      ACCESS_CALLS.has(node.initializer.name.text)
+    ) {
+      renamed.push(`${file}:${node.initializer.name.text} as ${node.name.text}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return renamed;
 }
 
@@ -140,7 +201,7 @@ export function scanFileAccesses(file: string, text: string): FileAccessSite[] {
           scope: scope?.name ?? "<module>",
           call,
           line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          bounded: isBoundArgument(node.arguments[0], scope?.node ?? source),
+          bounded: isBoundAccess(node, call, scope?.node ?? source),
         });
       }
     }

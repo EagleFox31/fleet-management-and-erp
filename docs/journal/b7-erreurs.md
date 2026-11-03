@@ -190,3 +190,11 @@ Modèle et règles : `docs/journal/README.md`.
 - Pourquoi : près-accident relevé par fleet-securite. Une borne posée sur une autre variable, écrite en commentaire, ou placée dans registerRoutes autour d'un rappel anonyme rendait la garde verte à tort.
 - Preuve : quatre cas unitaires de contournement, tous rouges avec l'ancienne règle. Hygiène + deleteFile : 19/19, et 3 rouges sans le correctif. tsc : 0 erreur ; 1905 tests unitaires après fusion de main.
 - Hors périmètre, non traité : un lien symbolique placé dans uploads/ (multer n'en crée pas).
+
+## 2026-11-03T18:19:47+01:00 — #210 : réserves du relecteur, correction du journal
+
+- Correction de l'entrée de 18:04 : « tous les chemins lus en base sont déjà bornés » est trop fort. La revue couvre les appels de `ACCESS_CALLS` trouvés par le scan ; un accès par une bibliothèque (pièce jointe nodemailer, `pdfkit`) ou par une écriture n'est pas couvert.
+- Quoi : liaison borne/argument structurelle (`isBoundExpression`). Une garde ne compte que si `isInsideDirectory` reçoit la variable directement ; `a ?? b` n'est borné que si chaque branche l'est. La destination de copyFile, cp et rename est vérifiée. Les alias `const { unlink: del } = fs` et `const del = fs.unlinkSync` sont refusés.
+- Code : `transferDocumentsToVehicle` vérifie la destination de la copie (`isInsideDirectory(vehicleUploadDir, newPath)`).
+- Pourquoi : le relecteur a relevé que `const p = req.body.p` héritait d'une garde posée sur `req.query.x`. Leçon ajoutée dans LESSONS_LEARNED.
+- Preuve : hygiène + deleteFile 20/20, nouveaux cas de contournement rouges avec la règle précédente.

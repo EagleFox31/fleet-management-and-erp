@@ -117,8 +117,20 @@ describe("scanFileAccesses", () => {
       router.get("/a", (req, res) => { const ok = uploadedFileCandidates(req.query.a); res.sendFile(req.query.p); });
       router.get("/b", (req, res) => { /* uploadedFileCandidates(p) */ const p = req.query.p; res.sendFile(p); });
       function viaPath(root, p) { isInsideDirectory(path.resolve(root, "uploads"), root); const t = path.resolve(p); fs.unlinkSync(t); }
+      router.post("/c", (req, res) => { const p = req.body.p; if (!isInsideDirectory(dir, req.query.x)) return; fs.unlinkSync(p); });
+      function fallback(p) { const t = uploadedFileCandidates(p)[0] ?? p; fs.unlinkSync(t); }
+      function inlineFallback(p) { fs.unlinkSync(uploadedFileCandidates(p)[0] || p); }
     `;
-    expect(scanFileAccesses("d.ts", text).map((s) => s.bounded)).toEqual([false, false, false]);
+    expect(scanFileAccesses("d.ts", text).map((s) => s.bounded)).toEqual([false, false, false, false, false, false]);
+  });
+
+  it("copie ou déplacement : la destination doit être bornée elle aussi", () => {
+    const text = `
+      function copyOut(p, dest) { const src = uploadedFileCandidates(p)[0]; fs.copyFileSync(src, dest); }
+      function copyIn(p, q) { const src = uploadedFileCandidates(p)[0]; const dst = uploadedFileCandidates(q)[0]; fs.renameSync(src, dst); }
+      function bothBranches(p, q) { fs.unlinkSync(uploadedFileCandidates(p)[0] ?? uploadedFileCandidates(q)[0]); }
+    `;
+    expect(scanFileAccesses("g.ts", text).map((s) => s.bounded)).toEqual([false, true, true]);
   });
 
   it("un rappel anonyme dans registerRoutes ne profite pas d'une borne de la fonction", () => {
@@ -136,6 +148,8 @@ describe("scanFileAccesses", () => {
 
   it("détecte un appel disque importé sous un autre nom", () => {
     expect(renamedAccessImports("f.ts", `import { unlink as del, existsSync } from "fs";`)).toEqual(["f.ts:unlink as del"]);
+    expect(renamedAccessImports("f.ts", `const { unlink: del, existsSync } = fs;`)).toEqual(["f.ts:unlink as del"]);
+    expect(renamedAccessImports("f.ts", `const del = fs.unlinkSync; const ok = fs.existsSync;`)).toEqual(["f.ts:unlinkSync as del"]);
   });
 
   it("une borne hors de la portée ne compte pas", () => {
