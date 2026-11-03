@@ -24,8 +24,9 @@ export function makeFailWith(log: ReturnType<typeof moduleLogger>) {
     if (err instanceof AppError) return next(err);
     if (err instanceof Error && err.name === "ZodError") return next(err);
     // Une seule ligne de journal, écrite par `errorHandler` avec ce contexte (AGENTS.md §10) :
-    // le module du routeur et le message propre à la route y sont conservés.
+    // le module du routeur (`routeModule` : la ligne porte déjà `module` = error-handler) et le
+    // message propre à la route y sont conservés.
     const { module } = (log.bindings?.() ?? {}) as { module?: string };
-    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: logMessage, module }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: logMessage, routeModule: module }));
   };
 }

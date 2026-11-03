@@ -9,7 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const spy = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
 vi.mock("../../../server/lib/logger", () => ({
   logger: spy,
-  moduleLogger: () => spy,
+  // Mêmes espions pour tous les modules ; `bindings` comme le child pino réel.
+  moduleLogger: (module: string) => ({ ...spy, bindings: () => ({ module }) }),
 }));
 
 import { AppError, errorHandler, errorResponseGuard } from "../../../server/middleware/error-handler";
@@ -96,7 +97,7 @@ describe("journal unique d'une erreur relayée", () => {
     expect(spy.error).not.toHaveBeenCalled();
     relay(relayed);
     expect(spy.error).toHaveBeenCalledTimes(1);
-    expect(spy.error.mock.calls[0][0]).toMatchObject({ event: "Liste des chauffeurs en echec", status: 500 });
+    expect(spy.error.mock.calls[0][0]).toMatchObject({ event: "Liste des chauffeurs en echec", routeModule: "drivers", status: 500 });
   });
 
   it("route historique qui répond 500 elle-même : la garde garde son log (aucune perte)", () => {
