@@ -18,7 +18,6 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "index.ts POST /auth/login (apiRouter)",
   "index.ts POST /auth/pin-login (apiRouter)",
   "missions.routes.ts POST /:id/document-renewal-requests",
-  "missions.routes.ts POST /:id/fuel-records",
   "missions.routes.ts POST /:id/fuel-records/declare-no-refuel",
   "missions.routes.ts POST /:id/fuel-records/regularize",
   "notification-settings.routes.ts PATCH /notifications/settings",

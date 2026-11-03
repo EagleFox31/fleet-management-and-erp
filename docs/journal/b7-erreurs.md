@@ -211,3 +211,11 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `supplier-invoices` ajouté aux routeurs de `error-500-relay-hygiene`, plus une garde sur `availableFiles`. Contrat `supplier-invoice-error-details`.
 - Pourquoi : un log par erreur, une AppError d'un service (validate, approve) garde son statut au lieu de devenir 500. La garde de sortie réécrivait déjà les 5xx : la fuite réelle était sur le 400 multer.
 - Preuve : hygiène rouge 4/25 sans le correctif ; contrat 400 rouge sans le correctif, 500 vert avant comme après (non-régression) ; 9 contrats fournisseurs 87/87 ; tsc 0 ; unitaires 1891.
+
+
+## 2026-11-03T18:45:54+01:00 — /api/suppliers/summary servi avant /:id
+
+- Quoi : `GET /summary` déclaré dans `server/api/suppliers.routes.ts` avant `/:id` ; la déclaration morte de `server/routes.ts` est supprimée (commentaire de renvoi à la place). Le témoin `it.fails` de `suppliers-summary-capture` devient le contrat.
+- Comment : même service (`vatBillingService.getSuppliersSummary`), erreurs relayées par `withLogContext`. Accès : garde de montage du routeur (lecture fournisseurs), le client reste en 403.
+- Pourquoi : `useBilling` recevait un 400 « ID invalide », la synthèse n'était jamais servie.
+- Preuve : contrat rouge sans le correctif, vert avec ; `client-read-scope-tires` (client 403 au montage) vert ; tsc 0 ; unitaires 1933.

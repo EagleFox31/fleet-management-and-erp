@@ -1664,6 +1664,13 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Même motif : `POST /api/fuel-card/consumption` (écriture d'argent) n'avait aucune garde de route sous `isStaff` ; technicien et chef d'atelier pouvaient débiter la carte de l'entreprise. Aucun écran ne l'appelle (`recordConsumption` du client n'a pas de consommateur ; le chauffeur passe par `POST /api/missions/:id/fuel-records`). Garde posée : `isFuelCardManager` (admin, logistics, secretary), comme `/recharge`.
 - Prévention : `fuel-card-routes.contract.test.ts` (403 et solde inchangé pour workshop_manager et technician, rouges sur `main`), entrée retirée de `write-route-guards.frozen.ts`.
 
+### Récurrence (3 novembre 2026, lot carte carburant 2) : les autres écritures du solde
+- Le correctif de `/consumption` n'avait pas recensé les autres écritures qui modifient la somme du solde de `fuel_records`. Inventaire : `POST /api/fuel-card/consumption` (gardé), `POST /api/missions/:id/fuel-records` (seulement `isStaff` au montage : technicien, magasinier, chef d'atelier ou direction débitaient la carte ; désormais gestionnaires de mission plus chauffeur affecté), `POST /api/missions/:id/fuel-records/regularize` et `declare-no-refuel` (contrôle de rôle dans le corps du handler, pas en garde de route), `DELETE /api/fuel-records/:id` (encore ouvert, attend une décision métier) et `PATCH` des pleins (PR #205).
+- Même lot : le corps de `/consumption` n'avait pas de schéma. Le code d'avant répondait déjà 400 lisible aux corps invalides, y compris `quantity:"abc"` (« La quantité doit être un nombre positif. », par le service) : ni NaN ni 500. Le gain est le schéma Zod, qui renvoie `errors` par champ et reprend les messages d'avant.
+- Ordre des contrôles : sur le plein de mission, le contrôle du chauffeur affecté passe avant la comparaison des véhicules, sinon un chauffeur non affecté distingue 400 de 403 et devine le véhicule d'une mission hors de son périmètre.
+- Prévention : `tests/contract/fuel-card-write-guards.contract.test.ts` (technician, workshop_manager et warehouse en 403 solde inchangé, chauffeur non affecté en 403, chauffeur affecté et gestionnaires en 201, six corps invalides en 400) ; entrée retirée de `write-route-guards.frozen.ts`.
+- Règle : quand on garde une écriture d'argent, lister par grep toutes les routes qui écrivent la même table (`fuelRecords`, `fuel_records`) avant de conclure ; une garde dans le corps du handler ne vaut pas une garde de route.
+
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
 ### Contexte
