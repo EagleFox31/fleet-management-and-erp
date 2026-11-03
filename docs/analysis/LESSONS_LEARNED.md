@@ -1585,3 +1585,33 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+## 2026-11-03 — Renouvellement rapide : justificatif orphelin, ou supprimé alors que référencé
+
+### Contexte
+- `POST /api/document-renewals/quick-renew` reçoit un justificatif par multer, qui l'écrit dans `uploads/` avant le handler.
+- Sur main avant #178 :
+  - plusieurs refus (404 document, 400 visite technique, 404 et 400 demande) renvoyaient la réponse sans supprimer le fichier, qui restait orphelin ;
+  - à l'inverse, un échec de `createAlert` APRÈS l'enregistrement passait par le `catch`, qui supprimait le fichier alors que la demande le référençait déjà. La demande affichait alors une preuve introuvable ;
+  - les écritures (échéance, miroir véhicule, levée des alertes, demande) n'étaient pas en transaction : un échec au milieu laissait l'échéance avancée avec une réponse 500 ;
+  - le centre agréé était créé avant les contrôles et restait en base même en cas de refus.
+
+### Cause racine
+- Classification : cycle de vie d'une ressource externe (un fichier) non lié au commit qui la référence.
+- La suppression était écrite au cas par cas, refus par refus, au lieu de découler d'un seul fait : « une écriture validée référence-t-elle le fichier ? ».
+
+### Résolution
+- Drapeau `proofRecorded`, posé juste après le `db.transaction` qui écrit la demande. Le `finally` supprime le fichier tant qu'il est faux, quel que soit le chemin de sortie.
+- Contrôles de la demande, puis résolution du centre, avant toute écriture. Une seule transaction couvre l'échéance, le miroir, la levée des alertes et la demande (`executor` optionnel sur `syncVehicleDocumentMirror` et `clearDocumentExpiryAlerts`).
+- Alertes et diffusions au mieux après le commit : leur échec ne touche plus au fichier.
+
+### Exceptions nommées
+- Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
+- Les autres routes multer (récépissé, preuves) n'ont pas encore été revues selon ce patron.
+
+### Prévention (vérifiable)
+- `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
+- Copié sur main (3a7c0e3) : 8 rouges sur 8. Les deux assertions « aucun centre » échouent sans la résolution déplacée.
+
+### Règle Projet (obligatoire)
+- Un fichier téléversé n'est conservé qu'une fois qu'une écriture validée le référence. Supprimer dans un `finally` gardé par un drapeau posé après le commit, jamais refus par refus ; les effets de bord après le commit n'y touchent pas.
