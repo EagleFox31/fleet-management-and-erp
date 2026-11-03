@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -125,9 +126,12 @@ export default function DriversIndex() {
       if (!res.ok) {
         toast({ title: "Erreur", description: data.message || "Erreur serveur", variant: "destructive" });
       } else {
-        toast({ title: "Compte créé ✓", description: `Username: ${data.user?.username}` });
+        toast({ title: "Compte créé", description: `Identifiant : ${data.user?.username}` });
         setCreateAccountDialog({ open: false, driver: null });
         setCreateAccountForm({ email: "", pin: "", showPin: false });
+        // Resync ciblé (AGENTS §2) : fiche liée et compteurs.
+        queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       }
     } catch {
       toast({ title: "Erreur", description: "Erreur réseau", variant: "destructive" });

@@ -12,8 +12,8 @@
  * Le routeur (`server/api/incidents.routes.ts`) est à l'API : il appelle
  * `createIncident(user, body)` et `listIncidents(user, query)`.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { assignments, drivers, incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
+import { and, desc, eq } from "drizzle-orm";
+import { incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { AppError } from "../lib/app-error";
@@ -57,17 +57,14 @@ export interface IncidentDeps {
 }
 
 async function defaultDeps(): Promise<IncidentDeps> {
-  const [{ db }, { storage }] = await Promise.all([import("../db"), import("../storage")]);
+  const [{ db }, { storage }, { assignedVehicleIdsOf }] = await Promise.all([
+    import("../db"),
+    import("../storage"),
+    import("../lib/driver-scope"),
+  ]);
   return {
     db,
-    assignedVehicleIds: async (actor) => {
-      const rows = await db
-        .select({ vehicleId: assignments.vehicleId })
-        .from(assignments)
-        .innerJoin(drivers, eq(assignments.driverId, drivers.id))
-        .where(and(eq(drivers.userId, actor.id), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])));
-      return rows.map((r: { vehicleId: number | null }) => r.vehicleId).filter((v: number | null): v is number => v !== null);
-    },
+    assignedVehicleIds: assignedVehicleIdsOf,
     notifyRoles: async ({ roles, title, message, link, dedupeKey, priority }) => {
       for (const role of roles) {
         for (const user of await storage.getUsersByRole(role)) {

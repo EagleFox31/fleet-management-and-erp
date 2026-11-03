@@ -5,6 +5,7 @@ import { assignments, drivers, incidents, missions, users, vehicles, workOrders 
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createIncident } from "../../server/services/incident-service";
+import { isUniqueViolation, pgConstraintOf } from "../../server/lib/pg-errors";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
@@ -53,6 +54,12 @@ async function newDriver(userId: number | null, cpc = "FORME") {
     .returning();
   driverIds.push(d.id);
   return d;
+}
+
+/** Fiche du compte, créée au premier appel : une seule fiche par compte (#113). */
+async function driverProfileOf(userId: number) {
+  const [existing] = await db.select().from(drivers).where(eq(drivers.userId, userId));
+  return existing ?? newDriver(userId);
 }
 
 async function newMission(assign?: { vehicleId: number; driverId: number }) {
@@ -151,35 +158,28 @@ describe("MIS1-API-1 : éligibilité du véhicule sur PATCH /api/missions/:id", 
 describe("DRV2-3 : cloison chauffeur sur les missions", { timeout: 180000 }, () => {
   let own: { id: number };
   let foreign: { id: number };
-  let ownSecondProfile: { id: number };
-  let secondProfileDriverId = 0;
   let driverAId = 0;
   let driverBId = 0;
 
   beforeAll(async () => {
-    const dA = await newDriver(session.userIdOf("driverA"));
-    const dB = await newDriver(session.userIdOf("driverB"));
+    const dA = await driverProfileOf(session.userIdOf("driverA"));
+    const dB = await driverProfileOf(session.userIdOf("driverB"));
     driverAId = dA.id;
     driverBId = dB.id;
     const vA = await newVehicle();
     const vB = await newVehicle();
     own = await newMission({ vehicleId: vA.id, driverId: dA.id });
     foreign = await newMission({ vehicleId: vB.id, driverId: dB.id });
-    // `drivers.user_id` n'est pas unique : le compte A porte une seconde fiche, ses missions comptent aussi.
-    const dA2 = await newDriver(session.userIdOf("driverA"));
-    const vA2 = await newVehicle();
-    ownSecondProfile = await newMission({ vehicleId: vA2.id, driverId: dA2.id });
-    secondProfileDriverId = dA2.id;
   }, 120000);
 
-  it("deux fiches pour un même compte : missions des deux, quel que soit l'ordre de création", async () => {
-    const listed = ((await call("GET", "/api/missions", { actor: "driverA" })).body as { id: number }[]).map((m) => m.id);
-    expect(listed).toEqual(expect.arrayContaining([own.id, ownSecondProfile.id]));
-    expect(listed).not.toContain(foreign.id);
-    expect((await call("GET", `/api/missions/${ownSecondProfile.id}`, { actor: "driverA" })).status).toBe(200);
-    expect((await call("GET", `/api/drivers/${driverAId}/missions`, { actor: "driverA" })).status).toBe(200);
-    expect((await call("GET", `/api/drivers/${secondProfileDriverId}/missions`, { actor: "driverA" })).status).toBe(200);
-    expect((await call("GET", `/api/drivers/${driverBId}/missions`, { actor: "driverA" })).status).toBe(403);
+  it("une seule fiche par compte (#113) : la seconde est refusée par la base", async () => {
+    // Avant #113, le compte A portait une seconde fiche ; driverScopeOf garde l'union pour les doublons
+    // antérieurs à l'index, que uq_drivers_user_id empêche désormais d'en créer.
+    const error = await newDriver(session.userIdOf("driverA")).then(() => null, (e: unknown) => e);
+    expect(isUniqueViolation(error)).toBe(true);
+    expect(pgConstraintOf(error)).toBe("uq_drivers_user_id");
+    const rows = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.userId, session.userIdOf("driverA")));
+    expect(rows.map((r) => r.id)).toEqual([driverAId]);
   });
 
   it("GET /api/missions : le chauffeur ne liste que ses missions", async () => {
@@ -219,7 +219,7 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
   let otherVehicleId = 0;
 
   beforeAll(async () => {
-    const dA = await newDriver(session.userIdOf("driverA"));
+    const dA = await driverProfileOf(session.userIdOf("driverA"));
     const vOwn = await newVehicle();
     const vOther = await newVehicle();
     ownVehicleId = vOwn.id;

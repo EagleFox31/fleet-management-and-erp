@@ -1059,7 +1059,10 @@ export const drivers = pgTable("drivers", {
   cpcStatusUpdatedAt: timestamp("cpc_status_updated_at"), // Dernière mise à jour statut
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // #113 : une fiche par compte ; posé par server/init-database.ts (DRIVERS_USER_ID_UNIQUE_SQL), jamais sur doublons.
+  uniqueIndex("uq_drivers_user_id").on(table.userId).where(sql`${table.userId} IS NOT NULL`),
+]);
 
 // Table suppliers - Gestion fournisseurs (12 fournisseurs Excel identifiés) - ENRICHIE PHASE 1
 export const suppliers = pgTable("suppliers", {
