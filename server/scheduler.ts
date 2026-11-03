@@ -3,6 +3,7 @@ import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
 import { idempotencyPurgeTick } from "./jobs/idempotency-purge";
 import { clientBillingService } from "./services/client-billing-service";
+import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("scheduler");
 
@@ -87,7 +88,7 @@ async function markOverdueClientInvoices(reason: string): Promise<void> {
         entity: "client_invoice",
         entityId: null,
         payload: { invoiceIds },
-        scope: { type: "broadcast" },
+        scope: { type: "roles", roles: [...CLIENT_BILLING_EVENT_ROLES] },
         actor: { userId: null, role: null },
         emittedAt: new Date().toISOString(),
       });
