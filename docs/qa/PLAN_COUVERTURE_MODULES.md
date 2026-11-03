@@ -291,7 +291,7 @@ Tables : `drivers` (`is_active`).
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | OK (`drivers-crud-deactivation` : CRUD et RBAC ; chauffeur désactivé ni affectable, ni sur l'écran PIN, ni connectable, corrigé par #76) |
-| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; panne ou accident → OT créé, retard ou autre → incident sans OT (contrat `adm2-drv2-mis1-server-defects`) ; cloison chauffeur à l'API missions. Défauts DRV2-1, DRV2-2, DRV2-3 corrigés par #102 et #107. Manque : aucune vue « missions du jour », le tableau de bord n'affiche que la mission active) |
+| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; panne ou accident → OT créé, retard ou autre → incident sans OT (contrat `adm2-drv2-mis1-server-defects`) ; cloison chauffeur à l'API missions. Défauts DRV2-1, DRV2-2, DRV2-3 corrigés par #102 et #107. Défaut DRV2-4 figé en `test.fail` : aucune vue « missions du jour », le tableau de bord ne garde que la première mission `assigned` ou `in_progress` (`dashboard.tsx`, `allMissions.find`) alors que `/api/drivers/me` renvoie les deux ; périmètre de la déclaration de panne à l'API (autre véhicule 403, corps invalide 400, atelier 403, aucun OT créé)) |
 
 ### 3.9 Carburant
 
@@ -376,7 +376,7 @@ sequenceDiagram
 
 ### P2 — Mission → facture client → paiement
 
-État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). Le lancement est rejoué par `17-mission-lifecycle` (mission non posée en base : affectation, lancement, livraison, clôture, facture générée depuis l'écran) ; le règlement reste dans la spec 13, qui pose encore « livrée » en base pour isoler le paiement.
+État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). Le lancement est rejoué par `17-mission-lifecycle` (mission non posée en base : affectation, lancement, livraison, clôture, facture générée depuis l'écran) ; le règlement reste dans la spec 13, qui pose encore « livrée » en base pour isoler le paiement. Ajouts du 3 novembre dans la spec 13 : état de la facture sur l'onglet Factures de la mission, en attente puis partielle puis payée, suivi sans rechargement par la trame `client_invoice_payment_recorded` reçue par la logistique (paiements joués par la secrétaire) ; paiement refusé en 403 à la logistique, au technicien et au chauffeur, solde intact ; trop-perçu et facture soldée en 409, montant négatif, non numérique ou mode inconnu en 400, rien d'écrit.
 
 ```mermaid
 flowchart LR
