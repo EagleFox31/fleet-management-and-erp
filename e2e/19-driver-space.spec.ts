@@ -141,10 +141,14 @@ async function declareBreakdown(page: Page): Promise<{ status: number; body: str
   const status = response.status();
   // Corps lu seulement en échec, et borné : `response.text()` ne rend jamais la main sur une réponse
   // passée par le service worker PWA (constaté sur un 201, le test restait bloqué jusqu'au timeout).
-  const body = status < 300 ? "" : await Promise.race([
+  if (status < 300) return { status, body: "" };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const body = await Promise.race([
     response.text().catch(() => "(corps illisible)"),
-    new Promise<string>((resolve) => setTimeout(() => resolve("(corps non lu en 5 s)"), 5_000)),
-  ]);
+    new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve("(corps non lu en 5 s)"), 5_000);
+    }),
+  ]).finally(() => clearTimeout(timer));
   return { status, body };
 }
 

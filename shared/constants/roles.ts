@@ -229,6 +229,13 @@ export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  */
 export const VEHICLE_DOCUMENT_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
+/**
+ * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : le
+ * personnel sauf le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
+ * agrégats de toute la flotte). Décision du 3 novembre 2026.
+ */
+export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }
