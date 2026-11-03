@@ -120,7 +120,7 @@ h2.sec{font:700 30px/1.1 var(--f-display);margin:48px 0 4px}
 <header class="top">
   <h1>Droits par profil</h1>
   <p class="lead">Choisissez un compte : la carte du haut montre ce que ce profil peut faire, ce qui est encore en essai ou pas livré, et ce qui lui est refusé. Les cartes plus bas détaillent chaque fonctionnalité et se recolorent selon le compte actif.</p>
-  <div class="src"><b>Source et limites.</b> Lecture du code de la branche principale (commit bbdb0dd, 2 novembre 2026), des menus par profil et des PR ouvertes #53 et #54. Rien n'a été rejoué en recette pour produire cette page. Les fonctions « en essai » sont coupées tant que le drapeau n'est pas activé sur l'environnement.</div>
+  <div class="src"><b>Source et limites.</b> Lecture du code de la branche principale (commit 7a341d6, 3 novembre 2026, 19:23) : gardes des routeurs <code>server/api</code>, middleware, constantes de rôles et menus par profil. Mise à jour depuis la version du 2 novembre (bbdb0dd) : #102, #105, #116, #127, #129, #134, #141, #167, #184, #201, #207, #216, #222. Les PR non fusionnées sont listées à part, en bas de page. Rien n'a été rejoué en recette pour produire cette page. Les fonctions « en essai » sont coupées tant que le drapeau n'est pas activé sur l'environnement.</div>
 </header>
 
 <nav class="switch" aria-label="Changer de compte">
@@ -144,6 +144,14 @@ h2.sec{font:700 30px/1.1 var(--f-display);margin:48px 0 4px}
 <h2 class="sec">Une carte par fonctionnalité</h2>
 <p class="sec-lead">Pour chaque fonctionnalité : créer, consulter, modifier, supprimer et traitements. Sous chaque action, les profils autorisés ; le compte actif est en gras.</p>
 <div id="features"></div>
+
+<h2 class="sec">À venir, non fusionné</h2>
+<p class="sec-lead">Ces changements de droits ne sont pas sur la branche principale : ils ne figurent pas dans les cartes ci-dessus.</p>
+<div class="src"><ul>
+  <li><b>#214 (ouverte)</b> : prix d’achat d’une pièce saisi par l’administrateur, le secrétariat et la logistique seulement.</li>
+  <li><b>#233 (ouverte, pour #227)</b> : plusieurs chauffeurs sur une même mission.</li>
+  <li><b>Suppression logique d’un plein</b> : branche <code>fix/fuel-record-soft-delete</code>, aucune PR ouverte.</li>
+</ul></div>
 
 <div class="roles-key"><h3>Codes des profils</h3><dl id="rolekey"></dl></div>
 <p class="foot">« Disponible » signifie que le garde de rôle du code l'autorise et que l'écran existe. « En essai » désigne une fonction livrée mais derrière un drapeau coupé par défaut. « Correctif en attente » désigne un défaut connu dont la correction n'est pas encore fusionnée. Les actions rangées sous « Supprimer » ne figurent que si une suppression existe réellement.</p>
@@ -174,24 +182,31 @@ var F=[
   ['R','Lister et consulter les véhicules',STAFF,'live','Le client voit les siens seulement'],
   ['C','Acquérir un véhicule, joindre ses documents',['adm','log','sec','wm','cli'],'live','Le client voit ses dossiers seulement'],
   ['C','Créer et modifier les 9 types de document',['adm'],'live'],
-  ['U','Saisir kilométrage et position',STAFF,'live','Le client consulte, il ne saisit pas'],
+  ['U','Saisir kilométrage et position',STAFF,'live','Chauffeur : véhicule de son affectation active seulement'],
+  ['U','Capacité du réservoir',['adm','wm'],'live','Le logisticien ne modifie que ce champ'],
+  ['U','Capacité du réservoir (écran logistique)',['log'],'flag','Drapeau : anomalies carburant'],
   ['T','Renouveler un document (alerte à 30 jours)',['adm','sec','log','wm'],'live'],
+  ['C','Gérer les centres de renouvellement',['adm','sec','log','wm'],'later','API livrée, écran de gestion absent (sélecteur seul)'],
   ['R','Coût cumulé d’un véhicule',['adm','dir','wm','log'],'flag','Drapeau : coût d’un véhicule']
  ]},
  {id:'drv',name:'Chauffeurs et pointage',desc:"Dossier de conformité du chauffeur, accès mobile et pointage mensuel.",ops:[
   ['R','Consulter les fiches chauffeurs',['adm','sec','log'],'live'],
+  ['R','Lire CNI, permis, date de naissance',['adm','log','sec','dir'],'live','Masqués pour tout autre profil'],
   ['C','Créer un chauffeur (CNI, permis, CPC)',['adm','log','sec'],'live'],
   ['U','Modifier et activer un chauffeur',['adm','log','sec'],'live'],
-  ['R','Voir ses missions et son CPC',['drv'],'reserve','Correctif en attente : #53'],
-  ['T','Déclarer une panne depuis le mobile',['drv','adm'],'flag','Drapeau : déclaration de panne'],
+  ['U','Mettre à jour le CPC',['adm','log','sec'],'live','Refusé au chauffeur lui-même'],
+  ['R','Voir ses missions et son CPC',['drv'],'live','Limité à ses propres missions'],
+  ['T','Déclarer une panne ou un accident',['drv','adm'],'live','Ouvre un ordre de travail'],
   ['C','Saisir le pointage mensuel',['adm','log'],'flag','Drapeau : pointage'],
   ['R','Consulter le pointage',['adm','log','sec','dir'],'flag','Drapeau : pointage'],
   ['R','Performance des chauffeurs',['dir'],'live']
  ]},
  {id:'fuel',name:'Carburant',desc:"Carte carburant, pleins, bons, anomalies de consommation et prix du litre.",ops:[
-  ['R','Consulter la carte et les pleins',['adm','wm','sec','log'],'live'],
+  ['R','Consulter la carte et les pleins',['adm','wm','sec','log'],'live','Statistiques par client limitées au propriétaire'],
   ['C','Recharger la carte carburant',['adm','log','sec'],'live'],
-  ['C','Saisir un plein',['adm','wm','sec','log'],'live'],
+  ['T','Débiter la carte (consommation)',['adm','log','sec'],'live','Auparavant ouvert à tout le personnel'],
+  ['C','Plein sur une mission',['adm','log','sec','drv'],'live','Chauffeur : mission qui lui est affectée'],
+  ['C','Saisir un plein',['adm','wm','sec','log'],'live','Prix du litre imposé par le serveur, sauf ADM et LOG'],
   ['R','Consulter bons, anomalies et prix du jour',['adm','log','sec','wm','dir'],'flag','Drapeaux : bons, anomalies, prix'],
   ['T','Valider un bon de carburant',['adm','log','sec'],'flag','Drapeau : bons de carburant'],
   ['T','Traiter une anomalie de consommation',['adm','log','sec'],'flag','Drapeau : anomalies carburant'],
@@ -209,16 +224,24 @@ var F=[
   ['R','Historique d’un ordre de travail',STAFF,'flag','Drapeau : historique d’OT'],
   ['T','Contrôle qualité avant clôture',['adm','wm'],'flag','Drapeau : contrôle qualité'],
   ['R','Pannes déclarées, création de l’OT',['adm','wm'],'flag','Drapeau : déclaration de panne'],
-  ['U','Intervalles de vidange préremplis',['adm','wm'],'flag','Drapeau : vidange préremplie']
+  ['U','Intervalles de vidange préremplis',['adm','wm'],'flag','Drapeau : vidange préremplie'],
+  ['T','Valider le catalogue de pannes, lier des pièces',['adm','wm'],'live','Validateur tracé'],
+  ['R','Rapport de maintenance',['adm','wm','dir'],'flag','Drapeau : rapport de maintenance']
  ]},
  {id:'parts',name:'Pièces et stock',desc:"Catalogue, niveaux de stock, alertes de stock bas et rapport d'inventaire.",ops:[
   ['R','Consulter l’inventaire des pièces',['adm','wm','sec','mag'],'live'],
   ['C','Créer une fiche pièce',['adm','mag'],'live'],
   ['U','Modifier une fiche pièce',['adm','mag'],'live'],
-  ['U','Ajuster le stock, sortir une pièce',['adm','mag','wm'],'live'],
+  ['U','Variantes et spécifications',['adm','mag'],'live'],
+  ['T','Mouvement de stock magasin',['adm','mag'],'live','Auparavant ouvert à tout le personnel'],
+  ['U','Ajuster le stock, sortir une pièce',['adm','mag','wm'],'live','Par ajustement tracé uniquement'],
   ['D','Supprimer une pièce',['adm'],'live'],
   ['R','Alertes de stock bas',['mag'],'live'],
-  ['R','Rapport d’inventaire',['adm','dir','wm','mag','sec'],'live']
+  ['R','Rapport d’inventaire',['adm','dir','wm','mag','sec'],'live'],
+  ['T','Scanner une pièce (QR)',['adm','mag','wm','tec'],'flag','Drapeau : étiquettes et scan QR'],
+  ['T','Imprimer les étiquettes',['adm','mag'],'flag','Drapeau : étiquettes et scan QR'],
+  ['R','Consulter les ventes de pièces',['adm','mag','sec','dir'],'flag','Drapeau : vente de pièces'],
+  ['C','Vendre une pièce',['adm','mag','sec'],'flag','Drapeau : vente de pièces']
  ]},
  {id:'req',name:'Demandes de pièces',desc:"En attente, Approuvée, Commandée, Entrée en stock, Sortie du stock.",ops:[
   ['C','Créer une demande de pièce',['adm','wm','tec','mag'],'live'],
@@ -239,27 +262,31 @@ var F=[
   ['R','Journal des mouvements de pneus',['adm','dir','wm','mag','tec'],'flag','Drapeau : mouvements de pneus']
  ]},
  {id:'proc',name:'Fournisseurs, commandes, factures fournisseur',desc:"Du bon de commande au paiement, avec rapprochement à trois voies.",ops:[
-  ['R','Consulter les fournisseurs',['adm','sec','log','mag','wm'],'live'],
+  ['R','Consulter les fournisseurs et leur synthèse',['adm','sec','log','mag','wm'],'live','Synthèse resserrée à ces profils (#222)'],
   ['C','Créer un fournisseur',P,'live'],
   ['U','Modifier, évaluer, désactiver un fournisseur',P,'live'],
   ['C','Créer un bon de commande',P,'live'],
   ['T','Réceptionner une commande',P,'live'],
   ['C','Enregistrer une facture fournisseur',P,'live'],
-  ['T','Solde initial TTC, doublon de numéro refusé',P,'reserve','Correctif en attente : #54'],
+  ['T','Solde initial TTC, doublon de numéro refusé',P,'reserve','#54 fermée sans fusion : correctif à refaire'],
   ['T','Rapprochement à 3 voies (écart de 5 %)',['adm','sec'],'live','Scénario de recette R-09'],
   ['T','Paiement idempotent, trop-perçu refusé',['adm','sec'],'live']
  ]},
  {id:'ops',name:'Missions et facturation client',desc:"Planification des missions, contrôle de lancement, factures et encaissements.",ops:[
-  ['R','Consulter les missions',['log'],'live'],
-  ['C','Créer une mission',['log'],'live'],
-  ['U','Modifier une mission et son statut',['log'],'live'],
-  ['T','Contrôler le lancement d’une mission',['log'],'live'],
+  ['R','Consulter les missions',['log'],'live','Écran au menu logistique ; chauffeur : ses missions'],
+  ['C','Créer une mission',['adm','log','sec'],'live'],
+  ['C','Mission depuis un plein',['adm','log','sec'],'live'],
+  ['U','Modifier une mission',['adm','log','sec'],'live'],
+  ['T','Démarrer et livrer une mission',['adm','log','sec','drv'],'live','Chauffeur : ces deux statuts seulement'],
+  ['T','Clôturer ou annuler une mission',['adm','log','sec'],'live'],
+  ['T','Contrôler le lancement d’une mission',['adm','log','sec'],'live'],
   ['C','Établir une facture client',['adm','sec','log'],'live'],
-  ['T','Enregistrer un paiement partiel puis total',['adm','sec','log'],'live'],
+  ['T','Enregistrer un paiement partiel puis total',['adm','sec'],'live','Le logisticien n’encaisse pas'],
   ['R','Factures en attente, par ancienneté',['adm','dir','sec','log'],'flag','Drapeau : factures en attente']
  ]},
  {id:'dir',name:'Pilotage direction',desc:"Indicateurs du cahier des charges, corridors, équipe et rapports de direction.",ops:[
-  ['R','Tableau de bord et 3 indicateurs du cahier',['adm','dir'],'live','Incidents, conformité préventive, coût moyen'],
+  ['R','Tableau de bord et 3 indicateurs du cahier',['adm','dir','wm'],'live','Incidents, conformité préventive, coût moyen'],
+  ['R','Rapports d’indicateurs',['adm','dir'],'flag','Drapeau : rapports d’indicateurs'],
   ['R','Carte des corridors CEMAC',['dir'],'live'],
   ['R','Mon équipe',['dir'],'live'],
   ['R','Board pack et audit flotte (TCO)',['dir'],'live'],
@@ -273,6 +300,9 @@ var F=[
   ['R','Journal d’audit : qui a fait quoi',['adm'],'live'],
   ['R','Sauvegardes : état et lancement manuel',['adm'],'live','Conservation 12 mois'],
   ['U','Workflows et paramètres',['adm'],'live'],
+  ['U','Taux horaire de l’atelier',['adm'],'flag','Drapeau'],
+  ['T','Import Excel',['adm','wm'],'flag','Drapeau : import Excel'],
+  ['U','Boîtiers de télématique',['adm'],'flag','Drapeau'],
   ['U','Régler ses notifications dans l’application',ALL,'live'],
   ['T','Alertes par e-mail',ALL,'later','Serveur d’envoi attendu (Q-09)'],
   ['T','SMS et notifications mobiles',ALL,'later','Fournisseur à choisir'],
@@ -281,11 +311,11 @@ var F=[
  ]},
  {id:'cli',name:'Espace client',desc:"Cloison stricte : le client ne voit que ce qui lui appartient.",ops:[
   ['R','Voir ses véhicules et leurs documents',['cli'],'live','Cloison par propriétaire'],
-  ['R','Tableau de bord client',['cli'],'live'],
+  ['R','Tableau de bord client',['cli'],'live','Lectures internes refusées au client'],
   ['T','Exporter ses propres données',['cli'],'later','Besoin à confirmer']
  ]},
  {id:'next',name:'Prochains lots',desc:"Hors périmètre de la recette : aucune date promise tant que les réponses du client manquent.",ops:[
-  ['R','Suivi GPS des véhicules',['adm','log','dir'],'later','Fournisseur de balises à choisir'],
+  ['R','Suivi GPS des véhicules',['adm','log','dir','wm'],'flag','Drapeau : suivi GPS ; fournisseur de balises à choisir'],
   ['R','Tarifs et rentabilité par opération',['adm','dir','log'],'later','Formule retenue attendue'],
   ['R','QHSE',['adm','dir'],'later','Hors cahier : périmètre à confirmer']
  ]}
