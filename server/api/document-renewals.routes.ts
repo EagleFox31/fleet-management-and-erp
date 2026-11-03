@@ -151,7 +151,8 @@ const broadcastVehicleDocumentEvent = (
   }
 };
 
-const broadcastAlertCreated = (alert: {
+/** Exporté pour le contrat de portée (repli personnel d'une alerte sans destinataire). */
+export const broadcastAlertCreated = (alert: {
   id: number;
   userId: number | null;
   title: string;

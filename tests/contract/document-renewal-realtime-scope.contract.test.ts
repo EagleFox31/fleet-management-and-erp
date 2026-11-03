@@ -7,6 +7,7 @@ import { alerts, documentRenewalCenters, documentRenewalRequests, vehicleDocumen
 import { startContractActors } from "../support/contract-actors";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
+import { broadcastAlertCreated } from "../../server/api/document-renewals.routes";
 
 /**
  * Cloison (AGENTS.md §11) des trames émises par le renouvellement rapide.
@@ -119,7 +120,7 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
     expect(captured.filter((frame) => reaches(frame.scope, driver)).map((frame) => frame.eventType)).toEqual([]);
     expect(captured.filter((frame) => isEffectiveBroadcast(frame.scope))).toEqual([]);
   });
-  it("un échec de diffusion après l'écriture ne renvoie pas 500 et garde le justificatif", async () => {
+  it("un échec de diffusion ne renvoie pas 500 et garde le justificatif", async () => {
     const vehicle = await createTestVehicle({ ownerId: actors.userIdOf("owner") });
     ids.vehicleIds.push(vehicle.id);
     const [document] = await db
@@ -144,11 +145,16 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
     form.append("newExpiryDate", "2028-01-31");
     form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-justificatif.pdf");
 
-    // Seules les diffusions émises après l'écriture du document et de la demande échouent.
-    const POST_WRITE_EVENTS = ["document_renewal_quick_completed", "vehicle_document_updated", "vehicle_updated"];
+    // Le centre est créé avant l'écriture (résolveur) ; les trois autres trames partent après.
+    const FAILING_EVENTS = [
+      "document_renewal_center_changed",
+      "document_renewal_quick_completed",
+      "vehicle_document_updated",
+      "vehicle_updated",
+    ];
     const spy = (global as any).broadcastUpdate;
     (global as any).broadcastUpdate = (eventType: string) => {
-      if (POST_WRITE_EVENTS.includes(eventType)) throw new Error("TEST socket indisponible");
+      if (FAILING_EVENTS.includes(eventType)) throw new Error("TEST socket indisponible");
     };
     try {
       const response = await fetch(`${actors.baseUrl}/api/document-renewals/quick-renew`, {
@@ -167,5 +173,15 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
       .where(eq(documentRenewalRequests.vehicleDocumentId, document.id));
     expect(request?.proofFilePath).toBeTruthy();
     expect(existsSync(join(process.cwd(), request!.proofFilePath!.replace(/^\//, "")))).toBe(true);
+  });
+  it("alert_created sans destinataire : personnel seulement, ni client ni chauffeur", () => {
+    captured.length = 0;
+    broadcastAlertCreated({ id: 1, userId: null, title: "TEST", type: "maintenance", priority: "high", link: null, message: "TEST" });
+    expect(captured).toHaveLength(1);
+    const [frame] = captured;
+    expect(isEffectiveBroadcast(frame.scope)).toBe(false);
+    expect(reaches(frame.scope, { userId: actors.userIdOf("stranger"), role: "client" })).toBe(false);
+    expect(reaches(frame.scope, { userId: actors.userIdOf("driver"), role: "driver" })).toBe(false);
+    expect(reaches(frame.scope, { userId: actors.userIdOf("secretary"), role: "secretary" })).toBe(true);
   });
 });
