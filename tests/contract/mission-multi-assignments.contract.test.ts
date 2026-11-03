@@ -458,13 +458,21 @@ describe("plusieurs affectations : statut, annulation et modification n'écriven
 
   it("chauffeur annulé : perd l'accès à la mission (403) et la voit disparaître de ses listes, l'autre chauffeur la garde", async () => {
     const { missionId, a2 } = await launchable();
-    const LISTS = ["/api/missions", "/api/operations/missions", "/api/operations/missions/upcoming"];
+    const LISTS = [
+      "/api/missions",
+      "/api/operations/missions",
+      "/api/operations/missions/upcoming",
+      "/api/drivers/me",
+      "/api/drivers/:own/missions",
+    ];
     const listed = async (actor: Actor) => {
       const seen: Record<string, boolean> = {};
       for (const path of LISTS) {
-        const res = await session.call("GET", path, { actor });
-        expect(res.status, `${actor} ${path}`).toBe(200);
-        seen[path] = (res.body as Array<{ id: number }>).some((m) => m.id === missionId);
+        const url = path.replace(":own", String(await fiche(actor)));
+        const res = await session.call("GET", url, { actor });
+        expect(res.status, `${actor} ${url}`).toBe(200);
+        const rows = (path === "/api/drivers/me" ? res.body.missions : res.body) as Array<{ id: number }>;
+        seen[path] = rows.some((m) => m.id === missionId);
       }
       return seen;
     };

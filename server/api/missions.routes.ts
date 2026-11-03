@@ -3,7 +3,7 @@ import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
-import { eq, and, asc, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -144,13 +144,17 @@ type MissionRealtimeEvent =
 
 type VehicleDocumentRequirementType = "carte_grise" | "assurance" | "visite_technique";
 
-/** Comptes utilisateur des chauffeurs affectés à la mission (destinataires de la trame réduite). */
+/**
+ * Comptes utilisateur des chauffeurs affectés à la mission (destinataires de la trame réduite).
+ * Affectation annulée ou refusée exclue : le chauffeur retiré ne reçoit plus les trames de la mission
+ * (son écran se resynchronise par polling sur des routes qui l'excluent déjà).
+ */
 async function assignedDriverUserIds(missionId: number): Promise<number[]> {
   const rows = await db
     .select({ userId: drivers.userId })
     .from(assignments)
     .innerJoin(drivers, eq(assignments.driverId, drivers.id))
-    .where(eq(assignments.missionId, missionId));
+    .where(and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])));
   return Array.from(new Set(rows.map((row) => row.userId).filter((id): id is number => typeof id === "number" && id > 0)));
 }
 
@@ -1791,6 +1795,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
           and(
             ne(assignments.missionId, mission.id),
             inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+            inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
             or(
               eq(assignments.vehicleId, missionAssignment.vehicleId),
               eq(assignments.driverId, missionAssignment.driverId),
@@ -2994,6 +2999,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
                 and(
                   ne(assignments.missionId, mission.id),
                   inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+                  inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
                   or(
                     eq(assignments.vehicleId, row.vehicleId),
                     eq(assignments.driverId, row.driverId),

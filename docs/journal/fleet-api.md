@@ -261,3 +261,18 @@ Règles : `docs/journal/README.md`.
 
   Ces trois cas demandent une règle métier (ajout en cours de route, clôture par chauffeur). Ils sont à trancher avant d'être codés.
 - **Preuves** : 0 `error TS` ; 163 fichiers / 2033 tests unitaires ; 14 fichiers / 230 contrats (mission*, operations, fuel-card-write-guards).
+
+## 2026-11-04 00:17 — Plusieurs chauffeurs par mission : fiche chauffeur et trames (#240, re-audit)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** :
+  - `GET /api/drivers/me` et `GET /api/drivers/:id/missions` filtrent par `driverLiveAssignmentFilter` : le tableau de bord d'un chauffeur retiré ne liste plus la mission (client, adresses, consignes).
+  - `assignedDriverUserIds` n'envoie plus de trame au chauffeur retiré.
+  - Les deux contrôles de conflit de planning au lancement ne comptent plus une affectation annulée ou refusée.
+- **Comment** : le garde-fou `assignment-write-hygiene` exige qu'un `eq`/`inArray(assignments.driverId, …)` vive dans un `.where` qui filtre aussi `assignments.status`. Seules exceptions : la jointure `= drivers.id` et le helper lui-même. Il remplace l'interdiction limitée à `inArray`.
+- **Pourquoi** : 96b680b n'avait couvert que les `inArray` ; les `eq` de la fiche chauffeur fuyaient encore. Le contrôle porte maintenant sur la classe de défaut, pas sur une forme d'écriture.
+- **Preuves** :
+  - preuve rouge sur l'ancien code : le garde-fou trouve 2 lectures dans `drivers-management.routes.ts` et 2 dans `missions.routes.ts` ; le contrat voit encore la mission sur `/api/drivers/me` et `/api/drivers/:id/missions` ;
+  - 0 `error TS` ;
+  - unitaires : 163 fichiers, 2034 tests ;
+  - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).

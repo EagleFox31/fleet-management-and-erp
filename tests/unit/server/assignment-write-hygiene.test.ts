@@ -62,17 +62,50 @@ export function unfilteredWritesIn(source: string): number {
 }
 
 /**
- * Lecture cloisonnée par chauffeur : `inArray(assignments.driverId, …)` seul garde visible la mission
- * d'un chauffeur retiré (affectation annulée ou refusée). Le filtre vit dans `driver-scope.ts`
- * (`driverLiveAssignmentFilter`, qui ajoute le statut) ; ailleurs, il est refusé.
+ * Lecture filtrée par chauffeur : `eq(assignments.driverId, x)` ou `inArray(assignments.driverId, …)`
+ * seul garde visible la mission d'un chauffeur retiré (affectation annulée ou refusée), ou compte
+ * cette ligne morte comme un conflit. Chaque filtre sur le chauffeur doit donc vivre dans un
+ * `.where(...)` qui filtre aussi `assignments.status`, ou passer par `driverLiveAssignmentFilter`
+ * (server/lib/driver-scope.ts, seul endroit où le filtre nu est écrit). La jointure
+ * `eq(assignments.driverId, drivers.id)` n'est pas un filtre.
  */
-const DRIVER_SCOPE_FILE = "server/lib/driver-scope.ts";
-const RAW_DRIVER_SCOPE = /inArray\(\s*assignments\s*\.\s*driverId\b/g;
+const DRIVER_FILTER = /\b(eq|inArray)\(\s*assignments\s*\.\s*driverId\b(?!\s*,\s*drivers\s*\.\s*id\s*\))/g;
+const STATUS_FILTER = /assignments\s*\.\s*status\b/;
+const HELPER = /export function driverLiveAssignmentFilter\([^)]*\)\s*\{[^}]*\}/;
+
+/** Le `.where(...)` qui contient la position `at`, ou `null`. */
+export function enclosingWhere(source: string, at: number): string | null {
+  for (let from = source.lastIndexOf(".where(", at); from !== -1; from = source.lastIndexOf(".where(", from - 1)) {
+    const open = source.indexOf("(", from);
+    let depth = 0;
+    for (let i = open; i < source.length; i += 1) {
+      if (source[i] === "(") depth += 1;
+      if (source[i] === ")") depth -= 1;
+      if (depth === 0) {
+        if (i > at) return source.slice(open, i + 1);
+        break;
+      }
+    }
+  }
+  return null;
+}
+
+export function driverFiltersWithoutStatus(source: string): number {
+  const helper = HELPER.exec(source);
+  let count = 0;
+  for (const match of source.matchAll(DRIVER_FILTER)) {
+    const at = match.index!;
+    if (helper && at >= helper.index && at < helper.index + helper[0].length) continue;
+    const where = enclosingWhere(source, at);
+    if (where === null || !STATUS_FILTER.test(where)) count += 1;
+  }
+  return count;
+}
 
 function scan() {
   const unfiltered: Record<string, number> = {};
   const rawSql: string[] = [];
-  const rawDriverScope: string[] = [];
+  const driverWithoutStatus: Record<string, number> = {};
   for (const path of tsFiles(serverDir)) {
     const rel = relative(join(serverDir, ".."), path).split(sep).join("/");
     if (DEAD_CODE.test(rel)) continue;
@@ -81,10 +114,10 @@ function scan() {
     if (n > 0) unfiltered[rel] = n;
     if (RAW_SQL_WRITE.test(source)) rawSql.push(rel);
     RAW_SQL_WRITE.lastIndex = 0;
-    if (rel !== DRIVER_SCOPE_FILE && RAW_DRIVER_SCOPE.test(source)) rawDriverScope.push(rel);
-    RAW_DRIVER_SCOPE.lastIndex = 0;
+    const d = driverFiltersWithoutStatus(source);
+    if (d > 0) driverWithoutStatus[rel] = d;
   }
-  return { unfiltered, rawSql, rawDriverScope };
+  return { unfiltered, rawSql, driverWithoutStatus };
 }
 
 describe("écritures sur assignments : filtre de statut ou de chauffeur", () => {
@@ -96,8 +129,8 @@ describe("écritures sur assignments : filtre de statut ou de chauffeur", () => 
     expect(scan().rawSql).toEqual([]);
   });
 
-  it("cloison chauffeur : aucun inArray(assignments.driverId) hors driver-scope.ts (passer par driverLiveAssignmentFilter)", () => {
-    expect(scan().rawDriverScope).toEqual([]);
+  it("cloison chauffeur : tout filtre sur assignments.driverId filtre aussi le statut (ou passe par driverLiveAssignmentFilter)", () => {
+    expect(scan().driverWithoutStatus).toEqual({});
   });
 
   it("driverLiveAssignmentFilter écarte les affectations annulées ou refusées", () => {
@@ -133,5 +166,12 @@ describe("scanner : faux verts connus", () => {
           `await db.update(assignments).set({ a: 1 }).where(and(eq(assignments.id, id), eq(assignments.driverId, d)));`,
       ),
     ).toBe(0);
+  });
+  it("lecture filtrée sur le chauffeur sans statut : refusée ; avec statut, jointure ou helper : acceptée", () => {
+    expect(driverFiltersWithoutStatus(`db.select().from(assignments).where(eq(assignments.driverId, driver.id)).orderBy(x);`)).toBe(1);
+    expect(driverFiltersWithoutStatus(`q.where(and(ne(a, b), or(eq(assignments.vehicleId, v), eq(assignments.driverId, d))));`)).toBe(1);
+    expect(driverFiltersWithoutStatus(`q.where(and(inArray(assignments.driverId, s), notInArray(assignments.status, [...V])));`)).toBe(0);
+    expect(driverFiltersWithoutStatus(`q.innerJoin(drivers, eq(assignments.driverId, drivers.id)).where(eq(missions.id, 1));`)).toBe(0);
+    expect(driverFiltersWithoutStatus(`q.where(driverLiveAssignmentFilter([driver.id]));`)).toBe(0);
   });
 });

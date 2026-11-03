@@ -9,7 +9,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
-import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
+import { driverLiveAssignmentFilter, driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
 import { withLogContext } from "../lib/error-log-context";
 
 const router = Router();
@@ -138,7 +138,8 @@ router.get("/me", async (req, res) => {
       .innerJoin(missions, eq(assignments.missionId, missions.id))
       .leftJoin(clients, eq(missions.clientId, clients.id))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
-      .where(eq(assignments.driverId, driver.id))
+      // Affectations vivantes seulement : un chauffeur retiré (annulée, refusée) ne voit plus la mission (#240).
+      .where(driverLiveAssignmentFilter([driver.id]))
       .orderBy(desc(missions.pickupDate));
 
     console.log(`[driver/me] userId=${userId} → driverId=${driver.id} → ${driverMissions.length} missions (statuts: ${driverMissions.map(m => m.status).join(",")||"aucune"})`);
@@ -177,7 +178,7 @@ router.get("/:id/missions", async (req, res) => {
       .innerJoin(missions, eq(assignments.missionId, missions.id))
       .leftJoin(clients, eq(missions.clientId, clients.id))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
-      .where(eq(assignments.driverId, driverId))
+      .where(driverLiveAssignmentFilter([driverId]))
       .orderBy(desc(missions.pickupDate));
 
     return res.status(200).json(rows);
