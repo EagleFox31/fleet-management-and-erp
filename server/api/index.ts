@@ -102,8 +102,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(auditWrites(AUDIT_CONFIG));
   // Ressources du chantier CDC : liste d'audit separee (AUDIT_CONFIG est gelee par un test).
   apiRouter.use(auditWrites(CDC_AUDIT_CONFIG));
-  // Idempotence des ecritures rejouables (CDC #10) : squelette sans effet, drapeau
-  // `technician-offline` et liste vide (lot #10b).
+  // Idempotence des ecritures rejouables (CDC #10b) : routes de IDEMPOTENCY_ROUTES, drapeau
+  // `offline-writes` (coupe par defaut), apres la session (req.session.userId).
   apiRouter.use(idempotencyGuard());
 
   // `/telemetry` recevra les positions des boitiers GPS, qui n'ont pas de compte et

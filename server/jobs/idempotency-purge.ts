@@ -1,14 +1,16 @@
 /**
- * Purge des clés d'idempotence expirées (CDC #10). Squelette sans effet du lot CDC-0a.
+ * Purge des clés d'idempotence expirées (CDC #10b).
  *
- * Garde-fous, dans l'ordre : drapeau `technician-offline` coupé, rien ; verrou consultatif
+ * Garde-fous, dans l'ordre : drapeau `offline-writes` coupé, rien ; verrou consultatif
  * Postgres non obtenu (une autre instance purge), rien ; table `idempotency_keys` absente
- * (créée par le lot DB-1), rien. Le lot #10b fournit la suppression réelle (`purgeExpired`).
+ * (créée par le lot DB-1), rien. Sinon, suppression des clés dont `expires_at` est passé.
  *
  * Verrou : `pg_try_advisory_lock` est lié à la session, donc pris sur une connexion dédiée
  * de la chaîne directe (`listenerPool`), jamais sur le pool poolé (voir `backup-production.ts`).
  */
 import { isFeatureEnabled } from "../lib/feature-flags";
+import { IDEMPOTENCY_FLAG } from "../lib/idempotency-config";
+import { idempotencyStore } from "../lib/idempotency-store";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("idempotency-purge");
@@ -47,7 +49,7 @@ export async function createProductionIdempotencyPurgeDeps(): Promise<Idempotenc
   type LockClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: () => void };
   let client: LockClient | null = null;
   return {
-    isEnabled: () => isFeatureEnabled("technician-offline"),
+    isEnabled: () => isFeatureEnabled(IDEMPOTENCY_FLAG),
     async tryLock() {
       const c = (await (listenerPool as unknown as { connect: () => Promise<LockClient> }).connect());
       try {
@@ -78,14 +80,14 @@ export async function createProductionIdempotencyPurgeDeps(): Promise<Idempotenc
       const rows = (result as unknown as { rows?: Array<{ present?: boolean }> }).rows ?? [];
       return rows[0]?.present === true;
     },
-    purgeExpired: async () => 0,
+    purgeExpired: () => idempotencyStore.purgeExpired(),
   };
 }
 
 /** Un tick du planificateur : jamais d'exception vers l'appelant. */
 export async function idempotencyPurgeTick(): Promise<void> {
   try {
-    if (!isFeatureEnabled("technician-offline")) return;
+    if (!isFeatureEnabled(IDEMPOTENCY_FLAG)) return;
     await runIdempotencyPurge(await createProductionIdempotencyPurgeDeps());
   } catch (err) {
     log.error({ err }, "purge des clés d'idempotence en échec");
