@@ -1,24 +1,24 @@
 # Plan : suppression des routes dupliquées de `server/routes.ts`
 
 Statut : exécuté le 3 novembre 2026 (branche `chore/routes-dedup`). Source : AGENTS.md §9, liste gelée `tests/unit/server/routes-hygiene.test.ts` (6 doublons, 8 déclarations mortes), désormais vide.
-Numéros de ligne relevés le 2 novembre 2026 : à relire avant chaque suppression, ils se décalent.
+Numéros de ligne : ceux de la base `8c35d1b` (avant suppression). Après suppression, voir la table du commit `d196739`.
 
 ## Règle
 
 Express sert la **première** déclaration. On supprime la seconde (code mort), sauf pour `/api/warehouse/*` :
-`server/api/index.ts:102` monte `warehouse.routes.ts` avant `registerRoutes` (`server/app.ts:109`), donc les
+`server/api/index.ts:104` monte `warehouse.routes.ts` avant `registerRoutes` (`server/app.ts:109`), donc les
 deux déclarations de `routes.ts` sont mortes.
 
 ## Qui sert, qui est mort
 
 | Route | Sert | Mort |
 |---|---|---|
-| `GET /api/maintenance-schedules` | `routes.ts:1553` (cloison client via `getVehiclesByOwner`) | `:1669` (filtres `vehicleId`/`active`, aucune cloison) |
-| `GET /api/statistics/fleet-history` | `:4394` (`vehicleStatusService`, défaut `week`) | `:4514` (`fleetStatisticsService`, défaut `month`) |
-| `GET /api/warehouse/top-consumed-parts` | `warehouse.routes.ts:172` | `routes.ts:402` et `:3241` (ont divergé) |
-| `GET /api/warehouse/stock-value-history` | `warehouse.routes.ts:187` | `routes.ts:417` et `:3263` |
-| `GET /api/parts/:id/usage-history` | à confirmer | `:3122` (supposé) |
-| `check-all-maintenance` | `:4969` | `:5311` |
+| `GET /api/maintenance-schedules` | `routes.ts:1576` (cloison client via `getVehiclesByOwner`) | `:1692` (filtres `vehicleId`/`active`, aucune cloison) |
+| `GET /api/statistics/fleet-history` | `:4420` (`vehicleStatusService`, défaut `week`) | `:4540` (`fleetStatisticsService`, défaut `month`) |
+| `GET /api/warehouse/top-consumed-parts` | `warehouse.routes.ts:172` | `routes.ts:406` et `:3264` (ont divergé) |
+| `GET /api/warehouse/stock-value-history` | `warehouse.routes.ts:187` | `routes.ts:421` et `:3286` |
+| `GET /api/parts/:id/usage-history` | `:3098` (`partsService.getUsageHistory`) | `:3145` (`storage.getPartUsageHistory`) |
+| `POST /api/check-all-maintenance` | `:4995` (km + dates + réconciliation) | `:5329` (dates seules, forme `totalWorkOrdersGenerated`) |
 
 ## Ordre, du moins risqué au plus risqué
 

@@ -312,7 +312,7 @@ Notes :
 
 ## 9. Dette connue à ne pas aggraver
 
-- `server/routes.ts` (~5 500 lignes) est gelé. Ne rien y ajouter : créer un routeur
+- `server/routes.ts` (~5 700 lignes) est gelé. Ne rien y ajouter : créer un routeur
   dans `server/api/` et le monter dans `server/api/index.ts`. Express sert la
   **première** déclaration d'un chemin : les six routes qui y étaient déclarées deux
   fois ont été dédoublonnées le 3 novembre 2026, et `tests/unit/server/routes-hygiene.test.ts`
