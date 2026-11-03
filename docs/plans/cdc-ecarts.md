@@ -100,3 +100,4 @@ Réserves d'aa (fleet-relecteur + fleet-securite) sur CDC-10a, à livrer avant l
 - **Recette** : consigne « ouvrir une fois l'application en ligne » avant tout usage hors ligne, puisque la PR a retiré le démarrage hors ligne authentifié.
 - **Données en clair dans IndexedDB** : risque résiduel sur appareil partagé, à documenter ou à chiffrer.
 - **Clé globale `currentVehicleRegistration`** (`form-draft-storage.ts`) : à cloisonner par compte.
+- **Kilométrage chauffeur (option A, règle stricte)** : `PUT /api/vehicles/:id/mileage` n'accepte d'un chauffeur que le véhicule d'une affectation active (`ACTIVE_ASSIGNMENT_STATUSES`, règle commune aux pannes, `assignedVehicleIdsOf` dans `server/lib/driver-scope.ts`). Après clôture, 403. **L'écran impose la saisie du kilométrage avant la clôture de la mission** ; un kilométrage resté dans la file hors ligne après la clôture sera refusé (403, clé libérée) et doit être signalé au chauffeur, pas rejoué en boucle.
