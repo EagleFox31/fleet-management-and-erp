@@ -136,3 +136,10 @@ Règles : `docs/journal/README.md`.
 - **Comment** : voir `docs/qa/JOURNAL_COUVERTURE.md` et la leçon du 2026-11-03 de `docs/analysis/LESSONS_LEARNED.md`.
 - **Pourquoi** : un client lisait les pleins, le stock, les prix et les factures fournisseur de toute la flotte.
 - **Reste / risques** : 55 lectures dans la liste gelée (certaines masquées par un routeur monté avant `registerRoutes`, à vérifier une à une) ; `GET /api/suppliers/:id/invoices/payment` non gardée ici.
+
+## 2026-11-03 — Lot A4 : lectures pneus, catalogue de pannes, garde en échec fermé
+- **Agent** : fleet-api · **Branche** : `fix/client-read-scope-tires`
+- **Quoi** : `GET /api/vehicle-tires` filtré sur les véhicules du client ; `/api/tires*`, inspections, dernière inspection, rotations (+ détails) et `/api/fault-catalog` réservés au personnel ; `GET /api/suppliers/:id/invoices/payment` limité à `PROCUREMENT_ROLES` ; `?vehicleId` hors plage en 400 sur les routes carburant ; `getLastInspection` et `getTireRotationDetails` (bouchons) implémentés ; garde d'hygiène réécrite en échec fermé, liste gelée 52 -> 22.
+- **Comment** : `server/routes.ts` (handlers en place, logs migrés vers `moduleLogger`), `server/services/tires-service-simplified.ts`, `tests/support/route-guard-scan.ts`, `tests/unit/server/routes-hygiene.test.ts`, `tests/contract/client-read-scope-tires.contract.test.ts` (53 cas), balayage d'orphelins de `tests/support/cleanup.ts`.
+- **Pourquoi** : un client lisait encore les pneus montés, inspections et rotations de toute la flotte ; la garde se laissait tromper par un nom de garde ou une garde locale.
+- **Reste / risques** : alertes, workflows et les autres lectures gelées faute de contrat (22 entrées) ; `exports.routes.ts` `router.get(path, ...)` non analysable (gelé, justifié) ; le scan ne vérifie pas la valeur d'un contrôle de propriétaire. Décision par défaut : `workshop_manager`, `technician`, `driver` n'ont plus accès à la lecture de règlement fournisseur.

@@ -23,10 +23,8 @@ const KNOWN_AUTHENTICATE_ONLY = [
   "get /api/vehicles/:id",
   // Contrôle de rôle fait dans le handler (lecture de l'utilisateur).
   "get /api/maintenance-schedules/vehicle/:vehicleId",
-  // Export tabulaire et pneus montés : écrans du personnel, cloison à poser.
+  // Export tabulaire : écran du personnel, couvert au montage (exportsGuard) ; pneus montés retirés (lot A4).
   "get /api/exports/vehicles",
-  "get /api/vehicle-tires",
-  "get /api/vehicle-tires/:vehicleTireId/last-inspection",
   // Sessions d'acquisition : cloison par propriétaire de la session (workflow-vehicle-acquisition).
   "post /api/workflows/vehicle-acquisition",
   "get /api/workflows/vehicle-acquisition/:sessionId",
