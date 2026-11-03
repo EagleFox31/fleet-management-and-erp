@@ -230,6 +230,14 @@ export const WORK_ORDER_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
 export const VEHICLE_DOCUMENT_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
 /**
+ * Destinataires de la trame complète des événements de mission (création, modification, statut,
+ * plein) : le routeur missions est réservé au personnel (`isStaff`) et la trame porte client,
+ * adresses, coûts et plein de toute la flotte. Le chauffeur affecté reçoit à part une trame
+ * réduite à l'identifiant ; un client ne reçoit rien (AGENTS.md §11).
+ */
+export const MISSION_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+/**
  * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : le
  * personnel sauf le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
  * agrégats de toute la flotte). Décision du 3 novembre 2026.

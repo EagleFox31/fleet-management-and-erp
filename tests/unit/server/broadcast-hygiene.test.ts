@@ -29,7 +29,6 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/drivers-management.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/drivers.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/fuel-card.routes.ts": { count: 1, why: "événements carte carburant suivis par plusieurs profils" },
-  "server/api/missions.routes.ts": { count: 3, why: "missions suivies par plusieurs profils" },
   "server/api/operations.routes.ts": { count: 1, why: "opérations suivies par plusieurs profils" },
   "server/api/part-requirements.routes.ts": { count: 3, why: "OT : demandes de pièce créées, modifiées, supprimées" },
   "server/api/purchase-orders.routes.ts": { count: 1, why: "commandes fournisseur suivies par plusieurs profils" },
