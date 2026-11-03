@@ -101,14 +101,20 @@ const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [
   "GET /api/fuel-card/vehicle/:p/anomalies",
   "GET /api/fuel-card/vehicle/:p/stats",
   "GET /api/suppliers/top",
-  "PATCH /api/admin/users/:p/toggle",
   "PATCH /api/fault-catalog/:p",
   "PATCH /api/workflows/vehicle-acquisition/:p",
   "POST /api/auth/pin-login",
-  "POST /api/fuel-card/consumption",
   "POST /api/fuel-card/recharge",
   "POST /api/workflows/vehicle-acquisition",
 ];
+
+/**
+ * Gardes chaînées : la route de `server/api/` ne fait qu'un contrôle puis passe la main par `next()`
+ * au handler de `routes.ts`, qui reste donc vivant. Ne pas supprimer ces déclarations.
+ * `PATCH /api/admin/users/:id/toggle` : `admin-users-guard.routes.ts` refuse l'auto-désactivation,
+ * `routes.ts` écrit `deletedAt` et révoque l'accès.
+ */
+const CHAINED_GUARD_ROUTES: string[] = ["PATCH /api/admin/users/:p/toggle"];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const roleConstants = roles as unknown as Record<string, readonly string[]>;
@@ -127,7 +133,10 @@ describe("hygiène des routes serveur", () => {
     // le scan n'est pas aveugle : il voit les deux côtés
     expect(apiRouteCount).toBeGreaterThan(150);
     expect(legacyRouteCount).toBeGreaterThan(100);
-    expect(shadowed).toEqual([...SHADOWED_LEGACY_ROUTES_FROZEN].sort());
+    // une garde chaînée déclarée ici doit rester détectée, sinon la ligne est périmée
+    for (const chained of CHAINED_GUARD_ROUTES) expect(shadowed).toContain(chained);
+    const dead = shadowed.filter((route) => !CHAINED_GUARD_ROUTES.includes(route));
+    expect(dead).toEqual([...SHADOWED_LEGACY_ROUTES_FROZEN].sort());
   });
 
   it("signature de route : paramètres anonymisés, méthode en capitales, barre finale ignorée", () => {
