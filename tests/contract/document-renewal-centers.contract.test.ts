@@ -311,7 +311,7 @@ describe("centres de renouvellement : résolution unique (demande et renouvellem
     }
   });
 
-  it("PATCH /active : isActive non booléen ou absent (400), id non numérique (404), désactivation répétée sans effet de bord", async () => {
+  it("PATCH /active : isActive non booléen ou absent (400), id non numérique (404), reste inactif après une seconde désactivation", async () => {
     const created = await createCenter(`TEST actif invalide ${SUFFIX}`);
     const path = documentRenewalCenterActivePath(created.body.id);
     for (const body of [{ isActive: "oui" }, { isActive: null }, {}]) {

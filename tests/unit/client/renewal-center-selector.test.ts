@@ -33,9 +33,4 @@ describe("DOC1 : sélecteur de centre de renouvellement", { timeout: REPO_SCAN_T
     }
     expect(offenders).toEqual([]);
   });
-
-  it("le filtre d'activité reste côté serveur : le GET des choix filtre sur is_active sauf includeInactive", async () => {
-    const route = await readRepoFile("server/api/document-renewals.routes.ts");
-    expect(route).toMatch(/includeInactive\s*\?\s*undefined\s*:\s*eq\(documentRenewalCenters\.isActive,\s*true\)/);
-  });
 });

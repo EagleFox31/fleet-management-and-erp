@@ -2302,8 +2302,8 @@ soumission sans doublon.
 
 ## 2026-11-03 18:52 — DOC1 : sélecteur de centre sans centre inactif, cas manquants du contrat
 
-- **Quoi** : test unitaire `tests/unit/client/renewal-center-selector.test.ts` (4 cas) et deux cas ajoutés au contrat existant `document-renewal-centers.contract.test.ts` (#99, #118). Ligne DOC1 du plan passée à « Fait ».
-  - Aucun filtre n'existe côté écran : les deux sélecteurs affichent la réponse de `GET /api/document-renewals/centers`, l'API retire les inactifs. Le test garde donc l'appel (jamais `includeInactive`) et la présence du filtre `is_active` côté route.
-  - Contrat : `PATCH /active` avec `isActive` non booléen ou absent (400), id non numérique (404), désactivation répétée ; filtre par type (centre d'un autre type absent, centre sans type présent) ; chauffeur et client en 403 sur la lecture.
+- **Quoi** : test unitaire `tests/unit/client/renewal-center-selector.test.ts` (3 cas) et deux cas ajoutés au contrat existant `document-renewal-centers.contract.test.ts` (#99, #118). Ligne DOC1 du plan passée à « Fait ».
+  - Aucun filtre n'existe côté écran : les deux sélecteurs affichent la réponse de `GET /api/document-renewals/centers`, l'API retire les inactifs. Le test garde donc l'appel (jamais `includeInactive`) ; le filtre `is_active` de la route est couvert par le contrat, pas par une regex sur le source.
+  - Contrat : `PATCH /active` avec `isActive` non booléen ou absent (400), id non numérique (404), reste inactif après une seconde désactivation ; filtre par type (centre d'un autre type absent, centre sans type présent) ; chauffeur et client en 403 sur la lecture.
 - **Pourquoi** : DOC1 était couvert côté API seulement ; rien ne gardait le côté écran.
-- **Preuves** : unitaire rouge si `document-renew.tsx` ajoute `includeInactive=1` (2 cas sur 4 en échec), vert après retour.
+- **Preuves** : unitaire rouge si `document-renew.tsx` ajoute `includeInactive=1` (2 cas sur 3 en échec), vert après retour.
