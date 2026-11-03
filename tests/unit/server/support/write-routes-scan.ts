@@ -49,12 +49,10 @@ export function mountPrefixes(indexSource: string): Map<string, { prefix: string
     const prefix = args.match(/^\s*"([^"]*)"/)?.[1] ?? "";
     for (const name of args.match(/\b\w+Routes\b/g) ?? []) {
       const file = fileOf.get(name) ?? name;
-      const before = args
-        .slice(0, args.indexOf(name))
-        .split(",")
-        .map((n) => n.trim())
+      const before = topLevelSplit(args.slice(0, args.indexOf(name)))
+        .map((n) => n.replace(/^\s*\/\/[^\n]*\n/gm, "").trim())
         .filter((n) => n && !n.startsWith('"'));
-      prefixes.set(file, { prefix: `/api${prefix}`, guarded: before.some((n) => n !== "authenticate") });
+      prefixes.set(file, { prefix: `/api${prefix}`, guarded: before.some((n) => isMountGuard(n)) });
     }
   }
   return prefixes;
@@ -112,12 +110,18 @@ export function writeRoutesOf(
   mounts: (routerVar: string) => { prefix: string; guarded: boolean } = () => ({ prefix: "", guarded: false }),
 ): WriteRoute[] {
   const heads = [...source.matchAll(HEAD)];
+  // `router.use(garde)` sans chemin : garde toutes les déclarations suivantes de ce routeur.
+  const fileGuards = [...source.matchAll(/\b(\w*(?:app|[rR]outer|Routes))\.use\(\s*(\w+)\s*\)/g)]
+    .filter((u) => isMountGuard(u[2]))
+    .map((u) => ({ router: u[1], at: u.index ?? 0 }));
   const routes: WriteRoute[] = [];
   heads.forEach((m, i) => {
     const method = m[2];
     if (method === "get") return;
     const declared = m[3] ?? m[4] ?? `<${m[5]}>`;
-    const { prefix, guarded: mountGuarded } = mounts(m[1]);
+    const mounted = mounts(m[1]);
+    const { prefix } = mounted;
+    const mountGuarded = mounted.guarded || fileGuards.some((g) => g.router === m[1] && g.at < (m.index ?? 0));
     const start = (m.index ?? 0) + m[0].length;
     const end = i + 1 < heads.length ? (heads[i + 1].index ?? source.length) : source.length;
     const text = source.slice(start, end);
@@ -212,27 +216,83 @@ export function allWriteRoutes(): WriteRoute[] {
 export const PUBLIC_BY_DESIGN = new Set(["post /api/auth/login", "post /api/auth/pin-login", "post /api/auth/logout"]);
 
 /**
- * Middlewares qui ne décident pas du rôle : authentification seule (`authenticate` ne connaît pas
- * le rôle, `isAnyUser` charge l'utilisateur sans le restreindre), drapeau de fonctionnalité,
- * téléversement.
+ * Liste POSITIVE des gardes de rôle : seul un nom connu compte. Un middleware inconnu (alias
+ * `anyone`, tableau `[isAnyUser]`, spread `...guards`, drapeau de fonctionnalité, téléversement)
+ * ne vaut pas garde.
+ *
+ *  - Exports `is*` de `server/middleware/auth.ts` construits par `authorize(...)` ou `sessionGuard(...)`,
+ *    sauf `isAnyUser` (tous les rôles) : lus dans la source, un nouveau garde y est reconnu d'office.
+ *  - `authorize([...])` écrit sur place, sauf s'il admet tous les rôles (`ALL_ROLES`).
+ *  - Gardes locales, par fichier : chaque nom est vérifié dans son fichier par le test.
  */
-const NOT_A_ROLE_GUARD = /^(?:\.\.\.)?(?:authenticate|requireAuth|checkAuth|isAnyUser|feature|requireFeature\(|upload\b|validateBody\(|ownedBy\()/;
+export const AUTH_ROLE_GUARDS: ReadonlySet<string> = new Set(
+  [
+    ...readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8").matchAll(
+      /export\s+const\s+(is[A-Z]\w*)\s*(?::\s*\w+\s*)?=\s*(?:authorize|sessionGuard)\(/g,
+    ),
+  ]
+    .map((m) => m[1])
+    .filter((n) => n !== "isAnyUser"),
+);
+
+/** Gardes définies localement, par fichier servi. */
+export const LOCAL_ROLE_GUARDS: Readonly<Record<string, readonly string[]>> = {
+  "api/billing.routes.ts": ["canAccessBilling", "canRecordPayment"],
+  "api/purchase-orders.routes.ts": ["checkWritePermission", "checkApprovalPermission"],
+  "api/supplier-invoices.routes.ts": ["checkCreatePermission", "checkPaymentPermission", "checkAutoApprovePermission"],
+  "api/suppliers.routes.ts": ["checkWritePermission", "checkEvaluationPermission", "checkSupplierCreatePermission"],
+  "api/time-tracking.routes.ts": ["writers"],
+  "api/vehicle-document-types.routes.ts": ["adminOnly"],
+};
+
+/** Gardes de montage locales à `server/api/index.ts` (`apiRouter.use("/x", garde, xRoutes)`). */
+export const MOUNT_ROLE_GUARDS: readonly string[] = ["gardeApprovisionnement", "...exportsGuard"];
+
+/** `authorize([...])` écrit sur place, qui n'admet pas tous les rôles. */
+function isInlineAuthorize(m: string): boolean {
+  return /^authorize\(\s*\[/.test(m) && !/\bALL_ROLES\b/.test(m);
+}
+
+/** Garde de rôle reconnue dans une déclaration de route. */
+export function isRoleGuard(m: string, file?: string): boolean {
+  return AUTH_ROLE_GUARDS.has(m) || isInlineAuthorize(m) || (file !== undefined && (LOCAL_ROLE_GUARDS[file] ?? []).includes(m));
+}
+
+/** Garde de rôle reconnue au montage d'un routeur. */
+function isMountGuard(m: string): boolean {
+  return AUTH_ROLE_GUARDS.has(m) || isInlineAuthorize(m) || MOUNT_ROLE_GUARDS.includes(m);
+}
 
 /**
  * `selfScoped` admet tous les rôles. Il ne vaut garde que si le handler (inline, ou résolu dans le
- * fichier quand il est passé par référence) n'agit que sur le compte de session : il lit
- * `req.user.id` ou `req.session.userId`, et ne lit ni l'URL (`params`, `query`) ni un identifiant
- * venu du corps (`req.body.userId`, `const { userId } = req.body`).
+ * fichier quand il est passé par référence) n'agit que sur le compte de session :
+ *  - il lit `req.user.id` ou `req.session.userId` ;
+ *  - il ne lit pas l'URL (`params`, `query`, segment `:x` du chemin) ;
+ *  - il ne lit le corps (toute mention de `body`) que derrière `validateBody(schéma)`, schéma non
+ *    permissif qui ne déclare ni `*Id`, ni `email`, ni `username` : `validateBody` retire tout champ
+ *    non déclaré, un alias ou une déstructuration de `req.body` ne peut donc rien désigner d'autre.
  */
 const SELF_SCOPED = /^selfScoped$/;
 const SESSION_IDENTITY = /\breq\.user!?\.id\b|\breq\.session\??\.userId\b/;
-const FOREIGN_TARGET = [
-  /\bparams\b/,
-  /\bquery\b/,
-  /\breq\.body\??\.\w*(?:id|Id|ID)\b/,
-  /\breq\.body\s*\[/,
-  /\{[^}]*\b\w*(?:id|Id|ID)\b[^}]*\}\s*=\s*req\.body\b/,
-];
+const URL_TARGET = /\b(?:params|query)\b/;
+const BODY_MENTION = /\bbody\b/;
+/** Clé de schéma écrite qui désigne un autre compte ou un autre objet. */
+const TARGET_KEY = /(?:^|[{,\s])["']?(?:\w*(?:id|Id|ID)|email|username)["']?\s*:/;
+const TARGET_FIELD = /(?:id|Id|ID)$|^email$|^username$/;
+/** Construction qui cache des clés à l'analyse du texte. */
+const OPAQUE_SCHEMA = /\.\.\.|\.(?:extend|merge|and|or|passthrough|catchall)\(|z\.(?:union|intersection|lazy|record|any|unknown)\(/;
+
+/** Le schéma de `validateBody(...)` ne déclare aucune clé de cible (`*Id`, `email`, `username`). Inconnu : faux. */
+function schemaHasNoTarget(m: string, fileSource: string): boolean {
+  if (validateBodyVerdict(m, fileSource) === "unsafe") return false;
+  const arg = topLevelSplit(m.slice(m.indexOf("(") + 1))[0] ?? "";
+  if (/^z\.object\(/.test(arg)) return !TARGET_KEY.test(arg) && !OPAQUE_SCHEMA.test(arg);
+  if (!/^[A-Za-z]\w*$/.test(arg)) return false;
+  const value = (schema as Record<string, unknown>)[arg] as { shape?: Record<string, unknown> } | undefined;
+  if (value && typeof value === "object" && value.shape) return !Object.keys(value.shape).some((k) => TARGET_FIELD.test(k));
+  const def = localSchemaDefinition(fileSource, arg);
+  return def !== undefined && /=\s*z\.object\(/.test(def) && !TARGET_KEY.test(def) && !OPAQUE_SCHEMA.test(def);
+}
 
 /** Texte d'un handler passé par référence (`const nom ... = async (...) => {...}` ou `function nom`). */
 function referencedHandler(r: WriteRoute): string | undefined {
@@ -244,24 +304,48 @@ function referencedHandler(r: WriteRoute): string | undefined {
   return stop >= 0 ? rest.slice(0, stop + 1) : rest;
 }
 
-/** `selfScoped` tient : handler connu, identité de session lue, aucune cible venue de la requête. */
+/** `selfScoped` tient : handler connu, identité de session lue, ni URL, ni corps hors `validateBody` sûr. */
 export function selfScopedHolds(r: WriteRoute): boolean {
   // Identifiant dans le chemin : la cible vient de l'URL, quel que soit le handler.
   if (r.path.includes(":")) return false;
   const handler = r.inline ? r.body : referencedHandler(r);
   if (!handler) return false;
-  return SESSION_IDENTITY.test(handler) && !FOREIGN_TARGET.some((re) => re.test(handler));
+  if (!SESSION_IDENTITY.test(handler) || URL_TARGET.test(handler)) return false;
+  if (!BODY_MENTION.test(handler)) return true;
+  const validators = r.middlewares.filter((m) => VALIDATE_BODY.test(m));
+  return validators.length > 0 && validators.every((m) => schemaHasNoTarget(m, r.fileSource));
 }
 
-/** T1 : un garde de rôle ou de permission dans la déclaration, ou un garde au montage du routeur. */
+/** T1 : un garde de rôle reconnu (liste positive) dans la déclaration, ou un garde au montage du routeur. */
 export function hasRoleGuard(r: WriteRoute): boolean {
   if (r.mountGuarded) return true;
   return r.middlewares.some((m) => {
-    if (NOT_A_ROLE_GUARD.test(m)) return false;
-    // `selfScoped` admet tous les rôles : il ne vaut garde que si la route n'agit pas sur un objet désigné par l'URL.
+    // `selfScoped` admet tous les rôles : il ne vaut garde que si la route n'agit que sur le compte de session.
     if (SELF_SCOPED.test(m)) return selfScopedHolds(r);
-    return true;
+    return isRoleGuard(m, r.file);
   });
+}
+
+/**
+ * Déclarations que l'analyse ne sait pas lire : `.route(...)`, `.all(...)`, chemin entre apostrophes
+ * ou en variable, routeur dont le nom n'est pas reconnu (`const r = Router()`). Le test exige zéro :
+ * sinon une route échapperait aux cliquets.
+ */
+export function unreadableDeclarations(source: string): string[] {
+  const routers = new Set<string>();
+  for (const m of source.matchAll(/\b(\w+)\s*(?::\s*\w+\s*)?=\s*(?:express\.)?Router\(/g)) routers.add(m[1]);
+  for (const m of source.matchAll(/\b(\w*(?:app|[rR]outer|Routes))\.(?:get|post|put|patch|delete|route|all)\(/g)) routers.add(m[1]);
+  const recognised = new Set([...source.matchAll(HEAD)].map((m) => m.index));
+  const out: string[] = [];
+  for (const name of routers) {
+    if (!/^\w*(?:app|[rR]outer|Routes)$/.test(name)) out.push(`routeur non reconnu : ${name}`);
+    for (const m of source.matchAll(new RegExp(`\\b${name}\\.(post|put|patch|delete|route|all)\\(`, "g"))) {
+      if (m[1] === "route" || m[1] === "all" || !recognised.has(m.index)) {
+        out.push(`déclaration illisible : ${source.slice(m.index, (m.index ?? 0) + 70).split("\n")[0]}`);
+      }
+    }
+  }
+  return out;
 }
 
 /* ---------------------------------------------------------------- T3 / T4 */
@@ -282,19 +366,20 @@ export function validatesBody(r: WriteRoute): boolean {
 
 /** Brique `validateBody(schema, options?)` de `server/middleware/validate-body.ts`. */
 const VALIDATE_BODY = /^validateBody\(/;
-/** Avec `keep:`, le schéma passé est analysé comme ailleurs. */
-const VALIDATE_BODY_KEEP = /\bkeep\s*:/;
+/** Avec `keep` (forme `keep:` ou abrégée `{ keep }`), le schéma passé est analysé comme ailleurs. */
+const VALIDATE_BODY_KEEP = /\bkeep\b/;
 /** Schéma permissif dans la déclaration : le retrait ne protège plus rien. */
 const PERMISSIVE = /\.passthrough\(|\.catchall\(|\bz\.(?:any|unknown|record)\(/;
 
 /**
- * `validateBody(schéma)` vaut T4 seul quand le retrait est garanti : aucun `keep:`, options absentes
- * ou écrites en littéral (`opts` variable : inconnu), schéma non permissif (y compris sa définition locale).
+ * `validateBody(schéma)` vaut T4 seul quand le retrait est garanti : aucun `keep` (y compris abrégé),
+ * options absentes ou écrites en littéral sans spread (`opts` variable ou `{ ...opts }` : inconnu),
+ * schéma non permissif (y compris sa définition locale).
  */
 function validateBodyVerdict(m: string, fileSource: string): "strips" | "analyse" | "unsafe" {
   const args = topLevelSplit(m.slice(m.indexOf("(") + 1));
   if (args.length === 0 || args.length > 2) return "unsafe";
-  if (args[1] !== undefined && !args[1].startsWith("{")) return "unsafe";
+  if (args[1] !== undefined && (!args[1].startsWith("{") || args[1].includes("..."))) return "unsafe";
   if (PERMISSIVE.test(m)) return "unsafe";
   const local = /^([A-Za-z]\w*)/.exec(args[0])?.[1];
   const def = local ? localSchemaDefinition(fileSource, local) : undefined;

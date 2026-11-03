@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,12 +7,17 @@ import {
   T4_WITHOUT_SERVER_FIELD_PROTECTION,
 } from "./support/write-routes-frozen";
 import {
+  AUTH_ROLE_GUARDS,
+  LOCAL_ROLE_GUARDS,
+  MOUNT_ROLE_GUARDS,
   PUBLIC_BY_DESIGN,
   serverDir,
   allWriteRoutes,
   hasRoleGuard,
   isPassThrough,
   mountOrder,
+  mountPrefixes,
+  unreadableDeclarations,
   protectsServerFields,
   readsBody,
   validatesBody,
@@ -145,11 +150,102 @@ router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (re
   });
 
   it("selfScoped vaut garde T1 seulement si le handler ne lit pas req.params", () => {
-    const [self, byId] = src(
-      `router.patch("/me", selfScoped, async (req, res) => { await update(req.user.id, req.body); });
-       router.patch("/:id", selfScoped, async (req, res) => { await update(Number(req.params.id), req.body); });`,
+    const [self, byId, noBody] = src(
+      `const prefsSchema = z.object({ theme: z.string() });
+       router.patch("/me", selfScoped, validateBody(prefsSchema), async (req, res) => { await update(req.user.id, req.body); });
+       router.patch("/:id", selfScoped, validateBody(prefsSchema), async (req, res) => { await update(Number(req.params.id), req.body); });
+       router.post("/me/read", selfScoped, async (req, res) => { await markRead(req.user.id); });`,
     );
-    expect([self, byId].map(hasRoleGuard)).toEqual([true, false]);
+    expect([self, byId, noBody].map(hasRoleGuard)).toEqual([true, false, true]);
+  });
+
+  it("selfScoped : toute lecture du corps hors validateBody(schéma sans *Id, email, username) est refusée", () => {
+    const code = `const prefsSchema = z.object({ theme: z.string() });
+const targetSchema = z.object({ theme: z.string(), userId: z.number() });
+const mailSchema = z.object({ "email": z.string() });
+const userSchema = z.object({ username: z.string() });
+const spreadSchema = z.object({ ...base, theme: z.string() });
+router.patch("/a", selfScoped, async (req, res) => { const data = req.body; await update(req.user.id, data.userId); });
+router.patch("/b", selfScoped, async (req, res) => { const { userId, ...rest }: Body = req.body; await update(req.user.id, userId); });
+router.patch("/c", selfScoped, async (req, res) => { await update(req.user.id, req.body?.["userId"]); });
+router.patch("/d", selfScoped, async (req, res) => { await updateByEmail(req.user.id, req.body.email); });
+router.patch("/e", selfScoped, async ({ user, body }, res) => { await update(user.id, body); });
+router.patch("/f", selfScoped, validateBody(targetSchema), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/g", selfScoped, validateBody(mailSchema), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/h", selfScoped, validateBody(userSchema), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/i", selfScoped, validateBody(spreadSchema), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/j", selfScoped, validateBody(unknownSchema), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/k", selfScoped, validateBody(prefsSchema, { ...opts }), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/l", selfScoped, validateBody(z.object({ ownerId: z.number() })), async (req, res) => { await update(req.user.id, req.body); });
+router.patch("/m", selfScoped, validateBody(prefsSchema), async (req, res) => { const data = req.body; await update(req.user.id, data); });
+router.patch("/n", selfScoped, validateBody(z.object({ theme: z.string() })), async (req, res) => { await update(req.user.id, req.body); });`;
+    expect(src(code).map(hasRoleGuard)).toEqual([
+      false, false, false, false, false, false, false, false, false, false, false, false, true, true,
+    ]);
+  });
+
+  it("T1 : liste positive, un middleware inconnu ne vaut pas garde", () => {
+    for (const mw of ["[isAnyUser]", "...guards", "anyone", "authorize([...ALL_ROLES])", "checkWritePermission", "isAnyUser", "selfScopedX", "isAdminLike"]) {
+      const [r] = src(`router.post("/y", ${mw}, async (req, res) => { res.json({}); });`);
+      expect(hasRoleGuard(r), mw).toBe(false);
+    }
+    for (const mw of ["isAdmin", "isStaff", "isWorkshopManager", 'authorize(["admin"])', "authorize([...PROCUREMENT_ROLES])"]) {
+      const [r] = src(`router.post("/y", ${mw}, async (req, res) => { res.json({}); });`);
+      expect(hasRoleGuard(r), mw).toBe(true);
+    }
+    expect(AUTH_ROLE_GUARDS.has("isAdmin")).toBe(true);
+    expect(AUTH_ROLE_GUARDS.has("isAnyUser")).toBe(false);
+  });
+
+  it("T1 : une garde locale ne vaut que dans son fichier", () => {
+    const [r] = src(`router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard({ ...r, file: "api/purchase-orders.routes.ts" })).toBe(true);
+    expect(hasRoleGuard({ ...r, file: "api/vehicles.routes.ts" })).toBe(false);
+  });
+
+  it("T1 : chaque garde locale de la liste est définie dans son fichier et ne vaut pas isAnyUser", () => {
+    for (const [file, names] of Object.entries(LOCAL_ROLE_GUARDS)) {
+      const source = readFileSync(join(serverDir, file), "utf8");
+      for (const name of names) {
+        const def = new RegExp(`\\bconst\\s+${name}\\s*=\\s*([^\\n]*)`).exec(source)?.[1];
+        expect(def, `${name} absent de ${file}`).toBeDefined();
+        expect(def, `${name} (${file})`).not.toMatch(/\bisAnyUser\b|\bALL_ROLES\b|\bauthenticate\b/);
+      }
+    }
+    const index = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+    for (const name of MOUNT_ROLE_GUARDS.map((n) => n.replace(/^\.\.\./, ""))) {
+      expect(new RegExp(`\\bconst\\s+${name}\\s*=|\\bimport\\s*\\{[^}]*\\b${name}\\b`).test(index), name).toBe(true);
+    }
+  });
+
+  it("T1 : montage gardé par un drapeau seul = non gardé ; router.use(garde) garde les déclarations suivantes", () => {
+    const flagOnly = mountPrefixes(`import tRoutes from "./t.routes";\napiRouter.use("/t", requireFeature("gps"), tRoutes);`);
+    expect(flagOnly.get("api/t.routes.ts")?.guarded).toBe(false);
+    const staff = mountPrefixes(`import tRoutes from "./t.routes";\napiRouter.use("/t", isStaff, tRoutes);`);
+    expect(staff.get("api/t.routes.ts")?.guarded).toBe(true);
+    const [before, after] = src(
+      `router.post("/a", async (req, res) => { res.json({}); });
+       router.use(isAdmin);
+       router.post("/b", async (req, res) => { res.json({}); });`,
+    );
+    expect([before, after].map(hasRoleGuard)).toEqual([false, true]);
+    const [flag] = src(`router.use(requireFeature("x"));\nrouter.post("/c", async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard(flag)).toBe(false);
+  });
+
+  it("déclarations illisibles (.route, .all, apostrophes, routeur non reconnu) : repérées", () => {
+    expect(unreadableDeclarations(`router.route("/a").post(isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.all("/a", h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.post('/a', isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.patch(path, isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`const r = Router();\nr.post("/a", isAdmin, h);`).length).toBeGreaterThan(0);
+    expect(unreadableDeclarations(`const router = Router();\nrouter.post("/a", isAdmin, h);\nrouter.get(p, h);`)).toEqual([]);
+  });
+
+  it("aucune déclaration illisible dans server/api ni server/routes.ts", () => {
+    const files = [...readdirSync(join(serverDir, "api")).filter((f) => f.endsWith(".ts")).map((f) => join("api", f)), "routes.ts"];
+    const found = files.flatMap((f) => unreadableDeclarations(readFileSync(join(serverDir, f), "utf8")).map((u) => `${f} : ${u}`));
+    expect(found, "Écris la route sous la forme router.post(\"/chemin\", garde, handler) : sinon elle échappe aux cliquets.").toEqual([]);
   });
 
   it("B1 : ownedBy n'est pas une garde T1, et sa fonction interne ne coupe pas l'en-tête", () => {
@@ -162,16 +258,18 @@ router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (re
   });
 
   it("B2 : selfScoped refusé pour chaque contournement connu", () => {
-    const code = `const byRef = async (req, res) => { await update(req.user.id, req.body); };
+    const code = `const prefsSchema = z.object({ theme: z.string() });
+const byRef = async (req, res) => { await update(req.user.id, req.body); };
 router.patch("/a", selfScoped, async (req, res) => { await update(req.body.userId, req.body); });
 router.patch("/b", selfScoped, async (req, res) => { await update(Number(req.query.userId), req.body); });
 router.patch("/c", selfScoped, async ({ params, body }, res) => { await update(Number(params.id), body); });
 router.patch("/d", selfScoped, async (req, res) => { const { userId, name } = req.body; await update(userId, name); });
 router.patch("/e", selfScoped, async (req, res) => { await update(42, req.body); });
 router.patch("/f/:id", selfScoped, byRef);
-router.patch("/g", selfScoped, byRef);
-router.patch("/h", selfScoped, missing);`;
-    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, true, false]);
+router.patch("/g", selfScoped, validateBody(prefsSchema), byRef);
+router.patch("/h", selfScoped, missing);
+router.patch("/i", selfScoped, byRef);`;
+    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, true, false, false]);
   });
 
   it("T4 : validateBody avec schéma permissif ou options en variable ne vaut pas protection", () => {
@@ -183,6 +281,15 @@ router.post("/c", isAdmin, validateBody(okSchema, opts), async (req, res) => { a
 router.post("/d", isAdmin, validateBody(okSchema, { serverFields: ["status"] }), async (req, res) => { await save(req.body); });`;
     const routes = src(code);
     expect(routes.map(protectsServerFields)).toEqual([false, false, false, true]);
+  });
+
+  it("T4 : keep en forme abrégée et options en spread ne valent pas retrait garanti", () => {
+    const code = `const leakSchema = z.object({ name: z.string(), cost: z.number() });
+router.post("/a", isAdmin, validateBody(leakSchema, { keep }), async (req, res) => { await save(req.body); });
+router.post("/b", isAdmin, validateBody(leakSchema, { ...opts }), async (req, res) => { await save(req.body); });
+router.post("/c", isAdmin, validateBody(leakSchema, { serverFields: ["x"], ...opts }), async (req, res) => { await save(req.body); });
+router.post("/d", isAdmin, validateBody(leakSchema), async (req, res) => { await save(req.body); });`;
+    expect(src(code).map(protectsServerFields)).toEqual([false, false, false, true]);
   });
 
   it("l'analyse voit bien les déclarations des sources", () => {

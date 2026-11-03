@@ -31,7 +31,12 @@ export function ownedBy(
 
 /**
  * Garde explicite d'une route qui n'agit que sur l'utilisateur connecté (préférences, mot de passe,
- * onboarding) : tous les rôles, aucun identifiant pris dans l'URL. Le cliquet T1 l'accepte comme garde
- * seulement si le handler ne lit pas `req.params`.
+ * onboarding) : tous les rôles. À l'exécution, il vaut `isAnyUser` ; la restriction au compte de
+ * session est vérifiée par le cliquet T1 (tests/unit/server/support/write-routes-scan.ts), qui ne
+ * l'accepte comme garde que si le handler :
+ *  - lit l'identité de session (`req.user.id` ou `req.session.userId`) ;
+ *  - ne lit ni `params`, ni `query`, et le chemin n'a pas de segment `:x` ;
+ *  - ne lit le corps que derrière `validateBody(schéma)`, schéma qui ne déclare ni `*Id`, ni `email`,
+ *    ni `username`.
  */
 export const selfScoped: RequestHandler = isAnyUser;
