@@ -208,4 +208,29 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(SATELLITE_GROUPS.stock.keys).toContain("/api/warehouse/most-used-parts");
     expect(SATELLITE_GROUPS.clientMoney.keys).toContain("/api/management/dashboard");
   });
+
+  it("kilométrage et position d'atelier : la fiche du seul véhicule touché, pas toutes les fiches", () => {
+    for (const event of ["vehicle_mileage_updated", "vehicle_maintenance_position_updated"]) {
+      const { keys, prefixes } = satelliteTargetsOf(event, { vehicleId: 42, vehicle: { registrationNumber: "LT-123-AB" } });
+      expect(keys).toEqual(expect.arrayContaining(["/api/vehicles/42", "/api/vehicles/LT-123-AB", "/api/vehicles", "/api/vehicles/all"]));
+      expect(prefixes).not.toContain("/api/vehicles/");
+      expect(keys).not.toContain("/api/vehicles/43");
+    }
+  });
+
+  it("sans identifiant dans la charge, repli sur toutes les fiches véhicule (trop plutôt que pas assez)", () => {
+    for (const payload of [undefined, {}, { vehicleId: "abc" }, { vehicleId: 0 }]) {
+      expect(satelliteTargetsOf("vehicle_mileage_updated", payload).prefixes).toContain("/api/vehicles/");
+    }
+  });
+
+  it("chaque gabarit par identifiant correspond à une clé construite par un écran", () => {
+    const groups = Object.entries(SATELLITE_GROUPS) as Array<[SatelliteGroupName, { byId?: readonly string[] }]>;
+    const orphans = groups.flatMap(([name, group]) =>
+      (group.byId ?? [])
+        .filter((template) => !clientTemplates.has(template.replace(/:\w+$/, "${")) && ![...clientTemplates].some((key) => key.startsWith(template.replace(/:\w+$/, "${"))))
+        .map((template) => `${name}: ${template}`),
+    );
+    expect(orphans).toEqual([]);
+  });
 });

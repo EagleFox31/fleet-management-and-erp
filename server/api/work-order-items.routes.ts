@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, isAnyUser, isTechnician } from "../middleware/auth";
+import { authenticate, isAnyUser, isStaff, isTechnician } from "../middleware/auth";
 import { assertWorkOrderReadable } from "../lib/work-order-scope";
 import { moduleLogger } from "../lib/logger";
 
@@ -188,12 +188,13 @@ workOrderItemDetailRoutes.delete("/:id", async (req, res) => {
 
 export const laborCatalogRoutes = Router();
 
-laborCatalogRoutes.get("/", authenticate, async (req, res) => {
+// Barème interne (heures standard, taux) : personnel seulement ; un client ne le lit pas.
+laborCatalogRoutes.get("/", isStaff, async (req, res) => {
   try {
     const includeInactive = req.query.includeInactive === "1";
     return res.status(200).json(await workOrderItemsService.getLaborCatalog(includeInactive));
   } catch (error) {
-    console.error("Get labor catalog error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get labor catalog error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

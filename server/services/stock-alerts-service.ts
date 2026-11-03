@@ -1,6 +1,12 @@
 import { db } from "../db";
-import { parts, partsStockMovements, partRequirements, suppliers, type Part } from "@shared/schema";
+import { parts, partsStockMovements, partRequirements, suppliers, workOrders, type Part } from "@shared/schema";
 import { eq, sql, desc, sum, count, gte, lte } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("stock-alerts-service");
+/** Borne de la colonne `integer` : au-delà, Postgres lèverait une erreur rendue en 500. */
+const MAX_STOCK = 2147483647;
 
 /**
  * Service Stock & Alertes
@@ -18,7 +24,7 @@ export class StockAlertsService {
    * Exploite les 58 pièces importées (94 366 959 FCFA)
    */
   async getInventoryValue() {
-    console.log("Calculating inventory value from 58 imported parts...");
+    log.debug("Calculating inventory value from 58 imported parts...");
 
     const [stats] = await db
       .select({
@@ -53,7 +59,7 @@ export class StockAlertsService {
       }, {} as Record<string, { count: number; value: number; quantity: number }>)
     };
 
-    console.log("Inventory value calculated:", result);
+    log.debug({ result }, "Inventory value calculated");
     return result;
   }
 
@@ -62,7 +68,7 @@ export class StockAlertsService {
    * Source de vérité: stock actuel <= seuil min (pas uniquement le flag reorderAlert)
    */
   async getReorderAlerts() {
-    console.log("Fetching reorder alerts (low stock parts)...");
+    log.debug("Fetching reorder alerts (low stock parts)...");
 
     const alerts = await db
       .select({
@@ -105,7 +111,7 @@ export class StockAlertsService {
       estimatedCost: estimatedCost
     };
 
-    console.log(`Found ${alerts.length} reorder alerts, estimated cost: ${estimatedCost} FCFA`);
+    log.debug(`Found ${alerts.length} reorder alerts, estimated cost: ${estimatedCost} FCFA`);
     return result;
   }
 
@@ -114,7 +120,7 @@ export class StockAlertsService {
    * Utilise realStock + mouvements pour cohérence
    */
   async getRealStock(partId: number) {
-    console.log(`Calculating real stock for part ${partId}...`);
+    log.debug(`Calculating real stock for part ${partId}...`);
 
     const [part] = await db
       .select()
@@ -122,7 +128,7 @@ export class StockAlertsService {
       .where(eq(parts.id, partId));
 
     if (!part) {
-      throw new Error(`Pièce ${partId} non trouvée`);
+      throw new AppError(404, "Pièce introuvable.");
     }
 
     // Récupérer les mouvements récents
@@ -152,7 +158,7 @@ export class StockAlertsService {
       }))
     };
 
-    console.log(`Real stock for part ${partId}: ${result.realStock}`);
+    log.debug(`Real stock for part ${partId}: ${result.realStock}`);
     return result;
   }
 
@@ -169,59 +175,83 @@ export class StockAlertsService {
     deliveryReceiptNumber?: string;
     userId: number;
   }) {
-    console.log(`Recording stock movement for part ${data.partId}:`, data);
+    log.debug({ partId: data.partId, type: data.type, quantity: data.quantity, workOrderId: data.workOrderId, userId: data.userId }, "Enregistrement d'un mouvement de stock");
 
-    const [part] = await db
-      .select()
-      .from(parts)
-      .where(eq(parts.id, data.partId));
-
-    if (!part) {
-      throw new Error(`Pièce ${data.partId} non trouvée`);
+    if (!Number.isInteger(data.quantity) || data.quantity <= 0 || data.quantity > MAX_STOCK) {
+      throw new AppError(400, "La quantité doit être un entier strictement positif.");
     }
 
-    const previousStock = part.quantity;
-    const adjustment = data.type === 'in' ? data.quantity : -data.quantity;
-    const newStock = Math.max(0, previousStock + adjustment);
+    if (data.workOrderId !== undefined) {
+      const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, data.workOrderId));
+      if (!wo) {
+        throw new AppError(404, "Ordre de travail introuvable.");
+      }
+    }
 
-    // Créer le mouvement
-    const [movement] = await db
-      .insert(partsStockMovements)
-      .values({
-        partId: data.partId,
-        movementType: data.type,
-        quantity: data.quantity,
-        previousStock: previousStock,
-        newStock: newStock,
-        reason: data.reason,
-        workOrderId: data.workOrderId,
-        createdBy: data.userId,
-        createdAt: new Date()
-      })
-      .returning();
+    // Lecture puis écriture dans une seule transaction, ligne verrouillée :
+    // deux sorties concurrentes ne peuvent plus lire le même stock initial.
+    const result = await db.transaction(async (tx) => {
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(eq(parts.id, data.partId))
+        .for("update");
 
-    // Mettre à jour le stock
-    const shouldReorder = newStock <= part.minQuantity;
+      if (!part) {
+        throw new AppError(404, "Pièce introuvable.");
+      }
 
-    await db
-      .update(parts)
-      .set({
-        quantity: newStock,
-        realStock: newStock,
-        reorderAlert: shouldReorder,
-        responsiblePerson: data.responsiblePerson || part.responsiblePerson,
-        deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber
-      })
-      .where(eq(parts.id, data.partId));
+      const previousStock = part.quantity;
+      if (data.type === 'out' && data.quantity > previousStock) {
+        throw new AppError(
+          409,
+          `Sortie impossible : ${previousStock} unité(s) en stock, ${data.quantity} demandée(s).`,
+        );
+      }
+      const newStock = data.type === 'in' ? previousStock + data.quantity : previousStock - data.quantity;
+      if (newStock > MAX_STOCK) {
+        throw new AppError(400, "Entrée impossible : le stock dépasserait la capacité enregistrable.");
+      }
 
-    console.log(`Stock movement recorded: ${previousStock} → ${newStock}, reorder alert: ${shouldReorder}`);
+      const [movement] = await tx
+        .insert(partsStockMovements)
+        .values({
+          partId: data.partId,
+          movementType: data.type,
+          quantity: data.quantity,
+          previousStock,
+          newStock,
+          reason: data.reason,
+          workOrderId: data.workOrderId,
+          createdBy: data.userId,
+          createdAt: new Date()
+        })
+        .returning();
 
-    return {
-      movement,
-      previousStock,
-      newStock,
-      reorderAlert: shouldReorder
-    };
+      const shouldReorder = newStock <= part.minQuantity;
+
+      await tx
+        .update(parts)
+        .set({
+          quantity: newStock,
+          realStock: newStock,
+          reorderAlert: shouldReorder,
+          responsiblePerson: data.responsiblePerson || part.responsiblePerson,
+          deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber,
+          updatedBy: data.userId,
+          updatedAt: new Date()
+        })
+        .where(eq(parts.id, data.partId));
+
+      return { movement, previousStock, newStock, reorderAlert: shouldReorder };
+    });
+
+    log.debug(
+      { partId: data.partId, previousStock: result.previousStock, newStock: result.newStock, reorderAlert: result.reorderAlert },
+      "mouvement de stock enregistré",
+    );
+
+    return result;
   }
 
   /**
@@ -229,7 +259,7 @@ export class StockAlertsService {
    * Basé sur les mouvements de type 'out'
    */
   async getMostUsedParts(limit: number = 10) {
-    console.log(`Fetching top ${limit} most used parts...`);
+    log.debug(`Fetching top ${limit} most used parts...`);
 
     const mostUsed = await db
       .select({
@@ -261,7 +291,7 @@ export class StockAlertsService {
       totalValue: Number(part.totalUsed || 0) * parseFloat(part.unitPrice || "0")
     }));
 
-    console.log(`Found ${result.length} most used parts`);
+    log.debug(`Found ${result.length} most used parts`);
     return result;
   }
 
@@ -269,7 +299,7 @@ export class StockAlertsService {
    * Récupère les statistiques globales du magasin
    */
   async getWarehouseStatistics() {
-    console.log("Calculating warehouse statistics...");
+    log.debug("Calculating warehouse statistics...");
 
     const inventoryValue = await this.getInventoryValue();
     const reorderAlerts = await this.getReorderAlerts();
@@ -328,7 +358,7 @@ export class StockAlertsService {
       }
     };
 
-    console.log("Warehouse statistics calculated:", result);
+    log.debug({ result }, "Warehouse statistics calculated");
     return result;
   }
 
@@ -336,7 +366,7 @@ export class StockAlertsService {
    * Récupère les pièces par fournisseur avec valeur totale
    */
   async getPartsBySupplier() {
-    console.log("Fetching parts by supplier...");
+    log.debug("Fetching parts by supplier...");
 
     // Regroupement sur `supplier_id` (clé étrangère), plus sur le nom en clair:
     // la saisie libre historique produisait des doublons ("CFAO Mobility" vs
@@ -366,7 +396,7 @@ export class StockAlertsService {
       totalValue: parseFloat(sup.totalValue || "0")
     }));
 
-    console.log(`Parts grouped by ${result.length} suppliers`);
+    log.debug(`Parts grouped by ${result.length} suppliers`);
     return result;
   }
 
@@ -375,7 +405,7 @@ export class StockAlertsService {
    * Format adapté pour le graphique de consommation
    */
   async getTopConsumedParts(limit: number = 10) {
-    console.log(`Fetching top ${limit} consumed parts for chart...`);
+    log.debug(`Fetching top ${limit} consumed parts for chart...`);
 
     const consumed = await db
       .select({
@@ -397,7 +427,7 @@ export class StockAlertsService {
       totalValue: Number(part.totalQuantity || 0) * parseFloat(part.unitPrice || "0")
     }));
 
-    console.log(`Found ${result.length} top consumed parts`);
+    log.debug(`Found ${result.length} top consumed parts`);
     return result;
   }
 
@@ -407,7 +437,7 @@ export class StockAlertsService {
    */
   async getStockValueHistory(days: number = 30) {
     const safeDays = Number.isFinite(days) ? Math.min(Math.max(Math.trunc(days), 1), 365) : 30;
-    console.log(`Generating stock value history for last ${safeDays} days (real data only)...`);
+    log.debug(`Generating stock value history for last ${safeDays} days (real data only)...`);
 
     const currentInventory = await this.getInventoryValue();
     const currentValue = Number(currentInventory.totalValue || 0);
@@ -481,7 +511,7 @@ export class StockAlertsService {
 
     history.reverse();
 
-    console.log(`Generated ${history.length} days of stock value history`);
+    log.debug(`Generated ${history.length} days of stock value history`);
     return history;
   }
 }

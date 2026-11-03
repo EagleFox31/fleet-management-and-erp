@@ -2203,3 +2203,57 @@ soumission sans doublon.
   - sur le code réel, les offenders sont identiques à `OPEN_GET_READS_FROZEN` (aucun ajout, aucun retrait) ;
   - avec le scanner de main, le test échoue sur 11 cas (les 10 contournements et l'alias sain) ;
   - tsc 0.
+
+## 2026-11-03 16:59 — Ménage des restes de test : pleins d'un véhicule orphelin
+
+- **Quoi** :
+  - `deleteOrphanTestRows` supprime les pleins d'un véhicule orphelin avant le véhicule, quelles que soient leurs notes.
+  - Test : `tests/integration/test-cleanup-orphan-fuel-records.test.ts`.
+- **Pourquoi** : signalé par aa.
+  - Sur la base de contrat partagée, `fuel_records_vehicle_id_vehicles_id_fk` bloquait la suppression d'un véhicule orphelin.
+  - Chaque fichier de contrat ressortait donc en échec alors que ses tests passaient.
+  - Le balayage par préfixe des notes ne voit pas un plein saisi sans préfixe.
+- **Preuves** :
+  - rouge sans la ligne : 1 échec ;
+  - vert 6/6, avec la garde des FK vers users et le test status_history ;
+
+## 2026-11-03 16:55 — Couche 3 : kilométrage et position d'atelier ciblés par véhicule
+
+- **Quoi** :
+  - Le groupe vehicleOperations ne rafraîchit plus toutes les fiches véhicule (préfixe `/api/vehicles/`). Il rafraîchit la fiche du véhicule touché, par `/api/vehicles/<id>` et par l'immatriculation, ainsi que les listes `/api/vehicles`, `/all` et `/all-with-status`.
+  - Gabarits `byId` dans `realtime-satellites.ts`, remplis depuis la charge de l'événement.
+  - Sans identifiant dans la charge, repli sur le préfixe large.
+- **Pourquoi** : un relevé de kilométrage invalidait chaque fiche, chaque liste de documents et chaque liste de pneus ouvertes dans le cache de tous les profils.
+- **Preuves** :
+  - rouge contre main : 1 échec sur le ciblage ;
+  - vert 16/16 ;
+
+## 2026-11-03 17:08 — e2e : plein de mission sans réponse, un seul débit (FUEL-DBL)
+
+- **Quoi** : `e2e/21-mission-fuel-double-debit.spec.ts`.
+  - Le chauffeur valide un plein.
+  - `page.route` laisse la requête atteindre le serveur, qui écrit le plein (`route.fetch`), puis jette la réponse (`route.abort`).
+  - Le chauffeur ferme la fiche (Annuler), la rouvre et renvoie le même plein.
+  - Attendu : même `requestKey` aux deux envois, rejeu en 2xx, un seul débit en base pour la mission.
+- **Pourquoi** : niveau E de #181.
+  - Les contrats prouvent le rejeu côté serveur.
+  - Seul un navigateur prouve que la clé survit à une issue inconnue et à la fermeture de la fiche (sessionStorage, `discard` qui garde une clé incertaine).
+- **Preuves** :
+  - vert sur Postgres local, serveur sur un port dédié, Chrome (`E2E_CHANNEL=chrome`) ;
+  - rouge quand `discard` libère aussi une clé incertaine : le renvoi part avec une nouvelle clé ;
+  - vert de nouveau après retour arrière ;
+  - tsc 0.
+
+## 2026-11-03 17:11 — Garde : toute alerte créée émet alert_created
+
+- **Quoi** : `tests/unit/server/alert-emission-hygiene.test.ts` et le scanner `tests/support/alert-emission-scan.ts` (API TypeScript).
+  - Le scanner recense les écritures d'alerte sous server/ : `insert(alerts)`, `createAlert(…)` et `INSERT INTO alerts`.
+  - Pour chacune, il exige dans la fonction englobante (ou le gestionnaire `METHODE /chemin`) `broadcastAlertCreated`, la chaîne `alert_created` ou un helper local qui émet.
+- **Résultat sur main** : 15 écritures, dont 10 qui émettent.
+  - Deux exceptions justifiées : la primitive `storage.createAlert` et la restauration de sauvegarde.
+  - Trois défauts gelés en égalité stricte : `POST /api/alerts`, `POST /api/test-date-maintenance`, `storage.checkAndCreateStockAlerts` (stock bas).
+- **Pourquoi** : section « Émetteurs non traités » de l'audit temps réel ; la réception de pièces est corrigée par #180 (b7). Cette garde complète `alerts-write-hygiene`, qui couvre UPDATE et DELETE.
+- **Preuves** :
+  - rouge quand l'émission de `procurement-service` est retirée : 1 échec ;
+  - unitaires 1862/1862 ;
+  - tsc 0.

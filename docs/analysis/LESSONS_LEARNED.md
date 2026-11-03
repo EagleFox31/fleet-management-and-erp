@@ -1614,6 +1614,28 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - **Prévention** : unitaire `tests/unit/client/submission-key.test.ts`. Le mutant « 5xx traité comme connu » le fait échouer (3 tests).
 - **Suivi (hors de cette correction)** : le statut de mission est contrôlé avant le verrou. Un plein normal rejoué après la clôture reçoit donc un 400 au lieu du rejeu.
 
+## 2026-11-03 — Écriture de stock jugée suffisante sous `isStaff` au montage (lot A5)
+
+### Contexte
+- `POST /api/warehouse/stock-movement` (`server/api/warehouse.routes.ts`) écrit un mouvement d'entrée ou de sortie et met à jour `parts.quantity`. Le routeur est monté sous `isStaff` (`server/api/index.ts`) et la route ne portait que `authenticate` : chauffeur, technicien, secrétaire pouvaient l'appeler. Sa réponse 500 renvoyait `error.message`. Le doublon de `routes.ts` (`isInventoryManager`) était masqué par le routeur monté avant, donc la garde voulue n'était jamais servie.
+- Même audit : `GET /api/dashboard/technician-stats` (toute la flotte), `GET /api/users/technicians` (noms du personnel) et `GET /labor-catalog` (barème) ouverts à un client ; `GET /api/vehicles/:id/tires` en 500 sur un id hors plage ; `GET /api/work-orders/:id` avec un contrôle de rôle recopié au lieu du helper `assertWorkOrderReadable`.
+
+### Cause racine
+- Classification : garde de rôle métier remplacée par une garde générique de montage. `isStaff` répond « est-ce du personnel », pas « est-ce le magasin » ; elle est posée au niveau du préfixe, donc une route d'écriture ajoutée dessous paraît protégée sans l'être.
+- Le doublon masqué de `routes.ts` a entretenu l'illusion : le code lisible portait la bonne garde, le code servi non.
+
+### Résolution
+- `isPartsCatalogManager` (admin, warehouse) sur le mouvement de stock. Pas `isStockIssuer` : le chef d'atelier ne sort une pièce que par `POST /api/work-orders/:id/part-requirements/:id/issue` (dérogation motivée, décidée dans le service) ; le technicien demande, le magasinier sort. Aucun écran n'appelle cette route aujourd'hui. Données validées (`assertValidDbId`, quantité finie et positive), erreurs par `AppError`, pièce inconnue en 404, logs migrés vers `moduleLogger`.
+- `isTechnician` sur `technician-stats` (aucun écran ne l'appelle), `isStaff` sur `/users/technicians` et `/labor-catalog` (les écrans client désactivent ces requêtes), `assertValidDbId` sur les pneus d'un véhicule, `assertWorkOrderReadable` sur le détail d'OT. Handlers morts `GET /api/vehicles` et `/all` de `routes.ts` supprimés après comparaison avec le routeur qui les masque.
+
+### Prévention (vérifiable)
+- `tests/contract/a5-role-guards.contract.test.ts` (45 cas, 19 rouges sur `main`) : refus 403 de chaque rôle non magasin avec stock inchangé, 400 sur données invalides, rôles autorisés en 201/200.
+- Liste gelée des lectures ouvertes (`routes-hygiene.test.ts`) réduite de 6 entrées, `KNOWN_AUTHENTICATE_ONLY` de 2, `write-route-guards.frozen.ts` de 1.
+
+### Règle Projet (obligatoire)
+- Une écriture d'argent ou de stock porte une garde de rôle métier explicite sur la route (`isPartsCatalogManager`, `isStockIssuer`, `isInventoryManager`…), jamais `isStaff` ou `authenticate` seuls, même si le montage du routeur en pose déjà une.
+- Une route déclarée à la fois dans un routeur `server/api/` et dans `routes.ts` : seule la première est servie ; vérifier laquelle porte la garde avant de la juger.
+
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
 ### Contexte
@@ -1730,3 +1752,27 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - **Résolution** : `assertMissionAcceptsFuel(tx)` relit le statut avec `FOR UPDATE` dans la transaction du débit, après le rejeu et avant le solde. Ordre des verrous : carte, puis ligne.
 - **Clé incertaine et nouvelle saisie** : la clé incertaine n’est reprise que pour la même saisie (empreinte sans l’heure par défaut). L’empreinte contient le jour du plein, que le serveur compare, mais pas l’heure par défaut : une fiche rouverte le lendemain prend une nouvelle clé au lieu d’un 409. Une saisie corrigée après une issue incertaine (autre quantité, autre prix, autre jour) est une nouvelle intention et prend une nouvelle clé. Si le premier envoi avait abouti, il y a deux pleins : les deux écrans relisent les pleins après une issue incertaine, donc le premier est affiché avant la correction.
 - **Prévention** : trois contrats (rejeu après clôture, plein neuf sur mission clôturée, clôture concurrente), dont deux rouges contre main ; unitaires de l’empreinte.
+
+## 2026-11-03 — Mouvement de stock magasin : sortie ramenée à 0 et course de lecture (récidive)
+
+### Contexte
+- `POST /api/warehouse/stock-movement` (`stockAlertsService.recordStockMovement`) lisait la pièce hors transaction, puis écrivait le mouvement et le stock dans deux requêtes séparées.
+- Une sortie supérieure au stock était ramenée à 0 par `Math.max(0, …)`, et le journal gardait un `newStock` qui ne correspondait pas à la quantité sortie.
+- Trois sorties concurrentes de 4 sur un stock de 10 réussissaient toutes, et chacune partait de 10.
+- Ce n'est pas la première fois : `POST /api/parts/:id/update-stock` avait le même défaut, corrigé par `partsService.updateStock`.
+
+### Cause racine
+- Classification : invariant métier non porté par la base ni par une transaction.
+- La correction de `updateStock` n'avait pas été étendue aux autres écrivains de `parts.quantity`.
+
+### Résolution
+- Lecture `FOR UPDATE`, insertion du mouvement et mise à jour du stock dans une seule transaction.
+- Sortie au-delà du stock : 409 lisible, rien n'est écrit. Pièce absente : 404. Quantité non entière ou nulle : 400.
+- La route transmet les erreurs au gestionnaire central (`next`) et ne renvoie plus `error.message`.
+
+### Prévention (vérifiable)
+- `tests/contract/warehouse-stock-movement.contract.test.ts` : 409 avec stock et journal intacts, 404, 400 (décimal, hors entier SQL, débordement), trois sorties concurrentes (deux 201, un 409, chaîne previous → new continue), entrées concurrentes additionnées, trame en portée personnel. Rouge sur main sur chaque cas.
+- À venir (backlog b7) : recenser tout écrivain de `parts.quantity` hors transaction verrouillée.
+
+### Règle Projet (obligatoire)
+- Toute écriture de `parts.quantity` relit la pièce `FOR UPDATE` dans la transaction qui écrit, et refuse en 409 un stock insuffisant. Ne jamais ramener un stock à 0 en silence.

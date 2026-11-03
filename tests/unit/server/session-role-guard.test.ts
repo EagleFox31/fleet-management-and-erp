@@ -27,7 +27,6 @@ const FROZEN_EXCEPTIONS: Record<string, Kind[]> = {
   "api/fuel-card.routes.ts": ["audit"],
   "api/operations.routes.ts": ["audit"],
   "api/vehicles.routes.ts": ["audit"],
-  "api/warehouse.routes.ts": ["audit"],
   "api/pin-auth.routes.ts": ["write"],
   // Fichier gelé (AGENTS.md §9) : écritures au login et étiquettes d'acteur d'événements.
   "routes.ts": ["audit", "write"],
