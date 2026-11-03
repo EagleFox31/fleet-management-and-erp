@@ -2149,3 +2149,33 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un secret n'a jamais de valeur par défaut hors d'une liste d'autorisation d'environnements de développement. En production, secret absent ou public = refus de démarrer, avec un message actionnable.
 - Un environnement se teste par liste d'autorisation, jamais par `=== "production"`.
 - Ne jamais normaliser (trim, casse) une clé de signature existante : on ne normalise que pour valider.
+
+### Assurance et visite : la check-list jugeait l'échéance un jour plus tard que le lancement (2026-11-03)
+
+- **Contexte** : une assurance ou une visite technique qui expire aujourd'hui était « conforme » dans `GET /api/missions/:id/launch-readiness`, puis refusée au lancement (`PUT /status` → `in_progress`). Même écart autour de minuit UTC.
+- **Cause racine** : la check-list passait par `isDateExpired`, qui compare en jour local avec un `<` strict. C'est la règle du permis chauffeur. Le lancement passe par `isExpiredOnOrBeforeToday` (jour UTC, le jour de l'échéance bloque, `shared/constants/expiry-day.ts`). C'est la deuxième divergence entre ces deux chemins, après la carte grise.
+- **Classification** : règle métier dupliquée, divergence de calcul de date.
+- **Résolution** :
+  - la check-list juge tous les papiers véhicule par `isExpiredOnOrBeforeToday` ;
+  - un papier sans date reste invalide, sauf la carte grise ;
+  - l'ancienne fonction est renommée `isDriverLicenseExpired`, réservée au permis.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-renewal-receipt.contract.test.ts`, bloc « jour de l'échéance » : 2 cas passent au rouge sur l'ancienne règle ;
+  - `tests/unit/server/mission-expiry-day-hygiene.test.ts` échoue si `isDocumentTypeValid` compare des dates elle-même, ou si la règle du permis sert à autre chose qu'au permis.
+- **Leçon** : une règle de date se nomme d'après le papier qu'elle juge. Une fonction générique `isDateExpired` invite à la réutiliser pour un papier dont la règle est différente.
+
+### Jour de l'échéance : une règle partagée renversée sans divergence (2026-11-03, #224)
+
+- **Contexte** : décision produit (#224) : un papier est valable le jour de son échéance et expiré le lendemain, comme le permis. Jusque-là, P3-2 (D1, D2) rendait le jour J expiré pour les papiers, et le permis suivait sa propre règle au jour local.
+- **Cause racine** : la règle du jour J existait en trois écritures : la source partagée (`isExpiredOn`, `<= 0`), deux calculs locaux qui la recopiaient (`alert-service.checkVehicleDocumentAlerts`, `GET /api/vehicles/alerts`, au jour local avec `setHours` et `Math.ceil`) et le permis (`isDriverLicenseExpired`, jour local, `<` strict). Basculer seulement la source aurait laissé les alertes dire « expiré » un jour où le lancement passe.
+- **Classification** : règle métier dupliquée, changement de décision produit.
+- **Résolution** :
+  - `shared/constants/expiry-day.ts` : `isExpiredOn` à `days < 0`, nouveau `isDriverLicenseExpiredOn` ;
+  - alertes (`alert-service`, `vehicles.routes`) rebranchées sur `toExpiryDateOnly` + `daysBetweenDateOnly`, jour UTC ;
+  - `isExpiredOnOrBeforeToday` renommée `isPaperExpired` : son nom contredisait la nouvelle règle ;
+  - le jour J reste signalé : alerte « expire bientôt », priorité haute, « dernier jour de validité ».
+- **Prévention vérifiable** :
+  - `tests/unit/server/document-expiry-day-j.test.ts` : J-1, J, J+1 sur les cinq verdicts papiers (éligibilité, statut, statistiques, liste, règle typée) et sur le permis, plus la bascule à minuit UTC sous Africa/Douala et UTC ;
+  - contrats `mission-document-expiry` et `mission-renewal-receipt` : alertes, check-list et lancement à J et J+1, permis à J-1, J, J+1.
+  - relecture : une troisième recopie (`getExpiredDocuments`, liste `expiredDocuments`, `new Date(échéance) < now`) avait échappé à la bascule. `tests/unit/server/expiry-day-local-math-hygiene.test.ts` échoue désormais sur toute comparaison locale d'une échéance dans `server/`, `client/src` et `shared/` (liste gelée de 6 fichiers client/CPC, qui ne peut que rétrécir).
+- **Leçon** : un changement de règle partagée se fait sur la source ET sur chaque recopie. Avant de basculer, chercher les calculs qui reproduisent la règle sans l'importer (`setHours(0`, `<= 0` sur un nombre de jours) ; une fonction dont le nom décrit l'ancienne règle se renomme dans le même changement.

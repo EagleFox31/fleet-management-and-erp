@@ -2,20 +2,21 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { vehicles } from "../../../shared/schema";
 import { getMissionEligibility } from "../../../shared/constants/vehicle-eligibility";
 import { classifyDocumentExpiry } from "../../../server/services/document-expiry-rule";
+import { isDriverLicenseExpiredOn, todayUtcDateOnly } from "../../../shared/constants/expiry-day";
 
 /**
  * P3-2, garde-fou « une règle, une source » : le jour de l'échéance.
  *
- * Règle métier décidée : un document dont l'échéance est AUJOURD'HUI est expiré
- * (lancement de mission bloqué) ; la veille de l'échéance il ne l'est pas ; le
- * lendemain il l'est. Trois emplacements la portent :
- *   - `getMissionEligibility` (shared) : le jour J bloque, conforme ;
+ * Règle métier (D2 révisée, #224, 3 novembre 2026) : un document est VALABLE le jour
+ * de son échéance et expiré le lendemain (J+1). Le permis suit la même règle. Trois
+ * emplacements la portent pour les papiers véhicule, un pour le permis :
+ *   - `getMissionEligibility` (shared) ;
  *   - `isDateExpired` de `vehicle-documentation-service.ts` (privée, testée par
  *     `getAllVehiclesWithDocStatus`, `getDocumentStats`, `getExpiredDocuments`) ;
- *   - `classifyDocumentExpiry` (alertes des documents typés).
+ *   - `classifyDocumentExpiry` (alertes des documents typés) ;
+ *   - `isDriverLicenseExpiredOn` (permis : check-list et lancement de mission).
  *
- * D1 et D2 corrigés (les anciens `it.fails` sont des `it`) : les trois sources rendent
- * « expiré » au jour J, via `shared/constants/expiry-day.ts`.
+ * Toutes passent par `shared/constants/expiry-day.ts` : J-1 et J valables, J+1 expiré.
  *
  * Référence temporelle (D4, décision produit) : la date du jour est la date UTC partout.
  * Le fichier tourne sous Africa/Douala (UTC+1, sans heure d'été) pour prouver que le
@@ -99,7 +100,7 @@ afterEach(() => {
 describe("jour J : éligibilité mission (règle de référence)", () => {
   it.each([
     [1, false, "la veille de l'échéance (échéance demain)"],
-    [0, true, "le jour de l'échéance"],
+    [0, false, "le jour de l'échéance (dernier jour de validité)"],
     [-1, true, "le lendemain de l'échéance (échéance hier)"],
   ])("échéance dans %i jour(s) -> bloquant=%s (%s)", (days, blocked) => {
     const result = getMissionEligibility({ insuranceExpiry: utcDate(offset(days)) }, utcDate(TODAY, 10));
@@ -118,10 +119,14 @@ describe("jour J : vehicle-documentation-service (isDateExpired, privée)", () =
     expect([v.status, v.stats, v.list]).toEqual([true, true, true]);
   });
 
-  // Défaut connu : `dateOnly < today` laisse passer l'échéance du jour.
-  it("le jour de l'échéance : expiré (statut, statistiques, liste)", async () => {
+  it("le jour de l'échéance : encore valable (statut, statistiques, liste)", async () => {
     const v = await verdicts(offset(0));
-    expect([v.status, v.stats, v.list]).toEqual([true, true, true]);
+    expect([v.status, v.stats, v.list]).toEqual([false, false, false]);
+  });
+
+  it("le jour de l'échéance : compté « expire bientôt », pas « expiré »", async () => {
+    seed(offset(0));
+    expect(await assuranceStatus()).toBe("expiring");
   });
 
   it("frontière de fuseau : la date de référence bascule à minuit UTC, pas avant", async () => {
@@ -129,7 +134,10 @@ describe("jour J : vehicle-documentation-service (isDateExpired, privée)", () =
     // 23:59:59Z le 3 : l'échéance du 4 est encore dans le futur.
     vi.setSystemTime(new Date("2026-11-03T23:59:59.000Z"));
     expect(await assuranceStatus()).not.toBe("expired");
-    // Deux jours plus tard : échue sans ambiguïté.
+    // 00:00Z le 4 : jour J, encore valable.
+    vi.setSystemTime(new Date("2026-11-04T00:00:00.000Z"));
+    expect(await assuranceStatus()).not.toBe("expired");
+    // 00:00Z le 5 : J+1, expirée.
     vi.setSystemTime(new Date("2026-11-05T00:00:00.000Z"));
     expect(await assuranceStatus()).toBe("expired");
   });
@@ -148,30 +156,26 @@ describe("jour J : classifyDocumentExpiry (documents typés)", () => {
     expect(classifyDocumentExpiry(offset(-1), new Date(NOW)).status).toBe("expired");
   });
 
-  // Défaut connu : `days < 0` classe l'échéance du jour « due ». Un test existant
-  // (document-expiry-rule.test.ts) fige ce « due » : arbitrage produit à rendre.
-  it("le jour de l'échéance : expiré", () => {
-    expect(classifyDocumentExpiry(offset(0), new Date(NOW)).status).toBe("expired");
+  it("le jour de l'échéance : « due » (alerte de rappel), pas « expired »", () => {
+    expect(classifyDocumentExpiry(offset(0), new Date(NOW))).toEqual({ status: "due", days: 0 });
   });
 });
 
 describe("une règle, une source : mêmes entrées, même verdict", () => {
-  it.each([1, -1])("échéance dans %i jour(s) : éligibilité, service et règle concordent", async (days) => {
+  it.each([
+    [1, false],
+    [0, false],
+    [-1, true],
+  ])("échéance dans %i jour(s) : les cinq verdicts valent expiré=%s", async (days, expired) => {
     const v = await verdicts(offset(days));
-    expect(new Set([v.eligibility, v.status, v.stats, v.list, v.rule]).size).toBe(1);
-  });
-
-  // Rougit dès que les cinq verdicts concordent aussi au jour J : retirer alors `.fails`.
-  it("échéance aujourd'hui : éligibilité, service et règle concordent", async () => {
-    const v = await verdicts(offset(0));
-    expect(new Set([v.eligibility, v.status, v.stats, v.list, v.rule]).size).toBe(1);
+    expect([v.eligibility, v.status, v.stats, v.list, v.rule]).toEqual([expired, expired, expired, expired, expired]);
   });
 });
 
 // D4 (décision produit : UTC partout). Le jour change à minuit UTC, soit 01:00 à Douala :
 // entre 00:00 et 01:00 heure de Douala, le jour J est encore la veille (décalage accepté).
-// Une assurance échéant le 4 n'est expirée nulle part à 23:30Z le 3, l'est partout à 00:00Z
-// le 4, que la machine soit en UTC ou à Douala.
+// Une assurance échéant le 4 n'est expirée nulle part le 4 (00:00Z à 23:59Z), l'est partout
+// à 00:00Z le 5, que la machine soit en UTC ou à Douala.
 describe.each(["Africa/Douala", "UTC"])("D4 : date UTC partout (machine en %s)", (tz) => {
   const previousTz = process.env.TZ;
   beforeEach(() => {
@@ -194,11 +198,65 @@ describe.each(["Africa/Douala", "UTC"])("D4 : date UTC partout (machine en %s)",
     ];
   }
 
-  it("23:30Z le 3 : l'échéance du 4 n'est expirée nulle part", async () => {
+  it("23:30Z le 3 (J-1) : l'échéance du 4 n'est expirée nulle part", async () => {
     expect(await expiredEverywhere("2026-11-03T23:30:00.000Z")).toEqual([false, false, false, false, false]);
   });
 
-  it("00:00Z le 4 : l'échéance du 4 est expirée partout", async () => {
-    expect(await expiredEverywhere("2026-11-04T00:00:00.000Z")).toEqual([true, true, true, true, true]);
+  it("00:00Z et 23:30Z le 4 (J) : l'échéance du 4 est encore valable partout", async () => {
+    expect(await expiredEverywhere("2026-11-04T00:00:00.000Z")).toEqual([false, false, false, false, false]);
+    expect(await expiredEverywhere("2026-11-04T23:30:00.000Z")).toEqual([false, false, false, false, false]);
+  });
+
+  it("00:00Z le 5 (J+1) : l'échéance du 4 est expirée partout", async () => {
+    expect(await expiredEverywhere("2026-11-05T00:00:00.000Z")).toEqual([true, true, true, true, true]);
+  });
+
+  it("permis : même bascule, valable le 4, expiré à 00:00Z le 5", () => {
+    const at = (instant: string) => isDriverLicenseExpiredOn("2026-11-04", todayUtcDateOnly(new Date(instant)));
+    expect(at("2026-11-03T23:30:00.000Z")).toBe(false);
+    expect(at("2026-11-04T23:30:00.000Z")).toBe(false);
+    expect(at("2026-11-05T00:00:00.000Z")).toBe(true);
+  });
+});
+
+describe("jour J : permis chauffeur (check-list et lancement)", () => {
+  it.each([
+    [1, false, "J-1 (échéance demain)"],
+    [0, false, "J (échéance aujourd'hui, dernier jour de validité)"],
+    [-1, true, "J+1 (échéance hier)"],
+  ])("échéance dans %i jour(s) -> expiré=%s (%s)", (days, expired) => {
+    expect(isDriverLicenseExpiredOn(offset(days), TODAY)).toBe(expired);
+  });
+
+  it("même verdict que les papiers véhicule à J-1, J et J+1", async () => {
+    for (const days of [1, 0, -1]) {
+      const v = await verdicts(offset(days));
+      expect(isDriverLicenseExpiredOn(offset(days), TODAY)).toBe(v.eligibility);
+    }
+  });
+
+  it("permis absent ou illisible : expiré ; horodatage lu par sa date UTC", () => {
+    expect(isDriverLicenseExpiredOn(null, TODAY)).toBe(true);
+    expect(isDriverLicenseExpiredOn("2026-02-30", TODAY)).toBe(true);
+    expect(isDriverLicenseExpiredOn(new Date(`${TODAY}T23:30:00.000Z`), TODAY)).toBe(false);
+  });
+});
+
+describe("jour J : getExpiredDocuments ne liste que les papiers échus (expiredDocuments)", () => {
+  it("assurance échue d'hier listée, plaque qui expire aujourd'hui absente", async () => {
+    dbState.vehicleRows = [
+      { id: 1, registrationNumber: "TEST-1", ownerId: null, insuranceExpiry: offset(-1), licensePlateExpiry: offset(0), technicalInspectionDate: offset(1) },
+    ];
+    const [row] = await service.getExpiredDocuments();
+    expect(row.expiredDocuments).toEqual([{ type: "assurance", expiryDate: offset(-1) }]);
+  });
+
+  it("sous Africa/Douala à 00:30 locale (23:30Z la veille), une échéance du jour UTC suivant n'est pas listée", async () => {
+    vi.setSystemTime(new Date(`${offset(-1)}T23:30:00.000Z`));
+    dbState.vehicleRows = [
+      { id: 1, registrationNumber: "TEST-1", ownerId: null, insuranceExpiry: offset(-2), licensePlateExpiry: offset(-1), technicalInspectionDate: null },
+    ];
+    const [row] = await service.getExpiredDocuments();
+    expect(row.expiredDocuments).toEqual([{ type: "assurance", expiryDate: offset(-2) }]);
   });
 });

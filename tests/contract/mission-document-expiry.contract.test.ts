@@ -138,23 +138,35 @@ describe("P3-2 papier dans la fenêtre d'alerte", () => {
   }, 60000);
 });
 
-describe("P3-2 papier échu aujourd'hui", () => {
-  it("l'échéance du jour produit l'alerte « expiré » (lancement bloqué), pas « expire bientôt »", async () => {
+describe("P3-2 papier à son échéance (#224 : valable le jour J, expiré à J+1)", () => {
+  async function alertsFor(expiry: string) {
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
-    const today = new Date().toLocaleDateString("en-CA");
-    await addDoc(vehicle.id, "assurance", today);
-    await db.update(vehicles).set({ insuranceExpiry: today }).where(eq(vehicles.id, vehicle.id));
-
+    await addDoc(vehicle.id, "assurance", expiry);
+    await db.update(vehicles).set({ insuranceExpiry: expiry }).where(eq(vehicles.id, vehicle.id));
     await (alertService as any).checkVehicleDocumentAlerts(await vehicleRow(vehicle.id));
-    const rows = await db
+    return db
       .select()
       .from(alerts)
       .where(and(eq(alerts.userId, session.userIdOf("atelier")), like(alerts.link, `%vehicleId=${vehicle.id}&%`)));
+  }
+
+  it("jour J : alerte « expire bientôt » (dernier jour), pas « expiré »", async () => {
+    const rows = await alertsFor(inDays(0));
+    expect(rows.filter((r) => r.title === "Document expiré")).toHaveLength(0);
+    const soon = rows.filter((r) => r.title === "Document expire bientôt");
+    expect(soon).toHaveLength(1);
+    expect(soon[0].priority).toBe("high");
+    expect(soon[0].message).toContain("dernier jour de validité");
+  }, 60000);
+
+  it("J+1 : alerte « expiré » (lancement bloqué), pas « expire bientôt »", async () => {
+    const rows = await alertsFor(inDays(-1));
     expect(rows.filter((r) => r.title === "Document expire bientôt")).toHaveLength(0);
     const expired = rows.filter((r) => r.title === "Document expiré");
     expect(expired).toHaveLength(1);
     expect(expired[0].priority).toBe("critical");
+    expect(expired[0].message).toContain("expirée depuis 1 jour :");
     expect(expired[0].message).toContain("lancement de mission bloqué");
   }, 60000);
 });
@@ -343,10 +355,18 @@ describe("P3-2 lancement : un seul document retenu par type, une seule règle de
     expectNoPaperError(res);
   }, 60000);
 
-  it("jour J : un papier qui expire aujourd'hui bloque, comme l'éligibilité", async () => {
+  it("jour J : un papier qui expire aujourd'hui est encore valable, comme l'éligibilité", async () => {
     const { vehicle, missionId } = await readyVehicleWithMission();
     await addDoc(vehicle.id, "carte_grise", inDays(100));
     await addDoc(vehicle.id, "assurance", inDays(0));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    expectNoPaperError(await launch(missionId));
+  }, 60000);
+
+  it("J+1 : un papier échu d'hier bloque, comme l'éligibilité", async () => {
+    const { vehicle, missionId } = await readyVehicleWithMission();
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(-1));
     await addDoc(vehicle.id, "visite_technique", inDays(100));
     const res = await launch(missionId);
     expect(res.status).toBe(400);

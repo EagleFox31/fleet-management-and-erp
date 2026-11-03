@@ -64,7 +64,7 @@ export interface EligibilityBlocker {
 /** Jours écoulés depuis une échéance. Positif = dépassée. */
 function joursDepuis(echeance: string | Date, aujourdhui: Date): number | null {
   // Date UTC sans heure, comme les statistiques et les alertes (expiry-day.ts) :
-  // une échéance « aujourd'hui » vaut 0 jour, quel que soit le fuseau de la machine.
+  // une échéance « aujourd'hui » vaut 0 jour (valable), quel que soit le fuseau de la machine.
   const dateEcheance = toExpiryDateOnly(echeance);
   if (dateEcheance === null) return null;
   return -daysBetweenDateOnly(dateEcheance, todayUtcDateOnly(aujourdhui));
@@ -102,7 +102,6 @@ export function isRenewalReceiptValid(
 }
 
 function formuler(libelle: string, jours: number): string {
-  if (jours === 0) return `${libelle} expire aujourd'hui`;
   if (jours === 1) return `${libelle} expirée depuis 1 jour`;
   return `${libelle} expirée depuis ${jours} jours`;
 }
@@ -151,7 +150,7 @@ export function getMissionEligibility(
     const valeur = vehicle[doc.champ] as string | Date | null | undefined;
     if (!valeur) continue;
     const jours = joursDepuis(valeur, aujourdhui);
-    if (jours === null || jours < 0) continue;
+    if (jours === null || jours <= 0) continue;
     if (recepisseValide(vehicle.receipts?.[doc.code as DocumentBlockerCode], aujourdhui)) continue;
     blockers.push({
       code: doc.code,
