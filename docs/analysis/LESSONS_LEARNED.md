@@ -2035,3 +2035,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.
+
+## 2026-11-03 — Route littérale masquée par un `/:id` frère (#222)
+
+### Contexte
+- `GET /api/suppliers/summary` répondait par le handler de `GET /api/suppliers/:id` (`id = "summary"`). La déclaration du résumé dans `server/routes.ts` n'était jamais atteinte : le routeur `suppliers.routes.ts` est monté avant `registerRoutes`, et son `/:id` capturait le littéral.
+
+### Cause racine
+- Classification : ordre de déclaration Express. Express sert la **première** route qui correspond. Un segment paramétré (`/:id`) déclaré avant un littéral frère (`/summary`) le masque, que les deux soient dans le même routeur ou que le paramétré vienne d'un routeur monté plus tôt.
+- Aucun test ne visait la route littérale. Le seul test existant était un témoin `.fails` qui figeait le défaut.
+
+### Résolution
+- `/summary` déclaré dans `suppliers.routes.ts` **avant** `/:id`, la déclaration morte de `routes.ts` remplacée par un renvoi. Le témoin est devenu un contrat (200, tableau).
+
+### Prévention (vérifiable)
+- `tests/contract/suppliers-summary-capture.contract.test.ts`.
+- Garde statique à venir : étendre le scan des routes masquées (`routes-hygiene`) au cas « `/:param` déclaré avant un littéral frère », confiée à la session de.
+
+### Règle Projet (obligatoire)
+- Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.
