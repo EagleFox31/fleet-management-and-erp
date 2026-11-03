@@ -271,6 +271,8 @@ export default function WorkOrderDetails({
   // Fetch technicians list
   const { data: technicians = [] as any[] } = useQuery<any[]>({
     queryKey: ["/api/users/technicians"],
+    // Le nom du technicien vient déjà de l'OT (technicianName) : un client n'a pas accès à la liste du personnel.
+    enabled: user?.role !== "client",
   });
 
   const technicianLabel = useMemo(() => {

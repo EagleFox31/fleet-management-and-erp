@@ -1,8 +1,12 @@
-import { Router, Request, Response } from "express";
-import { authenticate } from "../middleware/auth";
+import { Router, Request, Response, NextFunction } from "express";
+import { authenticate, isPartsCatalogManager } from "../middleware/auth";
 import { stockAlertsService } from "../services/stock-alerts-service";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { assertValidDbId } from "../lib/work-order-scope";
 
 const router = Router();
+const log = moduleLogger("warehouse-routes");
 
 const broadcastWarehouseUpdate = (
   eventType: string,
@@ -45,88 +49,90 @@ router.get("/inventory-value", authenticate, async (req: Request, res: Response)
     const inventoryValue = await stockAlertsService.getInventoryValue();
     return res.status(200).json(inventoryValue);
   } catch (error) {
-    console.error("Get inventory value error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get inventory value error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // Alertes de réapprovisionnement actives (38 alertes)
-router.get("/reorder-alerts", authenticate, async (_req: Request, res: Response) => {
+router.get("/reorder-alerts", authenticate, async (req: Request, res: Response) => {
   try {
     const alerts = await stockAlertsService.getReorderAlerts();
     return res.status(200).json(alerts);
   } catch (error) {
-    console.error("Get reorder alerts error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get reorder alerts error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // Stock réel d'une pièce avec historique mouvements
-router.get("/parts/:id/real-stock", authenticate, async (req: Request, res: Response) => {
+router.get("/parts/:id/real-stock", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const partId = parseInt(req.params.id);
-
-    if (isNaN(partId)) {
-      return res.status(400).json({ message: "ID de pièce invalide" });
-    }
+    const partId = Number(req.params.id);
+    assertValidDbId(partId, "ID de pièce invalide");
 
     const realStock = await stockAlertsService.getRealStock(partId);
 
     return res.status(200).json(realStock);
   } catch (error) {
-    console.error("Get real stock error:", error);
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur"
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Get real stock error");
+    return next(new AppError(500, "Erreur serveur", { cause: error }));
   }
 });
 
 // Enregistrer un mouvement de stock (ENTRÉE/SORTIE)
-// Note: isWorkshopManager removed - auth handled at router level
-router.post("/stock-movement", authenticate, async (req: Request, res: Response) => {
+// Écriture de stock : magasin seul (admin, warehouse). Le montage `isStaff` ne suffit pas : un
+// chauffeur ou une secrétaire écrivait un mouvement. Le chef d'atelier sort une pièce par
+// `POST /api/work-orders/:id/part-requirements/:id/issue` (dérogation motivée), pas ici ; le
+// technicien demande, il ne sort pas. Aucun écran n'appelle cette route aujourd'hui.
+router.post("/stock-movement", authenticate, isPartsCatalogManager, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { partId, type, quantity, reason, workOrderId, responsiblePerson, deliveryReceiptNumber } = req.body;
+    const { partId: rawPartId, type, quantity: rawQuantity, reason, workOrderId: rawWorkOrderId, responsiblePerson, deliveryReceiptNumber } = req.body ?? {};
 
-    if (!partId || !type || !quantity || !reason) {
-      return res.status(400).json({ message: "Données incomplètes" });
+    if (rawPartId === undefined || rawPartId === null || !type || rawQuantity === undefined || rawQuantity === null || !reason) {
+      throw new AppError(400, "Données incomplètes");
     }
-
-    if (!['in', 'out'].includes(type)) {
-      return res.status(400).json({ message: "Type de mouvement invalide (in/out)" });
+    if (!["in", "out"].includes(type)) {
+      throw new AppError(400, "Type de mouvement invalide (in/out)");
+    }
+    const partId = Number(rawPartId);
+    assertValidDbId(partId, "ID de pièce invalide");
+    const quantity = Number(rawQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new AppError(400, "La quantité doit être un entier strictement positif.");
+    }
+    let workOrderId: number | undefined;
+    if (rawWorkOrderId !== undefined && rawWorkOrderId !== null && rawWorkOrderId !== "") {
+      workOrderId = Number(rawWorkOrderId);
+      assertValidDbId(workOrderId, "ID d'ordre de travail invalide.");
+    }
+    if (typeof reason !== "string") {
+      throw new AppError(400, "Le motif du mouvement est invalide.");
     }
 
     const movement = await stockAlertsService.recordStockMovement({
-      partId: parseInt(partId),
-      type: type as 'in' | 'out',
-      quantity: parseFloat(quantity),
+      partId,
+      type: type as "in" | "out",
+      quantity,
       reason,
-      workOrderId: workOrderId ? parseInt(workOrderId) : undefined,
+      workOrderId,
       responsiblePerson,
       deliveryReceiptNumber,
-      userId: (req as any).session.userId
+      userId: req.user!.id,
     });
 
     broadcastWarehouseUpdate(
       "warehouse_stock_movement_recorded",
-      {
-        movement,
-        partId: parseInt(partId),
-        movementType: type,
-        quantity: parseFloat(quantity),
-      },
-      {
-        partId: parseInt(partId),
-        actorUserId: (req as any).session?.userId ?? null,
-        actorRole: (req as any).session?.role ?? null,
-      },
+      { movement, partId, movementType: type, quantity },
+      { partId, actorUserId: req.user!.id, actorRole: req.user!.role },
     );
 
     return res.status(201).json(movement);
   } catch (error) {
-    console.error("Record stock movement error:", error);
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur"
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Record stock movement error");
+    return next(new AppError(500, "Erreur serveur", { cause: error }));
   }
 });
 
@@ -139,31 +145,31 @@ router.get("/most-used-parts", authenticate, async (req: Request, res: Response)
 
     return res.status(200).json(mostUsedParts);
   } catch (error) {
-    console.error("Get most used parts error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get most used parts error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // Statistiques globales du magasin
-router.get("/statistics", authenticate, async (_req: Request, res: Response) => {
+router.get("/statistics", authenticate, async (req: Request, res: Response) => {
   try {
     const statistics = await stockAlertsService.getWarehouseStatistics();
 
     return res.status(200).json(statistics);
   } catch (error) {
-    console.error("Get warehouse statistics error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get warehouse statistics error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
 // Pièces par fournisseur avec valeur totale
-router.get("/parts-by-supplier", authenticate, async (_req: Request, res: Response) => {
+router.get("/parts-by-supplier", authenticate, async (req: Request, res: Response) => {
   try {
     const partsBySupplier = await stockAlertsService.getPartsBySupplier();
 
     return res.status(200).json(partsBySupplier);
   } catch (error) {
-    console.error("Get parts by supplier error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get parts by supplier error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -171,14 +177,14 @@ router.get("/parts-by-supplier", authenticate, async (_req: Request, res: Respon
 // Pièces les plus consommées pour graphique
 router.get("/top-consumed-parts", authenticate, async (req: Request, res: Response) => {
   try {
-    console.log('🔐 [AUTH] GET /top-consumed-parts - Session exists:', !!req.session, 'UserId:', (req as any).session?.userId);
+    log.debug({ userId: req.session?.userId, requestId: req.requestId }, "GET /top-consumed-parts");
     const limit = parseInt(req.query.limit as string) || 10;
     const topConsumed = await stockAlertsService.getTopConsumedParts(limit);
 
-    console.log(`📊 Top consumed parts (${topConsumed.length} items):`, topConsumed);
+    log.debug({ items: topConsumed.length, requestId: req.requestId }, "Top consumed parts");
     return res.status(200).json(topConsumed);
   } catch (error) {
-    console.error("Get top consumed parts error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get top consumed parts error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -186,14 +192,14 @@ router.get("/top-consumed-parts", authenticate, async (req: Request, res: Respon
 // Historique de la valeur du stock
 router.get("/stock-value-history", authenticate, async (req: Request, res: Response) => {
   try {
-    console.log('🔐 [AUTH] GET /stock-value-history - Session exists:', !!req.session, 'UserId:', (req as any).session?.userId);
+    log.debug({ userId: req.session?.userId, requestId: req.requestId }, "GET /stock-value-history");
     const days = parseInt(req.query.days as string) || 30;
     const history = await stockAlertsService.getStockValueHistory(days);
 
-    console.log(`📈 Stock value history (${history.length} days):`, history.slice(0, 3));
+    log.debug({ days: history.length, requestId: req.requestId }, "Stock value history");
     return res.status(200).json(history);
   } catch (error) {
-    console.error("Get stock value history error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Get stock value history error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
