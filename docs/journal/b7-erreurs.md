@@ -126,3 +126,9 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : 62 sites dans 42 fichiers client affichaient `error.message` brut (dont `instanceof Error ? error.message` et les gabarits `${error.message}`). Ils passent désormais par `userMessageOf(error, repli)`.
 - **Comment** : garde `tests/unit/client/toast-error-message-hygiene.test.ts`, compte par fichier à égalité stricte. Rouge sur main. Deux sites restent gelés, chez c7 (#181) : driver/dashboard.tsx et missions/[id].tsx.
 - **Pourquoi** : AGENTS.md §10. Le message brut peut être technique (réseau, JSON, exception JS) et n'a ni repli ni référence.
+
+## 2026-11-03T16:50:08+01:00 — Mouvement de stock magasin transactionnel
+
+- **Quoi** : `recordStockMovement` lit la pièce `FOR UPDATE` et écrit mouvement et stock dans la même transaction. Sortie au-delà du stock : 409, plus de remise à 0. Pièce absente : 404. Quantité non entière : 400. La route passe par `next` au lieu de renvoyer `error.message`. Les console.* du service et de la route sont migrés vers moduleLogger.
+- **Comment** : test de contrat `warehouse-stock-movement`, 5 cas dont trois sorties concurrentes. Rouge 5 sur 5 sur main, vert avec le correctif.
+- **Pourquoi** : même défaut que `update-stock`, corrigé plus tôt sur l'autre route. Rebase prévu après #184 (même route : garde de rôle, validation).

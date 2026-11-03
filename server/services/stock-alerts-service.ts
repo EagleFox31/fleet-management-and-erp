@@ -1,6 +1,10 @@
 import { db } from "../db";
 import { parts, partsStockMovements, partRequirements, suppliers, type Part } from "@shared/schema";
 import { eq, sql, desc, sum, count, gte, lte } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("stock-alerts-service");
 
 /**
  * Service Stock & Alertes
@@ -169,59 +173,73 @@ export class StockAlertsService {
     deliveryReceiptNumber?: string;
     userId: number;
   }) {
-    console.log(`Recording stock movement for part ${data.partId}:`, data);
+    log.debug({ partId: data.partId, type: data.type, quantity: data.quantity }, "mouvement de stock demandé");
 
-    const [part] = await db
-      .select()
-      .from(parts)
-      .where(eq(parts.id, data.partId));
-
-    if (!part) {
-      throw new Error(`Pièce ${data.partId} non trouvée`);
+    if (!Number.isInteger(data.quantity) || data.quantity <= 0) {
+      throw new AppError(400, "La quantité doit être un entier strictement positif.");
     }
 
-    const previousStock = part.quantity;
-    const adjustment = data.type === 'in' ? data.quantity : -data.quantity;
-    const newStock = Math.max(0, previousStock + adjustment);
+    // Lecture puis écriture dans une seule transaction, ligne verrouillée :
+    // deux sorties concurrentes ne peuvent plus lire le même stock initial.
+    const result = await db.transaction(async (tx) => {
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(eq(parts.id, data.partId))
+        .for("update");
 
-    // Créer le mouvement
-    const [movement] = await db
-      .insert(partsStockMovements)
-      .values({
-        partId: data.partId,
-        movementType: data.type,
-        quantity: data.quantity,
-        previousStock: previousStock,
-        newStock: newStock,
-        reason: data.reason,
-        workOrderId: data.workOrderId,
-        createdBy: data.userId,
-        createdAt: new Date()
-      })
-      .returning();
+      if (!part) {
+        throw new AppError(404, "Pièce introuvable.");
+      }
 
-    // Mettre à jour le stock
-    const shouldReorder = newStock <= part.minQuantity;
+      const previousStock = part.quantity;
+      if (data.type === 'out' && data.quantity > previousStock) {
+        throw new AppError(
+          409,
+          `Sortie impossible : ${previousStock} unité(s) en stock, ${data.quantity} demandée(s).`,
+        );
+      }
+      const newStock = data.type === 'in' ? previousStock + data.quantity : previousStock - data.quantity;
 
-    await db
-      .update(parts)
-      .set({
-        quantity: newStock,
-        realStock: newStock,
-        reorderAlert: shouldReorder,
-        responsiblePerson: data.responsiblePerson || part.responsiblePerson,
-        deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber
-      })
-      .where(eq(parts.id, data.partId));
+      const [movement] = await tx
+        .insert(partsStockMovements)
+        .values({
+          partId: data.partId,
+          movementType: data.type,
+          quantity: data.quantity,
+          previousStock,
+          newStock,
+          reason: data.reason,
+          workOrderId: data.workOrderId,
+          createdBy: data.userId,
+          createdAt: new Date()
+        })
+        .returning();
 
-    console.log(`Stock movement recorded: ${previousStock} → ${newStock}, reorder alert: ${shouldReorder}`);
+      const shouldReorder = newStock <= part.minQuantity;
 
-    return {
-      movement,
-      previousStock,
-      newStock,
-      reorderAlert: shouldReorder
-    };
+      await tx
+        .update(parts)
+        .set({
+          quantity: newStock,
+          realStock: newStock,
+          reorderAlert: shouldReorder,
+          responsiblePerson: data.responsiblePerson || part.responsiblePerson,
+          deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber,
+          updatedBy: data.userId,
+          updatedAt: new Date()
+        })
+        .where(eq(parts.id, data.partId));
+
+      return { movement, previousStock, newStock, reorderAlert: shouldReorder };
+    });
+
+    log.debug(
+      { partId: data.partId, previousStock: result.previousStock, newStock: result.newStock, reorderAlert: result.reorderAlert },
+      "mouvement de stock enregistré",
+    );
+
+    return result;
   }
 
   /**

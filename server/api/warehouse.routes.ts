@@ -1,6 +1,10 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { authenticate } from "../middleware/auth";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { stockAlertsService } from "../services/stock-alerts-service";
+
+const log = moduleLogger("warehouse-routes");
 
 const router = Router();
 
@@ -83,7 +87,7 @@ router.get("/parts/:id/real-stock", authenticate, async (req: Request, res: Resp
 
 // Enregistrer un mouvement de stock (ENTRÉE/SORTIE)
 // Note: isWorkshopManager removed - auth handled at router level
-router.post("/stock-movement", authenticate, async (req: Request, res: Response) => {
+router.post("/stock-movement", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { partId, type, quantity, reason, workOrderId, responsiblePerson, deliveryReceiptNumber } = req.body;
 
@@ -123,10 +127,9 @@ router.post("/stock-movement", authenticate, async (req: Request, res: Response)
 
     return res.status(201).json(movement);
   } catch (error) {
-    console.error("Record stock movement error:", error);
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur"
-    });
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Record stock movement error");
+    return next(new AppError(500, "Erreur serveur", { cause: error }));
   }
 });
 
