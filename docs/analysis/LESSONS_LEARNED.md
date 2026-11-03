@@ -2054,3 +2054,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un refus laisse l'objet **visible et rejouable** : on ne marque que ce qui a réellement abouti. Le rejeu qui suit doit être idempotent (zéro écriture une fois convergé).
+
+## 2026-11-03 — Route littérale masquée par un `/:id` frère (#222)
+
+### Contexte
+- `GET /api/suppliers/summary` répondait par le handler de `GET /api/suppliers/:id` (`id = "summary"`). La déclaration du résumé dans `server/routes.ts` n'était jamais atteinte : le routeur `suppliers.routes.ts` est monté avant `registerRoutes`, et son `/:id` capturait le littéral.
+
+### Cause racine
+- Classification : ordre de déclaration Express. Express sert la **première** route qui correspond. Un segment paramétré (`/:id`) déclaré avant un littéral frère (`/summary`) le masque, que les deux soient dans le même routeur ou que le paramétré vienne d'un routeur monté plus tôt.
+- Aucun test ne visait la route littérale. Le seul test existant était un témoin `.fails` qui figeait le défaut.
+
+### Résolution
+- `/summary` déclaré dans `suppliers.routes.ts` **avant** `/:id`, la déclaration morte de `routes.ts` remplacée par un renvoi. Le témoin est devenu un contrat (200, tableau).
+
+### Prévention (vérifiable)
+- `tests/contract/suppliers-summary-capture.contract.test.ts`.
+- Garde statique : `tests/unit/server/route-order-hygiene.test.ts` (PR séparée, session b7) reconstitue l'ordre de service (routeurs de `server/api/` dans l'ordre des montages, puis `routes.ts`) et échoue sur tout littéral masqué par un `/:param` déclaré avant lui. Sur le code d'avant #222, il trouve exactement `GET /api/suppliers/summary`.
+
+### Règle Projet (obligatoire)
+- Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.
