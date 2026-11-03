@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   assertNotProductionDatabase,
-  assertTestDatabaseNotProduction,
+  assertSafeTestDatabase,
   databaseUrlFromDotenv,
   hostOf,
   matchProductionMarker,
@@ -99,7 +99,7 @@ describe("production-guard (vitest intégration et contrat)", () => {
   it("refuse DATABASE_URL_TEST qui vise la production, sans en citer l'URL", () => {
     let message = "";
     try {
-      assertTestDatabaseNotProduction(PROD, env({}));
+      assertSafeTestDatabase(env({ DATABASE_URL_TEST: PROD }));
     } catch (e) {
       message = (e as Error).message;
     }
@@ -108,18 +108,31 @@ describe("production-guard (vitest intégration et contrat)", () => {
     expect(message).not.toContain("postgresql://");
   });
 
-  it("laisse passer une branche de test ou une URL absente", () => {
-    expect(() => assertTestDatabaseNotProduction(TEST, env({}))).not.toThrow();
-    expect(() => assertTestDatabaseNotProduction(undefined, env({}))).not.toThrow();
+  it("l'hôte de production par défaut reste refusé même avec ALLOW_NEON_TEST_DB=1", () => {
+    const e = env({ DATABASE_URL_TEST: PROD, ALLOW_NEON_TEST_DB: "1" });
+    expect(() => assertSafeTestDatabase(e)).toThrow(/ep-bitter-term-ai6i3ey4/);
   });
 
   it("respecte E2E_PRODUCTION_DB_MARKERS", () => {
-    expect(() => assertTestDatabaseNotProduction(TEST, env({ E2E_PRODUCTION_DB_MARKERS: "ep-plain-lake" }))).toThrow();
+    const e = env({ DATABASE_URL_TEST: TEST, ALLOW_NEON_TEST_DB: "1", E2E_PRODUCTION_DB_MARKERS: "ep-plain-lake" });
+    expect(() => assertSafeTestDatabase(e)).toThrow(/ep-plain-lake/);
   });
 
-  it("est branché dans tests/support/setup-db.ts avant la redirection de DATABASE_URL", () => {
+  it("setup-db.ts affecte DATABASE_URL avec le résultat du garde-fou, sans repli", () => {
     const src = readFileSync("tests/support/setup-db.ts", "utf8");
-    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeGreaterThan(-1);
-    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeLessThan(src.indexOf("process.env.DATABASE_URL = testUrl"));
+    expect(src).toMatch(/process\.env\.DATABASE_URL\s*=\s*assertSafeTestDatabase\(\)/);
+    expect(src).toMatch(/from "\.\.\/\.\.\/e2e\/helpers\/production-guard"/);
+  });
+
+  it("les setups intégration et contrat importent setup-db avant server/", () => {
+    for (const f of ["setup-integration.ts", "setup-contract.ts"]) {
+      const src = readFileSync(`tests/support/${f}`, "utf8");
+      expect(src.indexOf('import "./setup-db"'), f).toBeGreaterThan(-1);
+      expect(src.indexOf('import "./setup-db"'), f).toBeLessThan(src.indexOf("../../server/"));
+    }
+  });
+
+  it("setup-unit.ts appelle le garde-fou unitaire", () => {
+    expect(readFileSync("tests/support/setup-unit.ts", "utf8")).toMatch(/assertUnitDatabaseNotProduction\(\)/);
   });
 });

@@ -95,7 +95,7 @@ commande, pas de proxy à configurer.
 | Variable | Rôle |
 |---|---|
 | `DATABASE_URL` | Chaîne de connexion PostgreSQL. **Jamais commitée.** |
-| `DATABASE_URL_TEST` | Base des tests d'intégration. Par défaut : `DATABASE_URL`. |
+| `DATABASE_URL_TEST` | Base des tests d'intégration et de contrat, exportée dans le shell (jamais lue depuis `.env`). Obligatoire : aucun repli sur `DATABASE_URL`, et `DATABASE_URL` doit être absente ou identique (voir `tests/README.md`). |
 | `SESSION_SECRET` | Secret de signature des sessions Express. |
 
 ## Tests

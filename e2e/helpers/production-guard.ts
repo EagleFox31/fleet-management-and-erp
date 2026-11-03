@@ -85,22 +85,137 @@ export function assertNotProductionDatabase(
 }
 
 /**
- * Même refus pour vitest intégration et contrat : `setup-db.ts` redirige `DATABASE_URL` vers
- * `DATABASE_URL_TEST`, et ces suites écrivent. L'URL effective ne doit pas viser la production.
+ * Garde-fou des suites vitest (intégration, contrat, unitaires), en complément de
+ * `assertNotProductionDatabase` (e2e). Voir tests/README.md.
+ *
+ * `assertSafeTestDatabase` refuse de démarrer quand :
+ *  (a) `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` est défini et
+ *      diffère de `DATABASE_URL_TEST` (typiquement un `.env` de production chargé) ;
+ *  (b) `DATABASE_URL_TEST` manque : aucun repli sur `DATABASE_URL` ;
+ *  (c) l'hôte effectif est interdit : marqueur de `TEST_DB_FORBIDDEN_HOSTS` (virgules),
+ *      marqueurs ci-dessus, ou tout hôte `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`.
+ *      `ALLOW_NEON_TEST_DB` ne lève jamais un marqueur explicite.
+ * `assertUnitDatabaseNotProduction` : pas de base requise, mais refuse un `DATABASE_URL`
+ * exporté qui porte un marqueur (server/db.ts construirait un pool dessus).
+ * Les messages ne contiennent que l'hôte (`safeHostLabel`), jamais l'URL ni le mot de passe ;
+ * une URL illisible est refusée (on ne sait pas quel hôte elle vise).
  */
-export function assertTestDatabaseNotProduction(
-  testUrl: string | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  const marker = matchProductionMarker(testUrl, productionMarkers(env));
-  if (!marker) return;
-  throw new Error(
-    [
-      `Tests d'intégration et de contrat refusés : DATABASE_URL_TEST vise la base de production (hôte contenant « ${marker} »).`,
-      "Ces suites créent et suppriment des données : jamais sur la production.",
-      "Pointez DATABASE_URL_TEST vers une branche Neon de test, en variable d'environnement au lancement",
-      "(sans modifier .env), puis relancez.",
-      "Autre environnement protégé : ajoutez son hôte à E2E_PRODUCTION_DB_MARKERS (liste séparée par des virgules).",
-    ].join("\n"),
-  );
+
+const NEON_SUFFIX = "neon.tech";
+const UNREADABLE_HOST = "hôte illisible";
+const SIBLING_URLS = ["DATABASE_URL_LISTENER", "DATABASE_URL_DIRECT"] as const;
+const POWERSHELL_UNSET = "Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue";
+
+export function forbiddenHostMarkers(env: NodeJS.ProcessEnv = process.env): string[] {
+  const extra = (env.TEST_DB_FORBIDDEN_HOSTS ?? "")
+    .split(",")
+    .map((m) => m.trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set([...productionMarkers(env), ...extra]));
+}
+
+/** Hôte lisible par `new URL`, ou `null` (URL invalide : `#` ou `/` dans un mot de passe non encodé). */
+function parsedHost(url: string): { hostname: string; port: string } | null {
+  try {
+    const u = new URL(url);
+    if (!u.hostname || /[:@]/.test(u.hostname)) return null;
+    // Un « @ » dans l'URL alors que new URL n'a trouvé aucun identifiant : le mot de passe contient
+    // un `#` ou un `/` non encodé et l'« hôte » lu est un morceau d'identifiant.
+    if (!u.username && !u.password && url.includes("@")) return null;
+    return { hostname: u.hostname.toLowerCase(), port: u.port };
+  } catch {
+    return null;
+  }
+}
+
+/** Libellé d'hôte pour un message : jamais d'identifiant, « hôte illisible » au moindre doute. */
+export function safeHostLabel(url: string): string {
+  const h = parsedHost(url);
+  return h ? (h.port ? `${h.hostname}:${h.port}` : h.hostname) : UNREADABLE_HOST;
+}
+
+function explicitMarker(url: string, env: NodeJS.ProcessEnv): string | null {
+  const host = parsedHost(url)?.hostname ?? "";
+  return forbiddenHostMarkers(env).find((m) => host.includes(m)) ?? null;
+}
+
+function isNeonHost(url: string): boolean {
+  const host = parsedHost(url)?.hostname ?? "";
+  return host === NEON_SUFFIX || host.endsWith(`.${NEON_SUFFIX}`);
+}
+
+function assertHostAllowed(subject: string, url: string, env: NodeJS.ProcessEnv): void {
+  if (!parsedHost(url)) {
+    throw new Error(
+      [
+        `Tests refusés : ${subject} n'est pas une URL lisible (${UNREADABLE_HOST}) : l'hôte visé ne peut pas être vérifié.`,
+        "Encodez en pourcentage les caractères spéciaux du mot de passe (# / @ ?) ou utilisez le Postgres local.",
+      ].join("\n"),
+    );
+  }
+  const marker = explicitMarker(url, env);
+  if (marker) {
+    throw new Error(
+      [
+        `Tests refusés : ${subject} vise un hôte interdit (hôte « ${safeHostLabel(url)} », marqueur « ${marker} »).`,
+        "Pointez DATABASE_URL_TEST vers le Postgres local ou une base dédiée aux tests.",
+        "Marqueurs : TEST_DB_FORBIDDEN_HOSTS, E2E_PRODUCTION_DB_MARKERS (voir tests/README.md).",
+      ].join("\n"),
+    );
+  }
+  if (isNeonHost(url) && env.ALLOW_NEON_TEST_DB !== "1") {
+    throw new Error(
+      [
+        `Tests refusés : ${subject} vise un hôte ${NEON_SUFFIX} (hôte « ${safeHostLabel(url)} »).`,
+        "Neon est réservé aux e2e. Utilisez le Postgres local (npm run test:db:up).",
+        "Pour une branche Neon dédiée aux tests, définissez explicitement ALLOW_NEON_TEST_DB=1.",
+      ].join("\n"),
+    );
+  }
+}
+
+/** Renvoie l'URL de test effective, ou lève une erreur actionnable. */
+export function assertSafeTestDatabase(env: NodeJS.ProcessEnv = process.env): string {
+  const testUrl = env.DATABASE_URL_TEST;
+
+  if (!testUrl) {
+    throw new Error(
+      [
+        "Tests refusés : DATABASE_URL_TEST est requis pour les suites d'intégration et de contrat.",
+        "Il n'y a volontairement aucun repli sur DATABASE_URL (base de développement ou de production).",
+        "Lancez par exemple : DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:5433/v1 npm run test:contract",
+        "Voir tests/README.md, section « Postgres local ».",
+      ].join("\n"),
+    );
+  }
+
+  for (const name of ["DATABASE_URL", ...SIBLING_URLS] as const) {
+    const other = env[name];
+    if (other && other !== testUrl) {
+      const powershell = name === "DATABASE_URL" ? POWERSHELL_UNSET : `Remove-Item Env:${name} -ErrorAction SilentlyContinue`;
+      throw new Error(
+        [
+          `Tests refusés : ${name} (${safeHostLabel(other)}) diffère de DATABASE_URL_TEST (${safeHostLabel(testUrl)}).`,
+          "Une telle variable pendant les tests est le signe d'un .env de production chargé dans le runner",
+          "(--env-file=.env, export dans le shell). Ne le chargez pas : retirez-la de l'environnement",
+          `(bash : unset ${name} ; PowerShell : ${powershell}) ou alignez-la sur DATABASE_URL_TEST, puis relancez.`,
+        ].join("\n"),
+      );
+    }
+  }
+
+  assertHostAllowed("DATABASE_URL_TEST", testUrl, env);
+  return testUrl;
+}
+
+/**
+ * Unitaires : pas de base requise. Refuse un `DATABASE_URL` / `_LISTENER` / `_DIRECT` exporté qui
+ * porte un marqueur interdit ou un hôte `*.neon.tech` (sauf ALLOW_NEON_TEST_DB=1). Un placeholder
+ * local (127.0.0.1:1) passe.
+ */
+export function assertUnitDatabaseNotProduction(env: NodeJS.ProcessEnv = process.env): void {
+  for (const name of ["DATABASE_URL", ...SIBLING_URLS] as const) {
+    const url = env[name];
+    if (url) assertHostAllowed(name, url, env);
+  }
 }

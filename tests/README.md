@@ -23,11 +23,11 @@ npm run test:e2e         # Playwright
 
 ## Base utilisée
 
-Même Neon que `npm run dev` (`DATABASE_URL`). Pas de copie, pas de « branche » Neon.
+Intégration et contrat : le Postgres local Docker (voir plus bas), jamais le Neon de `npm run dev` (`DATABASE_URL`). Seuls les e2e écrivent sur la base pointée par `DATABASE_URL`.
 
 Les factories créent des lignes préfixées `TEST-` (username, immat, référence pièce…). `afterEach` les supprime ; un filet `afterAll` enlève d'éventuels orphelins `TEST-*` si un test a crashé.
 
-`DATABASE_URL_TEST` doit viser une **branche Neon de test**, passée en variable d'environnement au lancement (sans modifier `.env`). Si la variable manque, on retombe sur `DATABASE_URL`.
+`DATABASE_URL_TEST` vise le Postgres local (ou, exceptionnellement, une **branche Neon dédiée aux tests** avec `ALLOW_NEON_TEST_DB=1`). Elle est passée en variable d'environnement au lancement, jamais lue depuis `.env`. Si elle manque, les suites **refusent de démarrer** (aucun repli sur `DATABASE_URL`).
 
 ### Postgres local (plus rapide que Neon)
 
@@ -46,6 +46,14 @@ avant la première suite. Elle est idempotente, la rejouer ne change rien.
 
 PowerShell : `$env:DATABASE_URL_TEST="postgres://fleet:fleet@postgres:5432/fleet_test"; $env:DATABASE_WS_PROXY="localhost:5433/v1"; npm run test:contract`.
 
+Avant intégration ou contrat : `unset DATABASE_URL` (PowerShell : `Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue`). `DATABASE_URL_TEST` s'exporte, il n'est plus lu depuis `.env`. Si on l'oublie :
+
+```
+Tests refusés : DATABASE_URL (hôte « <hôte> ») diffère de DATABASE_URL_TEST (hôte « postgres:5432 »).
+```
+ou, sans `DATABASE_URL_TEST` : `Tests refusés : DATABASE_URL_TEST est requis pour les suites d'intégration et de contrat.`
+Les e2e et les scripts `backfill:*` / `benchmark:*` ne passent pas par ce garde-fou (`playwright.config.ts:5` garde sa propre vérification).
+
 Plusieurs sessions ou agents en parallèle : une base dédiée chacun dans le même conteneur, jamais `fleet_test` partagée. Un `drizzle-kit push` d'une autre branche y change le schéma entre deux passages et fait échouer des tests sains (échec labor-catalog non reproduit, novembre 2026).
 
 ```bash
@@ -58,14 +66,14 @@ Repousser le schéma à chaque changement de branche. Supprimer la base en fin d
 
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
-- Les variables d'environnement priment sur `.env` (`node --env-file`), pas besoin de modifier le fichier.
+- Les scripts `test:integration` et `test:contract` ne chargent pas `.env` : tout passe par l'environnement du shell.
 - Le `tmpfs` du conteneur repart vide à chaque `up` : les tables sont recréées par `test:db:schema`
   (appelé par `test:db:up`), pas par `initializeDatabase()`, qui suppose le schéma déjà poussé.
 
 La CI (`.github/workflows/ci.yml`) utilise le même montage en `services:`, avec le contrat découpé en shards vitest
 (`--shard=i/n`), une base par shard.
 
-**Garde-fou** : `tests/support/setup-db.ts` refuse de démarrer (intégration et contrat) quand l'URL effective vise la production (endpoint Neon de production ou marqueur de `E2E_PRODUCTION_DB_MARKERS`). Même détection que pour les e2e : `e2e/helpers/production-guard.ts`, cas unitaires dans `tests/unit/e2e/production-guard.test.ts`.
+**Garde-fou** : `tests/support/setup-db.ts` (intégration, contrat) et `tests/support/setup-unit.ts` (unitaires) appellent `e2e/helpers/production-guard.ts` et refusent de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` diffère de `DATABASE_URL_TEST`, si `DATABASE_URL_TEST` manque, ou si l'hôte est interdit : `TEST_DB_FORBIDDEN_HOSTS` (liste à virgules), `E2E_PRODUCTION_DB_MARKERS`, ou tout `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`. Les scripts `test:integration` et `test:contract` ne chargent plus `.env` : ne jamais l'ajouter. Cas : `tests/unit/server/test-db-guard.test.ts`.
 
 ## Pattern
 
