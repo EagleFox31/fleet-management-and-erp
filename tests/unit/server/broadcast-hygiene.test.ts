@@ -20,6 +20,10 @@ import { describe, expect, it } from "vitest";
  * à l'identique, à restreindre (décision produit : un client reçoit-il l'OT d'un autre ?).
  */
 const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
+  "shared/contracts/realtime-events.ts": {
+    count: 3,
+    why: "type RealtimeScope (1) + portées par défaut de fuel_price_changed et vehicle_document_type_changed (2), prix et types de papier lus par tous les profils",
+  },
   "server/api/billing.routes.ts": { count: 1, why: "événements de facturation suivis par plusieurs profils" },
   "server/api/clients.routes.ts": { count: 1, why: "événements client suivis par plusieurs profils" },
   "server/api/document-renewals.routes.ts": { count: 2, why: "véhicule et alerte sans destinataire nominatif (PR #151 en cours)" },
@@ -61,7 +65,9 @@ function serverSources(dir: string): string[] {
 
 function currentBroadcasts(): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const path of serverSources(serverDir)) {
+  // Les portées par défaut des événements vivent aussi dans le contrat partagé.
+  const sources = [...serverSources(serverDir), join(repoDir, "shared/contracts/realtime-events.ts")];
+  for (const path of sources) {
     const rel = relative(repoDir, path).split(sep).join("/");
     if (rel === "server/lib/realtime-scope.ts") continue;
     const n = (readFileSync(path, "utf8").match(/type:\s*["']broadcast["']/g) ?? []).length;
@@ -89,6 +95,37 @@ describe("hygiène des broadcasts temps réel", () => {
       .filter(([file, { count }]) => (now[file] ?? 0) < count)
       .map(([file, { count }]) => `${file} : ${now[file] ?? 0} au lieu de ${count}`);
     expect(stale, "Broadcast supprimé ou restreint : diminuer ou retirer l'entrée de KNOWN_BROADCASTS").toEqual([]);
+  });
+
+  it("chaque appel de broadcastUpdate (et alias) porte une portée explicite", () => {
+    // Sans portée l'événement est désormais muet (realtime-scope.ts) : il faut le voir à la revue.
+    const callStart = /(?:^|[^\w$])(?:[\w$]+\.)?(broadcastUpdate|broadcast|fn)\(/g;
+    const missing: string[] = [];
+    for (const path of serverSources(serverDir)) {
+      const rel = relative(repoDir, path).split(sep).join("/");
+      if (rel === "server/lib/realtime-scope.ts") continue;
+      const source = readFileSync(path, "utf8");
+      if (!/broadcastUpdate/.test(source)) continue;
+      for (const match of source.matchAll(callStart)) {
+        const open = match.index! + match[0].length - 1;
+        let depth = 0;
+        let end = open;
+        for (; end < source.length; end++) {
+          if (source[end] === "(") depth++;
+          else if (source[end] === ")" && --depth === 0) break;
+        }
+        const args = source.slice(open + 1, end);
+        const line = source.slice(0, open).split("\n").length;
+        const secondArg = args.slice(args.indexOf(",") + 1);
+        const forwarder = /^\s*event\s*,\s*data\s*$/.test(args); // enveloppe qui relaie tel quel
+        const explicit = /\bscope\b/.test(secondArg);
+        const spreadOfScoped = /\.\.\.base\b/.test(secondArg) && /\bscope:\s*\w+/.test(source); // vehicle-documents
+        if (args.includes(",") && (explicit || spreadOfScoped)) continue;
+        if (forwarder) continue;
+        missing.push(`${rel}:${line} ${match[1]}(…)`);
+      }
+    }
+    expect(missing, `Appel sans portée explicite (il ne partirait à personne) : ajouter scope: { type: "roles" | "user" | "broadcast", … }`).toEqual([]);
   });
 
   it("chaque entrée a une justification", () => {
