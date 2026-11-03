@@ -17,6 +17,8 @@
  * grise les mêmes véhicules avec les mêmes raisons.
  */
 
+import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "./expiry-day";
+
 export type VehicleEligibilityStatus = "operational" | "maintenance" | "out_of_service";
 
 export interface VehicleEligibilityInput {
@@ -44,13 +46,11 @@ export interface EligibilityBlocker {
 
 /** Jours écoulés depuis une échéance. Positif = dépassée. */
 function joursDepuis(echeance: string | Date, aujourdhui: Date): number | null {
-  const date = echeance instanceof Date ? echeance : new Date(echeance);
-  if (Number.isNaN(date.getTime())) return null;
-  // Comparaison de minuit à minuit: une échéance « aujourd'hui » vaut 0 jour,
-  // pas quelques heures selon l'instant du calcul.
-  const a = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-  const b = Date.UTC(aujourdhui.getFullYear(), aujourdhui.getMonth(), aujourdhui.getDate());
-  return Math.round((b - a) / 86_400_000);
+  // Date UTC sans heure, comme les statistiques et les alertes (expiry-day.ts) :
+  // une échéance « aujourd'hui » vaut 0 jour, quel que soit le fuseau de la machine.
+  const dateEcheance = toExpiryDateOnly(echeance);
+  if (dateEcheance === null) return null;
+  return -daysBetweenDateOnly(dateEcheance, todayUtcDateOnly(aujourdhui));
 }
 
 function formuler(libelle: string, jours: number): string {

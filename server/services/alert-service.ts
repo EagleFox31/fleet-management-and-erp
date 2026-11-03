@@ -645,7 +645,9 @@ export class AlertService {
           ? `${row.typeLabel} expiré (${vehicleLabel}, ${expiry})`
           : `${row.typeLabel} expire bientôt (${vehicleLabel}, ${expiry})`,
         message: expired
-          ? `Véhicule ${vehicleLabel} - ${row.name} expiré depuis ${Math.abs(days)} jour(s)`
+          ? days === 0
+            ? `Véhicule ${vehicleLabel} - ${row.name} expire aujourd'hui, lancement de mission bloqué`
+            : `Véhicule ${vehicleLabel} - ${row.name} expiré depuis ${Math.abs(days)} jour(s)`
           : `Véhicule ${vehicleLabel} - ${row.name} expire dans ${days} jour(s)`,
         priority: expired ? "critical" : days <= 7 ? "high" : "medium",
         entityType: "vehicle_document",
