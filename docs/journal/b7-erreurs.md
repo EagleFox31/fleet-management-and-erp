@@ -71,3 +71,24 @@ Modèle et règles : `docs/journal/README.md`.
 - **Reste / risques** :
   - le centre agréé est créé par `resolveRenewalCenter` avant les contrôles du document, donc il persiste même en cas de refus (comportement existant, à trancher) ;
   - `details: uploadError.message` à la ligne 920 renvoie le message de multer.
+
+## 2026-11-03T15:00:56+01:00 — Renouvellement rapide : réserves de l'audit fleet-securite
+
+- **Agent** : b7 · **Branche** : `fix/quick-renewal-proof-lifecycle`
+- **Statut** : fait. Verdict de l'audit : OK sous réserve, aucun bloquant.
+- **Quoi** :
+  - M1 : contrat d'échec en transaction (500, fichier supprimé, échéance, miroir et demande inchangés).
+  - M2 : le refus de multer donne un message lisible (taille, format), sans `details`.
+  - M3 : un `requestId` qui vise une demande close est refusé en 409, et la preuve d'origine est conservée.
+  - M4 : l'UPDATE de la demande porte la condition de statut ouvert, et 409 si 0 ligne (deux onglets).
+- **Comment** :
+  - `server/api/document-renewals.routes.ts`.
+  - Contrat `document-quick-renew-proof-lifecycle` : 8 cas.
+  - Garde-fou `error-500-relay-hygiene` : il interdit aussi `details: x.message`.
+- **Comment tester (QA)** :
+  - Contrat → `8 passed`. Sans le correctif, M2 et M3 échouent (M1 passait déjà, ce qui prouve le tout ou rien).
+  - Garde-fou : 1 échec sur la version précédente, 20/20 ensuite.
+- **Reste / risques** :
+  - M4 n'a pas de test de concurrence (condition SQL seule) ;
+  - M5 : une coupure après COMMIT non acquitté supprime un fichier référencé (cas théorique accepté) ;
+  - le centre créé avant les contrôles reste un point produit, à trancher par 0a.

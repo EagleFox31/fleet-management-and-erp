@@ -6,7 +6,8 @@ import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
-import { alerts, documentRenewalCenters, documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
+import { alertInboxService } from "../../server/services/alert-inbox-service";
+import { alerts, documentRenewalCenters, documentRenewalRequests, vehicleDocuments, vehicles } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
@@ -175,5 +176,51 @@ describe("renouvellement rapide : cycle de vie du justificatif", { timeout: 1800
     expect(request.proofFilePath).toMatch(new RegExp(`/${prefix}`));
     expect(proofFiles(prefix)).toHaveLength(1);
     expect(await expiryOf(document.id)).toBe("2028-03-31");
+  });
+  it("échec dans la transaction : 500, justificatif supprimé, échéance, miroir et demande inchangés", async () => {
+    const { vehicle, document, prefix } = await setup();
+    const [before] = await db.select({ insuranceExpiry: vehicles.insuranceExpiry }).from(vehicles).where(eq(vehicles.id, vehicle.id));
+    vi.spyOn(alertInboxService, "clearDocumentExpiryAlerts").mockRejectedValue(new Error("TEST panne en transaction"));
+    const response = await quickRenew(baseFields(vehicle.id, document.id), prefix);
+    expect(response.status).toBe(500);
+    expect(proofFiles(prefix)).toEqual([]);
+    expect(await expiryOf(document.id)).toBe("2026-11-20");
+    const [after] = await db.select({ insuranceExpiry: vehicles.insuranceExpiry }).from(vehicles).where(eq(vehicles.id, vehicle.id));
+    expect(after.insuranceExpiry).toEqual(before.insuranceExpiry);
+    const requests = await db.select().from(documentRenewalRequests).where(eq(documentRenewalRequests.vehicleDocumentId, document.id));
+    expect(requests).toEqual([]);
+  });
+
+  it("demande déjà close : 409, justificatif supprimé, preuve et échéance d'origine conservées", async () => {
+    const { vehicle, document, prefix } = await setup();
+    const [closed] = await db
+      .insert(documentRenewalRequests)
+      .values({
+        vehicleId: vehicle.id,
+        vehicleDocumentId: document.id,
+        documentType: "assurance",
+        status: "completed",
+        requestedBy: ids.userIds[0],
+        proofFilePath: "/uploads/document-renewals/proofs/TEST-preuve-origine.pdf",
+      })
+      .returning();
+    const response = await quickRenew({ ...baseFields(vehicle.id, document.id), requestId: String(closed.id) }, prefix);
+    expect(response.status).toBe(409);
+    expect(proofFiles(prefix)).toEqual([]);
+    expect(await expiryOf(document.id)).toBe("2026-11-20");
+    const [row] = await db.select({ proofFilePath: documentRenewalRequests.proofFilePath }).from(documentRenewalRequests).where(eq(documentRenewalRequests.id, closed.id));
+    expect(row.proofFilePath).toBe("/uploads/document-renewals/proofs/TEST-preuve-origine.pdf");
+  });
+
+  it("format refusé : 400 avec un message lisible, sans détail technique", async () => {
+    const { vehicle, document } = await setup();
+    const form = new FormData();
+    for (const [key, value] of Object.entries(baseFields(vehicle.id, document.id))) form.append(key, value);
+    form.append("proofFile", new Blob(["TEST"], { type: "text/plain" }), "TEST-format.txt");
+    const response = await fetch(`${baseUrl}/api/document-renewals/quick-renew`, { method: "POST", headers: { Cookie: cookie }, body: form });
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toBe("Justificatif invalide. Formats acceptés: PDF, JPG, PNG, WEBP.");
+    expect(body).not.toHaveProperty("details");
   });
 });

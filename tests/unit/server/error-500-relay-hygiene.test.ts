@@ -34,7 +34,7 @@ describe.each(ROUTERS)("server/api/%s.routes.ts relaie ses 500", (name) => {
   });
 
   it("n'expose pas error.message dans une réponse", () => {
-    const hits = lines.flatMap((l, i) => (/details:\s*\w+ instanceof Error/.test(l) ? [`${i + 1}: ${l.trim()}`] : []));
+    const hits = lines.flatMap((l, i) => (/details:\s*(?:\w+ instanceof Error|[\w.]*\.message\b)/.test(l) ? [`${i + 1}: ${l.trim()}`] : []));
     expect(hits).toEqual([]);
   });
 

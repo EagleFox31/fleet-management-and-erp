@@ -927,10 +927,14 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
     };
     try {
       if (uploadError) {
-        return res.status(400).json({
-          message: "Upload justificatif invalide",
-          details: uploadError.message,
-        });
+        // Message lisible sans texte technique de multer (AGENTS.md §10) : le fileFilter lève déjà en français.
+        const message =
+          uploadError instanceof multer.MulterError
+            ? uploadError.code === "LIMIT_FILE_SIZE"
+              ? "Fichier trop volumineux (8 Mo maximum)."
+              : "Upload justificatif invalide."
+            : "Justificatif invalide. Formats acceptés: PDF, JPG, PNG, WEBP.";
+        return res.status(400).json({ message });
       }
 
       const role = normalizeRole(req.user?.role);
@@ -1050,6 +1054,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
             id: documentRenewalRequests.id,
             vehicleId: documentRenewalRequests.vehicleId,
             vehicleDocumentId: documentRenewalRequests.vehicleDocumentId,
+            status: documentRenewalRequests.status,
           })
           .from(documentRenewalRequests)
           .where(eq(documentRenewalRequests.id, payload.requestId))
@@ -1057,6 +1062,10 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
 
         if (!existingRequest) {
           return res.status(404).json({ message: "Demande de renouvellement introuvable." });
+        }
+        // Une demande close garde sa preuve et son historique d'achèvement.
+        if (!(OPEN_DOCUMENT_RENEWAL_STATUSES as readonly string[]).includes(existingRequest.status)) {
+          return res.status(409).json({ message: "Cette demande est clôturée : on ne peut plus la renouveler." });
         }
         if (
           existingRequest.vehicleId !== payload.vehicleId ||
@@ -1130,11 +1139,21 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           )[0]?.id;
 
         if (targetRequestId) {
+          // Condition de statut dans l'UPDATE : deux envois simultanés ne peuvent pas clore la même
+          // demande deux fois (le second écraserait la preuve du premier).
           [finalizedRequest] = await tx
             .update(documentRenewalRequests)
             .set({ ...completion, updatedAt: now })
-            .where(eq(documentRenewalRequests.id, targetRequestId))
+            .where(
+              and(
+                eq(documentRenewalRequests.id, targetRequestId),
+                inArray(documentRenewalRequests.status, [...OPEN_DOCUMENT_RENEWAL_STATUSES]),
+              ),
+            )
             .returning();
+          if (!finalizedRequest) {
+            throw new AppError(409, "Cette demande vient d'être clôturée : rechargez la page.");
+          }
         } else {
           [finalizedRequest] = await tx
             .insert(documentRenewalRequests)
