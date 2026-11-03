@@ -129,24 +129,26 @@ const broadcastVehicleDocumentEvent = (
   const scopes: RealtimeScope[] = [{ type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] }];
   if (options?.ownerId) scopes.push({ type: "user", userIds: [options.ownerId] });
 
-  for (const scope of scopes) broadcastUpdate("vehicle_updated", {
-    version: 1,
-    entity: "vehicle",
-    entityId: payload.vehicleId,
-    payload: {
-      vehicleId: payload.vehicleId,
-      documentId: payload.documentId,
-      documentType: payload.documentType,
-      newExpiryDate: payload.newExpiryDate,
-      source: "document_renewal",
-    },
-    scope,
-    actor: {
-      userId: options?.actorUserId ?? null,
-      role: options?.actorRole ?? null,
-    },
-    emittedAt: new Date().toISOString(),
-  });
+  for (const scope of scopes) {
+    broadcastUpdate("vehicle_updated", {
+      version: 1,
+      entity: "vehicle",
+      entityId: payload.vehicleId,
+      payload: {
+        vehicleId: payload.vehicleId,
+        documentId: payload.documentId,
+        documentType: payload.documentType,
+        newExpiryDate: payload.newExpiryDate,
+        source: "document_renewal",
+      },
+      scope,
+      actor: {
+        userId: options?.actorUserId ?? null,
+        role: options?.actorRole ?? null,
+      },
+      emittedAt: new Date().toISOString(),
+    });
+  }
 };
 
 const broadcastAlertCreated = (alert: {
@@ -1238,50 +1240,56 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         });
       }
 
-      broadcastDocumentRenewalEvent(
-        "document_renewal_quick_completed",
-        {
-          request: withoutDiskPaths(finalizedRequest),
-          document: withoutDiskPaths(updatedDocument),
-          previousExpiryDate: documentRow.previousExpiryDate ?? null,
-        },
-        {
-          requestId: finalizedRequest.id,
-          actorUserId,
-          actorRole: role,
-        },
-      );
+      // Diffusion au mieux : document et demande sont écrits ; un échec d'envoi ne renvoie pas 500
+      // et ne supprime pas le justificatif enregistré (catch ci-dessous).
+      try {
+        broadcastDocumentRenewalEvent(
+          "document_renewal_quick_completed",
+          {
+            request: withoutDiskPaths(finalizedRequest),
+            document: withoutDiskPaths(updatedDocument),
+            previousExpiryDate: documentRow.previousExpiryDate ?? null,
+          },
+          {
+            requestId: finalizedRequest.id,
+            actorUserId,
+            actorRole: role,
+          },
+        );
 
-      broadcastDocumentRenewalEvent(
-        "vehicle_document_updated",
-        {
-          documentId: updatedDocument.id,
-          vehicleId: updatedDocument.vehicleId,
-          documentType: updatedDocument.type,
-          newExpiryDate: updatedDocument.expiryDate,
-        },
-        {
-          requestId: finalizedRequest.id,
-          actorUserId,
-          actorRole: role,
-          // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
-          scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
-        },
-      );
+        broadcastDocumentRenewalEvent(
+          "vehicle_document_updated",
+          {
+            documentId: updatedDocument.id,
+            vehicleId: updatedDocument.vehicleId,
+            documentType: updatedDocument.type,
+            newExpiryDate: updatedDocument.expiryDate,
+          },
+          {
+            requestId: finalizedRequest.id,
+            actorUserId,
+            actorRole: role,
+            // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
+            scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
+          },
+        );
 
-      broadcastVehicleDocumentEvent(
-        {
-          vehicleId: updatedDocument.vehicleId,
-          documentId: updatedDocument.id,
-          documentType: String(updatedDocument.type || documentRow.documentType || ""),
-          newExpiryDate: updatedDocument.expiryDate ?? null,
-        },
-        {
-          actorUserId,
-          actorRole: role,
-          ownerId: documentRow.vehicleOwnerId ?? null,
-        },
-      );
+        broadcastVehicleDocumentEvent(
+          {
+            vehicleId: updatedDocument.vehicleId,
+            documentId: updatedDocument.id,
+            documentType: String(updatedDocument.type || documentRow.documentType || ""),
+            newExpiryDate: updatedDocument.expiryDate ?? null,
+          },
+          {
+            actorUserId,
+            actorRole: role,
+            ownerId: documentRow.vehicleOwnerId ?? null,
+          },
+        );
+      } catch (broadcastError) {
+        log.error({ err: broadcastError, requestId: req.requestId }, "diffusion du renouvellement rapide");
+      }
 
       return res.status(200).json({
         message: "Renouvellement enregistré et document mis à jour.",

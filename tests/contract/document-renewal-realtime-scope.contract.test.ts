@@ -1,6 +1,6 @@
-import { rmSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { join } from "path";
-import { inArray, like } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { alerts, documentRenewalCenters, documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
@@ -118,5 +118,52 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
     expect(captured.filter((frame) => reaches(frame.scope, stranger)).map((frame) => frame.eventType)).toEqual([]);
     expect(captured.filter((frame) => reaches(frame.scope, driver)).map((frame) => frame.eventType)).toEqual([]);
     expect(captured.filter((frame) => isEffectiveBroadcast(frame.scope))).toEqual([]);
+  });
+  it("un échec de diffusion après l'écriture ne renvoie pas 500 et garde le justificatif", async () => {
+    const vehicle = await createTestVehicle({ ownerId: actors.userIdOf("owner") });
+    ids.vehicleIds.push(vehicle.id);
+    const [document] = await db
+      .insert(vehicleDocuments)
+      .values({
+        vehicleId: vehicle.id,
+        name: "TEST assurance",
+        type: "assurance",
+        filename: "test.pdf",
+        filesize: 1,
+        fileType: "application/pdf",
+        filePath: "uploads/test-inexistant.pdf",
+        expiryDate: "2026-11-10",
+      })
+      .returning();
+
+    const form = new FormData();
+    form.append("vehicleId", String(vehicle.id));
+    form.append("vehicleDocumentId", String(document.id));
+    form.append("comment", "TEST renouvellement");
+    form.append("centerName", `TEST-centre-${vehicle.registrationNumber}`);
+    form.append("newExpiryDate", "2028-01-31");
+    form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-justificatif.pdf");
+
+    const spy = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = (eventType: string) => {
+      if (eventType !== "alert_created") throw new Error("TEST socket indisponible");
+    };
+    try {
+      const response = await fetch(`${actors.baseUrl}/api/document-renewals/quick-renew`, {
+        method: "POST",
+        headers: { Cookie: actors.cookies.get("secretary")! },
+        body: form,
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      (global as any).broadcastUpdate = spy;
+    }
+
+    const [request] = await db
+      .select({ proofFilePath: documentRenewalRequests.proofFilePath })
+      .from(documentRenewalRequests)
+      .where(eq(documentRenewalRequests.vehicleDocumentId, document.id));
+    expect(request?.proofFilePath).toBeTruthy();
+    expect(existsSync(join(process.cwd(), request!.proofFilePath!.replace(/^\//, "")))).toBe(true);
   });
 });
