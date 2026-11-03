@@ -22,7 +22,13 @@ import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
-import { MISSION_MANAGER_ROLES, MISSION_STATUS_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
+import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
+  MISSION_EVENT_ROLES,
+  MISSION_MANAGER_ROLES,
+  MISSION_STATUS_ROLES,
+  canRoleSetMissionStatus,
+} from "@shared/constants/roles";
 
 const log = moduleLogger("missions");
 
@@ -53,31 +59,73 @@ type MissionRealtimeEvent =
 
 type VehicleDocumentRequirementType = "carte_grise" | "assurance" | "visite_technique";
 
-function broadcastMissionUpdate(
-  eventType: MissionRealtimeEvent,
-  mission: Record<string, unknown>,
-  extraPayload: Record<string, unknown> = {},
-): void {
+/** Comptes utilisateur des chauffeurs affectés à la mission (destinataires de la trame réduite). */
+async function assignedDriverUserIds(missionId: number): Promise<number[]> {
+  const rows = await db
+    .select({ userId: drivers.userId })
+    .from(assignments)
+    .innerJoin(drivers, eq(assignments.driverId, drivers.id))
+    .where(eq(assignments.missionId, missionId));
+  return Array.from(new Set(rows.map((row) => row.userId).filter((id): id is number => typeof id === "number" && id > 0)));
+}
+
+/**
+ * Cloison (AGENTS.md §11) : trame complète au personnel hors chauffeur, trame réduite à
+ * l'identifiant de mission pour le chauffeur affecté (son écran se resynchronise par la route
+ * qui le filtre déjà), rien pour un client. Diffusion au mieux : l'écriture est faite, un échec
+ * d'envoi est journalisé sans faire échouer la requête.
+ */
+async function emitMissionEvent(
+  eventType: string,
+  missionId: number | null,
+  staffData: Record<string, unknown>,
+  requestId?: string,
+): Promise<void> {
   const broadcastUpdate = (global as any).broadcastUpdate;
   if (typeof broadcastUpdate !== "function") {
     return;
   }
+  try {
+    broadcastUpdate(eventType, { ...staffData, scope: { type: "roles", roles: [...MISSION_EVENT_ROLES] } });
+    if (!missionId) return;
+    const driverUserIds = await assignedDriverUserIds(missionId);
+    if (driverUserIds.length === 0) return;
+    broadcastUpdate(eventType, {
+      entity: "mission",
+      entityId: missionId,
+      payload: { missionId },
+      scope: { type: "user", userIds: driverUserIds },
+    });
+  } catch (error) {
+    log.error({ err: error, requestId, eventType }, "diffusion temps réel d'un événement de mission");
+  }
+}
 
+async function broadcastMissionUpdate(
+  eventType: MissionRealtimeEvent,
+  mission: Record<string, unknown>,
+  extraPayload: Record<string, unknown> = {},
+  requestId?: string,
+): Promise<void> {
   const missionId =
     typeof mission.id === "number"
       ? mission.id
       : Number.parseInt(String(mission.id ?? ""), 10) || null;
 
-  broadcastUpdate(eventType, {
-    entity: "mission",
-    entityId: missionId,
-    payload: {
-      mission,
-      missionId,
-      ...extraPayload,
+  await emitMissionEvent(
+    eventType,
+    missionId,
+    {
+      entity: "mission",
+      entityId: missionId,
+      payload: {
+        mission,
+        missionId,
+        ...extraPayload,
+      },
     },
-    scope: { type: "broadcast" },
-  });
+    requestId,
+  );
 }
 
 function broadcastAlertCreated(
@@ -116,33 +164,34 @@ function broadcastAlertCreated(
   });
 }
 
-function broadcastMissionFuelRecorded(params: {
+/** Exporté pour le contrat de portée (tests/contract/mission-realtime-scope.contract.test.ts). */
+export async function broadcastMissionFuelRecorded(params: {
   missionId: number;
   fuelRecord: Record<string, unknown>;
   actorUserId: number | null;
   actorRole: string | null;
-}): void {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate("mission_fuel_recorded", {
-    version: 1,
-    entity: "mission",
-    entityId: params.missionId,
-    payload: {
-      missionId: params.missionId,
-      record: params.fuelRecord,
-      vehicleId: params.fuelRecord.vehicleId ?? null,
+  requestId?: string;
+}): Promise<void> {
+  await emitMissionEvent(
+    "mission_fuel_recorded",
+    params.missionId,
+    {
+      version: 1,
+      entity: "mission",
+      entityId: params.missionId,
+      payload: {
+        missionId: params.missionId,
+        record: params.fuelRecord,
+        vehicleId: params.fuelRecord.vehicleId ?? null,
+      },
+      actor: {
+        userId: params.actorUserId,
+        role: params.actorRole,
+      },
+      emittedAt: new Date().toISOString(),
     },
-    scope: { type: "broadcast" },
-    actor: {
-      userId: params.actorUserId,
-      role: params.actorRole,
-    },
-    emittedAt: new Date().toISOString(),
-  });
+    params.requestId,
+  );
 }
 
 const MISSION_STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -590,7 +639,8 @@ function isDocumentTypeValid(
   return receiptCovers || docs.some((doc) => !isDateExpired(doc.expiryDate));
 }
 
-function broadcastDocumentRenewalCreatedFromMission(
+/** Exporté pour le contrat de portée. */
+export function broadcastDocumentRenewalCreatedFromMission(
   request: Record<string, unknown>,
   actor: { userId: number | null; role: string | null },
   extraPayload: Record<string, unknown> = {},
@@ -613,7 +663,8 @@ function broadcastDocumentRenewalCreatedFromMission(
       request,
       ...extraPayload,
     },
-    scope: { type: "broadcast" },
+    // Même portée que la création par /api/document-renewals : rôles qui lisent les demandes (§11).
+    scope: { type: "roles", roles: [...DOCUMENT_RENEWAL_VIEWER_ROLES] },
     actor: {
       userId: actor.userId,
       role: actor.role,
@@ -980,13 +1031,11 @@ router.post("/:id/fuel-records", async (req, res, next) => {
 
     if (actorRole === "driver") {
       if (!mission.assignmentDriverId || !mission.assignmentDriverUserId) {
-        return res.status(403).json({ message: "Aucun chauffeur valide affecté à cette mission." });
+        throw new AppError(403, "Aucun chauffeur valide affecté à cette mission.");
       }
 
       if (mission.assignmentDriverUserId !== actorUserId) {
-        return res.status(403).json({
-          message: "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.",
-        });
+        throw new AppError(403, "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.");
       }
     }
 
@@ -1018,12 +1067,13 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       .limit(1);
 
     if (updatedMission) {
-      broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
+      await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_fuel_recorded",
       });
     }
 
-    broadcastMissionFuelRecorded({
+    await broadcastMissionFuelRecorded({
+      requestId: req.requestId,
       missionId,
       fuelRecord: result.consumption as unknown as Record<string, unknown>,
       actorUserId,
@@ -1040,7 +1090,8 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       mission: updatedMission || null,
     });
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
+    // Un refus (AppError) est journalisé par le gestionnaire central ; seule l'erreur imprévue est loggée ici.
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
     next(toFuelCardAppError(error));
   }
 });
@@ -1061,9 +1112,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     }
 
     if (!isMissionFuelManagerRole(actorRole)) {
-      return res.status(403).json({
-        message: "Seuls admin, logistique ou secrétariat peuvent régulariser un plein mission.",
-      });
+      throw new AppError(403, "Seuls admin, logistique ou secrétariat peuvent régulariser un plein mission.");
     }
 
     const payloadSchema = z.object({
@@ -1185,12 +1234,13 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
 
     if (updatedMission) {
-      broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
+      await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_fuel_regularized",
       });
     }
 
-    broadcastMissionFuelRecorded({
+    await broadcastMissionFuelRecorded({
+      requestId: req.requestId,
       missionId,
       fuelRecord: result.consumption as unknown as Record<string, unknown>,
       actorUserId,
@@ -1208,13 +1258,14 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       regularization: regularizationEntry,
     });
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
+    // Un refus (AppError) est journalisé par le gestionnaire central ; seule l'erreur imprévue est loggée ici.
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
     next(toFuelCardAppError(error));
   }
 });
 
 // POST /api/missions/:id/fuel-records/declare-no-refuel - Déclarer une mission terminée sans ravitaillement
-router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
+router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {
@@ -1229,9 +1280,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
     }
 
     if (!isMissionFuelManagerRole(actorRole)) {
-      return res.status(403).json({
-        message: "Seuls admin, logistique ou secrétariat peuvent déclarer une mission sans ravitaillement.",
-      });
+      throw new AppError(403, "Seuls admin, logistique ou secrétariat peuvent déclarer une mission sans ravitaillement.");
     }
 
     const payloadSchema = z.object({
@@ -1305,7 +1354,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
       });
 
     if (updatedMission) {
-      broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
+      await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_no_refuel_declared",
       });
     }
@@ -1315,6 +1364,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res) => {
       declaration,
     });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
@@ -1903,7 +1953,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
       await db.insert(assignments).values(assignmentData);
     }
 
-    broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
+    await broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
       hasAssignment: assignmentVehicleId !== null && assignmentDriverId !== null,
     });
 
@@ -2268,7 +2318,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
       .where(eq(missions.id, missionId))
       .returning();
 
-    broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
+    await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
       source: "mission_edit",
     });
 
@@ -2633,7 +2683,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
     }
 
-    broadcastMissionUpdate(
+    await broadcastMissionUpdate(
       targetStatus === "completed" ? "mission_completed" : "mission_status_changed",
       {
         ...(updatedMission as unknown as Record<string, unknown>),
@@ -2831,7 +2881,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
 });
 
 // POST /api/missions/:id/document-renewal-requests - Créer des demandes documentaires depuis un blocage mission
-router.post("/:id/document-renewal-requests", async (req, res) => {
+router.post("/:id/document-renewal-requests", async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (Number.isNaN(missionId)) {
@@ -2847,9 +2897,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
     }
 
     if (!allowedRequesterRoles.has(actorRole)) {
-      return res.status(403).json({
-        message: "Accès refusé: seuls Admin, Secrétaire, Logisticien et Chef d'atelier peuvent créer cette demande.",
-      });
+      throw new AppError(403, "Accès refusé: seuls Admin, Secrétaire, Logisticien et Chef d'atelier peuvent créer cette demande.");
     }
 
     const payloadSchema = z.object({
@@ -3063,7 +3111,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
       }
     }
 
-    broadcastMissionUpdate("mission_updated", mission as unknown as Record<string, unknown>, {
+    await broadcastMissionUpdate("mission_updated", mission as unknown as Record<string, unknown>, {
       source: "mission_document_renewal_request",
       missionId: mission.id,
       requestedDocumentTypes: targetDocTypes,
@@ -3093,6 +3141,7 @@ router.post("/:id/document-renewal-requests", async (req, res) => {
       targetDocumentTypes: targetDocTypes,
     });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
