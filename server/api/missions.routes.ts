@@ -20,6 +20,8 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
+import { assertValidDbId } from "../lib/work-order-scope";
+import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { toFieldErrors } from "@shared/errors";
 import {
   activeDriverAssignmentsOnMission,
@@ -2568,6 +2570,190 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Update mission error");
     return res.status(500).json({ message: "Erreur lors de la mise à jour de la mission" });
+  }
+});
+
+const addAssignmentSchema = z.object({
+  vehicleId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+  driverId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+});
+
+const editionBlockedMessage = (status: string) => `Mission ${status === "completed" ? "terminée" : "annulée"} : édition bloquée.`;
+
+// POST /api/missions/:id/assignments - Ajouter un chauffeur (et son véhicule) à la mission.
+// Une mission peut avoir plusieurs chauffeurs (#227) ; le PATCH ne sait remplacer qu'une affectation.
+// Mêmes rôles que l'affectation par PATCH (MISSION_MANAGER_ROLES). La ligne mission est verrouillée
+// (FOR UPDATE) : deux ajouts concurrents du même chauffeur se serrent, le second voit le premier et reçoit 409.
+router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
+  try {
+    const missionId = Number(req.params.id);
+    assertValidDbId(missionId, "ID mission invalide.");
+    const parsed = addAssignmentSchema.safeParse(req.body ?? {});
+    if (!parsed.success) throw new AppError(400, "Affectation invalide (véhicule/chauffeur).");
+    const { vehicleId, driverId } = parsed.data;
+    assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
+    assertValidDbId(driverId, "Affectation invalide (véhicule/chauffeur).");
+
+    const result = await db.transaction(async (tx) => {
+      const [mission] = await tx
+        .select({
+          id: missions.id,
+          status: missions.status,
+          weight: missions.weight,
+          pickupDate: missions.pickupDate,
+          deliveryDate: missions.deliveryDate,
+        })
+        .from(missions)
+        .where(eq(missions.id, missionId))
+        .for("update");
+      if (!mission) throw new AppError(404, "Mission non trouvée.");
+      if (mission.status === "completed" || mission.status === "cancelled") {
+        throw new AppError(400, editionBlockedMessage(mission.status));
+      }
+
+      const [vehicle] = await tx
+        .select({
+          id: vehicles.id,
+          registrationNumber: vehicles.registrationNumber,
+          tonnage: vehicles.tonnage,
+          status: vehicles.status,
+          insuranceExpiry: vehicles.insuranceExpiry,
+          technicalInspectionDate: vehicles.technicalInspectionDate,
+          licensePlateExpiry: vehicles.licensePlateExpiry,
+        })
+        .from(vehicles)
+        .where(and(eq(vehicles.id, vehicleId), isNull(vehicles.deletedAt)))
+        .limit(1);
+      if (!vehicle) throw new AppError(400, "Véhicule introuvable pour l'affectation.");
+
+      const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id) });
+      if (!eligibilite.eligible) {
+        throw new AppError(400, formatEligibilityRefusal(vehicle.registrationNumber, eligibilite.blockers));
+      }
+
+      const [driver] = await tx
+        .select({ id: drivers.id, firstName: drivers.firstName, lastName: drivers.lastName, cpcStatus: drivers.cpcStatus, isActive: drivers.isActive })
+        .from(drivers)
+        .where(eq(drivers.id, driverId))
+        .limit(1);
+      if (!driver) throw new AppError(400, "Chauffeur introuvable pour l'affectation.");
+      if (driver.isActive === false) throw new AppError(400, "Ce chauffeur est désactivé, il ne peut pas être affecté.");
+      if (normalizeCpcStatus(driver.cpcStatus) !== "FORME") {
+        throw new AppError(400, `CPC invalide pour ${driver.firstName} ${driver.lastName} : statut ${driver.cpcStatus || "non défini"}.`);
+      }
+
+      const missionWeight = mission.weight !== null && mission.weight !== undefined ? Number(mission.weight) : null;
+      const vehicleTonnage = vehicle.tonnage !== null && vehicle.tonnage !== undefined ? Number(vehicle.tonnage) : null;
+      if (missionWeight !== null && vehicleTonnage !== null && !Number.isNaN(missionWeight) && !Number.isNaN(vehicleTonnage) && missionWeight > vehicleTonnage) {
+        throw new AppError(400, `Charge incompatible : ${missionWeight}T > tonnage véhicule ${vehicle.registrationNumber} (${vehicleTonnage}T).`);
+      }
+
+      const [already] = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(and(eq(assignments.missionId, missionId), eq(assignments.driverId, driverId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+        .limit(1);
+      if (already) throw new AppError(409, "Ce chauffeur est déjà affecté à cette mission.");
+
+      // Conflit de planning (même règle que le lancement) : chaque chauffeur et chaque véhicule ajouté.
+      if (mission.pickupDate && mission.deliveryDate) {
+        const candidates = await tx
+          .select({
+            orderNumber: missions.orderNumber,
+            pickupDate: missions.pickupDate,
+            deliveryDate: missions.deliveryDate,
+            vehicleId: assignments.vehicleId,
+            driverId: assignments.driverId,
+          })
+          .from(assignments)
+          .innerJoin(missions, eq(assignments.missionId, missions.id))
+          .where(
+            and(
+              ne(assignments.missionId, missionId),
+              inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+              inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+              or(eq(assignments.vehicleId, vehicleId), eq(assignments.driverId, driverId)),
+            ),
+          );
+        const clash = candidates.find((c) => overlaps(mission.pickupDate, mission.deliveryDate, c.pickupDate, c.deliveryDate));
+        if (clash) {
+          const what = clash.driverId === driverId ? "Ce chauffeur" : "Ce véhicule";
+          throw new AppError(409, `Conflit de planning : ${what} est déjà affecté à la mission ${clash.orderNumber} sur ce créneau.`);
+        }
+      }
+
+      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" }).returning();
+      const [updatedMission] =
+        mission.status === "planned"
+          ? await tx.update(missions).set({ status: "assigned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
+          : await tx.select().from(missions).where(eq(missions.id, missionId));
+      return { assignment, mission: updatedMission };
+    });
+
+    // Après le commit : trame complète au personnel, trame réduite aux chauffeurs affectés (portée nominative).
+    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id }, req.requestId);
+    return res.status(201).json(result.assignment);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/missions/:id/assignments/:assignmentId - Annuler l'affectation d'un chauffeur.
+// Pas de suppression physique : la ligne passe à `cancelled` (l'historique carburant et les trames en dépendent).
+// Le chauffeur perd aussitôt le droit de saisie (activeDriverAssignmentsOnMission ne compte que les actives).
+router.delete("/:id/assignments/:assignmentId", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
+  try {
+    const missionId = Number(req.params.id);
+    const assignmentId = Number(req.params.assignmentId);
+    assertValidDbId(missionId, "ID mission invalide.");
+    assertValidDbId(assignmentId, "ID affectation invalide.");
+
+    const result = await db.transaction(async (tx) => {
+      const [mission] = await tx
+        .select({ id: missions.id, status: missions.status })
+        .from(missions)
+        .where(eq(missions.id, missionId))
+        .for("update");
+      if (!mission) throw new AppError(404, "Mission non trouvée.");
+      if (mission.status === "completed" || mission.status === "cancelled") {
+        throw new AppError(400, editionBlockedMessage(mission.status));
+      }
+      const [assignment] = await tx
+        .select()
+        .from(assignments)
+        .where(and(eq(assignments.id, assignmentId), eq(assignments.missionId, missionId)))
+        .limit(1);
+      if (!assignment) throw new AppError(404, "Affectation non trouvée sur cette mission.");
+      if (assignment.status === "cancelled") return { assignment, mission: undefined, changed: false };
+      if (assignment.status === "in_progress" || assignment.status === "completed") {
+        throw new AppError(409, "Cette affectation est déjà démarrée ou terminée : elle ne peut plus être annulée.");
+      }
+
+      const [cancelled] = await tx
+        .update(assignments)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(eq(assignments.id, assignmentId))
+        .returning();
+      const stillActive = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(and(eq(assignments.missionId, missionId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+        .limit(1);
+      const [updatedMission] =
+        stillActive.length === 0 && mission.status === "assigned"
+          ? await tx.update(missions).set({ status: "planned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
+          : await tx.select().from(missions).where(eq(missions.id, missionId));
+      return { assignment: cancelled, mission: updatedMission, changed: true };
+    });
+
+    // L'annulation est rejouable : une seconde demande ne rediffuse rien. Le chauffeur annulé reçoit la trame
+    // (son affectation reste une ligne de la mission) et resynchronise son écran, qui ne l'affiche plus actif.
+    if (result.changed && result.mission) {
+      await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_cancelled", assignmentId }, req.requestId);
+    }
+    return res.json(result.assignment);
+  } catch (error) {
+    next(error);
   }
 });
 
