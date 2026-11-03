@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
+import { STAFF_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("clients");
 const router = Router();
@@ -76,7 +77,8 @@ function broadcastClientUpdate(
     entity: "client",
     entityId: client.id,
     payload: { client },
-    scope: { type: "broadcast" },
+    // Fiche d'un client de flotte (coordonnées, créateur) : le personnel, jamais un compte client (§11).
+    scope: { type: "roles", roles: [...STAFF_ROLES] },
   });
 }
 

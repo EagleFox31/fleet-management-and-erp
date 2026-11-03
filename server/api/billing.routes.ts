@@ -4,6 +4,7 @@ import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
+import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 
@@ -141,7 +142,7 @@ const broadcastClientInvoiceUpdate = (
     entity: "client_invoice",
     entityId: options?.invoiceId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...CLIENT_BILLING_EVENT_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,

@@ -10,6 +10,7 @@ import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from 
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
+import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 const log = moduleLogger("vehicles-routes");
@@ -28,18 +29,27 @@ const broadcastVehicleUpdate = (
     return;
   }
 
-  broadcastUpdate(eventType, {
+  // Cloison (AGENTS.md §11) : la trame complète porte la fiche véhicule (prix d'achat compris).
+  // Le personnel hors chauffeur la reçoit ; le chauffeur et le seul client propriétaire
+  // (`vehicles.ownerId`) reçoivent une trame réduite, sans la fiche : leur écran se resynchronise
+  // par la requête. Jamais en broadcast.
+  const { vehicle, ...reducedPayload } = payload;
+  const ownerId = (vehicle as { ownerId?: unknown } | undefined)?.ownerId;
+  const envelope = {
     version: 1,
     entity: "vehicle",
     entityId: options?.vehicleId ?? null,
-    payload,
-    scope: { type: "broadcast" },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
     },
     emittedAt: new Date().toISOString(),
-  });
+  };
+  broadcastUpdate(eventType, { ...envelope, payload, scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] } });
+  broadcastUpdate(eventType, { ...envelope, payload: reducedPayload, scope: { type: "roles", roles: ["driver"] } });
+  if (typeof ownerId === "number" && Number.isInteger(ownerId) && ownerId > 0) {
+    broadcastUpdate(eventType, { ...envelope, payload: reducedPayload, scope: { type: "user", userIds: [ownerId] } });
+  }
 };
 
 /**
