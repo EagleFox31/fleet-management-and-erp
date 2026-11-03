@@ -1660,6 +1660,10 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Une écriture d'argent ou de stock porte une garde de rôle métier explicite sur la route (`isPartsCatalogManager`, `isStockIssuer`, `isInventoryManager`…), jamais `isStaff` ou `authenticate` seuls, même si le montage du routeur en pose déjà une.
 - Une route déclarée à la fois dans un routeur `server/api/` et dans `routes.ts` : seule la première est servie ; vérifier laquelle porte la garde avant de la juger.
 
+### Récurrence (3 novembre 2026) : débit de la carte carburant
+- Même motif : `POST /api/fuel-card/consumption` (écriture d'argent) n'avait aucune garde de route sous `isStaff` ; technicien et chef d'atelier pouvaient débiter la carte de l'entreprise. Aucun écran ne l'appelle (`recordConsumption` du client n'a pas de consommateur ; le chauffeur passe par `POST /api/missions/:id/fuel-records`). Garde posée : `isFuelCardManager` (admin, logistics, secretary), comme `/recharge`.
+- Prévention : `fuel-card-routes.contract.test.ts` (403 et solde inchangé pour workshop_manager et technician, rouges sur `main`), entrée retirée de `write-route-guards.frozen.ts`.
+
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
 ### Contexte
@@ -1769,6 +1773,26 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
+
+## 2026-11-03 — Événements d'ordre de travail diffusés à tous les comptes, clients compris
+
+### Contexte
+- Les trames d'OT (OT, pièces, demandes de pièce, pont des triggers Postgres) partaient en `scope: { type: "broadcast" }`, rendu explicite lors du passage à la portée fermée. Un client recevait titre, coûts et pièces de l'OT du véhicule d'un autre client.
+
+### Cause racine
+- Classification : dette de portée héritée. Le test d'hygiène gelait le comportement (« OT = historique ») sans le corriger ; aucun test ne jouait deux clients propriétaires.
+
+### Résolution
+- Portées `workOrderStaffScope` / `workOrderCostScope` (`server/lib/work-order-realtime-scope.ts`) ; le pont LISTEN/NOTIFY (`server/lib/db-event-relay.ts`) envoie `work_order_*` en `workOrderCostScope()` et `vehicle_status_changed` au personnel. Aucune trame d'OT vers un client. Seule exception : le propriétaire du véhicule reçoit une trame réduite `{ vehicleId, status }` de `vehicle_status_changed`, sans acteur (propriétaire lu en une requête ; nul ou lecture en échec, rien n'est envoyé), parce que l'écran client lit `/api/vehicles/:id` et que `useRealTimeSync` l'invalide sur cet événement.
+
+### Prévention (vérifiable)
+- `tests/contract/lotB-work-order-scope.contract.test.ts` : deux clients, un chauffeur, du personnel, destinataires résolus par le vrai `resolveRecipients` ; couvre les routes, le pont, incident-service, préventif, lignes de travail, awaiting-parts et procurement.
+- `broadcast-hygiene.test.ts` : égalité stricte, les entrées d'OT sont retirées ; tout retour en broadcast échoue.
+- `work-order-scope-hygiene.test.ts` : comptes gelés par fichier d'émission ; échoue si une trame qui porte `workOrder`, `partUsed` ou `requirement` n'est pas en `workOrderCostScope()`.
+
+### Règle Projet (obligatoire)
+- Un événement qui concerne un objet d'un véhicule part au personnel ; un client ne reçoit une trame que si un écran client l'écoute, réduite aux identifiants et au statut.
+- Une trame qui porte l'objet OT (`workOrder`), une demande de pièce (`requirement`) ou une pièce utilisée (`partUsed`) part en `workOrderCostScope()` : titre, coûts et pièces ne vont ni aux clients ni au chauffeur. `workOrderStaffScope()` est réservé aux trames d'identifiants.
 
 ### Suite : statut du plein normal relu sous le verrou de ligne
 
@@ -1915,3 +1939,92 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un nouveau workflow déclenché par `pull_request` porte les mêmes `types` et la même condition sur son job d'entrée. Un job qui ne dépend pas du job d'entrée doit porter la condition lui-même.
+
+## 2026-11-03 — Le verrou de base de test était facultatif et nommé d'après l'URL
+
+### Contexte
+- `fuel-card-routes` (solde global de la carte) échouait par intermittence, même lancé seul sous `lot-tools/db-lock.mjs` : 3 échecs sur 7. Le solde prenait +10 000 entre deux appels, y compris autour d'un 403 qui n'écrit rien.
+
+### Cause racine
+- Classification : exclusion mutuelle contournable.
+  - `db-lock.mjs` nommait son verrou d'après l'hôte de l'URL : `localhost:54320` et `postgres:5432`, qui désignent la même base locale, prenaient deux verrous différents.
+  - Surtout, le verrou était opt-in : toute session qui lançait vitest directement écrivait sans s'exclure.
+
+### Résolution
+- `db-lock.mjs`, hors dépôt : clé normalisée par base.
+- Dans le dépôt : verrou en base, `pg_advisory_lock(hashtext('fleet-test:' || current_database()))`, pris dans le `globalSetup` des suites intégration et contrat et tenu par une connexion dédiée jusqu'au teardown.
+  - Même base, même verrou, sans dépendre de l'URL ni d'un script à penser à lancer.
+  - Un crash libère le verrou.
+
+### Prévention (vérifiable)
+- `tests/integration/test-db-lock.test.ts` :
+  - le passage en cours tient le verrou réel, et une seconde prise expire en nommant le détenteur ;
+  - deux prises s'enchaînent ;
+  - le délai est configurable.
+- Deux passages lancés en même temps : le second affiche « en attente du verrou de test (pid …) » et ne démarre qu'à la fin du premier.
+
+### Règle Projet (obligatoire)
+- Une exclusion entre écrivains d'une ressource partagée vit dans la ressource elle-même (verrou en base), pas dans une convention d'appel que chacun doit penser à suivre.
+
+## 2026-11-03 — Une alerte de stock écrite dans la transaction annulait la sortie de stock (quasi-incident)
+
+### Contexte
+- `storage.checkAndCreateStockAlerts` créait l'alerte de stock bas avec l'exécuteur de la transaction du mouvement (sortie de stock d'un OT). Constaté en écrivant le test d'intégration de la couche 2 (#202) ; aucun signalement utilisateur.
+
+### Cause racine
+- Classification : effet secondaire couplé à la transaction métier. Sous Postgres, une erreur SQL dans une transaction l'empoisonne : un insert d'alerte en échec (contrainte, compte supprimé) faisait annuler le mouvement, donc la sortie de stock. La trame `alert_created` pouvait aussi partir avant un commit qui n'aurait jamais lieu.
+
+### Résolution
+- #202 : l'alerte n'est plus écrite dans la transaction. `StockWriteOptions.afterCommit` reçoit l'effet, que l'appelant (`work-order-parts.routes.ts`) exécute après le commit ; hors transaction, l'alerte est créée directement. Un échec de l'alerte est journalisé (`moduleLogger`) sans remonter.
+
+### Prévention (vérifiable)
+- `tests/integration/stock-alert-broadcast.test.ts` : un déclencheur qui refuse l'insert d'alerte n'empêche ni la baisse de stock ni le mouvement ; une transaction annulée n'emporte ni alerte ni trame ; rien avant le commit.
+- `tests/contract/stock-issue-alert-broadcast.contract.test.ts` : la sortie de stock HTTP réussit et notifie admins et magasiniers seulement.
+
+### Règle Projet (obligatoire)
+- Une notification (alerte, trame WebSocket, e-mail) déclenchée par une transition métier s'exécute après le commit, jamais avec l'exécuteur de la transaction. Mouvement en transaction sans `afterCommit` : l'alerte n'est pas créée et un avertissement est journalisé.
+
+## 2026-11-03 — Plein débité de la carte, montants réécrits sans contrepartie
+
+### Contexte
+- `PATCH /api/fuel-records/:id` permettait à l'auteur ou à l'admin de changer la quantité, le coût, le véhicule ou la date d'un plein qui avait déjà débité la carte carburant.
+- Le solde (somme des `creditAmount` et `debitAmount`) et les litres (somme des `quantity` débitées) ne suivaient pas le coût. La ligne et la carte divergeaient alors en silence.
+
+### Cause racine
+- Classification : invariant métier non gardé côté serveur.
+- La route était héritée d'un écran de saisie manuelle, qui ne mouvemente pas la carte. Elle n'a pas été revue quand les débits de carte ont été écrits dans la même table.
+
+### Résolution
+- `server/lib/fuel-record-ledger-lock.ts` : si `debitAmount` ou `creditAmount` est non nul, un changement réel de ces 4 champs renvoie 409. Le message indique de passer par une régularisation, ou d'annuler le plein puis d'en saisir un nouveau.
+- Notes, kilométrage et « plein complet » restent libres.
+- Une ré-sauvegarde à l'identique passe : les valeurs sont normalisées, et la date se compare au jour.
+
+### Prévention (vérifiable)
+- `tests/unit/server/fuel-record-ledger-lock.test.ts` et le bloc « montants figés » de `tests/contract/fuel-records-and-document-paths.contract.test.ts`. Sans le verrou, 4 cas passent au rouge.
+
+### Règle Projet (obligatoire)
+- Une ligne qui entre dans un solde (carte, stock, facture) ne se corrige pas par un PATCH de ses montants. On passe par une écriture de contrepartie, ou par une annulation suivie d'une nouvelle saisie.
+
+## 2026-11-03 — Garde statique des accès disque contournable (near miss, #210)
+
+### Contexte
+- `stored-path-hygiene.test.ts` doit vérifier qu'aucun accès disque de `server/` ne prend un chemin lu en base sans le borner à `uploads/` (AGENTS.md §9). Les deux relectures (sécurité, puis relecteur) l'ont jugé vert à tort sur des cas construits pour le contourner.
+
+### Cause racine
+- Classification : garde-fou fondé sur la présence de la borne, pas sur son lien avec l'argument.
+  - Première version : il suffisait que la borne apparaisse dans le texte de la portée. Un commentaire, une borne sur une autre variable, ou une fonction englobante comme `registerRoutes` suffisaient.
+  - Deuxième version : chaîne de dépendances trop large. `const p = req.body.p` héritait d'une garde posée sur `req.query.x`, parce que `req` y apparaissait. `uploadedFileCandidates(p)[0] ?? p` comptait aussi comme borné.
+
+### Résolution
+- Le lien est vérifié sur la structure de l'expression (`isBoundExpression`) :
+  - résultat d'un appel de borne, ou accès et méthode sur ce résultat ;
+  - variable dont toutes les déclarations sont bornées ;
+  - variable reçue directement par `isInsideDirectory` ;
+  - `??`, `||` et ternaire : chaque branche doit être bornée.
+- La destination de `copyFile`, `cp` et `rename` est vérifiée elle aussi. Les alias d'un appel disque sont refusés. Une exception couvre un seul appel.
+
+### Prévention (vérifiable)
+- Cas de contournement dans `stored-path-hygiene.test.ts`, rouges avec les règles précédentes : borne sur une autre variable, en commentaire, via `path`, sur un autre champ de `req`, repli `?? p`, destination non bornée, alias.
+
+### Règle Projet (obligatoire)
+- Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.

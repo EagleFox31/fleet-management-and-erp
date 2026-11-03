@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { Request } from 'express';
 import { AppError } from '../lib/app-error';
-import { isInsideDirectory } from '../lib/uploaded-file';
+import { isInsideDirectory, uploadedFileCandidates } from '../lib/uploaded-file';
 
 // Dossier pour stocker les documents des véhicules
 const UPLOAD_DIRECTORY = './uploads/documents';
@@ -106,10 +106,21 @@ export const uploadVehicleDocument = multer({
   }
 }).single('document');
 
-// Fonction utilitaire pour supprimer un fichier
-export function deleteFile(filePath: string): Promise<void> {
+/**
+ * Supprime un fichier téléversé. Même règle que `uploadedFileCandidates` (formes `uploads/…` et
+ * `/uploads/…`) : tout chemin hors de `<root>/uploads` est refusé, sans suppression et avec un
+ * message sans le chemin. Un chemin lu en base ne doit jamais atteindre un fichier que
+ * l'application n'a pas déposé (AGENTS.md §9).
+ */
+export function deleteFile(filePath: string, root = process.cwd()): Promise<void> {
   return new Promise((resolve, reject) => {
-    fs.unlink(filePath, (err) => {
+    const candidates = uploadedFileCandidates(filePath, root);
+    const target = candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+    if (!target) {
+      reject(new Error('suppression refusée : fichier hors du dossier des téléversements'));
+      return;
+    }
+    fs.unlink(target, (err) => {
       if (err) {
         reject(err);
       } else {

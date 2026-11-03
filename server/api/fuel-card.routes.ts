@@ -119,7 +119,7 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
 });
 
 // Enregistrer une consommation de carburant (débit)
-router.post("/consumption", async (req, res, next) => {
+router.post("/consumption", isFuelCardManager, async (req, res, next) => {
   try {
     const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
     

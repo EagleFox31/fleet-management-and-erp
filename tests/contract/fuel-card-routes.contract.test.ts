@@ -157,6 +157,28 @@ describe("FUEL1 : consommation (débit)", { timeout: 60000 }, () => {
     expect((await consume(validConsumption(vehicle.id), "client")).status).toBe(403);
   });
 
+  for (const actor of ["workshop_manager", "technician"] as const) {
+    it(`${actor} -> 403, solde inchangé, aucun débit`, async () => {
+      const vehicle = await newVehicle();
+      const before = await balance();
+      const res = await consume(validConsumption(vehicle.id), actor);
+      expect(res.status).toBe(403);
+      expect(await balance()).toBe(before);
+    });
+  }
+
+  for (const actor of ["logistics", "secretary"] as const) {
+    it(`${actor} -> 201, débit attribué à lui, solde - coût`, async () => {
+      await recharge(validRecharge());
+      const vehicle = await newVehicle();
+      const before = await balance();
+      const res = await consume(validConsumption(vehicle.id), actor);
+      expect(res.status).toBe(201);
+      expect(res.body.consumption).toMatchObject({ vehicleId: vehicle.id, createdBy: session.userId(actor) });
+      expect(await balance()).toBeCloseTo(before - Number(res.body.consumption.debitAmount), 2);
+    });
+  }
+
   it("201 : débit = quantité x prix, rattaché au véhicule, solde - coût", async () => {
     await recharge(validRecharge());
     const vehicle = await newVehicle();

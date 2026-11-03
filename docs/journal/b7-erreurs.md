@@ -171,6 +171,40 @@ Modèle et règles : `docs/journal/README.md`.
 - Pourquoi : alertes écrites sans trame, la cloche du destinataire attendait le polling (suite de #195). `checkAndCreateStockAlerts` reste gelé, chantier de la session de.
 - Preuve : `tests/contract/alerts-manual-realtime.contract.test.ts` 2/2, rouge 2/2 sans le correctif ; alerts-inbox et procurement-alert-realtime verts ; tsc 0 ; unitaires 1868.
 
+
+## 2026-11-03T18:04:13+01:00 — Chemins stockés : deleteFile borné à uploads/, garde d'hygiène des accès disque
+
+- Quoi : `deleteFile` (`server/middleware/upload.ts`) refuse tout chemin hors de `<root>/uploads`. Un test d'hygiène recense les accès disque de `server/` et exige une borne (`uploadedFileCandidates`, `existingUploadedFile`, `isInsideDirectory`) ou une entrée justifiée dans une liste gelée. Ligne périmée de AGENTS.md §9 remplacée.
+- Comment : `tests/support/file-access-scan.ts` (AST, portée partagée avec `alert-emission-scan`), `tests/unit/server/stored-path-hygiene.test.ts` (14 exceptions : multer, fichiers livrés, sauvegardes, vite), `tests/unit/server/upload-delete-file.test.ts`.
+- Pourquoi : dette §9. La revue montre que tous les chemins lus en base sont déjà bornés, sauf la primitive `deleteFile`, appelée avec une valeur brute par `services/documentStorage.ts` (code mort, laissé en place).
+- Preuve : deleteFile 6/6 (3 rouges sans correctif), hygiène 6/6 (2 rouges sans correctif), tsc 0, unitaires 1898.
+
+## 2026-11-03T18:12:22+01:00 — Réserves fleet-securite sur #210 (garde des accès disque)
+
+- Quoi : la garde ne cherche plus une borne dans le texte de la portée. Elle exige que l'argument de l'appel disque soit relié à une borne. Une exception couvre un seul appel. Les imports renommés d'un appel disque sont refusés. Appels ajoutés : open, cp, rename, rmdir. deleteFile suit la même règle que uploadedFileCandidates (forme /uploads/… acceptée).
+- Comment : AST, avec trois formes reconnues :
+  - l'argument contient la borne ;
+  - l'argument est déclaré (en chaîne, ou par for…of) depuis une borne ;
+  - l'argument est gardé par un appel de borne.
+  Ni les noms de propriété ni path, fs et process ne comptent.
+- Pourquoi : près-accident relevé par fleet-securite. Une borne posée sur une autre variable, écrite en commentaire, ou placée dans registerRoutes autour d'un rappel anonyme rendait la garde verte à tort.
+- Preuve : quatre cas unitaires de contournement, tous rouges avec l'ancienne règle. Hygiène + deleteFile : 19/19, et 3 rouges sans le correctif. tsc : 0 erreur ; 1905 tests unitaires après fusion de main.
+- Hors périmètre, non traité : un lien symbolique placé dans uploads/ (multer n'en crée pas).
+
+## 2026-11-03T18:19:47+01:00 — #210 : réserves du relecteur, correction du journal
+
+- Correction de l'entrée de 18:04 : « tous les chemins lus en base sont déjà bornés » est trop fort. La revue couvre les appels de `ACCESS_CALLS` trouvés par le scan ; un accès par une bibliothèque (pièce jointe nodemailer, `pdfkit`) ou par une écriture n'est pas couvert.
+- Quoi : liaison borne/argument structurelle (`isBoundExpression`). Une garde ne compte que si `isInsideDirectory` reçoit la variable directement ; `a ?? b` n'est borné que si chaque branche l'est. La destination de copyFile, cp et rename est vérifiée. Les alias `const { unlink: del } = fs` et `const del = fs.unlinkSync` sont refusés.
+- Code : `transferDocumentsToVehicle` vérifie la destination de la copie (`isInsideDirectory(vehicleUploadDir, newPath)`).
+- Pourquoi : le relecteur a relevé que `const p = req.body.p` héritait d'une garde posée sur `req.query.x`. Leçon ajoutée dans LESSONS_LEARNED.
+- Preuve : hygiène + deleteFile 20/20, nouveaux cas de contournement rouges avec la règle précédente.
+
+## 2026-11-03T18:16:39+01:00 — Workflows abandonnés : délai de 7 jours absent du nettoyage
+
+- Quoi : `cleanupAbandonedWorkflowDocuments` ne vise plus que les workflows abandonnés depuis plus de `olderThanDays` jours (7 par défaut, `updatedAt` = date de l'abandon).
+- Comment : `lt(updatedAt, cutoff)` dans le `where`, `now` et le délai injectables. Aucun job branché : la décision de rétention revient au produit.
+- Pourquoi : la clause n'était qu'un commentaire, et un workflow abandonné la veille perdait ses documents. La fonction n'a aucun appelant : le piège était armé, mais n'avait pas encore servi (constat de fleet-securite pendant la revue de #210).
+- Preuve : `tests/integration/workflow-cleanup-retention.test.ts` (1 jour gardé, 8 jours purgé, en cours intact), rouge sans la clause.
 ## 2026-11-03T18:34:35+01:00 — Factures fournisseurs : erreurs relayées au gestionnaire central (§10)
 
 - Quoi : les 9 `catch` de `server/api/supplier-invoices.routes.ts` qui répondaient `500 { error, details: error.message }`, et celui de `checkAuth`, relaient par `next(withLogContext(…, { event }))` (motif de #172). Le justificatif de règlement refusé renvoyait `details: err.message` de multer : 400 lisible (format ou 8 Mo). `POST /api/admin/import-backup` ne renvoie plus `availableFiles` (listage du dossier backup/) dans sa 404, ligne modifiée dans le handler existant.

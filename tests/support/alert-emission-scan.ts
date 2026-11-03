@@ -38,7 +38,8 @@ function isAlertWrite(node: ts.Node): boolean {
   return false;
 }
 
-function scopeOf(node: ts.Node): { name: string; node: ts.Node } | null {
+/** Portée nommée qui englobe `node` (fonction nommée ou `METHODE /chemin`). Partagée avec `file-access-scan`. */
+export function scopeOf(node: ts.Node): { name: string; node: ts.Node } | null {
   for (let current: ts.Node | undefined = node.parent; current; current = current.parent) {
     if (ts.isFunctionDeclaration(current) && current.name) return { name: current.name.text, node: current };
     if (ts.isMethodDeclaration(current) && (ts.isIdentifier(current.name) || ts.isStringLiteral(current.name))) {

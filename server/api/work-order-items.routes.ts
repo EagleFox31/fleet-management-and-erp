@@ -7,6 +7,7 @@ const log = moduleLogger("work-order-items");
 import { storage } from "../storage";
 import { AppError, isAppError } from "../lib/app-error";
 import { workOrderItemsService } from "../services/work-order-items-service";
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 /**
  * Lignes de travail d'un ordre de travail — heures passées, sans valorisation.
@@ -51,7 +52,7 @@ async function refusPourCetteOT(workOrderId: number, user: Express.Request["user
 function diffuser(event: string, payload: Record<string, unknown>) {
   const broadcast = (global as any).broadcastUpdate;
   if (typeof broadcast === "function") {
-    broadcast(event, { ...payload, scope: { type: "broadcast" } });
+    broadcast(event, { ...payload, scope: workOrderStaffScope() });
   }
 }
 
