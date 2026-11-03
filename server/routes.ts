@@ -2705,32 +2705,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // === WAREHOUSE & STOCK ALERTS ROUTES (Sprint 1 - Phase 2) ===
-  
-  // Valeur totale de l'inventaire (94,4M FCFA de pièces)
-  app.get("/api/warehouse/inventory-value", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const inventoryValue = await stockAlertsService.getInventoryValue();
-      return res.status(200).json(inventoryValue);
-    } catch (error) {
-      console.error("Get inventory value error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Alertes de réapprovisionnement actives (38 alertes)
-  app.get("/api/warehouse/reorder-alerts", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const alerts = await stockAlertsService.getReorderAlerts();
-      return res.status(200).json(alerts);
-    } catch (error) {
-      console.error("Get reorder alerts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Stock réel d'une pièce avec historique mouvements
   app.get("/api/parts/:id/real-stock", isStaff, async (req, res) => {
     try {
@@ -2752,85 +2726,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Enregistrer un mouvement de stock (ENTRÉE/SORTIE)
-  app.post("/api/warehouse/stock-movement", authenticate, isInventoryManager, async (req, res) => {
-    try {
-      const { partId, type, quantity, reason, workOrderId, responsiblePerson, deliveryReceiptNumber } = req.body;
-      
-      if (!partId || !type || !quantity || !reason) {
-        return res.status(400).json({ message: "Données incomplètes" });
-      }
-      
-      if (!['in', 'out'].includes(type)) {
-        return res.status(400).json({ message: "Type de mouvement invalide (in/out)" });
-      }
-
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const movement = await stockAlertsService.recordStockMovement({
-        partId: parseInt(partId),
-        type: type as 'in' | 'out',
-        quantity: parseFloat(quantity),
-        reason,
-        workOrderId: workOrderId ? parseInt(workOrderId) : undefined,
-        responsiblePerson,
-        deliveryReceiptNumber,
-        userId
-      });
-      
-      return res.status(201).json(movement);
-    } catch (error) {
-      console.error("Record stock movement error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
-  
-  // Pièces les plus utilisées (top N)
-  app.get("/api/warehouse/most-used-parts", authenticate, async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 10;
-      
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const mostUsedParts = await stockAlertsService.getMostUsedParts(limit);
-      
-      return res.status(200).json(mostUsedParts);
-    } catch (error) {
-      console.error("Get most used parts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Statistiques globales du magasin
-  app.get("/api/warehouse/statistics", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const statistics = await stockAlertsService.getWarehouseStatistics();
-      
-      return res.status(200).json(statistics);
-    } catch (error) {
-      console.error("Get warehouse statistics error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Pièces par fournisseur avec valeur totale
-  app.get("/api/warehouse/parts-by-supplier", authenticate, async (_req, res) => {
-    try {
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const partsBySupplier = await stockAlertsService.getPartsBySupplier();
-      
-      return res.status(200).json(partsBySupplier);
-    } catch (error) {
-      console.error("Get parts by supplier error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
   
   // Fuel Records Routes
   app.get("/api/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res) => {
@@ -4479,9 +4374,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
       // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
       assertValidDbId(vehicleId, "ID de véhicule invalide");
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {

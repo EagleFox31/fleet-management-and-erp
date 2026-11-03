@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { parts, partsStockMovements, partRequirements, suppliers, type Part } from "@shared/schema";
+import { parts, partsStockMovements, partRequirements, suppliers, workOrders, type Part } from "@shared/schema";
 import { eq, sql, desc, sum, count, gte, lte } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
@@ -173,7 +173,7 @@ export class StockAlertsService {
     deliveryReceiptNumber?: string;
     userId: number;
   }) {
-    log.debug({ data }, `Recording stock movement for part ${data.partId}`);
+    log.debug({ partId: data.partId, type: data.type, quantity: data.quantity, workOrderId: data.workOrderId, userId: data.userId }, "Enregistrement d'un mouvement de stock");
 
     const [part] = await db
       .select()
@@ -182,6 +182,13 @@ export class StockAlertsService {
 
     if (!part) {
       throw new AppError(404, "Pièce introuvable.");
+    }
+
+    if (data.workOrderId !== undefined) {
+      const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, data.workOrderId));
+      if (!wo) {
+        throw new AppError(404, "Ordre de travail introuvable.");
+      }
     }
 
     const previousStock = part.quantity;

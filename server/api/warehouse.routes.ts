@@ -99,8 +99,8 @@ router.post("/stock-movement", authenticate, isPartsCatalogManager, async (req: 
     const partId = Number(rawPartId);
     assertValidDbId(partId, "ID de pièce invalide");
     const quantity = Number(rawQuantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new AppError(400, "La quantité doit être un nombre strictement positif.");
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new AppError(400, "La quantité doit être un entier strictement positif.");
     }
     let workOrderId: number | undefined;
     if (rawWorkOrderId !== undefined && rawWorkOrderId !== null && rawWorkOrderId !== "") {

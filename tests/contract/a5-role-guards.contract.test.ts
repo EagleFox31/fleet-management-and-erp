@@ -161,12 +161,20 @@ describe("A5-1 POST /api/warehouse/stock-movement : écriture de stock réservé
     ["quantité négative", { quantity: -5 }],
     ["quantité non numérique", { quantity: "beaucoup" }],
     ["quantité infinie", { quantity: "1e999" }],
+    ["quantité décimale", { quantity: 1.5 }],
     ["workOrderId hors plage", { workOrderId: OUT_OF_RANGE }],
     ["type inconnu", { type: "swap" }],
   ] as const)("donnée invalide (%s) : 400 lisible, stock inchangé", async (_label, override) => {
     const before = await quantityOfPart();
     const res = await call("POST", "/api/warehouse/stock-movement", "warehouse", movement(override));
     expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
+    expect(await quantityOfPart()).toBe(before);
+  });
+
+  it("ordre de travail inexistant : 404 lisible, stock inchangé", async () => {
+    const before = await quantityOfPart();
+    const res = await call("POST", "/api/warehouse/stock-movement", "warehouse", movement({ workOrderId: MISSING_ID }));
+    expect(apiErrorProblems(res.status, res.body, 404)).toEqual([]);
     expect(await quantityOfPart()).toBe(before);
   });
 
