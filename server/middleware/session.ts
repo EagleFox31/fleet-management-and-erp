@@ -1,6 +1,8 @@
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "../db";
+import { moduleLogger } from "../lib/logger";
+import { resolveSessionSecret } from "../lib/session-secret";
 
 const PgSession = connectPgSimple(session);
 
@@ -13,7 +15,8 @@ const useCrossSiteCookies = process.env.ALLOW_CROSS_SITE_COOKIES === "true" || i
  * et le web local / distant.
  */
 export const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || "YaroFleetOSSecretKey",
+  // En production : lève (démarrage refusé) si le secret est absent, trop court ou public.
+  secret: resolveSessionSecret(process.env, (message) => moduleLogger("session").warn(message)),
   resave: false,
   saveUninitialized: false,
   cookie: {

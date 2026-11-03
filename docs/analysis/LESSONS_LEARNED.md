@@ -2091,3 +2091,25 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.
+
+## 2026-11-03 — Secret de session public par défaut : le serveur démarrait avec une clé connue de tous (#243)
+
+### Contexte
+- `server/middleware/session.ts` signait les cookies avec `process.env.SESSION_SECRET || "YaroFleetOSSecretKey"`. La valeur de repli figure dans le dépôt : un déploiement sans `SESSION_SECRET` démarrait sans alerte, et quiconque lit le code pouvait forger un cookie de session valide, donc se connecter sous n'importe quel compte.
+
+### Cause racine
+- Classification : configuration de sécurité par défaut non sûre (fail-open). Un repli pratique en développement s'appliquait aussi en production, et rien ne distinguait « secret absent » de « secret fourni ».
+- Aggravant : Express sert le build de production dès que `NODE_ENV` n'est pas `development` ; un test sur `NODE_ENV === "production"` aurait laissé passer `Production`, `staging` ou une variable absente.
+- Near miss lors de la correction : rogner le secret avant de signer aurait changé la clé d'un secret actuel entouré d'espaces et invalidé toutes les sessions ouvertes.
+
+### Résolution
+- `resolveSessionSecret` (`server/lib/session-secret.ts`) : repli seulement pour `NODE_ENV` dans une liste d'autorisation (`development`, `test`) ; ailleurs, démarrage refusé si le secret est absent, de moins de 32 caractères ou égal à une valeur publique du dépôt. Le message dit comment corriger et ne contient jamais la valeur. Le rognage sert à mesurer, la signature utilise la valeur brute.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-secret.test.ts` : refus en production (absent, vide, court, public), `NODE_ENV` hors liste traité comme la production, valeur brute conservée.
+- Garde statique dans le même fichier : `session.ts` doit passer par `resolveSessionSecret(process.env` et ne contenir ni `SESSION_SECRET ||`/`??` ni le repli littéral.
+
+### Règle Projet (obligatoire)
+- Un secret n'a jamais de valeur par défaut hors d'une liste d'autorisation d'environnements de développement. En production, secret absent ou public = refus de démarrer, avec un message actionnable.
+- Un environnement se teste par liste d'autorisation, jamais par `=== "production"`.
+- Ne jamais normaliser (trim, casse) une clé de signature existante : on ne normalise que pour valider.
