@@ -1,17 +1,12 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
-<<<<<<< HEAD
 import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
-=======
-import { eq, and, gte, lte, lt, desc, asc } from "drizzle-orm";
->>>>>>> origin/main
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 const log = moduleLogger("preventive-maintenance");
 
-<<<<<<< HEAD
 /** Rattrapage P3-1 : un plan calendaire resté bloqué derrière un OT préventif déjà clos. */
 export interface ScheduleCatchUp {
   scheduleId: number;
@@ -22,8 +17,6 @@ export interface ScheduleCatchUp {
 
 const toDay = (d: string | Date): string => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
 
-=======
->>>>>>> origin/main
 /**
  * Ajoute des mois en UTC (décision D4) en bornant au dernier jour du mois cible :
  * 31/01 + 1 mois = 28/02 (ou 29/02), et non 03/03 comme `setMonth`.
@@ -36,10 +29,7 @@ export function addMonthsUtc(date: Date, months: number): Date {
   out.setUTCFullYear(y, m, Math.min(date.getUTCDate(), lastDay));
   return out;
 }
-<<<<<<< HEAD
 
-=======
->>>>>>> origin/main
 const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
@@ -530,7 +520,6 @@ export class PreventiveMaintenanceService {
    * Renvoie la nouvelle date, ou `null` si rien n'a changé.
    */
   async advanceScheduleAfterCompletion(workOrderId: number): Promise<string | null> {
-<<<<<<< HEAD
     const step = await this.nextScheduleStep(workOrderId);
     if (!step) return null;
     const { plan, next } = step;
@@ -546,8 +535,6 @@ export class PreventiveMaintenanceService {
 
   /** Plan calendaire d'un OT préventif, échéance traitée (`base`) et échéance suivante (`next`). */
   private async nextScheduleStep(workOrderId: number): Promise<{ plan: MaintenanceSchedule; base: string; next: string } | null> {
-=======
->>>>>>> origin/main
     const [wo] = await db
       .select({
         isPreventive: workOrders.isPreventive,
@@ -567,7 +554,6 @@ export class PreventiveMaintenanceService {
     if (!plan || plan.frequency === 'mileage' || !plan.scheduledDate) return null;
 
     const base = planning?.dueDate ?? wo.startDate ?? plan.scheduledDate;
-<<<<<<< HEAD
     const next = toDay(this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue));
     return { plan, base: toDay(base), next };
   }
@@ -607,17 +593,6 @@ export class PreventiveMaintenanceService {
     }
     log.info({ count: applied.length }, "Rattrapage P3-1 : plans préventifs avancés");
     return applied;
-=======
-    const next = this.calculateNextDueDate(base, plan.frequency, plan.frequencyValue).toISOString().slice(0, 10);
-    const [updated] = await db
-      .update(maintenanceSchedules)
-      .set({ scheduledDate: next })
-      .where(and(eq(maintenanceSchedules.id, plan.id), lt(maintenanceSchedules.scheduledDate, next)))
-      .returning({ scheduledDate: maintenanceSchedules.scheduledDate });
-    if (!updated) return null;
-    log.info({ workOrderId, scheduleId: plan.id, from: plan.scheduledDate, to: next }, "Plan préventif : échéance avancée après clôture de l'OT");
-    return next;
->>>>>>> origin/main
   }
 
   /**
