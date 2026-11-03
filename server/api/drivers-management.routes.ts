@@ -465,6 +465,10 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
       return created;
     });
 
+    // Temps réel (AGENTS §2) : la fiche a désormais un compte, les autres profils resynchronisent.
+    const fullDriver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
+    broadcastDriverUpdate("driver_updated", fullDriver, driverId);
+
     return res.status(201).json({ user: newUser, message: `Compte créé: ${username}` });
   } catch (error: any) {
     if (error instanceof DriverAlreadyLinkedError) {

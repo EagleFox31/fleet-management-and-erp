@@ -359,6 +359,10 @@ export default function UsersAdminPage() {
       } else {
         toast({ title: "Compte créé", description: `Identifiant : ${data.user?.username}` });
         setCreateAccountDialog({ open: false, driver: null });
+        // Resync ciblé (AGENTS §2) : fiche liée, nouveau compte, compteurs.
+        queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
       }
     } catch {
       toast({ title: "Erreur réseau", variant: "destructive" });

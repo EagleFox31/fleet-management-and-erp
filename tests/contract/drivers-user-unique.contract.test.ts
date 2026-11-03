@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../server/db";
 import { drivers } from "../../shared/schema";
 import { getContractApp } from "../support/app";
@@ -156,13 +156,24 @@ describe("#113 : une fiche chauffeur par compte", { timeout: 60000 }, () => {
     const adminCookie = await login(await newUser("admin"));
     const free = await createDriver();
     expect(free.status).toBe(201);
-    const res = await call("POST", `/api/drivers/${free.body.id}/create-user`, {
-      cookie: adminCookie,
-      body: { pin: "1234", email: `${uniqueTestToken("cu")}@fleet.test` },
-    });
+    const original = (globalThis as any).broadcastUpdate;
+    const broadcast = vi.fn();
+    (globalThis as any).broadcastUpdate = broadcast;
+    let res;
+    try {
+      res = await call("POST", `/api/drivers/${free.body.id}/create-user`, {
+        cookie: adminCookie,
+        body: { pin: "1234", email: `${uniqueTestToken("cu")}@fleet.test` },
+      });
+    } finally {
+      (globalThis as any).broadcastUpdate = original;
+    }
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     ids.userIds.push(res.body.user.id);
     expect(await linkedTo(res.body.user.id)).toEqual([free.body.id]);
+    // Temps réel : les autres profils sont prévenus, sans données personnelles.
+    expect(broadcast).toHaveBeenCalledWith("driver_updated", expect.objectContaining({ entity: "driver", entityId: free.body.id }));
+    expect(broadcast.mock.calls[0][1].payload.driver).not.toHaveProperty("cniNumber");
   });
 
   it("/me avec la fiche liée par le personnel : 200, cette fiche", async () => {
