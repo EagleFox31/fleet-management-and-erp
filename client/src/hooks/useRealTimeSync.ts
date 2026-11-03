@@ -956,6 +956,18 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       invalidateAlertQueries();
       break;
 
+    // Fiche pièce créée, modifiée, supprimée ou stock ajusté (server/api/parts-catalog.routes.ts).
+    case "part_catalog_changed": {
+      invalidateCatalogEvent("part_catalog_changed");
+      const partId = toNumber(payloadRecord.id) ?? toNumericId(update.entityId);
+      if (partId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/parts/${partId}`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/parts/${partId}/stock-history`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/warehouse/parts", partId, "real-stock"] });
+      }
+      break;
+    }
+
     // Écarts du cahier des charges (CDC-0b) : couche 3 seulement, l'émetteur vient du lot fonctionnel.
     case "part_sale_validated":
       invalidateCatalogEvent("part_sale_validated");

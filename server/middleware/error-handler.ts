@@ -151,7 +151,16 @@ export function apiNotFound(_req: Request, _res: Response, next: NextFunction) {
 
 /** Dernier middleware : erreurs levées (`throw`, `next(err)`) et non rattrapées. */
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
-  if (res.headersSent) return next(err);
+  if (res.headersSent) {
+    // Réponse déjà engagée (flux, téléchargement) : impossible de répondre, mais l'erreur doit
+    // laisser une trace avec le contexte de la route, sinon seul Express l'écrit, sans requestId.
+    log.error(
+      { ...logContextOf(err), requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), status: res.statusCode, err },
+      "erreur après envoi des en-têtes",
+    );
+    if (res.locals) res.locals.errorLogged = true;
+    return next(err);
+  }
   const { status, message, fieldErrors, details } = toHttpError(err);
   // Seule ligne de journal d'une erreur relayée : la route y ajoute son contexte (withLogContext)
   // au lieu de journaliser elle-même (AGENTS.md §10).

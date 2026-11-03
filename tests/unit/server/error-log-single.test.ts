@@ -74,6 +74,17 @@ describe("journal unique d'une erreur relayée", () => {
     expect(spy.warn.mock.calls[0][0]).toMatchObject({ event: "refus", status: 403 });
   });
 
+  it("erreur après envoi des en-têtes : une ligne error avec contexte, puis relais à Express", () => {
+    const res = { ...fakeRes(), headersSent: true, statusCode: 200 };
+    const next = vi.fn();
+    const err = withLogContext(new Error("flux coupé"), { event: "Export en echec", exportId: 7 });
+    errorHandler(err, req, res as never, next);
+    expect(spy.error).toHaveBeenCalledTimes(1);
+    expect(spy.error.mock.calls[0][0]).toMatchObject({ event: "Export en echec", exportId: 7, requestId: "req-1", status: 200 });
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.body).toBeUndefined();
+  });
+
   it("route historique qui répond 500 elle-même : la garde garde son log (aucune perte)", () => {
     const res = fakeRes();
     errorResponseGuard(req, res as never, () => {});

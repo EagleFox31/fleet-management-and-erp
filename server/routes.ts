@@ -1607,7 +1607,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Work Order Routes
-  app.get("/api/work-orders/statistics", authenticate, async (req, res) => {
+  app.get("/api/work-orders/statistics", isStaff, async (req, res) => {
     try {
       // Récupérer le paramètre de période (week, month, quarter, year)
       const period = req.query.period as string || 'year';
@@ -1652,17 +1652,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cancelled: Number(statsRow?.cancelled ?? 0),
       };
       
-      console.log("Work orders statistics calculated:", stats);
+      log.info({ stats, requestId: req.requestId }, "Work orders statistics calculated");
       
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get work orders statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get work orders statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // Obtenir les OT en attente de pièces (pour le magasinier)
-  app.get("/api/work-orders/awaiting-parts", authenticate, async (req, res) => {
+  app.get("/api/work-orders/awaiting-parts", isStaff, async (req, res) => {
     try {
       // Récupérer tous les OT en attente de pièces
       const result = await storage.getWorkOrders('awaiting_parts', undefined, 100, 0);
@@ -1742,7 +1742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         total: result.total
       });
     } catch (error) {
-      console.error("Get awaiting parts work orders error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get awaiting parts work orders error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2450,99 +2450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/parts", authenticate, isPartsCatalogManager, async (req, res) => {
-    try {
-      const parsedPart = insertPartSchema.parse(req.body);
-      
-      const part = await partsService.createPart(parsedPart, req.user?.id);
-      
-      return res.status(201).json(part);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Données de pièce invalides",
-          errors: error.errors 
-        });
-      }
-      
-      console.error("Create part error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
-
-  app.patch("/api/parts/:id(\\d+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-
-      if (req.body?.unit !== undefined) {
-        const normalizedUnit = typeof req.body.unit === "string" ? req.body.unit.trim() : "";
-        const isAllowedUnit = PART_UNITS.includes(normalizedUnit as (typeof PART_UNITS)[number]);
-        if (!isAllowedUnit) {
-          return res.status(400).json({
-            message: "Unité invalide",
-            allowedUnits: PART_UNITS,
-          });
-        }
-        req.body.unit = normalizedUnit;
-      }
-
-      // Champs tenus par le serveur : jamais repris du corps (T4).
-      const {
-        id: _id,
-        createdBy: _createdBy,
-        createdAt: _createdAt,
-        updatedBy: _updatedBy,
-        updatedAt: _updatedAt,
-        ...partPayload
-      } = req.body ?? {};
-      const { data, errors } = prepareColumnUpdate(parts, partPayload);
-      if (errors.length > 0) {
-        return next(new AppError(400, "Certaines informations de la pièce sont invalides.", { fieldErrors: errors }));
-      }
-
-      const updatedPart = await partsService.updatePart(id, data, req.user?.id);
-      
-      return res.status(200).json(updatedPart);
-    } catch (error) {
-      // Le service signale ces deux cas par message : les traduire en statut
-      // plutôt que de renvoyer le texte de l'erreur au client.
-      if (error instanceof AppError) return next(error);
-      const message = error instanceof Error ? error.message : "";
-      if (message === "Pièce non trouvée") {
-        return next(new AppError(404, "Cette pièce n'existe plus.", { cause: error }));
-      }
-      if (message === "Une pièce avec cette référence existe déjà") {
-        return next(new AppError(409, "Une pièce avec cette référence existe déjà.", { cause: error }));
-      }
-      log.error({ err: error, requestId: req.requestId }, "Update part error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.delete("/api/parts/:id(\\d+)", isAdmin, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-      
-      await partsService.deletePart(id);
-      
-      return res.status(204).send();
-    } catch (error) {
-      console.error("Delete part error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
+  // POST, PATCH, DELETE /api/parts et POST /api/parts/:id/update-stock : server/api/parts-catalog.routes.ts
 
   // Parts Used Routes
   app.get("/api/parts-used", authenticate, async (req, res) => {
@@ -2603,7 +2511,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-orders/:workOrderId/tire-rotations", authenticate, async (req, res) => {
+  app.get("/api/work-orders/:workOrderId/tire-rotations", isAnyUser, async (req, res, next) => {
     try {
       const workOrderId = parseInt(req.params.workOrderId);
       
@@ -2611,11 +2519,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID d'ordre de travail invalide" });
       }
       
+      await assertWorkOrderReadable(req.user, workOrderId);
       const tireRotations = await storage.getTireRotationsForWorkOrder(workOrderId);
       
       return res.status(200).json(tireRotations);
     } catch (error) {
-      console.error("Get tire rotations for work order error:", error);
+      if (isAppError(error)) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire rotations for work order error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2713,9 +2623,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Export des ordres de travail en XLSX
-  app.get("/api/exports/work-orders", authenticate, async (req, res) => {
+  app.get("/api/exports/work-orders", isStaff, async (req, res) => {
     try {
-      console.log('Exporting work orders data to XLSX...');
+      log.info({ requestId: req.requestId }, "Exporting work orders data to XLSX");
       const { exportService } = await import("./services/export-service");
       const xlsxBuffer = await exportService.exportWorkOrdersXLSX();
       
@@ -2724,7 +2634,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.send(xlsxBuffer);
     } catch (error) {
-      console.error("Export work orders error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Export work orders error");
       return res.status(500).json({ message: "Erreur lors de l'export des ordres de travail" });
     }
   });
@@ -2838,7 +2748,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/parts/:id/work-orders", authenticate, async (req, res) => {
+  app.get("/api/parts/:id/work-orders", isStaff, async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
       
@@ -2850,12 +2760,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(workOrders);
     } catch (error) {
-      console.error("Get part work orders error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get part work orders error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/parts/:id/usage-history", authenticate, async (req, res) => {
+  app.get("/api/parts/:id/usage-history", isStaff, async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
       
@@ -2867,38 +2777,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(usageHistory);
     } catch (error) {
-      console.error("Get part usage history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get part usage history error");
       return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  const stockAdjustmentSchema = z.object({
-    adjustment: z.coerce
-      .number({ invalid_type_error: "L'ajustement doit être un nombre." })
-      .int("L'ajustement doit être un nombre entier.")
-      .refine((value) => value !== 0, "L'ajustement ne peut pas être nul."),
-    reason: z
-      .string({ required_error: "La raison de l'ajustement est obligatoire." })
-      .trim()
-      .min(1, "La raison de l'ajustement est obligatoire."),
-  });
-
-  app.post("/api/parts/:id/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
-    try {
-      const partId = parseInt(req.params.id);
-
-      if (isNaN(partId)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-
-      const { adjustment, reason } = stockAdjustmentSchema.parse(req.body);
-      const updatedPart = await partsService.updateStock(partId, adjustment, reason, req.user?.id);
-
-      return res.status(200).json(updatedPart);
-    } catch (error) {
-      // ZodError (400) et AppError (404, 409) : message métier et journalisation
-      // par le gestionnaire central (ancien `console.error` migré là-bas).
-      return next(error);
     }
   });
 
@@ -4201,7 +4081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint pour les statistiques des ordres de travail
-  app.get("/api/statistics/work-orders", authenticate, async (req, res) => {
+  app.get("/api/statistics/work-orders", isStaff, async (req, res) => {
     try {
       const workOrdersData = await storage.getWorkOrders();
       const workOrders = workOrdersData.workOrders;
@@ -4215,7 +4095,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get work orders statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get work orders statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
