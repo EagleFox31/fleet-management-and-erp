@@ -2280,3 +2280,5 @@ soumission sans doublon.
   - rouge si une entrée est retirée de la liste ;
   - unitaires 1886/1886 ;
   - tsc 0.
+
+- CI coupée sur les PR brouillons (décision du 3 novembre 2026). **Quoi** : `ci.yml` et `build-android-apk.yml` ne lancent rien sur un brouillon, et un run complet part au passage en ready (`ready_for_review`). **Comment** : `types` explicites, condition `draft` sur le job d'entrée, push sur `main` inchangé. **Pourquoi** : chaque poussée d'un brouillon payait la suite complète. La preuve se fait sur une PR de test (un brouillon, puis ready).
