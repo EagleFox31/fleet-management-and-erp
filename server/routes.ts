@@ -2565,7 +2565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       await assertWorkOrderReadable(req.user, workOrderId);
       const partsUsed = await storage.getPartsUsedForWorkOrder(workOrderId);
-      console.log(`Pièces récupérées pour l'ordre ${workOrderId}:`, JSON.stringify(partsUsed, null, 2));
+      log.debug({ workOrderId, count: partsUsed.length, requestId: req.requestId }, "Pièces récupérées pour l'ordre de travail");
       
       return res.status(200).json(partsUsed);
     } catch (error) {

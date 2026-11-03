@@ -5,10 +5,13 @@ import { canAccessOwned, OUT_OF_SCOPE_MESSAGE, type ScopeReader } from "./client
 /**
  * Cloison client sur la lecture d'un ordre de travail (AGENTS.md §11).
  *
- * Même règle que GET /api/work-orders/:id : l'OT doit exister (404), puis un
+ * Applique la cloison client uniquement : l'OT doit exister (404), puis un
  * client n'accède qu'aux OT d'un véhicule dont il est propriétaire
  * (`vehicles.ownerId`). Le personnel n'est pas filtré ; un véhicule sans
  * propriétaire n'est lisible que par lui.
+ *
+ * Écart connu : GET /api/work-orders/:id bloque aussi un technicien sur l'OT
+ * d'un autre technicien (routes.ts ~1851). Ce helper ne le fait pas.
  */
 export async function assertWorkOrderReadable(reader: ScopeReader | undefined, workOrderId: number): Promise<void> {
   const workOrder = await storage.getWorkOrder(workOrderId);
