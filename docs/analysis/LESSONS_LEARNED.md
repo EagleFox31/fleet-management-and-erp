@@ -1474,6 +1474,30 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Un e2e affirme le titre d'un toast avec `{ exact: true }` (ou par rôle dans la région « Notifications »). Un rouge intermittent se qualifie avec une trace (`--repeat-each`, `trace: retain-on-failure`) avant d'être classé « instable ».
 - Ne jamais lire `response.text()` / `body()` sans borne dans un e2e : l'app a un service worker.
 
+## 2026-11-03 - Near miss : suite de contrat lancée avec `--env-file=.env` (base de production)
+
+### Constat
+- Un agent a lancé les tests de contrat avec `--env-file=.env`. Le `.env` racine porte `DATABASE_URL` vers la base Neon de production. Aucune écriture n'a eu lieu, par chance : `DATABASE_URL_TEST` était fourni.
+
+### Cause racine
+- Les scripts `test:integration` et `test:contract` chargeaient eux-mêmes `.env` (`node --env-file=.env`). `tests/support/setup-db.ts` retombait sur `DATABASE_URL` quand `DATABASE_URL_TEST` manquait. La seule garde reconnaissait un unique hôte de production codé en dur (`ep-bitter-term-ai6i3ey4`). `server/db.ts` donne en plus priorité à `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` pour la connexion d'écoute. Les unitaires n'avaient aucun setup.
+- Classification : garde-fou incomplet (repli implicite vers la base de développement, marqueur codé en dur). Pas de défaut du produit.
+
+### Résolution
+- `e2e/helpers/production-guard.ts` : `assertSafeTestDatabase` (intégration, contrat) refuse (a) `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` différent de `DATABASE_URL_TEST`, (b) `DATABASE_URL_TEST` absent, sans repli, (c) un hôte de `TEST_DB_FORBIDDEN_HOSTS` / `E2E_PRODUCTION_DB_MARKERS` ou tout `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`. `assertUnitDatabaseNotProduction` couvre les unitaires (`tests/support/setup-unit.ts`). Les messages n'affichent que l'hôte.
+- Les scripts `test:integration` et `test:contract` ne chargent plus `.env`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/test-db-guard.test.ts` : chaque refus (a, b, c), le cas local accepté, l'absence de mot de passe dans les messages, et le câblage (setup-db, setup-unit, scripts sans `--env-file`). Rouge sur le code d'avant, vert après.
+
+### Règle Projet (obligatoire)
+- Ne jamais charger le `.env` de production dans un lanceur de tests. Les suites reçoivent `DATABASE_URL_TEST` par variable d'environnement, jamais par repli sur `DATABASE_URL`.
+
+### Forme générale de la leçon
+- **Pas de repli implicite vers une base (ou une ressource) plus privilégiée.** Une valeur manquante se traduit par un refus explicite, pas par la valeur voisine disponible.
+- **Refuser par défaut plutôt que par liste noire.** Un marqueur d'hôte interdit (liste noire) ne couvre que ce qu'on a pensé à nommer : l'URL illisible, le second hôte (`_LISTENER`, `_DIRECT`), l'autre branche Neon passaient. La garde exige ici une base de test explicite, identique pour toutes les variables, et traite tout ce qu'elle ne sait pas lire comme interdit. La liste noire n'est qu'une ceinture en plus.
+- **Un message d'erreur est une sortie : ne jamais y recopier une entrée non vérifiée.** L'ancien extracteur d'hôte découpait l'URL à la main et citait un morceau de mot de passe quand celui-ci contenait `#` ou `/` ; l'hôte est maintenant lu par `new URL`, et « hôte illisible » remplace tout doute (`tests/unit/server/test-db-guard.test.ts`).
+
 ---
 
 ## 2026-11-03 — Carte carburant : contrôle du solde hors transaction (course check-then-act)
@@ -1493,3 +1517,21 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Tout contrôle de solde ou de stock suivi d'une écriture se fait dans une transaction avec un verrou (ligne, ou verrou consultatif si la valeur est un agrégat). Pour la carte carburant : toute écriture touchant `debit_amount` / `credit_amount`, suppression comprise, prend `lockFuelCard` dans sa transaction (restent hors verrou au 3/11 : `DELETE /api/fuel-records/:id` de `server/routes.ts`, `fuel-service.ts` (create, update, delete d'un plein), `fuel-voucher-service.ts` (update) et la régularisation de mission, suivis à part). Un test de concurrence en est la preuve. Il ouvre les connexions du pool d'avance, sinon l'ouverture de connexion étale les appels et masque la course.
+
+## 2026-11-03 — Tests d'hygiène rouges par intermittence sous charge
+
+### Contexte
+- `conflict-markers`, `role-labels`, `toast-title-exact-hygiene` et `part-requirement-labels-hygiene` échouaient par intermittence dans `npm test` complet et passaient seuls (constat aa).
+
+### Cause racine
+- Lectures synchrones de 700 à 1 800 fichiers, chacun avec son propre parcours (`readdirSync` et `statSync` par entrée). Certains fichiers relisaient les mêmes sources deux fois. Sur une machine chargée (suite parallèle, antivirus, autres sessions), ce test prenait de 1,3 à 10,9 s, même lancé seul, contre un timeout Vitest de 5 s par défaut.
+- Classification : test lié au temps, pas un défaut du produit.
+
+### Résolution
+- `tests/support/repo-files.ts` : une seule liste `git ls-files` par worker (fichiers suivis et non suivis non ignorés, donc ni `node_modules` ni jonctions), des lectures asynchrones mémorisées, et `REPO_SCAN_TIMEOUT_MS` (60 s) explicite et justifié. Les quatre tests passent par ce module.
+
+### Prévention (vérifiable)
+- `npm test` complet ×5 : 1687/1687 à chaque passe. Gardes toujours actifs : un fichier non suivi planté (marqueur de conflit, `getRoleLabel`, libellé interdit, `getByText` de toast) fait échouer les cinq tests concernés.
+
+### Règle Projet (obligatoire)
+- Un test qui lit le dépôt passe par `tests/support/repo-files.ts` et déclare `REPO_SCAN_TIMEOUT_MS`. Pas de `readdirSync` récursif dans un test.
