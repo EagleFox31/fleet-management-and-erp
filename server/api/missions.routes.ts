@@ -18,7 +18,7 @@ import {
   extractMissionActualRoadExpensesHT,
   mergeMissionActualFdrCost,
 } from "@shared/constants/management-mission-profitability";
-import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
+import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { toFieldErrors } from "@shared/errors";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
@@ -330,25 +330,19 @@ function normalizeCpcStatus(value: string | null | undefined): string {
 }
 
 /**
- * Permis chauffeur uniquement : jour local, le jour de l'échéance passe. Règle propre au
- * permis, identique à la check-list et au lancement. Les papiers véhicule passent par
- * isExpiredOnOrBeforeToday.
+ * Permis chauffeur : même règle que les papiers véhicule (jour UTC, valable le jour J,
+ * expiré à J+1, #224), source `isDriverLicenseExpiredOn`. Absent ou illisible : expiré.
  */
 function isDriverLicenseExpired(dateValue: Date | string | null | undefined): boolean {
-  if (!dateValue) return true;
-  const candidate = new Date(dateValue);
-  if (Number.isNaN(candidate.getTime())) return true;
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  candidate.setHours(0, 0, 0, 0);
-  return candidate < now;
+  return isDriverLicenseExpiredOn(dateValue, todayUtcDateOnly());
 }
 
 /**
  * Même règle que `getMissionEligibility` (source unique `shared/constants/expiry-day.ts`) :
- * le jour de l'échéance bloque, la date du jour est la date UTC. Date illisible : bloque.
+ * le jour de l'échéance est valable, expiré à J+1, la date du jour est la date UTC.
+ * Date illisible : bloque.
  */
-function isExpiredOnOrBeforeToday(dateValue: Date | string): boolean {
+function isPaperExpired(dateValue: Date | string): boolean {
   if (toExpiryDateOnly(dateValue) === null) return true;
   return isExpiredOn(dateValue, todayUtcDateOnly());
 }
@@ -727,19 +721,19 @@ function isDocumentTypeValid(
 
   if (documentType === "carte_grise") {
     // Même règle que le lancement (transition in_progress) : une carte grise sans date ne bloque
-    // pas ; datée, la plus récente échéance compte, le jour de l'échéance bloque (UTC). Le
+    // pas ; datée, la plus récente échéance compte, valable le jour J, expirée à J+1 (UTC). Le
     // récépissé « plaque » lève l'échéance dépassée.
     if (receiptCovers) return true;
     const expiries = docs.flatMap((doc) => (doc.expiryDate ? [doc.expiryDate] : []));
     if (expiries.length === 0) return true;
-    return expiries.some((expiry) => !isExpiredOnOrBeforeToday(expiry));
+    return expiries.some((expiry) => !isPaperExpired(expiry));
   }
 
   // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier. Même jour
-  // d'échéance que le lancement : jour UTC, le jour de l'échéance bloque, papier sans date
-  // invalide (isExpiredOnOrBeforeToday, jamais la règle du permis).
+  // d'échéance que le lancement : jour UTC, valable le jour J, papier sans date
+  // invalide (isPaperExpired, jamais la règle du permis).
   if (receiptCovers) return true;
-  return docs.some((doc) => doc.expiryDate !== null && !isExpiredOnOrBeforeToday(doc.expiryDate));
+  return docs.some((doc) => doc.expiryDate !== null && !isPaperExpired(doc.expiryDate));
 }
 
 /** Exporté pour le contrat de portée. */
@@ -2697,7 +2691,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         const visiteTechnique = docsByType.get("visite_technique");
 
         // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
-        // comme dans getMissionEligibility). Le jour de l'échéance bloque ; le jour
+        // comme dans getMissionEligibility). Valable le jour J, expirée à J+1 ; le jour
         // courant est la date UTC (expiry-day.ts).
         // Récépissé provisoire valable : il lève l'échéance dépassée d'un papier présent,
         // jamais un papier manquant (même règle que getMissionEligibility).
@@ -2705,7 +2699,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         const expiredWithoutReceipt = (
           expiryDate: Date | string,
           code: "insurance" | "technical_inspection" | "license_plate",
-        ) => isExpiredOnOrBeforeToday(expiryDate) && !isRenewalReceiptValid(receipts, code);
+        ) => isPaperExpired(expiryDate) && !isRenewalReceiptValid(receipts, code);
 
         let carteGriseErreur = false;
         if (!carteGrise) {

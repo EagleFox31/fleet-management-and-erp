@@ -7,6 +7,7 @@ import { db } from "../db";
 import { alerts, missions, assignments, suppliers, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { and, desc, inArray, isNull, lt, eq, isNotNull } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
+import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("alert-service");
@@ -519,9 +520,7 @@ export class AlertService {
    * Vérifie les alertes de documents pour un véhicule
    */
   private async checkVehicleDocumentAlerts(vehicle: Vehicle): Promise<void> {
-    const today = new Date();
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(today.getDate() + 30);
+    const todayDateOnly = todayUtcDateOnly();
 
     const documents: Array<{
       field: "insuranceExpiry" | "technicalInspectionDate" | "licensePlateExpiry";
@@ -537,25 +536,21 @@ export class AlertService {
       const expiryDate = vehicle[doc.field];
       if (!expiryDate) continue;
 
-      // Même règle que isExpiredOnOrBeforeToday (missions.routes) et getMissionEligibility :
-      // comparaison au jour, le jour de l'échéance bloque déjà le lancement.
-      const expiry = new Date(expiryDate);
-      expiry.setHours(0, 0, 0, 0);
-      const todayStart = new Date(today);
-      todayStart.setHours(0, 0, 0, 0);
-      const daysUntilExpiry = Math.round((expiry.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+      // Même règle que le lancement et getMissionEligibility (shared/constants/expiry-day.ts) :
+      // jour UTC, le jour de l'échéance est valable, expiré à J+1.
+      const expiryDateOnly = toExpiryDateOnly(expiryDate);
+      if (expiryDateOnly === null) continue;
+      const daysUntilExpiry = daysBetweenDateOnly(expiryDateOnly, todayDateOnly);
 
-      // Document expiré (échéance aujourd'hui comprise)
-      if (daysUntilExpiry <= 0) {
+      // Document expiré (échéance au plus tard hier)
+      if (daysUntilExpiry < 0) {
         const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
         await this.createAlertIfNotExists({
           remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Document expiré',
-          message: daysUntilExpiry === 0
-            ? `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire aujourd'hui : lancement de mission bloqué jusqu'à régularisation`
-            : `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jours : lancement de mission bloqué`,
+          message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jour${daysUntilExpiry === -1 ? "" : "s"} : lancement de mission bloqué`,
           priority: 'critical',
           link: renewalLink,
           entityType: 'vehicle_document',
@@ -582,15 +577,17 @@ export class AlertService {
           });
         }
       }
-      // Document expire dans les 30 jours
-      else if (expiry <= thirtyDaysFromNow) {
+      // Document expire dans les 30 jours (jour J compris : dernier jour de validité)
+      else if (daysUntilExpiry <= 30) {
         const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
         await this.createAlertIfNotExists({
           remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Document expire bientôt',
-          message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire dans ${daysUntilExpiry} jours`,
+          message: daysUntilExpiry === 0
+            ? `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire ce soir : dernier jour de validité`
+            : `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire dans ${daysUntilExpiry} jours`,
           priority: daysUntilExpiry <= 7 ? 'high' : 'medium',
           link: renewalLink,
           entityType: 'vehicle_document',
@@ -672,10 +669,10 @@ export class AlertService {
           ? `${row.typeLabel} expiré (${vehicleLabel}, ${expiry})`
           : `${row.typeLabel} expire bientôt (${vehicleLabel}, ${expiry})`,
         message: expired
-          ? days === 0
-            ? `Véhicule ${vehicleLabel} - ${row.name} expire aujourd'hui, lancement de mission bloqué`
-            : `Véhicule ${vehicleLabel} - ${row.name} expiré depuis ${Math.abs(days)} jour(s)`
-          : `Véhicule ${vehicleLabel} - ${row.name} expire dans ${days} jour(s)`,
+          ? `Véhicule ${vehicleLabel} - ${row.name} expiré depuis ${Math.abs(days)} jour(s), lancement de mission bloqué`
+          : days === 0
+            ? `Véhicule ${vehicleLabel} - ${row.name} expire ce soir : dernier jour de validité`
+            : `Véhicule ${vehicleLabel} - ${row.name} expire dans ${days} jour(s)`,
         priority: expired ? "critical" : days <= 7 ? "high" : "medium",
         entityType: "vehicle_document",
         entityId: row.id,

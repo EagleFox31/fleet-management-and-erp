@@ -22,9 +22,9 @@ function body(name: string): string {
 }
 
 describe("missions.routes.ts : un seul jour d'échéance pour les papiers véhicule", () => {
-  it("isDocumentTypeValid ne juge les échéances que par isExpiredOnOrBeforeToday", () => {
+  it("isDocumentTypeValid ne juge les échéances que par isPaperExpired", () => {
     const fn = body("isDocumentTypeValid");
-    expect(fn).toContain("isExpiredOnOrBeforeToday(");
+    expect(fn).toContain("isPaperExpired(");
     expect(fn).not.toMatch(/isDriverLicenseExpired\(|isDateExpired\(|setHours\(|new Date\(/);
   });
 

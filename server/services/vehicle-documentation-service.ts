@@ -31,7 +31,7 @@ const addDaysToDateOnly = (baseDateOnly: string, days: number): string => {
   return base.toISOString().slice(0, 10);
 };
 
-/** Expiré dès le jour J : règle unique de `shared/constants/expiry-day.ts`. */
+/** Expiré à J+1, le jour J valable : règle unique de `shared/constants/expiry-day.ts`. */
 const isDateExpired = (value: DateValue, todayDateOnly: string): boolean =>
   isExpiredOn(toDateOnly(value), todayDateOnly);
 
@@ -41,7 +41,7 @@ const isDateExpiringSoon = (
   limitDateOnly: string,
 ): boolean => {
   const dateOnly = toDateOnly(value);
-  return dateOnly !== null && dateOnly > todayDateOnly && dateOnly <= limitDateOnly;
+  return dateOnly !== null && dateOnly >= todayDateOnly && dateOnly <= limitDateOnly;
 };
 
 /**
