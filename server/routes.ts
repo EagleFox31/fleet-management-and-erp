@@ -23,7 +23,7 @@ import {
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
   maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts,
-  faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows,
+  vehicleTires, insertFaultCatalogSchema,
   vehicleTankCapacitySchema, VEHICLE_TANK_CAPACITY_MESSAGE
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
@@ -4687,43 +4687,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour la persistance des workflows d'acquisition de véhicules
-  app.post("/api/workflows/vehicle-acquisition", authenticate, async (req, res) => {
-    try {
-      const { workflowService } = await import('./services/workflow-service');
-      const { VehicleAutoCreation } = await import('./services/vehicle-auto-creation');
-      const userId = req.session.userId;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-
-      const workflow = await workflowService.saveWorkflowState({
-        ...req.body,
-        userId
-      });
-
-      // Si le workflow est terminé (étape 5), activer automatiquement le véhicule
-      if (workflow.currentStep === 5 && workflow.status === 'completed') {
-        try {
-          console.log('🚛 Activation automatique du véhicule depuis le workflow terminé');
-          const vehicleId = await VehicleAutoCreation.createVehicleFromWorkflow(
-            workflow.workflowData as any
-          );
-          
-          console.log('✅ Véhicule activé automatiquement:', vehicleId);
-        } catch (activationError) {
-          console.error('❌ Erreur lors de l\'activation automatique:', activationError);
-          // Ne pas faire échouer la sauvegarde du workflow pour autant
-        }
-      }
-
-      return res.status(200).json(workflow);
-    } catch (error) {
-      console.error("Save workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   app.get("/api/workflows/vehicle-acquisition/:sessionId", authenticate, async (req, res) => {
     try {
       const { workflowService } = await import('./services/workflow-service');

@@ -36,7 +36,7 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/work-order-items.routes.ts": { count: 1, why: "lot B, OT : lignes de travail (point d'émission unique `diffuser`)" },
   "server/api/work-order-parts.routes.ts": { count: 6, why: "lot B, OT : pièces demandées, utilisées, OT en attente de pièces" },
   "server/index.ts": { count: 1, why: "lot B, pont LISTEN/NOTIFY des triggers Postgres : toujours broadcast" },
-  "server/routes.ts": { count: 6, why: "lot B, OT créé/modifié/supprimé, pièce retirée, recharge carte (fichier gelé, ne pas en ajouter)" },
+  "server/routes.ts": { count: 5, why: "lot B, OT créé/modifié/supprimé, pièce retirée (fichier gelé, ne pas en ajouter)" },
   "server/services/incident-service.ts": { count: 1, why: "lot B, OT créé depuis un incident" },
   "server/services/preventive-maintenance-service.ts": { count: 1, why: "lot B, OT : création préventive" },
   "server/services/procurement-service.ts": { count: 2, why: "lot B, OT : pièces livrées ou reçues" },

@@ -2280,3 +2280,5 @@ soumission sans doublon.
   - rouge si une entrée est retirée de la liste ;
   - unitaires 1886/1886 ;
   - tsc 0.
+
+- Routes mortes de `routes.ts` supprimées (liste `SHADOWED_LEGACY_ROUTES_FROZEN` vidée). **Quoi** : 13 déclarations masquées par `server/api` (auth ×2, fuel-card ×7, suppliers/top, fault-catalog PATCH, workflows POST et PATCH), et le code qu'elles seules appelaient : `vehicle-auto-creation.ts`, `storage.updateFaultCatalog`, imports `isFuelCardManager`, `faultCatalog`, `vehicleAcquisitionWorkflows`. `PATCH /api/admin/users/:id/toggle` est conservée (garde chaînée). **Comment** : une famille, un contrat existant qui distingue la route servie de la morte (chauffeur désactivé, client en 403, valideur forcé et 404, statut ignoré et aucun véhicule créé par WFL1). **Pourquoi** : une route masquée dort avec ses gardes ; elle revient si l'ordre de montage change. Constat annexe : `GET /api/suppliers/summary` est capté par `/:id` (400), consigné par un contrat `it.fails`, correctif dans une autre PR.
