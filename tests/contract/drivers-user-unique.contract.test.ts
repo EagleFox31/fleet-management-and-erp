@@ -45,7 +45,7 @@ async function login(user: { username: string }) {
   return res.headers.get("set-cookie")!.split(";")[0];
 }
 
-async function newUser(role: "logistics" | "driver", name?: string) {
+async function newUser(role: "admin" | "logistics" | "driver", name?: string) {
   const user = await createTestUser({ role, ...(name ? { name } : {}) });
   ids.userIds.push(user.id);
   return user;
@@ -132,6 +132,37 @@ describe("#113 : une fiche chauffeur par compte", { timeout: 60000 }, () => {
     const [row] = await db.select({ userId: drivers.userId }).from(drivers).where(eq(drivers.id, homonym.body.id));
     expect(row.userId).toBeNull();
     expect(await linkedTo(account.id)).toEqual([]);
+  });
+
+  it("création de compte pour une fiche déjà liée : 409, liaison et comptes inchangés", async () => {
+    const adminCookie = await login(await newUser("admin"));
+    const account = await newUser("driver");
+    const linked = await createDriver({ userId: account.id });
+    expect(linked.status).toBe(201);
+    const email = `${uniqueTestToken("cu")}@fleet.test`;
+
+    const res = await call("POST", `/api/drivers/${linked.body.id}/create-user`, {
+      cookie: adminCookie,
+      body: { pin: "1234", email },
+    });
+    expect(res.status).toBe(409);
+    expect(res.body?.message).toBe("Ce chauffeur a déjà un compte utilisateur");
+    expect(await linkedTo(account.id)).toEqual([linked.body.id]);
+    const { rows } = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    expect(rows).toEqual([]);
+  });
+
+  it("création de compte pour une fiche sans compte : 201, fiche liée au nouveau compte", async () => {
+    const adminCookie = await login(await newUser("admin"));
+    const free = await createDriver();
+    expect(free.status).toBe(201);
+    const res = await call("POST", `/api/drivers/${free.body.id}/create-user`, {
+      cookie: adminCookie,
+      body: { pin: "1234", email: `${uniqueTestToken("cu")}@fleet.test` },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    ids.userIds.push(res.body.user.id);
+    expect(await linkedTo(res.body.user.id)).toEqual([free.body.id]);
   });
 
   it("/me avec la fiche liée par le personnel : 200, cette fiche", async () => {

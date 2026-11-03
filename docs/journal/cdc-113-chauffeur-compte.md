@@ -21,3 +21,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : `tests/unit/server/drivers-user-id-unique-schema.test.ts`, `tests/integration/drivers-user-id-unique.test.ts`, `tests/contract/drivers-user-unique.contract.test.ts`, sous `db-lock` sur Postgres local.
 - **RAIDER** : R (patron migration jumelle + relevé des écarts réutilisé) ; A (`current_schema()`, aucun nom de base) ; I (index posé une fois, re-passage sans effet, testé) ; D (contrat `adm2-drv2` adapté : il créait volontairement deux fiches pour un compte, ce qui est désormais refusé) ; E (refus propre, log actionnable, aucune suppression) ; Retroactive (doublons conservés, signalés).
 - **Reste / risques** : relevé des doublons sur Neon (b7) ; s'il y en a, fusion choisie par la logistique (déplacer `assignments.driver_id`, retirer le `user_id` de l'autre fiche). Hors périmètre : `POST /api/drivers/:id/create-user` écrase un `user_id` existant.
+
+## 2026-11-03T10:00:00+01:00 — #113 — create-user ne réécrit plus une liaison existante
+
+- **Agent** : c7 · **Branche** : `lot/db/113-driver-unique-user` · **Commit** : voir `git log` de la branche
+- **Statut** : fait
+- **Quoi** : `POST /api/drivers/:id/create-user` refuse (409 « Ce chauffeur a déjà un compte utilisateur ») une fiche déjà liée au lieu d'écraser son `user_id`, ce qui laissait l'ancien compte sans fiche.
+- **Comment** : contrôle avant écriture ; création du compte et liaison dans une transaction, liaison conditionnée à `user_id IS NULL` (course entre deux créations : rollback, pas de compte orphelin) ; 23505 → 409 en dernier rempart ; `console.error` migré vers `moduleLogger`.
+- **Pourquoi** : l'index de #113 faisait de ce cas une 500 potentielle ; décision 0a de le corriger dans #132.
+- **Preuve automatisée** : `tests/contract/drivers-user-unique.contract.test.ts` (fiche liée → 409, aucun compte créé ; fiche libre → 201 et liaison) ; rouge avec la route précédente.
+- **RAIDER** : D (contrats chauffeurs verts 29/29), E (refus lisible, transaction, log structuré), I (aucune écriture sur refus).
