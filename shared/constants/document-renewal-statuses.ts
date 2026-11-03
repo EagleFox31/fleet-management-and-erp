@@ -31,3 +31,18 @@ export function documentRenewalTransitionRefusal(from: string, to: DocumentRenew
   }
   return null;
 }
+
+/** Demande encore ouverte : ni terminée ni rejetée. Un récépissé ne compte que sur une demande ouverte. */
+export const OPEN_DOCUMENT_RENEWAL_STATUSES = ["pending", "in_progress"] as const satisfies readonly DocumentRenewalRequestStatus[];
+
+/**
+ * Durée maximale de validité d'un récépissé provisoire, en jours après son dépôt. Constante unique
+ * aujourd'hui, nommée pour devenir un réglage par type de document sans changer le contrat.
+ */
+export const RENEWAL_RECEIPT_MAX_VALIDITY_DAYS = 90;
+
+/** Ajoute des jours à une date AAAA-MM-JJ, en UTC et en date seule (aucun accesseur local). */
+export function addDaysToIsoDate(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}

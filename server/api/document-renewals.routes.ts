@@ -8,12 +8,23 @@ import { db } from "../db";
 import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
-import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
+import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
+  DOCUMENT_RENEWAL_WRITER_ROLES,
+  VEHICLE_DOCUMENT_EVENT_ROLES,
+} from "@shared/constants/roles";
 import {
   DOCUMENT_RENEWAL_REQUEST_STATUSES,
+  OPEN_DOCUMENT_RENEWAL_STATUSES,
+  RENEWAL_RECEIPT_MAX_VALIDITY_DAYS,
+  addDaysToIsoDate,
   documentRenewalTransitionRefusal,
   isDocumentRenewalRequestStatus,
 } from "@shared/constants/document-renewal-statuses";
+import { REALTIME_EVENTS, type RealtimeScope } from "@shared/contracts/realtime-events";
+import { todayUtcDateOnly } from "@shared/lib/utc-day";
+import { isInsideDirectory, uploadedFileCandidates } from "../lib/uploaded-file";
+import { renewalReceiptErrorOf, withoutDiskPaths } from "../lib/renewal-receipts";
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
@@ -71,6 +82,7 @@ const broadcastDocumentRenewalEvent = (
     requestId?: number | null;
     actorUserId?: number | null;
     actorRole?: string | null;
+    scope?: RealtimeScope;
   },
 ) => {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -83,7 +95,8 @@ const broadcastDocumentRenewalEvent = (
     entity: "document_renewal_request",
     entityId: options?.requestId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    // Toute diffusion de ce routeur reste réservée aux rôles qui lisent les demandes.
+    scope: options?.scope ?? { type: "roles", roles: [...DOCUMENT_RENEWAL_VIEWER_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
@@ -174,7 +187,7 @@ const uploadRenewalProof = multer({
         .replace(/\.[^.]+$/, "")
         .slice(0, 40);
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${baseName || "proof"}-${uniqueSuffix}${extension || ".bin"}`);
+      cb(null, `${baseName || "proof"}-${uniqueSuffix}${extension}`);
     },
   }),
   fileFilter: (_req, file, cb) => {
@@ -195,6 +208,53 @@ const uploadRenewalProof = multer({
     fileSize: 8 * 1024 * 1024,
   },
 }).single("proofFile");
+
+// Récépissé provisoire : dossier fixe, aucun segment de chemin ne vient de la requête (AGENTS.md §9).
+const renewalReceiptUploadDir = path.join(process.cwd(), "uploads", "document-renewals", "receipts");
+// Seule la date de validité vient du corps ; fichier, chemin, déposant et horodatage sont posés par le serveur.
+const receiptDepositSchema = z.object({
+  validUntil: z.string().refine(isIsoCalendarDate),
+});
+const RECEIPT_STORED_PREFIX ="uploads/document-renewals/receipts";
+
+// Extension déduite du type MIME autorisé, jamais du nom envoyé par le client.
+const RECEIPT_EXTENSION_BY_MIME: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+};
+
+const uploadRenewalReceipt = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(renewalReceiptUploadDir, { recursive: true });
+      cb(null, renewalReceiptUploadDir);
+    },
+    filename: (_req, file, cb) => {
+      const extension = RECEIPT_EXTENSION_BY_MIME[file.mimetype] ?? ".bin";
+      const baseName = (file.originalname || "recepisse")
+        .replace(/\.[^.]*$/, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .slice(0, 40);
+      cb(null, `${baseName || "recepisse"}-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension || ".bin"}`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    cb(null, file.mimetype in RECEIPT_EXTENSION_BY_MIME);
+  },
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+}).single("receiptFile");
+
+/** Supprime un fichier du dossier uploads/ ; tout chemin hors de uploads/ est ignoré (uploadedFileCandidates). */
+const removeUploadedFile = (storedPath: string | null | undefined, requestId?: string) => {
+  for (const candidate of uploadedFileCandidates(storedPath)) {
+    fs.unlink(candidate, (err) => {
+      if (err && err.code !== "ENOENT") log.warn({ err, requestId }, "suppression d'un fichier de récépissé");
+    });
+  }
+};
 
 const readField = (value: unknown): string | undefined => {
   if (Array.isArray(value)) return readField(value[0]);
@@ -306,7 +366,6 @@ router.get("/requests", async (req, res) => {
         inspectorName: documentRenewalRequests.inspectorName,
         inspectorCode: documentRenewalRequests.inspectorCode,
         proofFileName: documentRenewalRequests.proofFileName,
-        proofFilePath: documentRenewalRequests.proofFilePath,
         createdAt: documentRenewalRequests.createdAt,
         updatedAt: documentRenewalRequests.updatedAt,
       })
@@ -625,7 +684,7 @@ router.post("/requests", async (req, res, next) => {
     broadcastDocumentRenewalEvent(
       "document_renewal_request_created",
       {
-        request: createdRequest,
+        request: withoutDiskPaths(createdRequest),
         vehicleRegistration: documentRow.vehicleRegistration ?? null,
         documentName: documentRow.documentName,
         previousExpiryDate: documentRow.documentExpiryDate ?? null,
@@ -640,7 +699,7 @@ router.post("/requests", async (req, res, next) => {
     return res.status(201).json({
       message: "Demande de renouvellement créée.",
       created: true,
-      request: createdRequest,
+      request: withoutDiskPaths(createdRequest),
     });
   } catch (error) {
     if (error instanceof AppError) return next(error);
@@ -713,19 +772,134 @@ router.patch("/requests/:id/status", async (req, res) => {
       {
         requestId: id,
         status,
-        request: updated,
+        request: withoutDiskPaths(updated),
         vehicleId: updated.vehicleId,
         documentId: updated.vehicleDocumentId,
       },
       { requestId: id, actorUserId: req.session?.userId ?? null, actorRole: role },
     );
 
-    return res.status(200).json(updated);
+    return res.status(200).json(withoutDiskPaths(updated));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "changement de statut d'une demande de renouvellement");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
+/**
+ * Dépôt (ou remplacement) du récépissé provisoire d'une demande ouverte : fichier + date de validité.
+ * Rôles : ceux qui créent et suivent déjà les demandes de ce routeur (DOCUMENT_RENEWAL_WRITER_ROLES),
+ * le récépissé étant une pièce de la demande ; le technicien (lecture seule) et le client n'y écrivent pas.
+ */
+router.post(
+  "/requests/:id/receipt",
+  isDocumentRenewalWriter,
+  (req: Request, res: Response, next: NextFunction) => {
+    uploadRenewalReceipt(req, res, (uploadError) => {
+      if (uploadError) {
+        next(new AppError(400, "Fichier du récépissé invalide (8 Mo maximum, un seul fichier).", { cause: uploadError }));
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response, next: NextFunction) => {
+    const file = req.file;
+    // Le fichier déjà rangé par multer : retiré si la demande est refusée ou si l'écriture échoue.
+    const discardUpload = () => file && removeUploadedFile(file.path, req.requestId);
+    try {
+      const id = Number.parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de demande invalide.");
+      if (!file) throw new AppError(400, "Le fichier du récépissé est obligatoire (PDF, JPG, PNG ou WEBP).");
+      if (!isInsideDirectory(renewalReceiptUploadDir, file.path)) {
+        throw new AppError(400, "Fichier du récépissé invalide.");
+      }
+
+      const parsedBody = receiptDepositSchema.safeParse({ validUntil: readField(req.body?.validUntil) });
+      if (!parsedBody.success) {
+        throw new AppError(400, "Date de validité illisible (format attendu : AAAA-MM-JJ).");
+      }
+      const { validUntil } = parsedBody.data;
+      // Un seul jour : le jour UTC, comme l'éligibilité (recepisseValide).
+      const today = todayUtcDateOnly();
+      if (validUntil < today) {
+        throw new AppError(400, "La date de validité du récépissé est déjà passée.");
+      }
+      // Borne haute : date du dépôt + durée maximale, calculée en UTC sur des dates seules.
+      if (validUntil > addDaysToIsoDate(today, RENEWAL_RECEIPT_MAX_VALIDITY_DAYS)) {
+        throw new AppError(400, `La validité d'un récépissé ne peut pas dépasser ${RENEWAL_RECEIPT_MAX_VALIDITY_DAYS} jours après son dépôt.`);
+      }
+
+      const now = new Date();
+      let outcome;
+      try {
+        // Verrou de ligne : l'ancien chemin lu est celui que cet UPDATE remplace (pas de course entre deux dépôts).
+        outcome = await db.transaction(async (tx) => {
+          const [current] = await tx
+            .select({
+              status: documentRenewalRequests.status,
+              receiptFilePath: documentRenewalRequests.receiptFilePath,
+            })
+            .from(documentRenewalRequests)
+            .where(eq(documentRenewalRequests.id, id))
+            .for("update");
+          if (!current) throw new AppError(404, "Demande introuvable.");
+          if (!(OPEN_DOCUMENT_RENEWAL_STATUSES as readonly string[]).includes(current.status)) {
+            throw new AppError(409, "Cette demande est clôturée : on ne peut plus y déposer de récépissé.");
+          }
+          const [row] = await tx
+            .update(documentRenewalRequests)
+            .set({
+              receiptValidUntil: validUntil,
+              receiptFileName: (file.originalname || file.filename).slice(0, 255),
+              receiptFilePath: `${RECEIPT_STORED_PREFIX}/${file.filename}`,
+              receiptUploadedAt: now,
+              receiptUploadedBy: req.user!.id,
+              updatedAt: now,
+            })
+            // Écriture conditionnelle : une clôture concurrente ne reçoit pas de récépissé.
+            .where(and(eq(documentRenewalRequests.id, id), inArray(documentRenewalRequests.status, [...OPEN_DOCUMENT_RENEWAL_STATUSES])))
+            .returning();
+          return { updated: row, previousPath: current.receiptFilePath };
+        });
+      } catch (error) {
+        throw renewalReceiptErrorOf(error) ?? error;
+      }
+      const { updated, previousPath } = outcome;
+      if (!updated) throw new AppError(409, "Cette demande vient d'être modifiée. Rechargez la page.");
+
+      // Remplacement : l'ancien fichier part une fois le nouveau enregistré.
+      if (previousPath && previousPath !== updated.receiptFilePath) {
+        removeUploadedFile(previousPath, req.requestId);
+      }
+
+      // Pas de chemin disque dans l'événement ni dans la réponse.
+      const request = withoutDiskPaths(updated);
+      // Diffusion au mieux : la base référence déjà le fichier, un échec ici ne doit ni le supprimer ni défaire le dépôt.
+      try {
+        broadcastDocumentRenewalEvent(
+          "document_renewal_receipt_uploaded",
+          { requestId: id, vehicleId: updated.vehicleId, documentId: updated.vehicleDocumentId, documentType: updated.documentType, request },
+          {
+            requestId: id,
+            actorUserId: req.user!.id,
+            actorRole: normalizeRole(req.user?.role),
+            scope: REALTIME_EVENTS.document_renewal_receipt_uploaded.scope as RealtimeScope,
+          },
+        );
+      } catch (broadcastError) {
+        log.error({ err: broadcastError, requestId: req.requestId }, "diffusion du dépôt de récépissé");
+      }
+      return res.status(201).json(request);
+    } catch (error) {
+      discardUpload();
+      if (!(error instanceof AppError)) {
+        log.error({ err: error, requestId: req.requestId }, "dépôt du récépissé d'une demande de renouvellement");
+      }
+      next(error);
+    }
+  },
+);
 
 router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response, next: NextFunction) => {
   uploadRenewalProof(req, res, async (uploadError) => {
@@ -1053,8 +1227,8 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       broadcastDocumentRenewalEvent(
         "document_renewal_quick_completed",
         {
-          request: finalizedRequest,
-          document: updatedDocument,
+          request: withoutDiskPaths(finalizedRequest),
+          document: withoutDiskPaths(updatedDocument),
           previousExpiryDate: documentRow.previousExpiryDate ?? null,
         },
         {
@@ -1076,6 +1250,8 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           requestId: finalizedRequest.id,
           actorUserId,
           actorRole: role,
+          // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
+          scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
         },
       );
 
@@ -1094,8 +1270,8 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
 
       return res.status(200).json({
         message: "Renouvellement enregistré et document mis à jour.",
-        request: finalizedRequest,
-        document: updatedDocument,
+        request: withoutDiskPaths(finalizedRequest),
+        document: withoutDiskPaths(updatedDocument),
       });
     } catch (error) {
       if (req.file?.path && fs.existsSync(req.file.path)) {
