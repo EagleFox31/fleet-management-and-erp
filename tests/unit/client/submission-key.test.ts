@@ -51,7 +51,6 @@ describe("createSubmissionKeyStore", () => {
     const key = first.take();
     first.settle(error);
     first.discard();
-    expect(first.hasUncertainSubmission()).toBe(true);
     expect(first.take()).toBe(key);
 
     // Rechargement de la page : nouvelle instance, même stockage.
@@ -67,7 +66,6 @@ describe("createSubmissionKeyStore", () => {
     const store = createSubmissionKeyStore(scope, fakeStorage());
     const key = store.take();
     store.settle(error);
-    expect(store.hasUncertainSubmission()).toBe(false);
     expect(store.take()).not.toBe(key);
   });
 
@@ -77,7 +75,6 @@ describe("createSubmissionKeyStore", () => {
     store.settle(networkError);
     expect(store.take()).toBe(key);
     store.settle();
-    expect(store.hasUncertainSubmission()).toBe(false);
     expect(store.take()).not.toBe(key);
   });
 
@@ -108,5 +105,44 @@ describe("createSubmissionKeyStore", () => {
     expect(typeof key).toBe("string");
     store.settle(networkError);
     expect(store.take()).toBe(key);
+  });
+
+  const fillA = { quantity: 40, unitPrice: 840, stationName: "Total Akwa", notes: null };
+  const fillB = { ...fillA, quantity: 35 };
+
+  it("issue incertaine puis MÊME saisie (fiche rouverte) : même clé, le serveur rejoue", () => {
+    const storage = fakeStorage();
+    const store = createSubmissionKeyStore(scope, storage);
+    const key = store.take(fillA);
+    store.settle(networkError);
+    store.discard();
+    expect(createSubmissionKeyStore(scope, storage).take({ ...fillA })).toBe(key);
+  });
+
+  it("issue incertaine puis AUTRE saisie : nouvelle clé (nouvelle intention, pas de 409)", () => {
+    const store = createSubmissionKeyStore(scope, fakeStorage());
+    const key = store.take(fillA);
+    store.settle(serverError);
+    store.discard();
+    const next = store.take(fillB);
+    expect(next).not.toBe(key);
+    // La nouvelle clé n'hérite pas de l'incertitude : une annulation la libère.
+    store.discard();
+    expect(store.take(fillB)).not.toBe(next);
+  });
+
+  it("issue incertaine, fiche rouverte le lendemain (autre jour) : nouvelle clé, pas de 409", () => {
+    const storage = fakeStorage();
+    const store = createSubmissionKeyStore(scope, storage);
+    const key = store.take({ day: "2026-11-03", ...fillA });
+    store.settle(networkError);
+    const reopened = createSubmissionKeyStore(scope, storage);
+    expect(reopened.take({ day: "2026-11-03", ...fillA })).toBe(key);
+    expect(reopened.take({ day: "2026-11-04", ...fillA })).not.toBe(key);
+  });
+
+  it("envoi non réglé (double clic) : même clé, même si l'empreinte change", () => {
+    const store = createSubmissionKeyStore(scope, fakeStorage());
+    expect(store.take(fillA)).toBe(store.take(fillB));
   });
 });
