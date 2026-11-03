@@ -2036,6 +2036,44 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.
 
+## 2026-11-03 — Refus de transfert silencieux : document sorti du workflow sans arriver au véhicule (#228)
+
+### Contexte
+- `transferDocumentsToVehicle` saute un document dont le fichier source manque ou dont la destination sort du dossier du véhicule. Il marquait ensuite **tous** les documents de la session `isTransferred` : le document refusé disparaissait du workflow sans exister dans `vehicle_documents`.
+
+### Cause racine
+- Classification : effet de bord appliqué au lot, pas à l'élément. Le marquage portait sur la session entière, pas sur les ids réellement copiés. Le refus de sécurité ajouté par #210 en a fait une perte silencieuse.
+- Corollaire (#231) : le rejeu n'est pas idempotent. Il ne filtre ni `isTransferred = false` ni `workflowId`, si bien qu'un second transfert duplique les lignes.
+
+### Résolution
+- Seuls les ids copiés sont marqués (`inArray`). Un refus est journalisé en `warn` avec sa raison. Le rejeu idempotent est suivi dans #231, la reprise des données déjà marquées dans #229.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-document-transfer.test.ts`, cas « fichier source disparu », rouge sans le correctif.
+- À livrer avec #231 : le test « second transfert = zéro nouvelle ligne ».
+
+### Règle Projet (obligatoire)
+- Un refus laisse l'objet **visible et rejouable** : on ne marque que ce qui a réellement abouti. Le rejeu qui suit doit être idempotent (zéro écriture une fois convergé).
+
+## 2026-11-03 — Route littérale masquée par un `/:id` frère (#222)
+
+### Contexte
+- `GET /api/suppliers/summary` répondait par le handler de `GET /api/suppliers/:id` (`id = "summary"`). La déclaration du résumé dans `server/routes.ts` n'était jamais atteinte : le routeur `suppliers.routes.ts` est monté avant `registerRoutes`, et son `/:id` capturait le littéral.
+
+### Cause racine
+- Classification : ordre de déclaration Express. Express sert la **première** route qui correspond. Un segment paramétré (`/:id`) déclaré avant un littéral frère (`/summary`) le masque, que les deux soient dans le même routeur ou que le paramétré vienne d'un routeur monté plus tôt.
+- Aucun test ne visait la route littérale. Le seul test existant était un témoin `.fails` qui figeait le défaut.
+
+### Résolution
+- `/summary` déclaré dans `suppliers.routes.ts` **avant** `/:id`, la déclaration morte de `routes.ts` remplacée par un renvoi. Le témoin est devenu un contrat (200, tableau).
+
+### Prévention (vérifiable)
+- `tests/contract/suppliers-summary-capture.contract.test.ts`.
+- Garde statique : `tests/unit/server/route-order-hygiene.test.ts` (PR séparée, session b7) reconstitue l'ordre de service (routeurs de `server/api/` dans l'ordre des montages, puis `routes.ts`) et échoue sur tout littéral masqué par un `/:param` déclaré avant lui. Sur le code d'avant #222, il trouve exactement `GET /api/suppliers/summary`.
+
+### Règle Projet (obligatoire)
+- Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.
+
 ## 2026-11-03 — Une table sans contrainte d'unicité, un code qui suppose « une seule ligne » (#227)
 
 ### Contexte

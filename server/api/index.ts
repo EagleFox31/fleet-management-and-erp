@@ -235,8 +235,9 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(userStockPermissionRoutes);
   apiRouter.use(vehicleDocumentsRoutes);
 
-  // Note: Legacy billing routes (/api/suppliers/*, /api/invoices/*) are in server/routes.ts
-  // for backward compatibility. New billing features use /api/billing/*
+  // Fournisseurs : `suppliers.routes.ts` sert /api/suppliers/* (dont /summary, déclaré avant /:id).
+  // Restent dans server/routes.ts (gelé) : /api/invoices/* et /api/suppliers/:id/invoices/payment.
+  // Les nouvelles fonctions de facturation passent par /api/billing/*.
 
   // Route de santé pour l'API
   apiRouter.get("/health", (_req, res) => {

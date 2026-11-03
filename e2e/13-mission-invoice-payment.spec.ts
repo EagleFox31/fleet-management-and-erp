@@ -1,12 +1,21 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../server/db";
-import { clientInvoices, clientPayments, missions } from "../shared/schema";
+import { clientInvoices, clientPayments } from "../shared/schema";
 import { apiErrorProblems } from "../tests/support/api-error";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient } from "../tests/support/factories";
 import { uniqueTestToken } from "../tests/support/ids";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
+import {
+  createLaunchableDriver,
+  createLaunchableVehicle,
+  creditFuelCard,
+  deleteJourneyRows,
+  driveToDeliveredByApi,
+  driveToDeliveredInBrowser,
+  purgeJourneyRows,
+} from "./helpers/mission-journey";
 import { createE2EUser } from "./helpers/test-data";
 
 /**
@@ -20,11 +29,10 @@ import { createE2EUser } from "./helpers/test-data";
  * Second describe (P2) : état de la facture sur l'écran mission suivi en temps réel (trame
  * `client_invoice_payment_recorded`, deux rôles), rôles du paiement, trop-perçu et corps invalides.
  *
- * Limite assumée : le lancement d'une mission exige affectation, documents du
- * véhicule et CPC du chauffeur (`PUT /api/missions/:id/status`). Ce parcours ne
- * le rejoue pas : la mission est créée par l'API puis posée à « livrée » en
- * base, état à partir duquel l'écran autorise la facturation. Le lancement est
- * rejoué au navigateur par `17-mission-lifecycle`.
+ * Aucune mission n'est posée à « livrée » en base : elle y arrive par le parcours
+ * (`helpers/mission-journey.ts`), gardes de lancement comprises (papiers, CPC, solde
+ * carte). Le premier test le joue à l'écran, les suivants par les mêmes routes API
+ * avec la session de la logistique.
  */
 
 const HT = 100000;
@@ -36,25 +44,39 @@ function expectApiError(status: number, text: string, expected: number, label: s
   expect(apiErrorProblems(status, text, expected, undefined, requestIdHeader), label).toEqual([]);
 }
 const missionIds: number[] = [];
+const driverIds: number[] = [];
+const PREFIX = "E2E-P2-";
+let stamp = 0;
+const token = (label: string) => `${PREFIX}${label}-${Date.now().toString(36)}-${++stamp}`;
+
+/** Véhicule et chauffeur aptes au lancement, nettoyés en fin de spec. */
+async function crew() {
+  const vehicle = await createLaunchableVehicle(ids, token("V"));
+  const driver = await createLaunchableDriver(token("D"), token("EMP"), { track: driverIds });
+  return { vehicleId: vehicle.id, driverId: driver.id };
+}
 let logistics: E2ECredentials;
 let secretary: E2ECredentials;
 
 test.beforeAll(async () => {
+  // Un run interrompu laisse missions, véhicules et chauffeurs E2E-P2- : on part propre.
+  await purgeJourneyRows(PREFIX);
   logistics = await createE2EUser("logistics", ids);
   secretary = await createE2EUser("secretary", ids);
+  await creditFuelCard(ids);
 });
 
 test.afterAll(async () => {
   if (missionIds.length > 0) {
     await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
-    await db.delete(missions).where(inArray(missions.id, missionIds));
   }
+  await deleteJourneyRows(missionIds, driverIds);
   await cleanupCreated(ids);
 });
 
 test.describe("Mission vers facture vers paiement : parcours complet", () => {
   test("P2 : facture générée depuis la mission, payée en deux fois, soldée", async ({ browser }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const client = await createTestClient();
     ids.clientIds.push(client.id);
     const logisticsContext = await browser.newContext();
@@ -65,10 +87,12 @@ test.describe("Mission vers facture vers paiement : parcours complet", () => {
       await loginWithSession(logisticsPage, logistics);
 
       // MIS1 : création par l'API avec la session de la logistique.
+      const orderNumber = token("MIS");
       const created = await logisticsPage.request.post("/api/missions", {
         data: {
-          orderNumber: uniqueTestToken("mis"),
+          orderNumber,
           clientId: client.id,
+          status: "planned",
           pickupAddress: "Douala",
           deliveryAddress: "Yaoundé",
         },
@@ -76,10 +100,10 @@ test.describe("Mission vers facture vers paiement : parcours complet", () => {
       expect(created.status(), await created.text()).toBeLessThan(300);
       const mission = await created.json();
       missionIds.push(mission.id);
-      await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, mission.id));
+      // Affectation, lancement et livraison à l'écran : rien n'est écrit dans missions.status.
+      await driveToDeliveredInBrowser(logisticsPage, mission.id, orderNumber, await crew());
 
       // Facturation depuis l'écran mission.
-      await logisticsPage.goto(`/missions/${mission.id}`, { waitUntil: "domcontentloaded" });
       await expect(logisticsPage.getByTestId("button-open-generate-invoice-dialog")).toBeEnabled();
       await logisticsPage.getByTestId("button-open-generate-invoice-dialog").click();
       await logisticsPage.getByTestId("input-amount").fill(String(HT));
@@ -151,15 +175,17 @@ async function openSession(browser: Browser, credentials: E2ECredentials) {
   return { context, page };
 }
 
-/** Mission livrée d'un nouveau client, puis facture générée par l'API avec la session logistique. */
+/** Mission menée à « livrée » par l'API (logistique), pour un nouveau client, puis facture générée par l'API avec la session logistique. */
 async function deliveredMissionWithInvoice(api: APIRequestContext): Promise<{ missionId: number; invoiceId: number }> {
   const client = await createTestClient();
   ids.clientIds.push(client.id);
-  const [mission] = await db
-    .insert(missions)
-    .values({ clientId: client.id, orderNumber: uniqueTestToken("mis"), status: "delivered", pickupAddress: "Douala", deliveryAddress: "Yaoundé" })
-    .returning();
+  const created = await api.post("/api/missions", {
+    data: { orderNumber: token("MIS"), clientId: client.id, status: "planned", pickupAddress: "Douala", deliveryAddress: "Yaoundé" },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const mission = (await created.json()) as { id: number };
   missionIds.push(mission.id);
+  await driveToDeliveredByApi(api, mission.id, await crew());
   const res = await api.post("/api/billing/invoices/generate", {
     data: { missionId: mission.id, amount: HT, dueDate: "2099-12-31" },
   });

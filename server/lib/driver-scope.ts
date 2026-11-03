@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
 import { assignments, drivers } from "@shared/schema";
 import { canReadDriverPersonalData } from "@shared/constants/roles";
-import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isVoidAssignmentStatus } from "@shared/constants/assignments";
 
 /**
  * Cloison des chauffeurs (AGENTS §11, pendant de `client-scope.ts`).
@@ -82,7 +82,7 @@ export async function missionVehicleIdsForStaff(missionId: number): Promise<numb
   const rows = await db
     .select({ vehicleId: assignments.vehicleId })
     .from(assignments)
-    .where(and(eq(assignments.missionId, missionId), notInArray(assignments.status, ["cancelled", "rejected"])))
+    .where(and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])))
     .orderBy(asc(assignments.id));
   return Array.from(new Set(rows.map((r) => r.vehicleId).filter((v): v is number => v !== null)));
 }
@@ -90,8 +90,8 @@ export async function missionVehicleIdsForStaff(missionId: number): Promise<numb
 /**
  * Affectation à présenter comme « l'affectation » d'une mission dans une réponse à valeur unique
  * (`assignment`). Chauffeur (`driverScope` défini) : uniquement les siennes, jamais celle d'un autre
- * chauffeur ; une active passe avant une autre. Personnel : la plus ancienne non annulée ni refusée
- * (à défaut la plus ancienne). Ordre stable, indépendant de l'ordre de lecture.
+ * chauffeur. Pour le chauffeur comme pour le personnel : la plus ancienne active d'abord, puis la plus
+ * ancienne non annulée ni refusée, à défaut la plus ancienne. Ordre stable, indépendant de l'ordre de lecture.
  */
 export function pickMissionAssignment<T extends { id: number; driverId: number | null; status: string }>(
   rows: T[],
@@ -100,7 +100,7 @@ export function pickMissionAssignment<T extends { id: number; driverId: number |
   const visible = (driverScope === undefined ? rows : rows.filter((r) => r.driverId !== null && driverScope.includes(r.driverId)))
     .slice()
     .sort((a, b) => a.id - b.id);
-  const live = visible.filter((r) => r.status !== "cancelled" && r.status !== "rejected");
+  const live = visible.filter((r) => !isVoidAssignmentStatus(r.status));
   const active = live.filter((r) => (ACTIVE_ASSIGNMENT_STATUSES as readonly string[]).includes(r.status));
   return active[0] ?? live[0] ?? visible[0] ?? null;
 }

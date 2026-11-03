@@ -11,6 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, asc, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { pickMissionAssignment } from "../lib/driver-scope";
 
 /**
  * Service Opérations & Missions
@@ -30,20 +31,53 @@ function missionsOfDrivers(driverIds: number[]) {
   );
 }
 
+type AssignmentKey = { id: number; driverId: number | null; status: string };
+
 /**
  * Une mission peut avoir plusieurs affectations (un chauffeur chacune) : la jointure `assignments` rend
- * alors une ligne par affectation. Garde la première ligne de chaque mission (les lignes sont lues
- * par ordre d'affectation), pour qu'une mission ne soit ni listée ni comptée deux fois.
+ * alors une ligne par affectation. Garde une seule ligne par mission, celle de l'affectation que
+ * `pickMissionAssignment` présente aussi dans `GET /api/missions/:id` (la plus ancienne active, puis la
+ * plus ancienne non annulée ni refusée), pour qu'une mission ne soit ni listée ni comptée deux fois et
+ * qu'elle affiche le même chauffeur et le même véhicule partout. L'ordre des missions est conservé.
  */
-function firstRowPerMission<T>(rows: T[], missionIdOf: (row: T) => number): T[] {
-  const seen = new Set<number>();
-  return rows.filter((row) => {
-    const id = missionIdOf(row);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
+function onePerMission<T>(
+  rows: T[],
+  missionIdOf: (row: T) => number,
+  assignmentOf: (row: T) => AssignmentKey | null,
+): T[] {
+  const byMission = new Map<number, T[]>();
+  for (const row of rows) {
+    const group = byMission.get(missionIdOf(row));
+    if (group) group.push(row);
+    else byMission.set(missionIdOf(row), [row]);
+  }
+  return Array.from(byMission.values(), (group) => {
+    const keyed = group.flatMap((row) => {
+      const a = assignmentOf(row);
+      return a ? [{ ...a, row }] : [];
+    });
+    return pickMissionAssignment(keyed)?.row ?? group[0];
   });
 }
+
+/** Clé d'affectation d'une ligne lue avec les colonnes `assignmentId`, `assignmentDriverId`, `assignmentStatus`. */
+function flatAssignmentKey(row: { assignmentId: number | null; assignmentDriverId: number | null; assignmentStatus: string | null }): AssignmentKey | null {
+  return row.assignmentId === null ? null : { id: row.assignmentId, driverId: row.assignmentDriverId, status: row.assignmentStatus ?? "" };
+}
+
+/** Retire les colonnes techniques de `flatAssignmentKey` : la forme de la réponse ne change pas. */
+function withoutAssignmentKey<T extends { assignmentId: unknown; assignmentDriverId: unknown; assignmentStatus: unknown }>(
+  row: T,
+): Omit<T, "assignmentId" | "assignmentDriverId" | "assignmentStatus"> {
+  const { assignmentId: _id, assignmentDriverId: _driver, assignmentStatus: _status, ...rest } = row;
+  return rest;
+}
+
+const assignmentKeyColumns = {
+  assignmentId: assignments.id,
+  assignmentDriverId: assignments.driverId,
+  assignmentStatus: assignments.status,
+};
 
 /**
  * Jointure des affectations : pour un chauffeur, ses seules affectations. Une mission réaffectée
@@ -204,7 +238,7 @@ export class OperationsService {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(and(...conditions));
 
-    const results = firstRowPerMission(await query.orderBy(asc(assignments.id)), (r) => r.mission.id);
+    const results = onePerMission(await query.orderBy(asc(assignments.id)), (r) => r.mission.id, (r) => r.assignment);
     const missionsList = results.map(r => ({
       ...r.mission,
       vehicle: r.vehicle,
@@ -354,9 +388,10 @@ export class OperationsService {
       query = query.where(and(...conditions)) as any;
     }
 
-    const results = firstRowPerMission(
+    const results = onePerMission(
       await query.orderBy(desc(missions.createdAt), asc(assignments.id)),
       (r) => r.mission.id,
+      (r) => r.assignment,
     );
 
     const missionsList = results.map(r => ({
@@ -387,6 +422,7 @@ export class OperationsService {
         clientName: clients.name,
         vehicleRegistration: vehicles.registrationNumber,
         driverName: drivers.firstName,
+        ...assignmentKeyColumns,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
@@ -400,7 +436,7 @@ export class OperationsService {
       )
       .orderBy(missions.pickupDate, asc(assignments.id));
 
-    return firstRowPerMission(results, (r) => r.id);
+    return onePerMission(results, (r) => r.id, flatAssignmentKey).map(withoutAssignmentKey);
   }
 
   /**
@@ -420,6 +456,7 @@ export class OperationsService {
         vehicleRegistration: vehicles.registrationNumber,
         driverName: drivers.firstName,
         startedAt: assignments.startedAt,
+        ...assignmentKeyColumns,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
@@ -433,7 +470,7 @@ export class OperationsService {
       )
       .orderBy(missions.deliveryDate, asc(assignments.id));
 
-    return firstRowPerMission(results, (r) => r.id);
+    return onePerMission(results, (r) => r.id, flatAssignmentKey).map(withoutAssignmentKey);
   }
 
   /**

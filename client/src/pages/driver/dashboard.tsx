@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
+import { splitDriverMissions } from "@/lib/driver-missions";
 import { useMemo, useState } from "react";
 import { format, isThisMonth } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -706,9 +707,7 @@ export default function DriverDashboard() {
   });
 
   const allMissions = driverData?.missions ?? [];
-  const activeMission: Mission | undefined = allMissions.find(
-    (m) => ["assigned", "in_progress"].includes(m.status)
-  );
+  const { active: activeMission, upcoming: upcomingMissions } = splitDriverMissions<Mission>(allMissions);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
@@ -988,6 +987,31 @@ export default function DriverDashboard() {
                     Signaler un problème
                   </button>
                 </div>
+
+                {upcomingMissions.length > 0 && (
+                  <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4 space-y-3" data-testid="driver-upcoming-missions">
+                    <p className="text-sm font-semibold text-gray-700">
+                      Ensuite ({upcomingMissions.length} mission{upcomingMissions.length > 1 ? "s" : ""})
+                    </p>
+                    <ul className="divide-y divide-gray-100">
+                      {upcomingMissions.map((mission) => (
+                        <li key={mission.id} className="py-2 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{mission.clientName ?? mission.client?.name ?? "—"}</p>
+                            <p className="text-xs text-gray-500 truncate">{mission.pickupAddress} → {mission.deliveryAddress}</p>
+                            {mission.pickupDate && (
+                              <p className="text-xs text-gray-400">{formatDateShort(mission.pickupDate)} — {formatTime(mission.pickupDate)}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <StatusBadge status={mission.status} />
+                            <span className="text-xs text-gray-400 font-mono">#{mission.orderNumber}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </>
             )}
           </>
