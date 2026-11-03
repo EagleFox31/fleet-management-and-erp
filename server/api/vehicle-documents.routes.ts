@@ -3,14 +3,15 @@ import multer from "multer";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
-import { vehicleDocumentTypes } from "@shared/schema";
+import { vehicleDocuments, vehicleDocumentTypes } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isWorkshopManager } from "../middleware/auth";
 import { deleteFile, isVehicleIdSegment, uploadVehicleDocument } from "../middleware/upload";
 import { storage } from "../storage";
-import { recomputeVehicleDocumentMirror, syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
+import { prepareColumnUpdate } from "../lib/column-validation";
+import { recomputeVehicleDocumentMirror, syncVehicleDocumentMirror, syncVehicleDocumentMirrorFromDocuments } from "../lib/vehicle-document-mirror";
 
 const log = moduleLogger("vehicle-documents");
 const router = Router();
@@ -75,14 +76,13 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
     try {
       if (err instanceof AppError) throw err;
       if (err) {
+        // Jamais `err.message` : une erreur disque (EACCES, ENOSPC...) porte un chemin du serveur.
+        // Le détail reste dans `cause` et dans le journal.
+        log.warn({ err, requestId: req.requestId, vehicleId }, "téléversement refusé");
         const message =
-          err instanceof multer.MulterError
-            ? err.code === "LIMIT_FILE_SIZE"
-              ? "Le fichier dépasse la taille maximale autorisée."
-              : "Le fichier téléversé est invalide."
-            : err instanceof Error
-              ? err.message
-              : "Le fichier téléversé est invalide.";
+          err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+            ? "Le fichier dépasse la taille maximale autorisée."
+            : "Le fichier téléversé est invalide.";
         throw new AppError(400, message, { cause: err });
       }
       const file = req.file;
@@ -187,6 +187,77 @@ router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
       });
     }
     return res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Correction d'un document (déplacée de `server/routes.ts`, P3-2 D3). Mêmes chemin, droits
+ * et réponse. La colonne miroir de `vehicles` est recalée par la lib du miroir sur la plus
+ * lointaine échéance des documents du type, au lieu de trois écritures directes.
+ */
+router.patch("/documents/:id", isWorkshopManager, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "ID de document invalide");
+
+    const document = await storage.getVehicleDocument(id);
+    if (!document) throw new AppError(404, "Document non trouvé");
+
+    const { name, description, expiryDate } = req.body ?? {};
+    const previousExpiryDate = document.expiryDate;
+
+    // Le stockage avale l'erreur SQL : une date illisible revenait en 404.
+    const { data, errors } = prepareColumnUpdate(vehicleDocuments, { name, description, expiryDate });
+    if (typeof data.name === "string" && data.name.trim() === "") {
+      errors.push({ field: "name", message: "Ce champ est obligatoire." });
+    }
+    if (errors.length > 0) {
+      throw new AppError(400, "Certaines informations du document sont invalides.", { fieldErrors: errors });
+    }
+
+    const updatedDocument = await storage.updateVehicleDocument(id, { ...data, updatedBy: req.user?.id });
+    if (!updatedDocument) throw new AppError(404, "Document non trouvé");
+
+    // La ligne est écrite : un échec du recalcul ne la fait pas passer pour ratée (journalisé).
+    if (expiryDate !== undefined && updatedDocument.expiryDate) {
+      try {
+        await syncVehicleDocumentMirrorFromDocuments(updatedDocument.vehicleId, updatedDocument.type);
+      } catch (err) {
+        log.error({ err, requestId: req.requestId, documentId: id, vehicleId: updatedDocument.vehicleId }, "recalcul du miroir après correction en échec");
+      }
+    }
+
+    const broadcastUpdate = (global as any).broadcastUpdate;
+    if (typeof broadcastUpdate === "function") {
+      const base = {
+        version: 1,
+        scope: STAFF_SCOPE,
+        actor: { userId: req.user?.id ?? null, role: req.user?.role ?? null },
+        emittedAt: new Date().toISOString(),
+      };
+      broadcastUpdate("vehicle_document_updated", {
+        ...base,
+        entity: "document_renewal_request",
+        entityId: updatedDocument.id,
+        payload: {
+          documentId: updatedDocument.id,
+          vehicleId: updatedDocument.vehicleId,
+          documentType: updatedDocument.type,
+          previousExpiryDate: previousExpiryDate ?? null,
+          newExpiryDate: updatedDocument.expiryDate ?? null,
+          source: "legacy_document_patch",
+        },
+      });
+      broadcastUpdate("vehicle_updated", {
+        ...base,
+        entity: "vehicle",
+        entityId: updatedDocument.vehicleId,
+        payload: { vehicleId: updatedDocument.vehicleId, source: "legacy_document_patch" },
+      });
+    }
+    return res.status(200).json(updatedDocument);
   } catch (error) {
     next(error);
   }

@@ -10,17 +10,16 @@
  * Un document dont l'échéance est le jour J est EXPIRÉ (lancement de mission bloqué).
  */
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+import { todayUtcDateOnly, utcDateOnly } from "../lib/utc-day";
 
-/** Date UTC (`YYYY-MM-DD`) d'un instant. */
-export function todayUtcDateOnly(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
+export { todayUtcDateOnly };
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Partie date `YYYY-MM-DD` d'une échéance (chaîne ISO ou `Date`), `null` si absente ou illisible. */
 export function toExpiryDateOnly(value: string | Date | null | undefined): string | null {
   if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : utcDateOnly(value);
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }

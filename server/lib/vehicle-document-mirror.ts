@@ -110,3 +110,27 @@ export async function recomputeVehicleDocumentMirror(
     .returning({ id: vehicles.id });
   return changed.length > 0;
 }
+
+/**
+ * Après la correction de la date d'un document : le miroir prend la plus lointaine échéance
+ * des documents de ce type (alias compris), le document corrigé inclus. Corriger un
+ * document plus ancien que le plus récent ne fait donc pas reculer le miroir.
+ * Renvoie `true` si une écriture a eu lieu.
+ */
+export async function syncVehicleDocumentMirrorFromDocuments(
+  vehicleId: number,
+  documentType: string | null | undefined,
+): Promise<boolean> {
+  const type = normalizeVehicleDocumentType(documentType);
+  if (!(type in MIRROR_COLUMNS)) return false;
+  const rows = await db
+    .select({ type: vehicleDocuments.type, expiryDate: vehicleDocuments.expiryDate })
+    .from(vehicleDocuments)
+    .where(and(eq(vehicleDocuments.vehicleId, vehicleId), isNotNull(vehicleDocuments.expiryDate)));
+  const dates = rows
+    .filter((row) => normalizeVehicleDocumentType(row.type) === type && row.expiryDate)
+    .map((row) => String(row.expiryDate).slice(0, 10));
+  if (dates.length === 0) return false;
+  const latest = dates.reduce((a, b) => (a >= b ? a : b));
+  return syncVehicleDocumentMirror(vehicleId, type, latest, "set");
+}
