@@ -1,8 +1,10 @@
 # Une image, une définition de base, deux usages, choisis par profil (depuis le dossier deploy/) :
 #
 #   docker compose --profile site up        serveur de site (PC sur le LAN), guide : docs/deploiement/site-local.md
-#   docker compose --profile vps up -d      VPS : prod derrière Caddy, guide : docs/deploiement/vps.md
-#   ... --profile vps --profile recette ...  ajoute la recette (VPS de 2 Go : pas les deux par défaut)
+#   docker compose --profile vps up -d      VPS : prod, publiée sur 127.0.0.1 seulement, guide : docs/deploiement/vps.md
+#   ... --profile vps --profile recette ...  ajoute la recette (pas les deux par défaut, la RAM est comptée)
+#   ... --profile vps --profile edge ...     ajoute Caddy en conteneur (80/443), seulement si l'hôte n'a pas
+#                                            déjà son reverse proxy
 #
 # Limites mémoire calibrées pour un VPS de 2 Go (prod seule) ; à relever si la RAM le permet.
 #
@@ -162,6 +164,9 @@ services:
     env_file: .env.recette
     environment:
       PORT: "5000"
+    # Boucle locale seulement : le reverse proxy (Caddy de l'hôte ou profil edge) sert l'extérieur.
+    ports:
+      - "127.0.0.1:${RECETTE_PORT:-5001}:5000"
     volumes:
       - uploads-recette:/app/uploads
     depends_on:
@@ -176,14 +181,18 @@ services:
     env_file: .env.prod
     environment:
       PORT: "5000"
+    # Boucle locale seulement : le reverse proxy (Caddy de l'hôte ou profil edge) sert l'extérieur.
+    ports:
+      - "127.0.0.1:${PROD_PORT:-5000}:5000"
     volumes:
       - uploads-prod:/app/uploads
     depends_on:
       schema-prod: { condition: service_completed_successfully }
 
+  # Facultatif : un hôte qui a déjà un reverse proxy sur 80/443 ne l'active pas (conflit de ports).
   caddy:
     image: caddy:2
-    profiles: [vps]
+    profiles: [edge]
     ports:
       - "80:80"
       - "443:443"

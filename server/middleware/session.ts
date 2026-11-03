@@ -1,7 +1,9 @@
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "../db";
-import { requireSessionSecret, sessionCookieFlags } from "../lib/session-cookie";
+import { moduleLogger } from "../lib/logger";
+import { sessionCookieFlags } from "../lib/session-cookie";
+import { resolveSessionSecret } from "../lib/session-secret";
 
 const PgSession = connectPgSimple(session);
 
@@ -13,7 +15,8 @@ const cookieFlags = sessionCookieFlags();
  * et le web local / distant.
  */
 export const sessionMiddleware = session({
-  secret: requireSessionSecret(),
+  // En production : lève (démarrage refusé) si le secret est absent, trop court ou public.
+  secret: resolveSessionSecret(process.env, (message) => moduleLogger("session").warn(message)),
   resave: false,
   saveUninitialized: false,
   cookie: {

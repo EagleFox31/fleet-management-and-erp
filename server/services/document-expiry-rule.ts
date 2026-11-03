@@ -18,9 +18,9 @@ export function daysUntilExpiry(expiryDate: string, today: Date): number | null 
 }
 
 /**
- * `expired` dès le jour J (`days <= 0` : une échéance aujourd'hui bloque, D2), `due` de
- * J+1 à J+alertDays inclus, `none` au-delà ou date invalide. La clé de dédoublonnage
- * passe donc de `due` à `expired` le jour J : l'alerte critique est émise ce jour-là.
+ * `expired` à partir de J+1 (`days < 0` : le jour J est valable, D2 révisée #224), `due`
+ * du jour J à J+alertDays inclus, `none` au-delà ou date invalide. La clé de
+ * dédoublonnage passe donc de `due` à `expired` le lendemain de l'échéance.
  */
 export function classifyDocumentExpiry(
   expiryDate: string | null | undefined,
@@ -30,7 +30,7 @@ export function classifyDocumentExpiry(
   if (!expiryDate) return { status: "none", days: null };
   const days = daysUntilExpiry(expiryDate, today);
   if (days === null) return { status: "none", days: null };
-  if (days <= 0) return { status: "expired", days };
+  if (days < 0) return { status: "expired", days };
   if (days <= alertDays) return { status: "due", days };
   return { status: "none", days };
 }

@@ -7,7 +7,9 @@
  * (décalage accepté, décision produit). Aucun accesseur local (`getDate`...) sur ces
  * chemins : éligibilité, statistiques documentaires et alertes passent par ici.
  *
- * Un document dont l'échéance est le jour J est EXPIRÉ (lancement de mission bloqué).
+ * Un document dont l'échéance est le jour J est encore VALABLE ; il est expiré à J+1
+ * (décision produit #224, 3 novembre 2026). Même règle pour les papiers véhicule et le
+ * permis.
  */
 
 import { todayUtcDateOnly, utcDateOnly } from "../lib/utc-day";
@@ -33,8 +35,17 @@ export function daysBetweenDateOnly(expiry: string, today: string): number {
   return Math.round((Date.parse(`${expiry}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / MS_PER_DAY);
 }
 
-/** Vrai si l'échéance est aujourd'hui ou passée. */
+/** Vrai si l'échéance est passée (au plus tard hier). Le jour J est valable. */
 export function isExpiredOn(expiry: string | Date | null | undefined, today: string): boolean {
   const dateOnly = toExpiryDateOnly(expiry);
-  return dateOnly !== null && daysBetweenDateOnly(dateOnly, today) <= 0;
+  return dateOnly !== null && daysBetweenDateOnly(dateOnly, today) < 0;
+}
+
+/**
+ * Permis chauffeur : même jour d'échéance que les papiers véhicule (valable le jour J,
+ * expiré à J+1, jour UTC). Contrairement à un papier, un permis absent ou illisible
+ * compte comme expiré : la check-list et le lancement le refusent.
+ */
+export function isDriverLicenseExpiredOn(expiry: string | Date | null | undefined, today: string): boolean {
+  return toExpiryDateOnly(expiry) === null || isExpiredOn(expiry, today);
 }

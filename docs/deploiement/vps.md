@@ -1,13 +1,17 @@
-# Déploiement sur un VPS (OVH, Europe)
+# Déploiement sur un VPS (OVH)
 
-Recette et production tournent sur le même VPS avec Docker Compose (`deploy/docker-compose.yml`) : une image, deux conteneurs (`app-recette`, `app-prod`), Caddy en frontal pour HTTPS et WebSocket. Chaque environnement a sa base Postgres 16 en conteneur (`db-recette`, `db-prod`), dans un volume nommé persistant. L'application la joint par le proxy WebSocket `wsproxy`, avec le driver inchangé. La définition de base est la même que celle du serveur de site (`docs/deploiement/site-local.md`), seul le `.env` change.
+Recette et production tournent sur le même VPS avec Docker Compose (`deploy/docker-compose.yml`) : une image, deux conteneurs (`app-recette`, `app-prod`) publiés sur la boucle locale seulement (`127.0.0.1:5000` pour la prod, `127.0.0.1:5001` pour la recette), derrière un Caddy qui sert HTTPS et WebSocket. Chaque environnement a sa base Postgres 16 en conteneur (`db-recette`, `db-prod`), dans un volume nommé persistant. L'application la joint par le proxy WebSocket `wsproxy`, avec le driver inchangé. La définition de base est la même que celle du serveur de site (`docs/deploiement/site-local.md`), seul le `.env` change.
 
-Profils : `--profile vps` lance la prod seule (avec Caddy). La recette s'ajoute par `--profile recette`. Sur un VPS de 2 Go, les deux ne tournent pas ensemble par défaut : les limites mémoire du compose sont calibrées pour la prod seule.
+Profils :
+
+- `--profile vps` lance la prod seule, sans reverse proxy.
+- `--profile recette` ajoute la recette. Elle ne tourne pas par défaut : les limites mémoire du compose sont calibrées pour la prod seule sur un petit VPS.
+- `--profile edge` ajoute Caddy en conteneur sur 80/443, **seulement si l'hôte n'a pas déjà un reverse proxy** (§2 bis).
 
 ## Variables requises (par environnement, `deploy/.env.recette` et `deploy/.env.prod`)
 
 - `DATABASE_URL` : `postgres://fleet:<mot de passe>@db-recette:5432/fleet` (ou `db-prod`) ; `DATABASE_WS_PROXY=wsproxy:80/v1`.
-- `SESSION_SECRET` : aléatoire (`openssl rand -hex 32`), distinct par environnement. **Absente, le serveur refuse de démarrer** (l'ancienne valeur par défaut publique est refusée aussi).
+- `SESSION_SECRET` : aléatoire (`openssl rand -hex 32`), distinct par environnement. **Absente, de moins de 32 caractères ou égale à une valeur publique du dépôt, le serveur refuse de démarrer** (`server/lib/session-secret.ts`).
 - `APP_URL` : URL publique de l'environnement (CORS).
 - `BACKUP_ENABLED=0` : la sauvegarde applicative exige `pg_dump` et `BACKUP_KEY`, absents de l'image ; sauvegarde par `pg_dump` depuis l'hôte (§6).
 
@@ -24,7 +28,29 @@ Dans `deploy/.env` : `RECETTE_DB_PASSWORD` et `PROD_DB_PASSWORD` (vides : Postgr
 
 ## 2. DNS
 
-Deux enregistrements A (et AAAA si IPv6) vers l'IP du VPS : le domaine de recette et celui de prod. Caddy obtient et renouvelle les certificats seul, une fois le DNS propagé et les ports 80/443 ouverts.
+Deux enregistrements A (et AAAA si IPv6) vers l'IP du VPS : le domaine de recette et celui de prod. Caddy (celui de l'hôte ou le profil `edge`) obtient et renouvelle les certificats seul, une fois le DNS propagé et les ports 80/443 ouverts.
+
+## 2 bis. Reverse proxy : déjà présent sur l'hôte, ou profil `edge`
+
+**Reverse proxy déjà présent** (cas du VPS OVH actuel). Un Caddy de l'hôte (systemd) y tient déjà 80/443 pour d'autres services, à préserver. Ne pas activer `edge` : le conteneur Caddy entrerait en conflit sur 80/443. Ajouter un bloc par domaine au Caddyfile de l'hôte (`/etc/caddy/Caddyfile`), sans toucher aux blocs existants :
+
+```
+fleet.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:5000
+}
+
+recette.fleet.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:5001
+}
+```
+
+Puis `sudo caddy validate --config /etc/caddy/Caddyfile` et `sudo systemctl reload caddy`. Le rechargement est à chaud : les sites existants ne sont pas coupés. Les WebSocket passent par `reverse_proxy` sans réglage.
+
+**Hôte vierge** : ajouter `--profile edge` à chaque commande. `deploy/Caddyfile` sert alors `PROD_DOMAIN` et `RECETTE_DOMAIN` (définis dans `deploy/.env`).
+
+Dans les deux cas, l'application n'écoute que sur `127.0.0.1` : elle n'est jamais joignable sans passer par le reverse proxy.
 
 ## 3. Premier lancement
 
@@ -37,7 +63,7 @@ chmod 600 .env .env.recette .env.prod
 docker compose --profile recette build app-recette            # construit l'image commune
 docker tag ghcr.io/eaglefox31/fleet-management-and-erp:latest ghcr.io/eaglefox31/fleet-management-and-erp:2026-11-04
 # PROD_TAG=2026-11-04 dans deploy/.env, puis :
-docker compose --profile vps up -d                             # prod + Caddy
+docker compose --profile vps up -d                             # prod (ajouter --profile edge sur un hôte vierge)
 docker compose --profile recette up -d app-recette             # recette, si la RAM le permet
 docker compose --profile vps logs -f app-prod
 ```

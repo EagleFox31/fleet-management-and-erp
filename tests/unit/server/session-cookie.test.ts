@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requireSessionSecret, sessionCookieFlags } from "../../../server/lib/session-cookie";
+import { sessionCookieFlags } from "../../../server/lib/session-cookie";
 
 describe("sessionCookieFlags", () => {
   it("production HTTPS : secure + sameSite none (inchangé)", () => {
@@ -35,17 +35,4 @@ describe("sessionCookieFlags : secure=false seulement si APP_URL commence par ht
       expect(sessionCookieFlags({ NODE_ENV: "production", APP_URL })).toEqual({ secure: false, sameSite: "lax" });
     },
   );
-});
-
-describe("requireSessionSecret", () => {
-  it("production sans secret, ou avec l'ancienne valeur publique : refus de démarrer", () => {
-    expect(() => requireSessionSecret({ NODE_ENV: "production" })).toThrow(/SESSION_SECRET/);
-    expect(() => requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "  " })).toThrow(/SESSION_SECRET/);
-    expect(() => requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "YaroFleetOSSecretKey" })).toThrow(/SESSION_SECRET/);
-  });
-
-  it("production avec secret : renvoyé tel quel ; hors production : repli", () => {
-    expect(requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "abc123" })).toBe("abc123");
-    expect(requireSessionSecret({ NODE_ENV: "development" })).toBe("YaroFleetOSSecretKey");
-  });
 });

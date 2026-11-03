@@ -17,18 +17,5 @@ export function sessionCookieFlags(env: NodeJS.ProcessEnv = process.env): Sessio
   return crossSite ? { secure: true, sameSite: "none" } : { secure: false, sameSite: "lax" };
 }
 
-/** Ancienne valeur par défaut, publique (présente dans l'historique du dépôt) : jamais acceptée en production. */
-const PUBLIC_DEFAULT_SECRET = "YaroFleetOSSecretKey";
 
-/**
- * Secret de session. En production, absent ou égal à l'ancienne valeur publique : le serveur
- * refuse de démarrer (sinon n'importe qui pourrait signer un cookie de session).
- * Hors production, repli sur l'ancienne valeur pour ne pas gêner le développement local.
- */
-export function requireSessionSecret(env: NodeJS.ProcessEnv = process.env): string {
-  const secret = env.SESSION_SECRET?.trim();
-  if (env.NODE_ENV === "production" && (!secret || secret === PUBLIC_DEFAULT_SECRET)) {
-    throw new Error("SESSION_SECRET manquant : le serveur refuse de démarrer en production (voir docs/deploiement/vps.md).");
-  }
-  return secret || PUBLIC_DEFAULT_SECRET;
-}
+// Le secret de session relève de server/lib/session-secret.ts (#243), pas de ce module.
