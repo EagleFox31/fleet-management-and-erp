@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative, sep } from "path";
 import { describe, expect, it } from "vitest";
-import { fileAccessKey, scanFileAccesses, type FileAccessSite } from "../../support/file-access-scan";
+import { fileAccessKey, renamedAccessImports, scanFileAccesses, type FileAccessSite } from "../../support/file-access-scan";
 
 /**
  * AGENTS.md §9 : un chemin lu en base n'ouvre, ne sert, ne copie ni ne supprime un fichier
@@ -26,7 +26,9 @@ const UNBOUNDED_FROZEN: Record<string, string> = {
   "server/routes.ts:POST /api/admin/import-backup:readFileSync": "fichier choisi parmi le listage du dossier backup/",
   "server/lib/backup/encrypt.ts:encryptFile:createReadStream": "fichier temporaire de sauvegarde produit par le job",
   "server/lib/backup/encrypt.ts:decryptFile:createReadStream": "fichier de sauvegarde du dossier de sauvegarde configuré",
-  "server/lib/backup/storage.ts:remove:rm": "nom résolu sous le dossier de sauvegarde configuré",
+  "server/lib/backup/encrypt.ts:decryptFile:open": "même fichier de sauvegarde, ouvert pour lire l'en-tête et l'étiquette",
+  "server/lib/backup/storage.ts:remove:rm":
+    "nom lu en base (backup_runs) mais contrôlé par SAFE_NAME (aucun séparateur ni ..), résolu sous BACKUP_DIR",
   "server/jobs/backup.ts:runBackup:rm": "fichier temporaire créé par le job lui-même",
   "server/vite.ts:USE *:readFile": "index.html du client (développement)",
   "server/vite.ts:USE *:sendFile": "index.html du build client (production)",
@@ -40,13 +42,13 @@ const walk = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) return walk(full);
-    return name.endsWith(".ts") ? [full] : [];
+    return /\.(ts|js|mjs|cjs)$/.test(name) ? [full] : [];
   });
 
-const sites: FileAccessSite[] = walk(join(root, "server"))
+const files = walk(join(root, "server"))
   .map((full) => relative(root, full).split(sep).join("/"))
-  .filter((file) => !DEAD_CODE.some((pattern) => pattern.test(file)))
-  .flatMap((file) => scanFileAccesses(file, readFileSync(join(root, file), "utf8")));
+  .filter((file) => !DEAD_CODE.some((pattern) => pattern.test(file)));
+const sites: FileAccessSite[] = files.flatMap((file) => scanFileAccesses(file, readFileSync(join(root, file), "utf8")));
 
 describe("accès disque : chemin borné à uploads/ ou exception justifiée (AGENTS.md §9)", () => {
   it("le scan voit les accès bornés connus (il n'est pas aveugle)", () => {
@@ -65,6 +67,16 @@ describe("accès disque : chemin borné à uploads/ ou exception justifiée (AGE
   it("tout accès non borné figure dans la liste gelée", () => {
     const unbounded = sites.filter((s) => !s.bounded && !(fileAccessKey(s) in UNBOUNDED_FROZEN));
     expect(unbounded.map((s) => `${fileAccessKey(s)} (ligne ${s.line})`)).toEqual([]);
+  });
+
+  it("une exception couvre un seul appel (un second appel dans la même portée se justifie à part)", () => {
+    const counts = new Map<string, number>();
+    for (const site of sites.filter((s) => !s.bounded)) counts.set(fileAccessKey(site), (counts.get(fileAccessKey(site)) ?? 0) + 1);
+    expect([...counts].filter(([, count]) => count > 1)).toEqual([]);
+  });
+
+  it("aucun appel disque importé sous un autre nom (il échapperait au scan)", () => {
+    expect(files.flatMap((file) => renamedAccessImports(file, readFileSync(join(root, file), "utf8")))).toEqual([]);
   });
 
   it("aucune exception n'est morte ni devenue bornée", () => {
@@ -89,6 +101,41 @@ describe("scanFileAccesses", () => {
       ["a.ts:ko:unlinkSync", false],
       ["a.ts:GET /x/:id:sendFile", false],
     ]);
+  });
+
+  it("borné par chaîne de déclarations ou par garde sur la même variable", () => {
+    const text = `
+      function chain(p) { const all = uploadedFileCandidates(p); const hit = all.find((c) => fs.existsSync(c)); res.download(hit); }
+      function guard(dir, p) { if (!isInsideDirectory(dir, p)) throw new Error("x"); fs.rmSync(p); }
+      function loop(p) { for (const c of uploadedFileCandidates(p)) fs.unlink(c, () => {}); }
+    `;
+    expect(scanFileAccesses("c.ts", text).map((s) => s.bounded)).toEqual([true, true, true]);
+  });
+
+  it("une borne sur une autre variable, en commentaire ou via path ne compte pas", () => {
+    const text = `
+      router.get("/a", (req, res) => { const ok = uploadedFileCandidates(req.query.a); res.sendFile(req.query.p); });
+      router.get("/b", (req, res) => { /* uploadedFileCandidates(p) */ const p = req.query.p; res.sendFile(p); });
+      function viaPath(root, p) { isInsideDirectory(path.resolve(root, "uploads"), root); const t = path.resolve(p); fs.unlinkSync(t); }
+    `;
+    expect(scanFileAccesses("d.ts", text).map((s) => s.bounded)).toEqual([false, false, false]);
+  });
+
+  it("un rappel anonyme dans registerRoutes ne profite pas d'une borne de la fonction", () => {
+    const text = `
+      async function registerRoutes(app) {
+        app.get("/x", (req, res) => { const f = uploadedFileCandidates(req.params.f)[0]; res.sendFile(f); });
+        setInterval(() => { fs.unlinkSync(stored.path); }, 1000);
+      }
+    `;
+    expect(scanFileAccesses("e.ts", text).map((s) => [fileAccessKey(s), s.bounded])).toEqual([
+      ["e.ts:GET /x:sendFile", true],
+      ["e.ts:registerRoutes:unlinkSync", false],
+    ]);
+  });
+
+  it("détecte un appel disque importé sous un autre nom", () => {
+    expect(renamedAccessImports("f.ts", `import { unlink as del, existsSync } from "fs";`)).toEqual(["f.ts:unlink as del"]);
   });
 
   it("une borne hors de la portée ne compte pas", () => {

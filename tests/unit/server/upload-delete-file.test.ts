@@ -27,6 +27,12 @@ describe("deleteFile : jamais hors de uploads/", () => {
     expect(existsSync(inside)).toBe(false);
   });
 
+  it("accepte l'ancienne forme /uploads/… (même règle que uploadedFileCandidates)", async () => {
+    writeFileSync(inside, "x");
+    await deleteFile("/uploads/documents/a.pdf", root);
+    expect(existsSync(inside)).toBe(false);
+  });
+
   it.each([
     ["remontée relative", path.join("uploads", "..", "secret.txt")],
     ["chemin absolu hors racine", outside],
