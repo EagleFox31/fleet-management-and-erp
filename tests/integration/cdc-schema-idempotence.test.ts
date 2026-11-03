@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
 import { pool } from "../../server/db";
-import { CDC_SCHEMA_STATEMENTS, initializeDatabase } from "../../server/init-database";
+import { CDC_SCHEMA_STATEMENTS, initializeDatabase, reportCdcConstraintGaps } from "../../server/init-database";
 
 // Schéma CDC (lot DB-1). Toute écriture de ce fichier a lieu dans une transaction annulée
 // ou sur une table temporaire : rien ne reste en base partagée.
@@ -125,6 +125,15 @@ describe("schéma CDC : réconciliation des contraintes", { timeout: 60_000 }, (
     return rows.map((r) => r.conname);
   }
 
+  // Définition et état validé, à comparer avec ceux d'une base neuve.
+  async function definitions(client: PoolClient) {
+    const { rows } = await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS def, convalidated FROM pg_constraint
+       WHERE conname = ANY($1) ORDER BY conname`, [names],
+    );
+    return rows.map((r) => `${r.conname} ${r.def} ${r.convalidated}`);
+  }
+
   async function withClient(run: (client: PoolClient) => Promise<void>) {
     const client = await pool.connect();
     try {
@@ -138,12 +147,18 @@ describe("schéma CDC : réconciliation des contraintes", { timeout: 60_000 }, (
 
   it("repose les CHECK et UNIQUE absents, sans écrire de ligne", async () => {
     await withClient(async (client) => {
+      const fresh = await definitions(client);
+      expect(fresh).toHaveLength(CONSTRAINTS.length);
+      expect(fresh).toContain("idempotency_keys_user_id_key_key UNIQUE (user_id, key) true");
       for (const [table, name] of CONSTRAINTS) await client.query(`ALTER TABLE ${table} DROP CONSTRAINT ${name}`);
       expect(await present(client)).toEqual([]);
       const before = await xactWrites(client);
       await client.query(CDC_SQL);
-      expect(await present(client)).toEqual([...names].sort());
+      expect(await definitions(client)).toEqual(fresh);
       expect(await xactWrites(client)).toEqual(before);
+      const warn = vi.fn();
+      expect(await reportCdcConstraintGaps(client, { warn })).toEqual({ missing: [], notValidated: [] });
+      expect(warn).not.toHaveBeenCalled();
       expect(await sqlState(client, `INSERT INTO workshop_labor_rates (effective_from, hourly_rate_ht) VALUES ('2099-01-01', -1)`))
         .toEqual({ code: "23514", constraint: "workshop_labor_rates_hourly_rate_ht_check" });
     });
@@ -169,6 +184,31 @@ describe("schéma CDC : réconciliation des contraintes", { timeout: 60_000 }, (
       );
       expect((await sqlState(client, CDC_SQL)).code).toBe("ok");
       expect(await present(client)).not.toContain("workshop_labor_rates_effective_from_key");
+      const warn = vi.fn();
+      expect(await reportCdcConstraintGaps(client, { warn })).toEqual({
+        missing: ["workshop_labor_rates_effective_from_key"], notValidated: [],
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0][0]).toEqual({ missing: ["workshop_labor_rates_effective_from_key"], notValidated: [] });
+    });
+  });
+
+  it("une ligne hors CHECK laisse la contrainte NOT VALID sans bloquer, les écritures suivantes sont refusées", async () => {
+    await withClient(async (client) => {
+      await client.query(`ALTER TABLE workshop_labor_rates DROP CONSTRAINT workshop_labor_rates_hourly_rate_ht_check`);
+      await client.query(`INSERT INTO workshop_labor_rates (effective_from, hourly_rate_ht) VALUES ('2099-02-01', -5)`);
+      expect((await sqlState(client, CDC_SQL)).code).toBe("ok");
+      const { rows } = await client.query(
+        `SELECT convalidated FROM pg_constraint WHERE conname = 'workshop_labor_rates_hourly_rate_ht_check'`,
+      );
+      expect(rows).toEqual([{ convalidated: false }]);
+      const warn = vi.fn();
+      expect(await reportCdcConstraintGaps(client, { warn })).toEqual({
+        missing: [], notValidated: ["workshop_labor_rates_hourly_rate_ht_check"],
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(await sqlState(client, `INSERT INTO workshop_labor_rates (effective_from, hourly_rate_ht) VALUES ('2099-03-01', -1)`))
+        .toEqual({ code: "23514", constraint: "workshop_labor_rates_hourly_rate_ht_check" });
     });
   });
 });

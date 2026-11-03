@@ -1199,7 +1199,8 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Prévention (vérifiable)
 - Les jobs CI integration et contract partent d'un `drizzle-kit push` sur base neuve : toute contrainte absente de Drizzle fait échouer `cdc-schema-idempotence.test.ts` (cas refusés 23514 / 23505).
 - `tests/unit/server/cdc-schema-drift.test.ts` garde la migration et `CDC_SCHEMA_STATEMENTS` identiques.
-- Reste ouvert : une base déjà poussée avec un schéma antérieur à 0ed84c5 n'a pas ces contraintes ; réconciliation au démarrage à faire avant d'activer `maintenance-report`, `excel-import` ou `technician-offline` (go/no-go fleet-release, condition C1).
+- Fermé (condition C1 du go/no-go) : une base déjà poussée avec un schéma antérieur à 0ed84c5 n'avait pas ces contraintes. Le démarrage les repose (#122, réserves de relecture dans le lot suivant) : CHECK `NOT VALID` puis validés, UNIQUE dans l'ordre de colonnes du schéma. Un écart restant (doublons, valeurs hors contrainte) est journalisé en `warn` par `reportCdcConstraintGaps` (`moduleLogger("init-database")`) : un `RAISE WARNING` seul n'atteint pas les logs applicatifs. Test : `tests/integration/cdc-schema-idempotence.test.ts`, « réconciliation des contraintes ».
+- Règle : un signal émis en SQL (`RAISE WARNING`, `NOTICE`) n'est pas un log. Ce qui doit être vu en production est relu côté application et journalisé par `moduleLogger`.
 
 ### Règle Projet (obligatoire)
 - Une contrainte écrite en SQL est aussi déclarée dans Drizzle, sous le même nom, ou réconciliée par un bloc DO idempotent. Une PR n'annonce « CI verte » qu'après `gh pr checks` sur sa tête.
