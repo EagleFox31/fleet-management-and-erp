@@ -303,5 +303,41 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       const { plan } = await closedPlan("p3-1-sweep", { frequency: "monthly", frequencyValue: 6, scheduledDate: daysFromNow(-1) });
       expect(await preventiveMaintenanceService.checkDateBasedMaintenance(plan.vehicleId)).toHaveLength(0);
     });
+
+    // Rattrapage des plans dont l'OT a ete clos avant P3-1 : aperçu en lecture seule, puis apply idempotent.
+    describe("rattrapage", () => {
+      // Etat d'avant P3-1 : OT clos, plan resté à l'échéance traitée.
+      async function stuckPlan(label: string, over: Partial<typeof maintenanceSchedules.$inferInsert>) {
+        const { plan, wo } = await closedPlan(label, over);
+        await db.update(maintenanceSchedules).set({ scheduledDate: over.scheduledDate }).where(eq(maintenanceSchedules.id, plan.id));
+        return { plan, wo };
+      }
+      const mine = (ids: number[], rows: { scheduleId: number }[]) => rows.filter((r) => ids.includes(r.scheduleId));
+
+      it("plan : liste les plans bloqués sans rien écrire ; apply avance ; second apply = aucune ligne", async () => {
+        const stuck = await stuckPlan("p3-1-stuck", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+        const km = await stuckPlan("p3-1-stuck-km", { frequency: "mileage", frequencyValue: 10000, scheduledMileage: 110000, scheduledDate: "2026-01-15" });
+        const open = await newSchedule((await newVehicle("p3-1-open")).id, { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+        await preventiveMaintenanceService.generateWorkOrderFromSchedule(open);
+        const ids = [stuck.plan.id, km.plan.id, open.id];
+
+        const preview = mine(ids, await preventiveMaintenanceService.planScheduleCatchUp());
+        expect(preview).toEqual([{ scheduleId: stuck.plan.id, workOrderId: stuck.wo.id, currentDate: "2026-01-15", targetDate: "2026-02-15" }]);
+        expect((await scheduleRow(stuck.plan.id)).scheduledDate).toBe("2026-01-15");
+
+        expect(mine(ids, await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(1);
+        expect((await scheduleRow(stuck.plan.id)).scheduledDate).toBe("2026-02-15");
+        expect((await scheduleRow(km.plan.id)).scheduledDate).toBe("2026-01-15");
+        expect((await scheduleRow(open.id)).scheduledDate).toBe("2026-01-15");
+
+        expect(mine(ids, await preventiveMaintenanceService.applyScheduleCatchUp())).toHaveLength(0);
+        expect(mine(ids, await preventiveMaintenanceService.planScheduleCatchUp())).toHaveLength(0);
+      });
+
+      it("plan déjà avancé par la clôture : absent de l'aperçu", async () => {
+        const { plan } = await closedPlan("p3-1-done", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
+        expect(mine([plan.id], await preventiveMaintenanceService.planScheduleCatchUp())).toHaveLength(0);
+      });
+    });
   });
 });
