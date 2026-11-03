@@ -241,3 +241,22 @@ describe("jour J : permis chauffeur (check-list et lancement)", () => {
     expect(isDriverLicenseExpiredOn(new Date(`${TODAY}T23:30:00.000Z`), TODAY)).toBe(false);
   });
 });
+
+describe("jour J : getExpiredDocuments ne liste que les papiers échus (expiredDocuments)", () => {
+  it("assurance échue d'hier listée, plaque qui expire aujourd'hui absente", async () => {
+    dbState.vehicleRows = [
+      { id: 1, registrationNumber: "TEST-1", ownerId: null, insuranceExpiry: offset(-1), licensePlateExpiry: offset(0), technicalInspectionDate: offset(1) },
+    ];
+    const [row] = await service.getExpiredDocuments();
+    expect(row.expiredDocuments).toEqual([{ type: "assurance", expiryDate: offset(-1) }]);
+  });
+
+  it("sous Africa/Douala à 00:30 locale (23:30Z la veille), une échéance du jour UTC suivant n'est pas listée", async () => {
+    vi.setSystemTime(new Date(`${offset(-1)}T23:30:00.000Z`));
+    dbState.vehicleRows = [
+      { id: 1, registrationNumber: "TEST-1", ownerId: null, insuranceExpiry: offset(-2), licensePlateExpiry: offset(-1), technicalInspectionDate: null },
+    ];
+    const [row] = await service.getExpiredDocuments();
+    expect(row.expiredDocuments).toEqual([{ type: "assurance", expiryDate: offset(-2) }]);
+  });
+});

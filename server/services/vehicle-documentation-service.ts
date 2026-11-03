@@ -165,8 +165,7 @@ export class VehicleDocumentationService {
     log.debug({ ownerId }, "documents expirés : lecture");
 
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
-    const now = new Date();
-    const nowStr = todayUtcDateOnly(now);
+    const nowStr = todayUtcDateOnly();
 
     const expiredVehicles = allVehicles.filter((v) =>
       isDateExpired(v.licensePlateExpiry, nowStr) ||
@@ -177,13 +176,13 @@ export class VehicleDocumentationService {
     const result = expiredVehicles.map(vehicle => ({
       ...vehicle,
       expiredDocuments: [
-        vehicle.licensePlateExpiry && new Date(vehicle.licensePlateExpiry) < now
+        isDateExpired(vehicle.licensePlateExpiry, nowStr)
           ? { type: 'carte_grise', expiryDate: vehicle.licensePlateExpiry }
           : null,
-        vehicle.insuranceExpiry && new Date(vehicle.insuranceExpiry) < now
+        isDateExpired(vehicle.insuranceExpiry, nowStr)
           ? { type: 'assurance', expiryDate: vehicle.insuranceExpiry }
           : null,
-        vehicle.technicalInspectionDate && new Date(vehicle.technicalInspectionDate) < now
+        isDateExpired(vehicle.technicalInspectionDate, nowStr)
           ? { type: 'visite_technique', expiryDate: vehicle.technicalInspectionDate }
           : null,
       ].filter(Boolean)

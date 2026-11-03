@@ -2177,4 +2177,5 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - **Prévention vérifiable** :
   - `tests/unit/server/document-expiry-day-j.test.ts` : J-1, J, J+1 sur les cinq verdicts papiers (éligibilité, statut, statistiques, liste, règle typée) et sur le permis, plus la bascule à minuit UTC sous Africa/Douala et UTC ;
   - contrats `mission-document-expiry` et `mission-renewal-receipt` : alertes, check-list et lancement à J et J+1, permis à J-1, J, J+1.
+  - relecture : une troisième recopie (`getExpiredDocuments`, liste `expiredDocuments`, `new Date(échéance) < now`) avait échappé à la bascule. `tests/unit/server/expiry-day-local-math-hygiene.test.ts` échoue désormais sur toute comparaison locale d'une échéance dans `server/`, `client/src` et `shared/` (liste gelée de 6 fichiers client/CPC, qui ne peut que rétrécir).
 - **Leçon** : un changement de règle partagée se fait sur la source ET sur chaque recopie. Avant de basculer, chercher les calculs qui reproduisent la règle sans l'importer (`setHours(0`, `<= 0` sur un nombre de jours) ; une fonction dont le nom décrit l'ancienne règle se renomme dans le même changement.
