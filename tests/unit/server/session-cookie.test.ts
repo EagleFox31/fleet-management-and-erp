@@ -1,0 +1,32 @@
+import { describe, expect, it } from "vitest";
+import { requireSessionSecret, sessionCookieFlags } from "../../../server/lib/session-cookie";
+
+describe("sessionCookieFlags", () => {
+  it("production HTTPS : secure + sameSite none (inchangé)", () => {
+    expect(sessionCookieFlags({ NODE_ENV: "production", APP_URL: "https://recette.example" })).toEqual({ secure: true, sameSite: "none" });
+    expect(sessionCookieFlags({ NODE_ENV: "production" })).toEqual({ secure: true, sameSite: "none" });
+  });
+
+  it("serveur de site en HTTP sur le LAN : cookie accepté par le navigateur", () => {
+    expect(sessionCookieFlags({ NODE_ENV: "production", APP_URL: "http://192.168.1.20:5000" })).toEqual({ secure: false, sameSite: "lax" });
+    expect(sessionCookieFlags({ ALLOW_CROSS_SITE_COOKIES: "true", APP_URL: "http://10.0.0.5:5000" })).toEqual({ secure: false, sameSite: "lax" });
+  });
+
+  it("développement : lax, non secure ; ALLOW_CROSS_SITE_COOKIES force none en HTTPS", () => {
+    expect(sessionCookieFlags({ NODE_ENV: "development" })).toEqual({ secure: false, sameSite: "lax" });
+    expect(sessionCookieFlags({ ALLOW_CROSS_SITE_COOKIES: "true" })).toEqual({ secure: true, sameSite: "none" });
+  });
+});
+
+describe("requireSessionSecret", () => {
+  it("production sans secret, ou avec l'ancienne valeur publique : refus de démarrer", () => {
+    expect(() => requireSessionSecret({ NODE_ENV: "production" })).toThrow(/SESSION_SECRET/);
+    expect(() => requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "  " })).toThrow(/SESSION_SECRET/);
+    expect(() => requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "YaroFleetOSSecretKey" })).toThrow(/SESSION_SECRET/);
+  });
+
+  it("production avec secret : renvoyé tel quel ; hors production : repli", () => {
+    expect(requireSessionSecret({ NODE_ENV: "production", SESSION_SECRET: "abc123" })).toBe("abc123");
+    expect(requireSessionSecret({ NODE_ENV: "development" })).toBe("YaroFleetOSSecretKey");
+  });
+});

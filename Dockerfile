@@ -16,6 +16,10 @@ COPY package.json package-lock.json ./
 COPY vendor ./vendor
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+# init-database rejoue au démarrage server/db/migrations et server/db/triggers (lus depuis le cwd) :
+# sans eux, il les saute sans erreur et la base reste incomplète.
+COPY server/db/migrations ./server/db/migrations
+COPY server/db/triggers ./server/db/triggers
 # Les fichiers téléversés sont écrits sous <cwd>/uploads : dossier monté en volume nommé.
 RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
 USER node
