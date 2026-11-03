@@ -7,6 +7,7 @@ import { requireFeature } from "../lib/feature-flags";
 import { reportMimeType } from "../lib/report-export";
 import { kpiReportService } from "../services/kpi-report-service";
 import { kpiReportQuerySchema } from "@shared/contracts/exports";
+import { withLogContext } from "../lib/error-log-context";
 
 /**
  * Exports Excel. Les gardes (session, role par EXPORT_ROLE_MATRIX, drapeau
@@ -50,8 +51,7 @@ function route(path: string, label: string, handler: Handler, ...guards: Request
       await handler(req, res);
     } catch (error) {
       if (error instanceof AppError) return next(error);
-      log.error({ err: error, requestId: req.requestId, path }, `Echec de l'export ${label}`);
-      next(new AppError(500, `Impossible de generer l'export ${label}.`, { cause: error }));
+      next(withLogContext(new AppError(500, `Impossible de generer l'export ${label}.`, { cause: error }), { event: `Echec de l'export ${label}`, path }));
     }
   });
 }
