@@ -158,3 +158,9 @@ Modèle et règles : `docs/journal/README.md`.
 - **Pourquoi** :
   - un réessai après coupure ajustait deux fois ;
   - réserves de 0a (option de route, 409 lisible, nouvelle clé par intention) et de c7 (une 5xx après le commit garde la clé).
+## 2026-11-03T17:31:19+01:00 — Document de workflow : fichier orphelin quand l'INSERT échoue
+
+- Quoi : `WorkflowDocumentService.saveWorkflowDocument` supprime le fichier écrit si l'INSERT `workflow_documents` est refusé, puis relance l'erreur.
+- Comment : `.catch` sur l'INSERT, `fs.rmSync(filePath, { force: true })`, échec du ménage journalisé en `warn` sans masquer l'erreur d'origine. Route (routes.ts gelé) inchangée.
+- Pourquoi : le fichier était écrit avant l'INSERT ; sans ligne, plus rien ne permettait de le retrouver ni de le supprimer (enquête multer).
+- Preuve : `tests/integration/workflow-document-orphan.test.ts` rouge sans correctif (1 fichier restant), vert avec ; transfert 5/5, tsc 0, unitaires 1868.

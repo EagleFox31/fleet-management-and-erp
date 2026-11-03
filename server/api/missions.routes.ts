@@ -1,4 +1,5 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
+import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
@@ -1063,6 +1064,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     const payloadSchema = z.object({
       vehicleId: z.coerce.number().int().positive(),
       quantity: z.coerce.number().positive(),
+      // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
       date: z.string().trim().min(1).optional(),
       stationName: z.string().trim().min(1).optional(),
@@ -1081,9 +1083,8 @@ router.post("/:id/fuel-records", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
+    const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db
       .select({
@@ -1131,7 +1132,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     const consumption = {
       vehicleId: payload.vehicleId,
       quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
+      unitPrice,
       date: parsedDate.toISOString(),
       stationName: payload.stationName || "MISSION",
       destination: mission.deliveryAddress || "Mission",
@@ -1232,6 +1233,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     const payloadSchema = z.object({
       vehicleId: z.coerce.number().int().positive(),
       quantity: z.coerce.number().positive(),
+      // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
       date: z.string().trim().min(1).optional(),
       stationName: z.string().trim().min(1).optional(),
@@ -1252,9 +1254,8 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
+    const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db
       .select({
@@ -1327,7 +1328,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     const consumptionData = {
       vehicleId: payload.vehicleId,
       quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
+      unitPrice,
       date: parsedDate.toISOString(),
       stationName: payload.stationName || "MISSION",
       destination: mission.deliveryAddress || "Mission",
@@ -1372,7 +1373,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
           createdBy: actorUserId,
           createdRole: actorRole || null,
           quantity: payload.quantity,
-          unitPrice: payload.unitPrice,
+          unitPrice,
           debitAmount: cost,
         };
 
