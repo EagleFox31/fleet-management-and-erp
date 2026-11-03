@@ -2092,6 +2092,42 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.
 
+## 2026-11-03 — Cliquet T1 : exclusion par nom contournée par alias, et liste négative (NO-GO n°2 et n°3, #235)
+
+### Contexte
+- Le cliquet T1 (`tests/unit/server/write-routes-ratchet.test.ts`) vérifie que chaque route d'écriture porte une garde de rôle. Deux relectures successives de #235 ont refusé la fusion.
+  - NO-GO n°2 : le scanner refusait une liste de noms connus pour ne pas être des gardes (`authenticate`, `isAnyUser`...). Tout middleware absent de cette liste comptait comme garde : un alias `anyone`, un tableau `[isAnyUser]` ou un spread passaient.
+  - NO-GO n°3 : la liste était devenue positive, mais `authorize([...])` sur place restait admis sauf s'il contenait le NOM `ALL_ROLES`. `authorize([...ALL_APP_ROLES])`, ou un alias local de tous les rôles, comptait comme garde alors qu'il vaut `isAnyUser`.
+
+### Cause racine
+- Classification : règle de sécurité appuyée sur un nom plutôt que sur une valeur.
+  - Une liste négative ne contient que ce qu'on a pensé à refuser.
+  - Une exclusion sur le nom d'une constante se contourne par une autre constante de même valeur, ou par un alias.
+- Aggravant : selfScoped, une garde « tous rôles, compte de session seul », vérifiée par analyse du handler, a ouvert une surface d'analyse que chaque relecture trouvait contournable. Aucune route n'en avait encore besoin.
+
+### Résolution
+- Le scanner résout l'ensemble de rôles par valeur (`resolveRoles`). Il suit les littéraux, les spreads, les constantes locales et les alias, puis les exports de `shared/constants/roles`.
+- `authorize(...)` n'est une garde que si cet ensemble exclut au moins un rôle de `ALL_APP_ROLES`. Un ensemble non résolu ne compte pas comme garde.
+- La règle vaut pour :
+  - `authorize` écrit sur place ;
+  - les exports `is*` de `auth.ts` (`isAnyUser` est écarté par sa valeur) ;
+  - les gardes locales et les gardes de montage, jugées sur leur définition dans leur fichier.
+- selfScoped est retiré de la PR (YAGNI). Il fera l'objet d'une PR dédiée.
+
+### Prévention (vérifiable)
+- Cas rouges dans `write-routes-ratchet.test.ts` :
+  - `authorize([...ALL_APP_ROLES])`, `authorize(ALL_APP_ROLES)` ;
+  - alias local de tous les rôles, `[...STAFF_ROLES, "client"]`, ensemble non résolu ;
+  - garde locale définie par `authorize([...ALL_APP_ROLES])` ou par `isAnyUser` ;
+  - garde de montage sur tous les rôles ;
+  - nom listé mais non défini dans son fichier.
+
+### Règle Projet (obligatoire)
+- Un contrôle d'accès se juge sur la valeur résolue, jamais sur le nom d'une constante.
+- Une liste de gardes est positive : ce qui n'est pas reconnu ne protège pas.
+- Une garde dont la validité dépend d'une analyse du handler n'entre qu'avec une route qui en a besoin, dans une PR dédiée.
+- Un scanner de gardes se fonde sur l'origine du symbole (import résolu, définition unique et non mutée) et sur le source débarrassé de ses commentaires, jamais sur un nom. Écarts restants de ce scanner : issue #244.
+
 ## 2026-11-03 — Secret de session public par défaut : le serveur démarrait avec une clé connue de tous (#243)
 
 ### Contexte
