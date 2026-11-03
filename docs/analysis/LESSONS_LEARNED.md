@@ -2004,3 +2004,27 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Une ligne qui entre dans un solde (carte, stock, facture) ne se corrige pas par un PATCH de ses montants. On passe par une écriture de contrepartie, ou par une annulation suivie d'une nouvelle saisie.
+
+## 2026-11-03 — Garde statique des accès disque contournable (near miss, #210)
+
+### Contexte
+- `stored-path-hygiene.test.ts` doit vérifier qu'aucun accès disque de `server/` ne prend un chemin lu en base sans le borner à `uploads/` (AGENTS.md §9). Les deux relectures (sécurité, puis relecteur) l'ont jugé vert à tort sur des cas construits pour le contourner.
+
+### Cause racine
+- Classification : garde-fou fondé sur la présence de la borne, pas sur son lien avec l'argument.
+  - Première version : il suffisait que la borne apparaisse dans le texte de la portée. Un commentaire, une borne sur une autre variable, ou une fonction englobante comme `registerRoutes` suffisaient.
+  - Deuxième version : chaîne de dépendances trop large. `const p = req.body.p` héritait d'une garde posée sur `req.query.x`, parce que `req` y apparaissait. `uploadedFileCandidates(p)[0] ?? p` comptait aussi comme borné.
+
+### Résolution
+- Le lien est vérifié sur la structure de l'expression (`isBoundExpression`) :
+  - résultat d'un appel de borne, ou accès et méthode sur ce résultat ;
+  - variable dont toutes les déclarations sont bornées ;
+  - variable reçue directement par `isInsideDirectory` ;
+  - `??`, `||` et ternaire : chaque branche doit être bornée.
+- La destination de `copyFile`, `cp` et `rename` est vérifiée elle aussi. Les alias d'un appel disque sont refusés. Une exception couvre un seul appel.
+
+### Prévention (vérifiable)
+- Cas de contournement dans `stored-path-hygiene.test.ts`, rouges avec les règles précédentes : borne sur une autre variable, en commentaire, via `path`, sur un autre champ de `req`, repli `?? p`, destination non bornée, alias.
+
+### Règle Projet (obligatoire)
+- Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.

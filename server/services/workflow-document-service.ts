@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
+import { isInsideDirectory, isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
 
@@ -147,8 +147,8 @@ export class WorkflowDocumentService {
         const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
 
-        // Copier le fichier
-        if (originalPath) {
+        // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
+        if (originalPath && isInsideDirectory(vehicleUploadDir, newPath)) {
           fs.copyFileSync(originalPath, newPath);
 
           // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
