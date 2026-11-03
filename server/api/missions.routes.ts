@@ -1,7 +1,7 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
 import { Router } from "express";
 import { db } from "../db";
-import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests } from "@shared/schema";
+import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
 import { eq, and, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
@@ -30,6 +30,13 @@ import {
   canRoleSetMissionStatus,
 } from "@shared/constants/roles";
 import { withLogContext } from "../lib/error-log-context";
+import { lockFuelCard } from "../lib/fuel-card-lock";
+import {
+  REGULARIZATION_REQUEST_KEY_PATTERN,
+  findMissionRegularization,
+  isSameRegularization,
+  type MissionRegularizationEntry,
+} from "../lib/mission-fuel-regularization";
 
 const log = moduleLogger("missions");
 
@@ -1124,6 +1131,8 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       notes: z.string().trim().optional(),
       regularizationReason: z.string().trim().min(8, "Le motif de régularisation est obligatoire."),
       isPreDeparture: z.coerce.boolean().optional().default(false),
+      // Clé d'une soumission : un second envoi avec la même clé rejoue la première sans second débit.
+      requestKey: z.string().trim().regex(REGULARIZATION_REQUEST_KEY_PATTERN, "Clé de requête invalide.").optional(),
     });
 
     const parsedPayload = payloadSchema.safeParse(req.body ?? {});
@@ -1135,6 +1144,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     }
 
     const payload = parsedPayload.data;
+    const requestKey = payload.requestKey;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
     if (Number.isNaN(parsedDate.getTime())) {
       return res.status(400).json({ message: "Date de plein invalide." });
@@ -1187,7 +1197,16 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
     // Débit et journal de régularisation dans une seule transaction, sous le verrou de la
     // carte : un échec du journal annule le débit, et deux régularisations simultanées
-    // relisent workflowData l'une après l'autre (aucune entrée perdue).
+    // relisent workflowData l'une après l'autre (aucune entrée perdue). Une clé déjà
+    // journalisée est lue sous ce même verrou : le second envoi rejoue, sans second débit.
+    const missionReturning = {
+      id: missions.id,
+      status: missions.status,
+      actualFuelCost: missions.actualFuelCost,
+      actualFuelQuantity: missions.actualFuelQuantity,
+      workflowData: missions.workflowData,
+      updatedAt: missions.updatedAt,
+    };
     let updatedMission:
       | {
           id: number;
@@ -1198,7 +1217,26 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
           updatedAt: Date | null;
         }
       | undefined;
-    let regularizationEntry: Record<string, unknown> | undefined;
+    let regularizationEntry: MissionRegularizationEntry | undefined;
+    const replay = requestKey
+      ? async (tx: Parameters<typeof lockFuelCard>[0]) => {
+          const [current] = await tx.select(missionReturning).from(missions).where(eq(missions.id, missionId));
+          const existing = findMissionRegularization(current?.workflowData, requestKey);
+          if (!existing) return null;
+          if (!isSameRegularization(existing, payload)) {
+            throw new AppError(409, "Cette régularisation a déjà été enregistrée avec d'autres valeurs. Rechargez la page.");
+          }
+          const [record] = typeof existing.id === "number"
+            ? await tx.select().from(fuelRecords).where(eq(fuelRecords.id, existing.id))
+            : [];
+          if (!record) {
+            throw new AppError(409, "Cette régularisation a déjà été enregistrée, puis son plein supprimé. Rechargez la page.");
+          }
+          regularizationEntry = existing;
+          updatedMission = current;
+          return record;
+        }
+      : undefined;
     const result = await fuelCardService.recordConsumption(
       {
         vehicleId: payload.vehicleId,
@@ -1221,6 +1259,8 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
         regularizationEntry = {
           id: consumption?.id ?? null,
+          ...(requestKey ? { requestKey } : {}),
+          vehicleId: payload.vehicleId,
           reason: payload.regularizationReason,
           createdAt: new Date().toISOString(),
           createdBy: actorUserId,
@@ -1242,18 +1282,28 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
             updatedAt: new Date(),
           })
           .where(eq(missions.id, missionId))
-          .returning({
-            id: missions.id,
-            status: missions.status,
-            actualFuelCost: missions.actualFuelCost,
-            actualFuelQuantity: missions.actualFuelQuantity,
-            workflowData: missions.workflowData,
-            updatedAt: missions.updatedAt,
-          });
+          .returning(missionReturning);
       },
+      { replay },
     );
 
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
+    const totals = {
+      totalQuantity: fuelData.totalQuantity,
+      totalCost: fuelData.totalCost,
+      recordsCount: fuelData.records.length,
+    };
+
+    if (result.replayed) {
+      // Rejeu : rien n'a été écrit, donc rien à diffuser. Même forme de réponse que le premier envoi.
+      return res.status(200).json({
+        record: result.consumption,
+        totals,
+        mission: updatedMission || null,
+        regularization: regularizationEntry,
+        replayed: true,
+      });
+    }
 
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
@@ -1271,11 +1321,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
     return res.status(201).json({
       record: result.consumption,
-      totals: {
-        totalQuantity: fuelData.totalQuantity,
-        totalCost: fuelData.totalCost,
-        recordsCount: fuelData.records.length,
-      },
+      totals,
       mission: updatedMission || null,
       regularization: regularizationEntry,
     });
@@ -1316,37 +1362,6 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
       });
     }
 
-    const [mission] = await db
-      .select({
-        id: missions.id,
-        status: missions.status,
-        workflowData: missions.workflowData,
-      })
-      .from(missions)
-      .where(eq(missions.id, missionId))
-      .limit(1);
-
-    if (!mission) {
-      return res.status(404).json({ message: "Mission non trouvée." });
-    }
-
-    if (
-      !MISSION_FUEL_DECLARATION_ALLOWED_STATUSES.includes(
-        mission.status as (typeof MISSION_FUEL_DECLARATION_ALLOWED_STATUSES)[number],
-      )
-    ) {
-      return res.status(400).json({
-        message: `Déclaration impossible pour une mission ${mission.status}.`,
-      });
-    }
-
-    const hasFuelRecords = await fuelCardService.hasFuelRecordsForMission(missionId);
-    if (hasFuelRecords) {
-      return res.status(409).json({
-        message: "Cette mission contient déjà un ou plusieurs pleins. La déclaration sans ravitaillement est impossible.",
-      });
-    }
-
     const declaration: MissionNoRefuelDeclaration = {
       reason: parsedPayload.data.reason,
       declaredAt: new Date().toISOString(),
@@ -1354,25 +1369,61 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
       declaredRole: actorRole || null,
     };
 
-    const nextWorkflowData = mergeMissionFuelTracking(mission.workflowData, {
-      noRefuelDeclaration: declaration,
-    });
+    // Sous le verrou de la carte, comme la régularisation : l'absence de plein est contrôlée
+    // et workflowData relu dans la transaction, sinon une régularisation concurrente serait
+    // écrasée par une copie périmée (entrée de journal perdue, débit sans trace).
+    const updatedMission = await db.transaction(async (tx) => {
+      await lockFuelCard(tx);
+      const [mission] = await tx
+        .select({
+          id: missions.id,
+          status: missions.status,
+          workflowData: missions.workflowData,
+        })
+        .from(missions)
+        .where(eq(missions.id, missionId))
+        .limit(1);
 
-    const [updatedMission] = await db
-      .update(missions)
-      .set({
-        workflowData: nextWorkflowData,
-        updatedAt: new Date(),
-      })
-      .where(eq(missions.id, missionId))
-      .returning({
-        id: missions.id,
-        status: missions.status,
-        actualFuelCost: missions.actualFuelCost,
-        actualFuelQuantity: missions.actualFuelQuantity,
-        workflowData: missions.workflowData,
-        updatedAt: missions.updatedAt,
+      if (!mission) {
+        throw new AppError(404, "Mission non trouvée.");
+      }
+
+      if (
+        !MISSION_FUEL_DECLARATION_ALLOWED_STATUSES.includes(
+          mission.status as (typeof MISSION_FUEL_DECLARATION_ALLOWED_STATUSES)[number],
+        )
+      ) {
+        throw new AppError(400, `Déclaration impossible pour une mission ${mission.status}.`);
+      }
+
+      if (await fuelCardService.hasFuelRecordsForMission(missionId, tx)) {
+        throw new AppError(
+          409,
+          "Cette mission contient déjà un ou plusieurs pleins. La déclaration sans ravitaillement est impossible.",
+        );
+      }
+
+      const nextWorkflowData = mergeMissionFuelTracking(mission.workflowData, {
+        noRefuelDeclaration: declaration,
       });
+
+      const [row] = await tx
+        .update(missions)
+        .set({
+          workflowData: nextWorkflowData,
+          updatedAt: new Date(),
+        })
+        .where(eq(missions.id, missionId))
+        .returning({
+          id: missions.id,
+          status: missions.status,
+          actualFuelCost: missions.actualFuelCost,
+          actualFuelQuantity: missions.actualFuelQuantity,
+          workflowData: missions.workflowData,
+          updatedAt: missions.updatedAt,
+        });
+      return row;
+    });
 
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
@@ -2657,7 +2708,8 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           : mission.currentStep,
         completedAt: targetStatus === "completed" ? now : undefined,
         cancelledAt: targetStatus === "cancelled" ? now : undefined,
-        workflowData: hasWorkflowDataPatch ? nextWorkflowData : mission.workflowData,
+        // Sans patch, ne pas réécrire une copie lue avant : elle écraserait une régularisation concurrente.
+        workflowData: hasWorkflowDataPatch ? nextWorkflowData : undefined,
       })
       .where(eq(missions.id, missionId))
       .returning();
