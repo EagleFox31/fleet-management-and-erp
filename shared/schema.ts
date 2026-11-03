@@ -254,16 +254,36 @@ export const documentRenewalRequests = pgTable("document_renewal_requests", {
   inspectorCode: text("inspector_code"),
   proofFileName: text("proof_file_name"),
   proofFilePath: text("proof_file_path"),
+  // Récépissé provisoire téléversé pendant la demande (P3-2) : rend le véhicule éligible
+  // jusqu'à receiptValidUntil inclus. Distinct de proofFile*, la preuve de clôture (completed).
+  // Date, chemin, nom et date de dépôt : tous NULL ou tous renseignés (CHECK
+  // document_renewal_requests_receipt_complete) ; receiptUploadedBy peut rester NULL.
+  receiptValidUntil: date("receipt_valid_until"),
+  receiptFileName: text("receipt_file_name"),
+  receiptFilePath: text("receipt_file_path"),
+  receiptUploadedAt: timestamp("receipt_uploaded_at"),
+  receiptUploadedBy: integer("receipt_uploaded_by").references(() => users.id),
   completedBy: integer("completed_by").references(() => users.id),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  check(
+    "document_renewal_requests_receipt_complete",
+    sql`num_nulls(${table.receiptValidUntil}, ${table.receiptFilePath}, ${table.receiptFileName}, ${table.receiptUploadedAt}) IN (0, 4)`,
+  ),
+]);
 
+// Fichier et traçabilité du récépissé : posés par le serveur au téléversement (chemin issu de
+// multer, AGENTS.md §9), jamais lus dans le corps de requête. Seule la date de validité est saisie.
 export const insertDocumentRenewalRequestSchema = createInsertSchema(documentRenewalRequests).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  receiptFileName: true,
+  receiptFilePath: true,
+  receiptUploadedAt: true,
+  receiptUploadedBy: true,
 });
 
 // Maintenance schedules

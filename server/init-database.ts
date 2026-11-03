@@ -424,6 +424,121 @@ END $$;
 DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
 
 /**
+ * P3-2 : récépissé provisoire d'une demande de renouvellement (date de validité, fichier, qui et quand).
+ * Rend le véhicule éligible jusqu'à receipt_valid_until inclus ; distinct de proof_file_*, preuve de clôture.
+ * CHECK document_renewal_requests_receipt_complete : date, chemin, nom et date de dépôt tous NULL ou tous
+ * renseignés (receipt_uploaded_by exclu, NULL admis). FK et CHECK dans deux blocs DO : l'échec de l'une
+ * n'annule pas l'autre ; l'écart est relu par reportDocumentRenewalReceiptGaps. Doit rester identique à
+ * server/db/migrations/20261103_document_renewal_receipt.sql : tests/unit/server/document-renewal-receipt-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const DOCUMENT_RENEWAL_RECEIPT_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_valid_until date;
+  ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_file_name text;
+  ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_file_path text;
+  ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_uploaded_at timestamp;
+  ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_uploaded_by integer;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'document_renewal_requests : colonnes receipt_* non ajoutées, verrou de table indisponible sous 5 s';
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_uploaded_by_users_id_fk'
+  ) THEN
+    ALTER TABLE document_renewal_requests ADD CONSTRAINT document_renewal_requests_receipt_uploaded_by_users_id_fk
+      FOREIGN KEY (receipt_uploaded_by) REFERENCES users(id) NOT VALID;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_uploaded_by_users_id_fk' AND NOT convalidated
+  ) THEN
+    BEGIN
+      ALTER TABLE document_renewal_requests VALIDATE CONSTRAINT document_renewal_requests_receipt_uploaded_by_users_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'document_renewal_requests_receipt_uploaded_by_users_id_fk laissée NOT VALID : receipt_uploaded_by vers un utilisateur absent';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available OR undefined_column THEN
+  RAISE WARNING 'document_renewal_requests_receipt_uploaded_by_users_id_fk non posée : verrou indisponible ou colonne receipt_uploaded_by absente';
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_complete'
+      AND pg_get_constraintdef(oid) NOT LIKE '%receipt_uploaded_at%'
+  ) THEN
+    ALTER TABLE document_renewal_requests DROP CONSTRAINT document_renewal_requests_receipt_complete;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_complete'
+  ) THEN
+    ALTER TABLE document_renewal_requests ADD CONSTRAINT document_renewal_requests_receipt_complete
+      CHECK (num_nulls(receipt_valid_until, receipt_file_path, receipt_file_name, receipt_uploaded_at) IN (0, 4)) NOT VALID;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_complete' AND NOT convalidated
+  ) THEN
+    BEGIN
+      ALTER TABLE document_renewal_requests VALIDATE CONSTRAINT document_renewal_requests_receipt_complete;
+    EXCEPTION WHEN check_violation THEN
+      RAISE WARNING 'document_renewal_requests_receipt_complete laissée NOT VALID : récépissés incomplets dans document_renewal_requests';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available OR undefined_column THEN
+  RAISE WARNING 'document_renewal_requests_receipt_complete non posée : verrou indisponible ou colonnes receipt_* absentes';
+END $$;`;
+
+export const DOCUMENT_RENEWAL_RECEIPT_CONSTRAINTS: readonly string[] = [
+  'document_renewal_requests_receipt_uploaded_by_users_id_fk',
+  'document_renewal_requests_receipt_complete',
+];
+
+/**
+ * Le RAISE WARNING des blocs DO n'atteint pas les logs applicatifs : relit pg_constraint après
+ * DOCUMENT_RENEWAL_RECEIPT_SQL et journalise toute contrainte absente, non validée, ou CHECK restée
+ * à l'ancienne définition (sans receipt_uploaded_at) parce que des lignes violent la nouvelle.
+ */
+export async function reportDocumentRenewalReceiptGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows } = await client.query(
+    `SELECT conname, convalidated, pg_get_constraintdef(oid) AS def
+       FROM pg_constraint
+      WHERE conrelid = 'document_renewal_requests'::regclass AND conname = ANY($1)`,
+    [DOCUMENT_RENEWAL_RECEIPT_CONSTRAINTS],
+  );
+  const found = new Map(rows.map((r) => [r.conname as string, r]));
+  const missing = DOCUMENT_RENEWAL_RECEIPT_CONSTRAINTS.filter((name) => !found.has(name));
+  const notValidated = DOCUMENT_RENEWAL_RECEIPT_CONSTRAINTS.filter((name) => found.get(name)?.convalidated === false);
+  const check = found.get('document_renewal_requests_receipt_complete');
+  const outdated = check && !String(check.def).includes('receipt_uploaded_at') ? [check.conname as string] : [];
+  const affected = [...new Set([...missing, ...notValidated, ...outdated])];
+  if (affected.length) {
+    // Chaque contrainte citée par son nom : la FK (receipt_uploaded_by → users) et la CHECK se corrigent différemment.
+    log.warn(
+      { missing, notValidated, outdated },
+      `Contraintes du récépissé de renouvellement non conformes : ${affected.join(', ')} ` +
+        '(FK : receipt_uploaded_by vers un utilisateur absent ; CHECK : récépissés incomplets ; ou verrou de table indisponible)',
+    );
+  }
+  return { missing, notValidated, outdated };
+}
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -977,6 +1092,9 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS center_accreditation_snapshot text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS inspector_name text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS inspector_code text`);
+    // Récépissé de renouvellement (P3-2) — jumelle de server/db/migrations/20261103_document_renewal_receipt.sql.
+    await pool.query(DOCUMENT_RENEWAL_RECEIPT_SQL);
+    await reportDocumentRenewalReceiptGaps(pool);
     await db.execute(sql`
       UPDATE document_renewal_centers
       SET accreditation_number = 'AGR-' || LPAD(id::text, 4, '0')
