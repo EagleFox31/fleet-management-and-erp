@@ -22,11 +22,18 @@ import { createTestVehicle } from "../support/factories";
 type Captured = { eventType: string; scope?: { type: string; userIds?: number[]; roles?: string[] } };
 type Recipient = { userId: number; role: string };
 
-const reaches = (scope: Captured["scope"], recipient: Recipient): boolean => {
+// normalizeScope (server/index.ts) retombe sur broadcast pour une portée absente, vide ou inconnue.
+const isEffectiveBroadcast = (scope: Captured["scope"]): boolean => {
   if (!scope || scope.type === "broadcast") return true;
-  if (scope.type === "user") return (scope.userIds ?? []).includes(recipient.userId);
-  if (scope.type === "roles") return (scope.roles ?? []).map((role) => role.trim().toLowerCase()).includes(recipient.role);
-  return false;
+  if (scope.type === "user") return !(scope.userIds ?? []).some((id) => Number.isInteger(id) && id > 0);
+  if (scope.type === "roles") return !(scope.roles ?? []).some((role) => typeof role === "string" && role.trim().length > 0);
+  return true;
+};
+
+const reaches = (scope: Captured["scope"], recipient: Recipient): boolean => {
+  if (isEffectiveBroadcast(scope)) return true;
+  if (scope!.type === "user") return (scope!.userIds ?? []).includes(recipient.userId);
+  return (scope!.roles ?? []).map((role) => role.trim().toLowerCase()).includes(recipient.role);
 };
 
 const ids = createIdBag();
@@ -35,13 +42,13 @@ const previousBroadcast = (global as any).broadcastUpdate;
 const proofPaths: string[] = [];
 let registration = "";
 
-let actors: Awaited<ReturnType<typeof startContractActors<"secretary" | "owner" | "stranger">>>;
+let actors: Awaited<ReturnType<typeof startContractActors<"secretary" | "owner" | "stranger" | "driver">>>;
 
 beforeAll(async () => {
   (global as any).broadcastUpdate = vi.fn((eventType: string, data: { scope?: Captured["scope"] }) => {
     captured.push({ eventType, scope: data?.scope });
   });
-  actors = await startContractActors({ secretary: "secretary", owner: "client", stranger: "client" }, ids.userIds);
+  actors = await startContractActors({ secretary: "secretary", owner: "client", stranger: "client", driver: "driver" }, ids.userIds);
 }, 180000);
 
 afterAll(async () => {
@@ -99,6 +106,7 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
 
     const owner: Recipient = { userId: ownerId, role: "client" };
     const stranger: Recipient = { userId: actors.userIdOf("stranger"), role: "client" };
+    const driver: Recipient = { userId: actors.userIdOf("driver"), role: "driver" };
     const secretary: Recipient = { userId: actors.userIdOf("secretary"), role: "secretary" };
 
     const vehicleUpdated = captured.filter((frame) => frame.eventType === "vehicle_updated");
@@ -106,8 +114,9 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
     expect(vehicleUpdated.some((frame) => reaches(frame.scope, secretary))).toBe(true);
     expect(vehicleUpdated.some((frame) => reaches(frame.scope, owner))).toBe(true);
 
-    // Aucune trame du renouvellement n'atteint le client tiers, et aucune ne part en broadcast.
+    // Aucune trame n'atteint le client tiers ni le chauffeur, aucune ne part en broadcast effectif.
     expect(captured.filter((frame) => reaches(frame.scope, stranger)).map((frame) => frame.eventType)).toEqual([]);
-    expect(captured.filter((frame) => !frame.scope || frame.scope.type === "broadcast")).toEqual([]);
+    expect(captured.filter((frame) => reaches(frame.scope, driver)).map((frame) => frame.eventType)).toEqual([]);
+    expect(captured.filter((frame) => isEffectiveBroadcast(frame.scope))).toEqual([]);
   });
 });
