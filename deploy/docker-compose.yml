@@ -1,0 +1,59 @@
+# Recette + production sur un même VPS : une image, deux conteneurs, Caddy en frontal (HTTPS automatique).
+# Base : Neon externe (DATABASE_URL des fichiers .env.*), aucun Postgres ici.
+# Guide : docs/deploiement/vps.md
+
+services:
+  app-recette:
+    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${RECETTE_TAG:-latest}
+    build:
+      context: ..
+    env_file: .env.recette
+    environment:
+      PORT: "5000"
+    volumes:
+      - uploads-recette:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  app-prod:
+    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${PROD_TAG:-latest}
+    env_file: .env.prod
+    environment:
+      PORT: "5000"
+    volumes:
+      - uploads-prod:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RECETTE_DOMAIN: ${RECETTE_DOMAIN:?à définir dans deploy/.env}
+      PROD_DOMAIN: ${PROD_DOMAIN:?à définir dans deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app-recette
+      - app-prod
+    restart: unless-stopped
+
+volumes:
+  uploads-recette:
+  uploads-prod:
+  caddy-data:
+  caddy-config:
