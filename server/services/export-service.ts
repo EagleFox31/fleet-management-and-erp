@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { vehicles, workOrders, parts, partsStockMovements, fuelRecords, users } from "@shared/schema";
 import { eq, desc, asc } from "drizzle-orm";
+import { ROLE_LABELS } from "@shared/constants/roles";
+import { WORK_ORDER_PRIORITY_LABELS, WORK_ORDER_STATUS_LABELS } from "@shared/constants/work-orders";
 import * as XLSX from 'xlsx';
 import archiver from 'archiver';
 import { Readable } from 'stream';
@@ -307,34 +309,15 @@ Chaque fichier contient un tableau d'objets représentant les enregistrements de
   }
 
   private translateWorkOrderStatus(status: string): string {
-    const statusMap: { [key: string]: string } = {
-      'pending': 'En attente',
-      'in_progress': 'En cours',
-      'completed': 'Terminé',
-      'cancelled': 'Annulé'
-    };
-    return statusMap[status] || status;
+    return (WORK_ORDER_STATUS_LABELS as Record<string, string>)[status] ?? status;
   }
 
   private translatePriority(priority: string): string {
-    const priorityMap: { [key: string]: string } = {
-      'low': 'Faible',
-      'medium': 'Moyenne',
-      'high': 'Élevée',
-      'urgent': 'Urgente'
-    };
-    return priorityMap[priority] || priority;
+    return (WORK_ORDER_PRIORITY_LABELS as Record<string, string>)[priority] ?? priority;
   }
 
   private translateUserRole(role: string): string {
-    const roleMap: { [key: string]: string } = {
-      'admin': 'Administrateur',
-      'manager': 'Gestionnaire',
-      'technician': 'Technicien',
-      'workshop_manager': 'Chef d\'atelier',
-      'driver': 'Chauffeur'
-    };
-    return roleMap[role] || role;
+    return (ROLE_LABELS as Record<string, string>)[role] ?? role;
   }
 }
 
