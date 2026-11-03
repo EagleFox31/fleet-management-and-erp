@@ -261,5 +261,12 @@ export const IMPORT_INTERVENTION_ROLES = ["admin", "workshop_manager"] as const 
 /** Rapport de maintenance (`/api/maintenance-reports`). */
 export const MAINTENANCE_REPORT_ROLES = ["admin", "workshop_manager", "management"] as const satisfies readonly AppRole[];
 
+/**
+ * Gestionnaires de missions : édition d'une mission (`PATCH /api/missions/:id`) — coût carburant,
+ * dates, budgets, chauffeur et véhicule. Aligné sur `MISSION_FUEL_MANAGERS` et `isDriverManager`.
+ * Le chauffeur affecté n'y figure pas : il n'a aucune écriture légitime par cette route.
+ */
+export const MISSION_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];

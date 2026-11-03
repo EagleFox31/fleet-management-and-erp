@@ -17,6 +17,8 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
+import { authorize } from "../middleware/auth";
+import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -1890,7 +1892,9 @@ const updateMissionSchema = z.object({
 });
 
 // PATCH /api/missions/:id - Mettre à jour les infos de mission
-router.patch("/:id", async (req, res) => {
+// Réservé aux gestionnaires de missions (R3) : le montage n'exige que isStaff, ce qui laissait
+// chauffeur, technicien et magasinier modifier coût carburant, dates, chauffeur et véhicule.
+router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
     if (!Number.isInteger(missionId)) {

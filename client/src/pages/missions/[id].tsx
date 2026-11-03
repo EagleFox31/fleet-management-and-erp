@@ -19,6 +19,7 @@ import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
+import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -1443,6 +1444,7 @@ export default function MissionDetailsPage() {
       : null;
 
   const canManageMissionFuel = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
+  const canManageMission = (MISSION_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
   const isMissionCompleted = String(mission?.status || "") === "completed";
   const canDeclareMissionWithoutFuel =
     canManageMissionFuel &&
@@ -1928,21 +1930,23 @@ export default function MissionDetailsPage() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Missions
             </Button>
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              {/* Le chauffeur exécute la mission (statut, carburant, incidents) mais ne la modifie pas. */}
-              {user?.role !== "driver" && (
+              {/* Édition et budgets : gestionnaires de missions seulement (PATCH /api/missions/:id, R3). */}
+              {canManageMission && (
                 <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
                   <FileText className="h-3.5 w-3.5" /> Modifier
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3 text-xs gap-1.5"
-                onClick={openMissionBudgetManagerDialog}
-                data-testid="button-open-mission-budgets"
-              >
-                <Wallet className="h-3.5 w-3.5" /> Budgets mission
-              </Button>
+              {canManageMission && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={openMissionBudgetManagerDialog}
+                  data-testid="button-open-mission-budgets"
+                >
+                  <Wallet className="h-3.5 w-3.5" /> Budgets mission
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
