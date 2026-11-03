@@ -15,9 +15,8 @@ import { describe, expect, it } from "vitest";
  *
  * `server/lib/realtime-scope.ts` (qui interprète la portée) et `server/_archive/` sont exclus.
  *
- * Chaque entrée porte sa justification. « OT » = comportement historique des événements d'ordre
- * de travail, qui retombaient en broadcast faute de portée avant la règle fermée : rendu explicite
- * à l'identique, à restreindre (décision produit : un client reçoit-il l'OT d'un autre ?).
+ * Chaque entrée porte sa justification. Les événements d’ordre de travail ne sont plus ici : ils partent
+ * au personnel (`server/lib/work-order-realtime-scope.ts`), jamais à un client.
  */
 const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "shared/contracts/realtime-events.ts": {
@@ -28,19 +27,10 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/drivers.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/fuel-card.routes.ts": { count: 1, why: "événements carte carburant suivis par plusieurs profils" },
   "server/api/operations.routes.ts": { count: 1, why: "opérations suivies par plusieurs profils" },
-  "server/api/part-requirements.routes.ts": { count: 3, why: "lot B, OT : demandes de pièce créées, modifiées, supprimées" },
   "server/api/purchase-orders.routes.ts": { count: 1, why: "commandes fournisseur suivies par plusieurs profils" },
   "server/api/supplier-invoices.routes.ts": { count: 1, why: "factures fournisseur suivies par plusieurs profils" },
   "server/api/suppliers.routes.ts": { count: 1, why: "fournisseurs suivis par plusieurs profils" },
-  "server/api/technician-work-orders.routes.ts": { count: 1, why: "lot B, OT : mise à jour par le technicien" },
-  "server/api/work-order-items.routes.ts": { count: 1, why: "lot B, OT : lignes de travail (point d'émission unique `diffuser`)" },
-  "server/api/work-order-parts.routes.ts": { count: 6, why: "lot B, OT : pièces demandées, utilisées, OT en attente de pièces" },
-  "server/index.ts": { count: 1, why: "lot B, pont LISTEN/NOTIFY des triggers Postgres : toujours broadcast" },
-  "server/routes.ts": { count: 6, why: "lot B, OT créé/modifié/supprimé, pièce retirée, recharge carte (fichier gelé, ne pas en ajouter)" },
-  "server/services/incident-service.ts": { count: 1, why: "lot B, OT créé depuis un incident" },
-  "server/services/preventive-maintenance-service.ts": { count: 1, why: "lot B, OT : création préventive" },
-  "server/services/procurement-service.ts": { count: 2, why: "lot B, OT : pièces livrées ou reçues" },
-  "server/services/technician-work-orders-service.ts": { count: 1, why: "lot B, OT : changement de statut par le technicien" },
+  "server/routes.ts": { count: 1, why: "recharge carte carburant (fichier gelé, ne pas en ajouter)" },
   "server/services/tires-service-simplified.ts": { count: 1, why: "pneus suivis par plusieurs profils" },
 };
 

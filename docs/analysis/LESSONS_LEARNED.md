@@ -1770,6 +1770,26 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
 
+## 2026-11-03 — Événements d'ordre de travail diffusés à tous les comptes, clients compris
+
+### Contexte
+- Les trames d'OT (OT, pièces, demandes de pièce, pont des triggers Postgres) partaient en `scope: { type: "broadcast" }`, rendu explicite lors du passage à la portée fermée. Un client recevait titre, coûts et pièces de l'OT du véhicule d'un autre client.
+
+### Cause racine
+- Classification : dette de portée héritée. Le test d'hygiène gelait le comportement (« OT = historique ») sans le corriger ; aucun test ne jouait deux clients propriétaires.
+
+### Résolution
+- Portées `workOrderStaffScope` / `workOrderCostScope` (`server/lib/work-order-realtime-scope.ts`) ; le pont LISTEN/NOTIFY (`server/lib/db-event-relay.ts`) envoie `work_order_*` en `workOrderCostScope()` et `vehicle_status_changed` au personnel. Aucune trame d'OT vers un client. Seule exception : le propriétaire du véhicule reçoit une trame réduite `{ vehicleId, status }` de `vehicle_status_changed`, sans acteur (propriétaire lu en une requête ; nul ou lecture en échec, rien n'est envoyé), parce que l'écran client lit `/api/vehicles/:id` et que `useRealTimeSync` l'invalide sur cet événement.
+
+### Prévention (vérifiable)
+- `tests/contract/lotB-work-order-scope.contract.test.ts` : deux clients, un chauffeur, du personnel, destinataires résolus par le vrai `resolveRecipients` ; couvre les routes, le pont, incident-service, préventif, lignes de travail, awaiting-parts et procurement.
+- `broadcast-hygiene.test.ts` : égalité stricte, les entrées d'OT sont retirées ; tout retour en broadcast échoue.
+- `work-order-scope-hygiene.test.ts` : comptes gelés par fichier d'émission ; échoue si une trame qui porte `workOrder`, `partUsed` ou `requirement` n'est pas en `workOrderCostScope()`.
+
+### Règle Projet (obligatoire)
+- Un événement qui concerne un objet d'un véhicule part au personnel ; un client ne reçoit une trame que si un écran client l'écoute, réduite aux identifiants et au statut.
+- Une trame qui porte l'objet OT (`workOrder`), une demande de pièce (`requirement`) ou une pièce utilisée (`partUsed`) part en `workOrderCostScope()` : titre, coûts et pièces ne vont ni aux clients ni au chauffeur. `workOrderStaffScope()` est réservé aux trames d'identifiants.
+
 ### Suite : statut du plein normal relu sous le verrou de ligne
 
 - **Cause** : `POST /api/missions/:id/fuel-records` contrôlait le statut sur une lecture faite avant les verrous. Deux effets : un rejeu après clôture recevait 400 au lieu du plein enregistré, et une clôture concurrente laissait passer un débit sur une mission clôturée.
