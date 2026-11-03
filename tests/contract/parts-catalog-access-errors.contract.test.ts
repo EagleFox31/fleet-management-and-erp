@@ -49,8 +49,8 @@ async function newPartId(): Promise<number> {
 const rowOf = async (id: number) => (await db.select().from(parts).where(eq(parts.id, id)))[0];
 
 /** Corps d'erreur conforme à ApiErrorBody (tests/support/api-error.ts, même contrôle que les e2e). */
-function expectApiError(res: { status: number; body: unknown }, status: number, code: string) {
-  expect(apiErrorProblems(res.status, res.body, status, code)).toEqual([]);
+function expectApiError(res: { status: number; body: unknown; headers: Headers }, status: number, code: string) {
+  expect(apiErrorProblems(res.status, res.body, status, code, res.headers.get("x-request-id"))).toEqual([]);
 }
 
 beforeAll(async () => {

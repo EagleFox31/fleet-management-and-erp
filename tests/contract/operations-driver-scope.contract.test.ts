@@ -66,8 +66,8 @@ async function missionFor(driverId: number, status: string) {
   return m;
 }
 
-function expectCleanError(res: { status: number; body: any }, status: number) {
-  expect(apiErrorProblems(res.status, res.body, status)).toEqual([]);
+function expectCleanError(res: { status: number; body: any; headers: Headers }, status: number) {
+  expect(apiErrorProblems(res.status, res.body, status, undefined, res.headers.get("x-request-id"))).toEqual([]);
 }
 
 const idsOf = (body: unknown) => (body as { id?: number; mission?: { id: number } }[]).map((m) => m.id ?? m.mission?.id);

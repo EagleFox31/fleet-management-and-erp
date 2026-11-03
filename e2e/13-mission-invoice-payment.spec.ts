@@ -32,8 +32,8 @@ const TTC = 119250; // TVA 19,25 %
 const ids = createIdBag();
 
 /** Corps conforme à ApiErrorBody (tests/support/api-error.ts, même contrôle que les contrats). */
-function expectApiError(status: number, text: string, expected: number, label: string) {
-  expect(apiErrorProblems(status, text, expected), label).toEqual([]);
+function expectApiError(status: number, text: string, expected: number, label: string, requestIdHeader?: string | null) {
+  expect(apiErrorProblems(status, text, expected, undefined, requestIdHeader), label).toEqual([]);
 }
 const missionIds: number[] = [];
 let logistics: E2ECredentials;
@@ -231,7 +231,7 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       const { invoiceId } = await deliveredMissionWithInvoice(logisticsSession.page.request);
       const attempt = async (api: APIRequestContext, label: string) => {
         const res = await api.post(`/api/billing/invoices/${invoiceId}/payments`, payment(1000));
-        expectApiError(res.status(), await res.text(), 403, `rôle ${label}`);
+        expectApiError(res.status(), await res.text(), 403, `rôle ${label}`, res.headers()["x-request-id"] ?? null);
       };
       await attempt(logisticsSession.page.request, "logistics");
       for (const credentials of [technician, driver]) {
@@ -256,7 +256,7 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       const { invoiceId } = await deliveredMissionWithInvoice(logisticsSession.page.request);
       const pay = async (body: unknown) => {
         const res = await secretarySession.page.request.post(`/api/billing/invoices/${invoiceId}/payments`, { data: body });
-        return { status: () => res.status(), text: await res.text() };
+        return { status: () => res.status(), text: await res.text(), requestIdHeader: res.headers()["x-request-id"] ?? null };
       };
       const base = { paymentDate: "2026-11-03", paymentMethod: "bank_transfer" };
 
@@ -269,7 +269,7 @@ test.describe("P2 : état de la facture sur la mission et rôles du paiement", (
       ];
       for (const { label, body } of invalid) {
         const res = await pay(body);
-        expectApiError(res.status(), res.text, 400, label);
+        expectApiError(res.status(), res.text, 400, label, res.requestIdHeader);
       }
 
       const state = await balanceOf(invoiceId);
