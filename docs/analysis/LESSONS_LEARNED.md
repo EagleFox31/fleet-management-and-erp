@@ -1965,3 +1965,21 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Une exclusion entre écrivains d'une ressource partagée vit dans la ressource elle-même (verrou en base), pas dans une convention d'appel que chacun doit penser à suivre.
+
+## 2026-11-03 — Une alerte de stock écrite dans la transaction annulait la sortie de stock (quasi-incident)
+
+### Contexte
+- `storage.checkAndCreateStockAlerts` créait l'alerte de stock bas avec l'exécuteur de la transaction du mouvement (sortie de stock d'un OT). Constaté en écrivant le test d'intégration de la couche 2 (#202) ; aucun signalement utilisateur.
+
+### Cause racine
+- Classification : effet secondaire couplé à la transaction métier. Sous Postgres, une erreur SQL dans une transaction l'empoisonne : un insert d'alerte en échec (contrainte, compte supprimé) faisait annuler le mouvement, donc la sortie de stock. La trame `alert_created` pouvait aussi partir avant un commit qui n'aurait jamais lieu.
+
+### Résolution
+- #202 : l'alerte n'est plus écrite dans la transaction. `StockWriteOptions.afterCommit` reçoit l'effet, que l'appelant (`work-order-parts.routes.ts`) exécute après le commit ; hors transaction, l'alerte est créée directement. Un échec de l'alerte est journalisé (`moduleLogger`) sans remonter.
+
+### Prévention (vérifiable)
+- `tests/integration/stock-alert-broadcast.test.ts` : un déclencheur qui refuse l'insert d'alerte n'empêche ni la baisse de stock ni le mouvement ; une transaction annulée n'emporte ni alerte ni trame ; rien avant le commit.
+- `tests/contract/stock-issue-alert-broadcast.contract.test.ts` : la sortie de stock HTTP réussit et notifie admins et magasiniers seulement.
+
+### Règle Projet (obligatoire)
+- Une notification (alerte, trame WebSocket, e-mail) déclenchée par une transition métier s'exécute après le commit, jamais avec l'exécuteur de la transaction. Mouvement en transaction sans `afterCommit` : l'alerte n'est pas créée et un avertissement est journalisé.
