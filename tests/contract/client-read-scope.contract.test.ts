@@ -217,6 +217,16 @@ describe("routes à identifiant : refus du client avant toute lecture", () => {
   );
 });
 
+describe("GET /api/parts/:id/* : id hors plage", () => {
+  it.each(["/api/parts/99999999999", "/api/parts/99999999999/stock-history", "/api/parts/99999999999/work-orders", "/api/parts/99999999999/usage-history", "/api/parts/99999999999/real-stock"])(
+    "GET %s : 400 pour le personnel (et non 500)",
+    async (path) => {
+      const res = await get(path, "manager");
+      expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
+    },
+  );
+});
+
 describe("GET /api/work-orders/:id : id hors plage", () => {
   it("un id hors entier 32 bits répond 400 (et non 500)", async () => {
     for (const actor of ["manager", "clientA"] as const) {

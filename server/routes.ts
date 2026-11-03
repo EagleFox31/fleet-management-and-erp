@@ -35,7 +35,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
-import { assertWorkOrderReadable, assertValidDbId } from "./lib/work-order-scope";
+import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -1652,7 +1652,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cancelled: Number(statsRow?.cancelled ?? 0),
       };
       
-      log.info({ stats, requestId: req.requestId }, "Work orders statistics calculated");
+      log.debug({ stats, requestId: req.requestId }, "Work orders statistics calculated");
       
       return res.status(200).json(stats);
     } catch (error) {
@@ -1820,10 +1820,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
 
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
-      assertValidDbId(id, "ID d'ordre de travail invalide");
+      assertValidDbId(id, "ID d'ordre de travail invalide.");
 
       const workOrder = await storage.getWorkOrder(id);
       // Pas de contenu dans le journal : l'accès n'est pas encore contrôlé ici.
@@ -2005,7 +2005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       const workOrder = await storage.getWorkOrder(id);
@@ -2257,7 +2257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
 
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
 
       const workOrder = await storage.getWorkOrder(id);
@@ -2437,7 +2437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       
-      if (isNaN(id)) {
+      if (isNaN(id) || id < 1 || id > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2472,7 +2472,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrderId = parseInt(req.params.workOrderId);
       
       if (isNaN(workOrderId)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       await assertWorkOrderReadable(req.user, workOrderId);
@@ -2520,7 +2520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrderId = parseInt(req.params.workOrderId);
       
       if (isNaN(workOrderId)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       await assertWorkOrderReadable(req.user, workOrderId);
@@ -2739,7 +2739,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2756,7 +2756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2773,7 +2773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2817,7 +2817,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
