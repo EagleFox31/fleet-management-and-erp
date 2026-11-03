@@ -3303,40 +3303,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Enregistrer une consommation de carburant (débit)
-  app.post("/api/fuel-card/consumption", authenticate, async (req, res, next) => {
-    try {
-      const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
-      
-      if (!vehicleId || !quantity || !unitPrice || !date || !stationName || !destination) {
-        return res.status(400).json({ message: "Données de consommation incomplètes" });
-      }
-
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const result = await fuelCardService.recordConsumption({
-        vehicleId: parseInt(vehicleId),
-        quantity: parseFloat(quantity),
-        unitPrice: parseFloat(unitPrice),
-        date,
-        stationName,
-        destination,
-        clientName,
-        notes,
-        userId
-      });
-      
-      return res.status(201).json(result);
-    } catch (error) {
-      log.error({ err: error, requestId: (req as any).requestId }, "enregistrement de la consommation en échec");
-      return next(toFuelCardAppError(error));
-    }
-  });
-  
+  // POST /api/fuel-card/consumption : servi par server/api/fuel-card.routes.ts (monté avant).
   // Historique carburant avec filtres (année, mois, véhicule, type)
   app.get("/api/fuel-card/history", authenticate, async (req, res) => {
     try {
