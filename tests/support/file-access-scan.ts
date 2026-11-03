@@ -15,9 +15,15 @@ import { scopeOf } from "./alert-emission-scan";
  * La recherche se fait sur l'AST : un commentaire, ou une borne posée sur une autre variable
  * (y compris un autre champ de `req`), ne comptent pas.
  *
+ * Garde : `isInsideDirectory(dir, p)` ne borne `p` que s'il en est le **second** argument (le
+ * candidat), placé **avant** l'accès et dans la **même fonction** : une garde dans un rappel ou
+ * après l'appel disque ne compte pas. Méthode sur une valeur bornée : seules `find`, `filter`,
+ * `at` et `slice` gardent le résultat borné (`candidates.concat(p)[0]` ne l'est pas).
+ *
  * Limites connues (garde statique, pas une preuve) :
  *   - borne appelée mais résultat ignoré : `isInsideDirectory(dir, p); fs.unlinkSync(p)` est jugé
- *     borné, que le `if` refuse ou non ;
+ *     borné, que le `if` refuse ou non ; une garde dans une branche (`if (x) isInsideDirectory(…)`)
+ *     compte comme si elle précédait l'accès sur tous les chemins ;
  *   - une réaffectation (`p = req.body.p` après une déclaration bornée) n'est pas suivie ;
  *   - un chemin passé à une autre fonction est jugé dans la portée de celle-ci, sans suivre l'appelant.
  */
@@ -64,6 +70,17 @@ function boundCallsIn(node: ts.Node): ts.CallExpression[] {
   return found;
 }
 
+/** Fonction englobante la plus proche (ou le fichier) : la garde doit vivre dans la même que l'accès. */
+function enclosingFunction(node: ts.Node): ts.Node {
+  for (let current = node.parent; current; current = current.parent) {
+    if (ts.isFunctionLike(current) || ts.isSourceFile(current)) return current;
+  }
+  return node.getSourceFile();
+}
+
+/** Méthodes dont le résultat reste dans l'ensemble borné (sous-ensemble ou élément). */
+const BOUND_PRESERVING_METHODS = new Set(["find", "filter", "at", "slice"]);
+
 function unwrap(node: ts.Expression): ts.Expression {
   let current = node;
   while (
@@ -96,49 +113,58 @@ function initializersOf(name: string, scope: ts.Node): ts.Expression[] {
 
 /**
  * `name` est borné :
- *   - gardé : `isInsideDirectory` le reçoit **directement** en argument (`isInsideDirectory(dir, name)`) ;
+ *   - gardé : `isInsideDirectory` le reçoit **directement** en second argument (`isInsideDirectory(dir, name)`),
+ *     avant `at` et dans la même fonction ;
  *   - ou déclaré : toutes ses déclarations dans la portée sont des expressions bornées.
  * Un paramètre ou `req` n'a pas de déclaration locale : il n'est borné que gardé directement.
  */
-function isBoundName(name: string, scope: ts.Node, seen: Set<string>): boolean {
+function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Node): boolean {
   if (seen.has(name)) return false;
   seen.add(name);
   // Seul isInsideDirectory est une garde : uploadedFileCandidates(p) borne son résultat, pas p.
-  const guarded = boundCallsIn(scope).some((call) =>
-    calleeName(call) === "isInsideDirectory" && call.arguments.some((arg) => {
-      const inner = unwrap(arg);
-      return ts.isIdentifier(inner) && inner.text === name;
-    }),
-  );
+  const guarded = boundCallsIn(scope).some((call) => {
+    if (calleeName(call) !== "isInsideDirectory" || !call.arguments[1]) return false;
+    const candidate = unwrap(call.arguments[1]);
+    return (
+      ts.isIdentifier(candidate) &&
+      candidate.text === name &&
+      call.getEnd() <= at.getStart() &&
+      enclosingFunction(call) === enclosingFunction(at)
+    );
+  });
   if (guarded) return true;
   const initializers = initializersOf(name, scope);
-  return initializers.length > 0 && initializers.every((init) => isBoundExpression(init, scope, seen));
+  return initializers.length > 0 && initializers.every((init) => isBoundExpression(init, scope, seen, init));
 }
 
 /**
  * Expression bornée, par sa structure :
  *   - appel de borne (`uploadedFileCandidates(p)`) ;
- *   - accès ou méthode sur une valeur bornée (`candidates[0]`, `candidates.find(…)`) ;
+ *   - accès, ou méthode de `BOUND_PRESERVING_METHODS`, sur une valeur bornée (`candidates[0]`, `candidates.find(…)`) ;
  *   - identifiant borné (`isBoundName`) ;
  *   - `a ?? b`, `a || b`, `c ? a : b` : **chaque** branche bornée (`candidates[0] ?? p` ne l'est pas).
  */
-function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string>): boolean {
+function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string>, at: ts.Node): boolean {
   const expr = unwrap(node);
   if (ts.isCallExpression(expr)) {
     if (BOUND_CALLS.has(calleeName(expr) ?? "")) return true;
-    return ts.isPropertyAccessExpression(expr.expression) && isBoundExpression(expr.expression.expression, scope, seen);
+    return (
+      ts.isPropertyAccessExpression(expr.expression) &&
+      BOUND_PRESERVING_METHODS.has(expr.expression.name.text) &&
+      isBoundExpression(expr.expression.expression, scope, seen, at)
+    );
   }
-  if (ts.isElementAccessExpression(expr)) return isBoundExpression(expr.expression, scope, seen);
-  if (ts.isIdentifier(expr)) return isBoundName(expr.text, scope, seen);
+  if (ts.isElementAccessExpression(expr)) return isBoundExpression(expr.expression, scope, seen, at);
+  if (ts.isIdentifier(expr)) return isBoundName(expr.text, scope, seen, at);
   if (ts.isBinaryExpression(expr)) {
     const kind = expr.operatorToken.kind;
     if (kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken) {
-      return isBoundExpression(expr.left, scope, new Set(seen)) && isBoundExpression(expr.right, scope, new Set(seen));
+      return isBoundExpression(expr.left, scope, new Set(seen), at) && isBoundExpression(expr.right, scope, new Set(seen), at);
     }
     return false;
   }
   if (ts.isConditionalExpression(expr)) {
-    return isBoundExpression(expr.whenTrue, scope, new Set(seen)) && isBoundExpression(expr.whenFalse, scope, new Set(seen));
+    return isBoundExpression(expr.whenTrue, scope, new Set(seen), at) && isBoundExpression(expr.whenFalse, scope, new Set(seen), at);
   }
   return false;
 }
@@ -148,15 +174,29 @@ const TWO_PATH_CALLS = new Set(["copyFile", "copyFileSync", "cp", "cpSync", "ren
 
 function isBoundAccess(node: ts.CallExpression, call: string, scope: ts.Node): boolean {
   const [source, destination] = node.arguments;
-  if (!source || !isBoundExpression(source, scope, new Set())) return false;
+  if (!source || !isBoundExpression(source, scope, new Set(), node)) return false;
   if (!TWO_PATH_CALLS.has(call)) return true;
-  return !!destination && isBoundExpression(destination, scope, new Set());
+  return !!destination && isBoundExpression(destination, scope, new Set(), node);
 }
 
 /**
  * Alias d'un appel disque, qui échapperaient au scan par nom :
- * `import { unlink as del }`, `const { unlink: del } = fs`, `const del = fs.unlinkSync`.
+ * `import { unlink as del }`, `const { unlink: del } = fs`, et toute référence non appelée à un
+ * membre disque : `const del = fs.unlinkSync`, `del = fs["unlinkSync"]`, `fs.unlinkSync.bind(fs)`,
+ * `promisify(fs.unlink)`.
  */
+function aliasLabel(member: ts.Expression): string {
+  let node: ts.Node = member;
+  // fs.unlinkSync.bind(fs) : l'alias est ce qui reçoit le résultat de bind.
+  if (ts.isPropertyAccessExpression(node.parent) && node.parent.name.text === "bind" && ts.isCallExpression(node.parent.parent)) {
+    node = node.parent.parent;
+  }
+  const parent = node.parent;
+  if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text;
+  if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) return parent.left.getText();
+  return "<valeur>";
+}
+
 export function renamedAccessImports(file: string, text: string): string[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const renamed: string[] = [];
@@ -173,14 +213,14 @@ export function renamedAccessImports(file: string, text: string): string[] {
     ) {
       renamed.push(`${file}:${node.propertyName.text} as ${node.name.text}`);
     }
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer &&
-      ts.isPropertyAccessExpression(node.initializer) &&
-      ACCESS_CALLS.has(node.initializer.name.text)
-    ) {
-      renamed.push(`${file}:${node.initializer.name.text} as ${node.name.text}`);
+    const member = ts.isPropertyAccessExpression(node)
+      ? node.name.text
+      : ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
+        ? node.argumentExpression.text
+        : null;
+    const called = !!node.parent && ts.isCallExpression(node.parent) && node.parent.expression === node;
+    if (member && ACCESS_CALLS.has(member) && !called) {
+      renamed.push(`${file}:${member} as ${aliasLabel(node as ts.Expression)}`);
     }
     ts.forEachChild(node, visit);
   };

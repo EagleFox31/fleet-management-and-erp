@@ -159,4 +159,37 @@ describe("scanFileAccesses", () => {
     `;
     expect(scanFileAccesses("b.ts", text).map((s) => s.bounded)).toEqual([false]);
   });
+
+  it("garde : second argument seulement, avant l'accès, dans la même fonction", () => {
+    const text = `
+      function asDirectory(p) { if (!isInsideDirectory(p, "/tmp/x")) return; fs.rmSync(p); }
+      function after(dir, p) { fs.rmSync(p); if (!isInsideDirectory(dir, p)) throw new Error("x"); }
+      function nested(dir, p) { const check = () => isInsideDirectory(dir, p); fs.rmSync(p); }
+      function before(dir, p) { if (!isInsideDirectory(dir, p)) return; fs.rmSync(p); }
+    `;
+    expect(scanFileAccesses("h.ts", text).map((s) => [s.scope, s.bounded])).toEqual([
+      ["asDirectory", false],
+      ["after", false],
+      ["nested", false],
+      ["before", true],
+    ]);
+  });
+
+  it("méthode sur une valeur bornée : concat (ou toute méthode hors liste) perd la borne", () => {
+    const text = `
+      function concat(p, q) { const all = uploadedFileCandidates(p).concat([q]); fs.unlinkSync(all[1]); }
+      function inlineConcat(p, q) { fs.unlinkSync(uploadedFileCandidates(p).concat(q)[0]); }
+      function map(p, q) { fs.unlinkSync(uploadedFileCandidates(p).map(() => q)[0]); }
+      function filtered(p) { fs.unlinkSync(uploadedFileCandidates(p).filter((c) => fs.existsSync(c))[0]); }
+    `;
+    expect(scanFileAccesses("i.ts", text).map((s) => s.bounded)).toEqual([false, false, false, true]);
+  });
+
+  it("alias : accès par crochets, bind, affectation ou passage en valeur", () => {
+    expect(renamedAccessImports("j.ts", `const del = fs["unlinkSync"];`)).toEqual(["j.ts:unlinkSync as del"]);
+    expect(renamedAccessImports("j.ts", `const del = fs.unlinkSync.bind(fs);`)).toEqual(["j.ts:unlinkSync as del"]);
+    expect(renamedAccessImports("j.ts", `let del; del = fs.unlinkSync;`)).toEqual(["j.ts:unlinkSync as del"]);
+    expect(renamedAccessImports("j.ts", `const del = promisify(fs.unlink);`)).toEqual(["j.ts:unlink as <valeur>"]);
+    expect(renamedAccessImports("j.ts", `fs.unlinkSync(p); fs["rmSync"](p);`)).toEqual([]);
+  });
 });
