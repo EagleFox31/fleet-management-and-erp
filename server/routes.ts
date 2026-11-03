@@ -22,7 +22,7 @@ import {
   insertUserSchema, insertVehicleSchema, insertMaintenanceScheduleSchema, 
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
-  maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts, vehicleDocuments,
+  maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts,
   faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows,
   vehicleTankCapacitySchema, VEHICLE_TANK_CAPACITY_MESSAGE
 } from "@shared/schema";

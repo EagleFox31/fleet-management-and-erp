@@ -21,7 +21,11 @@ export function toExpiryDateOnly(value: string | Date | null | undefined): strin
   if (!value) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : utcDateOnly(value);
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+  if (!match) return null;
+  const dateOnly = `${match[1]}-${match[2]}-${match[3]}`;
+  // Date impossible (2026-02-30, 2026-13-45) : illisible, jamais NaN en aval.
+  const parsed = Date.parse(`${dateOnly}T00:00:00Z`);
+  return !Number.isNaN(parsed) && utcDateOnly(new Date(parsed)) === dateOnly ? dateOnly : null;
 }
 
 /** Jours calendaires entre `today` et `expiry` (dates `YYYY-MM-DD`). Négatif = échu, 0 = jour J. */
