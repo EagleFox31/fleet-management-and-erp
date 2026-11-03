@@ -29,6 +29,7 @@ import {
   MISSION_STATUS_ROLES,
   canRoleSetMissionStatus,
 } from "@shared/constants/roles";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("missions");
 
@@ -1069,7 +1070,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_fuel_recorded",
-      });
+      }, req.requestId);
     }
 
     await broadcastMissionFuelRecorded({
@@ -1091,8 +1092,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     });
   } catch (error) {
     // Un refus (AppError) est journalisé par le gestionnaire central ; seule l'erreur imprévue est loggée ici.
-    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Create mission fuel record error");
-    next(toFuelCardAppError(error));
+    next(withLogContext(toFuelCardAppError(error), { event: "Create mission fuel record error" }));
   }
 });
 
@@ -1236,7 +1236,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_fuel_regularized",
-      });
+      }, req.requestId);
     }
 
     await broadcastMissionFuelRecorded({
@@ -1259,8 +1259,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     });
   } catch (error) {
     // Un refus (AppError) est journalisé par le gestionnaire central ; seule l'erreur imprévue est loggée ici.
-    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Regularize mission fuel record error");
-    next(toFuelCardAppError(error));
+    next(withLogContext(toFuelCardAppError(error), { event: "Regularize mission fuel record error" }));
   }
 });
 
@@ -1356,7 +1355,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
         source: "mission_no_refuel_declared",
-      });
+      }, req.requestId);
     }
 
     return res.status(200).json({
@@ -1364,8 +1363,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
       declaration,
     });
   } catch (error) {
-    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
-    next(error);
+    next(withLogContext(error, { event: "Declare mission no-refuel error" }));
   }
 });
 
@@ -1954,7 +1952,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
 
     await broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
       hasAssignment: assignmentVehicleId !== null && assignmentDriverId !== null,
-    });
+    }, req.requestId);
 
     return res.status(201).json(newMission);
   } catch (error) {
@@ -2319,7 +2317,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 
     await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
       source: "mission_edit",
-    });
+    }, req.requestId);
 
     return res.json(updatedMission);
   } catch (error) {
@@ -2703,6 +2701,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         previousStatus: currentStatus,
         nextStatus: targetStatus,
       },
+      req.requestId,
     );
 
     const noFuelRecordsWarning = targetStatus === "completed"
@@ -3115,7 +3114,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       missionId: mission.id,
       requestedDocumentTypes: targetDocTypes,
       requestCount: created.length,
-    });
+    }, req.requestId);
 
     for (const createdRequest of createdRenewalRequests) {
       broadcastDocumentRenewalCreatedFromMission(
@@ -3140,8 +3139,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       targetDocumentTypes: targetDocTypes,
     });
   } catch (error) {
-    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
-    next(error);
+    next(withLogContext(error, { event: "Create mission document renewal request error" }));
   }
 });
 
