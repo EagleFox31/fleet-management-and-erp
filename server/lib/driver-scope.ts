@@ -32,7 +32,11 @@ export async function driverScopeOf(reader: DriverScopeReader | undefined): Prom
   return rows.map((r) => r.id);
 }
 
-/** Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté. */
+/**
+ * Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté.
+ * Une affectation annulée ou refusée ne compte pas : le chauffeur retiré de la mission n'y a plus accès.
+ * Une affectation terminée garde l'accès (historique de ses missions).
+ */
 export async function canAccessMissionAsDriver(reader: DriverScopeReader | undefined, missionId: number): Promise<boolean> {
   const scope = await driverScopeOf(reader);
   if (scope === undefined) return true;
@@ -40,7 +44,13 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
   const [row] = await db
     .select({ id: assignments.id })
     .from(assignments)
-    .where(and(eq(assignments.missionId, missionId), inArray(assignments.driverId, scope)))
+    .where(
+      and(
+        eq(assignments.missionId, missionId),
+        inArray(assignments.driverId, scope),
+        notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]),
+      ),
+    )
     .limit(1);
   return Boolean(row);
 }
