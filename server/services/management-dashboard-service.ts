@@ -1,4 +1,4 @@
-import { and, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   computeTrendPercent,
   extractCargoLabel,
@@ -456,7 +456,8 @@ export class ManagementDashboardService {
           vehicleId: assignments.vehicleId,
         })
         .from(assignments)
-        .where(sql`${assignments.vehicleId} IS NOT NULL`),
+        // Une affectation annulée ou refusée ne reçoit aucune part du CA.
+        .where(and(sql`${assignments.vehicleId} IS NOT NULL`, notInArray(assignments.status, ["cancelled", "rejected"]))),
       db
         .select({
           missionId: clientInvoices.missionId,

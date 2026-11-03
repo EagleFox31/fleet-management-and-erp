@@ -90,8 +90,8 @@ export async function missionVehicleIdsForStaff(missionId: number): Promise<numb
 /**
  * Affectation à présenter comme « l'affectation » d'une mission dans une réponse à valeur unique
  * (`assignment`). Chauffeur (`driverScope` défini) : uniquement les siennes, jamais celle d'un autre
- * chauffeur ; une active passe avant une autre. Personnel : la plus ancienne non annulée ni refusée
- * (à défaut la plus ancienne). Ordre stable, indépendant de l'ordre de lecture.
+ * chauffeur. Pour le chauffeur comme pour le personnel : la plus ancienne active d'abord, puis la plus
+ * ancienne non annulée ni refusée, à défaut la plus ancienne. Ordre stable, indépendant de l'ordre de lecture.
  */
 export function pickMissionAssignment<T extends { id: number; driverId: number | null; status: string }>(
   rows: T[],
