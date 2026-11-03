@@ -141,6 +141,7 @@ export class WorkflowDocumentService {
         fs.mkdirSync(vehicleUploadDir, { recursive: true });
       }
       
+      const transferredIds: number[] = [];
       for (const doc of documents) {
         const originalPath = existingUploadedFile(doc.filePath);
         // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
@@ -148,34 +149,44 @@ export class WorkflowDocumentService {
         const newPath = path.join(vehicleUploadDir, newFileName);
 
         // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
-        if (originalPath && isInsideDirectory(vehicleUploadDir, newPath)) {
-          fs.copyFileSync(originalPath, newPath);
-
-          // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
-          await db.insert(vehicleDocuments).values({
-            vehicleId,
-            name: doc.originalName,
-            type: toVehicleDocumentType(doc.documentType),
-            description: "Document transféré depuis le workflow d'acquisition",
-            filename: newFileName,
-            filesize: doc.fileSize,
-            fileType: doc.mimeType,
-            filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
-            uploadedBy: doc.uploadedBy,
-          });
+        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath)) {
+          // Ni copié ni marqué : le document reste dans le workflow, visible comme non transféré.
+          log.warn(
+            { sessionId, vehicleId, docId: doc.id, reason: originalPath ? "destination hors du dossier du véhicule" : "fichier source introuvable" },
+            "document workflow non transféré",
+          );
+          continue;
         }
+
+        fs.copyFileSync(originalPath, newPath);
+
+        // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
+        await db.insert(vehicleDocuments).values({
+          vehicleId,
+          name: doc.originalName,
+          type: toVehicleDocumentType(doc.documentType),
+          description: "Document transféré depuis le workflow d'acquisition",
+          filename: newFileName,
+          filesize: doc.fileSize,
+          fileType: doc.mimeType,
+          filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
+          uploadedBy: doc.uploadedBy,
+        });
+        transferredIds.push(doc.id);
       }
       
-      // Marquer les documents comme transférés
-      await db
-        .update(workflowDocuments)
-        .set({ 
-          vehicleId: vehicleId,
-          isTransferred: true 
-        })
-        .where(eq(workflowDocuments.sessionId, sessionId));
+      // Marquer comme transférés les seuls documents copiés
+      if (transferredIds.length > 0) {
+        await db
+          .update(workflowDocuments)
+          .set({ 
+            vehicleId: vehicleId,
+            isTransferred: true 
+          })
+          .where(and(eq(workflowDocuments.sessionId, sessionId), inArray(workflowDocuments.id, transferredIds)));
+      }
       
-      log.info({ sessionId, vehicleId }, "documents workflow transférés au véhicule");
+      log.info({ sessionId, vehicleId, transferred: transferredIds.length, skipped: documents.length - transferredIds.length }, "documents workflow transférés au véhicule");
 
     } catch (error) {
       log.error({ err: error, sessionId, vehicleId }, "transfert des documents workflow en échec");

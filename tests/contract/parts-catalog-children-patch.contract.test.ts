@@ -65,6 +65,7 @@ describe("PRT1 : modification d'une spécification", { timeout: 60000 }, () => {
     const partId = await newPartId();
     const otherPartId = await newPartId();
     const spec = await post(`/api/parts/${partId}/specifications`, { specificationName: uniqueTestToken("Masse"), specificationValue: "3" });
+    expect(spec.status).toBe(201);
     const res = await patch(`/api/parts/${partId}/specifications/${spec.body.id}`, { partId: otherPartId, specificationValue: "4" });
     expect(res.status).toBe(200);
     const row = await specRow(spec.body.id);
@@ -75,6 +76,7 @@ describe("PRT1 : modification d'une spécification", { timeout: 60000 }, () => {
   it("valeur vide : 400 lisible ; spécification inconnue : 404", async () => {
     const partId = await newPartId();
     const spec = await post(`/api/parts/${partId}/specifications`, { specificationName: uniqueTestToken("Pas"), specificationValue: "5" });
+    expect(spec.status).toBe(201);
     const empty = await patch(`/api/parts/${partId}/specifications/${spec.body.id}`, { specificationValue: "   " });
     expect(apiErrorProblems(empty.status, empty.body, 400)).toEqual([]);
     noLeak(empty.body);
@@ -108,6 +110,7 @@ describe("PRT1 : modification d'une variante", { timeout: 60000 }, () => {
     const otherPartId = await newPartId();
     const taken = await post(`/api/parts/${otherPartId}/variants`, variant());
     const mine = await post(`/api/parts/${partId}/variants`, variant());
+    expect([taken.status, mine.status]).toEqual([201, 201]);
     const res = await patch(`/api/parts/${partId}/variants/${mine.body.id}`, { variantCode: taken.body.variantCode });
     expect(apiErrorProblems(res.status, res.body, 409)).toEqual([]);
     noLeak(res.body);
@@ -118,6 +121,7 @@ describe("PRT1 : modification d'une variante", { timeout: 60000 }, () => {
     const partId = await newPartId();
     const otherPartId = await newPartId();
     const created = await post(`/api/parts/${partId}/variants`, variant());
+    expect(created.status).toBe(201);
     const moved = await patch(`/api/parts/${partId}/variants/${created.body.id}`, { partId: otherPartId, isAvailable: false });
     expect(moved.status).toBe(200);
     expect((await variantRow(created.body.id)).partId).toBe(partId);
