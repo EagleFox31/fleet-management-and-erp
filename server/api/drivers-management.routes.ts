@@ -7,6 +7,8 @@ import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+// Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
+import { isUniqueViolation } from "../lib/pg-errors";
 import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
 
 const router = Router();
@@ -71,12 +73,6 @@ function parseDriverId(rawId: string): number | null {
   return parsed;
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  return (error as { code?: string }).code === "23505";
-}
 
 function broadcastDriverUpdate(
   eventType: "driver_created" | "driver_updated" | "driver_toggled",
@@ -104,29 +100,13 @@ router.get("/me", async (req, res) => {
     const userId = req.session?.userId;
     if (!userId) return res.status(401).json({ message: "Non authentifié" });
 
-    let [driver] = await db
+    // Fiche liée par le personnel seulement (#113) : plus de repli par nom, qui liait le compte au
+    // premier homonyme venu. Une fiche par compte au plus (index uq_drivers_user_id).
+    const [driver] = await db
       .select()
       .from(drivers)
       .where(eq(drivers.userId, userId))
       .limit(1);
-
-    // Fallback: si userId n'est pas encore renseigné dans drivers, chercher par le nom du user
-    if (!driver) {
-      const [currentUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-      if (currentUser?.name) {
-        const parts = currentUser.name.trim().split(" ");
-        const firstName = parts[0];
-        const lastName = parts.slice(1).join(" ");
-        const [found] = await db.select().from(drivers)
-          .where(eq(drivers.firstName, firstName))
-          .limit(1);
-        if (found && found.lastName?.toLowerCase() === lastName.toLowerCase()) {
-          driver = found;
-          // Auto-corriger le lien manquant
-          await db.update(drivers).set({ userId }).where(eq(drivers.id, found.id));
-        }
-      }
-    }
 
     if (!driver) return res.status(404).json({ message: "Profil chauffeur introuvable" });
 
