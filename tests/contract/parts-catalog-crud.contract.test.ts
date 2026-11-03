@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { parts } from "../../shared/schema";
+import { partRequirements, partSpecifications, partVariants, parts } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart } from "../support/factories";
@@ -12,8 +12,9 @@ import { uniqueTestToken } from "../support/ids";
  * - création et modification : admin et magasinier ; suppression : admin seul ;
  * - traçabilité (AGENTS.md §5) : `createdBy` / `updatedBy` viennent de la session, jamais du corps ;
  * - référence unique, corps invalide : 4xx lisible, jamais 500 ni texte d'exception.
- * Les variantes et spécifications (`part_variants`, `part_specifications`) n'ont aucune route
- * ni méthode de stockage : rien à tester au contrat tant qu'elles ne sont pas exposées.
+ * Variantes et spécifications (`/api/parts/:id/variants|specifications`) : écriture admin et magasinier,
+ * lecture de tout le personnel ; enfant d'une autre pièce 404, code de variante dupliqué 409, supplément
+ * de prix invalide 400, variante référencée par une demande non supprimable (409).
  */
 
 const ACTORS = {
@@ -22,6 +23,7 @@ const ACTORS = {
   technician: "technician",
   workshopManager: "workshop_manager",
   secretary: "secretary",
+  client: "client",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -199,5 +201,196 @@ describe("PRT1 : suppression", { timeout: 60000 }, () => {
     expect((await call("DELETE", `/api/parts/${part.id}`, { actor: "admin" })).status).toBe(204);
     const again = await call("DELETE", `/api/parts/${part.id}`, { actor: "admin" });
     expect(again.status).toBeLessThan(500);
+  });
+});
+
+const variantBody = (overrides: Record<string, unknown> = {}) => ({
+  variantName: "TEST variante",
+  variantCode: uniqueTestToken("var"),
+  additionalPrice: 250,
+  ...overrides,
+});
+
+async function newPartId(): Promise<number> {
+  const part = await createTestPart();
+  ids.partIds.push(part.id);
+  return part.id;
+}
+
+describe("PRT1 : spécifications d'une pièce", { timeout: 60000 }, () => {
+  it.each(["warehouse", "admin"] as const)("%s crée, lit, modifie puis supprime une spécification", async (actor) => {
+    const partId = await newPartId();
+    const created = await call("POST", `/api/parts/${partId}/specifications`, {
+      actor,
+      body: { specificationName: uniqueTestToken("diam"), specificationValue: "52", unit: "mm", partId: 999999 },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.partId).toBe(partId); // partId du corps ignoré
+
+    const list = await call("GET", `/api/parts/${partId}/specifications`, { actor: "technician" });
+    expect(list.status).toBe(200);
+    expect(list.body.map((s: { id: number }) => s.id)).toEqual([created.body.id]);
+
+    const patched = await call("PATCH", `/api/parts/${partId}/specifications/${created.body.id}`, { actor, body: { specificationValue: "55" } });
+    expect(patched.status).toBe(200);
+    expect(patched.body.specificationValue).toBe("55");
+
+    expect((await call("DELETE", `/api/parts/${partId}/specifications/${created.body.id}`, { actor })).status).toBe(204);
+    expect((await call("DELETE", `/api/parts/${partId}/specifications/${created.body.id}`, { actor })).status).toBe(404);
+  });
+
+  it.each(["technician", "workshopManager", "secretary"] as const)("%s ne crée pas de spécification (403)", async (actor) => {
+    const partId = await newPartId();
+    const res = await call("POST", `/api/parts/${partId}/specifications`, { actor, body: { specificationName: "a", specificationValue: "b" } });
+    expect(res.status).toBe(403);
+  });
+
+  it("sans session : 401", async () => {
+    const partId = await newPartId();
+    expect((await call("GET", `/api/parts/${partId}/specifications`, {})).status).toBe(401);
+  });
+
+  it("pièce inconnue : 404 en lecture et en création", async () => {
+    expect((await call("GET", "/api/parts/2147483000/specifications", { actor: "admin" })).status).toBe(404);
+    const res = await call("POST", "/api/parts/2147483000/specifications", { actor: "admin", body: { specificationName: "a", specificationValue: "b" } });
+    expect(res.status).toBe(404);
+    noLeak(res);
+  });
+
+  it("spécification d'une autre pièce : 404, intacte", async () => {
+    const [partA, partB] = [await newPartId(), await newPartId()];
+    const spec = await call("POST", `/api/parts/${partA}/specifications`, {
+      actor: "admin",
+      body: { specificationName: uniqueTestToken("s"), specificationValue: "1" },
+    });
+    expect((await call("PATCH", `/api/parts/${partB}/specifications/${spec.body.id}`, { actor: "admin", body: { specificationValue: "2" } })).status).toBe(404);
+    expect((await call("DELETE", `/api/parts/${partB}/specifications/${spec.body.id}`, { actor: "admin" })).status).toBe(404);
+    const list = await call("GET", `/api/parts/${partA}/specifications`, { actor: "admin" });
+    expect(list.body[0].specificationValue).toBe("1");
+  });
+
+  it("nom en double (casse ignorée) : 409 sans fuite ; texte vide : 400 nommé", async () => {
+    const partId = await newPartId();
+    const name = uniqueTestToken("dup");
+    await call("POST", `/api/parts/${partId}/specifications`, { actor: "admin", body: { specificationName: name, specificationValue: "1" } });
+    const dup = await call("POST", `/api/parts/${partId}/specifications`, {
+      actor: "admin",
+      body: { specificationName: name.toUpperCase(), specificationValue: "2" },
+    });
+    expect(dup.status).toBe(409);
+    noLeak(dup);
+    const empty = await call("POST", `/api/parts/${partId}/specifications`, { actor: "admin", body: { specificationName: "  ", specificationValue: "2" } });
+    expect(empty.status).toBe(400);
+    expect(empty.body.errors?.map((e: { field: string }) => e.field)).toContain("specificationName");
+  });
+});
+
+describe("PRT1 : variantes d'une pièce", { timeout: 60000 }, () => {
+  it.each(["warehouse", "admin"] as const)("%s crée, modifie et supprime une variante", async (actor) => {
+    const partId = await newPartId();
+    const created = await call("POST", `/api/parts/${partId}/variants`, { actor, body: variantBody({ partId: 999999 }) });
+    expect(created.status).toBe(201);
+    expect(created.body.partId).toBe(partId);
+    expect(created.body.additionalPrice).toBe("250.00");
+
+    const list = await call("GET", `/api/parts/${partId}/variants`, { actor: "technician" });
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(1);
+
+    const patched = await call("PATCH", `/api/parts/${partId}/variants/${created.body.id}`, { actor, body: { isAvailable: false } });
+    expect(patched.status).toBe(200);
+    expect(patched.body.isAvailable).toBe(false);
+
+    expect((await call("DELETE", `/api/parts/${partId}/variants/${created.body.id}`, { actor })).status).toBe(204);
+  });
+
+  it.each(["technician", "workshopManager", "secretary"] as const)("%s ne crée pas de variante (403)", async (actor) => {
+    const partId = await newPartId();
+    expect((await call("POST", `/api/parts/${partId}/variants`, { actor, body: variantBody() })).status).toBe(403);
+  });
+
+  it("pièce inconnue : 404 ; variante d'une autre pièce : 404", async () => {
+    expect((await call("GET", "/api/parts/2147483000/variants", { actor: "admin" })).status).toBe(404);
+    const [partA, partB] = [await newPartId(), await newPartId()];
+    const variant = await call("POST", `/api/parts/${partA}/variants`, { actor: "admin", body: variantBody() });
+    expect((await call("PATCH", `/api/parts/${partB}/variants/${variant.body.id}`, { actor: "admin", body: { variantName: "x" } })).status).toBe(404);
+    expect((await call("DELETE", `/api/parts/${partB}/variants/${variant.body.id}`, { actor: "admin" })).status).toBe(404);
+  });
+
+  it("code déjà utilisé (même sur une autre pièce) : 409 sans fuite", async () => {
+    const [partA, partB] = [await newPartId(), await newPartId()];
+    const body = variantBody();
+    expect((await call("POST", `/api/parts/${partA}/variants`, { actor: "admin", body })).status).toBe(201);
+    const dup = await call("POST", `/api/parts/${partB}/variants`, { actor: "admin", body });
+    expect(dup.status).toBe(409);
+    noLeak(dup);
+  });
+
+  it.each([["deux"], [-5], ["-1"]])("supplément de prix %j : 400 avec le champ nommé", async (additionalPrice) => {
+    const partId = await newPartId();
+    const res = await call("POST", `/api/parts/${partId}/variants`, { actor: "admin", body: variantBody({ additionalPrice }) });
+    expect(res.status).toBe(400);
+    expect(res.body.errors?.map((e: { field: string }) => e.field)).toContain("additionalPrice");
+    noLeak(res);
+  });
+
+  it("variante utilisée par une demande : suppression refusée (409), variante intacte", async () => {
+    const partId = await newPartId();
+    const variant = await call("POST", `/api/parts/${partId}/variants`, { actor: "admin", body: variantBody() });
+    const [requirement] = await db
+      .insert(partRequirements)
+      .values({ partId, variantId: variant.body.id, quantityNeeded: 1, reason: "TEST variante" })
+      .returning({ id: partRequirements.id });
+    try {
+      const res = await call("DELETE", `/api/parts/${partId}/variants/${variant.body.id}`, { actor: "admin" });
+      expect(res.status).toBe(409);
+      noLeak(res);
+      expect((await call("GET", `/api/parts/${partId}/variants`, { actor: "admin" })).body).toHaveLength(1);
+    } finally {
+      await db.delete(partRequirements).where(eq(partRequirements.id, requirement.id));
+    }
+  });
+
+  it("supprimer la pièce supprime ses spécifications et variantes (cascade)", async () => {
+    const partId = await newPartId();
+    await call("POST", `/api/parts/${partId}/variants`, { actor: "admin", body: variantBody() });
+    await call("POST", `/api/parts/${partId}/specifications`, { actor: "admin", body: { specificationName: "a", specificationValue: "b" } });
+    expect((await call("DELETE", `/api/parts/${partId}`, { actor: "admin" })).status).toBe(204);
+    expect(await db.select().from(partVariants).where(eq(partVariants.partId, partId))).toHaveLength(0);
+    expect(await db.select().from(partSpecifications).where(eq(partSpecifications.partId, partId))).toHaveLength(0);
+  });
+});
+
+describe("PRT1 : accès client, unité vide et identifiants hors plage", { timeout: 60000 }, () => {
+  it("un client ne lit ni les spécifications ni les variantes (403)", async () => {
+    const partId = await newPartId();
+    expect((await call("GET", `/api/parts/${partId}/specifications`, { actor: "client" })).status).toBe(403);
+    expect((await call("GET", `/api/parts/${partId}/variants`, { actor: "client" })).status).toBe(403);
+  });
+
+  it("une unité vide est enregistrée comme absente (null), jamais refusée", async () => {
+    const partId = await newPartId();
+    const res = await call("POST", `/api/parts/${partId}/specifications`, {
+      actor: "warehouse",
+      body: { specificationName: uniqueTestToken("long"), specificationValue: "10", unit: "" },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.unit).toBeNull();
+    const patched = await call("PATCH", `/api/parts/${partId}/specifications/${res.body.id}`, {
+      actor: "warehouse",
+      body: { unit: "mm" },
+    });
+    expect(patched.body.unit).toBe("mm");
+    const cleared = await call("PATCH", `/api/parts/${partId}/specifications/${res.body.id}`, {
+      actor: "warehouse",
+      body: { unit: "  " },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.unit).toBeNull();
+  });
+
+  it("identifiant au-delà d'un integer Postgres : 400 et non 500", async () => {
+    expect((await call("GET", "/api/parts/99999999999/specifications", { actor: "technician" })).status).toBe(400);
+    expect((await call("GET", "/api/parts/99999999999/variants", { actor: "technician" })).status).toBe(400);
   });
 });

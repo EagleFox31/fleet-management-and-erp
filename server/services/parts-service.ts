@@ -1,5 +1,5 @@
 import { db, type DbExecutor } from "../db";
-import { parts, partsStockMovements, users, workOrders, type Part, type InsertPart } from "@shared/schema";
+import { faultCatalogParts, parts, partsStockMovements, users, workOrders, type Part, type InsertPart } from "@shared/schema";
 import { eq, desc, asc, sql, and, lte, gte, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AppError } from "../lib/app-error";
@@ -228,6 +228,16 @@ export class PartsService {
     const existingPart = await this.getPartById(id);
     if (!existingPart) {
       throw new AppError(404, "Pièce non trouvée");
+    }
+
+    // Une pièce citée par le catalogue de pannes ne se supprime pas (FK RESTRICT) : refus lisible avant toute écriture.
+    const [usedByFault] = await db
+      .select({ id: faultCatalogParts.id })
+      .from(faultCatalogParts)
+      .where(eq(faultCatalogParts.partId, id))
+      .limit(1);
+    if (usedByFault) {
+      throw new AppError(409, "Pièce utilisée dans le catalogue de pannes");
     }
 
     // Supprimer les mouvements de stock associés

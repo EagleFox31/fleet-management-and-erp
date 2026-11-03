@@ -191,7 +191,7 @@ stateDiagram-v2
 | MNT1 | CRUD plan de maintenance, désactivation (plus de déclenchement) | C | OK (`maintenance-schedules` : CRUD, droits, 400/404, cloison client, désactivation ; DELETE supprime vraiment, corrigé par #80) |
 | MNT2 | Déclenchement par date et par kilométrage | I | OK (`preventive-maintenance-triggers` : fenêtre 30 jours, seuil km, plan inactif ; échéance du plan et doublon km corrigés par #80) |
 | CAT1 | CRUD catalogue main-d'œuvre, désactivation | C | OK (`labor-catalog` : création, lecture, droits, doublon, concurrence, poste inactif refusé sur OT ; désactivation par PATCH ajoutée par #80) |
-| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | Partiel (cycle de vie au contrat ; `validatedBy` forgeable et non renseigné, id inconnu en 200 : `it.fails` ; pièces associées sans route) |
+| CAT2 | Catalogue de pannes `draft → validated → archived`, pièces associées | C | OK (contrat `fault-catalog-lifecycle` : cycle de vie, `validatedBy` posé par le serveur, id inconnu 404, pièces associées `/api/fault-catalog/:id/parts` : rôles, doublon 409, panne archivée figée 409, suppression en cascade ; plus aucun `it.fails`) |
 | WO1 | CRUD OT, chaque transition par le bon rôle (chef d'atelier / technicien) | E | OK (`03-work-orders` ; `14-realtime-work-order-roles` : création par le chef d'atelier, démarrage par le technicien affecté, autre technicien refusé 403 ; `15-…` : fin d'intervention par le technicien, correction par le chef, création et suppression refusées au technicien, suppression par le chef + trame `work_order_deleted`) |
 | WO2 | Transitions interdites refusées (ex. `completed → in_progress`) | C | OK (route technicien : `technician-work-order-status` ; `PATCH /api/work-orders/:id` : `work-order-status-transitions`, terminé/annulé 409, technicien hors de ses gestes 403, même statut permis ; unitaires `technician-work-order-transitions`, `work-order-transitions`) |
 | WO3 | Lignes de travail OT (lot 3) : ajout, modification, suppression, statuts | U / C | OK (`work-order-items` : saisie, droits, OT terminé/annulé 409, technicien/poste inconnu 400 ; unitaire `work-order-items`) |
@@ -222,7 +222,7 @@ Libellés : source unique `shared/constants/part-requirements.ts` (voir `AGENTS.
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variante et spécification sans route) |
+| PRT1 | CRUD pièce, catégorie, variante, spécification | C | Partiel (contrat `parts-catalog-crud` ; doublon de référence 409, prix non numérique et stock négatif 400, pièce inconnue ou déjà supprimée sans 500 : corrigés par #76 ; variantes et spécifications `/api/parts/:id/variants|specifications` : rôles, enfant d'une autre pièce 404, code dupliqué 409, supplément invalide 400, variante référencée 409, cascade) |
 | PRT2 | Ajustement de stock → mouvement tracé avec auteur | I | OK (`parts-stock-adjustment` I et C : auteur, concurrence, refus 400/404/409) |
 | PRT3 | Stock bas → alerte ; réappro → alerte levée | I | Fait en I (`stock-alert-lifecycle`) ; export « Alerte CDE » suit le stock (défaut corrigé) |
 | PRT4 | Demande de pièce : chaîne complète + annulation à chaque étape possible | C | OK (`part-requirements-chain` : chaîne par rôle réel, stock +/− et mouvement attribué vérifiés en base, annulation à chaque étape ; `issued` refusé sans déstockage) |
@@ -291,7 +291,7 @@ Tables : `drivers` (`is_active`).
 | # | Test | Niveau | État |
 |---|---|---|---|
 | DRV1 | CRUD chauffeur, désactivation (absent de l'écran PIN et des affectations) | C | OK (`drivers-crud-deactivation` : CRUD et RBAC ; chauffeur désactivé ni affectable, ni sur l'écran PIN, ni connectable, corrigé par #76) |
-| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; défauts figés DRV2-1 panne refusée en 403, DRV2-2 aucun OT créé, DRV2-3 pas de cloison chauffeur à l'API missions) |
+| DRV2 | Espace chauffeur : missions du jour, déclaration de panne → OT créé | E | Partiel (`19-driver-space` : chaque chauffeur voit sa seule mission à l'écran ; panne ou accident → OT créé, retard ou autre → incident sans OT (contrat `adm2-drv2-mis1-server-defects`) ; cloison chauffeur à l'API missions. Défauts DRV2-1, DRV2-2, DRV2-3 corrigés par #102 et #107. Manque : aucune vue « missions du jour », le tableau de bord n'affiche que la mission active) |
 
 ### 3.9 Carburant
 
@@ -322,7 +322,7 @@ stateDiagram-v2
 | # | Test | Niveau | État |
 |---|---|---|---|
 | CLI1 | CRUD client, désactivation | C | OK (contrat `clients-crud`) |
-| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Couvert au navigateur (`17-mission-lifecycle` : affectation véhicule + chauffeur par l'écran, lancement avec budgets, livraison, clôture avec FDR, facture ; trames `mission_status_changed` / `mission_completed` lues par un second profil ; lancement refusé pour assurance expirée et CPC invalide ; `13-mission-invoice-payment` garde le règlement). Défauts figés : renouvellement non proposé sur lancement bloqué (écran), PATCH d'affectation sans contrôle d'éligibilité du véhicule (`mission-assignment-eligibility.contract.test.ts`) |
+| MIS1 | Mission : création, affectation véhicule + chauffeur, étapes, clôture | E | Couvert au navigateur (`17-mission-lifecycle` : affectation véhicule + chauffeur par l'écran, lancement avec budgets, livraison, clôture avec FDR, facture ; trames `mission_status_changed` / `mission_completed` lues par un second profil ; lancement refusé pour assurance expirée et CPC invalide ; `13-mission-invoice-payment` garde le règlement). OK : renouvellement proposé sur lancement bloqué (écran, MIS1-UI-1) et contrôle d'éligibilité du véhicule au PATCH d'affectation (`mission-assignment-eligibility.contract.test.ts`), corrigés par #102 et #107 |
 | MIS2 | Conflit d'affectation (véhicule ou chauffeur déjà pris) refusé | C | OK (`mission-planning-conflict` ; lancement refusé avec le motif du conflit, corrigé par #80) |
 | CINV1 | Facture : TVA, paiements partiels, solde | I / E | Fait en C (`client-invoice-payments.contract`) en plus de `vat-billing-service`, `05` |
 | CINV2 | Passage automatique en `overdue` | I | OK (`client-invoice-overdue` : échues non soldées seulement, échéance du jour exclue, payée/annulée intactes, second passage sans écriture, paiement partiel garde le retard, solde → payée) |
@@ -345,7 +345,7 @@ Tables : `fleetKpiCache`.
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
 | DIR2 | Rapports filtrés par période | C | Fait en C (`reports-inventory-period` : mouvements de la fenêtre, bornes incluses, valeur absolue, statistiques, fenêtre vide ; `reports-technician-period` : totaux et taux par technicien et globaux, bornes, fenêtre vide ; export carburant couvert avant). Défauts corrigés par #86 : rapports réservés aux rôles `INVENTORY_REPORT_ROLES` / `TECHNICIAN_REPORT_ROLES` (écran `/reports` aligné), date invalide ou inexistante refusée en 400 |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (XLSX : carburant, inventaire (`exports-inventory-content`), factures fournisseurs et clients (`exports-invoices-content`) en cellules exactes ; droits dans `lot-exports-roles`. Non couverts : exports missions clients, rapport mensuel, véhicules, OT, utilisateurs, complet ; PDF/CSV générés côté navigateur (`pdf-export.ts`) hors de portée du contrat) |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | OK pour les exports XLSX et ZIP (carburant, inventaire, factures fournisseurs et clients, missions clients, rapport mensuel, véhicules, OT, utilisateurs, export complet) en cellules exactes : `exports-operations-content.contract.test.ts`, droits dans `lot-exports-roles`. Défauts figés (`it.fails`) : DIR3-1 rôles magasinier, secrétaire, logistique et direction exportés bruts ; DIR3-2 statut `awaiting_parts` brut ; DIR3-3 priorité `critical` brute. Hors de portée : PDF/CSV générés côté navigateur (`pdf-export.ts`) |
 
 ---
 
@@ -386,7 +386,7 @@ flowchart LR
 
 ### P3 — Maintenance préventive
 
-État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance couvert (MNT1, MNT2) ; alerte, clôture de l'OT → véhicule opérationnel et recalcul de la prochaine échéance par date non couverts.
+État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance (MNT1, MNT2) ; alerte à l'échéance (date et kilométrage, sans doublon), clôture de l'OT → véhicule opérationnel (un ou deux OT ouverts) et recalcul de la prochaine échéance (`completeMaintenanceAndScheduleNext` : mensuel, trimestriel, annuel, kilométrique) couverts par `tests/integration/preventive-maintenance-lifecycle.test.ts`. Reste partiel car deux règles ne sont pas câblées dans le produit, figées en `it.fails` : P3-1 clôturer l'OT n'avance jamais l'échéance du plan (rien n'appelle `completeMaintenanceAndScheduleNext`) ; P3-2 un OT issu d'un plan échu n'immobilise pas le véhicule (seul `nextMaintenanceDate` le fait).
 
 ```mermaid
 flowchart LR
