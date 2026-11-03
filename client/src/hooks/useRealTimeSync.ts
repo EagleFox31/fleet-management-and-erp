@@ -1148,6 +1148,12 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders/statistics"] });
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders/overdue"] });
+      // Réception d'une commande : le stock est crédité, l'alerte stock bas et les demandes
+      // de pièce changent chez les autres profils (couche 3, AGENTS.md §2).
+      queryClient.invalidateQueries({ queryKey: ["/api/warehouse/reorder-alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts/low-on-stock"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/part-requirements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
       break;
 
     case "supplier_created":
