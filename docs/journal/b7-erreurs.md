@@ -144,3 +144,10 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : une quantité au-delà de 2^31-1, ou une entrée qui ferait déborder le stock, est refusée en 400 au lieu d'un 500 Postgres. Le compte de cas est corrigé dans LESSONS.
 - **Comment** : deux cas de contrat, rouges sans la borne. Total 8/8.
 - **Pourquoi** : réserves de fleet-securite et fleet-relecteur.
+
+## 2026-11-03T17:35:36+01:00 — alert_created sur POST /api/alerts et POST /api/test-date-maintenance
+
+- Quoi : les deux handlers existants de `server/routes.ts` émettent `broadcastAlertCreated` après chaque `storage.createAlert` ; ils sortent de la liste gelée de `alert-emission-hygiene`.
+- Comment : émission dans le handler, aucune route ajoutée ; portée nominative, sans repli de rôles (§11). Le `console.error` du handler POST /api/alerts migré vers `log.error` avec `requestId`.
+- Pourquoi : alertes écrites sans trame, la cloche du destinataire attendait le polling (suite de #195). `checkAndCreateStockAlerts` reste gelé, chantier de la session de.
+- Preuve : `tests/contract/alerts-manual-realtime.contract.test.ts` 2/2, rouge 2/2 sans le correctif ; alerts-inbox et procurement-alert-realtime verts ; tsc 0 ; unitaires 1868.
