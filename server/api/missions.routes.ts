@@ -725,9 +725,9 @@ function isDocumentTypeValid(
     // pas ; datée, la plus récente échéance compte, le jour de l'échéance bloque (UTC). Le
     // récépissé « plaque » lève l'échéance dépassée.
     if (receiptCovers) return true;
-    const dated = docs.filter((doc) => Boolean(doc.expiryDate));
-    if (dated.length === 0) return true;
-    return dated.some((doc) => !isExpiredOnOrBeforeToday(doc.expiryDate as Date | string));
+    const expiries = docs.flatMap((doc) => (doc.expiryDate ? [doc.expiryDate] : []));
+    if (expiries.length === 0) return true;
+    return expiries.some((expiry) => !isExpiredOnOrBeforeToday(expiry));
   }
 
   // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier.
@@ -1595,6 +1595,9 @@ router.get("/:id/launch-readiness", async (req, res) => {
         vehicleStatus: vehicles.status,
         vehicleTonnage: vehicles.tonnage,
         vehicleFuelType: vehicles.fuelType,
+        vehicleInsuranceExpiry: vehicles.insuranceExpiry,
+        vehicleTechnicalInspectionDate: vehicles.technicalInspectionDate,
+        vehicleLicensePlateExpiry: vehicles.licensePlateExpiry,
         driverFirstName: drivers.firstName,
         driverLastName: drivers.lastName,
         driverIsActive: drivers.isActive,
@@ -1633,19 +1636,37 @@ router.get("/:id/launch-readiness", async (req, res) => {
       ? await loadOpenRenewalReceipts(missionAssignment.vehicleId)
       : {};
     const carteGriseDocs = docsByType.get("carte_grise") || [];
-    const carteGriseValid = hasVehicle && isDocumentTypeValid(
+    // Colonnes miroir de `vehicles` : même règle qu'au lancement (getMissionEligibility),
+    // récépissés compris. Un motif de conformité fait tomber l'item du papier concerné.
+    const mirrorBlockers = hasVehicle
+      ? getMissionEligibility({
+          status: missionAssignment?.vehicleStatus,
+          insuranceExpiry: missionAssignment?.vehicleInsuranceExpiry,
+          technicalInspectionDate: missionAssignment?.vehicleTechnicalInspectionDate,
+          licensePlateExpiry: missionAssignment?.vehicleLicensePlateExpiry,
+          receipts: readinessReceipts,
+        }).blockers.filter((blocker) => blocker.kind === "compliance")
+      : [];
+    const mirrorReason = (code: string): string | null => {
+      const reason = mirrorBlockers.find((blocker) => blocker.code === code)?.reason;
+      return reason ? `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.` : null;
+    };
+    const carteGriseMirror = mirrorReason("license_plate");
+    const assuranceMirror = mirrorReason("insurance");
+    const visiteMirror = mirrorReason("technical_inspection");
+    const carteGriseValid = !carteGriseMirror && hasVehicle && isDocumentTypeValid(
       "carte_grise",
       carteGriseDocs,
       isRenewalReceiptValid(readinessReceipts, "license_plate"),
     );
     const assuranceDocs = docsByType.get("assurance") || [];
     const visiteDocs = docsByType.get("visite_technique") || [];
-    const assuranceValid = hasVehicle && isDocumentTypeValid(
+    const assuranceValid = !assuranceMirror && hasVehicle && isDocumentTypeValid(
       "assurance",
       assuranceDocs,
       isRenewalReceiptValid(readinessReceipts, "insurance"),
     );
-    const visiteTechniqueValid = hasVehicle && isDocumentTypeValid(
+    const visiteTechniqueValid = !visiteMirror && hasVehicle && isDocumentTypeValid(
       "visite_technique",
       visiteDocs,
       isRenewalReceiptValid(readinessReceipts, "technical_inspection"),
@@ -1837,7 +1858,9 @@ router.get("/:id/launch-readiness", async (req, res) => {
           ? "Carte grise couverte par un récépissé provisoire."
           : carteGriseValid
             ? "Carte grise valide."
-            : carteGriseDocs.length > 0
+            : carteGriseMirror && isDocumentTypeValid("carte_grise", carteGriseDocs, isRenewalReceiptValid(readinessReceipts, "license_plate"))
+              ? carteGriseMirror
+              : carteGriseDocs.length > 0
               ? "Carte grise expirée."
               : "Carte grise manquante.",
       },
@@ -1848,7 +1871,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
         blocking: true,
         detail: assuranceParRecepisse
           ? "Assurance couverte par un récépissé provisoire."
-          : assuranceValid ? "Assurance valide." : "Assurance manquante ou expirée.",
+          : assuranceValid ? "Assurance valide." : assuranceMirror && assuranceDocs.length > 0 ? assuranceMirror : "Assurance manquante ou expirée.",
       },
       {
         key: "doc_visite_technique",
@@ -1857,7 +1880,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
         blocking: true,
         detail: visiteParRecepisse
           ? "Visite technique couverte par un récépissé provisoire."
-          : visiteTechniqueValid ? "Visite technique valide." : "Visite technique manquante ou expirée.",
+          : visiteTechniqueValid ? "Visite technique valide." : visiteMirror && visiteDocs.length > 0 ? visiteMirror : "Visite technique manquante ou expirée.",
       },
       {
         key: "budget_fuel",
