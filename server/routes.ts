@@ -3823,10 +3823,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backupFile = files.find(f => f.startsWith('fleet-backup-') && f.endsWith('.json'));
       
       if (!backupFile) {
-        return res.status(404).json({ 
-          message: "Fichier de backup non trouvé",
-          availableFiles: files
-        });
+        // Le listage du dossier backup/ reste côté serveur (AGENTS.md §10).
+        return res.status(404).json({ message: "Fichier de backup non trouvé" });
       }
 
       const backupFilePath = path.join(backupDir, backupFile);

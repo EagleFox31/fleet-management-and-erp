@@ -35,7 +35,7 @@ Tu es le développeur serveur de FleetMaster. Tu travailles dans le worktree et 
 ## Vérification avant rapport
 - `node node_modules/typescript/bin/tsc --noEmit -p .` : 0 `error TS` sur tout le projet.
 - Unitaires : `node node_modules/vitest/vitest.mjs run --reporter=dot`.
-- Contrat / intégration des fichiers touchés, **toujours sous verrou** : `node ../lot-tools/db-lock.mjs <agent> -- node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.contract.config.ts <fichier>`. Chaque route touchée a un test de contrat (rôle autorisé, rôle refusé, cas d'erreur). Jamais de log vitest brut sur disque (mot de passe de la base).
+- Contrat / intégration des fichiers touchés, `node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.contract.config.ts <fichier>` ; le verrou de la base de test est pris par le globalSetup vitest (`tests/support/global-setup-db-lock.ts`), sans script à lancer. Chaque route touchée a un test de contrat (rôle autorisé, rôle refusé, cas d'erreur). Jamais de log vitest brut sur disque (mot de passe de la base).
 - Base partagée : données `TEST*` créées puis supprimées ; données de recette protégées (véhicule #13, pièce #20, OT #62, demande #7, commande #5, facture #39, règlement #4) intactes. Jamais contre la production, aucune commande `neonctl`.
 
 ## Git

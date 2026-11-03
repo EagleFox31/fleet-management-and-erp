@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * Toute réponse 500 locale ou tout `console.*` réintroduit ici est une régression.
  */
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
-const ROUTERS = ["clients", "document-renewals", "operations", "suppliers", "vehicles"];
+const ROUTERS = ["clients", "document-renewals", "operations", "supplier-invoices", "suppliers", "vehicles"];
 
 const sourceOf = (name: string) =>
   readFileSync(join(ROOT, "server", "api", `${name}.routes.ts`), "utf-8");
@@ -44,5 +44,12 @@ describe.each(ROUTERS)("server/api/%s.routes.ts relaie ses 500", (name) => {
       return guard && new RegExp(`${guard[1]} instanceof AppError \\?`).test(l) ? [`${i + 1}: ${l.trim()}`] : [];
     });
     expect(hits).toEqual([]);
+  });
+});
+
+describe("server/routes.ts POST /api/admin/import-backup", () => {
+  it("ne renvoie pas le listage du dossier backup/ dans sa 404", () => {
+    const source = readFileSync(join(ROOT, "server", "routes.ts"), "utf-8");
+    expect(source).not.toMatch(/availableFiles/);
   });
 });
