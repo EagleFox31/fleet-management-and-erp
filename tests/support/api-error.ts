@@ -9,6 +9,22 @@ import { codeForStatus } from "../../shared/errors";
 export const TECHNICAL = /SQLSTATE|violates|duplicate key|invalid input syntax|foreign key|constraint|at \S+:\d+|ZodError|"path":|\binvalid_type\b/i;
 
 /**
+ * Texte d'un corps de réponse à contrôler contre une fuite technique, sans le `requestId`.
+ * Celui-ci est aléatoire (`nanoid(10)`, repris dans « Référence : … » des 5xx) : il contient
+ * parfois « Sql », « NaN » ou « select », et un contrôle sur le corps entier échoue au hasard.
+ */
+export function leakText(body: unknown): string {
+  const text = typeof body === "string" ? body : JSON.stringify(body) ?? "";
+  let requestId: unknown;
+  try {
+    requestId = (typeof body === "string" ? JSON.parse(body) : body as { requestId?: unknown })?.requestId;
+  } catch {
+    requestId = undefined;
+  }
+  return typeof requestId === "string" && requestId.length > 0 ? text.split(requestId).join("") : text;
+}
+
+/**
  * Écarts entre une réponse et le contrat ApiErrorBody : statut attendu, `code` du statut
  * (`codeForStatus`, sauf `code` explicite), message lisible non vide, rien de technique.
  * `body` accepte le corps déjà décodé ou le texte brut de la réponse.
@@ -50,6 +66,6 @@ export function apiErrorProblems(
       problems.push(`requestId ${parsed.requestId} différent de l'en-tête X-Request-Id ${requestIdHeader}`);
     }
   }
-  if (TECHNICAL.test(text)) problems.push(`détail technique dans la réponse : ${text}`);
+  if (TECHNICAL.test(leakText(body))) problems.push(`détail technique dans la réponse : ${text}`);
   return problems;
 }

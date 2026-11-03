@@ -6,6 +6,7 @@ import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, P3-2 : PATCH /api/documents/:id (server/api/vehicle-documents.routes.ts) et
@@ -112,7 +113,7 @@ describe("PATCH /api/documents/:id et miroir des échéances", { timeout: 120000
     const docId = await addDoc(vehicleId, "assurance", "2030-01-01");
     const res = await patch(docId, { expiryDate: "pas une date" }, "workshop_manager");
     expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).not.toMatch(/select|insert|update|stack/i);
+    expect(leakText(res.body)).not.toMatch(/select|insert|update|stack/i);
     expect((await mirrorOf(vehicleId)).insurance).toBe("2030-01-01");
   });
 

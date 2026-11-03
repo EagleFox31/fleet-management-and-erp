@@ -6,6 +6,7 @@ import { faultCatalog, fuelRecords, maintenanceSchedules, users, vehicleDocument
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestFuelRecord, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, routes secondaires (T3 et T4) : planifications, documents,
@@ -43,7 +44,7 @@ function expectErrorContract(res: { body: any; headers: Headers }, code: string)
   expect(typeof res.body.message).toBe("string");
   expect(res.body.message.length).toBeGreaterThan(0);
   expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
-  expect(JSON.stringify(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|null value|NaN/);
+  expect(leakText(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|null value|NaN/);
 }
 
 function expectFieldError(res: { status: number; body: any; headers: Headers }, field: string) {
