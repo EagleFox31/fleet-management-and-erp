@@ -53,13 +53,23 @@ async function newVehicle() {
   return v;
 }
 
-async function newMission(actor: Actor, status: string) {
-  const vehicle = await newVehicle();
+const ficheOf = new Map<Actor, number>();
+/** Une seule fiche par compte (#113, `uq_drivers_user_id`). */
+async function driverFiche(actor: Actor) {
+  const known = ficheOf.get(actor);
+  if (known !== undefined) return known;
   const [driver] = await db
     .insert(drivers)
     .values({ userId: session.userIdOf(actor), firstName: "TEST", lastName: uniqueTestToken("drv"), cpcStatus: "FORME", licenseExpiry: FUTURE } as any)
     .returning();
   driverIds.push(driver.id);
+  ficheOf.set(actor, driver.id);
+  return driver.id;
+}
+
+async function newMission(actor: Actor, status: string) {
+  const vehicle = await newVehicle();
+  const driver = { id: await driverFiche(actor) };
   const [mission] = await db
     .insert(missions)
     .values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status } as any)

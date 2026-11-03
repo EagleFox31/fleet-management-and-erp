@@ -539,6 +539,54 @@ export async function reportDocumentRenewalReceiptGaps(client: Queryable, log: W
 }
 
 /**
+ * #113 : une fiche chauffeur par compte (index unique partiel uq_drivers_user_id). Doit rester identique à
+ * server/db/migrations/20261103_drivers_user_id_unique.sql : tests/unit/server/drivers-user-id-unique-schema.test.ts
+ * compare les deux. Doublons existants : index non posé, rien supprimé, écart relu par reportDriverUserIdUniqueGaps.
+ */
+export const DRIVERS_USER_ID_UNIQUE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_drivers_user_id') THEN
+    IF EXISTS (SELECT 1 FROM drivers WHERE user_id IS NOT NULL GROUP BY user_id HAVING count(*) > 1) THEN
+      RAISE WARNING 'uq_drivers_user_id non posé : comptes liés à plusieurs fiches dans drivers';
+    ELSE
+      CREATE UNIQUE INDEX uq_drivers_user_id ON drivers (user_id) WHERE user_id IS NOT NULL;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'uq_drivers_user_id non posé : verrou indisponible ou doublon apparu pendant la création';
+END $$;`;
+
+/**
+ * Le RAISE WARNING n'atteint pas les logs applicatifs : relit pg_indexes après DRIVERS_USER_ID_UNIQUE_SQL.
+ * Index absent : journalise chaque compte lié à plusieurs fiches (identifiants seulement, aucune donnée
+ * personnelle) pour que la logistique choisisse la fiche gardée. Rien n'est fusionné ni supprimé ici.
+ */
+export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows: index } = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_drivers_user_id'`,
+  );
+  if (index.length) return { missing: false, duplicates: [] as { userId: number; driverIds: number[] }[] };
+  const { rows } = await client.query(
+    `SELECT user_id, array_agg(id ORDER BY id) AS driver_ids
+       FROM drivers WHERE user_id IS NOT NULL
+      GROUP BY user_id HAVING count(*) > 1 ORDER BY user_id`,
+  );
+  const duplicates = rows.map((r) => ({ userId: Number(r.user_id), driverIds: (r.driver_ids as unknown[]).map(Number) }));
+  log.warn(
+    { duplicates },
+    duplicates.length
+      ? `Index uq_drivers_user_id non posé : ${duplicates.length} compte(s) liés à plusieurs fiches chauffeur. ` +
+          "La logistique choisit la fiche gardée ; déplacer assignments.driver_id vers elle puis retirer le user_id " +
+          "des autres fiches. L'index est posé au démarrage suivant."
+      : "Index uq_drivers_user_id non posé : verrou de table indisponible, nouvel essai au démarrage suivant.",
+  );
+  return { missing: true, duplicates };
+}
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -944,6 +992,9 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE vehicle_documents ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS hire_date date`);
+    // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
+    await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
+    await reportDriverUserIdUniqueGaps(pool);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Entrée en stock attribuée au réceptionnaire — doit rester ici ET dans
     // server/db/migrations/20261030_part_requirements_received_by.sql (AGENTS.md §5).
