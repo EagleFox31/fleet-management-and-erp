@@ -61,6 +61,8 @@ function clientQueryKeys(): { exact: Set<string>; templates: Set<string> } {
 const TRACKED_FAMILIES: Array<[family: string, pattern: RegExp]> = [
   ["stock", /^(part_used|part_requirement|purchase_order|parts_delivered|part_received|warehouse_stock|part_catalog)/],
   ["argent", /^(fuel_card|fuel_record|client_invoice|supplier_invoice)/],
+  // Heures d'une tâche d'OT : main-d'oeuvre valorisée dans les KPI de coût (`kpi-service`, `loadCostRows`).
+  ["coût OT", /^work_order_item/],
   ["statut", /^(work_order_(created|updated|status_changed|deleted|awaiting_parts)|vehicle_(updated|status_changed|mileage_updated|maintenance_position_updated)|mission_|document_renewal_request|document_renewal_quick|vehicle_document_updated|alert_)/],
 ];
 
@@ -126,6 +128,7 @@ describe("couche 3 : table des écrans satellites", () => {
     const required: Array<[family: string, groups: readonly SatelliteGroupName[]]> = [
       ["stock", ["stock", "partRequirements"]],
       ["argent", ["fuel", "clientMoney", "supplierMoney"]],
+      ["coût OT", ["workOrderCost"]],
     ];
     const wrong = required.flatMap(([family, groups]) => {
       const pattern = TRACKED_FAMILIES.find(([name]) => name === family)![1];
@@ -191,6 +194,12 @@ describe("couche 3 : table des écrans satellites", () => {
   it("une clé de la liste gelée n'y reste pas une fois couverte", () => {
     const covered = coveredKeys();
     expect(UNCOVERED_SATELLITES.filter((key) => covered.has(key) || !clientKeys.has(key))).toEqual([]);
+  });
+
+  it("une tâche d'OT modifiée rafraîchit les KPI de coût et les listes du technicien", () => {
+    const { keys } = satelliteTargetsOf("work_order_item_changed");
+    expect(keys).toEqual(expect.arrayContaining(["/api/kpi/maintenance-costs", "/api/kpi/avg-cost-per-intervention", "/api/management/dashboard"]));
+    expect(keys).toEqual(expect.arrayContaining(["/api/technician/my-work-orders", "/api/dashboard/technician-stats"]));
   });
 
   it("les écarts hauts de l'audit du 3 novembre 2026 sont couverts", () => {
