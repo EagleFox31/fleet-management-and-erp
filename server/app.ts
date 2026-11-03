@@ -5,7 +5,7 @@ import type { Server } from "http";
 import { registerRoutes } from "./routes";
 import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
-import { accessLog, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
+import { accessLog, apiNotFound, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
 
 export type CreateAppOptions = {
   /**
@@ -108,6 +108,8 @@ export async function createApp(
   app.use("/api", apiRouter);
   const server = await registerRoutes(app);
 
+  // Après tous les routeurs /api, avant le repli Vite ou static monté par server/index.ts.
+  app.use("/api", apiNotFound);
   app.use(errorHandler);
 
   return { app, server };
