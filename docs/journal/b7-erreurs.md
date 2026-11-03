@@ -170,3 +170,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : émission dans le handler, aucune route ajoutée ; portée nominative, sans repli de rôles (§11). Le `console.error` du handler POST /api/alerts migré vers `log.error` avec `requestId`.
 - Pourquoi : alertes écrites sans trame, la cloche du destinataire attendait le polling (suite de #195). `checkAndCreateStockAlerts` reste gelé, chantier de la session de.
 - Preuve : `tests/contract/alerts-manual-realtime.contract.test.ts` 2/2, rouge 2/2 sans le correctif ; alerts-inbox et procurement-alert-realtime verts ; tsc 0 ; unitaires 1868.
+
+## 2026-11-03T18:34:35+01:00 — Factures fournisseurs : erreurs relayées au gestionnaire central (§10)
+
+- Quoi : les 9 `catch` de `server/api/supplier-invoices.routes.ts` qui répondaient `500 { error, details: error.message }`, et celui de `checkAuth`, relaient par `next(withLogContext(…, { event }))` (motif de #172). Le justificatif de règlement refusé renvoyait `details: err.message` de multer : 400 lisible (format ou 8 Mo). `POST /api/admin/import-backup` ne renvoie plus `availableFiles` (listage du dossier backup/) dans sa 404, ligne modifiée dans le handler existant.
+- Comment : `supplier-invoices` ajouté aux routeurs de `error-500-relay-hygiene`, plus une garde sur `availableFiles`. Contrat `supplier-invoice-error-details`.
+- Pourquoi : un log par erreur, une AppError d'un service (validate, approve) garde son statut au lieu de devenir 500. La garde de sortie réécrivait déjà les 5xx : la fuite réelle était sur le 400 multer.
+- Preuve : hygiène rouge 4/25 sans le correctif ; contrat 400 rouge sans le correctif, 500 vert avant comme après (non-régression) ; 9 contrats fournisseurs 87/87 ; tsc 0 ; unitaires 1891.
