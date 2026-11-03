@@ -1801,6 +1801,16 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute écriture de `parts.quantity` relit la pièce `FOR UPDATE` dans la transaction qui écrit, et refuse en 409 un stock insuffisant. Ne jamais ramener un stock à 0 en silence.
 
+### Prix du carburant : imposé côté serveur, pas seulement à l’écran (2026-11-03)
+
+- **Contexte** : seuls admin et logistique fixent le prix du litre (décision du 31 octobre 2026). L’écran affichait le prix du jour en lecture seule pour les autres rôles, mais trois routes de débit (`POST /api/fuel-card/consumption`, `POST /api/missions/:id/fuel-records` et `/regularize`) prenaient le `unitPrice` du corps de la requête tel quel.
+- **Cause racine** : la règle métier vivait dans l’interface seule. Un appel direct à l’API, par un chauffeur ou un secrétaire, débitait la carte au prix choisi par l’appelant.
+- **Classification** : contrôle d’accès côté client seulement (argent).
+- **Résolution** : `resolveFuelUnitPrice(role, prixEnvoyé, datePlein)` (`server/lib/fuel-unit-price.ts`). Le prix envoyé est retenu si `canWriteFuelPrice(role)`, sinon c’est `getFuelPriceAt(jour du plein)`. Le prix reste obligatoire dans le corps (contrat inchangé). L’empreinte de rejeu compare le prix retenu, donc un prix forgé différent sous la même clé est rejoué, pas refusé.
+- **Prévention vérifiable** : `tests/contract/fuel-price-imposed.contract.test.ts`. Sans le contrôle du rôle, quatre cas passent au rouge.
+- **Leçon** : une restriction affichée par l’écran (champ en lecture seule, bouton masqué) doit avoir son équivalent dans la route qui écrit. `declare-no-refuel` n’a pas de prix, il n’est pas concerné.
+- **Limite connue** : le jour du prix est le jour UTC du plein, alors que l’écran prend le jour local (UTC+1). Cela n’a d’effet qu’entre minuit et 1 h, le jour d’un changement de prix.
+
 ## 2026-11-03 — Ajustement de stock rejoué au réessai (idempotence absente, puis clé libérée sur une issue incertaine)
 
 ### Contexte
@@ -1863,3 +1873,20 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
 - Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
 - En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
+
+## 2026-11-03 — Fichier de workflow orphelin quand l'enregistrement en base échoue
+
+### Contexte
+- `WorkflowDocumentService.saveWorkflowDocument` écrivait le fichier sous `uploads/workflows/<session>/` puis insérait la ligne `workflow_documents`. Un INSERT refusé (workflow supprimé entre-temps, contrainte) laissait le fichier sans ligne.
+
+### Cause racine
+- Classification : effet de bord non compensé. Deux écritures (disque, base) sans transaction commune, et aucune compensation de la première quand la seconde échoue.
+
+### Résolution
+- L'INSERT échoué supprime le fichier écrit (`fs.rmSync`, `force`), puis l'erreur d'origine remonte. Un échec du ménage est journalisé en `warn`, il ne masque pas l'erreur.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-document-orphan.test.ts` : workflow inexistant -> rejet et dossier de session vide. Rouge sans le correctif.
+
+### Règle Projet (obligatoire)
+- Un service qui écrit un fichier avant une ligne en base supprime ce fichier si l'écriture en base échoue. Les autres cas déjà couverts : documents véhicule, récépissé de renouvellement, preuves de règlement fournisseur.
