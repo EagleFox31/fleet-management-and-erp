@@ -5,6 +5,7 @@ import { vehicleAcquisitionWorkflows, vehicles } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, WFL1 : brouillon d'acquisition de véhicule
@@ -21,7 +22,7 @@ const sessionIds: string[] = ["TEST-wfl-invalide", "TEST-wfl-autre-session"];
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 const call = (...args: Parameters<typeof session.call>) => session.call(...args);
 const noLeak = (res: { body: any }) =>
-  expect(JSON.stringify(res.body)).not.toMatch(/SQLSTATE|violates|duplicate key|invalid input syntax|at \S+:\d+|ZodError/);
+  expect(leakText(res.body)).not.toMatch(/SQLSTATE|violates|duplicate key|invalid input syntax|at \S+:\d+|ZodError/);
 
 const newSession = () => {
   const id = uniqueTestToken("wfl");

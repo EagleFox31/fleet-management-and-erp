@@ -12,6 +12,7 @@ import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /** Niveau C, T-16 : referentiel des types de document vehicule. */
 
@@ -91,7 +92,7 @@ describe("/api/vehicle-document-types", { timeout: 120000 }, () => {
     expect((await call("POST", VEHICLE_DOCUMENT_TYPES_PATH, "admin", { code: CODE, label: "Autre", validityMonths: 6 })).status).toBe(409);
     const bad = await call("POST", VEHICLE_DOCUMENT_TYPES_PATH, "admin", { code: "Code Invalide", label: "Autre", validityMonths: 6 });
     expect(bad.status).toBe(400);
-    expect(JSON.stringify(bad.body)).not.toMatch(/ZodError|stack/);
+    expect(leakText(bad.body)).not.toMatch(/ZodError|stack/);
   });
 
   it("modifie, desactive (jamais de suppression) et masque le type inactif aux non-admin", async () => {

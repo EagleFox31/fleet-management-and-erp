@@ -5,6 +5,7 @@ import { fuelRecords } from "../../shared/schema";
 import { createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * FUEL2, consommation par véhicule : `GET /api/fuel-card/vehicle/:id/stats`.
@@ -96,6 +97,6 @@ describe("FUEL2 : statistiques de consommation d'un véhicule", { timeout: 60000
   it("un véhicule inconnu répond 404, pas 500", async () => {
     const res = await session.call("GET", "/api/fuel-card/vehicle/2147483000/stats", { actor: "admin" });
     expect(res.status).toBe(404);
-    expect(JSON.stringify(res.body)).not.toMatch(/2147483000|SELECT/);
+    expect(leakText(res.body)).not.toMatch(/2147483000|SELECT/);
   });
 });
