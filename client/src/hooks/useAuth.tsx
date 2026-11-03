@@ -1,9 +1,10 @@
 import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
-import { login as apiLogin, logout as apiLogout, User, LoginCredentials } from "@/lib/auth";
-import { checkSession, nextSessionRetryDelay } from "@/lib/session-check";
+import { login as apiLogin, logout as apiLogout, resumeSession, User, LoginCredentials } from "@/lib/auth";
+import { nextSessionRetryDelay } from "@/lib/session-check";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { loginFailureOf } from "@/lib/lockout-message";
+import { clientLogger } from "@/lib/logger";
 
 interface AuthContextValue {
   user: User | null;
@@ -54,7 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const checkUser = async () => {
       setIsLoading(true);
       for (let attempt = 1; ; attempt++) {
-        const result = await checkSession();
+        // Seul chemin d'amorçage : déconnexion différée, puis /me, puis magasin hors ligne.
+        const result = await resumeSession();
         if (isStale()) return;
         if (result.status !== "unreachable") {
           setUser(result.status === "authenticated" ? result.user : null);
@@ -62,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsLoading(false);
           return;
         }
-        console.warn(`Session check unreachable (attempt ${attempt})`);
+        clientLogger.warn("Session check unreachable", { attempt });
         setSessionUnreachable(true);
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, nextSessionRetryDelay(attempt));
@@ -100,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return true;
     } catch (error) {
-      console.error("Login error:", error);
+      clientLogger.error("Login error", { err: error });
       if (!mountedRef.current) {
         return false;
       }
@@ -133,12 +135,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
     } catch (error) {
-      console.error("Logout error:", error);
+      clientLogger.error("Logout error", { err: error });
       if (mountedRef.current) {
         toast({
           variant: "destructive",
           title: "Déconnexion locale appliquée",
-          description: "Le serveur a renvoyé une erreur, mais votre session locale a été fermée.",
+          description: "Votre session locale est fermée. La déconnexion sera confirmée auprès du serveur dès que possible.",
         });
       }
     } finally {
