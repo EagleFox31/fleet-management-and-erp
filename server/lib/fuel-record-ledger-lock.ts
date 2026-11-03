@@ -16,7 +16,7 @@ export type LedgerLockedField = (typeof LEDGER_LOCKED_FIELDS)[number];
 
 export const FUEL_RECORD_LEDGER_LOCKED_MESSAGE =
   "Ce plein a déjà mouvementé la carte carburant : quantité, coût, véhicule et date ne se modifient plus. " +
-  "Pour corriger, passez par une régularisation, ou annulez le plein puis saisissez-en un nouveau.";
+  "Pour corriger, passez par une régularisation, ou demandez l'annulation du plein puis saisissez-en un nouveau.";
 
 type LedgerRecord = {
   vehicleId: number | null;
@@ -62,9 +62,16 @@ export function changedLedgerFields(record: LedgerRecord, patch: LedgerPatch): L
   return LEDGER_LOCKED_FIELDS.filter((field) => patch[field] !== undefined && !sameValue(field, record[field], patch[field]));
 }
 
-/** Lève 409 si le plein a mouvementé la carte et que le correctif touche un champ verrouillé. */
-export function assertFuelRecordLedgerEditable(record: LedgerRecord, patch: LedgerPatch): void {
-  if (!hasMovedFuelCard(record)) return;
-  const changed = changedLedgerFields(record, patch);
-  if (changed.length > 0) throw new AppError(409, FUEL_RECORD_LEDGER_LOCKED_MESSAGE, { details: { fields: changed } });
+/**
+ * Lève 409 si le plein a mouvementé la carte et que le correctif touche un champ verrouillé.
+ * Sinon, renvoie le correctif sans les champs verrouillés d'un plein qui a mouvementé la
+ * carte : la valeur stockée reste écrite, même quand l'envoi n'en diffère que d'un arrondi
+ * (sans quoi des ré-sauvegardes répétées feraient dériver litres et prix au litre).
+ */
+export function assertFuelRecordLedgerEditable<P extends LedgerPatch>(record: LedgerRecord, patch: P): P {
+  if (!hasMovedFuelCard(record)) return patch;
+  if (changedLedgerFields(record, patch).length > 0) throw new AppError(409, FUEL_RECORD_LEDGER_LOCKED_MESSAGE);
+  const kept = { ...patch };
+  for (const field of LEDGER_LOCKED_FIELDS) delete kept[field];
+  return kept;
 }

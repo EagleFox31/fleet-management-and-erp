@@ -174,7 +174,7 @@ describe("plein qui a débité la carte : montants figés", { timeout: 60000 }, 
       expect(res.status).toBe(409);
       expectErrorContract(res, "CONFLICT");
       expect(res.body.message).toContain("régularisation");
-      expect(res.body.fields).toEqual([field]);
+      expect(res.body.message).toContain("demandez l'annulation");
       const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
       expect(row.quantity).toBe(record.quantity);
       expect(row.cost).toBe(record.cost);
@@ -193,8 +193,8 @@ describe("plein qui a débité la carte : montants figés", { timeout: 60000 }, 
     const res = await patch(record.id, {
       vehicleId: record.vehicleId,
       date: "2026-01-15T00:00:00.000Z",
-      quantity: "100",
-      cost: "82800",
+      quantity: "100.004",
+      cost: "82800.004",
       mileage: 1500,
       notes: "corrigé",
       fullTank: false,

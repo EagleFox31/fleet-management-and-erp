@@ -21,14 +21,23 @@ describe("verrou comptable d'un plein", () => {
     expect(changedLedgerFields(debited, { quantity: 99, cost: "82800", date: "2026-01-16" })).toEqual(["date", "quantity"]);
   });
 
-  it("409 sur un plein débité, rien sur un plein manuel", () => {
+  it("409 sur un plein débité, sans détail technique dans le corps", () => {
     expect(() => assertFuelRecordLedgerEditable(debited, { cost: 1 })).toThrow(AppError);
     try {
       assertFuelRecordLedgerEditable(debited, { cost: 1 });
     } catch (err) {
       expect((err as AppError).status).toBe(409);
-      expect((err as AppError).details).toEqual({ fields: ["cost"] });
+      expect((err as AppError).details).toBeUndefined();
     }
-    expect(() => assertFuelRecordLedgerEditable({ ...debited, debitAmount: null }, { cost: 1 })).not.toThrow();
+  });
+
+  it("plein débité : un écart d'arrondi garde la valeur stockée (pas de dérive des litres)", () => {
+    const kept = assertFuelRecordLedgerEditable(debited, { quantity: 100.004, cost: 82800.004, notes: "n", mileage: 5 });
+    expect(kept).toEqual({ notes: "n", mileage: 5 });
+  });
+
+  it("plein manuel : correctif transmis tel quel", () => {
+    const patch = { cost: 1, quantity: 2 };
+    expect(assertFuelRecordLedgerEditable({ ...debited, debitAmount: null }, patch)).toEqual(patch);
   });
 });

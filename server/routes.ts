@@ -2852,9 +2852,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Convertir les données du formulaire au bon format ; champ absent = inchangé
-      const input = fuelRecordBodySchema.partial().parse(req.body ?? {});
-      // Plein qui a mouvementé la carte : montants, véhicule et date figés (409).
-      assertFuelRecordLedgerEditable(fuelRecord, input);
+      // Plein qui a mouvementé la carte : montants, véhicule et date figés (409), valeurs stockées conservées.
+      const input = assertFuelRecordLedgerEditable(fuelRecord, fuelRecordBodySchema.partial().parse(req.body ?? {}));
       const updateData = {
         vehicleId: input.vehicleId ?? fuelRecord.vehicleId,
         date: input.date ?? fuelRecord.date,
