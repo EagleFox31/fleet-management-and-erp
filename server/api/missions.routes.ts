@@ -1364,9 +1364,8 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
       declaration,
     });
   } catch (error) {
-    if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Declare mission no-refuel error");
+    next(error);
   }
 });
 
@@ -3141,9 +3140,8 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       targetDocumentTypes: targetDocTypes,
     });
   } catch (error) {
-    if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Create mission document renewal request error");
+    next(error);
   }
 });
 
