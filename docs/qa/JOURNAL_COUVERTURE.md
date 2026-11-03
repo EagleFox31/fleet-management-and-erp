@@ -2227,4 +2227,33 @@ soumission sans doublon.
 - **Preuves** :
   - rouge contre main : 1 échec sur le ciblage ;
   - vert 16/16 ;
+
+## 2026-11-03 17:08 — e2e : plein de mission sans réponse, un seul débit (FUEL-DBL)
+
+- **Quoi** : `e2e/21-mission-fuel-double-debit.spec.ts`.
+  - Le chauffeur valide un plein.
+  - `page.route` laisse la requête atteindre le serveur, qui écrit le plein (`route.fetch`), puis jette la réponse (`route.abort`).
+  - Le chauffeur ferme la fiche (Annuler), la rouvre et renvoie le même plein.
+  - Attendu : même `requestKey` aux deux envois, rejeu en 2xx, un seul débit en base pour la mission.
+- **Pourquoi** : niveau E de #181.
+  - Les contrats prouvent le rejeu côté serveur.
+  - Seul un navigateur prouve que la clé survit à une issue inconnue et à la fermeture de la fiche (sessionStorage, `discard` qui garde une clé incertaine).
+- **Preuves** :
+  - vert sur Postgres local, serveur sur un port dédié, Chrome (`E2E_CHANNEL=chrome`) ;
+  - rouge quand `discard` libère aussi une clé incertaine : le renvoi part avec une nouvelle clé ;
+  - vert de nouveau après retour arrière ;
+  - tsc 0.
+
+## 2026-11-03 17:11 — Garde : toute alerte créée émet alert_created
+
+- **Quoi** : `tests/unit/server/alert-emission-hygiene.test.ts` et le scanner `tests/support/alert-emission-scan.ts` (API TypeScript).
+  - Le scanner recense les écritures d'alerte sous server/ : `insert(alerts)`, `createAlert(…)` et `INSERT INTO alerts`.
+  - Pour chacune, il exige dans la fonction englobante (ou le gestionnaire `METHODE /chemin`) `broadcastAlertCreated`, la chaîne `alert_created` ou un helper local qui émet.
+- **Résultat sur main** : 15 écritures, dont 10 qui émettent.
+  - Deux exceptions justifiées : la primitive `storage.createAlert` et la restauration de sauvegarde.
+  - Trois défauts gelés en égalité stricte : `POST /api/alerts`, `POST /api/test-date-maintenance`, `storage.checkAndCreateStockAlerts` (stock bas).
+- **Pourquoi** : section « Émetteurs non traités » de l'audit temps réel ; la réception de pièces est corrigée par #180 (b7). Cette garde complète `alerts-write-hygiene`, qui couvre UPDATE et DELETE.
+- **Preuves** :
+  - rouge quand l'émission de `procurement-service` est retirée : 1 échec ;
+  - unitaires 1862/1862 ;
   - tsc 0.

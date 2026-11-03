@@ -33,7 +33,6 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/supplier-invoices.routes.ts": { count: 1, why: "factures fournisseur suivies par plusieurs profils" },
   "server/api/suppliers.routes.ts": { count: 1, why: "fournisseurs suivis par plusieurs profils" },
   "server/api/technician-work-orders.routes.ts": { count: 1, why: "lot B, OT : mise à jour par le technicien" },
-  "server/api/warehouse.routes.ts": { count: 1, why: "#188 (stock-movement) : warehouse_stock_movement_recorded, passage en portée personnel par une autre session" },
   "server/api/work-order-items.routes.ts": { count: 1, why: "lot B, OT : lignes de travail (point d'émission unique `diffuser`)" },
   "server/api/work-order-parts.routes.ts": { count: 6, why: "lot B, OT : pièces demandées, utilisées, OT en attente de pièces" },
   "server/index.ts": { count: 1, why: "lot B, pont LISTEN/NOTIFY des triggers Postgres : toujours broadcast" },
