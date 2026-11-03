@@ -129,3 +129,10 @@ Règles : `docs/journal/README.md`.
 - **Comment** : `tests/contract/document-renewal-receipt-hardening.contract.test.ts`, `tests/unit/shared/document-renewal-event-scope.test.ts`, `tests/unit/shared/vehicle-eligibility-receipt-utc.test.ts` ; chaque règle démontrée rouge par mutation.
 - **Pourquoi** : fuite de chemins disque vers des rôles non autorisés (audit), deux calculs du jour qui divergeaient (Douala contre local), diffusion en échec qui supprimait un fichier référencé.
 - **Reste / risques** : `GET /requests` ne renvoie plus `proofFilePath` (aucun consommateur client) ; branchement de `missions.routes.ts` à venir (b7).
+
+## 2026-11-03 — Lot A3 : lectures GET ouvertes au client
+- **Agent** : fleet-api · **Branche** : `fix/client-read-scope-fuel-invoices`
+- **Quoi** : carburant cloisonné par propriétaire, données internes (stock, prix, factures, KPI) réservées au personnel, ids hors plage en 400, garde d'hygiène étendue aux GET portant une garde reconnue, avec liste gelée (limites et échec fermé au lot A4).
+- **Comment** : voir `docs/qa/JOURNAL_COUVERTURE.md` et la leçon du 2026-11-03 de `docs/analysis/LESSONS_LEARNED.md`.
+- **Pourquoi** : un client lisait les pleins, le stock, les prix et les factures fournisseur de toute la flotte.
+- **Reste / risques** : 55 lectures dans la liste gelée (certaines masquées par un routeur monté avant `registerRoutes`, à vérifier une à une) ; `GET /api/suppliers/:id/invoices/payment` non gardée ici.

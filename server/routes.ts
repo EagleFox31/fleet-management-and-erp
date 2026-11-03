@@ -35,7 +35,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
-import { assertWorkOrderReadable } from "./lib/work-order-scope";
+import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -1652,7 +1652,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cancelled: Number(statsRow?.cancelled ?? 0),
       };
       
-      log.info({ stats, requestId: req.requestId }, "Work orders statistics calculated");
+      log.debug({ stats, requestId: req.requestId }, "Work orders statistics calculated");
       
       return res.status(200).json(stats);
     } catch (error) {
@@ -1815,16 +1815,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single work order by ID (MUST be before other specific routes)
-  app.get("/api/work-orders/:id", authenticate, async (req, res) => {
+  app.get("/api/work-orders/:id", authenticate, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
-      
+
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
-      
+      // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
+      assertValidDbId(id, "ID d'ordre de travail invalide.");
+
       const workOrder = await storage.getWorkOrder(id);
-      console.log("Work order retrieved:", JSON.stringify(workOrder, null, 2));
+      // Pas de contenu dans le journal : l'accès n'est pas encore contrôlé ici.
+      log.debug({ workOrderId: id, found: Boolean(workOrder), requestId: req.requestId }, "Ordre de travail lu");
       
       if (!workOrder) {
         return res.status(404).json({ message: "Ordre de travail non trouvé" });
@@ -1858,7 +1861,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(workOrder);
     } catch (error) {
-      console.error("Get work order error:", error);
+      if (isAppError(error)) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Get work order error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2001,7 +2005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       const workOrder = await storage.getWorkOrder(id);
@@ -2253,7 +2257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
 
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
 
       const workOrder = await storage.getWorkOrder(id);
@@ -2387,7 +2391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/technician/work-orders/:id/status : server/api/technician-work-orders.routes.ts
 
   // Parts Inventory Routes
-  app.get("/api/parts", authenticate, async (req, res) => {
+  app.get("/api/parts", isStaff, async (req, res) => {
     try {
       const search = req.query.search as string | undefined;
       // Bornes : un limit nul, négatif ou hors entier sûr, ou un offset négatif, retombent sur le repli.
@@ -2408,32 +2412,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/parts/statistics", authenticate, async (_req, res) => {
+  app.get("/api/parts/statistics", isStaff, async (req, res) => {
     try {
       const stats = await partsService.getPartsStatistics();
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get parts statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get parts statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/parts/low-on-stock", authenticate, async (_req, res) => {
+  app.get("/api/parts/low-on-stock", isStaff, async (req, res) => {
     try {
       const parts = await partsService.getLowStockParts();
       
       return res.status(200).json(parts);
     } catch (error) {
-      console.error("Get low stock parts error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get low stock parts error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/parts/:id(\\d+)", authenticate, async (req, res) => {
+  app.get("/api/parts/:id(\\d+)", isStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
-      if (isNaN(id)) {
+      if (isNaN(id) || id < 1 || id > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2445,7 +2449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(part);
     } catch (error) {
-      console.error("Get part error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get part error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2453,12 +2457,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST, PATCH, DELETE /api/parts et POST /api/parts/:id/update-stock : server/api/parts-catalog.routes.ts
 
   // Parts Used Routes
-  app.get("/api/parts-used", authenticate, async (req, res) => {
+  app.get("/api/parts-used", isStaff, async (req, res) => {
     try {
       const partsUsed = await storage.getAllPartsUsed();
       return res.status(200).json(partsUsed);
     } catch (error) {
-      console.error("Get all parts used error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get all parts used error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2468,7 +2472,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrderId = parseInt(req.params.workOrderId);
       
       if (isNaN(workOrderId)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       await assertWorkOrderReadable(req.user, workOrderId);
@@ -2516,7 +2520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrderId = parseInt(req.params.workOrderId);
       
       if (isNaN(workOrderId)) {
-        return res.status(400).json({ message: "ID d'ordre de travail invalide" });
+        return res.status(400).json({ message: "ID d'ordre de travail invalide." });
       }
       
       await assertWorkOrderReadable(req.user, workOrderId);
@@ -2708,7 +2712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Parts History and Analytics Routes
-  app.get("/api/parts/stock-movements", authenticate, async (req, res) => {
+  app.get("/api/parts/stock-movements", isStaff, async (req, res) => {
     try {
       const partId = req.query.partId ? parseInt(req.query.partId as string) : undefined;
       
@@ -2726,16 +2730,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(200).json(allMovements);
       }
     } catch (error) {
-      console.error("Get stock movements error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get stock movements error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/parts/:id/stock-history", authenticate, async (req, res) => {
+  app.get("/api/parts/:id/stock-history", isStaff, async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2743,7 +2747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(stockHistory);
     } catch (error) {
-      console.error("Get part stock history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get part stock history error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -2752,7 +2756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2769,7 +2773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2809,11 +2813,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Stock réel d'une pièce avec historique mouvements
-  app.get("/api/parts/:id/real-stock", authenticate, async (req, res) => {
+  app.get("/api/parts/:id/real-stock", isStaff, async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
       
-      if (isNaN(partId)) {
+      if (isNaN(partId) || partId < 1 || partId > MAX_DB_INTEGER_ID) {
         return res.status(400).json({ message: "ID de pièce invalide" });
       }
       
@@ -2822,9 +2826,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(realStock);
     } catch (error) {
-      console.error("Get real stock error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get real stock error");
       return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
+        message: "Erreur serveur" 
       });
     }
   });
@@ -3098,17 +3102,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/fuel-records/:id : server/api/fuel-records.routes.ts (verrou carte carburant).
 
   // Récupérer tous les enregistrements de carburant
-  app.get("/api/fuel-records", authenticate, async (req, res) => {
+  app.get("/api/fuel-records", isAnyUser, async (req, res) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
       let fuelRecords: Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>> = [];
-      
+
       if (vehicleId && !isNaN(vehicleId)) {
+        if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        }
         fuelRecords = await storage.getFuelRecordsByVehicleId(vehicleId);
       } else {
         // Récupérer tous les enregistrements de carburant
         // Note: Dans une application réelle, il faudrait paginer les résultats
-        const vehicles = await storage.getVehicles();
+        // Cloison client : un client ne lit que les pleins de ses propres véhicules.
+        const ownerScope = ownerScopeOf(req.user);
+        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
@@ -3133,7 +3142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(enrichedFuelRecords);
     } catch (error) {
-      console.error("Get all fuel records error:", error);
+      log.error({ err: error, requestId: req.requestId }, "lecture des pleins en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3202,13 +3211,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/fuel-records/statistics", authenticate, async (req, res) => {
+  app.get("/api/fuel-records/statistics", isAnyUser, async (req, res) => {
     try {
       const period = req.query.period as string || 'month';
-      
-      // Récupérer tous les véhicules
-      const vehicles = await storage.getVehicles();
-      console.log('Vehicles retrieved for fuel stats:', vehicles);
+
+      // Cloison client : les statistiques d'un client ne portent que sur ses véhicules.
+      const ownerScope = ownerScopeOf(req.user);
+      const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+      log.debug({ vehicleCount: vehicles.vehicles.length, requestId: req.requestId }, "véhicules retenus pour les statistiques carburant");
       
       let totalFuel = 0;
       let totalCost = 0;
@@ -3286,13 +3296,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicleStats,
       });
     } catch (error) {
-      console.error("Get fuel statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "statistiques carburant en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
   
   // Historique de consommation pour le graphique
-  app.get("/api/fuel-records/consumption-history", authenticate, async (req, res) => {
+  app.get("/api/fuel-records/consumption-history", isAnyUser, async (req, res) => {
     try {
       const period = req.query.period as string || 'month';
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
@@ -3329,14 +3339,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let allRecords: FuelRecordWithDate[] = [];
       
       if (vehicleId && !isNaN(vehicleId)) {
+        if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
+          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        }
         const records = await storage.getFuelRecordsByVehicleId(vehicleId);
         allRecords = records.filter(
           (record): record is FuelRecordWithDate =>
             typeof record.date === "string" && new Date(record.date) >= limitDate
         );
       } else {
-        // Récupérer pour tous les véhicules
-        const vehicles = await storage.getVehicles();
+        // Récupérer pour tous les véhicules (un client : les siens seulement)
+        const ownerScope = ownerScopeOf(req.user);
+        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         for (const vehicle of vehicles.vehicles) {
           const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
@@ -3380,7 +3394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
-      console.error("Get fuel consumption history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "historique de consommation carburant en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3616,13 +3630,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Statistiques par famille de produits
-  app.get("/api/invoices/by-family", authenticate, async (_req, res) => {
+  app.get("/api/invoices/by-family", isStaff, async (req, res) => {
     try {
       const { vatBillingService } = await import("./services/vat-billing-service");
       const stats = await vatBillingService.getInvoicesByFamily();
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get invoices by family error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get invoices by family error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3641,9 +3655,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
-      console.error("Get supplier invoices with payments error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get supplier invoices with payments error");
       return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
+        message: "Erreur serveur" 
       });
     }
   });
@@ -3668,7 +3682,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Pièces extraites d'une facture
-  app.get("/api/invoices/:id/parts", authenticate, async (req, res) => {
+  app.get("/api/invoices/:id/parts", isStaff, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.id);
       
@@ -3681,15 +3695,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
-      console.error("Get parts from invoice error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get parts from invoice error");
       return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
+        message: "Erreur serveur" 
       });
     }
   });
   
   // Statistiques TVA mensuelles
-  app.get("/api/invoices/monthly-vat-stats", authenticate, async (req, res) => {
+  app.get("/api/invoices/monthly-vat-stats", isStaff, async (req, res) => {
     try {
       const year = parseInt(req.query.year as string) || new Date().getFullYear();
       const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
@@ -3699,7 +3713,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get monthly VAT stats error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get monthly VAT stats error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3894,8 +3908,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Dashboard Statistics Routes
-  app.get("/api/statistics/fleet", authenticate, async (req: Request, res) => {
+  app.get("/api/statistics/fleet", isAnyUser, async (req: Request, res) => {
     try {
+      // Cloison client (écran /vehicles) : décompte de ses seuls véhicules, sans KPI de flotte.
+      const ownerScope = ownerScopeOf(req.user);
+      if (ownerScope !== null) {
+        const { vehicles: ownVehicles } = await storage.getVehiclesByOwner(ownerScope);
+        const own = {
+          operational: ownVehicles.filter((v) => v.status === "operational").length,
+          maintenance: ownVehicles.filter((v) => v.status === "maintenance").length,
+          outOfService: ownVehicles.filter((v) => v.status === "out_of_service").length,
+        };
+        const ownTotal = own.operational + own.maintenance + own.outOfService;
+        const ownRate = ownTotal > 0 ? (own.operational / ownTotal) * 100 : 0;
+        return res.status(200).json({ ...own, availabilityRate: ownRate, availabilityRateKpi: ownRate });
+      }
+
       // Statistiques opérationnelles + KPI (cache optimisé)
       const [statistics, kpi] = await Promise.all([
         storage.getFleetStatistics(),
@@ -3918,7 +3946,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         availabilityRateKpi: Number(kpi?.availabilityRate || 0),
       });
     } catch (error) {
-      console.error("Get fleet statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get fleet statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -3970,24 +3998,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Fleet KPI endpoint - utilise le service de statut dédié avec cache optimisé
-  app.get("/api/statistics/fleet-kpi", authenticate, async (req, res) => {
+  app.get("/api/statistics/fleet-kpi", isStaff, async (req, res) => {
     try {
       const kpi = await vehicleStatusService.getFleetKPI();
       return res.status(200).json(kpi);
     } catch (error) {
-      console.error("Get fleet KPI error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get fleet KPI error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // Fleet history endpoint - historique des statuts par période
-  app.get("/api/statistics/fleet-history", authenticate, async (req, res) => {
+  app.get("/api/statistics/fleet-history", isStaff, async (req, res) => {
     try {
       const period = req.query.period as 'week' | 'month' | 'quarter' | 'year' || 'week';
       const history = await vehicleStatusService.getFleetStatusHistory(period);
       return res.status(200).json(history);
     } catch (error) {
-      console.error("Get fleet history error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get fleet history error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4063,7 +4091,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Nouveau endpoint pour les maintenances planifiées
-  app.get("/api/statistics/scheduled-maintenance", authenticate, async (req, res) => {
+  app.get("/api/statistics/scheduled-maintenance", isStaff, async (req, res) => {
     try {
       const period = req.query.period as 'week' | 'month' | 'quarter' | 'year' | undefined;
       
@@ -4075,7 +4103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json({ scheduled: count });
     } catch (error) {
-      console.error("Get scheduled maintenance count error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get scheduled maintenance count error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

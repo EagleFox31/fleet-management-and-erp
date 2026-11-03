@@ -23,7 +23,7 @@ export function assertValidDbId(value: number, message: string): void {
 }
 
 export async function assertWorkOrderReadable(reader: ScopeReader | undefined, workOrderId: number): Promise<void> {
-  assertValidDbId(workOrderId, "ID d'ordre de travail invalide");
+  assertValidDbId(workOrderId, "ID d'ordre de travail invalide.");
   const workOrder = await storage.getWorkOrder(workOrderId);
   if (!workOrder) {
     throw new AppError(404, "Ordre de travail non trouvé.");
