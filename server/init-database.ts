@@ -616,6 +616,17 @@ BEGIN
   END IF;
 END $$`,
   `ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_mileage integer CONSTRAINT work_orders_due_mileage_check CHECK (due_mileage IS NULL OR due_mileage >= 0)`,
+  `DO $$
+BEGIN
+  -- Base créée par drizzle-kit push : la colonne existe déjà, l'ADD COLUMN ci-dessus n'a pas posé le CHECK.
+  -- NOT VALID : les lignes existantes ne bloquent pas le démarrage, les écritures suivantes sont contrôlées.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'work_orders'::regclass AND conname = 'work_orders_due_mileage_check'
+  ) THEN
+    ALTER TABLE work_orders ADD CONSTRAINT work_orders_due_mileage_check CHECK (due_mileage IS NULL OR due_mileage >= 0) NOT VALID;
+  END IF;
+END $$`,
   `CREATE INDEX IF NOT EXISTS work_orders_preventive_due_idx ON work_orders (due_date) WHERE is_preventive`,
   `CREATE TABLE IF NOT EXISTS workshop_labor_rates (
   id serial PRIMARY KEY,
