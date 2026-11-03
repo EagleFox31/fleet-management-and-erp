@@ -321,9 +321,10 @@ export class TiresService {
   }
 
   // Vehicle Tires Management - Version simplifiée
-  async getAllVehicleTires(): Promise<any[]> {
+  /** `ownerId` : propriétaire imposé à un client (`ownerScopeOf`), `null` pour le personnel (pas de filtre). */
+  async getAllVehicleTires(ownerId: number | null = null): Promise<any[]> {
     try {
-      console.log('getAllVehicleTires called - using simplified PostgreSQL methods');
+      log.debug("getAllVehicleTires called - using simplified PostgreSQL methods");
 
       const rows = await db
         .select({
@@ -346,7 +347,7 @@ export class TiresService {
         .from(vehicleTires)
         .leftJoin(tires, eq(vehicleTires.tireId, tires.id))
         .leftJoin(vehicles, eq(vehicleTires.vehicleId, vehicles.id))
-        .where(eq(vehicleTires.status, "active"))
+        .where(ownerId === null ? eq(vehicleTires.status, "active") : and(eq(vehicleTires.status, "active"), eq(vehicles.ownerId, ownerId)))
         .orderBy(desc(vehicleTires.installationDate));
 
       return rows.map((row) => ({
@@ -354,7 +355,7 @@ export class TiresService {
         wearScore: computeTireWearScore(row.currentTreadDepth, row.initialTreadDepth),
       }));
     } catch (error) {
-      console.error('Error getting all vehicle tires:', error);
+      log.error({ err: error }, "lecture des pneus montés en échec");
       return [];
     }
   }
@@ -846,8 +847,20 @@ export class TiresService {
     }
   }
 
-  async getLastInspection(): Promise<any> {
-    return undefined;
+  /** Dernière inspection du pneu monté `vehicleTireId` (`null` si aucune). */
+  async getLastInspection(vehicleTireId: number): Promise<any | null> {
+    try {
+      const [row] = await db
+        .select()
+        .from(tireInspections)
+        .where(eq(tireInspections.vehicleTireId, vehicleTireId))
+        .orderBy(desc(tireInspections.inspectionDate), desc(tireInspections.id))
+        .limit(1);
+      return row ?? null;
+    } catch (error) {
+      log.error({ err: error, vehicleTireId }, "lecture de la dernière inspection en échec");
+      throw new Error("Erreur lors de la lecture de l'inspection");
+    }
   }
 
   // Statistiques avancées avec données réelles
@@ -1010,8 +1023,42 @@ export class TiresService {
 
   // Cette méthode a été déplacée plus haut dans le fichier
 
-  async getTireRotationDetails(): Promise<any> {
-    return undefined;
+  /** Rotation `rotationId` avec le mouvement de chaque pneu (`null` si inconnue). */
+  async getTireRotationDetails(rotationId: number): Promise<any | null> {
+    try {
+      const [rotation] = await db
+        .select({
+          id: tireRotations.id,
+          vehicleId: tireRotations.vehicleId,
+          rotationDate: tireRotations.rotationDate,
+          rotationMileage: tireRotations.rotationMileage,
+          rotationType: tireRotations.rotationType,
+          performedBy: tireRotations.performedBy,
+          cost: tireRotations.cost,
+          nextRotationMileage: tireRotations.nextRotationMileage,
+          notes: tireRotations.notes,
+          createdAt: tireRotations.createdAt,
+          vehicleRegistration: vehicles.registrationNumber,
+        })
+        .from(tireRotations)
+        .leftJoin(vehicles, eq(tireRotations.vehicleId, vehicles.id))
+        .where(eq(tireRotations.id, rotationId));
+      if (!rotation) return null;
+      const movements = await db
+        .select({
+          id: tireRotationDetails.id,
+          vehicleTireId: tireRotationDetails.vehicleTireId,
+          fromPosition: tireRotationDetails.fromPosition,
+          toPosition: tireRotationDetails.toPosition,
+        })
+        .from(tireRotationDetails)
+        .where(eq(tireRotationDetails.rotationId, rotationId))
+        .orderBy(tireRotationDetails.id);
+      return { ...rotation, movements };
+    } catch (error) {
+      log.error({ err: error, rotationId }, "lecture du détail de rotation en échec");
+      throw new Error("Erreur lors de la lecture de la rotation");
+    }
   }
 
   async getTireStatistics(): Promise<any> {

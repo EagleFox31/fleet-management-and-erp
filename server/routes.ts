@@ -15,7 +15,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -38,6 +38,7 @@ import { AppError, isAppError } from "./lib/app-error";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
@@ -3102,12 +3103,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/fuel-records/:id : server/api/fuel-records.routes.ts (verrou carte carburant).
 
   // Récupérer tous les enregistrements de carburant
-  app.get("/api/fuel-records", isAnyUser, async (req, res) => {
+  app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
       let fuelRecords: Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>> = [];
 
       if (vehicleId && !isNaN(vehicleId)) {
+        assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
           return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         }
@@ -3142,6 +3144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(enrichedFuelRecords);
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "lecture des pleins en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
@@ -3302,7 +3305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Historique de consommation pour le graphique
-  app.get("/api/fuel-records/consumption-history", isAnyUser, async (req, res) => {
+  app.get("/api/fuel-records/consumption-history", isAnyUser, async (req, res, next) => {
     try {
       const period = req.query.period as string || 'month';
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
@@ -3339,6 +3342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let allRecords: FuelRecordWithDate[] = [];
       
       if (vehicleId && !isNaN(vehicleId)) {
+        assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
           return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         }
@@ -3394,6 +3398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "historique de consommation carburant en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
@@ -3642,7 +3647,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Factures d'un fournisseur avec suivi paiements
-  app.get("/api/suppliers/:id/invoices/payment", authenticate, async (req, res) => {
+  // Données financières fournisseur : achats et trésorerie, jamais un client. Aucun écran ne l'appelle.
+  app.get("/api/suppliers/:id/invoices/payment", authorize([...PROCUREMENT_ROLES]), async (req, res) => {
     try {
       const supplierId = parseInt(req.params.id);
       
@@ -4230,12 +4236,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour le catalogue d'interventions
-  app.get("/api/fault-catalog", authenticate, async (req, res) => {
+  app.get("/api/fault-catalog", isStaff, async (req, res) => {
     try {
       const catalogs = await storage.getFaultCatalogs();
       res.json(catalogs);
     } catch (error) {
-      console.error("Get fault catalogs error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get fault catalogs error");
       res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4411,7 +4417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== TIRE MANAGEMENT ROUTES =====
 
   // Tire inventory routes
-  app.get("/api/tires", authenticate, async (req, res) => {
+  app.get("/api/tires", isStaff, async (req, res) => {
     try {
       const search = req.query.search as string;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -4427,42 +4433,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(result);
     } catch (error) {
-      console.error("Get tires error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tires error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tires/statistics", authenticate, async (req, res) => {
+  app.get("/api/tires/statistics", isStaff, async (req, res) => {
     try {
       const stats = await tiresService.getTireStatistics();
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get tire statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tires/statistics-advanced", authenticate, async (req, res) => {
+  app.get("/api/tires/statistics-advanced", isStaff, async (req, res) => {
     try {
       const stats = await tiresService.getTireStatisticsAdvanced();
       return res.status(200).json(stats);
     } catch (error) {
-      console.error("Get advanced tire statistics error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get advanced tire statistics error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tires/low-stock", authenticate, async (req, res) => {
+  app.get("/api/tires/low-stock", isStaff, async (req, res) => {
     try {
       const lowStockTires = await tiresService.getLowStockTires();
       return res.status(200).json(lowStockTires);
     } catch (error) {
-      console.error("Get low stock tires error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get low stock tires error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tires/:id", authenticate, async (req, res) => {
+  app.get("/api/tires/:id", isStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -4478,7 +4484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(tire);
     } catch (error) {
-      console.error("Get tire error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4663,12 +4669,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Global vehicle tires endpoint for the interface
-  app.get("/api/vehicle-tires", authenticate, async (req, res) => {
+  // Ouvert au client (le tableau des véhicules s'en sert) : limité aux pneus de ses véhicules.
+  app.get("/api/vehicle-tires", isAnyUser, async (req, res) => {
     try {
-      const allVehicleTires = await tiresService.getAllVehicleTires();
+      const allVehicleTires = await tiresService.getAllVehicleTires(ownerScopeOf(req.user));
       return res.status(200).json(allVehicleTires);
     } catch (error) {
-      console.error("Get all vehicle tires error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get all vehicle tires error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5026,7 +5033,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Tire inspection routes
-  app.get("/api/tire-inspections", authenticate, async (req, res) => {
+  app.get("/api/tire-inspections", isStaff, async (req, res) => {
     try {
       const vehicleTireId = req.query.vehicleTireId ? parseInt(req.query.vehicleTireId as string) : undefined;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -5035,12 +5042,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const inspections = await tiresService.getTireInspections();
       return res.status(200).json(inspections);
     } catch (error) {
-      console.error("Get tire inspections error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire inspections error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tire-inspections/recent", authenticate, async (req, res) => {
+  app.get("/api/tire-inspections/recent", isStaff, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 10;
       const inspections = await tiresService.getTireInspections();
@@ -5048,7 +5055,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Retourner les inspections simplifiées (limite appliquée)
       return res.status(200).json(inspections.slice(0, limit));
     } catch (error) {
-      console.error("Get recent tire inspections error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get recent tire inspections error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5069,7 +5076,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Détail d'une inspection par ID
-  app.get("/api/tire-inspections/:id", authenticate, async (req, res) => {
+  app.get("/api/tire-inspections/:id", isStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -5085,29 +5092,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(inspection);
     } catch (error) {
-      console.error("Get tire inspection by ID error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire inspection by ID error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/vehicle-tires/:vehicleTireId/last-inspection", authenticate, async (req, res) => {
+  app.get("/api/vehicle-tires/:vehicleTireId/last-inspection", isStaff, async (req, res, next) => {
     try {
       const vehicleTireId = parseInt(req.params.vehicleTireId);
-      
-      if (isNaN(vehicleTireId)) {
-        return res.status(400).json({ message: "ID de pneu véhicule invalide" });
+      assertValidDbId(vehicleTireId, "ID de pneu véhicule invalide.");
+
+      const lastInspection = await tiresService.getLastInspection(vehicleTireId);
+      if (!lastInspection) {
+        return next(new AppError(404, "Aucune inspection pour ce pneu."));
       }
-      
-      const lastInspection = await tiresService.getLastInspection();
       return res.status(200).json(lastInspection);
     } catch (error) {
-      console.error("Get last inspection error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Get last inspection error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // Tire rotation routes
-  app.get("/api/tire-rotations", authenticate, async (req, res) => {
+  app.get("/api/tire-rotations", isStaff, async (req, res) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -5116,7 +5124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rotations = await tiresService.getTireRotations();
       return res.status(200).json(rotations);
     } catch (error) {
-      console.error("Get tire rotations error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire rotations error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5146,18 +5154,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tire-rotations/:id/details", authenticate, async (req, res) => {
+  app.get("/api/tire-rotations/:id/details", isStaff, async (req, res, next) => {
     try {
       const rotationId = parseInt(req.params.id);
-      
-      if (isNaN(rotationId)) {
-        return res.status(400).json({ message: "ID de rotation invalide" });
+      assertValidDbId(rotationId, "ID de rotation invalide.");
+
+      const details = await tiresService.getTireRotationDetails(rotationId);
+      if (!details) {
+        return next(new AppError(404, "Rotation non trouvée."));
       }
-      
-      const details = await tiresService.getTireRotationDetails();
       return res.status(200).json(details);
     } catch (error) {
-      console.error("Get tire rotation details error:", error);
+      if (error instanceof AppError) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Get tire rotation details error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
