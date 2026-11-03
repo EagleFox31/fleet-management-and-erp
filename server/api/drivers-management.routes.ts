@@ -10,6 +10,7 @@ import { moduleLogger } from "../lib/logger";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
 import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
+import { withLogContext } from "../lib/error-log-context";
 
 const router = Router();
 router.use(authenticate);
@@ -196,8 +197,7 @@ router.get("/:id", async (req, res, next) => {
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Fiche chauffeur en echec");
-    return next(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }), { event: "Fiche chauffeur en echec" }));
   }
 });
 

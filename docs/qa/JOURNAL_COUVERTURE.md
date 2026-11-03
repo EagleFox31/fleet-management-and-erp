@@ -2039,6 +2039,13 @@ soumission sans doublon.
 - **Décision (utilisateur, 3 novembre 2026)** : `/missions/:id/costs` reste refusé au chauffeur, même pour sa propre mission. L'amortissement est tiré du prix d'achat du véhicule, et les agrégats couvrent toute la flotte. D'où le masquage de `purchasePrice` dans les listes.
 - **Preuves** : contrat `operations-driver-scope` 9/9 sur fleet_test ; mutation (service remis à la version précédente) : « mission réaffectée » rouge, 8/9. Erreurs contrôlées par `apiErrorProblems` (`tests/support/api-error.ts`, #146). tsc 0, unit 1633/1633.
 
+## 2026-11-03 13:18 — Cloison client sur les sous-ressources d'un OT (IDOR)
+
+- **Quoi** : `GET /api/work-orders/:id/parts`, `/:id/items` et `/:id/pending-part-requirements` n'exigeaient qu'une session. Un client énumérait les ids et lisait prix unitaires et heures des OT d'un autre client. Elles passent à `isAnyUser` puis à `assertWorkOrderReadable` : 404 si l'OT n'existe pas (avant la cloison), 403 si le véhicule n'est pas au client. Le personnel est inchangé ; un client lit toujours le coût de son propre OT (décision du commanditaire).
+- **Comment** : helper `server/lib/work-order-scope.ts`, qui réutilise `storage.getWorkOrder`, `storage.getVehicle` et `canAccessOwned` (même lecture du propriétaire que `GET /api/work-orders/:id`). Les `catch` des trois handlers relaient une `AppError` au gestionnaire central. Seuls les GET sont touchés ; `server/routes.ts` : le handler existant, sans nouvelle route.
+- **Pourquoi** : AGENTS.md §11. Un OT dont le véhicule n'a pas de propriétaire n'est lisible que par le personnel.
+- **Preuves** : `tests/contract/work-order-detail-client-scope.contract.test.ts`, 15 cas (3 routes x 5). Rouge sur main : 9 échecs / 6 verts (les 6 verts sont personnel et propriétaire). Vert après : 15/15 sur fleet_test. Contrats voisins (work-order*, vehicle-documents-client-scope, part-requirements-chain, api-role-guard) 104/104. tsc 0, unit 1658/1658.
+
 ## 2026-11-03 12:55 — Portée temps réel fermée par défaut
 
 - **Quoi** : une portée WebSocket absente, vide ou invalide n'envoie plus rien (avant : broadcast à tous, clients compris, cause commune de #53, #127 et #151). Le broadcast n'existe que si `type: "broadcast"` est écrit.
@@ -2059,4 +2066,17 @@ soumission sans doublon.
 - **Quoi** : `e2e/21-parts-catalog.spec.ts`. Parcours navigateur du magasinier (création par le formulaire avec catégorie libre, recherche dans le tableau, modification catégorie et prix, `createdBy`/`updatedBy` relus en base, corbeille absente et DELETE 403), suppression par l'admin à l'écran avec cascade des variante et spécification. Cas temps réel figé en `test.fail` : un second profil (chef d'atelier) sur `/inventory/parts` ne reçoit aucune trame de pièce.
 - **Comment** : comptes créés par `createE2EUser` (warehouse, workshop_manager, admin), références `TEST-prt1-*`, nettoyage par `cleanupCreated`. Variante et spécification par l'API dans la session du magasinier : `parts-database.tsx`, seul écran qui les porte, n'est montée par aucune route. Base locale `fleet_test_de_rid`, serveur port 5137, msedge.
 - **Pourquoi** : le contrat couvre les routes ; restait ce que l'écran affirme et la règle des 3 couches. `POST/PATCH/DELETE /api/parts` (`server/routes.ts`, gelé) n'émettent aucun événement et `useRealTimeSync.ts` n'invalide `/api/parts` que sur `part_used_*` et `part_requirement_*`.
-- **Preuves** : le cas temps réel, sans `test.fail`, échoue sur « aucune trame WebSocket de pièce reçue par le profil observateur » (`auth_success` reçu, création 201 et modification 200 vérifiées avant) : cause bien l'absence de trame, pas un sélecteur. Trois passages consécutifs verts (voir PR). tsc et unit : voir PR.
+- **Preuves** : le cas temps réel, sans `test.fail`, échoue sur « aucune trame WebSocket de pièce reçue par le profil observateur » (`auth_success` reçu, création 201 et modification 200 vérifiées avant) : cause bien l'absence de trame, pas un sélecteur. Mise en place hors du `test.fail` (garde `it-fails-hygiene`) : un témoin vérifie socket, création 201 et modification 200. Trois passages consécutifs verts (3/3 tests chaque fois), tsc 0, unit verts. Une PR corrective émet `part_catalog_changed` : la première des deux à fusionner laisse le `test.fail` en place, la seconde le retire.
+
+## 2026-11-03 14:05 — Cloison OT : logs migrés, commentaire du helper (suite de 51dfdef)
+
+- **Quoi** : dans les catch des GET touchés, les `console.*` passent à `moduleLogger` sans rien supprimer. `GET /api/work-orders/:id/parts` : le `console.log` du contenu des lignes devient un `log.debug` (`workOrderId`, `count`, `requestId`, sans le contenu), et le `console.error` un `log.error({ err, requestId })`. `GET /:id/items` : `console.error` migré vers `log.error`. Le commentaire de `assertWorkOrderReadable` dit qu'il applique la cloison client seulement ; l'écart technicien (OT d'un autre technicien, bloqué par `GET /api/work-orders/:id`) est noté comme connu.
+- **Pourquoi** : AGENTS.md §10, un log se migre, il ne se supprime pas. Le contenu des lignes (prix) n'a pas à finir dans les journaux.
+- **Preuves** : tsc 0, unitaires 1687/1687 ; contrats `work-order*` et `vehicle-documents-client-scope` 67/67 sur 10 fichiers, lancés sans `.env` ni `DATABASE_URL` (seulement `DATABASE_URL_TEST` et `DATABASE_WS_PROXY`).
+
+## 2026-11-03 13:19 — apiErrorProblems vérifie le requestId
+
+- **Quoi** : `apiErrorProblems` (`tests/support/api-error.ts`) exige maintenant un `requestId` non vide dans le corps d'erreur. Si l'appelant fournit l'en-tête `X-Request-Id` de la réponse, il doit être identique (`null` = en-tête absent, c'est un écart). Les trois contrats consommateurs (parts-catalog-access-errors, operations-driver-scope, mission-fuel-errors) et l'e2e 13 passent l'en-tête.
+- **Comment** : cinquième paramètre optionnel `requestIdHeader`, signature existante inchangée. `contract-session.call` expose `headers` (ajout, même forme que `contract-actors`).
+- **Pourquoi** : contrat `ApiErrorBody` (`shared/errors.ts`). Le requestId est la référence que l'utilisateur donne au support (AGENTS.md §10), et rien ne le gardait.
+- **Preuves** : unitaire 6/6, rouge à 2/6 avec l'ancien contrôle. Mutation serveur (`normalizeErrorBody` sans requestId) : 17 tests de contrat rouges sur les 3 suites consommatrices, verts une fois le serveur rétabli. Contrats complets 1340/1340 sur fleet_test_de_rid. Unit 1660/1660, tsc 0. Aucune route sans requestId parmi celles qu'appellent ces suites.

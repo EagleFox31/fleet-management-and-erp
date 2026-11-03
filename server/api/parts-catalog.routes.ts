@@ -13,6 +13,7 @@ import { isUniqueViolation } from "../lib/pg-errors";
 import { authenticate, isAdmin, isPartsCatalogManager, isStaff } from "../middleware/auth";
 import { partCatalogChildrenService } from "../services/part-catalog-children-service";
 import { partsService } from "../services/parts-service";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("parts-catalog");
 const router = Router();
@@ -36,8 +37,7 @@ router.post("/parts", authenticate, isPartsCatalogManager, async (req, res, next
       return next(new AppError(409, "Une pièce avec cette référence existe déjà", { cause: err }));
     }
     if (err instanceof Error && err.name === "ZodError") return next(err);
-    log.error({ err, requestId: req.requestId }, "Échec de la création de la pièce");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la création de la pièce" }));
   }
 });
 
@@ -47,8 +47,7 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
     return res.status(204).send();
   } catch (err) {
     if (err instanceof AppError) return next(err);
-    log.error({ err, requestId: req.requestId }, "Échec de la suppression de la pièce");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la suppression de la pièce" }));
   }
 });
 
