@@ -1,6 +1,11 @@
 import { db } from '../db';
-import { workOrders, vehicles, users, partsUsed, parts, tireRotations } from '../../shared/schema';
+import { workOrders, vehicles, users, partsUsed, parts, tireRotations, workOrderItems } from '../../shared/schema';
 import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
+import { computeWorkOrderCost } from '@shared/work-order-cost';
+import { moduleLogger } from '../lib/logger';
+import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
+
+const log = moduleLogger('technician-work-orders');
 
 export interface TechnicianWorkOrder {
   id: number;
@@ -45,14 +50,16 @@ interface WorkOrderCostBreakdown {
   totalCost: number;
 }
 
+const ZERO_COST: WorkOrderCostBreakdown = { baseCost: 0, partsCost: 0, tiresCost: 0, totalCost: 0 };
+
 export class TechnicianWorkOrdersService {
   /**
    * Récupérer tous les ordres de travail assignés à un technicien spécifique
    */
   async getTechnicianWorkOrders(technicianId: number): Promise<TechnicianWorkOrder[]> {
     try {
-      console.log(`🔧 [TECH-WO] Récupération des ordres de travail pour technicien ID: ${technicianId}`);
-      
+      log.debug({ technicianId }, 'récupération des ordres de travail du technicien');
+
       const result = await db
         .select({
           id: workOrders.id,
@@ -83,15 +90,10 @@ export class TechnicianWorkOrdersService {
         .where(eq(workOrders.technicianId, technicianId))
         .orderBy(desc(workOrders.createdAt));
 
-      // Calculer les coûts totaux pour chaque ordre de travail
-      const enrichedWorkOrders: TechnicianWorkOrder[] = await Promise.all(
-        result.map(async (wo) => {
-          console.log(`🔧 [TECH-WO] Calcul du coût total pour l'ordre ${wo.id}`);
-          const costBreakdown = await this.calculateWorkOrderCosts(wo.id);
-          console.log(
-            `🔧 [TECH-WO] Coûts calculés pour l'ordre ${wo.id}: Base=${costBreakdown.baseCost}, Pièces=${costBreakdown.partsCost}, Pneus=${costBreakdown.tiresCost}, Total=${costBreakdown.totalCost}`,
-          );
-          
+      // Coûts de toute la liste en quatre requêtes groupées, pas cinq par OT.
+      const costs = await this.calculateWorkOrderCosts(result.map((wo) => ({ id: wo.id, cost: wo.cost })));
+      const enrichedWorkOrders: TechnicianWorkOrder[] = result.map((wo) => {
+          const costBreakdown = costs.get(wo.id) ?? ZERO_COST;
           return {
             id: wo.id,
             vehicleId: wo.vehicleId,
@@ -119,70 +121,80 @@ export class TechnicianWorkOrdersService {
             isOverdue: this.isWorkOrderOverdue(wo.startDate, wo.status),
             estimatedDuration: this.getDefaultDuration(wo.title)
           };
-        })
-      );
+        });
 
-      console.log(`🔧 [TECH-WO] Trouvé ${enrichedWorkOrders.length} ordres pour le technicien`);
+      log.debug({ technicianId, count: enrichedWorkOrders.length }, 'ordres de travail du technicien trouvés');
       return enrichedWorkOrders;
     } catch (error) {
-      console.error('Erreur lors de la récupération des ordres de travail technicien:', error);
+      log.error({ err: error, technicianId }, 'récupération des ordres de travail du technicien impossible');
       throw error;
     }
   }
 
   /**
-   * Calculer le détail des coûts d'un ordre de travail (base + pièces + rotations pneus)
+   * Détail des coûts d'une liste d'OT : même règle que l'écran, le PDF et le KPI
+   * (`shared/work-order-cost.ts`). La main-d'oeuvre vaut heures réelles × taux en vigueur
+   * quand un taux existe, sinon `work_orders.cost`. Quatre requêtes groupées, quelle que
+   * soit la longueur de la liste. Si l'une des requêtes échoue, l'erreur est journalisée et la
+   * carte renvoyée est vide : l'appelant lit alors `ZERO_COST` pour tous les OT de la liste, y
+   * compris ceux dont le coût de base est renseigné. Avant le calcul groupé, la panne ne
+   * touchait que l'OT en cause.
    */
-  private async calculateWorkOrderCosts(workOrderId: number): Promise<WorkOrderCostBreakdown> {
+  private async calculateWorkOrderCosts(
+    rows: ReadonlyArray<{ id: number; cost: string | number | null }>,
+  ): Promise<Map<number, WorkOrderCostBreakdown>> {
+    const costs = new Map<number, WorkOrderCostBreakdown>();
+    if (rows.length === 0) return costs;
+    const ids = rows.map((row) => row.id);
     try {
-      // Coût de base de l'ordre de travail
-      const workOrder = await db
-        .select({ cost: workOrders.cost })
-        .from(workOrders)
-        .where(eq(workOrders.id, workOrderId))
-        .limit(1);
+      const [hoursRows, partsRows, rotationsRows, rates] = await Promise.all([
+        db
+          .select({
+            workOrderId: workOrderItems.workOrderId,
+            hours: sql<string>`COALESCE(SUM(${workOrderItems.actualHours}), 0)`,
+          })
+          .from(workOrderItems)
+          .where(and(inArray(workOrderItems.workOrderId, ids), sql`${workOrderItems.status} <> 'cancelled'`))
+          .groupBy(workOrderItems.workOrderId),
+        db
+          .select({
+            workOrderId: partsUsed.workOrderId,
+            total: sql<string>`COALESCE(SUM(${partsUsed.unitPrice} * ${partsUsed.quantity}), 0)`,
+          })
+          .from(partsUsed)
+          .where(inArray(partsUsed.workOrderId, ids))
+          .groupBy(partsUsed.workOrderId),
+        db
+          .select({
+            workOrderId: tireRotations.workOrderId,
+            total: sql<string>`COALESCE(SUM(CAST(${tireRotations.cost} AS NUMERIC)), 0)`,
+          })
+          .from(tireRotations)
+          .where(inArray(tireRotations.workOrderId, ids))
+          .groupBy(tireRotations.workOrderId),
+        laborRatesForWorkOrders(ids),
+      ]);
+      const hoursOf = new Map(hoursRows.map((row) => [Number(row.workOrderId), row.hours]));
+      const partsOf = new Map(partsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
+      const rotationsOf = new Map(rotationsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
 
-      const baseCost = workOrder[0]?.cost ? Number(workOrder[0].cost) : 0;
-
-      // Coût des pièces détachées
-      const partsResult = await db
-        .select({
-          totalPartsCost: sql<number>`COALESCE(SUM(${partsUsed.unitPrice} * ${partsUsed.quantity}), 0)`
-        })
-        .from(partsUsed)
-        .where(eq(partsUsed.workOrderId, workOrderId));
-
-      const partsCost = Number(partsResult[0]?.totalPartsCost || 0);
-
-      // Coût des rotations de pneus
-      const rotationsResult = await db
-        .select({
-          totalRotationsCost: sql<number>`COALESCE(SUM(CAST(${tireRotations.cost} AS NUMERIC)), 0)`
-        })
-        .from(tireRotations)
-        .where(eq(tireRotations.workOrderId, workOrderId));
-
-      const rotationsCost = Number(rotationsResult[0]?.totalRotationsCost) || 0;
-
-      const totalCost = Number(baseCost) + Number(partsCost) + Number(rotationsCost);
-      
-      console.log(`💰 [COST] Ordre ${workOrderId}: Base=${baseCost}, Pièces=${partsCost}, Rotations=${rotationsCost}, Total=${totalCost}`);
-      
-      return {
-        baseCost: Number(baseCost),
-        partsCost,
-        tiresCost: rotationsCost,
-        totalCost: Number(totalCost),
-      };
+      for (const row of rows) {
+        const partsCost = partsOf.get(row.id) ?? 0;
+        const tiresCost = rotationsOf.get(row.id) ?? 0;
+        const { baseCost, totalCost } = computeWorkOrderCost({
+          baseCost: row.cost,
+          parts: [{ unitPrice: partsCost, quantity: 1 }],
+          tireRotations: [{ cost: tiresCost }],
+          laborHours: hoursOf.get(row.id) ?? 0,
+          laborRate: rates.get(row.id) ?? null,
+        });
+        costs.set(row.id, { baseCost, partsCost, tiresCost, totalCost });
+      }
+      log.debug({ count: rows.length }, "coûts des OT calculés");
     } catch (error) {
-      console.error(`Erreur calcul coût ordre ${workOrderId}:`, error);
-      return {
-        baseCost: 0,
-        partsCost: 0,
-        tiresCost: 0,
-        totalCost: 0,
-      };
+      log.error({ err: error, workOrderIds: ids }, "calcul du coût des OT impossible");
     }
+    return costs;
   }
 
   /**

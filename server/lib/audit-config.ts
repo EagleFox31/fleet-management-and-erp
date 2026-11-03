@@ -22,3 +22,25 @@ export const AUDIT_CONFIG: AuditConfig = {
     ...resource("users", "user"),
   ],
 };
+
+/**
+ * Ecritures des ressources du chantier CDC (lot CDC-0a), journalisees en plus de AUDIT_CONFIG.
+ * Liste separee : AUDIT_CONFIG est gelee a 8 entites par tests/unit/server/audit-config.test.ts,
+ * un test qui n'appartient pas a ce lot. Les deux configurations sont montees l'une apres
+ * l'autre dans server/api/index.ts ; leurs chemins ne se recoupent pas.
+ *
+ * Exclus a dessein : `/telemetry/positions` et `/vehicle-positions` (volume : une ligne par
+ * position et par boitier ; le journal est reserve aux decisions humaines). Une route non
+ * listee n'est pas auditee, l'exclusion est donc l'absence de regle.
+ */
+export const CDC_AUDIT_CONFIG: AuditConfig = {
+  rules: [
+    ...resource("mission-advisories", "mission_advisory"),
+    ...resource("part-scans", "part_scan"),
+    ...resource("part-sales", "part_sale"),
+    ...resource("admin/telemetry-devices", "telemetry_device"),
+    ...resource("workshop-labor-rates", "workshop_labor_rate"),
+    ...resource("maintenance-reports", "maintenance_report"),
+    { pattern: /^\/imports\/[a-z-]+$/, entityType: "import" },
+  ],
+};

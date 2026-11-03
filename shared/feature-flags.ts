@@ -35,6 +35,15 @@ export const FEATURE_FLAGS = {
   "oil-change-prefill": { level: "should", defaultEnabled: false, label: "Intervalles de vidange préremplis" },
   "quality-check": { level: "should", defaultEnabled: false, label: "Contrôle qualité des ordres de travail" },
 
+  // Écarts du cahier des charges (chantier CDC, lot CDC-0a). Coupés jusqu'à validation en répétition.
+  "mission-maintenance-advisory": { level: "should", defaultEnabled: false, label: "Avis de maintenance sur mission" },
+  "part-qr": { level: "should", defaultEnabled: false, label: "Étiquettes et scan QR des pièces" },
+  "part-sales": { level: "should", defaultEnabled: false, label: "Vente de pièces" },
+  "kpi-reports": { level: "should", defaultEnabled: false, label: "Rapports d'indicateurs" },
+  "maintenance-report": { level: "should", defaultEnabled: false, label: "Rapport de maintenance" },
+  "excel-import": { level: "should", defaultEnabled: false, label: "Import Excel" },
+  "technician-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du technicien" },
+
   "email-notifications": { level: "later", defaultEnabled: false, label: "Alertes par e-mail" },
   finance: { level: "later", defaultEnabled: false, label: "Trésorerie et recouvrement" },
   "report-schedules": { level: "later", defaultEnabled: false, label: "Envoi automatique des rapports" },
