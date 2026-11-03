@@ -243,6 +243,20 @@ describe("P3-2 papier expiré pendant une mission en cours", () => {
     expect(mine).toHaveLength(1);
     expect(mine[0].priority).toBe("critical");
 
+    // Comportement voulu (décision utilisateur du 3 novembre 2026) : le chef de parc
+    // reçoit aussi l'alerte générale « Document expiré », une seule fois.
+    const generic = await db
+      .select()
+      .from(alerts)
+      .where(
+        and(
+          eq(alerts.userId, session.userIdOf("logistics")),
+          like(alerts.link, `%vehicleId=${vehicle.id}&%`),
+          eq(alerts.title, "Document expiré"),
+        ),
+      );
+    expect(generic).toHaveLength(1);
+
     // La mission n'est pas interrompue, le véhicule garde son statut.
     const [mission] = await db.select().from(missions).where(eq(missions.id, missionId));
     expect(mission.status).toBe("in_progress");
