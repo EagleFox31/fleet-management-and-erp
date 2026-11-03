@@ -12,6 +12,7 @@
     "backfill:created-by": "tsx --env-file=.env scripts/backfill-created-by.ts",
     "backfill:vehicle-document-master-dates": "node --env-file=.env --import tsx scripts/backfill-vehicle-document-master-dates.ts",
     "backfill:procurement-reception-stock": "tsx --env-file=.env scripts/backfill-procurement-reception-stock.ts",
+    "backfill:preventive-schedules": "tsx --env-file=.env scripts/backfill-preventive-schedules.ts",
     "backfill:procurement-auto-invoices": "tsx --env-file=.env scripts/backfill-procurement-auto-invoices.ts",
     "benchmark:management-dashboard": "tsx --env-file=.env scripts/benchmark-management-dashboard.ts",
     "test": "node ./node_modules/vitest/vitest.mjs run",
