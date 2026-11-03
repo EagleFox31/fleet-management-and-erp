@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { inArray } from "drizzle-orm";
+import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { db } from "../server/db";
 import { partsUsed, tireRotations, workOrderItems, workOrders, workshopLaborRates } from "../shared/schema";
@@ -110,23 +111,22 @@ async function seedWorkOrder(opts: {
 }
 
 /** Coût lu sur l'écran (en-tête et récapitulatif), dans le PDF téléchargé, et par l'API KPI. */
-async function readThreeCosts(page: Page, wo: { id: number; vehicleId: number }, day: string) {
+async function readThreeCosts(page: Page, wo: { id: number; vehicleId: number }, day: string, expectedTotal: number) {
   await page.goto(`/maintenance/work-orders/${wo.id}?tab=report`, { waitUntil: "domcontentloaded" });
   const header = page.getByText("Coût total", { exact: true }).locator("xpath=following-sibling::div");
   await expect(header).toBeVisible({ timeout: 60_000 });
   const recapTotal = page.getByText("Total", { exact: true }).locator("xpath=following-sibling::span").first();
   await expect(recapTotal).toBeVisible();
 
-  // Le total affiché dépend du taux, chargé après l'OT : on attend qu'il se stabilise.
+  // Le total affiché dépend du taux, chargé après l'OT : on attend le montant attendu (un total partiel > 0 ne suffit pas).
   const printButton = page.getByTestId("button-print-work-order");
   await expect(printButton).toBeEnabled({ timeout: 30_000 });
-  await expect.poll(async () => amountOf((await header.textContent()) ?? ""), { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => amountOf((await header.textContent()) ?? ""), { timeout: 30_000 }).toBe(expectedTotal);
   const screenHeader = amountOf((await header.textContent()) ?? "");
   const screenRecap = amountOf((await recapTotal.textContent()) ?? "");
 
   const [download] = await Promise.all([page.waitForEvent("download"), printButton.click()]);
   const path = await download.path();
-  const { readFileSync } = await import("node:fs");
   const texts = pdfTexts(readFileSync(path));
   const totalIndex = texts.findIndex((t) => t.trim() === "TOTAL");
   expect(totalIndex, `ligne TOTAL absente du PDF (${texts.length} textes)`).toBeGreaterThanOrEqual(0);
@@ -157,7 +157,7 @@ test.describe("WO5 - coût d'un ordre de travail (navigateur)", () => {
     });
 
     await loginWithSession(page, admin);
-    const costs = await readThreeCosts(page, wo, "2016-09-20");
+    const costs = await readThreeCosts(page, wo, "2016-09-20", 35000);
     expect(costs).toEqual({ screenHeader: 35000, screenRecap: 35000, pdfTotal: 35000, kpiTotal: 35000 });
   });
 
@@ -174,7 +174,12 @@ test.describe("WO5 - coût d'un ordre de travail (navigateur)", () => {
     });
 
     await loginWithSession(page, admin);
-    const costs = await readThreeCosts(page, wo, "2016-03-10");
+    // Le cas suppose qu'aucun taux n'est en vigueur au 2016-03-10 (le contrat work-order-labor-rate en pose un au
+    // 2016-03-01 le temps de son passage) : on l'affirme au lieu de le supposer.
+    const rateRes = await page.request.get(`/api/work-orders/${wo.id}/labor-rate`);
+    expect(rateRes.status()).toBe(200);
+    expect(await rateRes.json(), "aucun taux en vigueur à la clôture de l'OT").toBeNull();
+    const costs = await readThreeCosts(page, wo, "2016-03-10", 840);
     expect(costs).toEqual({ screenHeader: 840, screenRecap: 840, pdfTotal: 840, kpiTotal: 840 });
   });
 });

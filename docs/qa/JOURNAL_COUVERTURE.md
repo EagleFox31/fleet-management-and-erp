@@ -2133,3 +2133,15 @@ soumission sans doublon.
 - **Comment** : acteurs manager, technicien, chauffeur, magasinier, clients A, B et sans véhicule ; données `TEST*` (pneu, 2 pneus montés, 3 inspections, 2 rotations) supprimées en `afterAll`, balayage d'orphelins étendu. Scan par classification de la source des gardes, identifiant inconnu = permissif.
 - **Pourquoi** : dernière famille de fuites de lecture côté client (récidive des lots A1 à A3) et garde qui acceptait un nom de garde sans en lire le rôle.
 - **Preuves** : rouge sur `routes.ts` de main : 21 échecs sur 53 ; vert 53/53. Mutation : `routes-hygiene` 1 échec / 24 réussis. Liste gelée 52 -> 22, liste non analysable 1. tsc 0, unitaires 1773/1773, familles de contrat 54 fichiers / 869 tests.
+
+## 2026-11-03 14:58 — P6 : stock bas -> réapprovisionnement au navigateur (niveau E)
+
+- **Quoi** : `e2e/23-low-stock-restock.spec.ts` (7 cas, série) : pièce TEST- sous son seuil, alerte au magasinier et compteur du chef d'atelier ; commande brouillon -> envoyée -> confirmée par l'écran du magasinier, alerte et stock inchangés ; réception par l'écran (+10, entrée de stock à son nom, relus en base) avec la trame `purchase_order_status_updated(delivered)` vérifiée chez le chef d'atelier ; technicien sans bouton, API 403, stock inchangé ; après rechargement l'alerte est levée.
+- **Comment** : parcours joué une fois dans un beforeAll, observations dans `seen`, un maillon par test. La levée de l'alerte sans rechargement est un défaut produit figé en `test.fail` (mise en place hors du corps, témoin présent : garde #159). Libellés lus dans `shared/constants/purchase-order-statuses.ts`. Données TEST- supprimées en fin de spec (0 reste).
+- **Pourquoi** : le contrat prouvait l'API, pas ce que voit le second profil. Le client ignore la réception pour l'alerte : `useRealTimeSync.ts` n'invalide pas les requêtes d'alerte sur cette trame. Non corrigé ici, à rendre à fleet-fe.
+- **Preuves** : trois passes 7/7 ; rouge si l'émission serveur est retirée (`purchase-orders.routes.ts`, rétabli) : test de réception en échec faute de trame ; avec les quatre invalidations ajoutées côté client (rétabli), le `test.fail` passe au vert donc échoue (« Expected to fail »). tsc 0, unitaires 1763/1763.
+
+## 2026-11-03 14:59 — WO5 : réserves de relecture sur e2e/22
+
+- **Quoi** : `e2e/22-work-order-cost.spec.ts` : sondage direct vers 35 000 et 840 (plus de `toBeGreaterThan(0)`), `GET /api/work-orders/:id/labor-rate` vérifié nul avant le cas sans taux, import `node:fs` en tête.
+- **Comment** : `readThreeCosts` reçoit le total attendu. **Pourquoi** : réserves du relecteur de #171 (un sondage > 0 pouvait valider un montant partiel). **Preuves** : spec 22 rejouée 2/2, tsc 0.

@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
@@ -24,6 +24,7 @@ import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
+import { newRequestKey } from "@/lib/request-key";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -975,6 +976,10 @@ export default function MissionDetailsPage() {
     },
   });
 
+  // Clé de la régularisation en cours : gardée jusqu'au succès, pour qu'un nouvel envoi après
+  // une coupure soit rejoué par le serveur au lieu de débiter la carte une seconde fois.
+  const fuelRegularizationKeyRef = useRef<string | null>(null);
+
   const addMissionFuelMutation = useMutation({
     mutationFn: async () => {
       const assignedVehicleId = Number(mission?.assignment?.vehicle?.id || 0);
@@ -1017,6 +1022,9 @@ export default function MissionDetailsPage() {
         notes: fuelForm.notes || undefined,
         regularizationReason: isRegularizationRequest ? fuelRegularizationReason.trim() : undefined,
         isPreDeparture: fuelForm.isPreDeparture,
+        requestKey: isRegularizationRequest
+          ? (fuelRegularizationKeyRef.current ??= newRequestKey())
+          : undefined,
       });
 
       return {
@@ -1025,6 +1033,7 @@ export default function MissionDetailsPage() {
       };
     },
     onSuccess: ({ normalizedPayload: payload, isRegularizationRequest }) => {
+      if (isRegularizationRequest) fuelRegularizationKeyRef.current = null;
       queryClient.setQueryData([`/api/missions/${missionId}/fuel-records`], (current: any) => {
         const normalizedCurrent = normalizeMissionFuelRecordsResponse(current);
         const nextRecords = payload.record
@@ -1085,6 +1094,9 @@ export default function MissionDetailsPage() {
       });
     },
   });
+
+  // Débit de la carte carburant : un double clic ne doit envoyer qu'une requête.
+  const submitMissionFuel = useSingleFlightMutate(addMissionFuelMutation.mutate);
 
   const updateMissionMutation = useMutation({
     mutationFn: async () => {
@@ -3167,7 +3179,7 @@ export default function MissionDetailsPage() {
               Annuler
             </Button>
             <Button
-              onClick={() => addMissionFuelMutation.mutate()}
+              onClick={() => submitMissionFuel()}
               disabled={addMissionFuelMutation.isPending || fuelPriceLoading}
               className="bg-green-600 hover:bg-green-700 text-white"
               data-testid="button-save-mission-fuel"
