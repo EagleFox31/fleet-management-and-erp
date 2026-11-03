@@ -7,6 +7,19 @@ import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 
 type FuelCardServiceErrorCode = "INSUFFICIENT_BALANCE" | "INVALID_INPUT" | "VEHICLE_NOT_FOUND";
 
+/** Exécuteur Drizzle : la base, ou une transaction en cours. */
+type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Verrou transactionnel de la carte carburant. La carte est unique et son solde
+ * est une somme sur fuel_records : aucune ligne à verrouiller par FOR UPDATE.
+ * Ce verrou sérialise contrôle du solde et écriture (débit comme crédit) ; il
+ * est relâché au COMMIT ou au ROLLBACK.
+ */
+async function lockFuelCard(tx: DbExecutor): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fleetmaster_fuel_card'))`);
+}
+
 const log = moduleLogger("fuel-card-service");
 
 /**
@@ -63,11 +76,11 @@ export class FuelCardService {
    * Récupère le solde actuel de la carte carburant
    * Exploite les 24 enregistrements août 2025 importés
    */
-  async getCurrentBalance() {
-    console.log("Calculating current fuel card balance...");
+  async getCurrentBalance(executor: DbExecutor = db) {
+    log.debug("calcul du solde de la carte carburant");
     
     // Calculer totaux crédits et débits
-    const [totals] = await db
+    const [totals] = await executor
       .select({
         totalCredits: sql<string>`COALESCE(SUM(${fuelRecords.creditAmount}), 0)`,
         totalDebits: sql<string>`COALESCE(SUM(${fuelRecords.debitAmount}), 0)`,
@@ -81,14 +94,14 @@ export class FuelCardService {
     const balance = credits - debits;
     
     // Récupérer dernier crédit et dernier débit
-    const [lastCredit] = await db
+    const [lastCredit] = await executor
       .select()
       .from(fuelRecords)
       .where(sql`${fuelRecords.creditAmount} > 0`)
       .orderBy(desc(fuelRecords.date))
       .limit(1);
     
-    const [lastDebit] = await db
+    const [lastDebit] = await executor
       .select()
       .from(fuelRecords)
       .where(sql`${fuelRecords.debitAmount} > 0`)
@@ -124,7 +137,7 @@ export class FuelCardService {
           : "fallback",
     };
     
-    console.log(`Current balance: ${balance} FCFA (${Math.round(fuelBalance)} L)`);
+    log.debug({ balance, fuelBalance: Math.round(fuelBalance) }, "solde de la carte carburant");
     return result;
   }
   
@@ -174,39 +187,44 @@ export class FuelCardService {
       unitPrice = 0;
     }
 
-    // Calculer nouveau solde
-    const currentBalance = await this.getCurrentBalance();
-    const newBalance = currentBalance.balance + amount;
-    const newFuelBalance = currentBalance.fuelBalance + quantity;
+    // Lecture du solde et écriture dans la même transaction, sous verrou :
+    // l'instantané balance de la ligne reste juste face à un plein simultané.
+    const { recharge, currentBalance, newBalance, newFuelBalance } = await db.transaction(async (tx) => {
+      await lockFuelCard(tx);
+      const currentBalance = await this.getCurrentBalance(tx);
+      const newBalance = currentBalance.balance + amount;
+      const newFuelBalance = currentBalance.fuelBalance + quantity;
 
-    // Créer l'enregistrement de recharge
-    const [recharge] = await db
-      .insert(fuelRecords)
-      .values({
-        vehicleId: null, // Pas de véhicule pour une recharge
-        date: data.date,
-        quantity,
-        fuelType: 'diesel',
-        stationName: 'APPROVISIONNEMENT',
-        unitPrice: unitPrice.toString(),
-        paymentMode: data.paymentMode,
-        orderNumber: data.orderNumber || null,
-        creditAmount: amount.toString(),
-        debitAmount: "0",
-        balance: newBalance.toString(),
-        fuelBalance: newFuelBalance.toString(),
-        notes:
-          data.notes ||
-          `Recharge carte - ${data.paymentMode}${data.orderNumber ? ` - ${data.orderNumber}` : ""}${
-            data.priceSource ? ` - prix ${data.priceSource}` : ""
-          }`,
-        year: new Date(data.date).getFullYear(),
-        month: new Date(data.date).getMonth() + 1,
-        createdBy: data.userId
-      })
-      .returning();
+      // Créer l'enregistrement de recharge
+      const [recharge] = await tx
+        .insert(fuelRecords)
+        .values({
+          vehicleId: null, // Pas de véhicule pour une recharge
+          date: data.date,
+          quantity,
+          fuelType: 'diesel',
+          stationName: 'APPROVISIONNEMENT',
+          unitPrice: unitPrice.toString(),
+          paymentMode: data.paymentMode,
+          orderNumber: data.orderNumber || null,
+          creditAmount: amount.toString(),
+          debitAmount: "0",
+          balance: newBalance.toString(),
+          fuelBalance: newFuelBalance.toString(),
+          notes:
+            data.notes ||
+            `Recharge carte - ${data.paymentMode}${data.orderNumber ? ` - ${data.orderNumber}` : ""}${
+              data.priceSource ? ` - prix ${data.priceSource}` : ""
+            }`,
+          year: new Date(data.date).getFullYear(),
+          month: new Date(data.date).getMonth() + 1,
+          createdBy: data.userId
+        })
+        .returning();
+      return { recharge, currentBalance, newBalance, newFuelBalance };
+    });
 
-    console.log(`Card recharged: +${amount} FCFA, new balance: ${newBalance} FCFA`);
+    log.info({ amount, newBalance }, "carte carburant rechargée");
     
     return {
       recharge,
@@ -260,48 +278,55 @@ export class FuelCardService {
     
     // Calculer coût et nouveau solde
     const cost = data.quantity * data.unitPrice;
-    const currentBalance = await this.getCurrentBalance();
-    
-    if (cost > currentBalance.balance) {
-      throw this.createServiceError(
-        `Solde insuffisant (${currentBalance.balance} FCFA < ${cost} FCFA)`,
-        "INSUFFICIENT_BALANCE",
-      );
-    }
-    
-    const newBalance = currentBalance.balance - cost;
-    const newFuelBalance = currentBalance.fuelBalance - data.quantity;
-    
+
     const noteSegments = [
       data.isPreDeparture ? "[PRE_DEPART]" : null,
       data.notes?.trim() || null,
       `Destination: ${data.destination}${data.clientName ? ` - Client: ${data.clientName}` : ""}`,
     ].filter((segment): segment is string => Boolean(segment && segment.trim()));
 
-    // Créer l'enregistrement de consommation
-    const [consumption] = await db
-      .insert(fuelRecords)
-      .values({
-        vehicleId: data.vehicleId,
-        missionId: data.missionId ?? null,
-        date: data.date,
-        quantity: data.quantity,
-        cost: cost.toString(),
-        fuelType: 'diesel',
-        stationName: data.stationName,
-        unitPrice: data.unitPrice.toString(),
-        creditAmount: "0",
-        debitAmount: cost.toString(),
-        balance: newBalance.toString(),
-        fuelBalance: Math.max(0, newFuelBalance).toString(),
-        notes: noteSegments.join(" | "),
-        year: new Date(data.date).getFullYear(),
-        month: new Date(data.date).getMonth() + 1,
-        createdBy: data.userId
-      })
-      .returning();
+    // Contrôle du solde et débit atomiques : deux pleins simultanés ne peuvent
+    // plus lire le même solde et passer tous deux sous zéro.
+    const { consumption, currentBalance, newBalance } = await db.transaction(async (tx) => {
+      await lockFuelCard(tx);
+      const currentBalance = await this.getCurrentBalance(tx);
     
-    console.log(`Consumption recorded: -${cost} FCFA, new balance: ${newBalance} FCFA`);
+      if (cost > currentBalance.balance) {
+        throw this.createServiceError(
+          `Solde insuffisant (${currentBalance.balance} FCFA < ${cost} FCFA)`,
+          "INSUFFICIENT_BALANCE",
+        );
+      }
+    
+      const newBalance = currentBalance.balance - cost;
+      const newFuelBalance = currentBalance.fuelBalance - data.quantity;
+
+      // Créer l'enregistrement de consommation
+      const [consumption] = await tx
+        .insert(fuelRecords)
+        .values({
+          vehicleId: data.vehicleId,
+          missionId: data.missionId ?? null,
+          date: data.date,
+          quantity: data.quantity,
+          cost: cost.toString(),
+          fuelType: 'diesel',
+          stationName: data.stationName,
+          unitPrice: data.unitPrice.toString(),
+          creditAmount: "0",
+          debitAmount: cost.toString(),
+          balance: newBalance.toString(),
+          fuelBalance: Math.max(0, newFuelBalance).toString(),
+          notes: noteSegments.join(" | "),
+          year: new Date(data.date).getFullYear(),
+          month: new Date(data.date).getMonth() + 1,
+          createdBy: data.userId
+        })
+        .returning();
+      return { consumption, currentBalance, newBalance };
+    });
+
+    log.info({ vehicleId: data.vehicleId, cost, newBalance }, "consommation de carburant enregistrée");
     
     return {
       consumption,
