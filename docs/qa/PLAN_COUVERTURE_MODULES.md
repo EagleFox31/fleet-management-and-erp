@@ -158,7 +158,7 @@ stateDiagram-v2
 
 | # | Test | Niveau | État |
 |---|---|---|---|
-| DOC1 | CRUD centre de renouvellement, désactivation (absent des choix) | C | À faire |
+| DOC1 | CRUD centre de renouvellement, désactivation (absent des choix) | C | Fait : `tests/contract/document-renewal-centers.contract.test.ts` (#99, #118 : CRUD par rôle, 400, 409, désactivation et choix, includeInactive ; ajouts : PATCH /active 400/404, filtre de type, 403 chauffeur et client) et `tests/unit/client/renewal-center-selector.test.ts` (aucun filtre côté écran : le sélecteur ne demande jamais `includeInactive` ; le filtre `is_active` est gardé par le contrat) |
 | DOC2 | Demande : transitions valides, transitions interdites refusées | C | OK (`document-renewal-status` : terminée/rejetée 409, en attente → terminée 409, date illisible 400 ; unitaire `document-renewal-statuses`) |
 | DOC3 | Échéance proche → alerte ; renouvellement → alerte levée, date mise à jour | I | OK (`document-quick-renew-alerts` : échéance mise à jour, alertes due/expired du document levées, celles d'un autre document gardées ; défaut corrigé : alertes laissées en place) |
 
