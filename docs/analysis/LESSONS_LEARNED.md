@@ -1536,6 +1536,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Un test qui lit le dépôt passe par `tests/support/repo-files.ts` et déclare `REPO_SCAN_TIMEOUT_MS`. Pas de `readdirSync` récursif dans un test.
 
+## 2026-11-03 - Lectures GET ouvertes au client : trois récidives, une garde qui se laissait tromper
+
+### Constat
+- Après #157 (lectures d'OT) et #163 (statistiques, rotations de pneus), un client lisait encore les pleins de carburant de toute la flotte (`GET /api/fuel-records`, `/statistics`, `/consumption-history`), le stock, les prix, les factures fournisseur et les KPI de flotte. Toutes ces routes étaient gardées par `authenticate` seul, qui ne connaît pas le rôle. Un id d'OT hors entier 32 bits sur `GET /api/work-orders/:id` donnait un 500, après avoir journalisé l'OT entier avant le contrôle d'accès.
+
+### Cause racine
+- Deux chemins vers la même donnée : #157 et #163 ont fermé la lecture par OT, pas la lecture par véhicule ni les agrégats. La prévention de #163 ne visait que les chemins `work-orders/:`, donc ne voyait rien ailleurs (récidive de la leçon du 2026-10-30 : la cloison se faisait route par route, sur une liste écrite à la main).
+- La garde elle-même était contournable : un handler `async function (req, res)` ou un commentaire citant `assertWorkOrderReadable` suffisait, `isAnyUserX` passait par son préfixe, `isWorkflowDocumentWriter` (qui admet `client`) comptait comme garde de rôle, et un contrôle placé après l'envoi de la donnée était accepté.
+- Classification : contrôle d'accès horizontal manquant (IDOR), récidive ; faux négatifs de la garde statique. Répétition : contrôle renforcé ci-dessous.
+
+### Résolution
+- `server/routes.ts` : carburant cloisonné sur les véhicules du client (`canAccessOwned`, `ownerScopeOf`), car l'écran client lit `/statistics` et `/api/statistics/fleet` ; données internes (pièces, factures, KPI, maintenance planifiée) en `isStaff` ; `GET /api/work-orders/:id` et `/api/parts/:id/*` refusent un id hors plage par un 400 ; le contenu de l'OT n'est plus journalisé.
+
+### Prévention (vérifiable)
+- `tests/support/route-guard-scan.ts` + `tests/unit/server/routes-hygiene.test.ts` : le scan classe les gardes d'après `server/middleware/auth.ts` (rôles réels, pas une liste écrite à la main), retire les commentaires, coupe l'en-tête au premier `async` / `function` / `(req`, exige le contrôle avant le premier envoi de donnée, juge les GET de `server/` portant une garde reconnue (`authenticate`, `is*` d'`auth.ts`, `guardBy*`, `garde*`, `authorize([...])` en ligne), routeurs montés sous `/work-orders` compris, et refuse toute lecture ouverte hors liste gelée (55 entrées à traiter, elle ne peut que rétrécir). Un cas négatif par contournement connu.
+- Limites connues : une garde locale à un fichier (`const readers = authorize([...])`) ou nommée hors `is*` / `guardBy*` / `garde*` (`canAccessBilling`, `viewers`, `requireSession`) n'est pas classée, la route est vue comme publique et n'est pas jugée ; un `authorize([...])` posé au montage (`part-scans`) n'est pas lu ; un spread en ligne non résolu (`authorize([...X])`) est présumé restrictif ; le contrôle « avant l'envoi » est une position textuelle, pas un flux. Le durcissement en échec fermé suit au lot A4.
+- Contrat `tests/contract/client-read-scope.contract.test.ts` (40 cas) : rouge sur les handlers de main (25 échecs sur 40), vert après.
+
+### Règle Projet (obligatoire)
+- Fermer une fuite de lecture, c'est fermer la classe : tous les chemins qui servent la même donnée (par objet, par liste, par agrégat). La garde qui l'empêche de revenir cible la classe des GET, pas la route corrigée, et se prouve par un cas négatif par contournement.
+
 ## 2026-11-03 — Régularisation de plein de mission : un rejeu débitait deux fois
 
 ### Contexte

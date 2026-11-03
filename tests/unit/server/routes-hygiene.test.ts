@@ -1,10 +1,20 @@
-import { readdirSync, readFileSync, statSync } from "fs";
+import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
+import * as roles from "../../../shared/constants/roles";
+import {
+  classifyAuthGuards,
+  extractGetRoutes,
+  judgeGetRoute,
+  routerLevelGuards,
+  scanOpenGetReads,
+  sourceFiles,
+  stripComments,
+} from "../../support/route-guard-scan";
 
 /**
- * Deux garde-fous issus d'incidents réels (LESSONS_LEARNED, 29 octobre 2026).
+ * Garde-fous issus d'incidents réels (LESSONS_LEARNED, 29 octobre 2026 et suivants).
  *
  * 1. Routes déclarées deux fois dans `server/routes.ts` : Express sert la
  *    première, la seconde est du code mort qui a l'air vivant. Le premier
@@ -18,27 +28,83 @@ import { describe, expect, it } from "vitest";
  * 2. `POST /api/users` journalisait `req.body` par `console.log`, donc le mot de
  *    passe en clair. Un corps de requête ne se journalise que par
  *    `moduleLogger`, dont la configuration masque `*.password`.
- * 3. Lectures d'OT sans cloison (3 novembre 2026) : `GET /api/work-orders/:id/tire-rotations`
- *    n'exigeait qu'une session, un client lisait les rotations de tout OT. Toute lecture
- *    déclarée sur `/work-orders/:...` ou `:workOrderId` appelle `assertWorkOrderReadable`
- *    ou porte une garde de rôle (AGENTS.md §11).
+ * 3. Lectures sans cloison (3 novembre 2026, #157 puis #163 puis ce lot) : une lecture GET gardée
+ *    par la seule session (`authenticate`, `isAnyUser`, `authorize([... 'client' ...])`,
+ *    `isWorkflowDocumentWriter`...) doit, AVANT d'envoyer la donnée, contrôler le propriétaire
+ *    (`canAccessOwned`, `ownerScopeOf`) ou l'OT (`assertWorkOrderReadable`, obligatoire sur un
+ *    chemin d'OT), sinon porter une garde qui exclut le client (AGENTS.md §11). Les gardes sont
+ *    classées depuis `server/middleware/auth.ts` (rôles réels), commentaires retirés, en-tête
+ *    coupé au premier `async` / `function` / `(req`. Liste gelée des lectures restantes : elle ne
+ *    peut que rétrécir (une entrée corrigée doit en sortir). Une nouvelle lecture ouverte échoue.
  */
-const WORK_ORDER_READ_EXCEPTIONS: Record<string, string> = {
-  "server/routes.ts GET /api/work-orders/:id":
-    "cloison client et technicien faite en ligne dans le handler (propriétaire du véhicule, technicien affecté)",
-};
+/**
+ * Lectures encore ouvertes à tout compte connecté, à traiter une à une (dette connue, 3 novembre 2026).
+ * Certaines sont masquées par un routeur de `server/api/` monté avant `registerRoutes`
+ * (`/api/exports/*`, `/api/warehouse/*`, `/api/alerts*`, `/api/fuel-card/*`) ou cloisonnent en ligne
+ * par un rôle lu sur l'utilisateur chargé (`/api/vehicles`, `/api/users`, `/api/work-orders/:id`) :
+ * le scan statique ne le voit pas, il faut vérifier la route servie avant de la retirer d'ici.
+ */
+const OPEN_GET_READS_FROZEN: string[] = [
+  "server/api/document-renewals.routes.ts GET /document-renewals/centers",
+  "server/api/document-renewals.routes.ts GET /document-renewals/requests",
+  "server/api/feature-flags.routes.ts GET /feature-flags",
+  "server/api/incidents.routes.ts GET /incidents",
+  "server/api/notification-settings.routes.ts GET /notifications/settings",
+  "server/api/work-order-items.routes.ts GET /labor-catalog/",
+  "server/routes.ts GET /api/alerts",
+  "server/routes.ts GET /api/alerts/active",
+  "server/routes.ts GET /api/alerts/count",
+  "server/routes.ts GET /api/alerts/type/:type",
+  "server/routes.ts GET /api/alerts/unread",
+  "server/routes.ts GET /api/auth/me",
+  "server/routes.ts GET /api/dashboard/technician-stats",
+  "server/routes.ts GET /api/exports/complete",
+  "server/routes.ts GET /api/exports/fuel",
+  "server/routes.ts GET /api/exports/inventory",
+  "server/routes.ts GET /api/exports/users",
+  "server/routes.ts GET /api/exports/vehicles",
+  "server/routes.ts GET /api/fault-catalog",
+  "server/routes.ts GET /api/fuel-card/balance",
+  "server/routes.ts GET /api/fuel-card/history",
+  "server/routes.ts GET /api/fuel-card/monthly-stats",
+  "server/routes.ts GET /api/fuel-card/stats-by-client",
+  "server/routes.ts GET /api/onboarding/status",
+  "server/routes.ts GET /api/suppliers/:id/invoices/payment",
+  "server/routes.ts GET /api/suppliers/summary",
+  "server/routes.ts GET /api/suppliers/top",
+  "server/routes.ts GET /api/technician/my-work-orders",
+  "server/routes.ts GET /api/tire-inspections",
+  "server/routes.ts GET /api/tire-inspections/:id",
+  "server/routes.ts GET /api/tire-inspections/recent",
+  "server/routes.ts GET /api/tire-rotations",
+  "server/routes.ts GET /api/tire-rotations/:id/details",
+  "server/routes.ts GET /api/tires",
+  "server/routes.ts GET /api/tires/:id",
+  "server/routes.ts GET /api/tires/low-stock",
+  "server/routes.ts GET /api/tires/statistics",
+  "server/routes.ts GET /api/tires/statistics-advanced",
+  "server/routes.ts GET /api/users",
+  "server/routes.ts GET /api/users/:id",
+  "server/routes.ts GET /api/users/technicians",
+  "server/routes.ts GET /api/vehicle-tires",
+  "server/routes.ts GET /api/vehicle-tires/:vehicleTireId/last-inspection",
+  "server/routes.ts GET /api/vehicles",
+  "server/routes.ts GET /api/vehicles/all",
+  "server/routes.ts GET /api/vehicles/check/:registrationNumber",
+  "server/routes.ts GET /api/warehouse/inventory-value",
+  "server/routes.ts GET /api/warehouse/most-used-parts",
+  "server/routes.ts GET /api/warehouse/parts-by-supplier",
+  "server/routes.ts GET /api/warehouse/reorder-alerts",
+  "server/routes.ts GET /api/warehouse/statistics",
+  "server/routes.ts GET /api/work-orders/:id",
+  "server/routes.ts GET /api/workflows/active",
+  "server/routes.ts GET /api/workflows/stats",
+  "server/routes.ts GET /api/workflows/vehicle-acquisition/:sessionId",
+];
 const KNOWN_DUPLICATE_ROUTES: string[] = [];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
-
-function serverSources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    if (name === "_archive" || name === "node_modules") return [];
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return serverSources(path);
-    return path.endsWith(".ts") ? [path] : [];
-  });
-}
+const roleConstants = roles as unknown as Record<string, readonly string[]>;
 
 describe("hygiène des routes serveur", () => {
   it("aucune nouvelle route déclarée deux fois dans server/routes.ts", () => {
@@ -50,7 +116,7 @@ describe("hygiène des routes serveur", () => {
   });
 
   it("aucun corps de requête journalisé par console.*", () => {
-    const offenders = serverSources(serverDir).flatMap((path) =>
+    const offenders = sourceFiles(serverDir).flatMap((path) =>
       readFileSync(path, "utf8")
         .split("\n")
         .map((line, index) => ({ line, index }))
@@ -60,31 +126,86 @@ describe("hygiène des routes serveur", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("toute lecture d'OT appelle assertWorkOrderReadable ou porte une garde de rôle", () => {
-    const roleGuard = /\b(is(?!AnyUser\b)[A-Z]\w*|authorize\(|guardBy\w+)/;
-    const declaration = /\b(?:app|router|\w+Routes)\.get\(\s*["'`]([^"'`]*(?:work-orders\/:|:workOrderId)[^"'`]*)["'`]/g;
-    const nextDeclaration = /\n\s*(?:app|router|\w+Routes)\.(?:get|post|patch|put|delete|use)\(/;
-    const offenders: string[] = [];
-    const seen = new Set<string>();
-    for (const path of serverSources(serverDir)) {
-      const source = readFileSync(path, "utf8");
-      const file = `server/${path.slice(serverDir.length + 1).replace(/\\/g, "/")}`;
-      for (const match of source.matchAll(declaration)) {
-        const rest = source.slice(match.index! + match[0].length);
-        const end = rest.search(nextDeclaration);
-        const body = end === -1 ? rest : rest.slice(0, end);
-        const arrow = body.indexOf("=>");
-        const header = arrow === -1 ? body : body.slice(0, arrow);
-        const key = `${file} GET ${match[1]}`;
-        seen.add(key);
-        if (body.includes("assertWorkOrderReadable") || roleGuard.test(header)) continue;
-        if (key in WORK_ORDER_READ_EXCEPTIONS) continue;
-        offenders.push(key);
-      }
-    }
-    expect(seen.size).toBeGreaterThan(5);
-    expect(offenders).toEqual([]);
-    // une exception gelée qui n'existe plus doit sortir de la liste
-    expect(Object.keys(WORK_ORDER_READ_EXCEPTIONS).filter((key) => !seen.has(key))).toEqual([]);
+  it("aucune lecture GET n'est ouverte à un client sans cloison (liste gelée qui ne peut que rétrécir)", () => {
+    const { offenders, seen } = scanOpenGetReads(serverDir, roleConstants);
+    expect(seen.size).toBeGreaterThan(150);
+    // nouvelle lecture ouverte = régression ; entrée gelée devenue saine = à retirer de la liste
+    expect(offenders.filter((key) => !OPEN_GET_READS_FROZEN.includes(key))).toEqual([]);
+    expect(OPEN_GET_READS_FROZEN.filter((key) => !offenders.includes(key))).toEqual([]);
+  });
+});
+
+describe("garde de cloison des lectures : le scan ne se laisse pas tromper", () => {
+  const kinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
+  const verdictOf = (source: string, mountPrefix = "", fileGuards: string[] = []) => {
+    const [route] = extractGetRoutes("server/api/test.routes.ts", source);
+    return judgeGetRoute({ ...route, mountPrefix }, kinds, fileGuards).ok;
+  };
+
+  it("classe les gardes d'auth.ts d'après leurs rôles réels", () => {
+    expect(kinds.restrictive.has("isStaff")).toBe(true);
+    expect(kinds.restrictive.has("isWorkshopManager")).toBe(true);
+    expect(kinds.permissive.has("isAnyUser")).toBe(true);
+    expect(kinds.permissive.has("isWorkflowDocumentWriter")).toBe(true);
+    expect(kinds.permissive.has("authenticate")).toBe(true);
+  });
+
+  it("session seule sans contrôle : refusé", () => {
+    expect(verdictOf('router.get("/x", authenticate, async (req, res) => { res.json(await read()); });')).toBe(false);
+    expect(verdictOf('router.get("/x", isAnyUser, async (req, res) => { res.json(await read()); });')).toBe(false);
+  });
+
+  it("handler `async function (req, res)` : l'en-tête est coupé avant le corps", () => {
+    const src = 'router.get("/x", authenticate, async function (req, res) { const ok = isStaff(req.user); authorize(["admin"]); res.json(await read()); });';
+    expect(verdictOf(src)).toBe(false);
+  });
+
+  it("une garde `is*` qui laisse passer le client (isWorkflowDocumentWriter) n'est pas une cloison", () => {
+    expect(verdictOf('router.get("/x", isWorkflowDocumentWriter, async (req, res) => { res.json(1); });')).toBe(false);
+  });
+
+  it("authorize avec le rôle client : refusé ; sans lui : accepté", () => {
+    expect(verdictOf('router.get("/x", authorize(["client", "admin"]), async (req, res) => { res.json(1); });')).toBe(false);
+    expect(verdictOf('router.get("/x", authorize(["admin", "warehouse"]), async (req, res) => { res.json(1); });')).toBe(true);
+  });
+
+  it("une garde nommée isAnyUserX n'est pas exemptée par son préfixe", () => {
+    expect(verdictOf('router.get("/x", isAnyUserOrGuest, async (req, res) => { res.json(1); });')).toBe(false);
+  });
+
+  it("un commentaire qui cite le contrôle ne vaut pas contrôle", () => {
+    const src = 'router.get("/work-orders/:id/x", authenticate, async (req, res) => {\n  // TODO assertWorkOrderReadable\n  /* canAccessOwned */\n  res.json(1);\n});';
+    expect(verdictOf(src)).toBe(false);
+  });
+
+  it("le contrôle placé après l'envoi de la donnée ne vaut pas contrôle", () => {
+    const after = 'router.get("/work-orders/:id/x", authenticate, async (req, res) => { res.json(await read()); await assertWorkOrderReadable(req.user, 1); });';
+    const before = 'router.get("/work-orders/:id/x", authenticate, async (req, res) => { await assertWorkOrderReadable(req.user, 1); res.json(await read()); });';
+    expect(verdictOf(after)).toBe(false);
+    expect(verdictOf(before)).toBe(true);
+  });
+
+  it("une réponse d'erreur 4xx avant le contrôle n'est pas un envoi de donnée", () => {
+    const src =
+      'router.get("/x", isAnyUser, async (req, res) => { if (!id) return res.status(400).json({ message: "id" }); if (!(await canAccessOwned(req.user, owner))) return res.status(403).json({}); res.json(1); });';
+    expect(verdictOf(src)).toBe(true);
+  });
+
+  it("route `/:id/...` d'un routeur monté sous /work-orders : assertWorkOrderReadable exigé", () => {
+    const owned = 'router.get("/:id/lines", isAnyUser, async (req, res) => { await canAccessOwned(req.user, owner); res.json(1); });';
+    const readable = 'router.get("/:id/lines", isAnyUser, async (req, res) => { await assertWorkOrderReadable(req.user, 1); res.json(1); });';
+    expect(verdictOf(owned, "/work-orders")).toBe(false);
+    expect(verdictOf(readable, "/work-orders")).toBe(true);
+  });
+
+  it("garde posée sur le routeur ou au montage : toutes ses lectures sont couvertes", () => {
+    const src = 'router.get("/x", authenticate, async (req, res) => { res.json(1); });';
+    expect(verdictOf(src, "", ["isStaff"])).toBe(true);
+    expect(verdictOf(src, "", ["isAnyUser"])).toBe(false);
+    expect(routerLevelGuards("router.use(isStaff);\nrouter.get('/a', authenticate, h);").get("router")).toEqual(["isStaff"]);
+  });
+
+  it("stripComments conserve les chaînes qui contiennent //", () => {
+    expect(stripComments('const u = "http://x"; // note\nconst v = 1; /* bloc */')).toBe('const u = "http://x"; \nconst v = 1; ');
   });
 });
