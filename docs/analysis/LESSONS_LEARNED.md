@@ -1660,6 +1660,10 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Une écriture d'argent ou de stock porte une garde de rôle métier explicite sur la route (`isPartsCatalogManager`, `isStockIssuer`, `isInventoryManager`…), jamais `isStaff` ou `authenticate` seuls, même si le montage du routeur en pose déjà une.
 - Une route déclarée à la fois dans un routeur `server/api/` et dans `routes.ts` : seule la première est servie ; vérifier laquelle porte la garde avant de la juger.
 
+### Récurrence (3 novembre 2026) : débit de la carte carburant
+- Même motif : `POST /api/fuel-card/consumption` (écriture d'argent) n'avait aucune garde de route sous `isStaff` ; technicien et chef d'atelier pouvaient débiter la carte de l'entreprise. Aucun écran ne l'appelle (`recordConsumption` du client n'a pas de consommateur ; le chauffeur passe par `POST /api/missions/:id/fuel-records`). Garde posée : `isFuelCardManager` (admin, logistics, secretary), comme `/recharge`.
+- Prévention : `fuel-card-routes.contract.test.ts` (403 et solde inchangé pour workshop_manager et technician, rouges sur `main`), entrée retirée de `write-route-guards.frozen.ts`.
+
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
 ### Contexte
