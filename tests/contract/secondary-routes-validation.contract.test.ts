@@ -246,8 +246,9 @@ describe("carburant : nombres saisis", { timeout: 60000 }, () => {
   });
 
   it("non-régression : PATCH quantité en chaîne numérique enregistrée", async () => {
-    // Auteur du plein : seul lui (ou l'admin) peut le modifier.
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("workshop_manager") });
+    // Auteur du plein : seul lui (ou l'admin) peut le modifier. Plein manuel : un plein débité
+    // de la carte a sa quantité figée (fuel-record-ledger-lock).
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("workshop_manager"), debitAmount: "0" });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("workshop_manager"), body: { quantity: "25.5" } });
     expect(res.status).toBe(200);
