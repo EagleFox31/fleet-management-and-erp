@@ -86,23 +86,63 @@ function enclosingFunction(node: ts.Node): ts.Node {
 }
 
 /**
- * Racine `uploads` connue : littéral contenant `uploads`, `path.join` / `path.resolve` dont un argument
- * l'est, ou identifiant dont toutes les déclarations du fichier le sont.
+ * Racine `uploads` connue : littéral contenant `uploads`, `path.join` / `path.resolve` dont **tous**
+ * les arguments sont des morceaux sûrs et au moins un nomme `uploads`, ou identifiant dont toutes les
+ * déclarations du fichier le sont. `path.join(req.body.dir, "uploads")` et
+ * `path.resolve("uploads", req.body.dir)` ne bornent rien : la racine vient de la requête.
  */
 function isUploadsRoot(node: ts.Expression, seen = new Set<string>()): boolean {
+  return rootKind(node, seen) === "uploads";
+}
+
+const UPLOADS_SEGMENT = /(^|[\\/.])uploads([\\/]|$)/;
+const PARENT_SEGMENT = /(^|[\\/])\.\.([\\/]|$)/;
+
+/**
+ * Nature d'un morceau de racine : `uploads` (nomme le dossier), `neutral` (littéral, `process.cwd()`,
+ * `__dirname`, constante qui l'est), sinon `unknown`. Un `..` placé après `uploads` en sort : `unknown`.
+ */
+function rootKind(node: ts.Expression, seen: Set<string>): "uploads" | "neutral" | "unknown" {
   const expr = unwrap(node);
-  if (ts.isStringLiteralLike(expr)) return /(^|[\\/.])uploads([\\/]|$)/.test(expr.text);
+  if (ts.isStringLiteralLike(expr)) {
+    const match = UPLOADS_SEGMENT.exec(expr.text);
+    if (!match) return "neutral";
+    return PARENT_SEGMENT.test(expr.text.slice(match.index + match[0].length - 1)) ? "unknown" : "uploads";
+  }
+  if (ts.isIdentifier(expr) && expr.text === "__dirname") return "neutral";
   if (ts.isCallExpression(expr)) {
+    const callee = expr.expression;
+    if (
+      ts.isPropertyAccessExpression(callee) &&
+      callee.name.text === "cwd" &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === "process" &&
+      expr.arguments.length === 0
+    ) {
+      return "neutral";
+    }
     const name = calleeName(expr);
-    return (name === "join" || name === "resolve") && expr.arguments.some((arg) => isUploadsRoot(arg, seen));
+    if (name !== "join" && name !== "resolve") return "unknown";
+    let named = false;
+    for (const arg of expr.arguments) {
+      const kind = rootKind(arg, seen);
+      if (kind === "unknown") return "unknown";
+      // un `..` après le segment uploads remonte hors du dossier
+      if (named && ts.isStringLiteralLike(unwrap(arg)) && PARENT_SEGMENT.test((unwrap(arg) as ts.StringLiteralLike).text)) return "unknown";
+      if (kind === "uploads") named = true;
+    }
+    return named ? "uploads" : "neutral";
   }
   if (ts.isIdentifier(expr)) {
-    if (seen.has(expr.text)) return false;
+    if (seen.has(expr.text)) return "unknown";
     seen.add(expr.text);
     const initializers = initializersOf(expr.text, expr.getSourceFile());
-    return initializers.length > 0 && initializers.every((init) => isUploadsRoot(init, seen));
+    if (initializers.length === 0) return "unknown";
+    const kinds = initializers.map((init) => rootKind(init, seen));
+    if (kinds.every((kind) => kind === "uploads")) return "uploads";
+    return kinds.every((kind) => kind === "neutral") ? "neutral" : "unknown";
   }
-  return false;
+  return "unknown";
 }
 
 /** Méthodes dont le résultat reste dans l'ensemble borné (sous-ensemble ou élément). */

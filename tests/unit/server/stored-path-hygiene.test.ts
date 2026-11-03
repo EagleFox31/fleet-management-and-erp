@@ -20,6 +20,8 @@ const UNBOUNDED_FROZEN: Record<string, string> = {
     "nettoie le fichier que la même fonction vient d'écrire (sessionId contrôlé par isSafePathSegment)",
   "server/services/workflow-document-service.ts:cleanupAbandonedWorkflowDocuments:rmSync":
     "dossier uploads/workflows/<sessionId> construit en dur, sessionId contrôlé par isSafePathSegment",
+  "server/services/workflow-document-service.ts:transferDocumentsToVehicle:copyFileSync":
+    "source bornée par uploadedFileCandidates ; destination sous uploads/documents/vehicle-<vehicleId>, vehicleId entier (signature number), gardée par isInsideDirectory",
   "server/init-database.ts:applySqlFile:readFile": "fichiers de migration SQL livrés avec le code",
   "server/lib/tay-header-asset.ts:readTayHeaderImage:readFile": "image d'en-tête livrée avec le code",
   "server/routes.ts:GET /api/documentation/:filename:readFile": "liste blanche de noms de fichiers de documentation",
@@ -58,7 +60,6 @@ describe("accès disque : chemin borné à uploads/ ou exception justifiée (AGE
       "server/routes.ts:GET /api/workflows/documents/:documentId:createReadStream",
       "server/middleware/upload.ts:deleteFile:unlink",
       "server/services/workflow-document-service.ts:deleteWorkflowDocument:unlinkSync",
-      "server/services/workflow-document-service.ts:transferDocumentsToVehicle:copyFileSync",
     ]) {
       expect(bounded, key).toContain(key);
     }
@@ -170,6 +171,10 @@ describe("scanFileAccesses", () => {
       function viaConstant(p) { if (!isInsideDirectory(ROOT, p)) return; fs.rmSync(p); }
       function dirnameOfItself(p) { if (!isInsideDirectory(path.dirname(p), p)) return; fs.rmSync(p); }
       router.post("/d", (req, res) => { const p = req.body.p; if (!isInsideDirectory(req.body.dir, p)) return; fs.rmSync(p); });
+      router.post("/e", (req, res) => { const p = req.body.p; if (!isInsideDirectory(path.join(req.body.dir, "uploads"), p)) return; fs.rmSync(p); });
+      router.post("/f", (req, res) => { const p = req.body.p; if (!isInsideDirectory(path.resolve("uploads", req.body.dir), p)) return; fs.rmSync(p); });
+      function dotDot(p) { if (!isInsideDirectory(path.join(process.cwd(), "uploads", ".."), p)) return; fs.rmSync(p); }
+      function viaDirname(p) { if (!isInsideDirectory(path.join(__dirname, "..", "uploads"), p)) return; fs.rmSync(p); }
     `;
     expect(scanFileAccesses("h.ts", text).map((s) => [s.scope, s.bounded])).toEqual([
       ["asDirectory", false],
@@ -179,6 +184,10 @@ describe("scanFileAccesses", () => {
       ["viaConstant", true],
       ["dirnameOfItself", false],
       ["POST /d", false],
+      ["POST /e", false],
+      ["POST /f", false],
+      ["dotDot", false],
+      ["viaDirname", true],
     ]);
   });
 

@@ -225,3 +225,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `dir` doit être une racine `uploads` connue (`isUploadsRoot` : littéral, `path.join`/`resolve`, ou constante du fichier qui en contient). Un accès à `fs` par clé dynamique est signalé comme alias. Limites ajoutées à l'en-tête : masquage par bloc, `slice`/`at` sur une chaîne, écritures hors `ACCESS_CALLS`. Issue #231 ouverte (rejeu non idempotent), liée à #229. Leçon ajoutée dans LESSONS_LEARNED.
 - Pourquoi : une garde qui compare un chemin à son propre dossier ne borne rien.
 - Preuve : hygiène 16/16 ; sans `isUploadsRoot` ni la détection de clé dynamique, 2 cas rouges. `server/` reste vert sans nouvelle exception. tsc 0 erreur, unitaires 1944/1944.
+
+## 2026-11-03T19:21:40+01:00 — #228 : racine uploads exigée sur tous les arguments de join/resolve (relecture 0a)
+
+- Quoi : `isUploadsRoot` acceptait `path.join`/`path.resolve` dès qu'un argument nommait `uploads`. `path.join(req.body.dir, "uploads")` et `path.resolve("uploads", req.body.dir)` passaient pour bornés alors que la racine vient de la requête.
+- Comment : `rootKind` classe chaque morceau (`uploads`, `neutral` = littéral, `process.cwd()`, `__dirname`, constante qui l'est, sinon `unknown`). Join/resolve bornent seulement si tous leurs arguments sont sûrs et qu'au moins un nomme `uploads`. Un `..` placé après `uploads` en sort. Effet sur `server/` : la copie de `transferDocumentsToVehicle` (destination `vehicle-${vehicleId}`, gabarit interpolé) n'est plus jugée bornée, d'où une entrée justifiée dans la liste gelée.
+- Pourquoi : une racine dont un seul morceau est sûr ne borne rien.
+- Preuve : 4 cas ajoutés (`/e`, `/f`, `..` après uploads, `__dirname/../uploads` qui reste borné). Ils sont rouges avec l'ancien scan et verts avec le nouveau. Hygiène 16/16, tsc 0 erreur.
