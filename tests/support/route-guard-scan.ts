@@ -587,3 +587,49 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
   }
   return { offenders: offenders.sort(), unanalysable: unanalysable.sort(), seen };
 }
+
+/** Méthode + chemin complet, paramètres anonymisés : `/api/x/:id` et `/api/x/:vehicleId` sont la même route. */
+export const routeSignature = (method: string, fullPath: string) =>
+  `${method.toUpperCase()} ${fullPath.replace(/:\w+/g, ":p").replace(/\/+$/, "") || "/"}`;
+
+/** Déclarations `routeur.méthode("chemin"` d'un fichier (commentaires retirés), toutes méthodes. */
+export function extractRoutes(rawSource: string): Array<{ routerVar: string; method: string; path: string }> {
+  const source = stripComments(rawSource);
+  const routers = routerVarsOf(source);
+  const out: Array<{ routerVar: string; method: string; path: string }> = [];
+  for (const m of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
+    if (!routers.has(m[1]) || (m[3] === "`" && m[4].includes("${"))) continue;
+    out.push({ routerVar: m[1], method: m[2], path: m[4] });
+  }
+  return out;
+}
+
+/**
+ * Routes de `server/routes.ts` masquées par un routeur de `server/api/` : `apiRouter` est monté sur
+ * `/api` AVANT `registerRoutes` (server/app.ts), donc Express sert la déclaration de `server/api/`
+ * et celle de `routes.ts` dort, avec ses gardes et sa logique, prête à revenir si l'autre disparaît.
+ * Renvoie les signatures en double et le nombre de routes de `server/api/` rattachées à un montage.
+ * Limite : seuls les routeurs montés dans `server/api/index.ts` sont vus (pas un sous-routeur monté
+ * par un autre fichier), et deux chemins différents qui se recouvrent (`/:id` contre `/top`) ne sont
+ * pas comparés.
+ */
+export function scanShadowedRoutes(serverDir: string) {
+  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+  const mounts = parseMounts(indexSource, { restrictive: new Set(), permissive: new Set(), neutral: new Set(), arrays: new Map(), roles: {} });
+  const apiSignatures = new Set<string>();
+  for (const path of sourceFiles(join(serverDir, "api"))) {
+    const file = `server/api/${path.slice(join(serverDir, "api").length + 1).replace(/\\/g, "/")}`;
+    const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
+    if (fileMounts.length === 0) continue;
+    for (const route of extractRoutes(readFileSync(path, "utf8"))) {
+      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      if (!own) continue;
+      apiSignatures.add(routeSignature(route.method, `/api${own.prefix}${route.path}`));
+    }
+  }
+  const legacy = extractRoutes(readFileSync(join(serverDir, "routes.ts"), "utf8"))
+    .filter((route) => route.routerVar === "app")
+    .map((route) => routeSignature(route.method, route.path));
+  const shadowed = [...new Set(legacy.filter((signature) => apiSignatures.has(signature)))].sort();
+  return { shadowed, apiRouteCount: apiSignatures.size, legacyRouteCount: legacy.length };
+}
