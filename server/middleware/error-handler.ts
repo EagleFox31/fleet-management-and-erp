@@ -12,6 +12,7 @@ import {
   type ApiFieldError,
 } from "@shared/errors";
 import { AppError } from "../lib/app-error";
+import { logContextOf } from "../lib/error-log-context";
 import { moduleLogger } from "../lib/logger";
 
 export { AppError } from "../lib/app-error";
@@ -112,7 +113,8 @@ export function errorResponseGuard(req: Request, res: Response, next: NextFuncti
   res.json = (body: unknown) => {
     if (res.statusCode < 400) return originalJson(body);
     const normalized = normalizeErrorBody(res.statusCode, body, req.requestId);
-    if (res.statusCode >= 500) {
+    // Une erreur passée par errorHandler y est déjà journalisée : un seul log par erreur.
+    if (res.statusCode >= 500 && !res.locals?.errorLogged) {
       log.error({ requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), body }, "erreur serveur renvoyée par la route");
     }
     const details = res.locals?.appErrorDetails as Record<string, unknown> | undefined;
@@ -151,10 +153,13 @@ export function apiNotFound(_req: Request, _res: Response, next: NextFunction) {
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
   if (res.headersSent) return next(err);
   const { status, message, fieldErrors, details } = toHttpError(err);
-  const context = { requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), status, err };
+  // Seule ligne de journal d'une erreur relayée : la route y ajoute son contexte (withLogContext)
+  // au lieu de journaliser elle-même (AGENTS.md §10).
+  const context = { ...logContextOf(err), requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), status, err };
   if (status >= 500) log.error(context, "erreur non gérée");
   else log.warn(context, "requête rejetée");
 
+  if (res.locals) res.locals.errorLogged = true;
   // Transmis à la garde de sortie, qui normalise le corps puis y fusionne les détails.
   if (details && res.locals) res.locals.appErrorDetails = details;
   res.status(status).json({ message, errors: fieldErrors });

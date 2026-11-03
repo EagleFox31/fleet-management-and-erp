@@ -1,8 +1,5 @@
-import { execFileSync } from "child_process";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
+import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../support/repo-files";
 
 /**
  * Garde-fou issu d'un near miss (LESSONS_LEARNED, 3 novembre 2026, #142) : une
@@ -18,28 +15,16 @@ const KNOWN_MARKER_FILES: string[] = [];
 const EXTENSIONS = [".md", ".sql", ".yml", ".yaml", ".json", ".ts", ".tsx"];
 const MARKER = /^(<{7} |>{7} |={7}\r?$)/m;
 
-const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-
-function trackedFiles(): string[] {
-  const out = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return out.split("\0").filter((f) => EXTENSIONS.some((ext) => f.endsWith(ext)));
-}
 
 describe("hygiène du dépôt", () => {
-  it("aucun marqueur de conflit dans les fichiers suivis", () => {
-    const files = trackedFiles();
+  it("aucun marqueur de conflit dans les fichiers suivis", async () => {
+    const files = repoFiles().filter((f) => EXTENSIONS.some((ext) => f.endsWith(ext)));
     expect(files.length).toBeGreaterThan(100);
-    const offenders = files
-      .filter((f) => !KNOWN_MARKER_FILES.includes(f))
-      .filter((f) => {
-        try {
-          return MARKER.test(readFileSync(join(repoRoot, f), "utf8"));
-        } catch {
-          return false; // suivi mais absent de l'arbre de travail (suppression non commitée)
-        }
-      });
+    const offenders = (await readRepoFiles(files.filter((f) => !KNOWN_MARKER_FILES.includes(f))))
+      .filter(([, text]) => MARKER.test(text))
+      .map(([f]) => f);
     expect(offenders).toEqual([]);
-  });
+  }, REPO_SCAN_TIMEOUT_MS);
 
   it("le motif reconnaît les trois marqueurs, et eux seuls", () => {
     expect(MARKER.test("a\n<<<<<<< HEAD\nb")).toBe(true);

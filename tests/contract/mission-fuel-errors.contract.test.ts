@@ -37,8 +37,8 @@ async function missionWithVehicle(status: string) {
 /** Coût hors de portée de toute carte : 1e6 L à 1e6 FCFA. */
 const hugeFill = (vehicleId: number) => ({ vehicleId, quantity: 1_000_000, unitPrice: 1_000_000 });
 
-function expectReadableBalanceError(res: { status: number; body: any }) {
-  expect(apiErrorProblems(res.status, res.body, 409)).toEqual([]);
+function expectReadableBalanceError(res: { status: number; body: any; headers: Headers }) {
+  expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);
   expect(res.body.message).toBe("Solde de la carte carburant insuffisant.");
   expect(JSON.stringify(res.body)).not.toMatch(/FCFA|\d{6,}/);
 }

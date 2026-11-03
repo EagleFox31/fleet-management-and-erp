@@ -4,6 +4,7 @@ import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { DRIVER_CPC_FORBIDDEN_MESSAGE, redactDriverPersonalData } from "../lib/driver-scope";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("drivers");
 
@@ -55,8 +56,7 @@ router.get("/", async (req, res, next) => {
     const drivers = await cpcTrainingService.getAllDriversStatus();
     return res.status(200).json(await redactDriverPersonalData(req.user, drivers));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Liste des chauffeurs en echec");
-    return next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }), { event: "Liste des chauffeurs en echec" }));
   }
 });
 
@@ -69,8 +69,7 @@ router.get("/cpc-status", async (req, res, next) => {
     const statuses = await cpcTrainingService.getAllDriversStatus();
     return res.status(200).json(await redactDriverPersonalData(req.user, statuses));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Statut CPC des chauffeurs en echec");
-    return next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }), { event: "Statut CPC des chauffeurs en echec" }));
   }
 });
 
@@ -83,8 +82,7 @@ router.get("/expiring-cpc", async (req, res, next) => {
     const alerts = await cpcTrainingService.getExpiringCPCAlerts();
     return res.status(200).json(await redactDriverPersonalData(req.user, alerts));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Alertes CPC en echec");
-    return next(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger les chauffeurs.", { cause: error }), { event: "Alertes CPC en echec" }));
   }
 });
 
@@ -136,8 +134,7 @@ router.post("/:id/update-cpc", (req, res, next) => {
     
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Mise a jour CPC en echec");
-    return next(new AppError(500, "Impossible de mettre à jour la certification CPC.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de mettre à jour la certification CPC.", { cause: error }), { event: "Mise a jour CPC en echec" }));
   }
 });
 
@@ -150,8 +147,7 @@ router.get("/cpc-statistics", async (req, res, next) => {
     const stats = await cpcTrainingService.getCPCStatistics();
     return res.status(200).json(stats);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Statistiques CPC en echec");
-    return next(new AppError(500, "Impossible de charger les statistiques CPC.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger les statistiques CPC.", { cause: error }), { event: "Statistiques CPC en echec" }));
   }
 });
 
@@ -170,8 +166,7 @@ router.get("/:id/cpc-status", async (req, res, next) => {
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Statut CPC du chauffeur en echec");
-    return next(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }), { event: "Statut CPC du chauffeur en echec" }));
   }
 });
 
@@ -196,8 +191,7 @@ router.post("/sync-cpc-statuses", async (req, res, next) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Synchronisation des statuts CPC en echec");
-    return next(new AppError(500, "Impossible de synchroniser les statuts CPC.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de synchroniser les statuts CPC.", { cause: error }), { event: "Synchronisation des statuts CPC en echec" }));
   }
 });
 
