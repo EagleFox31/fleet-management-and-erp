@@ -1593,6 +1593,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
 
+### Suite du 3 novembre 2026 : exceptions levées, clé obligatoire
+- **Budget et statut sous verrou de ligne** : le `PATCH` budget et la transition de statut avec modification relisent `workflowData` par `SELECT … FOR UPDATE` dans une transaction, puis fusionnent leur patch sur cette relecture. L'écriture de l'entrée de régularisation prend le même verrou de ligne. Ordre des verrous fixe : carte carburant puis ligne mission (statut et budget ne prennent que la ligne), donc pas d'interblocage. La première exception nommée ci-dessus est levée ; celle des suppressions admin reste.
+- **Clé obligatoire, unique en base** : `fuel_records.request_key` avec index unique `ux_fuel_records_request_key` (migration `20261103_fuel_records_request_key.sql`, jumelle de `FUEL_RECORDS_REQUEST_KEY_SQL` dans `init-database.ts`). Sans clé : 400 « rechargez la page ». Une violation de l'index devient 409. Les régularisations antérieures (clé dans le journal seul) restent rejouables.
+- **Plein normal couvert** : `POST /api/missions/:id/fuel-records` suit le même rejeu sous verrou.
+- **Comparaison complète** : mission, véhicule, quantité, prix, date, station et notes ou motif. Un écart avec la même clé donne 409.
+- **Client** : la clé est remise à zéro au succès, au 409 et à l'annulation. Deux onglets génèrent deux clés : c'est voulu, le verrou de carte sérialise les deux débits et chacun est un plein distinct aux yeux du serveur.
+- **Prévention** : contrat (18 tests : course statut, course budget, rejeu après clôture, plein normal double, date/station/motif = 409) et unitaire de schéma (migration = constante, idempotente). Six mutants, tous rouges : statut sur copie périmée, budget sur copie périmée, verrou sans `FOR UPDATE`, station non comparée, plein normal sans rejeu, date non comparée.
+
+### Suite (relecture sécurité) : une issue indéterminée conserve la clé
+
+- **Contexte** : la première version remettait la clé à zéro à la fermeture de la fiche, quelle que soit l’issue de l’envoi.
+- **Risque (sécurité, moyen)** : coupure réseau ou 5xx après l’écriture en base, puis le chauffeur ferme la fiche, la rouvre et renvoie. Une clé neuve donne un second débit de la carte. Le rejeu ne protège que si la clé survit à l’incertitude.
+- **Règle générale** : une issue indéterminée doit conserver la clé. Seule une issue connue la libère : un succès ou un 4xx. L’annulation explicite ne libère pas une clé incertaine.
+- **Résolution** : `client/src/lib/submission-key.ts` (`createSubmissionKeyStore`). La clé est rangée en `sessionStorage` par mission, partagée par la fiche mission et le tableau de bord chauffeur, et survit au rechargement. `isIndeterminateOutcome` couvre le réseau et le 5xx. Sur un 409 ou une issue incertaine, les deux écrans relisent les pleins, la mission et le solde.
+- **Autres réserves levées** :
+  - les notes comparées sont la seule partie saisie (`buildEnteredFuelNotes`) : une mission dont la destination ou le client a changé ne transforme plus un rejeu en 409 ;
+  - l’index unique est posé dans un bloc `DO` qui avale `lock_not_available` et `unique_violation`, avec un avertissement au démarrage, comme `DRIVERS_USER_ID_UNIQUE_SQL` ;
+  - un test d’intégration déclenche la vraie violation de `ux_fuel_records_request_key` et attend un 409 sans détail SQL. Il passe par le service sans rejeu, car en HTTP la recherche précède toujours l’insertion sous le verrou de carte.
+- **Prévention** : unitaire `tests/unit/client/submission-key.test.ts`. Le mutant « 5xx traité comme connu » le fait échouer (3 tests).
+- **Suivi (hors de cette correction)** : le statut de mission est contrôlé avant le verrou. Un plein normal rejoué après la clôture reçoit donc un 400 au lieu du rejeu.
+
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
 ### Contexte
