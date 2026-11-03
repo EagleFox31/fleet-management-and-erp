@@ -1,19 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../server/db";
-import {
-  assignments,
-  clientInvoices,
-  drivers,
-  missions,
-  vehicleDocuments,
-  vehicles,
-} from "../shared/schema";
+import { assignments, clientInvoices, drivers, missions, vehicleDocuments } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
-import { createLaunchableDriver, createLaunchableVehicle, creditFuelCard, FAR } from "./helpers/mission-journey";
+import {
+  createLaunchableDriver,
+  createLaunchableVehicle,
+  creditFuelCard,
+  FAR,
+  purgeJourneyRows,
+} from "./helpers/mission-journey";
 
 /**
  * MIS1, niveau E : le cycle de vie d'une mission rejoué au navigateur, sans écrire
@@ -44,34 +43,17 @@ let stamp = 0;
 
 const token = (label: string) => `${PREFIX}${label}-${Date.now().toString(36)}-${++stamp}`;
 
-async function purge(): Promise<void> {
-  const rows = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${PREFIX}%`));
-  const missionIds = rows.map((row) => row.id);
-  if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
-    await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
-    await db.delete(missions).where(inArray(missions.id, missionIds));
-  }
-  const vehicleRows = await db
-    .select({ id: vehicles.id })
-    .from(vehicles)
-    .where(like(vehicles.registrationNumber, `${PREFIX}%`));
-  const vehicleIds = vehicleRows.map((row) => row.id);
-  if (vehicleIds.length > 0) {
-    await db.delete(assignments).where(inArray(assignments.vehicleId, vehicleIds));
-    // Un run interrompu (réseau) peut laisser des véhicules : les documents partent en cascade.
-    await db.delete(vehicles).where(inArray(vehicles.id, vehicleIds));
-  }
-  await db.delete(drivers).where(like(drivers.lastName, `${PREFIX}%`));
+function purge(): Promise<void> {
+  return purgeJourneyRows(PREFIX);
 }
 
 function createVehicle(overrides: { insuranceDoc?: string } = {}) {
   return createLaunchableVehicle(ids, token("V"), overrides);
 }
 
-const driverIds: number[] = [];
+/** Chauffeur au préfixe de la spec : purge() le retrouve, nul besoin de suivre son id. */
 function createDriver(cpcStatus = "FORMÉ") {
-  return createLaunchableDriver(driverIds, token("D"), token("EMP"), cpcStatus);
+  return createLaunchableDriver(token("D"), token("EMP"), { cpcStatus });
 }
 
 async function missionRow(id: number) {

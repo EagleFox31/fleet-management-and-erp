@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../../server/db";
-import { assignments, drivers, missions, vehicleDocuments } from "../../shared/schema";
+import { assignments, clientInvoices, drivers, missions, vehicleDocuments, vehicles } from "../../shared/schema";
 import type { CreatedIds } from "../../tests/support/cleanup";
 import { createTestFuelRecord, createTestVehicle } from "../../tests/support/factories";
 
@@ -44,18 +44,17 @@ export async function createLaunchableVehicle(
   return vehicle;
 }
 
-/** Chauffeur actif, permis valable ; `driverIds` reçoit son id pour le nettoyage. */
+/** Chauffeur actif, permis valable ; `track`, s'il est fourni, reçoit son id pour le nettoyage. */
 export async function createLaunchableDriver(
-  driverIds: number[],
   lastName: string,
   employeeNumber: string,
-  cpcStatus = "FORMÉ",
+  { cpcStatus = "FORMÉ", track }: { cpcStatus?: string; track?: number[] } = {},
 ) {
   const [driver] = await db
     .insert(drivers)
     .values({ firstName: "Chauffeur", lastName, employeeNumber, cpcStatus, licenseExpiry: FAR, isActive: true })
     .returning();
-  driverIds.push(driver.id);
+  track?.push(driver.id);
   return driver;
 }
 
@@ -78,6 +77,31 @@ export async function deleteJourneyRows(missionIds: number[], driverIds: number[
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
   if (driverIds.length > 0) await db.delete(drivers).where(inArray(drivers.id, driverIds));
+}
+
+/**
+ * Restes d'un run interrompu, retrouvés par préfixe : missions (factures et paiements en
+ * cascade), affectations, véhicules (documents en cascade) et chauffeurs. À appeler en
+ * beforeAll comme en afterAll ; le préfixe doit être propre à la spec.
+ */
+export async function purgeJourneyRows(prefix: string) {
+  const rows = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${prefix}%`));
+  const missionIds = rows.map((row) => row.id);
+  if (missionIds.length > 0) {
+    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
+    await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
+    await db.delete(missions).where(inArray(missions.id, missionIds));
+  }
+  const vehicleRows = await db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(like(vehicles.registrationNumber, `${prefix}%`));
+  const vehicleIds = vehicleRows.map((row) => row.id);
+  if (vehicleIds.length > 0) {
+    await db.delete(assignments).where(inArray(assignments.vehicleId, vehicleIds));
+    await db.delete(vehicles).where(inArray(vehicles.id, vehicleIds));
+  }
+  await db.delete(drivers).where(like(drivers.lastName, `${prefix}%`));
 }
 
 export async function missionStatus(id: number) {
@@ -117,8 +141,10 @@ export async function driveToDeliveredInBrowser(page: Page, missionId: number, o
   await page.getByTestId("button-transition-mission-status-header").click();
   await expect(page.getByTestId("button-save-mission-budgets")).toBeVisible();
   for (const [field, value] of Object.entries(LAUNCH_BUDGETS)) {
+    // Un champ absent fait échouer le test : le sauter lancerait la mission sans ce budget.
     const input = page.getByTestId(`input-mission-budget-${field}`);
-    if (await input.isVisible()) await input.fill(String(value));
+    await expect(input, `champ budget ${field}`).toBeVisible();
+    await input.fill(String(value));
   }
   await page.getByTestId("button-save-mission-budgets").click();
   await expect.poll(() => missionStatus(missionId), { timeout: 30_000 }).toBe("in_progress");

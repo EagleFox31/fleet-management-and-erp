@@ -14,6 +14,7 @@ import {
   deleteJourneyRows,
   driveToDeliveredByApi,
   driveToDeliveredInBrowser,
+  purgeJourneyRows,
 } from "./helpers/mission-journey";
 import { createE2EUser } from "./helpers/test-data";
 
@@ -44,19 +45,22 @@ function expectApiError(status: number, text: string, expected: number, label: s
 }
 const missionIds: number[] = [];
 const driverIds: number[] = [];
+const PREFIX = "E2E-P2-";
 let stamp = 0;
-const token = (label: string) => `E2E-P2-${label}-${Date.now().toString(36)}-${++stamp}`;
+const token = (label: string) => `${PREFIX}${label}-${Date.now().toString(36)}-${++stamp}`;
 
 /** Véhicule et chauffeur aptes au lancement, nettoyés en fin de spec. */
 async function crew() {
   const vehicle = await createLaunchableVehicle(ids, token("V"));
-  const driver = await createLaunchableDriver(driverIds, token("D"), token("EMP"));
+  const driver = await createLaunchableDriver(token("D"), token("EMP"), { track: driverIds });
   return { vehicleId: vehicle.id, driverId: driver.id };
 }
 let logistics: E2ECredentials;
 let secretary: E2ECredentials;
 
 test.beforeAll(async () => {
+  // Un run interrompu laisse missions, véhicules et chauffeurs E2E-P2- : on part propre.
+  await purgeJourneyRows(PREFIX);
   logistics = await createE2EUser("logistics", ids);
   secretary = await createE2EUser("secretary", ids);
   await creditFuelCard(ids);
