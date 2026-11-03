@@ -1585,3 +1585,28 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
+
+### Contexte
+L'e2e P6 a montré que la réception d'une commande fournisseur laissait l'alerte stock bas affichée chez le chef d'atelier jusqu'au rechargement (#177). L'audit qui a suivi a trouvé quatorze autres écarts, dont sept hauts : stock, carburant, tableau de bord de gestion.
+
+### Cause racine
+Chaque `case` de `useRealTimeSync.ts` listait ses clés à la main. Un écran de compteur ajouté plus tard n'était rattaché à aucun événement, et `staleTime` (5 min, sans polling) le laissait périmé. Les clés TanStack se comparent élément par élément : `["/api/fuel-card"]` n'atteint pas `["/api/fuel-card/balance"]`.
+
+Classification : oubli de contrat, récidive de la règle des 3 couches (AGENTS.md §2).
+
+### Résolution
+`client/src/lib/realtime-satellites.ts` : des groupes d'écrans par fait métier, et une table événement -> groupes, appliquée avant le `switch`. `parts_delivered`, `part_received`, `vehicle_mileage_updated`, `vehicle_maintenance_position_updated` et `work_order_awaiting_parts` sont désormais rafraîchis. L'émission de `alert_created` par ces flux est côté serveur.
+
+### Prévention (vérifiable)
+`tests/unit/client/realtime-satellites.test.ts` échoue dans ces cas :
+- un événement de stock, d'argent ou de statut émis par le serveur est absent de la table ;
+- un événement de stock ou d'argent ne porte pas de groupe de sa famille ;
+- un écran satellite (compteur, statistique, tableau de bord) n'est rafraîchi par aucun événement ;
+- une clé de groupe n'est posée par aucun écran.
+
+Les listes gelées ne peuvent que diminuer. La preuve par mutation rend la suite rouge : entrée retirée ; groupe de stock remplacé.
+
+### Règle Projet
+Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-satellites.ts` dans la PR qui le crée.
