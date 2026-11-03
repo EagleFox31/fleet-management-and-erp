@@ -1,10 +1,13 @@
 import { db, type DbExecutor } from "../db";
-import { faultCatalogParts, parts, partsStockMovements, users, workOrders, type Part, type InsertPart } from "@shared/schema";
+import { faultCatalogParts, insertPartSchema, partRequirements, parts, partsStockMovements, users, workOrders, type Part, type InsertPart } from "@shared/schema";
 import { eq, desc, asc, sql, and, lte, gte, inArray, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AppError } from "../lib/app-error";
 import { escapeLike } from "../lib/sql-like";
 import { moduleLogger } from "../lib/logger";
+
+/** Mêmes bornes qu'à la création : stock et seuil jamais négatifs. */
+const PART_STOCK_BOUNDS = insertPartSchema.pick({ quantity: true, minQuantity: true }).partial();
 
 const log = moduleLogger("parts");
 
@@ -184,6 +187,11 @@ export class PartsService {
   ): Promise<Part> {
     console.log(`Updating part ${id}:`, updateData);
 
+    const bounds = PART_STOCK_BOUNDS.safeParse({ quantity: updateData.quantity, minQuantity: updateData.minQuantity });
+    if (!bounds.success) {
+      throw new AppError(400, bounds.error.issues[0]?.message ?? "Certaines informations de la pièce sont invalides.");
+    }
+
     // Vérifier que la pièce existe
     const existingPart = await this.getPartById(id);
     if (!existingPart) {
@@ -238,6 +246,16 @@ export class PartsService {
       .limit(1);
     if (usedByFault) {
       throw new AppError(409, "Pièce utilisée dans le catalogue de pannes");
+    }
+
+    // Même règle pour une pièce citée par une demande de pièce (FK sans cascade) : l'historique est gardé.
+    const [usedByRequirement] = await db
+      .select({ id: partRequirements.id })
+      .from(partRequirements)
+      .where(eq(partRequirements.partId, id))
+      .limit(1);
+    if (usedByRequirement) {
+      throw new AppError(409, "Pièce citée par une demande de pièce : elle ne peut pas être supprimée.");
     }
 
     // Supprimer les mouvements de stock associés

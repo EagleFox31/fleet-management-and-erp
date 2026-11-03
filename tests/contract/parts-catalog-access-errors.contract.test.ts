@@ -145,9 +145,7 @@ describe("PRT1 : forme des erreurs (ApiErrorBody)", { timeout: 60000 }, () => {
     expect(after.quantity).toBe(before.quantity);
   });
 
-  // Défaut produit (non corrigé ici) : le PATCH accepte un stock négatif (200, valeur écrite), alors que la
-  // création le refuse en 400 (voir parts-catalog-crud). `prepareColumnUpdate` ne porte pas la borne min 0
-  // de `insertPartSchema` ; de plus, le stock ne devrait bouger que par `update-stock`, qui le trace.
+  // Le PATCH applique les bornes de `insertPartSchema` (stock et seuil >= 0), comme la création.
   let negativeStockPartId = 0;
   beforeAll(async () => {
     negativeStockPartId = await newPartId();
@@ -157,9 +155,10 @@ describe("PRT1 : forme des erreurs (ApiErrorBody)", { timeout: 60000 }, () => {
     expect((await rowOf(negativeStockPartId)).quantity).toBeGreaterThanOrEqual(0);
   });
 
-  it.fails("modification : stock négatif refusé en 400, la fiche ne bouge pas", async () => {
+  it("modification : stock négatif refusé en 400, la fiche ne bouge pas", async () => {
     const res = await call("PATCH", `/api/parts/${negativeStockPartId}`, { actor: "warehouse", body: { quantity: -3 } });
     expectApiError(res, 400, "VALIDATION");
+    expect((await rowOf(negativeStockPartId)).quantity).toBeGreaterThanOrEqual(0);
   });
 
   // Le statut seul : aucune route `/api` inconnue n'a de gestionnaire, le 404 d'Express sort hors ApiErrorBody (backlog).
@@ -200,10 +199,7 @@ describe("PRT1 : suppression d'une pièce référencée", { timeout: 60000 }, ()
     }
   });
 
-  // Défaut produit (non corrigé ici) : `deletePart` (server/services/parts-service.ts) ne contrôle que le
-  // catalogue de pannes. Une pièce citée par `part_requirements` (FK sans cascade) fait échouer le DELETE
-  // à la base ; la route `DELETE /api/parts/:id` (server/routes.ts, bloc catch) répond alors 500 avec
-  // `error.message` brut dans le corps, ce qu'interdit AGENTS.md §10. Attendu : 409 lisible, pièce intacte.
+  // Une pièce citée par `part_requirements` (FK sans cascade) : `deletePart` refuse en 409 avant toute écriture.
   let referencedPartId = 0;
   let requirementId = 0;
   beforeAll(async () => {
@@ -223,8 +219,9 @@ describe("PRT1 : suppression d'une pièce référencée", { timeout: 60000 }, ()
     expect(row.partId).toBe(referencedPartId);
   });
 
-  it.fails("citée par une demande de pièce : 409 lisible, jamais 500 ni texte d'exception", async () => {
+  it("citée par une demande de pièce : 409 lisible, jamais 500 ni texte d'exception", async () => {
     const res = await call("DELETE", `/api/parts/${referencedPartId}`, { actor: "admin" });
     expectApiError(res, 409, "CONFLICT");
+    expect(await rowOf(referencedPartId)).toBeDefined();
   });
 });
