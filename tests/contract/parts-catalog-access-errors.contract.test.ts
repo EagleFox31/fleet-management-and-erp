@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { faultCatalog, faultCatalogParts, partRequirements, parts } from "../../shared/schema";
+import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart } from "../support/factories";
@@ -47,15 +48,9 @@ async function newPartId(): Promise<number> {
 
 const rowOf = async (id: number) => (await db.select().from(parts).where(eq(parts.id, id)))[0];
 
-const TECHNICAL = /SQLSTATE|violates|duplicate key|invalid input syntax|foreign key|constraint|at \S+:\d+|ZodError|"path":|\binvalid_type\b/i;
-
-/** Corps d'erreur conforme à ApiErrorBody : message lisible, code connu, rien de technique. */
-function expectApiError(res: { status: number; body: any }, status: number, code: string) {
-  expect(res.status).toBe(status);
-  expect(typeof res.body.message).toBe("string");
-  expect(res.body.message.length).toBeGreaterThan(0);
-  expect(res.body.code).toBe(code);
-  expect(JSON.stringify(res.body)).not.toMatch(TECHNICAL);
+/** Corps d'erreur conforme à ApiErrorBody (tests/support/api-error.ts, même contrôle que les e2e). */
+function expectApiError(res: { status: number; body: unknown }, status: number, code: string) {
+  expect(apiErrorProblems(res.status, res.body, status, code)).toEqual([]);
 }
 
 beforeAll(async () => {
