@@ -251,6 +251,13 @@ export const PART_CATALOG_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((
  */
 export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
+/**
+ * Destinataires des événements de facturation client (création, paiement, retard) : les rôles
+ * qui lisent la facturation (`authorize` de `server/api/billing.routes.ts`). La facture est celle
+ * d'un client de flotte (table `clients`), pas d'un compte : aucun compte `client` n'en reçoit.
+ */
+export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }

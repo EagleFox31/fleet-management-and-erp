@@ -23,8 +23,6 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
     count: 3,
     why: "type RealtimeScope (1) + portées par défaut de fuel_price_changed et vehicle_document_type_changed (2), prix et types de papier lus par tous les profils",
   },
-  "server/api/billing.routes.ts": { count: 1, why: "événements de facturation suivis par plusieurs profils" },
-  "server/api/clients.routes.ts": { count: 1, why: "événements client suivis par plusieurs profils" },
   "server/api/drivers-management.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/drivers.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/fuel-card.routes.ts": { count: 1, why: "événements carte carburant suivis par plusieurs profils" },
@@ -32,9 +30,7 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/purchase-orders.routes.ts": { count: 1, why: "commandes fournisseur suivies par plusieurs profils" },
   "server/api/supplier-invoices.routes.ts": { count: 1, why: "factures fournisseur suivies par plusieurs profils" },
   "server/api/suppliers.routes.ts": { count: 1, why: "fournisseurs suivis par plusieurs profils" },
-  "server/api/vehicles.routes.ts": { count: 1, why: "véhicules suivis par plusieurs profils" },
   "server/routes.ts": { count: 1, why: "recharge carte carburant (fichier gelé, ne pas en ajouter)" },
-  "server/scheduler.ts": { count: 1, why: "factures client en retard, tâche de fond sans acteur" },
   "server/services/tires-service-simplified.ts": { count: 1, why: "pneus suivis par plusieurs profils" },
 };
 
