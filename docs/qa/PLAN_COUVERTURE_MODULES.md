@@ -345,7 +345,7 @@ Tables : `fleetKpiCache`.
 |---|---|---|---|
 | DIR1 | KPI recalculés après chaque transition métier | I | Fait en C (`management-dashboard-kpis` : OT en cours puis terminé, OT annulé, statut véhicule, plein saisi puis supprimé, facture fournisseur ; accès 401/403) ; `management-dashboard-service` en I |
 | DIR2 | Rapports filtrés par période | C | Fait en C (`reports-inventory-period` : mouvements de la fenêtre, bornes incluses, valeur absolue, statistiques, fenêtre vide ; `reports-technician-period` : totaux et taux par technicien et globaux, bornes, fenêtre vide ; export carburant couvert avant). Défauts corrigés par #86 : rapports réservés aux rôles `INVENTORY_REPORT_ROLES` / `TECHNICIAN_REPORT_ROLES` (écran `/reports` aligné), date invalide ou inexistante refusée en 400 |
-| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | Partiel (XLSX : carburant, inventaire (`exports-inventory-content`), factures fournisseurs et clients (`exports-invoices-content`) en cellules exactes ; droits dans `lot-exports-roles`. Non couverts : exports missions clients, rapport mensuel, véhicules, OT, utilisateurs, complet ; PDF/CSV générés côté navigateur (`pdf-export.ts`) hors de portée du contrat) |
+| DIR3 | Exports CSV / PDF : contenu exact, droits par rôle | C | OK pour les exports XLSX et ZIP (carburant, inventaire, factures fournisseurs et clients, missions clients, rapport mensuel, véhicules, OT, utilisateurs, export complet) en cellules exactes : `exports-operations-content.contract.test.ts`, droits dans `lot-exports-roles`. Défauts figés (`it.fails`) : DIR3-1 rôles magasinier, secrétaire, logistique et direction exportés bruts ; DIR3-2 statut `awaiting_parts` brut ; DIR3-3 priorité `critical` brute. Hors de portée : PDF/CSV générés côté navigateur (`pdf-export.ts`) |
 
 ---
 
@@ -386,7 +386,7 @@ flowchart LR
 
 ### P3 — Maintenance préventive
 
-État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance couvert (MNT1, MNT2) ; alerte, clôture de l'OT → véhicule opérationnel et recalcul de la prochaine échéance par date non couverts.
+État : **Partiel** : plan → échéance date/km → OT préventif → véhicule en maintenance (MNT1, MNT2) ; alerte à l'échéance (date et kilométrage, sans doublon), clôture de l'OT → véhicule opérationnel (un ou deux OT ouverts) et recalcul de la prochaine échéance (`completeMaintenanceAndScheduleNext` : mensuel, trimestriel, annuel, kilométrique) couverts par `tests/integration/preventive-maintenance-lifecycle.test.ts`. Reste partiel car deux règles ne sont pas câblées dans le produit, figées en `it.fails` : P3-1 clôturer l'OT n'avance jamais l'échéance du plan (rien n'appelle `completeMaintenanceAndScheduleNext`) ; P3-2 un OT issu d'un plan échu n'immobilise pas le véhicule (seul `nextMaintenanceDate` le fait).
 
 ```mermaid
 flowchart LR
