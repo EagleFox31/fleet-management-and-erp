@@ -8,10 +8,16 @@ import { db } from "../db";
 import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
-import { DOCUMENT_RENEWAL_VIEWER_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES } from "@shared/constants/roles";
+import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
+  DOCUMENT_RENEWAL_WRITER_ROLES,
+  VEHICLE_DOCUMENT_EVENT_ROLES,
+} from "@shared/constants/roles";
 import {
   DOCUMENT_RENEWAL_REQUEST_STATUSES,
   OPEN_DOCUMENT_RENEWAL_STATUSES,
+  RENEWAL_RECEIPT_MAX_VALIDITY_DAYS,
+  addDaysToIsoDate,
   documentRenewalTransitionRefusal,
   isDocumentRenewalRequestStatus,
 } from "@shared/constants/document-renewal-statuses";
@@ -19,7 +25,6 @@ import { REALTIME_EVENTS, type RealtimeScope } from "@shared/contracts/realtime-
 import { todayUtcDateOnly } from "@shared/lib/utc-day";
 import { isInsideDirectory, uploadedFileCandidates } from "../lib/uploaded-file";
 import { renewalReceiptErrorOf, withoutDiskPaths } from "../lib/renewal-receipts";
-import { RENEWAL_RECEIPT_MAX_VALIDITY_DAYS, addDaysToIsoDate } from "@shared/constants/document-renewal-statuses";
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
@@ -1245,6 +1250,8 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
           requestId: finalizedRequest.id,
           actorUserId,
           actorRole: role,
+          // Même portée que vehicle_document_updated émis par vehicle-documents.routes.ts.
+          scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] },
         },
       );
 
