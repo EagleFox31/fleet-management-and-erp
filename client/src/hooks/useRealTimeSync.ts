@@ -4,6 +4,21 @@ import { queryClient } from "@/lib/queryClient";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
 import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
+import { satelliteTargetsOf } from "@/lib/realtime-satellites";
+
+/** Couche 3, écrans satellites : groupes déclarés pour l'événement (`client/src/lib/realtime-satellites.ts`). */
+function invalidateSatellites(event: string): void {
+  const { keys, prefixes } = satelliteTargetsOf(event);
+  for (const key of keys) queryClient.invalidateQueries({ queryKey: [key] });
+  if (prefixes.length > 0) {
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const first = query.queryKey[0];
+        return typeof first === "string" && prefixes.some((prefix) => first.startsWith(prefix));
+      },
+    });
+  }
+}
 
 /** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 function invalidateCatalogEvent(name: RealtimeEventName): void {
@@ -661,6 +676,8 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
   const payload = update.payload ?? update.data;
   const payloadRecord = asRecord(payload) ?? {};
 
+  invalidateSatellites(update.type);
+
   switch (update.type) {
     case "work_order_created": {
       const createdWorkOrder = extractWorkOrderFromPayload(payload);
@@ -870,6 +887,8 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           queryClient.invalidateQueries({
             queryKey: [`/api/work-orders/${workOrderId}/pending-part-requirements`],
           });
+          // Coût de l'OT affiché sur sa fiche.
+          queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
         }
 
         const partId =
