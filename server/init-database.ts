@@ -4,6 +4,9 @@ import { db, pool } from './db';
 import { users } from '../shared/schema';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
+import { moduleLogger } from './lib/logger';
+
+const initLog = moduleLogger('init-database');
 
 const BOOTSTRAP_SQL_FILES = [
   'work-orders-realtime-triggers.sql',
@@ -703,7 +706,7 @@ DECLARE
 BEGIN
   -- Base dont les tables CDC ont été créées par drizzle-kit push avant que Drizzle déclare
   -- ces contraintes : CREATE TABLE IF NOT EXISTS a été sauté, elles manquent. Rien à faire sinon.
-  -- CHECK en NOT VALID : les lignes existantes ne bloquent pas le démarrage.
+  -- CHECK posé en NOT VALID puis validé : une ligne non conforme laisse un WARNING, pas un démarrage bloqué.
   FOR c IN SELECT * FROM (VALUES
     ('workshop_labor_rates', 'workshop_labor_rates_hourly_rate_ht_check', 'CHECK (hourly_rate_ht >= 0)'),
     ('import_batches', 'import_batches_kind_check', 'CHECK (kind IN (''vehicles'', ''interventions''))'),
@@ -713,13 +716,21 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
     END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
   END LOOP;
-  -- UNIQUE sous le nom attendu par les services (409 sur conflit) : une unicité posée sous un
-  -- autre nom sur les mêmes colonnes est renommée ; des doublons existants laissent la base en
-  -- l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  -- UNIQUE sous le nom attendu par les services (409 sur conflit), colonnes dans l'ordre déclaré
+  -- par Drizzle : une unicité posée sous un autre nom sur les mêmes colonnes est renommée ; des
+  -- doublons existants laissent la base en l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  -- Un index UNIQUE seul, sans contrainte, n'est pas reconnu : une seconde unicité serait posée à côté.
   FOR c IN SELECT * FROM (VALUES
     ('workshop_labor_rates', 'workshop_labor_rates_effective_from_key', ARRAY['effective_from']),
-    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['key', 'user_id'])
+    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['user_id', 'key'])
   ) AS v(tbl, name, cols) LOOP
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       CONTINUE;
@@ -728,7 +739,8 @@ BEGIN
     SELECT k.conname INTO existing FROM pg_constraint k
     WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
       AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
-           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)) = c.cols
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey))
+        = (SELECT array_agg(x ORDER BY x) FROM unnest(c.cols) AS x)
     LIMIT 1;
     IF existing IS NOT NULL THEN
       EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
@@ -745,8 +757,41 @@ BEGIN
 END $$`,
 ];
 
+// Contraintes CDC réconciliées au démarrage. Le RAISE WARNING du bloc n'atteint pas les logs
+// applicatifs (aucun écouteur de notice) : l'écart restant est relu ici et journalisé.
+export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
+  'workshop_labor_rates_hourly_rate_ht_check',
+  'import_batches_kind_check',
+  'import_batches_status_check',
+  'idempotency_keys_state_check',
+  'workshop_labor_rates_effective_from_key',
+  'idempotency_keys_user_id_key_key',
+];
+
+type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+type WarnLogger = { warn: (obj: object, msg: string) => void };
+
+/** Contraintes absentes ou laissées NOT VALID (lignes non conformes ou doublons), journalisées en warn. */
+export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows } = await client.query(
+    `SELECT conname, convalidated FROM pg_constraint WHERE conname = ANY($1)`,
+    [CDC_RECONCILED_CONSTRAINTS],
+  );
+  const found = new Map(rows.map((r) => [r.conname as string, r.convalidated as boolean]));
+  const missing = CDC_RECONCILED_CONSTRAINTS.filter((name) => !found.has(name));
+  const notValidated = CDC_RECONCILED_CONSTRAINTS.filter((name) => found.get(name) === false);
+  if (missing.length || notValidated.length) {
+    log.warn(
+      { missing, notValidated },
+      'Contraintes CDC incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
+    );
+  }
+  return { missing, notValidated };
+}
+
 async function applyCdcSchema() {
   await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
+  await reportCdcConstraintGaps(pool);
 }
 
 export async function initializeDatabase() {

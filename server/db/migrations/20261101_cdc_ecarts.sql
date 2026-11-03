@@ -148,7 +148,7 @@ DECLARE
 BEGIN
   -- Base dont les tables CDC ont été créées par drizzle-kit push avant que Drizzle déclare
   -- ces contraintes : CREATE TABLE IF NOT EXISTS a été sauté, elles manquent. Rien à faire sinon.
-  -- CHECK en NOT VALID : les lignes existantes ne bloquent pas le démarrage.
+  -- CHECK posé en NOT VALID puis validé : une ligne non conforme laisse un WARNING, pas un démarrage bloqué.
   FOR c IN SELECT * FROM (VALUES
     ('workshop_labor_rates', 'workshop_labor_rates_hourly_rate_ht_check', 'CHECK (hourly_rate_ht >= 0)'),
     ('import_batches', 'import_batches_kind_check', 'CHECK (kind IN (''vehicles'', ''interventions''))'),
@@ -158,13 +158,21 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
     END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
   END LOOP;
-  -- UNIQUE sous le nom attendu par les services (409 sur conflit) : une unicité posée sous un
-  -- autre nom sur les mêmes colonnes est renommée ; des doublons existants laissent la base en
-  -- l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  -- UNIQUE sous le nom attendu par les services (409 sur conflit), colonnes dans l'ordre déclaré
+  -- par Drizzle : une unicité posée sous un autre nom sur les mêmes colonnes est renommée ; des
+  -- doublons existants laissent la base en l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  -- Un index UNIQUE seul, sans contrainte, n'est pas reconnu : une seconde unicité serait posée à côté.
   FOR c IN SELECT * FROM (VALUES
     ('workshop_labor_rates', 'workshop_labor_rates_effective_from_key', ARRAY['effective_from']),
-    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['key', 'user_id'])
+    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['user_id', 'key'])
   ) AS v(tbl, name, cols) LOOP
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       CONTINUE;
@@ -173,7 +181,8 @@ BEGIN
     SELECT k.conname INTO existing FROM pg_constraint k
     WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
       AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
-           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)) = c.cols
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey))
+        = (SELECT array_agg(x ORDER BY x) FROM unnest(c.cols) AS x)
     LIMIT 1;
     IF existing IS NOT NULL THEN
       EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
