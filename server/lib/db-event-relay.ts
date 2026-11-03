@@ -53,6 +53,11 @@ export async function relayDatabaseEvent(parsed: DatabaseRealtimeMessage, deps: 
       : {};
   const entityId = parsed.entityId ?? positiveInteger(payload.workOrderId) ?? positiveInteger(payload.vehicleId) ?? null;
   const emittedAt = typeof parsed.emittedAt === "string" ? parsed.emittedAt : new Date().toISOString();
+  // Fermé par défaut : seuls les événements connus des triggers ont une portée.
+  if (!eventType.startsWith("work_order") && eventType !== "vehicle_status_changed") {
+    log.warn({ eventType }, "événement de base inconnu : non relayé");
+    return;
+  }
   const entity = typeof parsed.entity === "string" ? parsed.entity : deps.inferEntity(eventType);
 
   deps.broadcast(eventType, {
@@ -78,7 +83,7 @@ export async function relayDatabaseEvent(parsed: DatabaseRealtimeMessage, deps: 
       version: 1,
       entity: "vehicle",
       entityId: vehicleId,
-      payload: { vehicleId, status: payload.status ?? null },
+      payload: { vehicleId, status: typeof payload.status === "string" ? payload.status : null },
       scope: { type: "user", userIds: [ownerId] },
       actor: null,
       emittedAt,

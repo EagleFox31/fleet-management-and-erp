@@ -432,7 +432,11 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
           return;
         }
 
-        console.log(`[DB-EVENTS] ${parsed.eventType} (entityId=${String(parsed.entityId ?? "n/a")})`);
+        const logged = parsed.payload && typeof parsed.payload === "object" ? (parsed.payload as Record<string, unknown>) : {};
+        moduleLogger("db-events").info(
+          { eventType: parsed.eventType, entityId: parsed.entityId ?? logged.workOrderId ?? logged.vehicleId ?? null },
+          "événement de base reçu",
+        );
 
         // Portées : voir `server/lib/db-event-relay.ts` (personnel, coûts d'OT, propriétaire du véhicule).
         void relayDatabaseEvent(parsed, {

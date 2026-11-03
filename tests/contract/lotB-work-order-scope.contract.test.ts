@@ -337,6 +337,13 @@ describe("Pont LISTEN/NOTIFY : trames d'ordre de travail et trame réduite au pr
     expect(framesFor("clientB", "vehicle_status_changed")).toHaveLength(1);
   });
 
+  it("événement inconnu : rejeté, aucun envoi ; statut non texte : trame réduite avec status nul", async () => {
+    await relay({ eventType: "alert_created", payload: { vehicleId: vehicleA } });
+    expect(captured).toEqual([]);
+    await relay({ eventType: "vehicle_status_changed", payload: { vehicleId: vehicleA, status: { x: 1 } } });
+    expect(framesFor("clientA", "vehicle_status_changed")[0].data.payload).toEqual({ vehicleId: vehicleA, status: null });
+  });
+
   it("propriétaire nul ou lecture en échec : rien pour les clients, aucune exception", async () => {
     await relay({ eventType: "vehicle_status_changed", payload: { vehicleId: vehicleA, status: "active" } }, async () => null);
     expect(framesFor("clientA")).toEqual([]);

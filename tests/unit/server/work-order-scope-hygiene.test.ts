@@ -26,6 +26,8 @@ const EMITTERS: Record<string, { cost: number; staff: number }> = {
   "server/services/preventive-maintenance-service.ts": { cost: 1, staff: 0 },
   "server/services/procurement-service.ts": { cost: 0, staff: 2 },
   "server/services/technician-work-orders-service.ts": { cost: 0, staff: 1 },
+  // Un seul appel `broadcast`, dont la portée est un ternaire (coûts pour work_order_*, personnel
+  // sinon) : il compte une fois dans chaque colonne. La trame réduite au propriétaire est en `user`.
   "server/lib/db-event-relay.ts": { cost: 1, staff: 1 },
 };
 
@@ -47,7 +49,7 @@ function emissions(source: string): string[] {
 }
 
 const carriesWorkOrderObject = (call: string): boolean =>
-  /(?:^|[\s{,])(?:workOrder|partUsed|requirement)\s*[:,}\r\n]/.test(call.replace(/scope\s*:[^,\n]*/, ""));
+  /(?:^|[\s{,.])(?:workOrder|partUsed|requirement)\s*[:,}\r\n]/.test(call.replace(/scope\s*:[^,\n]*/, ""));
 
 describe("portée des émissions d'ordre de travail", () => {
   for (const [file, expected] of Object.entries(EMITTERS)) {
