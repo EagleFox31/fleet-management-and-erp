@@ -58,6 +58,7 @@ import {
   vehicles,
   workOrders,
 } from "@shared/schema";
+import { VOID_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { db } from "../db";
 import { vehicleStatusService } from "./vehicle-status-service";
 
@@ -457,7 +458,7 @@ export class ManagementDashboardService {
         })
         .from(assignments)
         // Une affectation annulée ou refusée ne reçoit aucune part du CA.
-        .where(and(sql`${assignments.vehicleId} IS NOT NULL`, notInArray(assignments.status, ["cancelled", "rejected"]))),
+        .where(and(sql`${assignments.vehicleId} IS NOT NULL`, notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]))),
       db
         .select({
           missionId: clientInvoices.missionId,

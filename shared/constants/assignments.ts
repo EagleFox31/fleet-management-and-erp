@@ -10,6 +10,17 @@ export const ACTIVE_ASSIGNMENT_STATUSES = ["pending", "accepted", "in_progress"]
 
 export type ActiveAssignmentStatus = (typeof ACTIVE_ASSIGNMENT_STATUSES)[number];
 
+/**
+ * Statuts d'une affectation qui n'a jamais eu lieu : elle ne donne aucun droit (saisie carburant)
+ * et ne reçoit aucune part du chiffre d'affaires de la mission. Une affectation terminée
+ * (`completed`) n'est plus active mais reste comptée.
+ */
+export const VOID_ASSIGNMENT_STATUSES = ["cancelled", "rejected"] as const;
+
+export function isVoidAssignmentStatus(status: string | null | undefined): boolean {
+  return (VOID_ASSIGNMENT_STATUSES as readonly string[]).includes(String(status ?? ""));
+}
+
 export function isActiveAssignmentStatus(status: string | null | undefined): boolean {
   return (ACTIVE_ASSIGNMENT_STATUSES as readonly string[]).includes(String(status ?? ""));
 }
