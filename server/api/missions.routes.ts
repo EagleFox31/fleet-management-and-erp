@@ -1185,51 +1185,73 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       ? `${regularizationNotePrefix} | ${payload.notes.trim()}`
       : regularizationNotePrefix;
 
-    const result = await fuelCardService.recordConsumption({
-      vehicleId: payload.vehicleId,
-      quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
-      date: parsedDate.toISOString(),
-      stationName: payload.stationName || "MISSION",
-      destination: mission.deliveryAddress || "Mission",
-      clientName: mission.clientName || undefined,
-      notes: mergedNotes,
-      missionId,
-      isPreDeparture: payload.isPreDeparture,
-      userId: actorUserId,
-    });
+    // Débit et journal de régularisation dans une seule transaction, sous le verrou de la
+    // carte : un échec du journal annule le débit, et deux régularisations simultanées
+    // relisent workflowData l'une après l'autre (aucune entrée perdue).
+    let updatedMission:
+      | {
+          id: number;
+          status: string | null;
+          actualFuelCost: string | null;
+          actualFuelQuantity: number | null;
+          workflowData: unknown;
+          updatedAt: Date | null;
+        }
+      | undefined;
+    let regularizationEntry: Record<string, unknown> | undefined;
+    const result = await fuelCardService.recordConsumption(
+      {
+        vehicleId: payload.vehicleId,
+        quantity: payload.quantity,
+        unitPrice: payload.unitPrice,
+        date: parsedDate.toISOString(),
+        stationName: payload.stationName || "MISSION",
+        destination: mission.deliveryAddress || "Mission",
+        clientName: mission.clientName || undefined,
+        notes: mergedNotes,
+        missionId,
+        isPreDeparture: payload.isPreDeparture,
+        userId: actorUserId,
+      },
+      async (tx, consumption, cost) => {
+        const [current] = await tx
+          .select({ workflowData: missions.workflowData })
+          .from(missions)
+          .where(eq(missions.id, missionId));
 
-    const regularizationEntry = {
-      id: result.consumption?.id ?? null,
-      reason: payload.regularizationReason,
-      createdAt: new Date().toISOString(),
-      createdBy: actorUserId,
-      createdRole: actorRole || null,
-      quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
-      debitAmount: result.cost,
-    };
+        regularizationEntry = {
+          id: consumption?.id ?? null,
+          reason: payload.regularizationReason,
+          createdAt: new Date().toISOString(),
+          createdBy: actorUserId,
+          createdRole: actorRole || null,
+          quantity: payload.quantity,
+          unitPrice: payload.unitPrice,
+          debitAmount: cost,
+        };
 
-    const nextWorkflowData = mergeMissionFuelTracking(mission.workflowData, {
-      noRefuelDeclaration: null,
-      regularizationEntry,
-    });
+        const nextWorkflowData = mergeMissionFuelTracking(current?.workflowData ?? mission.workflowData, {
+          noRefuelDeclaration: null,
+          regularizationEntry,
+        });
 
-    const [updatedMission] = await db
-      .update(missions)
-      .set({
-        workflowData: nextWorkflowData,
-        updatedAt: new Date(),
-      })
-      .where(eq(missions.id, missionId))
-      .returning({
-        id: missions.id,
-        status: missions.status,
-        actualFuelCost: missions.actualFuelCost,
-        actualFuelQuantity: missions.actualFuelQuantity,
-        workflowData: missions.workflowData,
-        updatedAt: missions.updatedAt,
-      });
+        [updatedMission] = await tx
+          .update(missions)
+          .set({
+            workflowData: nextWorkflowData,
+            updatedAt: new Date(),
+          })
+          .where(eq(missions.id, missionId))
+          .returning({
+            id: missions.id,
+            status: missions.status,
+            actualFuelCost: missions.actualFuelCost,
+            actualFuelQuantity: missions.actualFuelQuantity,
+            workflowData: missions.workflowData,
+            updatedAt: missions.updatedAt,
+          });
+      },
+    );
 
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
 

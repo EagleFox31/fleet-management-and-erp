@@ -17,7 +17,7 @@ import { idParam, makeFailWith } from "../lib/route-helpers";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { authenticate, isAdmin, isInventoryManager, isPartsCatalogManager, isStaff } from "../middleware/auth";
 import { partCatalogChildrenService } from "../services/part-catalog-children-service";
-import { partsService } from "../services/parts-service";
+import { assertNoStockFields, partsService } from "../services/parts-service";
 import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("parts-catalog");
@@ -83,6 +83,9 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
 router.patch("/parts/:id([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
+    // Le stock ne change que par `update-stock`, qui trace le mouvement et son motif : une
+    // quantité dans le PATCH modifierait le stock sans aucune trace. Même refus côté service.
+    assertNoStockFields(req.body);
     if (req.body?.unit !== undefined) {
       const normalizedUnit = typeof req.body.unit === "string" ? req.body.unit.trim() : "";
       if (!PART_UNITS.includes(normalizedUnit as (typeof PART_UNITS)[number])) {
