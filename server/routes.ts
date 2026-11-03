@@ -2450,99 +2450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/parts", authenticate, isPartsCatalogManager, async (req, res) => {
-    try {
-      const parsedPart = insertPartSchema.parse(req.body);
-      
-      const part = await partsService.createPart(parsedPart, req.user?.id);
-      
-      return res.status(201).json(part);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Données de pièce invalides",
-          errors: error.errors 
-        });
-      }
-      
-      console.error("Create part error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
-
-  app.patch("/api/parts/:id(\\d+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-
-      if (req.body?.unit !== undefined) {
-        const normalizedUnit = typeof req.body.unit === "string" ? req.body.unit.trim() : "";
-        const isAllowedUnit = PART_UNITS.includes(normalizedUnit as (typeof PART_UNITS)[number]);
-        if (!isAllowedUnit) {
-          return res.status(400).json({
-            message: "Unité invalide",
-            allowedUnits: PART_UNITS,
-          });
-        }
-        req.body.unit = normalizedUnit;
-      }
-
-      // Champs tenus par le serveur : jamais repris du corps (T4).
-      const {
-        id: _id,
-        createdBy: _createdBy,
-        createdAt: _createdAt,
-        updatedBy: _updatedBy,
-        updatedAt: _updatedAt,
-        ...partPayload
-      } = req.body ?? {};
-      const { data, errors } = prepareColumnUpdate(parts, partPayload);
-      if (errors.length > 0) {
-        return next(new AppError(400, "Certaines informations de la pièce sont invalides.", { fieldErrors: errors }));
-      }
-
-      const updatedPart = await partsService.updatePart(id, data, req.user?.id);
-      
-      return res.status(200).json(updatedPart);
-    } catch (error) {
-      // Le service signale ces deux cas par message : les traduire en statut
-      // plutôt que de renvoyer le texte de l'erreur au client.
-      if (error instanceof AppError) return next(error);
-      const message = error instanceof Error ? error.message : "";
-      if (message === "Pièce non trouvée") {
-        return next(new AppError(404, "Cette pièce n'existe plus.", { cause: error }));
-      }
-      if (message === "Une pièce avec cette référence existe déjà") {
-        return next(new AppError(409, "Une pièce avec cette référence existe déjà.", { cause: error }));
-      }
-      log.error({ err: error, requestId: req.requestId }, "Update part error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.delete("/api/parts/:id(\\d+)", isAdmin, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-      
-      await partsService.deletePart(id);
-      
-      return res.status(204).send();
-    } catch (error) {
-      console.error("Delete part error:", error);
-      return res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Erreur serveur" 
-      });
-    }
-  });
+  // POST, PATCH, DELETE /api/parts et POST /api/parts/:id/update-stock : server/api/parts-catalog.routes.ts
 
   // Parts Used Routes
   app.get("/api/parts-used", authenticate, async (req, res) => {
@@ -2871,36 +2779,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "Get part usage history error");
       return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  const stockAdjustmentSchema = z.object({
-    adjustment: z.coerce
-      .number({ invalid_type_error: "L'ajustement doit être un nombre." })
-      .int("L'ajustement doit être un nombre entier.")
-      .refine((value) => value !== 0, "L'ajustement ne peut pas être nul."),
-    reason: z
-      .string({ required_error: "La raison de l'ajustement est obligatoire." })
-      .trim()
-      .min(1, "La raison de l'ajustement est obligatoire."),
-  });
-
-  app.post("/api/parts/:id/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
-    try {
-      const partId = parseInt(req.params.id);
-
-      if (isNaN(partId)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-
-      const { adjustment, reason } = stockAdjustmentSchema.parse(req.body);
-      const updatedPart = await partsService.updateStock(partId, adjustment, reason, req.user?.id);
-
-      return res.status(200).json(updatedPart);
-    } catch (error) {
-      // ZodError (400) et AppError (404, 409) : message métier et journalisation
-      // par le gestionnaire central (ancien `console.error` migré là-bas).
-      return next(error);
     }
   });
 
