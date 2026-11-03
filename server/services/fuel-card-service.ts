@@ -605,9 +605,15 @@ export class FuelCardService {
   /**
    * Statistiques par client (MAERSK, CNPCC, etc.)
    */
-  async getStatsByClient() {
+  async getStatsByClient(ownerId: number | null = null) {
     console.log("Fetching fuel stats by client...");
-    
+
+    // Cloison client (AGENTS §11) : `ownerId` non nul = ne compter que les pleins des véhicules
+    // de ce propriétaire (`vehicles.ownerId`). `null` = personnel, aucun filtre.
+    const ownerFilter = ownerId === null
+      ? sql`TRUE`
+      : sql`${fuelRecords.vehicleId} IN (SELECT ${vehicles.id} FROM ${vehicles} WHERE ${vehicles.ownerId} = ${ownerId})`;
+
     const byClient = await db
       .select({
         clientName: fuelRecords.stationName,
@@ -616,7 +622,7 @@ export class FuelCardService {
         recordsCount: sql<string>`COUNT(*)`
       })
       .from(fuelRecords)
-      .where(sql`${fuelRecords.debitAmount} > 0`)
+      .where(sql`${fuelRecords.debitAmount} > 0 AND ${ownerFilter}`)
       .groupBy(fuelRecords.stationName)
       .orderBy(desc(sql<string>`COALESCE(SUM(${fuelRecords.debitAmount}), 0)`));
     

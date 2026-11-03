@@ -116,3 +116,12 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : T-16 reste (validation a l'upload), sans aggraver la dette de `routes.ts` (AGENTS §9). Les anciens documents au type hors liste restent lisibles.
 - **Comment tester (QA)** : en responsable atelier, televerser un PDF avec `type=carte_grise` (201), puis avec `type=nimporte` (400 lisible, rien sur disque) ; en technicien, 403.
 - **Preuve** : `tsc` global a zero ; unitaires 541 verts ; premier passage des contrats `vehicle-documents-upload` (4) et `vehicle-documents-client-scope` (16) : 20 tests verts. Les suites echouent ensuite au teardown/setup sur la base partagee : des lignes `activity_logs` d'utilisateurs TEST laissees par mes premiers passages (l'intercepteur d'audit journalise l'upload) bloquent `cleanupOrphanTestRows`. Le test supprime desormais ces lignes ; le menage des restes anterieurs reste a faire.
+## 2026-11-03T09:00:00+01:00 - R-03/R-13 suite - Cloison chauffeur et client : CPC, donnees personnelles, diffusion, carburant
+
+- **Agent** : api · **Branche** : `lot/api/R-03-R-13-suite` · **Commit** : voir `git log` de la branche
+- **Statut** : fait ; remplace la PR #53 (non rebasee)
+- **Quoi** : (1) `POST /api/drivers/:id/update-cpc` refuse le chauffeur (403) ; (2) CNI, permis, date de naissance, validites et embauche retires des fiches (detail et listes `server/api/drivers*.ts`) pour tout lecteur hors admin/logistique/secretariat, sauf le chauffeur pour sa propre fiche ; (3) `broadcastDriverUpdate` et `driver_cpc_updated` ne diffusent plus de donnees personnelles ; (4) `getStatsByClient(ownerId)` filtre sur `vehicles.ownerId` via `ownerScopeOf` ; (5) bouton « Modifier » de la mission masque au chauffeur.
+- **Comment** : `server/lib/driver-scope.ts` etendu (`redactDriverPersonalData`, `stripDriverPersonalData`) ; handlers touches migres vers `moduleLogger` et `AppError`.
+- **Pourquoi** : AGENTS §11 ; les ecrans resynchronisent par invalidation, ils n'utilisent pas la fiche diffusee.
+- **Comment tester (QA)** : chauffeur sur `/api/drivers` (sa fiche complete, les autres sans CNI/permis) ; chauffeur sur `update-cpc` (403) ; logistique (complet).
+- **Preuve** : contrat `driver-personal-data-scope` 8 verts, integration `fuel-stats-owner-scope` 2 verts, non-regression 68 verts, unitaires 1473, `tsc` global a zero.

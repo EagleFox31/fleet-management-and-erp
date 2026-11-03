@@ -1,0 +1,154 @@
+import { inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../../server/db";
+import { drivers } from "../../shared/schema";
+import { startContractSession } from "../support/contract-session";
+import { uniqueTestToken } from "../support/ids";
+
+/**
+ * R-03 / R-13 : cloison du chauffeur sur ses propres données.
+ * - `POST /api/drivers/:id/update-cpc` refusé au chauffeur ;
+ * - CNI, permis, date de naissance lisibles par les gestionnaires (admin, logistique,
+ *   secrétariat) et par le chauffeur concerné, masqués pour tout autre lecteur ;
+ * - la diffusion temps réel d'une fiche ne porte aucune donnée personnelle.
+ */
+
+type Actor = "admin" | "logistics" | "driver" | "technician";
+let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
+const driverIds: number[] = [];
+let ownId = 0;
+let otherId = 0;
+
+const PII = {
+  birthDate: "1985-04-12",
+  cniNumber: "CNI-SECRET-123",
+  cniExpiry: "2030-01-01",
+  licenseNumber: "PERMIS-SECRET-456",
+  licenseExpiry: "2031-02-02",
+  hireDate: "2015-06-01",
+};
+const PII_KEYS = Object.keys(PII);
+
+async function newDriver(userId: number | null) {
+  const [row] = await db
+    .insert(drivers)
+    .values({ firstName: "Test", lastName: uniqueTestToken("chauffeur"), userId, ...PII })
+    .returning();
+  driverIds.push(row.id);
+  return row.id;
+}
+
+const hasPii = (row: Record<string, unknown>) => PII_KEYS.filter((k) => row[k] !== undefined && row[k] !== null);
+
+beforeAll(async () => {
+  session = await startContractSession<Actor>({
+    admin: "admin",
+    logistics: "logistics",
+    driver: "driver",
+    technician: "technician",
+  });
+  ownId = await newDriver(session.userId("driver"));
+  otherId = await newDriver(null);
+}, 60000);
+
+afterAll(async () => {
+  if (driverIds.length > 0) await db.delete(drivers).where(inArray(drivers.id, driverIds));
+  await session.stop();
+});
+
+describe("POST /api/drivers/:id/update-cpc", () => {
+  it("refuse le chauffeur (403) sans rien écrire", async () => {
+    const res = await session.call("POST", `/api/drivers/${otherId}/update-cpc`, {
+      actor: "driver",
+      body: { cpcDate: "2026-01-01" },
+    });
+    expect(res.status).toBe(403);
+    const after = await session.call("GET", `/api/drivers/${otherId}`, { actor: "admin" });
+    expect(after.body.cpcTrainingDate ?? null).not.toBe("2026-01-01");
+  });
+
+  it("accepte la logistique et ne renvoie que la fiche utile", async () => {
+    const res = await session.call("POST", `/api/drivers/${otherId}/update-cpc`, {
+      actor: "logistics",
+      body: { cpcDate: "2026-01-01" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.cpcTrainingDate).toBe("2026-01-01");
+  });
+});
+
+describe("fiche chauffeur : données personnelles", () => {
+  it("détail : le gestionnaire voit tout", async () => {
+    for (const actor of ["admin", "logistics"] as const) {
+      const res = await session.call("GET", `/api/drivers/${otherId}`, { actor });
+      expect(res.status).toBe(200);
+      expect(res.body.cniNumber).toBe(PII.cniNumber);
+      expect(res.body.licenseNumber).toBe(PII.licenseNumber);
+      expect(res.body.birthDate).toBe(PII.birthDate);
+    }
+  });
+
+  it("détail : le chauffeur voit la sienne, pas celle d'un autre", async () => {
+    const own = await session.call("GET", `/api/drivers/${ownId}`, { actor: "driver" });
+    expect(own.status).toBe(200);
+    expect(own.body.cniNumber).toBe(PII.cniNumber);
+    const other = await session.call("GET", `/api/drivers/${otherId}`, { actor: "driver" });
+    expect(other.status).toBe(200);
+    expect(hasPii(other.body)).toEqual([]);
+    expect(other.body.firstName).toBe("Test");
+  });
+
+  it("détail : un autre personnel (technicien) ne voit aucune donnée personnelle", async () => {
+    const res = await session.call("GET", `/api/drivers/${ownId}`, { actor: "technician" });
+    expect(res.status).toBe(200);
+    expect(hasPii(res.body)).toEqual([]);
+  });
+
+  it("listes : mêmes règles sur /api/drivers et /api/drivers/cpc-status", async () => {
+    for (const path of ["/api/drivers", "/api/drivers/cpc-status"]) {
+      const asLogistics = await session.call("GET", path, { actor: "logistics" });
+      const mine = asLogistics.body.find((d: any) => d.id === otherId);
+      expect(mine.cniNumber).toBe(PII.cniNumber);
+
+      const asDriver = await session.call("GET", path, { actor: "driver" });
+      const own = asDriver.body.find((d: any) => d.id === ownId);
+      const other = asDriver.body.find((d: any) => d.id === otherId);
+      expect(own.licenseNumber).toBe(PII.licenseNumber);
+      expect(hasPii(other)).toEqual([]);
+
+      const asTech = await session.call("GET", path, { actor: "technician" });
+      expect(asTech.body.every((d: any) => hasPii(d).length === 0)).toBe(true);
+    }
+  });
+
+  it("GET /:id/cpc-status masque pour le technicien, pas pour l'admin", async () => {
+    const tech = await session.call("GET", `/api/drivers/${otherId}/cpc-status`, { actor: "technician" });
+    expect(tech.status).toBe(200);
+    expect(hasPii(tech.body)).toEqual([]);
+    const admin = await session.call("GET", `/api/drivers/${otherId}/cpc-status`, { actor: "admin" });
+    expect(admin.body.cniNumber).toBe(PII.cniNumber);
+  });
+});
+
+describe("diffusion temps réel d'une fiche chauffeur", () => {
+  it("PATCH /api/drivers/:id ne diffuse ni CNI, ni permis, ni date de naissance", async () => {
+    const events: Array<{ type: string; data: any }> = [];
+    const previous = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = (type: string, data: unknown) => events.push({ type, data });
+    try {
+      const res = await session.call("PATCH", `/api/drivers/${otherId}`, {
+        actor: "logistics",
+        body: { firstName: "TestBis" },
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      (global as any).broadcastUpdate = previous;
+    }
+    const updated = events.find((e) => e.type === "driver_updated");
+    expect(updated).toBeDefined();
+    expect(updated!.data.entityId).toBe(otherId);
+    expect(updated!.data.payload.driver.firstName).toBe("TestBis");
+    expect(hasPii(updated!.data.payload.driver)).toEqual([]);
+    expect(JSON.stringify(updated!.data)).not.toContain(PII.cniNumber);
+  });
+});

@@ -535,10 +535,12 @@ export default function NewMission() {
                             {selectedDriver.cpcStatus}
                           </p>
                         </div>
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Permis N°:</span>
-                          <p className="font-medium">{selectedDriver.licenseNumber || 'N/A'}</p>
-                        </div>
+                        {selectedDriver.licenseNumber ? (
+                          <div>
+                            <span className="text-gray-600 dark:text-gray-400">Permis N°:</span>
+                            <p className="font-medium">{selectedDriver.licenseNumber}</p>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   )}

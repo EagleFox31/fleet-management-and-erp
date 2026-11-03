@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate, isFuelCardManager } from "../middleware/auth";
 import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { moduleLogger } from "../lib/logger";
+import { ownerScopeOf } from "../lib/client-scope";
 
 const log = moduleLogger("fuel-card");
 
@@ -216,14 +217,15 @@ router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
 });
 
 // Statistiques par client (MAERSK, CNPCC, etc.)
-router.get("/stats-by-client", async (_req, res) => {
+router.get("/stats-by-client", async (req, res, next) => {
   try {
-    const stats = await fuelCardService.getStatsByClient();
-    
+    // Cloison client : un client ne voit que les pleins de ses véhicules (null = personnel).
+    const stats = await fuelCardService.getStatsByClient(ownerScopeOf(req.user));
+
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get fuel stats by client error:", error);
-    return res.status(500).json({ message: "Erreur serveur" });
+    log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant par client en échec");
+    return next(toFuelCardAppError(error));
   }
 });
 

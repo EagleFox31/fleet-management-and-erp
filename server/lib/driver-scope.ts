@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { assignments, drivers } from "@shared/schema";
+import { canManageDrivers } from "@shared/constants/roles";
 
 /**
  * Cloison des chauffeurs (AGENTS §11, pendant de `client-scope.ts`).
@@ -40,4 +41,48 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
     .where(and(eq(assignments.missionId, missionId), inArray(assignments.driverId, scope)))
     .limit(1);
   return Boolean(row);
+}
+
+export const DRIVER_CPC_FORBIDDEN_MESSAGE = "Accès refusé : la certification CPC est saisie par l'exploitation.";
+
+/**
+ * Données personnelles de la fiche chauffeur : lisibles par les gestionnaires
+ * (`DRIVER_MANAGER_ROLES`) et par le chauffeur concerné, retirées pour tout autre lecteur.
+ */
+export const DRIVER_PERSONAL_FIELDS = [
+  "birthDate",
+  "cniNumber",
+  "cniExpiry",
+  "licenseNumber",
+  "licenseExpiry",
+  "hireDate",
+] as const;
+
+/** Retire les champs personnels d'une fiche (sans la modifier). */
+export function stripDriverPersonalData<T extends Record<string, any>>(row: T): T {
+  const copy: Record<string, any> = { ...row };
+  for (const field of DRIVER_PERSONAL_FIELDS) delete copy[field];
+  return copy as T;
+}
+
+/**
+ * Applique la règle de lecture aux fiches chauffeur : gestionnaire = tout ; chauffeur = ses
+ * propres fiches complètes, les autres sans données personnelles ; autre personnel = sans.
+ */
+export async function redactDriverPersonalData<T extends { id: number } & Record<string, any>>(
+  reader: DriverScopeReader | undefined,
+  data: T,
+): Promise<T>;
+export async function redactDriverPersonalData<T extends { id: number } & Record<string, any>>(
+  reader: DriverScopeReader | undefined,
+  data: T[],
+): Promise<T[]>;
+export async function redactDriverPersonalData<T extends { id: number } & Record<string, any>>(
+  reader: DriverScopeReader | undefined,
+  data: T | T[],
+): Promise<T | T[]> {
+  if (reader && canManageDrivers(reader.role)) return data;
+  const own = new Set((await driverScopeOf(reader)) ?? []);
+  const apply = (row: T): T => (own.has(row.id) ? row : stripDriverPersonalData(row));
+  return Array.isArray(data) ? data.map(apply) : apply(data);
 }
