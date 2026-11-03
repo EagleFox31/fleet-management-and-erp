@@ -362,6 +362,8 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
     // `received` à `issued` (un double clic n'en fait qu'une), et un stock
     // devenu insuffisant entre-temps annule la transition.
     let stockError: unknown = null;
+    // Trames dues par la sortie (alerte de stock bas), jouées une fois la transaction validée.
+    const afterCommit: Array<() => void> = [];
     const issueResult = await partRequirementsService.updatePartRequirement(
       requirementId,
       { status: "issued", notes: nextNotes },
@@ -374,7 +376,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
             partUsed = await storage.addPartToWorkOrder(
               { workOrderId, partId, quantity: quantityNeeded, unitPrice },
               user?.id,
-              { executor: tx, requireAvailable: true },
+              { executor: tx, requireAvailable: true, afterCommit: (effect) => afterCommit.push(effect) },
             );
           } catch (error) {
             stockError = error;
@@ -392,6 +394,8 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         issueResult.error === STALE_STATUS_ERROR ? 409 : issueResult.error === STOCK_ISSUE_REVOKED_ERROR ? 403 : 400;
       return res.status(status).json({ message: issueResult.error });
     }
+
+    for (const effect of afterCommit) effect();
 
     const updatedRequirement = issueResult.data;
 

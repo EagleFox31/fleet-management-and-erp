@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
+import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
@@ -34,6 +35,11 @@ export type StockWriteOptions = {
   executor?: DbExecutor;
   /** Refuser une sortie qui rendrait le stock négatif (contrôle atomique). */
   requireAvailable?: boolean;
+  /**
+   * Avec `executor` : reçoit les effets à jouer après le commit (trame `alert_created`).
+   * Sans lui, une alerte écrite dans la transaction n'est pas diffusée (elle pourrait être annulée).
+   */
+  afterCommit?: (effect: () => void) => void;
 };
 type FleetStatsSnapshot = {
   operational: number;
@@ -2030,7 +2036,7 @@ export class DatabaseStorage implements IStorage {
       });
 
       // Vérifier et créer les alertes de stock automatiquement
-      await this.checkAndCreateStockAlerts(partId, currentPart, newStock, previousStock);
+      await this.checkAndCreateStockAlerts(partId, currentPart, newStock, previousStock, options);
     } catch (error) {
       if (isAppError(error)) throw error;
       storageLog.error({ err: error, partId, movementType, quantity, workOrderId }, 'mouvement de stock en échec');
@@ -2039,7 +2045,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Fonction pour vérifier et créer les alertes de stock automatiquement
-  private async checkAndCreateStockAlerts(partId: number, part: Part, newStock: number, previousStock: number): Promise<void> {
+  private async checkAndCreateStockAlerts(
+    partId: number,
+    part: Part,
+    newStock: number,
+    previousStock: number,
+    options: StockWriteOptions = {},
+  ): Promise<void> {
+    // L'alerte suit le mouvement : écrite dans sa transaction, annulée avec lui.
+    const executor = options.executor ?? db;
     try {
       const minThreshold = part.minQuantity;
       const alertThreshold = Math.ceil(minThreshold * 1.2); // Seuil d'alerte à 20% au-dessus du minimum
@@ -2080,7 +2094,7 @@ export class DatabaseStorage implements IStorage {
       // Créer l'alerte si nécessaire
       if (alertMessage) {
         // Vérifier si une alerte similaire n'existe pas déjà récemment
-        const existingAlerts = await db
+        const existingAlerts = await executor
           .select()
           .from(alerts)
           .where(
@@ -2093,7 +2107,7 @@ export class DatabaseStorage implements IStorage {
 
         // Ne créer l'alerte que si il n'y en a pas de similaire récente non lue
         if (existingAlerts.length === 0) {
-          await db.insert(alerts).values({
+          const [created] = await executor.insert(alerts).values({
             userId: 1, // Admin par défaut - à adapter selon le contexte
             title: `Stock ${alertPriority === 'critical' ? 'Critique' : 'Bas'}`,
             message: alertMessage,
@@ -2101,13 +2115,19 @@ export class DatabaseStorage implements IStorage {
             priority: alertPriority,
             isRead: false,
             link: `/warehouse/parts/${partId}`
-          });
+          }).returning();
 
-          console.log(`Alerte créée: ${alertMessage}`);
+          storageLog.info({ partId, alertId: created.id, priority: alertPriority }, `Alerte créée: ${alertMessage}`);
+
+          // Couche 2 : la cloche des autres profils, après le commit de l'alerte.
+          const emit = () => broadcastAlertCreated(created);
+          if (!options.executor) emit();
+          else if (options.afterCommit) options.afterCommit(emit);
+          else storageLog.warn({ partId, alertId: created.id }, "alerte de stock écrite en transaction sans afterCommit : non diffusée");
         }
       }
     } catch (error) {
-      console.error('Error creating stock alert:', error);
+      storageLog.error({ err: error, partId }, "alerte de stock non créée");
       // Ne pas faire échouer l'opération principale si la création d'alerte échoue
     }
   }

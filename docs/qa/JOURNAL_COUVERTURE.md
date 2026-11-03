@@ -2271,3 +2271,17 @@ soumission sans doublon.
 - **Quoi** : `.github/appfactory-impact.json`, les surfaces `e2e` et `scripts` gagnent `unit`.
 - **Pourquoi** : main rouge après #194. La garde `toast-title-exact-hygiene` lit e2e/, et la CI d'une PR limitée à e2e/ ne la lançait pas. Leçon dans `docs/analysis/LESSONS_LEARNED.md`.
 - **Preuves** : unitaires 1854/1854 avec la spec corrigée.
+
+## 2026-11-03 17:33 — Couche 2 : l'alerte de stock bas est diffusée (alert_created)
+
+- **Quoi** : `storage.checkAndCreateStockAlerts` émet `alert_created` après le commit de l'alerte.
+  - Hors transaction, la trame part tout de suite.
+  - Dans une transaction, elle passe par `StockWriteOptions.afterCommit`. La route de sortie joue les effets une fois la transition validée.
+- **Pourquoi** : l'alerte de stock bas était écrite sans trame, donc la cloche du magasin ne bougeait qu'au rafraîchissement suivant. Dans une transaction, l'alerte était aussi écrite hors de celle-ci et survivait à son annulation. Elle suit désormais l'exécuteur du mouvement.
+- **Aussi** : retrait de l'appel mort `/api/invoices/monthly-stats` (`useBilling`, `api-calls`, `billingService`), qu'aucune route ne servait. Les deux listes gelées se réduisent d'autant.
+- **Preuves** :
+  - intégration `stock-alert-broadcast` : 4 cas, 3 rouges contre main ;
+  - contrat `stock-issue-alert-broadcast` : rouge contre main ;
+  - contrats de la sortie : 19/19 ;
+  - unitaires : 1868/1868 ;
+  - tsc : 0.

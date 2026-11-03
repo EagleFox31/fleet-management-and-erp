@@ -30,12 +30,10 @@ const NOT_A_NEW_ALERT: Record<string, string> = {
  * - POST /api/alerts : création manuelle (chef d'atelier) ; `server/routes.ts` est gelé, la
  *   correction passe par un routeur de `server/api/`.
  * - test-date-maintenance : route de diagnostic, à retirer ou à faire émettre.
- * - checkAndCreateStockAlerts : alerte de stock bas après un ajustement, jamais diffusée.
  */
 const SILENT_WRITES_FROZEN = [
   "server/routes.ts:POST /api/alerts",
   "server/routes.ts:POST /api/test-date-maintenance",
-  "server/storage.ts:checkAndCreateStockAlerts",
 ];
 
 function walk(dir: string): string[] {

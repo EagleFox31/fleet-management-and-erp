@@ -18,11 +18,6 @@ export function useBilling() {
     enabled: true,
   });
 
-  const monthlyStatsQuery = useQuery<any>({
-    queryKey: ['/api/invoices/monthly-stats'],
-    enabled: true,
-  });
-
   return {
     suppliersSummary: {
       data: suppliersSummaryQuery.data,
@@ -41,12 +36,6 @@ export function useBilling() {
       isLoading: unpaidInvoicesQuery.isLoading,
       error: unpaidInvoicesQuery.error,
       refetch: unpaidInvoicesQuery.refetch,
-    },
-    monthlyStats: {
-      data: monthlyStatsQuery.data,
-      isLoading: monthlyStatsQuery.isLoading,
-      error: monthlyStatsQuery.error,
-      refetch: monthlyStatsQuery.refetch,
     },
     service: billingService,
   };

@@ -58,7 +58,6 @@ export const billingApi = {
     apiRequest("GET", `/api/suppliers/${supplierId}/invoices`),
   getInvoicesByFamily: () => apiRequest("GET", "/api/invoices/by-family"),
   getUnpaidInvoices: () => apiRequest("GET", "/api/invoices/unpaid"),
-  getMonthlyStats: () => apiRequest("GET", "/api/invoices/monthly-stats"),
 };
 
 // ============================================
