@@ -112,7 +112,7 @@ async function runBackupTick(reason: string): Promise<void> {
 
 /**
  * Purge des clés d'idempotence, au plus une fois par heure. Sans effet tant que le drapeau
- * `technician-offline` est coupé ou que la table `idempotency_keys` n'existe pas (lot DB-1).
+ * `offline-writes` est coupé ou que la table `idempotency_keys` n'existe pas (lot DB-1).
  */
 async function runIdempotencyPurgeTick(): Promise<void> {
   if (idempotencyPurgeRunning) return;
