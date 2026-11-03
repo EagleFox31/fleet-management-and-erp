@@ -45,17 +45,20 @@ async function switchUser(page: Page, user: E2ECredentials) {
   await loginWithSession(page, user);
 }
 
-/** Trame de pièce (hors part_used_* et part_requirement_*) qui vise cette pièce ; accepte part_catalog_changed. */
-function isPartFrameFor(frame: string, reference: string, partId: number): boolean {
-  try {
-    const message = JSON.parse(frame) as { type?: string };
-    return (
-      /^parts?_(catalog_)?(created|updated|changed|deleted)/.test(message.type ?? "") &&
-      (frame.includes(reference) || new RegExp(String.raw`"(id|entityId|partId)":\s*${partId}\b`).test(frame))
-    );
-  } catch {
-    return false;
+/** Actions des trames `part_catalog_changed` qui visent cette pièce, dans l'ordre de réception. */
+function partCatalogActionsFor(frames: readonly string[], partId: number): string[] {
+  const actions: string[] = [];
+  for (const frame of frames) {
+    try {
+      const message = JSON.parse(frame) as { type?: string; payload?: { id?: number; action?: string } };
+      if (message.type === "part_catalog_changed" && message.payload?.id === partId && message.payload.action) {
+        actions.push(message.payload.action);
+      }
+    } catch {
+      // trame non JSON : ignorée
+    }
   }
+  return actions;
 }
 
 test.describe("PRT1 - catalogue de pièces (navigateur)", () => {
@@ -200,12 +203,13 @@ test.describe("PRT1 - catalogue de pièces (navigateur)", () => {
      * server/api/parts-catalog.routes.ts). Un second profil sur /inventory/parts reçoit la trame.
      */
     test("une pièce créée ou modifiée par le magasinier émet une trame WebSocket chez un autre profil", async () => {
+      // Deux trames distinctes pour la même pièce : la création, puis la modification.
       await expect
-        .poll(() => frames.some((frame) => isPartFrameFor(frame, reference, setup.partId)), {
+        .poll(() => partCatalogActionsFor(frames, setup.partId), {
           timeout: 8_000,
-          message: "aucune trame WebSocket de pièce reçue par le profil observateur",
+          message: "trames part_catalog_changed (created puis updated) non reçues par le profil observateur",
         })
-        .toBe(true);
+        .toEqual(["created", "updated"]);
     });
   });
 });
