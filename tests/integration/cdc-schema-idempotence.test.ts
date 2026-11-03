@@ -105,6 +105,74 @@ describe("schéma CDC : création et idempotence", { timeout: 120_000 }, () => {
   });
 });
 
+// Base poussée par drizzle-kit avant que Drizzle déclare ces contraintes (lot C1) :
+// le démarrage doit les reposer, sans écrire de ligne ni bloquer sur des doublons.
+describe("schéma CDC : réconciliation des contraintes", { timeout: 60_000 }, () => {
+  const CONSTRAINTS: Array<[string, string]> = [
+    ["workshop_labor_rates", "workshop_labor_rates_effective_from_key"],
+    ["workshop_labor_rates", "workshop_labor_rates_hourly_rate_ht_check"],
+    ["import_batches", "import_batches_kind_check"],
+    ["import_batches", "import_batches_status_check"],
+    ["idempotency_keys", "idempotency_keys_state_check"],
+    ["idempotency_keys", "idempotency_keys_user_id_key_key"],
+  ];
+  const names = CONSTRAINTS.map(([, name]) => name);
+
+  async function present(client: PoolClient) {
+    const { rows } = await client.query(
+      `SELECT conname FROM pg_constraint WHERE conname = ANY($1) ORDER BY conname`, [names],
+    );
+    return rows.map((r) => r.conname);
+  }
+
+  async function withClient(run: (client: PoolClient) => Promise<void>) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await run(client);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
+  }
+
+  it("repose les CHECK et UNIQUE absents, sans écrire de ligne", async () => {
+    await withClient(async (client) => {
+      for (const [table, name] of CONSTRAINTS) await client.query(`ALTER TABLE ${table} DROP CONSTRAINT ${name}`);
+      expect(await present(client)).toEqual([]);
+      const before = await xactWrites(client);
+      await client.query(CDC_SQL);
+      expect(await present(client)).toEqual([...names].sort());
+      expect(await xactWrites(client)).toEqual(before);
+      expect(await sqlState(client, `INSERT INTO workshop_labor_rates (effective_from, hourly_rate_ht) VALUES ('2099-01-01', -1)`))
+        .toEqual({ code: "23514", constraint: "workshop_labor_rates_hourly_rate_ht_check" });
+    });
+  });
+
+  it("renomme une unicité posée sous un autre nom sur les mêmes colonnes", async () => {
+    await withClient(async (client) => {
+      await client.query(`ALTER TABLE idempotency_keys DROP CONSTRAINT idempotency_keys_user_id_key_key`);
+      await client.query(`ALTER TABLE idempotency_keys ADD CONSTRAINT idempotency_keys_legacy_uq UNIQUE (user_id, key)`);
+      await client.query(CDC_SQL);
+      const { rows } = await client.query(
+        `SELECT conname FROM pg_constraint WHERE conrelid = 'idempotency_keys'::regclass AND contype = 'u'`,
+      );
+      expect(rows.map((r) => r.conname)).toEqual(["idempotency_keys_user_id_key_key"]);
+    });
+  });
+
+  it("des doublons existants laissent l'unicité absente sans bloquer le démarrage", async () => {
+    await withClient(async (client) => {
+      await client.query(`ALTER TABLE workshop_labor_rates DROP CONSTRAINT workshop_labor_rates_effective_from_key`);
+      await client.query(
+        `INSERT INTO workshop_labor_rates (effective_from, hourly_rate_ht) VALUES ('2099-01-01', 1), ('2099-01-01', 2)`,
+      );
+      expect((await sqlState(client, CDC_SQL)).code).toBe("ok");
+      expect(await present(client)).not.toContain("workshop_labor_rates_effective_from_key");
+    });
+  });
+});
+
 describe("schéma CDC : invariants (cas accepté, cas refusé)", { timeout: 60_000 }, () => {
   let client: PoolClient;
   let userId: number;
