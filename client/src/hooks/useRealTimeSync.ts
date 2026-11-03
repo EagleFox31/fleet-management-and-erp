@@ -6,7 +6,6 @@ import { triggerNativeNotification } from "@/lib/native-mobile";
 import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
 import { satelliteTargetsOf } from "@/lib/realtime-satellites";
 
-/** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 /** Couche 3, écrans satellites : groupes déclarés pour l'événement (`client/src/lib/realtime-satellites.ts`). */
 function invalidateSatellites(event: string): void {
   const { keys, prefixes } = satelliteTargetsOf(event);
@@ -21,6 +20,7 @@ function invalidateSatellites(event: string): void {
   }
 }
 
+/** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 function invalidateCatalogEvent(name: RealtimeEventName): void {
   for (const key of REALTIME_EVENTS[name].invalidates) {
     queryClient.invalidateQueries({ queryKey: [key] });

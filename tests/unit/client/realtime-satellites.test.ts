@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
-import { EVENT_SATELLITES, SATELLITE_GROUPS, type SatelliteGroupName } from "@/lib/realtime-satellites";
+import { EVENT_SATELLITES, SATELLITE_GROUPS, satelliteTargetsOf, type SatelliteGroupName } from "@/lib/realtime-satellites";
 
 /**
  * Garde-fou de la couche 3 (AGENTS.md §2) : un événement de stock, d'argent ou de statut qui
@@ -65,8 +65,8 @@ const TRACKED_FAMILIES: Array<[family: string, pattern: RegExp]> = [
 ];
 
 /**
- * Événements des familles suivies encore absents de la table. Liste gelée : elle ne peut que
- * diminuer. Ajouter un événement ici demande de justifier pourquoi aucun écran satellite ne bouge.
+ * Événements des familles suivies encore absents de la table. Liste gelée, figée par égalité
+ * stricte : elle ne peut que diminuer, en modifiant aussi le test d'égalité. Ajouter un événement ici demande de justifier pourquoi aucun écran satellite ne bouge.
  */
 const NOT_YET_IN_TABLE: string[] = [];
 
@@ -175,6 +175,17 @@ describe("couche 3 : table des écrans satellites", () => {
       .filter((key) => !covered.has(key) && !UNCOVERED_SATELLITES.includes(key))
       .sort();
     expect(uncovered).toEqual([]);
+  });
+
+  it("les listes gelées ne grandissent pas (égalité stricte)", () => {
+    expect([...NOT_YET_IN_TABLE].sort()).toEqual([]);
+    expect([...UNCOVERED_SATELLITES].sort()).toEqual(["/api/invoices/monthly-stats", "/api/workflows/stats"]);
+  });
+
+  it("le carburant d'un véhicule (fiche véhicule) suit les événements carburant", () => {
+    const { keys, prefixes } = satelliteTargetsOf("fuel_record_changed");
+    expect(keys).toContain("/api/fuel-card/vehicle");
+    expect(prefixes).toContain("/api/fuel-records/vehicle/");
   });
 
   it("une clé de la liste gelée n'y reste pas une fois couverte", () => {

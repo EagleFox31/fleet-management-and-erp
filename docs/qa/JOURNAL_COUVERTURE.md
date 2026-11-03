@@ -2164,3 +2164,9 @@ soumission sans doublon.
   - rouge par mutation : retirer `parts_delivered` fait échouer le test de famille, et `warehouse_stock_movement_recorded` sans groupe stock fait échouer le test de groupe et celui de l'audit ;
   - vert : unitaires 142 fichiers, tsc 0 ;
   - e2e en local : 23 + 21 (10/10), 06 + 14 + 15 (4 verts, 1 skip préexistant de 06 : aucun véhicule en base).
+
+## 2026-11-03 15:31 — Couche 3 : réserves de relecture sur #179
+
+- **Quoi** : NOT_YET_IN_TABLE et UNCOVERED_SATELLITES sont figées par égalité stricte. Le groupe fuel couvre aussi `["/api/fuel-card/vehicle", id, …]` et le préfixe `/api/fuel-records/vehicle/` (fiche véhicule). La JSDoc de `invalidateCatalogEvent` est revenue au-dessus de sa fonction.
+- **Pourquoi** : réserve du relecteur. Les deux listes pouvaient grandir sans que le test échoue, ce qui contredisait leur nature de liste gelée.
+- **Preuves** : rouge si on ajoute une entrée à l'une ou l'autre liste (2 échecs). tsc 0, unitaires 142/142 fichiers.

@@ -83,7 +83,7 @@ export const SATELLITE_GROUPS = {
     keys: ["/api/vehicles", "/api/maintenance/date-alerts"],
     prefixes: ["/api/vehicles/", "/api/maintenance-schedules"],
   },
-  /** Carburant : solde et historique de la carte, consommation, statistiques des pleins. */
+  /** Carburant : solde et historique de la carte, consommation, statistiques des pleins, fiche véhicule. */
   fuel: {
     keys: [
       "/api/fuel-card",
@@ -95,7 +95,9 @@ export const SATELLITE_GROUPS = {
       "/api/fuel-records",
       "/api/fuel-records/statistics",
       "/api/fuel-records/consumption-history",
+      "/api/fuel-card/vehicle",
     ],
+    prefixes: ["/api/fuel-records/vehicle/"],
   },
   /** Chiffre d'affaires (factures client). */
   clientMoney: { keys: [MANAGEMENT_DASHBOARD] },
