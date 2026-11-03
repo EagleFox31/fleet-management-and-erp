@@ -2,21 +2,11 @@
  * Doit s'exécuter AVANT tout import de `server/db.ts`.
  * Vitest setupFiles tournent avant les fichiers de test.
  *
- * On pointe DATABASE_URL vers DATABASE_URL_TEST (branche Neon de test ; le
- * garde-fou refuse l'endpoint de production). Les données de test sont préfixées TEST- et nettoyées
- * après chaque fichier.
+ * On pointe DATABASE_URL vers DATABASE_URL_TEST après que `assertSafeTestDatabase`
+ * a refusé : DATABASE_URL_TEST absent (aucun repli sur DATABASE_URL), DATABASE_URL
+ * différent, hôte de production ou *.neon.tech non autorisé. Les données de test
+ * sont préfixées TEST- et nettoyées après chaque fichier.
  */
-import { assertTestDatabaseNotProduction } from "../../e2e/helpers/production-guard";
+import { assertSafeTestDatabase } from "../../e2e/helpers/production-guard";
 
-const testUrl = process.env.DATABASE_URL_TEST || process.env.DATABASE_URL;
-
-if (!testUrl) {
-  throw new Error(
-    "DATABASE_URL ou DATABASE_URL_TEST est requis pour les tests d'intégration et de contrat. " +
-      "Voir tests/README.md et .env.example.",
-  );
-}
-
-assertTestDatabaseNotProduction(testUrl);
-
-process.env.DATABASE_URL = testUrl;
+process.env.DATABASE_URL = assertSafeTestDatabase();

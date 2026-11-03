@@ -2061,11 +2061,30 @@ soumission sans doublon.
 - **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
 - **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
 
+## 2026-11-03 13:35 — Tests : refuser de démarrer sur une base de production
+
+- **Quoi** : intégration, contrat et unitaires refusent de démarrer si `DATABASE_URL` (ou `_LISTENER`, `_DIRECT`) diffère de `DATABASE_URL_TEST`, si celui-ci manque (plus de repli), ou si l'hôte est interdit (`TEST_DB_FORBIDDEN_HOSTS`, `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`).
+- **Comment** : fonctions pures ajoutées à `e2e/helpers/production-guard.ts` (pas de second module), branchées dans `setup-db.ts` et un nouveau `setup-unit.ts` ; `--env-file=.env` retiré de `test:integration` et `test:contract`. CI inchangée (elle ne définit que `DATABASE_URL_TEST`).
+- **Pourquoi** : near miss, contrat lancé avec le `.env` de production (voir `LESSONS_LEARNED.md`, 2026-11-03).
+- **Preuves** : `tests/unit/server/test-db-guard.test.ts`, rouge sur le code d'avant, vert après ; essai manuel : `DATABASE_URL=postgres://u:p@ep-x.neon.tech/db` fait échouer un contrat avant toute connexion ; contrat `vehicle-documents-client-scope` 19/19 sur la base locale.
+
+## 2026-11-03 14:00 — Garde base de test : rupture documentée, périmètre prouvé
+
+- **Quoi** : AGENTS.md §8 et tests/README.md : `DATABASE_URL_TEST` s'exporte, `unset DATABASE_URL` avant intégration ou contrat, message d'erreur attendu. Preuve que e2e, `backfill:*` et `benchmark:*` sont hors garde.
+- **Pourquoi** : revue de #159 (rupture à documenter).
+
 ## 2026-11-03 14:05 — Cloison OT : logs migrés, commentaire du helper (suite de 51dfdef)
 
 - **Quoi** : dans les catch des GET touchés, les `console.*` passent à `moduleLogger` sans rien supprimer. `GET /api/work-orders/:id/parts` : le `console.log` du contenu des lignes devient un `log.debug` (`workOrderId`, `count`, `requestId`, sans le contenu), et le `console.error` un `log.error({ err, requestId })`. `GET /:id/items` : `console.error` migré vers `log.error`. Le commentaire de `assertWorkOrderReadable` dit qu'il applique la cloison client seulement ; l'écart technicien (OT d'un autre technicien, bloqué par `GET /api/work-orders/:id`) est noté comme connu.
 - **Pourquoi** : AGENTS.md §10, un log se migre, il ne se supprime pas. Le contenu des lignes (prix) n'a pas à finir dans les journaux.
 - **Preuves** : tsc 0, unitaires 1687/1687 ; contrats `work-order*` et `vehicle-documents-client-scope` 67/67 sur 10 fichiers, lancés sans `.env` ni `DATABASE_URL` (seulement `DATABASE_URL_TEST` et `DATABASE_WS_PROXY`).
+
+## 2026-11-03 13:50 — Garde-fou base de test : relecture de #159 (identifiants, unitaires, docs)
+
+- **Quoi** : `e2e/helpers/production-guard.ts` lit l'hôte par `new URL` (jamais d'extraction manuelle) et affiche « hôte illisible » au moindre doute (`#`, `/` ou `?` non encodé dans le mot de passe) ; une URL illisible est refusée. La garde unitaire (`assertUnitDatabaseNotProduction`) refuse aussi `*.neon.tech` hors `ALLOW_NEON_TEST_DB=1` et vérifie `DATABASE_URL_LISTENER` / `_DIRECT` (le placeholder `127.0.0.1:1` passe). Le message de refus donne `unset` et `Remove-Item Env:… -ErrorAction SilentlyContinue`. `assertTestDatabaseNotProduction` supprimée (plus aucun appelant hors son test, vérifié dans `e2e/`, `scripts/`, `tests/`). Docs corrigées : `tests/README.md`, `README.md`, `.env.example`, `.claude/agents/fleet-db.md`, `docs/analysis/controles-donnees-lot.md`. CI : `touch .env` et son commentaire retirés des jobs intégration et contrat.
+- **Comment** : l'assertion toujours vraie (`toContain("productionMarkers(")`) est remplacée par des tests de câblage sur `setup-db.ts`, `setup-integration.ts`, `setup-contract.ts` (import de `./setup-db` avant `server/`) et `setup-unit.ts`, plus « l'hôte de production par défaut reste refusé avec `ALLOW_NEON_TEST_DB=1` ».
+- **Pourquoi** : la relecture a montré que le message pouvait citer un morceau de mot de passe, que les unitaires n'étaient gardés que par marqueur, et que plusieurs documents décrivaient encore le repli sur `DATABASE_URL`. `touch .env` ne servait plus : les deux jobs n'exécutent que `test:db:schema` (cross-env, drizzle-kit) et vitest, sans `--env-file`.
+- **Preuves** : tsc 0 ; unitaires 1710 (1709 au passage complet, `conflict-markers` en dépassement de délai sous charge, 2/2 seul) ; 21 cas dans `test-db-guard.test.ts`, rouge démontré en retirant le contrôle `@` de `parsedHost` (le cas `u:12/ss@…` fuit alors `u:12`) ; contrat `work-order-detail-client-scope` 15/15 et intégration `fuel-card-service` 6/6 sur le Postgres local ; refus fail-fast rejoués (URL illisible, `*.neon.tech`, `DATABASE_URL_TEST` absente) sans identifiant dans la sortie.
 
 ## 2026-11-03 13:19 — apiErrorProblems vérifie le requestId
 
