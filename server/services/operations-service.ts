@@ -10,6 +10,7 @@ import {
   type Client,
 } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
 
 /**
  * Service Opérations & Missions
@@ -44,7 +45,7 @@ export class OperationsService {
       .limit(1);
 
     if (!fuelRecord) {
-      throw new Error("Enregistrement carburant non trouvé");
+      throw new AppError(404, "Enregistrement carburant non trouvé.");
     }
 
     // Vérifier/créer le client

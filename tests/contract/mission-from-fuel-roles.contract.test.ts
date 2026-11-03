@@ -31,13 +31,32 @@ describe("POST /api/operations/missions/from-fuel : création réservée aux ges
   it.each(REFUSED_STAFF)("%s reçoit 403", async (role) => {
     const res = await session.call("POST", "/api/operations/missions/from-fuel", { actor: role, body: MISSING_FUEL_RECORD });
     expect(res.status).toBe(403);
+    expect(res.body.code).toBe("FORBIDDEN");
+    expect(typeof res.body.message).toBe("string");
+    expect(res.body.message).not.toMatch(/error|stack|select |insert /i);
+    expect(res.body.requestId).toBeTruthy();
   });
 
-  it.each([...MISSION_MANAGER_ROLES])("%s passe la garde, l'erreur ne porte aucun détail technique", async (role) => {
+  // Enregistrement carburant inconnu : 404 lisible au contrat ApiErrorBody, plus de 500.
+  it.each([...MISSION_MANAGER_ROLES])("%s passe la garde, fuelRecordId inconnu donne 404", async (role) => {
     const res = await session.call("POST", "/api/operations/missions/from-fuel", { actor: role, body: MISSING_FUEL_RECORD });
-    expect(res.status).toBe(500);
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
     expect(res.body.error).toBeUndefined();
-    expect(JSON.stringify(res.body)).not.toContain("Enregistrement carburant");
+    expect(res.body.message).toBe("Enregistrement carburant non trouvé.");
+    expect(res.body.code).toBeTruthy();
     expect(res.body.requestId).toBeTruthy();
+  });
+
+  // Corps validé par Zod : identifiant non numérique ou client absent, 400 sans appel au service.
+  it.each([
+    ["fuelRecordId non numérique", { fuelRecordId: "abc", clientName: "TEST" }],
+    ["fuelRecordId négatif", { fuelRecordId: -3, clientName: "TEST" }],
+    ["clientName vide", { fuelRecordId: 12, clientName: "   " }],
+    ["corps vide", {}],
+  ])("%s : 400", async (_label, body) => {
+    const res = await session.call("POST", "/api/operations/missions/from-fuel", { actor: "logistics", body });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.requestId).toBeTruthy();
+    expect(Array.isArray(res.body.errors)).toBe(true);
   });
 });

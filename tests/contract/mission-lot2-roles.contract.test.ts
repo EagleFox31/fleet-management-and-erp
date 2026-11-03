@@ -55,6 +55,15 @@ async function createdCount() {
   return rows.length;
 }
 
+/** 403 au contrat ApiErrorBody : code FORBIDDEN, phrase lisible, référence, aucun détail technique. */
+function expectForbiddenBody(res: { status: number; body: any }) {
+  expect(res.body.code).toBe("FORBIDDEN");
+  expect(typeof res.body.message).toBe("string");
+  expect(res.body.message.length).toBeGreaterThan(0);
+  expect(res.body.message).not.toMatch(/error|stack|select |insert |update |at \w+ \(/i);
+  expect(res.body.requestId).toBeTruthy();
+}
+
 const newMissionBody = (suffix: string) => ({
   orderNumber: `${ORDER_PREFIX}-${suffix}`,
   pickupAddress: "TEST A",
@@ -108,6 +117,7 @@ describe("Lot 2 : POST /api/missions réservé aux gestionnaires", { timeout: 18
     const before = await createdCount();
     const res = await session.call("POST", "/api/missions", { actor, body: newMissionBody(actor) });
     expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(403);
+    expectForbiddenBody(res);
     expect(await createdCount()).toBe(before);
   });
 
@@ -154,6 +164,7 @@ describe("Lot 2 : PUT /api/missions/:id/status, gestionnaires et chauffeur affec
     const id = await createMission("assigned", otherDriverId, otherVehicleId);
     const res = await session.call("PUT", `/api/missions/${id}/status`, { actor, body: { status: "cancelled" } });
     expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(403);
+    expectForbiddenBody(res);
     expect(await statusOf(id)).toBe("assigned");
   });
 
@@ -161,6 +172,7 @@ describe("Lot 2 : PUT /api/missions/:id/status, gestionnaires et chauffeur affec
     const id = await createMission("in_progress", otherDriverId, otherVehicleId);
     const res = await session.call("PUT", `/api/missions/${id}/status`, { actor: "driver", body: { status: "delivered" } });
     expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectForbiddenBody(res);
     expect(await statusOf(id)).toBe("in_progress");
   });
 
@@ -170,6 +182,30 @@ describe("Lot 2 : PUT /api/missions/:id/status, gestionnaires et chauffeur affec
     const res = await session.call("PUT", `/api/missions/${id}/status`, { actor: "driver", body: { status: "delivered" } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(await statusOf(id)).toBe("delivered");
+  });
+
+  // Le chauffeur affecté démarre et livre, rien d'autre : annuler et clôturer restent aux
+  // gestionnaires, et il n'écrit aucun montant (décision du 3/11, relecture de aa sur #141).
+  it("chauffeur affecté : assigned -> cancelled refusé (403), statut inchangé", async () => {
+    const id = await createMission("assigned", ownDriverId, vehicleId);
+    const res = await session.call("PUT", `/api/missions/${id}/status`, { actor: "driver", body: { status: "cancelled" } });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectForbiddenBody(res);
+    expect(await statusOf(id)).toBe("assigned");
+  });
+
+  it("chauffeur affecté : delivered -> completed avec actualFdrCost refusé (403), rien d'écrit", async () => {
+    const id = await createMission("delivered", ownDriverId, vehicleId);
+    const [before] = await db.select({ workflowData: missions.workflowData }).from(missions).where(eq(missions.id, id));
+    const res = await session.call("PUT", `/api/missions/${id}/status`, {
+      actor: "driver",
+      body: { status: "completed", actualFdrCost: 123456 },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectForbiddenBody(res);
+    expect(await statusOf(id)).toBe("delivered");
+    const [after] = await db.select({ workflowData: missions.workflowData }).from(missions).where(eq(missions.id, id));
+    expect(after.workflowData).toEqual(before.workflowData);
   });
 
   // Contre-épreuve du refus : le même corps est appliqué pour chaque gestionnaire.

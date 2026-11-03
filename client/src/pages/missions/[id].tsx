@@ -19,7 +19,7 @@ import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
-import { MISSION_MANAGER_ROLES, MISSION_STATUS_ROLES } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -1447,8 +1447,11 @@ export default function MissionDetailsPage() {
   // Carburant de mission : mêmes gestionnaires que la mission (MISSION_FUEL_MANAGERS côté serveur).
   const canManageMissionFuel = canManageMission;
   // PUT /status : gestionnaires, plus le chauffeur affecté. Un chauffeur ne charge cette page
-  // que pour ses propres missions (cloison serveur), le rôle suffit donc ici.
-  const canChangeMissionStatus = (MISSION_STATUS_ROLES as readonly string[]).includes(String(user?.role || ""));
+  // que pour ses propres missions (cloison serveur), le rôle suffit donc ici. Il démarre et livre ;
+  // « Clôturer » (coût réel) et l'annulation restent aux gestionnaires, comme côté serveur.
+  const canChangeMissionStatus = Boolean(
+    primaryMissionAction && canRoleSetMissionStatus(user?.role, primaryMissionAction.nextStatus),
+  );
   const isMissionCompleted = String(mission?.status || "") === "completed";
   const canDeclareMissionWithoutFuel =
     canManageMissionFuel &&

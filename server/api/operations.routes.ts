@@ -1,5 +1,7 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
+import { z } from "zod";
 import { operationsService } from "../services/operations-service";
+import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
@@ -51,16 +53,27 @@ const broadcastOperationMissionUpdate = (
  * POST /api/operations/missions/from-fuel
  * Créer une mission depuis un enregistrement carburant
  */
-router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async (req: Request, res: Response) => {
-  try {
-    const { fuelRecordId, clientName, orderNumber, pickupAddress, roadExpenses } = req.body;
+const createFromFuelSchema = z.object({
+  fuelRecordId: z.coerce.number().int().positive(),
+  clientName: z.string().trim().min(1),
+  orderNumber: z.string().trim().optional(),
+  pickupAddress: z.string().trim().optional(),
+  roadExpenses: z.coerce.number().nonnegative().optional(),
+});
 
-    if (!fuelRecordId || !clientName) {
-      return res.status(400).json({ error: "fuelRecordId et clientName sont requis" });
+router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = createFromFuelSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "fuelRecordId et clientName sont requis.",
+        errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
+      });
     }
+    const { fuelRecordId, clientName, orderNumber, pickupAddress, roadExpenses } = parsed.data;
 
     const result = await operationsService.createMissionFromFuel(
-      parseInt(fuelRecordId),
+      fuelRecordId,
       {
         clientName,
         orderNumber,
@@ -81,7 +94,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
     broadcastOperationMissionUpdate(
       "mission_created_from_fuel",
       {
-        fuelRecordId: parseInt(fuelRecordId),
+        fuelRecordId,
         result,
       },
       {
@@ -93,6 +106,8 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
 
     res.json(result);
   } catch (error: any) {
+    // Enregistrement carburant inconnu (404) : le gestionnaire central rend l'ApiErrorBody.
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Error creating mission from fuel:");
     res.status(500).json({ message: "Erreur serveur." });
   }
