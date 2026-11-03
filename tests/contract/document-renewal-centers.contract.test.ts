@@ -311,6 +311,33 @@ describe("centres de renouvellement : résolution unique (demande et renouvellem
     }
   });
 
+  it("PATCH /active : isActive non booléen ou absent (400), id non numérique (404), désactivation répétée sans effet de bord", async () => {
+    const created = await createCenter(`TEST actif invalide ${SUFFIX}`);
+    const path = documentRenewalCenterActivePath(created.body.id);
+    for (const body of [{ isActive: "oui" }, { isActive: null }, {}]) {
+      expect((await call("PATCH", path, "admin", body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect((await call("PATCH", `${DOCUMENT_RENEWAL_CENTERS_PATH}/abc/active`, "admin", { isActive: false })).status).toBe(404);
+    expect((await call("PATCH", `${DOCUMENT_RENEWAL_CENTERS_PATH}/abc`, "admin", { address: "x" })).status).toBe(404);
+    expect((await call("PATCH", path, "admin", { isActive: false })).body.isActive).toBe(false);
+    expect((await call("PATCH", path, "admin", { isActive: false })).body.isActive).toBe(false);
+    const [row] = await db.select().from(documentRenewalCenters).where(eq(documentRenewalCenters.id, created.body.id));
+    expect(row.isActive).toBe(false);
+  });
+
+  it("GET des choix : un centre d'un autre type n'est pas proposé, un centre sans type l'est ; chauffeur et client refusés (403)", async () => {
+    const typed = await createCenter(`TEST type taxe ${SUFFIX}`, "taxe");
+    const generic = await createCenter(`TEST sans type ${SUFFIX}`, null);
+    const res = await call("GET", `${DOCUMENT_RENEWAL_CENTERS_PATH}?documentType=assurance`, "technician");
+    expect(res.status).toBe(200);
+    const got = (res.body as Array<{ id: number }>).map((row) => row.id);
+    expect(got).not.toContain(typed.body.id);
+    expect(got).toContain(generic.body.id);
+    for (const actor of ["driver", "client"] as const) {
+      expect((await call("GET", DOCUMENT_RENEWAL_CENTERS_PATH, actor)).status, actor).toBe(403);
+    }
+  });
+
   it("PATCH /active refuse un champ inconnu (400) et ne change rien", async () => {
     const created = await createCenter(`TEST inconnu actif ${SUFFIX}`);
     const res = await call("PATCH", documentRenewalCenterActivePath(created.body.id), "admin", { isActive: false, name: "autre" });
