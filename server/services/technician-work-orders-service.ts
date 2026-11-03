@@ -265,6 +265,12 @@ export class TechnicianWorkOrdersService {
         .where(eq(workOrders.id, workOrderId))
         .returning();
 
+      if (newStatus === 'completed' && existingOrder[0].status !== 'completed') {
+        // P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
+        const { preventiveMaintenanceService } = await import('./preventive-maintenance-service');
+        await preventiveMaintenanceService.onWorkOrderCompleted(workOrderId);
+      }
+
       console.log(`✅ [TECH-WO] Statut mis à jour avec succès`);
       
       // Diffuser la mise à jour via WebSocket temps réel

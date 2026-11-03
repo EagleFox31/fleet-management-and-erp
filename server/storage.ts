@@ -1529,6 +1529,11 @@ export class DatabaseStorage implements IStorage {
           // S'assurer que le véhicule est en maintenance quand l'OT est en cours
           await this.setVehicleToMaintenance(updatedWorkOrder.vehicleId, id);
         }
+        if (workOrder.status === 'completed') {
+          // P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
+          const { preventiveMaintenanceService } = await import("./services/preventive-maintenance-service");
+          await preventiveMaintenanceService.onWorkOrderCompleted(id);
+        }
       }
 
       // Retour enrichi (technicianName, createdByName…) — le `.returning()` brut

@@ -1966,7 +1966,6 @@ soumission sans doublon.
 - **Pourquoi** : réserves 1 à 4 de fleet-relecteur, mineurs M1 et M4 de fleet-securite. M2 (`err.message` multer et `looksTechnical` sans `EACCES`) et M3 (extension non confrontée au type MIME) sont antérieurs à la PR : suite à part.
 - **Preuves** : garde-fou rouge sur l'ancien `upload.ts`, vert après ; contrats `vehicle-documents-upload-path` 7/7 et `vehicle-documents-upload` 16/16 sur le Postgres local ; unitaires `upload-vehicle-directory` et `multer-storage-hygiene` verts.
 
-
 ## 2026-11-03 09:58 — P3-2 : garde-fous du jour J, du miroir et du PATCH /api/documents/:id
 
 - **Quoi** : trois garde-fous sur les échéances de documents véhicule. (1) Une règle, une source au jour J : éligibilité mission, `isDateExpired` de `vehicle-documentation-service.ts` et `classifyDocumentExpiry` doivent rendre le même verdict. (2) Hygiène : aucune écriture d'une colonne miroir de `vehicles` hors de `server/lib/vehicle-document-mirror.ts`, sauf liste gelée. (3) Contrat du PATCH `/api/documents/:id`.
@@ -1981,3 +1980,25 @@ soumission sans doublon.
 - **Comment** : `vehicle-mirror-write-hygiene.test.ts` (regex élargies, alias signalé, upsert scanné) ; `document-expiry-day-j.test.ts` fixe `TZ=Africa/Douala` le temps du fichier et passe des `Date` locales à l'éligibilité ; contrat : `max(vehicle_documents.id) + 1`.
 - **Pourquoi** : réserves 1 à 3 de la relecture. Nouveau défaut D4 : le service compte en date UTC, l'éligibilité en date locale ; à 23:30Z (00:30 à Douala) une assurance échéant le lendemain bloque l'une et pas l'autre, même après correction de D1. Arbitrage produit sur la date de référence.
 - **Preuves** : rouge avant : fichier sonde temporaire avec les 5 formes, chacune vue (4 écritures miroir, 1 générique, 1 alias), sonde supprimée, liste gelée inchangée (aucun site réel nouveau) ; D4 en `it.fails` rougit quand le service compte en date locale. Vert après : `tsc` 0 erreur, `npm test` 1599/1599, contrat 9/9 sur fleet_test_p32gf2 (supprimée par dropdb).
+
+## 2026-11-03 10:20 — FUEL3 constaté OK, PRT1 : accès, erreurs et suppression d'une pièce référencée
+
+- **Quoi** : FUEL3 passe de « À faire » à OK : la couverture existait déjà sur main et recouvre point par point le cadrage (limites exactes, plein sans kilométrage, premier plein, hors ordre, contrat de la liste, capacité par rôle), aucun test ajouté. PRT1 reste Partiel avec 12 cas de plus (et 2 tests témoins) ; deux défauts produit sont figés.
+- **Comment** : `tests/contract/parts-catalog-access-errors.contract.test.ts` : 401 anonyme sur POST, PATCH, DELETE et enfants, 403 client, technicien et magasinier, corps `ApiErrorBody` (code, message, rien de technique) sur 400/401/403/404/409, double création simultanée, pièce citée par le catalogue de pannes. Deux `it.fails` avec test témoin et mise en place dans `beforeAll` (garde-fou `it-fails-hygiene`).
+- **Pourquoi** : les erreurs de la fiche pièce n'étaient vérifiées que par statut ; AGENTS.md §10 exige le contrat unique. Il n'existe pas de CRUD de catégorie : `parts.category` est un texte libre.
+- **Défauts figés (non corrigés)** : (1) `PATCH /api/parts/:id` accepte `quantity: -3` (200) alors que la création refuse (400) ; (2) `DELETE /api/parts/:id` d'une pièce citée par `part_requirements` : `deletePart` ne contrôle que le catalogue de pannes, la FK échoue et la route (`server/routes.ts`, catch du DELETE) renvoie 500 avec `error.message` brut. Correctif à fleet-api.
+- **Preuves** : contrats `fuel-anomaly-rules`, `parts-catalog-crud`, `parts-catalog-access-errors` 78/78 et intégration `fuel-anomaly-rules` 20/20 sur `fleet_test_cov` ; `npm test` 1585/1585 ; `tsc` 0 erreur. Les deux `it.fails` sont rouges sur le produit actuel (le premier observé en 200, vérifié par sonde) et passeront en échec dès le correctif, signal pour les retirer.
+
+## 2026-11-03 10:40 — DRV2 et P2 : espace chauffeur, état de la facture sur la mission, rôles du paiement (niveau E)
+
+- **Quoi** : DRV2 reste Partiel, avec un défaut produit de plus figé : DRV2-4, aucune vue « missions du jour » (le tableau de bord ne garde que `allMissions.find(assigned | in_progress)`, alors que `/api/drivers/me` renvoie les deux missions). Ajouts : périmètre de la déclaration de panne (véhicule d'un autre 403, corps invalide 400, atelier 403, aucun OT créé). P2 : l'onglet Factures de la mission suit en attente, partielle, payée par la trame `client_invoice_payment_recorded` reçue par la logistique ; paiement refusé en 403 à la logistique, au technicien et au chauffeur ; trop-perçu et facture soldée en 409 ; montant négatif, non numérique ou mode inconnu en 400.
+- **Comment** : `e2e/19-driver-space.spec.ts` (chauffeur C à deux missions, chauffeur D, `test.fail` DRV2-4 avec témoin en `beforeEach`) et second describe de `e2e/13-mission-invoice-payment.spec.ts` (une mission et une facture par test, deux sessions de rôles différents). Aucun fichier serveur ni autre spec touché.
+- **Pourquoi** : les niveaux U, I et C de ces règles existent déjà (`client-invoice-payments`, `adm2-drv2-mis1-server-defects`) ; il manquait la preuve au navigateur et sur la trame.
+- **Preuves** : 19 e2e verts sur le Postgres local `fleet_test_cov` (serveur sur le port 5177, navigateur msedge). Rouge avant : garde de rôle du paiement élargie à la logistique, le test des rôles échoue (200 au lieu de 403), mutation retirée. DRV2-4 est rouge par construction (`test.fail`). `tsc` 0 erreur, `npm test` 1585/1585.
+- **Pièges** : les paiements clients prennent `bank_transfer` (pas `virement`) ; le port 5000 était occupé par un autre projet ; un OT ouvert par un test précédent sur le même véhicule impose de comparer avant et après.
+
+## 2026-11-03 11:34 — DRV2 et P2 : réserves de relecture de #139
+
+- **Quoi** : spec 13, le passage à « Payée » est prouvé par une seconde trame `client_invoice_payment_recorded` pour la même facture (compte exact 1 puis 2), plus seulement à l'écran ; les 403 du paiement (logistique, technicien, chauffeur) et les trois 400 (montant négatif, non numérique, mode inconnu) vérifient le contrat `ApiErrorBody` (code = `codeForStatus`, message non vide, aucun détail technique, même filtre que PRT1).
+- **Pourquoi** : réserves a et b de b7 ; une assertion d'écran au-delà du `refetchInterval` est satisfaite par le polling (AGENTS.md §3), un statut seul ne prouve pas le contrat d'erreur (§10).
+- **Preuves** : e2e 13 et 19 sur `fleet_test_cov` (serveur port 5177, msedge) : 18/19 au premier passage, DRV2-1 vert au rejeu isolé (2/2), instable, sans lien avec le delta ; tsc 0.
