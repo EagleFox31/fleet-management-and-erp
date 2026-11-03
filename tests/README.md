@@ -64,6 +64,14 @@ DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test_<session> DATA
 
 Repousser le schéma à chaque changement de branche. Supprimer la base en fin de chantier (`docker compose -f docker-compose.test.yml exec postgres dropdb -U fleet fleet_test_<session>`), pas avec `test:db:down`, qui détruit le volume de tout le monde.
 
+**Verrou de la base de test** : les suites intégration et contrat prennent un verrou en base (`pg_advisory_lock`, clé `hashtext('fleet-test:' || current_database())`) dans leur `globalSetup` (`tests/support/global-setup-db-lock.ts`) et le gardent jusqu'à la fin du passage. Deux passages sur la même base s'enchaînent, quelle que soit l'URL qui la désigne. Une base dédiée par session ne fait jamais attendre.
+
+- Il remplace `lot-tools/db-lock.mjs` pour l'intégration et le contrat : plus besoin de l'envelopper. `db-lock.mjs` reste utile pour les e2e, que ce verrou ne couvre pas.
+- Celui qui attend voit `[verrou base de test] en attente du verrou de test (pid N, fleet-test-lock <machine> pid <p> <worktree>, depuis …)`, rappelé chaque minute.
+- Délai maximal : `FLEET_TEST_DB_LOCK_TIMEOUT_MS` (30 min par défaut). Au-delà, le passage échoue en nommant le détenteur et la commande pour libérer une session morte (`SELECT pg_terminate_backend(N);`).
+- Un processus tué libère le verrou avec sa connexion : il n'y a aucun fichier périmé à nettoyer.
+- En CI, une base par job : le verrou est pris aussitôt, sans effet. Cas : `tests/integration/test-db-lock.test.ts`.
+
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
 - Les scripts `test:integration` et `test:contract` ne chargent pas `.env` : tout passe par l'environnement du shell.
