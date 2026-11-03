@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, max } from "drizzle-orm";
 import { activityLogs, vehicleDocuments, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
@@ -136,7 +136,8 @@ describe("PATCH /api/documents/:id et miroir des échéances", { timeout: 120000
   });
 
   it("document inconnu : 404", async () => {
-    expect((await patch(2147483000, { expiryDate: "2040-01-01" }, "workshop_manager")).status).toBe(404);
+    const [{ top }] = await db.select({ top: max(vehicleDocuments.id) }).from(vehicleDocuments);
+    expect((await patch((top ?? 0) + 1, { expiryDate: "2040-01-01" }, "workshop_manager")).status).toBe(404);
   });
 
   it("double soumission : même résultat, idempotent", async () => {

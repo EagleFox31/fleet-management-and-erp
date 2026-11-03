@@ -57,24 +57,39 @@ function serverSources(dir: string): string[] {
 
 const rel = (path: string) => relative(join(serverDir, ".."), path).split(sep).join("/");
 
-type Hit = { file: string; kind: "mirror" | "generic" };
+type Hit = { file: string; kind: "mirror" | "generic" | "alias" };
+
+/** `.set(variable)` ou `.set({ ...variable })` : les clés écrites sont invisibles au scan. */
+const GENERIC_SET = /\.set\(\s*(?:[A-Za-z_$][\w$.]*\s*\)|\{[^}]*\.\.\.)/;
 
 function scan(): Hit[] {
   const hits: Hit[] = [];
   for (const path of serverSources(serverDir)) {
     const source = readFileSync(path, "utf8");
-    // Drizzle : `.update(vehicles)` puis `.set(...)` ; SQL brut : `UPDATE vehicles SET ...`.
-    const starts = [...source.matchAll(/\.update\(\s*vehicles\s*\)|UPDATE\s+vehicles\b/gi)];
-    for (const start of starts) {
-      const from = start.index ?? 0;
-      const rest = source.slice(from);
+    const file = rel(path);
+    // `import { vehicles as v }` : un alias contourne les regex sur le nom, on le signale.
+    const aliases = [...source.matchAll(/\bvehicles\s+as\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
+    for (let i = 0; i < aliases.length; i++) hits.push({ file, kind: "alias" });
+    const table = [String.raw`[\w.]*vehicles`, ...aliases].join("|");
+    // Drizzle : `.update(vehicles)` / `.update(schema.vehicles)` puis `.set(...)` ;
+    // SQL brut : `UPDATE vehicles`, `UPDATE "vehicles"`, `UPDATE public.vehicles`.
+    const updates = new RegExp(String.raw`\.update\(\s*(?:${table})\s*\)|UPDATE\s+"?(?:public"?\."?)?vehicles"?(?![\w])`, "gi");
+    for (const start of source.matchAll(updates)) {
+      const rest = source.slice(start.index ?? 0);
       const stop = rest.search(/\.where\(|WHERE\b|\.returning\(/i);
       const window = rest.slice(0, stop === -1 ? 600 : Math.min(stop, 800));
-      if (MIRROR_KEYS.test(window) || COMPUTED_KEY.test(window)) {
-        hits.push({ file: rel(path), kind: "mirror" });
-      } else if (/\.set\(\s*[A-Za-z_$][\w$.]*\s*\)/.test(window)) {
-        hits.push({ file: rel(path), kind: "generic" });
-      }
+      if (MIRROR_KEYS.test(window) || COMPUTED_KEY.test(window)) hits.push({ file, kind: "mirror" });
+      else if (GENERIC_SET.test(window)) hits.push({ file, kind: "generic" });
+    }
+    // Upsert : `insert(vehicles).values(...).onConflictDoUpdate({ set: { insuranceExpiry } })`.
+    const inserts = new RegExp(String.raw`\.insert\(\s*(?:${table})\s*\)`, "g");
+    for (const start of source.matchAll(inserts)) {
+      const window = source.slice(start.index ?? 0, (start.index ?? 0) + 1500);
+      const at = window.indexOf("onConflictDoUpdate");
+      if (at === -1) continue;
+      const set = window.slice(at, at + 600);
+      if (MIRROR_KEYS.test(set) || COMPUTED_KEY.test(set)) hits.push({ file, kind: "mirror" });
+      else if (/set:\s*(?:[A-Za-z_$][\w$.]*\s*[,}]|\{[^}]*\.\.\.)/.test(set)) hits.push({ file, kind: "generic" });
     }
   }
   return hits;
@@ -101,7 +116,11 @@ describe("écriture directe du miroir de documents véhicule (hygiène)", () => 
     expect(countByFile(hits, "mirror", SANCTIONED)).toEqual(FROZEN_DIRECT_WRITES);
   });
 
-  it("aucun nouvel `UPDATE vehicles` générique (.set(variable)), hors liste gelée", () => {
+  it("aucun nouvel `UPDATE vehicles` générique (.set(variable), .set({ ...p })), hors liste gelée", () => {
     expect(countByFile(hits, "generic")).toEqual(FROZEN_GENERIC_WRITES);
+  });
+
+  it("aucun alias de la table (`vehicles as v`) : il masquerait les écritures au scan", () => {
+    expect(countByFile(hits, "alias")).toEqual({});
   });
 });
