@@ -42,6 +42,8 @@ let vehicleBare = { id: 0, registrationNumber: "" };
 const orders = { delivered: "", planned: "", other: "" };
 const wo = { completed: 0, awaiting: 0 };
 const people: Record<string, { username: string; name: string }> = {};
+/** Roles que translateUserRole ne connait pas (DIR3-1). */
+const RAW_ROLES = ["warehouse", "secretary", "logistics", "management"] as const;
 const invoiceNumbers = { supplier: "", client: "" };
 
 async function workbook(path: string): Promise<{ wb: XLSX.WorkBook; disposition: string; type: string }> {
@@ -153,8 +155,8 @@ beforeAll(async () => {
   wo.awaiting = w2.id;
   people.technician = { username: technician.username, name: technician.name };
 
-  // Utilisateurs : un role traduit, deux roles sans libelle francais.
-  for (const role of ["workshop_manager", "warehouse", "management"] as const) {
+  // Utilisateurs : un role traduit, quatre roles sans libelle francais (DIR3-1).
+  for (const role of ["workshop_manager", ...RAW_ROLES] as const) {
     const u = await createTestUser({ role });
     session.ids.userIds.push(u.id);
     people[role] = { username: u.username, name: u.name };
@@ -349,6 +351,15 @@ describe("DIR3 : export ordres de travail", { timeout: 60000 }, () => {
     for (const empty of ["ID Technicien", "Diagnostic", "Date de début", "Date de fin"]) expect(row[empty] ?? "", empty).toBe("");
   });
 
+  // Temoin des marqueurs DIR3-2/3 : la ligne existe et porte aujourd'hui les identifiants bruts.
+  // Sans lui, un `it.fails` passerait aussi sur une ligne absente ou un export en erreur.
+  // Quand DIR3-2/3 sont corriges, ce temoin casse : le retirer avec les deux marqueurs.
+  it("temoin DIR3-2/3 : l'OT en attente de pieces est exporte avec statut et priorite bruts", async () => {
+    const row = rowsOf((await workbook("/api/exports/work-orders")).wb, "Ordres de travail").find((r) => r["N° OT"] === numero(wo.awaiting));
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ Statut: "awaiting_parts", Priorité: "critical" });
+  });
+
   // DIR3-2 : la table de statuts du service n'a pas `awaiting_parts` (statut reel de l'OT) ; la cellule porte l'identifiant technique.
   it.fails("DIR3-2 : un OT en attente de pieces est exporte avec un libelle francais", async () => {
     const row = rowsOf((await workbook("/api/exports/work-orders")).wb, "Ordres de travail").find((r) => r["N° OT"] === numero(wo.awaiting))!;
@@ -379,10 +390,21 @@ describe("DIR3 : export utilisateurs", { timeout: 60000 }, () => {
   });
 
   // DIR3-1 : translateUserRole ne connait ni warehouse, ni secretary, ni logistics, ni management (« manager » n'est pas un role).
-  it.fails("DIR3-1 : le role magasinier est exporte avec un libelle francais, pas l'identifiant technique", async () => {
+  // Temoin du marqueur DIR3-1 : les quatre utilisateurs sont exportes, chacun avec son identifiant brut.
+  // Quand DIR3-1 est corrige (meme partiellement), ce temoin casse : le revoir avec le marqueur.
+  it("temoin DIR3-1 : magasinier, secretaire, logisticien et direction sont exportes avec leur role brut", async () => {
     const rows = rowsOf((await workbook("/api/exports/users")).wb, "Utilisateurs");
-    const keeper = rows.find((r) => r["Nom d'utilisateur"] === people.warehouse.username)!;
-    expect(keeper.Rôle).not.toBe("warehouse");
+    for (const role of RAW_ROLES) {
+      const row = rows.find((r) => r["Nom d'utilisateur"] === people[role].username);
+      expect(row, role).toBeDefined();
+      expect(row!.Rôle, role).toBe(role);
+    }
+  });
+
+  it.fails("DIR3-1 : magasinier, secretaire, logisticien et direction sont exportes avec un libelle francais", async () => {
+    const rows = rowsOf((await workbook("/api/exports/users")).wb, "Utilisateurs");
+    const raw = RAW_ROLES.filter((role) => rows.find((r) => r["Nom d'utilisateur"] === people[role].username)?.Rôle === role);
+    expect(raw).toEqual([]);
   });
 });
 

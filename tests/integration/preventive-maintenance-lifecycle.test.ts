@@ -205,6 +205,10 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
       await newSchedule(v.id, { scheduledDate: daysFromNow(-1) });
       expect(await preventiveMaintenanceService.checkDateBasedMaintenance(v.id)).toHaveLength(1);
     });
+    // Temoin : le vehicule existe et reste aujourd'hui operationnel. Casse quand P3-2 est tranche.
+    it("temoin P3-2 : le vehicule d'un plan echu reste operationnel", async () => {
+      expect(await vehicleStatus(vehicleId)).toBe("operational");
+    });
     it.fails("P3-2 : l'OT issu d'un plan echu immobilise aussi le vehicule", async () => {
       expect(await vehicleStatus(vehicleId)).toBe("maintenance");
     });
@@ -269,6 +273,13 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       const wo = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
       await storage.updateWorkOrder(wo.id, { status: "in_progress" });
       await storage.updateWorkOrder(wo.id, { status: "completed" });
+    });
+    // Temoin : le plan existe et garde aujourd'hui sa date echue. Sans lui, un plan absent
+    // (scheduleRow -> undefined) ferait passer le marqueur. Casse quand P3-1 est corrige.
+    it("temoin P3-1 : apres cloture de l'OT, le plan garde sa date echue", async () => {
+      const row = await scheduleRow(planId);
+      expect(row).toBeDefined();
+      expect(row.scheduledDate).toBe(from);
     });
     it.fails("P3-1 : cloturer l'OT preventif fait avancer l'echeance du plan", async () => {
       expect((await scheduleRow(planId)).scheduledDate).not.toBe(from);
