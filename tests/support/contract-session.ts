@@ -8,7 +8,7 @@ import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "./factori
  * Serveur HTTP in-process et sessions par rôle pour les tests de contrat.
  * Un acteur = un compte créé pour le fichier, supprimé par `stop()`.
  */
-export type ContractResponse = { status: number; body: any };
+export type ContractResponse = { status: number; body: any; headers: Headers };
 
 export async function startContractSession<A extends string>(actors: Record<A, TestUserRole>) {
   const ids = createIdBag();
@@ -50,7 +50,7 @@ export async function startContractSession<A extends string>(actors: Record<A, T
     } catch {
       // corps non JSON (fichier, vide)
     }
-    return { status: response.status, body };
+    return { status: response.status, body, headers: response.headers };
   }
 
   /** Réponse brute (fichier binaire) : l'appelant lit `arrayBuffer()`. */

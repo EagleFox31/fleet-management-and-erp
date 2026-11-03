@@ -12,12 +12,22 @@ export const TECHNICAL = /SQLSTATE|violates|duplicate key|invalid input syntax|f
  * Écarts entre une réponse et le contrat ApiErrorBody : statut attendu, `code` du statut
  * (`codeForStatus`, sauf `code` explicite), message lisible non vide, rien de technique.
  * `body` accepte le corps déjà décodé ou le texte brut de la réponse.
+ *
+ * `requestId` : toujours exigé dans le corps (chaîne non vide), c'est la référence que
+ * l'utilisateur donne au support. `requestIdHeader` est la valeur de l'en-tête `X-Request-Id`
+ * de la réponse (`null` s'il manque) ; omis, l'en-tête n'est pas comparé.
  */
-export function apiErrorProblems(status: number, body: unknown, expectedStatus: number, code: string = codeForStatus(expectedStatus)): string[] {
+export function apiErrorProblems(
+  status: number,
+  body: unknown,
+  expectedStatus: number,
+  code: string = codeForStatus(expectedStatus),
+  requestIdHeader?: string | null,
+): string[] {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   const problems: string[] = [];
   if (status !== expectedStatus) problems.push(`statut ${status} au lieu de ${expectedStatus} : ${text}`);
-  let parsed: { message?: unknown; code?: unknown } | undefined;
+  let parsed: { message?: unknown; code?: unknown; requestId?: unknown } | undefined;
   if (typeof body === "string") {
     try {
       parsed = JSON.parse(body);
@@ -32,6 +42,13 @@ export function apiErrorProblems(status: number, body: unknown, expectedStatus: 
   } else {
     if (typeof parsed.message !== "string" || parsed.message.length === 0) problems.push(`message absent ou vide : ${text}`);
     if (parsed.code !== code) problems.push(`code ${String(parsed.code)} au lieu de ${code}`);
+    if (typeof parsed.requestId !== "string" || parsed.requestId.trim().length === 0) {
+      problems.push(`requestId absent ou vide : ${text}`);
+    } else if (requestIdHeader === null) {
+      problems.push("en-tête X-Request-Id absent de la réponse");
+    } else if (requestIdHeader !== undefined && requestIdHeader !== parsed.requestId) {
+      problems.push(`requestId ${parsed.requestId} différent de l'en-tête X-Request-Id ${requestIdHeader}`);
+    }
   }
   if (TECHNICAL.test(text)) problems.push(`détail technique dans la réponse : ${text}`);
   return problems;
