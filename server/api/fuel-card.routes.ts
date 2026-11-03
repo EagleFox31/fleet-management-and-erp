@@ -121,16 +121,21 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
 });
 
 // Corps de POST /consumption : les nombres peuvent arriver en chaîne (formulaires), jamais en NaN.
+// Un message par champ, repris de l'ancien contrôle : il sert de message principal et de `errors`.
+const INCOMPLETE = "Données de consommation incomplètes";
+const QUANTITY_MESSAGE = "La quantité doit être un nombre positif.";
+const VEHICLE_MESSAGE = "Identifiant de véhicule invalide.";
+const requiredText = z.string({ required_error: INCOMPLETE, invalid_type_error: INCOMPLETE }).trim().min(1, INCOMPLETE);
 const consumptionBodySchema = z.object({
-  vehicleId: z.coerce.number().int().positive(),
-  quantity: z.coerce.number().positive().finite(),
+  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE),
+  quantity: z.coerce.number({ invalid_type_error: QUANTITY_MESSAGE }).positive(QUANTITY_MESSAGE).finite(QUANTITY_MESSAGE),
   // Présent seulement : la lecture du prix (« Prix du litre invalide. ») reste à resolveFuelUnitPrice.
-  unitPrice: z.union([z.string().trim().min(1), z.number()]),
-  date: z.string().trim().min(1),
-  stationName: z.string().trim().min(1),
-  destination: z.string().trim().min(1),
-  clientName: z.string().trim().optional(),
-  notes: z.string().trim().optional(),
+  unitPrice: z.any().refine((v) => typeof v === "number" || (typeof v === "string" && v.trim() !== ""), INCOMPLETE),
+  date: requiredText,
+  stationName: requiredText,
+  destination: requiredText,
+  clientName: z.string().trim().nullish(),
+  notes: z.string().trim().nullish(),
 });
 
 // Enregistrer une consommation de carburant (débit)
@@ -138,8 +143,9 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
   try {
     const parsedBody = consumptionBodySchema.safeParse(req.body ?? {});
     if (!parsedBody.success) {
-      throw new AppError(400, "Données de consommation invalides.", {
-        fieldErrors: toFieldErrors(parsedBody.error.issues),
+      const fieldErrors = toFieldErrors(parsedBody.error.issues);
+      throw new AppError(400, fieldErrors?.[0]?.message ?? "Données de consommation invalides.", {
+        fieldErrors,
         cause: parsedBody.error,
       });
     }
@@ -157,8 +163,8 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
       date,
       stationName,
       destination,
-      clientName,
-      notes,
+      clientName: clientName ?? undefined,
+      notes: notes ?? undefined,
       userId: (req as any).session.userId
     });
 
