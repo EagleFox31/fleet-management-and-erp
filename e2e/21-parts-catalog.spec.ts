@@ -142,9 +142,8 @@ test.describe("PRT1 - catalogue de pièces (navigateur)", () => {
 
   test.describe("temps réel inter-profils", () => {
     /**
-     * Mise en place hors du `test.fail` (tests/unit/server/it-fails-hygiene.test.ts) : un setup en échec
-     * ferait passer un test.fail au vert sans prouver le défaut. Le témoin ci-dessous vérifie la mise en place ;
-     * le `test.fail` ne contient que l'attente de la trame.
+     * Mise en place dans un beforeAll : le témoin ci-dessous vérifie la mise en place, le test suivant
+     * ne contient que l'attente de la trame.
      */
     const reference = uniqueTestToken("prt1-rt");
     const frames: string[] = [];
@@ -197,13 +196,10 @@ test.describe("PRT1 - catalogue de pièces (navigateur)", () => {
     });
 
     /**
-     * DÉFAUT PRODUIT CONNU, figé en test.fail : le CRUD des pièces n'émet aucune trame WebSocket
-     * (`server/routes.ts` POST/PATCH/DELETE /api/parts, fichier gelé ; aucun part_created|updated|deleted),
-     * et `useRealTimeSync.ts` n'invalide `/api/parts` que sur part_used_* et part_requirement_*.
-     * Un second profil sur /inventory/parts ne reçoit donc rien : couche 2 de AGENTS.md §2 absente.
-     * Quand l'événement existera, ce test passera : retirer `test.fail` (Playwright signale alors l'échec inverse).
+     * Couche 2 de AGENTS.md §2 : le CRUD des pièces émet part_catalog_changed (corrigé par #165,
+     * server/api/parts-catalog.routes.ts). Un second profil sur /inventory/parts reçoit la trame.
      */
-    test.fail("une pièce créée ou modifiée par le magasinier émet une trame WebSocket chez un autre profil", async () => {
+    test("une pièce créée ou modifiée par le magasinier émet une trame WebSocket chez un autre profil", async () => {
       await expect
         .poll(() => frames.some((frame) => isPartFrameFor(frame, reference, setup.partId)), {
           timeout: 8_000,

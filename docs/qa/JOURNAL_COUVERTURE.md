@@ -2099,3 +2099,9 @@ soumission sans doublon.
 - **Comment** : cinquième paramètre optionnel `requestIdHeader`, signature existante inchangée. `contract-session.call` expose `headers` (ajout, même forme que `contract-actors`).
 - **Pourquoi** : contrat `ApiErrorBody` (`shared/errors.ts`). Le requestId est la référence que l'utilisateur donne au support (AGENTS.md §10), et rien ne le gardait.
 - **Preuves** : unitaire 6/6, rouge à 2/6 avec l'ancien contrôle. Mutation serveur (`normalizeErrorBody` sans requestId) : 17 tests de contrat rouges sur les 3 suites consommatrices, verts une fois le serveur rétabli. Contrats complets 1340/1340 sur fleet_test_de_rid. Unit 1660/1660, tsc 0. Aucune route sans requestId parmi celles qu'appellent ces suites.
+
+## 2026-11-03 14:05 — PRT1 : test.fail du temps réel levé après #165
+
+- **Quoi** : le cas deux profils de `e2e/21-parts-catalog.spec.ts` passe en `test` ordinaire ; la ligne PRT1 du plan note le défaut corrigé.
+- **Comment** : #165 émet `part_catalog_changed` sur POST, PATCH, DELETE et update-stock ; la reconnaissance de trame de la spec l'acceptait déjà.
+- **Pourquoi** : la PR qui fusionne en second lève le `test.fail` (Playwright signalerait sinon l'échec inverse).
