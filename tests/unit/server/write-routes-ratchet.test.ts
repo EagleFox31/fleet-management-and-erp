@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+import { ALL_APP_ROLES } from "../../../shared/constants/roles";
 import {
   T1_WITHOUT_ROLE_GUARD,
   T3_WITHOUT_BODY_VALIDATION,
@@ -11,6 +12,7 @@ import {
   LOCAL_ROLE_GUARDS,
   MOUNT_ROLE_GUARDS,
   PUBLIC_BY_DESIGN,
+  resolveRoles,
   serverDir,
   allWriteRoutes,
   hasRoleGuard,
@@ -149,43 +151,8 @@ router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (re
     expect(src(code).map(protectsServerFields)).toEqual([true, false, true]);
   });
 
-  it("selfScoped vaut garde T1 seulement si le handler ne lit pas req.params", () => {
-    const [self, byId, noBody] = src(
-      `const prefsSchema = z.object({ theme: z.string() });
-       router.patch("/me", selfScoped, validateBody(prefsSchema), async (req, res) => { await update(req.user.id, req.body); });
-       router.patch("/:id", selfScoped, validateBody(prefsSchema), async (req, res) => { await update(Number(req.params.id), req.body); });
-       router.post("/me/read", selfScoped, async (req, res) => { await markRead(req.user.id); });`,
-    );
-    expect([self, byId, noBody].map(hasRoleGuard)).toEqual([true, false, true]);
-  });
-
-  it("selfScoped : toute lecture du corps hors validateBody(schéma sans *Id, email, username) est refusée", () => {
-    const code = `const prefsSchema = z.object({ theme: z.string() });
-const targetSchema = z.object({ theme: z.string(), userId: z.number() });
-const mailSchema = z.object({ "email": z.string() });
-const userSchema = z.object({ username: z.string() });
-const spreadSchema = z.object({ ...base, theme: z.string() });
-router.patch("/a", selfScoped, async (req, res) => { const data = req.body; await update(req.user.id, data.userId); });
-router.patch("/b", selfScoped, async (req, res) => { const { userId, ...rest }: Body = req.body; await update(req.user.id, userId); });
-router.patch("/c", selfScoped, async (req, res) => { await update(req.user.id, req.body?.["userId"]); });
-router.patch("/d", selfScoped, async (req, res) => { await updateByEmail(req.user.id, req.body.email); });
-router.patch("/e", selfScoped, async ({ user, body }, res) => { await update(user.id, body); });
-router.patch("/f", selfScoped, validateBody(targetSchema), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/g", selfScoped, validateBody(mailSchema), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/h", selfScoped, validateBody(userSchema), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/i", selfScoped, validateBody(spreadSchema), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/j", selfScoped, validateBody(unknownSchema), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/k", selfScoped, validateBody(prefsSchema, { ...opts }), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/l", selfScoped, validateBody(z.object({ ownerId: z.number() })), async (req, res) => { await update(req.user.id, req.body); });
-router.patch("/m", selfScoped, validateBody(prefsSchema), async (req, res) => { const data = req.body; await update(req.user.id, data); });
-router.patch("/n", selfScoped, validateBody(z.object({ theme: z.string() })), async (req, res) => { await update(req.user.id, req.body); });`;
-    expect(src(code).map(hasRoleGuard)).toEqual([
-      false, false, false, false, false, false, false, false, false, false, false, false, true, true,
-    ]);
-  });
-
   it("T1 : liste positive, un middleware inconnu ne vaut pas garde", () => {
-    for (const mw of ["[isAnyUser]", "...guards", "anyone", "authorize([...ALL_ROLES])", "checkWritePermission", "isAnyUser", "selfScopedX", "isAdminLike"]) {
+    for (const mw of ["[isAnyUser]", "...guards", "anyone", "authorize([...ALL_ROLES])", "checkWritePermission", "isAnyUser", "selfScoped", "isAdminLike"]) {
       const [r] = src(`router.post("/y", ${mw}, async (req, res) => { res.json({}); });`);
       expect(hasRoleGuard(r), mw).toBe(false);
     }
@@ -197,9 +164,55 @@ router.patch("/n", selfScoped, validateBody(z.object({ theme: z.string() })), as
     expect(AUTH_ROLE_GUARDS.has("isAnyUser")).toBe(false);
   });
 
+  it("T1 : authorize juge l'ensemble de rôles résolu, pas le nom de la constante (NO-GO n°3)", () => {
+    const code = `const EVERYONE = ALL_APP_ROLES;
+const anyone = [...ALL_APP_ROLES];
+const STAFF_PLUS_CLIENT = [...STAFF_ROLES, "client"];
+const FEW = ["admin", "warehouse"];
+router.post("/a", authorize([...ALL_APP_ROLES]), async (req, res) => { res.json({}); });
+router.post("/b", authorize(ALL_APP_ROLES), async (req, res) => { res.json({}); });
+router.post("/c", authorize([...EVERYONE]), async (req, res) => { res.json({}); });
+router.post("/d", authorize(anyone), async (req, res) => { res.json({}); });
+router.post("/e", authorize([...STAFF_PLUS_CLIENT]), async (req, res) => { res.json({}); });
+router.post("/f", authorize([...STAFF_ROLES, ...CLIENT_ONLY]), async (req, res) => { res.json({}); });
+router.post("/g", authorize(roles.ALL_APP_ROLES), async (req, res) => { res.json({}); });
+router.post("/h", authorize([...FEW]), async (req, res) => { res.json({}); });
+router.post("/i", authorize([...STAFF_ROLES]), async (req, res) => { res.json({}); });`;
+    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, false, true, true]);
+    expect(resolveRoles("[...STAFF_ROLES, \"client\"]", "")).toEqual(new Set(ALL_APP_ROLES));
+  });
+
+  it("T1 : une garde locale ou un export is* qui admet tous les rôles ne vaut pas garde", () => {
+    const local = `const writers = authorize([...ALL_APP_ROLES]);
+router.post("/y", writers, async (req, res) => { res.json({}); });`;
+    const [r] = src(local);
+    expect(hasRoleGuard({ ...r, file: "api/time-tracking.routes.ts" })).toBe(false);
+    const alias = `const writers = isAnyUser;
+router.post("/y", writers, async (req, res) => { res.json({}); });`;
+    const [a] = src(alias);
+    expect(hasRoleGuard({ ...a, file: "api/time-tracking.routes.ts" })).toBe(false);
+    const [kept] = src(`const writers = authorize(["admin"]);
+router.post("/y", writers, async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard({ ...kept, file: "api/time-tracking.routes.ts" })).toBe(true);
+    const mount = mountPrefixes(
+      `import tRoutes from "./t.routes";
+const gardeApprovisionnement = authorize([...ALL_APP_ROLES]);
+apiRouter.use("/t", gardeApprovisionnement, tRoutes);`,
+    );
+    expect(mount.get("api/t.routes.ts")?.guarded).toBe(false);
+    for (const name of AUTH_ROLE_GUARDS) expect(name).not.toBe("isAnyUser");
+    expect(AUTH_ROLE_GUARDS.has("isStaff")).toBe(true);
+  });
+
   it("T1 : une garde locale ne vaut que dans son fichier", () => {
-    const [r] = src(`router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`);
+    const [r] = src(
+      `const checkWritePermission = (req, res, next) => { if (!PROCUREMENT.has(req.user.role)) return next(denied()); next(); };
+router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`,
+    );
     expect(hasRoleGuard({ ...r, file: "api/purchase-orders.routes.ts" })).toBe(true);
+    // Nom listé mais non défini dans la source : pas de garde.
+    const [undefinedGuard] = src(`router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard({ ...undefinedGuard, file: "api/purchase-orders.routes.ts" })).toBe(false);
     expect(hasRoleGuard({ ...r, file: "api/vehicles.routes.ts" })).toBe(false);
   });
 
@@ -254,22 +267,6 @@ router.patch("/n", selfScoped, validateBody(z.object({ theme: z.string() })), as
     );
     expect(hasRoleGuard(owned)).toBe(false);
     expect(owned.middlewares.map((m) => m.split("(")[0])).toEqual(["...ownedBy", "validateBody"]);
-    expect(owned.inline).toBe(true);
-  });
-
-  it("B2 : selfScoped refusé pour chaque contournement connu", () => {
-    const code = `const prefsSchema = z.object({ theme: z.string() });
-const byRef = async (req, res) => { await update(req.user.id, req.body); };
-router.patch("/a", selfScoped, async (req, res) => { await update(req.body.userId, req.body); });
-router.patch("/b", selfScoped, async (req, res) => { await update(Number(req.query.userId), req.body); });
-router.patch("/c", selfScoped, async ({ params, body }, res) => { await update(Number(params.id), body); });
-router.patch("/d", selfScoped, async (req, res) => { const { userId, name } = req.body; await update(userId, name); });
-router.patch("/e", selfScoped, async (req, res) => { await update(42, req.body); });
-router.patch("/f/:id", selfScoped, byRef);
-router.patch("/g", selfScoped, validateBody(prefsSchema), byRef);
-router.patch("/h", selfScoped, missing);
-router.patch("/i", selfScoped, byRef);`;
-    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, true, false, false]);
   });
 
   it("T4 : validateBody avec schéma permissif ou options en variable ne vaut pas protection", () => {

@@ -2,6 +2,8 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { SERVER_FIELDS } from "../../../../shared/constants/server-fields";
+import * as roles from "../../../../shared/constants/roles";
+import { ALL_APP_ROLES } from "../../../../shared/constants/roles";
 import * as schema from "../../../../shared/schema";
 
 /**
@@ -27,10 +29,6 @@ export interface WriteRoute {
   body: string;
   /** Source complète du fichier (pour retrouver un schéma local). */
   fileSource: string;
-  /** Handler écrit dans la déclaration (`async (req, res) => ...`), et non passé par référence. */
-  inline?: boolean;
-  /** Handler passé par référence : identifiant du dernier argument (`patchSettings`). */
-  handlerRef?: string;
   /** Fichier de la déclaration servie (`routes.ts`, `api/x.routes.ts`), renseigné par `allWriteRoutes`. */
   file?: string;
 }
@@ -52,7 +50,7 @@ export function mountPrefixes(indexSource: string): Map<string, { prefix: string
       const before = topLevelSplit(args.slice(0, args.indexOf(name)))
         .map((n) => n.replace(/^\s*\/\/[^\n]*\n/gm, "").trim())
         .filter((n) => n && !n.startsWith('"'));
-      prefixes.set(file, { prefix: `/api${prefix}`, guarded: before.some((n) => isMountGuard(n)) });
+      prefixes.set(file, { prefix: `/api${prefix}`, guarded: before.some((n) => isMountGuard(n, indexSource)) });
     }
   }
   return prefixes;
@@ -112,7 +110,7 @@ export function writeRoutesOf(
   const heads = [...source.matchAll(HEAD)];
   // `router.use(garde)` sans chemin : garde toutes les déclarations suivantes de ce routeur.
   const fileGuards = [...source.matchAll(/\b(\w*(?:app|[rR]outer|Routes))\.use\(\s*(\w+)\s*\)/g)]
-    .filter((u) => isMountGuard(u[2]))
+    .filter((u) => isMountGuard(u[2], source))
     .map((u) => ({ router: u[1], at: u.index ?? 0 }));
   const routes: WriteRoute[] = [];
   heads.forEach((m, i) => {
@@ -134,11 +132,8 @@ export function writeRoutesOf(
     const header = byReference ? text.slice(0, close) : fn >= 0 ? text.slice(0, fn) : "";
     const path = declared.startsWith("/api/") ? declared : `${prefix}${declared === "/" ? "" : declared}`;
     if (!path.startsWith("/api")) throw new Error(`Routeur non monté sous /api : ${method} ${path} (${m[1]}) ; compléter mountPrefixes.`);
-    const ref = byReference ? topLevelSplit(header).at(-1) : undefined;
     routes.push({
       key: `${method} ${path}`,
-      inline: !byReference && fn >= 0,
-      handlerRef: ref && /^\w+$/.test(ref) ? ref : undefined,
       method,
       path,
       middlewares: (byReference ? topLevelSplit(header).slice(0, -1) : topLevelSplit(header)).filter((x) => x !== "authenticate"),
@@ -220,19 +215,63 @@ export const PUBLIC_BY_DESIGN = new Set(["post /api/auth/login", "post /api/auth
  * `anyone`, tableau `[isAnyUser]`, spread `...guards`, drapeau de fonctionnalité, téléversement)
  * ne vaut pas garde.
  *
- *  - Exports `is*` de `server/middleware/auth.ts` construits par `authorize(...)` ou `sessionGuard(...)`,
- *    sauf `isAnyUser` (tous les rôles) : lus dans la source, un nouveau garde y est reconnu d'office.
- *  - `authorize([...])` écrit sur place, sauf s'il admet tous les rôles (`ALL_ROLES`).
- *  - Gardes locales, par fichier : chaque nom est vérifié dans son fichier par le test.
+ * Un `authorize(rôles)` n'est une garde que si l'ENSEMBLE de rôles, résolu par valeur
+ * (`shared/constants/roles`, constantes locales, alias), exclut au moins un rôle. Le nom de la
+ * constante ne compte pas : `authorize([...ALL_APP_ROLES])` ou un alias de tous les rôles vaut
+ * `isAnyUser`. Un ensemble qu'on ne sait pas résoudre ne vaut pas garde.
+ *
+ *  - Exports `is*` de `server/middleware/auth.ts` : `sessionGuard(...)`, ou `authorize(...)` jugé
+ *    comme ci-dessus (ce qui écarte `isAnyUser` par sa valeur) ;
+ *  - `authorize(...)` écrit sur place ;
+ *  - gardes locales, par fichier : une définition `authorize(...)` est jugée comme ci-dessus.
  */
+const EVERY_ROLE: readonly string[] = ALL_APP_ROLES;
+
+/** Ensemble de rôles d'une expression (`["a", ...X]`, `X`), résolu dans `source` puis dans `shared/constants/roles`. Inconnu : `undefined`. */
+export function resolveRoles(expr: string, source: string, seen: Set<string> = new Set()): Set<string> | undefined {
+  const e = expr.trim().replace(/\s+as\s+const$/, "");
+  if (e.startsWith("[") && e.endsWith("]")) {
+    const out = new Set<string>();
+    for (const item of topLevelSplit(e.slice(1, -1)).map((x) => x.trim()).filter(Boolean)) {
+      const literal = /^(["'])([\w-]+)\1$/.exec(item);
+      if (literal) {
+        out.add(literal[2]);
+        continue;
+      }
+      if (!item.startsWith("...")) return undefined;
+      const inner = resolveRoles(item.slice(3), source, seen);
+      if (!inner) return undefined;
+      for (const r of inner) out.add(r);
+    }
+    return out;
+  }
+  if (!/^[A-Za-z_]\w*$/.test(e) || seen.has(e)) return undefined;
+  seen.add(e);
+  const local = constDefinition(source, e);
+  if (local !== undefined) return resolveRoles(local, source, seen);
+  const value = (roles as Record<string, unknown>)[e];
+  return Array.isArray(value) && value.every((v) => typeof v === "string") ? new Set(value as string[]) : undefined;
+}
+
+/** Valeur de `const name = ...;` dans `source` (première occurrence), sans le `;`. */
+function constDefinition(source: string, name: string): string | undefined {
+  return new RegExp(`\\bconst\\s+${name}\\b\\s*(?::[^=]+)?=\\s*([^;]+);`).exec(source)?.[1]?.trim();
+}
+
+/** `authorize(rôles)` dont l'ensemble résolu exclut au moins un rôle. */
+function authorizeRestricts(m: string, source: string): boolean {
+  const call = /^authorize\(([\s\S]*)\)$/.exec(m.trim());
+  if (!call) return false;
+  const set = resolveRoles(call[1], source);
+  return set !== undefined && EVERY_ROLE.some((r) => !set.has(r));
+}
+
+const authSource = readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8");
+
 export const AUTH_ROLE_GUARDS: ReadonlySet<string> = new Set(
-  [
-    ...readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8").matchAll(
-      /export\s+const\s+(is[A-Z]\w*)\s*(?::\s*\w+\s*)?=\s*(?:authorize|sessionGuard)\(/g,
-    ),
-  ]
-    .map((m) => m[1])
-    .filter((n) => n !== "isAnyUser"),
+  [...authSource.matchAll(/export\s+const\s+(is[A-Z]\w*)\s*(?::\s*\w+\s*)?=\s*(sessionGuard\(|authorize\([^;]*\)(?=;))/g)]
+    .filter((m) => m[2] === "sessionGuard(" || authorizeRestricts(m[2], authSource))
+    .map((m) => m[1]),
 );
 
 /** Gardes définies localement, par fichier servi. */
@@ -248,82 +287,34 @@ export const LOCAL_ROLE_GUARDS: Readonly<Record<string, readonly string[]>> = {
 /** Gardes de montage locales à `server/api/index.ts` (`apiRouter.use("/x", garde, xRoutes)`). */
 export const MOUNT_ROLE_GUARDS: readonly string[] = ["gardeApprovisionnement", "...exportsGuard"];
 
-/** `authorize([...])` écrit sur place, qui n'admet pas tous les rôles. */
-function isInlineAuthorize(m: string): boolean {
-  return /^authorize\(\s*\[/.test(m) && !/\bALL_ROLES\b/.test(m);
-}
-
-/** Garde de rôle reconnue dans une déclaration de route. */
-export function isRoleGuard(m: string, file?: string): boolean {
-  return AUTH_ROLE_GUARDS.has(m) || isInlineAuthorize(m) || (file !== undefined && (LOCAL_ROLE_GUARDS[file] ?? []).includes(m));
-}
-
-/** Garde de rôle reconnue au montage d'un routeur. */
-function isMountGuard(m: string): boolean {
-  return AUTH_ROLE_GUARDS.has(m) || isInlineAuthorize(m) || MOUNT_ROLE_GUARDS.includes(m);
-}
-
 /**
- * `selfScoped` admet tous les rôles. Il ne vaut garde que si le handler (inline, ou résolu dans le
- * fichier quand il est passé par référence) n'agit que sur le compte de session :
- *  - il lit `req.user.id` ou `req.session.userId` ;
- *  - il ne lit pas l'URL (`params`, `query`, segment `:x` du chemin) ;
- *  - il ne lit le corps (toute mention de `body`) que derrière `validateBody(schéma)`, schéma non
- *    permissif qui ne déclare ni `*Id`, ni `email`, ni `username` : `validateBody` retire tout champ
- *    non déclaré, un alias ou une déstructuration de `req.body` ne peut donc rien désigner d'autre.
+ * Garde listée par nom : sa définition dans `source` la confirme. `authorize(...)` est jugé sur
+ * l'ensemble résolu, un alias sur ce qu'il désigne ; une fonction écrite (`(req, res, next) => ...`)
+ * ou un tableau de gardes (`exportsGuard`) a été relu et reste admis par son nom.
  */
-const SELF_SCOPED = /^selfScoped$/;
-const SESSION_IDENTITY = /\breq\.user!?\.id\b|\breq\.session\??\.userId\b/;
-const URL_TARGET = /\b(?:params|query)\b/;
-const BODY_MENTION = /\bbody\b/;
-/** Clé de schéma écrite qui désigne un autre compte ou un autre objet. */
-const TARGET_KEY = /(?:^|[{,\s])["']?(?:\w*(?:id|Id|ID)|email|username)["']?\s*:/;
-const TARGET_FIELD = /(?:id|Id|ID)$|^email$|^username$/;
-/** Construction qui cache des clés à l'analyse du texte. */
-const OPAQUE_SCHEMA = /\.\.\.|\.(?:extend|merge|and|or|passthrough|catchall)\(|z\.(?:union|intersection|lazy|record|any|unknown)\(/;
-
-/** Le schéma de `validateBody(...)` ne déclare aucune clé de cible (`*Id`, `email`, `username`). Inconnu : faux. */
-function schemaHasNoTarget(m: string, fileSource: string): boolean {
-  if (validateBodyVerdict(m, fileSource) === "unsafe") return false;
-  const arg = topLevelSplit(m.slice(m.indexOf("(") + 1))[0] ?? "";
-  if (/^z\.object\(/.test(arg)) return !TARGET_KEY.test(arg) && !OPAQUE_SCHEMA.test(arg);
-  if (!/^[A-Za-z]\w*$/.test(arg)) return false;
-  const value = (schema as Record<string, unknown>)[arg] as { shape?: Record<string, unknown> } | undefined;
-  if (value && typeof value === "object" && value.shape) return !Object.keys(value.shape).some((k) => TARGET_FIELD.test(k));
-  const def = localSchemaDefinition(fileSource, arg);
-  return def !== undefined && /=\s*z\.object\(/.test(def) && !TARGET_KEY.test(def) && !OPAQUE_SCHEMA.test(def);
+function listedGuardHolds(name: string, source: string): boolean {
+  const def = constDefinition(source, name.replace(/^\.\.\./, ""));
+  if (def === undefined) return false;
+  if (/^authorize\(/.test(def)) return authorizeRestricts(def, source);
+  if (/^[A-Za-z_]\w*$/.test(def)) return AUTH_ROLE_GUARDS.has(def);
+  return true;
 }
 
-/** Texte d'un handler passé par référence (`const nom ... = async (...) => {...}` ou `function nom`). */
-function referencedHandler(r: WriteRoute): string | undefined {
-  if (!r.handlerRef) return undefined;
-  const at = r.fileSource.search(new RegExp(`\\bconst\\s+${r.handlerRef}\\b[^=]*=|\\bfunction\\s+${r.handlerRef}\\s*\\(`));
-  if (at < 0) return undefined;
-  const rest = r.fileSource.slice(at);
-  const stop = rest.slice(1).search(/\n(?:const|let|function|export|router|app|async)\b/);
-  return stop >= 0 ? rest.slice(0, stop + 1) : rest;
+/** Garde de rôle reconnue dans une déclaration de route (`source` : le fichier de la déclaration). */
+export function isRoleGuard(m: string, file: string | undefined, source: string): boolean {
+  if (AUTH_ROLE_GUARDS.has(m) || authorizeRestricts(m, source)) return true;
+  return file !== undefined && (LOCAL_ROLE_GUARDS[file] ?? []).includes(m) && listedGuardHolds(m, source);
 }
 
-/** `selfScoped` tient : handler connu, identité de session lue, ni URL, ni corps hors `validateBody` sûr. */
-export function selfScopedHolds(r: WriteRoute): boolean {
-  // Identifiant dans le chemin : la cible vient de l'URL, quel que soit le handler.
-  if (r.path.includes(":")) return false;
-  const handler = r.inline ? r.body : referencedHandler(r);
-  if (!handler) return false;
-  if (!SESSION_IDENTITY.test(handler) || URL_TARGET.test(handler)) return false;
-  if (!BODY_MENTION.test(handler)) return true;
-  const validators = r.middlewares.filter((m) => VALIDATE_BODY.test(m));
-  return validators.length > 0 && validators.every((m) => schemaHasNoTarget(m, r.fileSource));
+/** Garde de rôle reconnue au montage d'un routeur (`source` : le fichier du montage). */
+function isMountGuard(m: string, source: string): boolean {
+  if (AUTH_ROLE_GUARDS.has(m) || authorizeRestricts(m, source)) return true;
+  return MOUNT_ROLE_GUARDS.includes(m) && listedGuardHolds(m, source);
 }
 
 /** T1 : un garde de rôle reconnu (liste positive) dans la déclaration, ou un garde au montage du routeur. */
 export function hasRoleGuard(r: WriteRoute): boolean {
-  if (r.mountGuarded) return true;
-  return r.middlewares.some((m) => {
-    // `selfScoped` admet tous les rôles : il ne vaut garde que si la route n'agit que sur le compte de session.
-    if (SELF_SCOPED.test(m)) return selfScopedHolds(r);
-    return isRoleGuard(m, r.file);
-  });
+  return r.mountGuarded || r.middlewares.some((m) => isRoleGuard(m, r.file, r.fileSource));
 }
 
 /**
