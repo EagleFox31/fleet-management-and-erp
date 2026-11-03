@@ -177,6 +177,8 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   work_order_status_changed: ["workOrderStatus"],
   work_order_deleted: ["workOrderStatus", "workOrderLists"],
   work_order_awaiting_parts: ["workOrderStatus", "partRequirements"],
+  // Heures d'une tâche : main-d'oeuvre valorisée dans les KPI de coût.
+  work_order_item_changed: ["workOrderCost", "workOrderLists"],
   vehicle_updated: ["vehicleStatus"],
   vehicle_status_changed: ["vehicleStatus"],
   vehicle_mileage_updated: ["vehicleOperations"],

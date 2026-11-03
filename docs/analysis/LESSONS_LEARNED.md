@@ -1810,3 +1810,66 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - **Prévention vérifiable** : `tests/contract/fuel-price-imposed.contract.test.ts`. Sans le contrôle du rôle, quatre cas passent au rouge.
 - **Leçon** : une restriction affichée par l’écran (champ en lecture seule, bouton masqué) doit avoir son équivalent dans la route qui écrit. `declare-no-refuel` n’a pas de prix, il n’est pas concerné.
 - **Limite connue** : le jour du prix est le jour UTC du plein, alors que l’écran prend le jour local (UTC+1). Cela n’a d’effet qu’entre minuit et 1 h, le jour d’un changement de prix.
+
+## 2026-11-03 — Ajustement de stock rejoué au réessai (idempotence absente, puis clé libérée sur une issue incertaine)
+
+### Contexte
+- `POST /api/parts/:id/update-stock` n'était pas protégé : un réessai après une coupure réseau ou un 5xx appliquait l'ajustement une seconde fois.
+- La garde d'idempotence existante (`server/middleware/idempotency-guard.ts`) libère la clé quand l'enregistrement de la réponse échoue, et reprend une clé restée « en cours » au bout de 60 s. Pour le stock, ces deux comportements rejouent l'ajustement : le commit a déjà eu lieu.
+
+### Cause racine
+- Classification : contrat implicite non outillé (la garde supposait que toute route pouvait être réexécutée une fois l'issue inconnue).
+- Les options vivaient au niveau global : drapeau `idempotency`, délai de reprise, libération sur échec. Aucune route ne pouvait dire « une issue inconnue n'est jamais rejouée ».
+
+### Résolution
+- Options par route dans `server/lib/idempotency-config.ts` :
+  - `keepKeyOnUncertainOutcome` garde la clé si l'enregistrement de la réponse échoue, sur toute 5xx et sur une fin sans JSON. Seuls 401, 403, 408 et 429, qui arrivent avant l'écriture, la libèrent ;
+  - `staleSeconds: null` : la clé n'est jamais reprise, seule son expiration la libère ;
+  - `ignoreFeatureFlag` : la route est protégée quel que soit le drapeau ;
+  - `inProgressMessage` : 409 lisible « vérifiez le stock avant de réessayer ».
+- Côté client, `sendWithSubmissionKey` (`client/src/lib/submission-key.ts`) et la portée `partStockKeyScope(id, delta)` :
+  - le réessai de la même intention renvoie la même clé ;
+  - une nouvelle intention (autre pièce, autre quantité, succès ou refus connu) en prend une nouvelle.
+- Les deux écrans d'ajustement (fiche pièce, liste des pièces) envoient l'en-tête. Leurs envois passent par `useSingleFlightMutate`, donc un double clic ne peut pas envoyer deux fois la même clé en vol. Leurs toasts d'erreur affichent `userMessageOf`, c'est-à-dire le texte du 409.
+- Compromis assumé, le même que pour le plein carburant : le 409 « vérifiez le stock » est une issue connue, donc il libère la clé côté client. Si la personne passe outre le message et renvoie le même delta, l'envoi part avec une nouvelle clé et ajuste le stock. La clé restée « en cours » côté serveur ne sert plus et n'est jamais purgée avant son expiration : une ligne par incident, sans risque.
+
+### Prévention (vérifiable)
+- `tests/contract/parts-update-stock-idempotency.contract.test.ts` :
+  - même clé : rejeu, un seul mouvement ;
+  - l'enregistrement de la réponse échoue après le commit : le réessai reçoit un 409 sans ajustement et la clé reste « en cours » ;
+  - nouvelle clé : l'ajustement s'applique ;
+  - sans clé : comportement inchangé.
+  - Rouge sans le correctif serveur : 2 sur 4.
+- Tests unitaires :
+  - `tests/unit/server/idempotency-guard.test.ts` : drapeau coupé, statuts 5xx et 4xx avant écriture, fin sans JSON ;
+  - `tests/unit/client/submission-key.test.ts` : même intention, nouvelle intention, en-tête aligné sur le serveur.
+- `tests/integration/idempotency-store.test.ts` : `staleSeconds: null` ne reprend jamais une clé en cours.
+
+### Règle Projet (obligatoire)
+- Une route qui écrit du stock ou de l'argent et qui n'est pas rejouable sans risque déclare `keepKeyOnUncertainOutcome: true` et `staleSeconds: null`. Le client garde la clé tant que l'issue est inconnue, et change de clé à chaque nouvelle intention.
+
+## 2026-11-03 — Main rouge en unitaire après une PR e2e seule (#194)
+
+### Contexte
+- #194 n'ajoutait qu'une spec e2e. Elle contenait `getByText("Erreur carburant")` sans `{ exact: true }`, que refuse la garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts` (#155).
+- La CI de la PR, puis celle de main, étaient vertes. Toutes les PR suivantes ont échoué en unitaire.
+
+### Cause racine
+- Classification : carte d'impact incomplète (exécution ciblée).
+- Dans `.github/appfactory-impact.json`, les surfaces `e2e` et `scripts` n'activaient que `typecheck`. Or des gardes unitaires lisent ces répertoires :
+  - les gardes de `tests/unit/e2e/` ;
+  - les parcours `repoFiles` de `it-fails-hygiene` et de `leak-check-hygiene`.
+- Un changement limité à ces répertoires ne lançait donc pas les tests qui les contrôlent.
+- Facteur humain : l'auteur n'avait lancé que tsc, pas la suite unitaire, en se fiant au périmètre « e2e seul ».
+
+### Résolution
+- Spec corrigée dans #195 (`exact: true`).
+- Les surfaces `e2e` et `scripts` activent aussi `unit`.
+
+### Prévention (vérifiable)
+- Les surfaces `e2e` et `scripts` portent maintenant la porte `unit` dans la carte d'impact.
+
+### Règle Projet (obligatoire)
+- Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
+- Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
+- En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.

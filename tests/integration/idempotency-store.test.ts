@@ -85,6 +85,16 @@ describe("Stockage des clés d'idempotence", { timeout: 120000 }, () => {
     expect(await store.reserve(request)).toEqual({ kind: "reserved" });
   });
 
+  it("staleSeconds: null (ajustement de stock) : une clé en cours n'est jamais reprise, sauf expirée", async () => {
+    const request = await newRequest();
+    await store.reserve(request, { staleSeconds: null });
+    const where = and(eq(idempotencyKeys.userId, request.userId), eq(idempotencyKeys.key, request.key));
+    await db.update(idempotencyKeys).set({ createdAt: sql`now() - interval '2 hours'` }).where(where);
+    expect(await store.reserve(request, { staleSeconds: null })).toEqual({ kind: "in_progress" });
+    await db.update(idempotencyKeys).set({ expiresAt: sql`now() - interval '1 second'` }).where(where);
+    expect(await store.reserve(request, { staleSeconds: null })).toEqual({ kind: "reserved" });
+  });
+
   it("une clé terminée récente n'est pas reprise, une clé expirée l'est", async () => {
     const request = await newRequest();
     await store.reserve(request);

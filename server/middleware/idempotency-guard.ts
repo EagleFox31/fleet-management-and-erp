@@ -8,6 +8,7 @@ import {
   IDEMPOTENCY_REPLAYED_HEADER,
   IDEMPOTENCY_ROUTES,
   isReplayableStatus,
+  PRE_WRITE_REFUSALS,
   type IdempotencyRoute,
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
@@ -30,10 +31,15 @@ export function normalizeIdempotencyPath(path: string): string {
   return decoded.toLowerCase().replace(/\/+$/, "") || "/";
 }
 
+/** Règle de la liste qui couvre l'écriture `method path`, ou `undefined`. */
+export function findIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): IdempotencyRoute | undefined {
+  const clean = normalizeIdempotencyPath(path);
+  return routes.find((route) => route.method === method.toUpperCase() && route.pattern.test(clean));
+}
+
 /** Vrai si l'écriture `method path` figure dans la liste des routes rejouables. */
 export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): boolean {
-  const clean = normalizeIdempotencyPath(path);
-  return routes.some((route) => route.method === method.toUpperCase() && route.pattern.test(clean));
+  return findIdempotentRoute(routes, method, path) !== undefined;
 }
 
 /**
@@ -48,6 +54,8 @@ export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: s
  * - connexion coupée : rien n'est libéré, la route peut encore répondre et sa réponse est
  *   enregistrée ; si elle ne répond jamais, la réservation expire (arrêt du serveur compris).
  * Compte supprimé : 401 avant toute réservation. Sans en-tête, la requête passe comme avant.
+ * Options par route (`IdempotencyRoute`) : `staleSeconds`, `keepKeyOnUncertainOutcome` (aucune
+ * libération sauf 401/403/408/429), `ignoreFeatureFlag`, `inProgressMessage`.
  * Stockage indisponible : 503, rien n'est écrit.
  */
 export function idempotencyGuard(
@@ -56,10 +64,13 @@ export function idempotencyGuard(
   findUser: (id: number) => Promise<unknown> = findActiveSessionUser,
 ): RequestHandler {
   return async (req, res, next) => {
-    if (routes.length === 0 || !isFeatureEnabled(IDEMPOTENCY_FLAG)) return next();
+    if (routes.length === 0) return next();
     const method = req.method.toUpperCase();
     const path = normalizeIdempotencyPath(req.originalUrl.replace(/^\/api/i, ""));
-    if (!isIdempotentRoute(routes, method, path)) return next();
+    const route = findIdempotentRoute(routes, method, path);
+    if (!route) return next();
+    if (!route.ignoreFeatureFlag && !isFeatureEnabled(IDEMPOTENCY_FLAG)) return next();
+    const keepKey = route.keepKeyOnUncertainOutcome === true;
 
     const rawKey = req.get(IDEMPOTENCY_HEADER);
     if (rawKey === undefined) return next();
@@ -77,7 +88,10 @@ export function idempotencyGuard(
       // Compte supprimé : 401 comme la route, et pas de réservation sur un compte disparu
       // (sa clé étrangère ferait un 503).
       if (!(await findUser(userId))) return next(new AppError(401, "Session expirée, reconnectez-vous."));
-      outcome = await store.reserve({ userId, key, method, path, requestHash });
+      outcome = await store.reserve(
+        { userId, key, method, path, requestHash },
+        route.staleSeconds === undefined ? undefined : { staleSeconds: route.staleSeconds },
+      );
     } catch (err) {
       return next(new AppError(503, "Service momentanément indisponible, réessayez.", { cause: err }));
     }
@@ -87,7 +101,7 @@ export function idempotencyGuard(
       return res.status(outcome.status).json(outcome.body);
     }
     if (outcome.kind === "in_progress") {
-      return next(new AppError(409, "Cette opération est déjà en cours de traitement. Réessayez dans un instant."));
+      return next(new AppError(409, route.inProgressMessage ?? "Cette opération est déjà en cours de traitement. Réessayez dans un instant."));
     }
     if (outcome.kind === "mismatch") {
       return next(new AppError(422, "Cette clé d'idempotence a déjà servi pour une autre opération."));
@@ -97,6 +111,12 @@ export function idempotencyGuard(
     const release = () =>
       store.release(userId, key).catch((err) => log.error({ err, requestId: req.requestId }, "libération de la clé d'idempotence en échec"));
 
+    // Issue incertaine sur une route qui garde sa clé : rien n'est libéré, un réessai reçoit 409.
+    const keepUncertain = (reason: string) => {
+      log.warn({ requestId: req.requestId, path, reason }, "clé d'idempotence conservée sur une issue incertaine");
+      return Promise.resolve();
+    };
+
     const originalJson = res.json.bind(res);
     res.json = ((body: unknown) => {
       if (settled) return originalJson(body);
@@ -105,9 +125,11 @@ export function idempotencyGuard(
       const persist = isReplayableStatus(status)
         ? store.complete(userId, key, status, body).catch((err) => {
             log.error({ err, requestId: req.requestId }, "enregistrement de la réponse idempotente en échec");
-            return release();
+            return keepKey ? keepUncertain("réponse non enregistrée") : release();
           })
-        : release();
+        : keepKey && !PRE_WRITE_REFUSALS.includes(status)
+          ? keepUncertain(`statut ${status}`)
+          : release();
       // La réponse part une fois la clé tranchée : un rejeu immédiat voit l'état final.
       void persist
         .finally(() => originalJson(body))
@@ -121,7 +143,7 @@ export function idempotencyGuard(
     res.on("finish", () => {
       if (settled) return;
       settled = true;
-      void release();
+      void (keepKey ? keepUncertain("réponse sans JSON") : release());
     });
 
     next();

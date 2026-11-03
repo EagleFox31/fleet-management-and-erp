@@ -105,5 +105,36 @@ export function createSubmissionKeyStore(scope: string, storage: KeyStorage = de
 
 export type SubmissionKeyStore = ReturnType<typeof createSubmissionKeyStore>;
 
+/** En-tête lu par `server/middleware/idempotency-guard.ts` (`IDEMPOTENCY_HEADER`). */
+export const IDEMPOTENCY_HEADER = "Idempotency-Key";
+
 /** Portée partagée par les écrans qui saisissent un plein sur une mission. */
 export const missionFuelKeyScope = (missionId: number | string) => `mission-fuel-${missionId}`;
+
+/**
+ * Ajustement de stock d'une pièce : la portée inclut le delta, donc une nouvelle intention
+ * (autre pièce, autre quantité) prend une nouvelle clé, et le réessai de la même intention
+ * après une issue inconnue renvoie la même (le serveur répond 409 « vérifiez le stock »).
+ */
+export const partStockKeyScope = (partId: number | string, adjustment: number) => `part-stock-${partId}-${adjustment}`;
+
+/**
+ * Envoi sous clé : `take()` avant, `settle()` au succès, `settle(error)` en échec (la clé
+ * n'est conservée que si l'issue est inconnue). `send` reçoit la clé à poser en en-tête.
+ */
+export async function sendWithSubmissionKey<T>(
+  scope: string,
+  send: (key: string) => Promise<T>,
+  storage?: KeyStorage,
+): Promise<T> {
+  const store = createSubmissionKeyStore(scope, storage);
+  const key = store.take();
+  try {
+    const result = await send(key);
+    store.settle();
+    return result;
+  } catch (error) {
+    store.settle(error);
+    throw error;
+  }
+}
