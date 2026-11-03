@@ -56,6 +56,8 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 > environnement: les utiliser fait skipper les specs sans que rien ne le signale.
 - `E2E_WORKERS`: nombre de workers Playwright (defaut `1` pour stabilite locale)
 - `CI`: si defini, active 2 retries par test
+- `E2E_RECORD=1`: mode enregistrement (montage video par fonctionnalite). Video et capture de **chaque** test, succes compris, en 1280x720 (taille du viewport), sans trace. Sortie : `test-results/recordings/<spec>-<titre du test>-chromium/` (`video.webm`, `test-finished-1.png`). Playwright vide ce dossier au debut de chaque run : copier les videos avant de relancer. Sans la variable, le defaut reste « en cas d'echec seulement »
+- `PORT`: port du serveur lance par Playwright (defaut `5000`), pour tourner a cote d'un serveur deja lance
 
 ## Configuration (`playwright.config.ts`)
 
