@@ -9,6 +9,13 @@ import { join } from "path";
  * (`authenticate`, `isAnyUser`, `authorize([... 'client' ...])`, `isWorkflowDocumentWriter`...)
  * mais aucune garde qui exclut le client, et que son corps ne contrôle ni le propriétaire ni
  * l'OT AVANT d'envoyer la donnée.
+ *
+ * Portée réelle : seuls sont jugés les GET portant une garde reconnue (`authenticate`, `is*`,
+ * `guardBy*`, `garde*`, `authorize([...])` en ligne). Limites connues, durcissement en échec fermé
+ * prévu au lot A4 : une garde locale à un fichier ou nommée autrement (`readers`, `canAccessBilling`,
+ * `requireSession`) n'est pas classée et la route est vue comme publique ; un `authorize([...])`
+ * posé au montage n'est pas lu ; un spread en ligne non résolu est présumé restrictif ; le contrôle
+ * « avant l'envoi » est une position textuelle, pas un flux.
  */
 
 /** Retire les commentaires de ligne et de bloc hors chaînes : un commentaire ne vaut ni garde ni contrôle. */
