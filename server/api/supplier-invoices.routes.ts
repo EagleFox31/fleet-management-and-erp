@@ -5,6 +5,7 @@ import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { withLogContext } from "../lib/error-log-context";
 import { storage } from "../storage";
 import { supplierManagementService } from "../services/supplier-management-service";
 import multer from "multer";
@@ -130,8 +131,7 @@ const checkAuth = async (req: Request, res: Response, next: NextFunction) => {
 
     next();
   } catch (error) {
-    console.error('Error in checkAuth middleware:', error);
-    return res.status(500).json({ error: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Échec du chargement de l'utilisateur (checkAuth)" }));
   }
 };
 
@@ -277,7 +277,7 @@ const uploadSettlementProof = multer({
  * GET /api/supplier-invoices
  * Liste des factures fournisseurs avec filtres
  */
-router.get("/", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, supplierId, hasDiscrepancy, startDate, endDate } = req.query;
 
@@ -293,11 +293,7 @@ router.get("/", checkReadPermission, async (req: Request, res: Response) => {
     
     res.json(invoices);
   } catch (error) {
-    console.error("Erreur lors de la récupération des factures:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des factures",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des factures.", { cause: error }), { event: "Erreur lors de la récupération des factures" }));
   }
 });
 
@@ -358,16 +354,12 @@ router.post("/", checkCreatePermission, async (req: Request, res: Response, next
  * GET /api/supplier-invoices/discrepancies
  * Récupérer les factures avec écarts à traiter (dashboard)
  */
-router.get("/discrepancies", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/discrepancies", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await threeWayMatchingService.escalateDiscrepancies();
     res.json(result);
   } catch (error) {
-    console.error("Erreur lors de la récupération des écarts:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des écarts",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des écarts.", { cause: error }), { event: "Erreur lors de la récupération des écarts" }));
   }
 });
 
@@ -375,16 +367,12 @@ router.get("/discrepancies", checkReadPermission, async (req: Request, res: Resp
  * GET /api/supplier-invoices/overdue
  * Récupérer les factures en retard (dueDate dépassée et non payées)
  */
-router.get("/overdue", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/overdue", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const overdueInvoices = await threeWayMatchingService.getOverdueInvoices();
     res.json(overdueInvoices);
   } catch (error) {
-    console.error("Erreur lors de la récupération des factures en retard:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des factures en retard",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des factures en retard.", { cause: error }), { event: "Erreur lors de la récupération des factures en retard" }));
   }
 });
 
@@ -392,7 +380,7 @@ router.get("/overdue", checkReadPermission, async (req: Request, res: Response) 
  * POST /api/supplier-invoices/auto-approve
  * Approuver automatiquement les factures sans écart
  */
-router.post("/auto-approve", checkAutoApprovePermission, async (req: Request, res: Response) => {
+router.post("/auto-approve", checkAutoApprovePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -413,11 +401,7 @@ router.post("/auto-approve", checkAutoApprovePermission, async (req: Request, re
       message: `${result.approvedCount} facture(s) approuvée(s) automatiquement`
     });
   } catch (error) {
-    console.error("Erreur lors de l'approbation automatique:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de l'approbation automatique",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de l'approbation automatique.", { cause: error }), { event: "Erreur lors de l'approbation automatique" }));
   }
 });
 
@@ -425,16 +409,12 @@ router.post("/auto-approve", checkAutoApprovePermission, async (req: Request, re
  * GET /api/supplier-invoices/statistics
  * Statistiques globales des factures fournisseurs
  */
-router.get("/statistics", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/statistics", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await threeWayMatchingService.getStatistics();
     res.json(stats);
   } catch (error) {
-    console.error("Erreur lors de la récupération des statistiques:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération des statistiques",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des statistiques.", { cause: error }), { event: "Erreur lors de la récupération des statistiques" }));
   }
 });
 
@@ -442,7 +422,7 @@ router.get("/statistics", checkReadPermission, async (req: Request, res: Respons
  * GET /api/supplier-invoices/:id
  * Détails d'une facture avec contrôle 3 voies
  */
-router.get("/:id", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/:id", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const invoiceId = parseInt(req.params.id);
     const invoiceData = await threeWayMatchingService.getSupplierInvoiceById(invoiceId);
@@ -488,11 +468,7 @@ router.get("/:id", checkReadPermission, async (req: Request, res: Response) => {
 
     res.json(response);
   } catch (error) {
-    console.error("Erreur lors de la récupération de la facture:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération de la facture",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération de la facture.", { cause: error }), { event: "Erreur lors de la récupération de la facture" }));
   }
 });
 
@@ -500,7 +476,7 @@ router.get("/:id", checkReadPermission, async (req: Request, res: Response) => {
  * PATCH /api/supplier-invoices/:id/validate
  * Valider une facture (étape 1 du workflow)
  */
-router.patch("/:id/validate", checkAuth, async (req: Request, res: Response) => {
+router.patch("/:id/validate", checkAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -550,11 +526,7 @@ router.patch("/:id/validate", checkAuth, async (req: Request, res: Response) => 
       message: "Facture validée avec succès"
     });
   } catch (error) {
-    console.error("Erreur lors de la validation de la facture:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de la validation de la facture",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la validation de la facture.", { cause: error }), { event: "Erreur lors de la validation de la facture" }));
   }
 });
 
@@ -562,7 +534,7 @@ router.patch("/:id/validate", checkAuth, async (req: Request, res: Response) => 
  * PATCH /api/supplier-invoices/:id/approve
  * Approuver une facture (étape 2 du workflow)
  */
-router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: Response) => {
+router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: "Utilisateur non authentifié" });
@@ -588,11 +560,7 @@ router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: 
       message: "Facture approuvée avec succès"
     });
   } catch (error) {
-    console.error("Erreur lors de l'approbation de la facture:", error);
-    res.status(500).json({ 
-      error: "Erreur lors de l'approbation de la facture",
-      details: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de l'approbation de la facture.", { cause: error }), { event: "Erreur lors de l'approbation de la facture" }));
   }
 });
 
@@ -600,7 +568,7 @@ router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: 
  * GET /api/supplier-invoices/:id/settlements
  * Historique des règlements saisis / rapprochés pour une facture
  */
-router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Response) => {
+router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const invoiceId = parseInt(req.params.id);
     if (Number.isNaN(invoiceId)) {
@@ -610,11 +578,7 @@ router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Re
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     res.json(settlements);
   } catch (error) {
-    console.error("Erreur lors de la récupération des règlements:", error);
-    res.status(500).json({
-      error: "Erreur lors de la récupération des règlements",
-      details: error instanceof Error ? error.message : "Erreur inconnue",
-    });
+    next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des règlements.", { cause: error }), { event: "Erreur lors de la récupération des règlements" }));
   }
 });
 
@@ -652,10 +616,10 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
   uploadSettlementProof(req, res, async (err) => {
     try {
       if (err) {
-        return res.status(400).json({
-          error: "Upload justificatif invalide",
-          details: err.message,
-        });
+        const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+          ? "Justificatif trop volumineux : 8 Mo maximum."
+          : "Justificatif invalide. Formats acceptés : PDF, JPG, PNG, WEBP.";
+        return next(new AppError(400, message, { cause: err }));
       }
 
       if (!req.user) {

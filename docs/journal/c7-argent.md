@@ -48,3 +48,20 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R : une seule règle de date pour les papiers véhicule ;
   - D : permis inchangé, `checks[]` inchangé ;
   - failure memory : entrée LESSONS.
+
+## 2026-11-03T19:03:17+01:00 — P2 : règlement de facture rejoué depuis une mission livrée par le parcours
+
+- **Agent** : c7 · **Branche** : `test/p2-delivered-by-journey` · **Commit** : voir `git log` de la branche
+- **Statut** : fait, en relecture
+- **Quoi** : `e2e/13-mission-invoice-payment` n'écrit plus `missions.status = delivered`.
+  - Test 1 : affectation, lancement et livraison à l'écran.
+  - Tests 2 à 4 : mêmes routes par l'API (PATCH affectation, PATCH budgets, PUT status).
+  - P2 passe à « Fait » dans `docs/qa/PLAN_COUVERTURE_MODULES.md`.
+- **Comment** : nouveau `e2e/helpers/mission-journey.ts`, extrait de la spec 17 (véhicule aux papiers valides, chauffeur FORMÉ, crédit carte, parcours navigateur et API, nettoyage). La spec 17 l'importe désormais.
+- **Pourquoi** : le paiement était testé sur un état posé en base, qui ne prouvait pas que le parcours réel y mène.
+- **Comment tester** : `node node_modules/@playwright/test/cli.js test e2e/13-mission-invoice-payment.spec.ts e2e/17-mission-lifecycle.spec.ts` sur une base de test (jamais la prod).
+- **Preuve automatisée** : spec 13 4/4, spec 17 5/5, sur une base locale dédiée (`fleet_test_c7e2e`).
+- **RAIDER** :
+  - R : helper partagé par les deux specs ;
+  - D : la spec 17 reste verte ;
+  - I : données préfixées, supprimées en fin de spec.

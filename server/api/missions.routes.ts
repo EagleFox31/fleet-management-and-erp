@@ -20,6 +20,7 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
+import { toFieldErrors } from "@shared/errors";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
@@ -1055,7 +1056,8 @@ router.get("/:id/fuel-records", async (req, res) => {
 });
 
 // POST /api/missions/:id/fuel-records - Enregistrer un plein lié à une mission
-router.post("/:id/fuel-records", async (req, res, next) => {
+// Débite la carte de l'entreprise : gestionnaires de mission et chauffeur affecté seulement (contrôle du chauffeur plus bas).
+router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"]), async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {
@@ -1083,9 +1085,9 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     const requestKey = readFuelRequestKey(req.body);
     const parsedPayload = payloadSchema.safeParse(req.body ?? {});
     if (!parsedPayload.success) {
-      return res.status(400).json({
-        message: "Payload invalide.",
-        errors: parsedPayload.error.errors,
+      throw new AppError(400, "Payload invalide.", {
+        fieldErrors: toFieldErrors(parsedPayload.error.issues),
+        cause: parsedPayload.error,
       });
     }
 
@@ -1116,6 +1118,18 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
+    // Périmètre d'abord : un chauffeur non affecté reçoit 403 quel que soit le véhicule envoyé, sans
+    // pouvoir distinguer 400 et 403 pour deviner le véhicule d'une mission hors de son périmètre.
+    if (actorRole === "driver") {
+      if (!mission.assignmentDriverId || !mission.assignmentDriverUserId) {
+        throw new AppError(403, "Aucun chauffeur valide affecté à cette mission.");
+      }
+
+      if (mission.assignmentDriverUserId !== actorUserId) {
+        throw new AppError(403, "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.");
+      }
+    }
+
     // Statut : contrôlé sous le verrou de ligne, après le rejeu (assertMissionAcceptsFuel), pas ici.
     if (!mission.assignmentId || !mission.assignmentVehicleId) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
@@ -1125,16 +1139,6 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       return res.status(400).json({
         message: "Le véhicule renseigné ne correspond pas au véhicule affecté à la mission.",
       });
-    }
-
-    if (actorRole === "driver") {
-      if (!mission.assignmentDriverId || !mission.assignmentDriverUserId) {
-        throw new AppError(403, "Aucun chauffeur valide affecté à cette mission.");
-      }
-
-      if (mission.assignmentDriverUserId !== actorUserId) {
-        throw new AppError(403, "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.");
-      }
     }
 
     const consumption = {

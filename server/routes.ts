@@ -3173,17 +3173,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/fuel-card/consumption : servi par server/api/fuel-card.routes.ts (monté avant).
   // === VAT & BILLING SERVICE ROUTES (Sprint 1 - Phase 2) ===
   
-  // Synthèse complète fournisseurs avec factures (96 factures)
-  app.get("/api/suppliers/summary", authenticate, async (_req, res) => {
-    try {
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const summary = await vatBillingService.getSuppliersSummary();
-      return res.status(200).json(summary);
-    } catch (error) {
-      console.error("Get suppliers summary error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/suppliers/summary : servi par server/api/suppliers.routes.ts (déclaré avant /:id).
   
   // Statistiques par famille de produits
   app.get("/api/invoices/by-family", isStaff, async (req, res) => {
@@ -3833,10 +3823,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backupFile = files.find(f => f.startsWith('fleet-backup-') && f.endsWith('.json'));
       
       if (!backupFile) {
-        return res.status(404).json({ 
-          message: "Fichier de backup non trouvé",
-          availableFiles: files
-        });
+        // Le listage du dossier backup/ reste côté serveur (AGENTS.md §10).
+        return res.status(404).json({ message: "Fichier de backup non trouvé" });
       }
 
       const backupFilePath = path.join(backupDir, backupFile);
