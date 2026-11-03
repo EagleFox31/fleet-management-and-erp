@@ -1622,3 +1622,34 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un fichier téléversé n'est conservé qu'une fois qu'une écriture validée le référence. Supprimer dans un `finally` gardé par un drapeau posé après le commit, jamais refus par refus ; les effets de bord après le commit n'y touchent pas.
+
+## 2026-11-03 — Alertes écrites en base sans trame temps réel (couche 2 oubliée, récidive)
+
+### Contexte
+- À la réception de pièces, `procurement-service` (`notifyDeliveryReceived` et `notifyPartReceived`) insérait des alertes pour le chef d'atelier et le technicien, sans émettre `alert_created`. La cloche et le toast restaient muets jusqu'au rechargement.
+- Le renouvellement de document émettait bien la trame, mais avec une charge imbriquée `{ alert }` alors que `useRealTimeSync` lit une charge à plat : toast vide.
+- Ce n'est pas la première fois : la couche 2 des transitions (AGENTS.md §2) avait déjà été oubliée sur d'autres écrans.
+
+### Cause racine
+- Classification : contrat implicite non outillé.
+- Chaque site écrivait `db.insert(alerts)` puis construisait sa trame à la main, ou l'oubliait. Rien ne liait l'insertion à l'émission, et la forme attendue par le client n'était écrite nulle part côté serveur.
+- Un envoi qui levait au milieu de la boucle coupait aussi les trames suivantes et `parts_delivered`.
+
+### Résolution
+- Un helper unique, `server/lib/alert-broadcast.ts` (`broadcastAlertCreated`) :
+  - charge à plat ;
+  - portée nominative, ou repli sur des rôles explicites, jamais de broadcast ;
+  - ne lève jamais : un échec est journalisé par alerte.
+- Les sites de procurement et de renouvellement passent par lui, avec `.returning()` sur l'insertion.
+
+### Prévention (vérifiable)
+- `tests/contract/procurement-alert-realtime.contract.test.ts` vérifie quatre points :
+  - la trame est reçue par deux rôles distincts, et non par le magasinier ;
+  - toute trame `alert_created` a une portée `user` ;
+  - un envoi raté ne coupe pas la suite ;
+  - la charge du renouvellement est à plat.
+- Rouge sans le correctif : 3 sur 3 pour le lot initial (#180), puis 1 sur 4 pour le try/catch par alerte.
+- À venir (backlog de) : un garde d'hygiène qui échoue sur tout `insert(alerts)` d'un fichier qui n'appelle ni `broadcastAlertCreated` ni `alert-service`.
+
+### Règle Projet (obligatoire)
+- Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
