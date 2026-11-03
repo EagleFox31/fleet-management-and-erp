@@ -1,10 +1,11 @@
 import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { activityLogs, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
+import * as mirrorLib from "../../server/lib/vehicle-document-mirror";
 import { syncVehicleDocumentMirror } from "../../server/lib/vehicle-document-mirror";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -65,6 +66,10 @@ afterAll(async () => {
   if (ids.userIds.length) await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
@@ -154,5 +159,21 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     expect((await upload({ type: "carte_grise" }, "workshop_manager")).status).toBe(400);
     expect((await upload({ name: "n", type: "carte_grise" }, "workshop_manager", "text/plain")).status).toBe(400);
     expect(filesOnDisk()).toHaveLength(before);
+  });
+  it("P3-2 : si la synchro du miroir echoue, 500 lisible, aucune ligne document et fichier supprime", async () => {
+    const rowsBefore = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    const filesBefore = filesOnDisk().length;
+    vi.spyOn(mirrorLib, "syncVehicleDocumentMirror").mockRejectedValueOnce(new Error("SQL secret: relation vehicles"));
+    const res = await upload({ name: "Echec miroir", type: "assurance", expiryDate: "2035-01-01" }, "workshop_manager");
+    expect(res.status).toBe(500);
+    expect(res.body.message).toContain("Une erreur technique est survenue");
+    expect(res.body.message).toContain(`Référence : ${res.body.requestId}`);
+    expect(res.body.code).toBeTruthy();
+    expect(res.body.requestId).toBeTruthy();
+    expect(JSON.stringify(res.body)).not.toMatch(/SQL|secret|relation|stack/i);
+    const rowsAfter = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rowsAfter).toHaveLength(rowsBefore.length);
+    expect(rowsAfter.some((r) => r.name === "Echec miroir")).toBe(false);
+    expect(filesOnDisk()).toHaveLength(filesBefore);
   });
 });
