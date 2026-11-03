@@ -72,6 +72,12 @@ export class AlertService {
     "warehouse",
   ];
 
+  // Stock bas : le magasin réapprovisionne, l'admin surveille (décision du 3 novembre 2026).
+  private readonly lowStockRecipients: AlertRecipientRole[] = [
+    "admin",
+    "warehouse",
+  ];
+
   /**
    * Une fiche fournisseur est "à compléter" quand elle ne porte que son nom.
    * Cas produit par la création inline depuis le formulaire pièce: le magasinier
@@ -258,6 +264,27 @@ export class AlertService {
       entityType: "part_requirement",
       entityId: params.requirementId,
       targetRoles: this.stockOverrideRecipients,
+    });
+  }
+
+  /**
+   * Stock bas après un mouvement : une alerte nominative et une trame `alert_created`
+   * par admin et magasinier. `createAlertIfNotExists` déduplique par destinataire
+   * (même titre et même lien non lus). À appeler hors transaction, après le commit.
+   */
+  async notifyLowStock(params: {
+    partId: number;
+    title: string;
+    message: string;
+    priority: Alert["priority"];
+  }): Promise<void> {
+    await this.createAlertIfNotExists({
+      type: "inventory",
+      title: params.title,
+      message: params.message,
+      priority: params.priority,
+      link: `/warehouse/parts/${params.partId}`,
+      targetRoles: this.lowStockRecipients,
     });
   }
 

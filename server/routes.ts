@@ -42,6 +42,7 @@ import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
+import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
 import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { revokeUserAccess } from "./lib/user-sessions";
@@ -3431,7 +3432,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsedAlert = insertAlertSchema.parse(req.body);
       
       const alert = await storage.createAlert(parsedAlert);
-      
+      // Couche 2 : la cloche du destinataire l'apprend tout de suite (sans destinataire : rien, §11).
+      broadcastAlertCreated(alert);
+
       return res.status(201).json(alert);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -3441,7 +3444,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.error("Create alert error:", error);
+      log.error({ err: error, requestId: req.requestId }, "création d'alerte en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4399,7 +4402,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           continue;
         }
 
-        await storage.createAlert({
+        const created = await storage.createAlert({
           userId: recipientId,
           title: requestConfig.title,
           message: requestMessage,
@@ -4407,6 +4410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           priority: "high",
           link: requestLink,
         });
+        broadcastAlertCreated(created);
         requestsCreated += 1;
       }
 

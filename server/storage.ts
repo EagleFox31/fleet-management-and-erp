@@ -34,6 +34,11 @@ export type StockWriteOptions = {
   executor?: DbExecutor;
   /** Refuser une sortie qui rendrait le stock négatif (contrôle atomique). */
   requireAvailable?: boolean;
+  /**
+   * Avec `executor` : reçoit les effets à jouer après le commit (trame `alert_created`).
+   * Sans lui, une alerte écrite dans la transaction n'est pas diffusée (elle pourrait être annulée).
+   */
+  afterCommit?: (effect: () => void | Promise<void>) => void;
 };
 type FleetStatsSnapshot = {
   operational: number;
@@ -2029,7 +2034,7 @@ export class DatabaseStorage implements IStorage {
       });
 
       // Vérifier et créer les alertes de stock automatiquement
-      await this.checkAndCreateStockAlerts(partId, currentPart, newStock, previousStock);
+      await this.checkAndCreateStockAlerts(partId, currentPart, newStock, previousStock, options);
     } catch (error) {
       if (isAppError(error)) throw error;
       storageLog.error({ err: error, partId, movementType, quantity, workOrderId }, 'mouvement de stock en échec');
@@ -2038,7 +2043,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Fonction pour vérifier et créer les alertes de stock automatiquement
-  private async checkAndCreateStockAlerts(partId: number, part: Part, newStock: number, previousStock: number): Promise<void> {
+  private async checkAndCreateStockAlerts(
+    partId: number,
+    part: Part,
+    newStock: number,
+    previousStock: number,
+    options: StockWriteOptions = {},
+  ): Promise<void> {
+    // L'alerte suit le mouvement : créée après son commit, jamais pour un mouvement annulé.
     try {
       const minThreshold = part.minQuantity;
       const alertThreshold = Math.ceil(minThreshold * 1.2); // Seuil d'alerte à 20% au-dessus du minimum
@@ -2078,35 +2090,29 @@ export class DatabaseStorage implements IStorage {
 
       // Créer l'alerte si nécessaire
       if (alertMessage) {
-        // Vérifier si une alerte similaire n'existe pas déjà récemment
-        const existingAlerts = await db
-          .select()
-          .from(alerts)
-          .where(
-            and(
-              ilike(alerts.message, `%${part.name}%`),
-              eq(alerts.isRead, false),
-              gte(alerts.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)) // Dernières 24h
-            )
-          );
-
-        // Ne créer l'alerte que si il n'y en a pas de similaire récente non lue
-        if (existingAlerts.length === 0) {
-          await db.insert(alerts).values({
-            userId: 1, // Admin par défaut - à adapter selon le contexte
-            title: `Stock ${alertPriority === 'critical' ? 'Critique' : 'Bas'}`,
-            message: alertMessage,
-            type: 'inventory',
-            priority: alertPriority,
-            isRead: false,
-            link: `/warehouse/parts/${partId}`
-          });
-
-          console.log(`Alerte créée: ${alertMessage}`);
-        }
+        // Destinataires : tous les admins et magasiniers, une alerte et une trame chacun
+        // (décision du 3 novembre 2026). Écrite hors de la transaction du mouvement, après
+        // son commit : un échec de l'alerte ne peut pas annuler la sortie de stock, et une
+        // sortie annulée n'emporte aucune alerte.
+        const notify = async () => {
+          try {
+            const { alertService } = await import("./services/alert-service");
+            await alertService.notifyLowStock({
+              partId,
+              title: `Stock ${alertPriority === 'critical' ? 'Critique' : 'Bas'}`,
+              message: alertMessage,
+              priority: alertPriority,
+            });
+          } catch (error) {
+            storageLog.error({ err: error, partId }, "alerte de stock non créée");
+          }
+        };
+        if (!options.executor) await notify();
+        else if (options.afterCommit) options.afterCommit(notify);
+        else storageLog.warn({ partId }, "mouvement en transaction sans afterCommit : alerte de stock non créée");
       }
     } catch (error) {
-      console.error('Error creating stock alert:', error);
+      storageLog.error({ err: error, partId }, "alerte de stock non créée");
       // Ne pas faire échouer l'opération principale si la création d'alerte échoue
     }
   }

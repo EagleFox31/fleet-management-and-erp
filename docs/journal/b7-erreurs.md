@@ -164,3 +164,9 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `.catch` sur l'INSERT, `fs.rmSync(filePath, { force: true })`, échec du ménage journalisé en `warn` sans masquer l'erreur d'origine. Route (routes.ts gelé) inchangée.
 - Pourquoi : le fichier était écrit avant l'INSERT ; sans ligne, plus rien ne permettait de le retrouver ni de le supprimer (enquête multer).
 - Preuve : `tests/integration/workflow-document-orphan.test.ts` rouge sans correctif (1 fichier restant), vert avec ; transfert 5/5, tsc 0, unitaires 1868.
+## 2026-11-03T17:35:36+01:00 — alert_created sur POST /api/alerts et POST /api/test-date-maintenance
+
+- Quoi : les deux handlers existants de `server/routes.ts` émettent `broadcastAlertCreated` après chaque `storage.createAlert` ; ils sortent de la liste gelée de `alert-emission-hygiene`.
+- Comment : émission dans le handler, aucune route ajoutée ; portée nominative, sans repli de rôles (§11). Le `console.error` du handler POST /api/alerts migré vers `log.error` avec `requestId`.
+- Pourquoi : alertes écrites sans trame, la cloche du destinataire attendait le polling (suite de #195). `checkAndCreateStockAlerts` reste gelé, chantier de la session de.
+- Preuve : `tests/contract/alerts-manual-realtime.contract.test.ts` 2/2, rouge 2/2 sans le correctif ; alerts-inbox et procurement-alert-realtime verts ; tsc 0 ; unitaires 1868.
