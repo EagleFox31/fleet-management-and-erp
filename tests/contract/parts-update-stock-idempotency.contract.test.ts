@@ -25,12 +25,25 @@ let server: Server;
 let baseUrl = "";
 let cookie = "";
 let userId = 0;
+const extraUserIds: number[] = [];
 const ids = createIdBag();
 
-async function adjust(partId: number, adjustment: number, key?: string) {
+async function login(role: "warehouse" | "driver") {
+  const user = await createTestUser({ role });
+  ids.userIds.push(user.id);
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: user.username, password: TEST_USER_PASSWORD }),
+  });
+  expect(res.status).toBe(200);
+  return { id: user.id, cookie: res.headers.get("set-cookie")!.split(";")[0] };
+}
+
+async function adjust(partId: number, adjustment: number, key?: string, as = cookie) {
   const response = await fetch(`${baseUrl}/api/parts/${partId}/update-stock`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: cookie, ...(key ? { "Idempotency-Key": key } : {}) },
+    headers: { "Content-Type": "application/json", Cookie: as, ...(key ? { "Idempotency-Key": key } : {}) },
     body: JSON.stringify({ adjustment, reason: "TEST idempotence" }),
   });
   return { status: response.status, body: await response.json().catch(() => null), headers: response.headers };
@@ -69,7 +82,7 @@ beforeAll(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 afterAll(async () => {
-  await db.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, userId));
+  await db.delete(idempotencyKeys).where(inArray(idempotencyKeys.userId, [userId, ...extraUserIds]));
   if (ids.partIds.length > 0) await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -115,6 +128,34 @@ describe("Ajustement de stock : idempotence", { timeout: 120000 }, () => {
     expect((await adjust(part.id, 2, uniqueTestToken("idem"))).status).toBe(200);
     expect((await adjust(part.id, 2, uniqueTestToken("idem"))).status).toBe(200);
     expect((await stateOf(part.id)).quantity).toBe(14);
+  });
+
+  it("même clé, deux comptes : deux ajustements, jamais la réponse de l'autre", async () => {
+    const other = await login("warehouse");
+    extraUserIds.push(other.id);
+    const part = await newPart(10);
+    const key = uniqueTestToken("idem");
+    const mine = await adjust(part.id, 2, key);
+    const theirs = await adjust(part.id, 2, key, other.cookie);
+    expect(mine.status).toBe(200);
+    expect(theirs.status).toBe(200);
+    expect(theirs.headers.get("idempotent-replayed")).toBeNull();
+    expect((await stateOf(part.id)).quantity).toBe(14);
+  });
+
+  it("rôle hors magasin avec une clé : 403, aucune clé ni mouvement laissés", async () => {
+    const driver = await login("driver");
+    extraUserIds.push(driver.id);
+    const part = await newPart(10);
+    const before = await stateOf(part.id);
+    const key = uniqueTestToken("idem");
+    const res = await adjust(part.id, 2, key, driver.cookie);
+    expect(res.status).toBe(403);
+    expect(await stateOf(part.id)).toEqual(before);
+    await vi.waitFor(async () => {
+      const rows = await db.select().from(idempotencyKeys).where(and(eq(idempotencyKeys.userId, driver.id), eq(idempotencyKeys.key, key)));
+      expect(rows).toHaveLength(0);
+    });
   });
 
   it("sans clé : comportement inchangé", async () => {

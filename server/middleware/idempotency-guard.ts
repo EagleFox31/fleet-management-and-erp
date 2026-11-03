@@ -8,6 +8,7 @@ import {
   IDEMPOTENCY_REPLAYED_HEADER,
   IDEMPOTENCY_ROUTES,
   isReplayableStatus,
+  PRE_WRITE_REFUSALS,
   type IdempotencyRoute,
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
@@ -40,9 +41,6 @@ export function findIdempotentRoute(routes: readonly IdempotencyRoute[], method:
 export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): boolean {
   return findIdempotentRoute(routes, method, path) !== undefined;
 }
-
-/** Refus prononcés avant toute écriture : la clé est libérée même sur une route qui la garde. */
-const PRE_WRITE_REFUSALS = [401, 403, 408, 429];
 
 /**
  * Garde d'idempotence des écritures (CDC #10b), modèle du brouillon IETF « Idempotency-Key ».

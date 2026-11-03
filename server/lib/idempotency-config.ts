@@ -73,7 +73,10 @@ export const IDEMPOTENCY_STALE_SECONDS = 60;
 /**
  * Statuts conservés et rejoués. Les 5xx et les refus liés à la session ou au débit
  * (401, 403, 408, 429) sont libérés : le client doit pouvoir réessayer avec la même clé.
+ * Ces refus sont prononcés avant toute écriture : la clé est libérée même sur une route qui la garde.
  */
+export const PRE_WRITE_REFUSALS: readonly number[] = [401, 403, 408, 429];
+
 export function isReplayableStatus(status: number): boolean {
-  return status >= 200 && status < 500 && ![401, 403, 408, 429].includes(status);
+  return status >= 200 && status < 500 && !PRE_WRITE_REFUSALS.includes(status);
 }
