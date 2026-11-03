@@ -1989,6 +1989,13 @@ soumission sans doublon.
 - **Pourquoi** : réserves 1 à 3 de la relecture. Nouveau défaut D4 : le service compte en date UTC, l'éligibilité en date locale ; à 23:30Z (00:30 à Douala) une assurance échéant le lendemain bloque l'une et pas l'autre, même après correction de D1. Arbitrage produit sur la date de référence.
 - **Preuves** : rouge avant : fichier sonde temporaire avec les 5 formes, chacune vue (4 écritures miroir, 1 générique, 1 alias), sonde supprimée, liste gelée inchangée (aucun site réel nouveau) ; D4 en `it.fails` rougit quand le service compte en date locale. Vert après : `tsc` 0 erreur, `npm test` 1599/1599, contrat 9/9 sur fleet_test_p32gf2 (supprimée par dropdb).
 
+## 2026-11-03 12:30 — P3-2 lot 2b partie B : jour J expiré, date UTC, PATCH documents, téléversement
+
+- **Quoi** : D1/D2 le jour J est expiré partout ; D4 date du jour UTC unique (`shared/constants/expiry-day.ts` sur `shared/lib/utc-day.ts`) pour éligibilité, statistiques, alertes et lancement de mission ; D3 `PATCH /api/documents/:id` déplacé dans `vehicle-documents.routes.ts`, miroir recalé sur la plus lointaine échéance des documents du type ; M2 erreurs de téléversement génériques (détail dans `cause` et le journal), `EACCES|ENOSPC|EPERM` dans `looksTechnical` ; M3 extension confrontée au MIME.
+- **Comment** : les `it.fails` D1, D2, D3, D4 de #135 passent en `it` ; `document-expiry-day-j.test.ts` rejoue D4 sous Africa/Douala et UTC (23:30Z le 3 : non expiré partout, 00:00Z le 4 : expiré partout) ; liste gelée du scan d'hygiène du miroir vidée ; nouveaux tests `upload-extension-and-technical-errors` (unitaire) et `vehicle-documents-upload-errors` (contrat).
+- **Pourquoi** : une règle, une source ; décisions produit D2 (jour J expiré) et D4 (UTC partout). Décalage accepté : de 00:00 à 01:00 à Douala, le jour J est encore la veille.
+- **Preuves** : rouge avant (code de #135 restauré) : 7 échecs sur day-j et règle, 16 échecs unitaires et 4 contrats (M3 x2, M2 tronqué, D3). Vert après : `tsc` 0 erreur, `npm test` 1629/1629, contrats voisins 83/83 sur fleet_test_p32c (supprimée par dropdb).
+
 ## 2026-11-03 10:20 — FUEL3 constaté OK, PRT1 : accès, erreurs et suppression d'une pièce référencée
 
 - **Quoi** : FUEL3 passe de « À faire » à OK : la couverture existait déjà sur main et recouvre point par point le cadrage (limites exactes, plein sans kilométrage, premier plein, hors ordre, contrat de la liste, capacité par rôle), aucun test ajouté. PRT1 reste Partiel avec 12 cas de plus (et 2 tests témoins) ; deux défauts produit sont figés.

@@ -3,6 +3,7 @@ import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { isExpiredOn, todayUtcDateOnly } from "@shared/constants/expiry-day";
 
 const log = moduleLogger("vehicle-documentation");
 
@@ -30,10 +31,9 @@ const addDaysToDateOnly = (baseDateOnly: string, days: number): string => {
   return base.toISOString().slice(0, 10);
 };
 
-const isDateExpired = (value: DateValue, todayDateOnly: string): boolean => {
-  const dateOnly = toDateOnly(value);
-  return dateOnly !== null && dateOnly < todayDateOnly;
-};
+/** Expiré dès le jour J : règle unique de `shared/constants/expiry-day.ts`. */
+const isDateExpired = (value: DateValue, todayDateOnly: string): boolean =>
+  isExpiredOn(toDateOnly(value), todayDateOnly);
 
 const isDateExpiringSoon = (
   value: DateValue,
@@ -41,7 +41,7 @@ const isDateExpiringSoon = (
   limitDateOnly: string,
 ): boolean => {
   const dateOnly = toDateOnly(value);
-  return dateOnly !== null && dateOnly >= todayDateOnly && dateOnly <= limitDateOnly;
+  return dateOnly !== null && dateOnly > todayDateOnly && dateOnly <= limitDateOnly;
 };
 
 /**
@@ -113,7 +113,7 @@ export class VehicleDocumentationService {
     log.debug({ daysBeforeExpiry, ownerId }, "documents expirant bientôt : lecture");
 
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
-    const nowStr = new Date().toISOString().slice(0, 10);
+    const nowStr = todayUtcDateOnly();
     const expiryDateStr = addDaysToDateOnly(nowStr, daysBeforeExpiry);
 
     const carteGrise = allVehicles.filter((v) =>
@@ -166,7 +166,7 @@ export class VehicleDocumentationService {
 
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     const now = new Date();
-    const nowStr = now.toISOString().slice(0, 10);
+    const nowStr = todayUtcDateOnly(now);
 
     const expiredVehicles = allVehicles.filter((v) =>
       isDateExpired(v.licensePlateExpiry, nowStr) ||
@@ -271,7 +271,7 @@ export class VehicleDocumentationService {
 
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     
-    const todayDateOnly = new Date().toISOString().slice(0, 10);
+    const todayDateOnly = todayUtcDateOnly();
     const expiryDateOnly = addDaysToDateOnly(todayDateOnly, 30);
     
     // Compter documents valides, expirant bientôt, expirés
@@ -325,7 +325,7 @@ export class VehicleDocumentationService {
   async getAllVehiclesWithDocStatus(ownerId: number | null = null) {
     log.debug({ ownerId }, "véhicules avec statut documents : lecture");
 
-    const todayDateOnly = new Date().toISOString().slice(0, 10);
+    const todayDateOnly = todayUtcDateOnly();
     const expiryDateOnly = addDaysToDateOnly(todayDateOnly, 30);
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
     

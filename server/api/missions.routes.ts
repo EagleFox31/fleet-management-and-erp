@@ -17,6 +17,7 @@ import {
   extractMissionActualRoadExpensesHT,
   mergeMissionActualFdrCost,
 } from "@shared/constants/management-mission-profitability";
+import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
@@ -214,16 +215,12 @@ function isDateExpired(dateValue: Date | string | null | undefined): boolean {
 }
 
 /**
- * Même règle que `getMissionEligibility` : le jour de l'échéance bloque (jours écoulés >= 0).
- * Date illisible : bloque.
+ * Même règle que `getMissionEligibility` (source unique `shared/constants/expiry-day.ts`) :
+ * le jour de l'échéance bloque, la date du jour est la date UTC. Date illisible : bloque.
  */
 function isExpiredOnOrBeforeToday(dateValue: Date | string): boolean {
-  const candidate = new Date(dateValue);
-  if (Number.isNaN(candidate.getTime())) return true;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  candidate.setHours(0, 0, 0, 0);
-  return candidate <= today;
+  if (toExpiryDateOnly(dateValue) === null) return true;
+  return isExpiredOn(dateValue, todayUtcDateOnly());
 }
 
 function overlaps(
@@ -2429,7 +2426,8 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         const visiteTechnique = docsByType.get("visite_technique");
 
         // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
-        // comme dans getMissionEligibility).
+        // comme dans getMissionEligibility). Le jour de l'échéance bloque ; le jour
+        // courant est la date UTC (expiry-day.ts).
         // Récépissé provisoire valable : il lève l'échéance dépassée d'un papier présent,
         // jamais un papier manquant (même règle que getMissionEligibility).
         const receipts = await loadOpenRenewalReceipts(missionAssignment.vehicleId);

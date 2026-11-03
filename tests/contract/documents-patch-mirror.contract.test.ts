@@ -8,15 +8,10 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 
 /**
- * Niveau C, P3-2 : PATCH /api/documents/:id (server/routes.ts, route gelée) et miroir
- * `vehicles.*Expiry`. Fige le comportement actuel : la route écrit la colonne miroir
- * en direct (équivalent du mode "set" de la lib), sans comparer aux autres documents.
- *
- * Défaut connu (signalé, non corrigé ici) : corriger la date d'un document qui n'est
- * PAS le plus récent de son type fait reculer le miroir sur cette date plus ancienne ;
- * un véhicule peut ainsi redevenir « expiré » alors qu'un document valide existe. Le
- * scénario est en `it.fails` : vert tant que le défaut existe, rouge à la correction
- * (retirer alors `.fails`).
+ * Niveau C, P3-2 : PATCH /api/documents/:id (server/api/vehicle-documents.routes.ts) et
+ * miroir `vehicles.*Expiry`. Le miroir se recale sur la plus lointaine échéance des
+ * documents du type : corriger un document plus ancien que le plus récent ne le fait pas
+ * reculer (D3).
  */
 
 let server: Server;
@@ -149,8 +144,8 @@ describe("PATCH /api/documents/:id et miroir des échéances", { timeout: 120000
     expect((await mirrorOf(vehicleId)).insurance).toBe("2037-07-07");
   });
 
-  // Défaut connu : l'écriture est directe (mode "set"), sans garde « ne recule pas ».
-  it.fails("corriger un document qui n'est pas le plus récent ne fait pas reculer le miroir", async () => {
+  // D3 : le miroir se recale sur la plus lointaine échéance des documents du type.
+  it("corriger un document qui n'est pas le plus récent ne fait pas reculer le miroir", async () => {
     expect((await patch(stale.oldDoc, { expiryDate: "2031-01-01" }, "workshop_manager")).status).toBe(200);
     expect((await mirrorOf(stale.vehicleId)).insurance).toBe("2036-01-01");
   });
