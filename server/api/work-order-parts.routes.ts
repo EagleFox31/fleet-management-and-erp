@@ -24,6 +24,7 @@ import { moduleLogger } from "../lib/logger";
 const log = moduleLogger("work-order-parts");
 import { partRequirements, parts, users } from "@shared/schema";
 import { alertService } from "../services/alert-service";
+import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const router = Router();
 
@@ -165,7 +166,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
     if ((global as any).broadcastUpdate) {
       if (statusWasChanged) {
         (global as any).broadcastUpdate("work_order_updated", {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId,
           updates: { status: "awaiting_parts" },
           workOrder: updatedWorkOrder,
@@ -211,7 +212,7 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
   for (const requirement of created) {
     if (!requirement) continue;
     broadcast("part_requirement_created", {
-      scope: { type: "broadcast" },
+      scope: workOrderCostScope(),
       requirementId: requirement.id,
       workOrderId,
       partId: result.part.id,
@@ -224,7 +225,7 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
 
   if (result.workOrderStatusChanged) {
     broadcast("work_order_updated", {
-      scope: { type: "broadcast" },
+      scope: workOrderCostScope(),
       workOrderId,
       updates: { status: "awaiting_parts" },
       workOrder: result.workOrder,
@@ -233,7 +234,7 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
       actor,
     });
     broadcast("work_order_awaiting_parts", {
-      scope: { type: "broadcast" },
+      scope: workOrderStaffScope(),
       workOrderId,
       partName: result.part.name,
       partReference: result.part.reference,
@@ -436,7 +437,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
 
     if ((global as any).broadcastUpdate) {
       (global as any).broadcastUpdate("part_used_added", {
-        scope: { type: "broadcast" },
+        scope: workOrderCostScope(),
         workOrderId,
         partUsed,
         source: "issue_requirement_to_work_order",
@@ -445,7 +446,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
 
       if (updatedWorkOrder) {
         (global as any).broadcastUpdate("work_order_updated", {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId,
           updates: { status: "in_progress" },
           workOrder: updatedWorkOrder,

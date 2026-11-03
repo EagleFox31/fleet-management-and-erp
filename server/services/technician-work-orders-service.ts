@@ -4,6 +4,7 @@ import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
 import { computeWorkOrderCost } from '@shared/work-order-cost';
 import { moduleLogger } from '../lib/logger';
 import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger('technician-work-orders');
 
@@ -276,7 +277,7 @@ export class TechnicianWorkOrdersService {
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('work_order_status_changed', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           workOrderId,
           technicianId,
           oldStatus: existingOrder[0].status,

@@ -4,6 +4,7 @@ import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("preventive-maintenance");
 
@@ -41,7 +42,7 @@ function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   }
 
   broadcastUpdate("work_order_created", {
-    scope: { type: "broadcast" },
+    scope: workOrderCostScope(),
     workOrderId: workOrder.id,
     workOrder,
     source,

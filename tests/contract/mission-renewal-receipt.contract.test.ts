@@ -264,3 +264,51 @@ describe("carte grise : préparation alignée sur le lancement", { timeout: 6000
     expect(await readinessCheck(missionId, "doc_carte_grise")).toMatchObject({ passed: false, detail: "Carte grise manquante." });
   });
 });
+
+describe("colonnes miroir de vehicles : préparation alignée sur le lancement", { timeout: 60000 }, () => {
+  /** Papiers valides dans vehicle_documents ; seule la colonne miroir de l'assurance est échue. */
+  async function vehicleWithStaleMirror() {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    const assurance = await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(-4) }).where(eq(vehicles.id, vehicle.id));
+    return { vehicle, assurance };
+  }
+
+  it("assurance échue sur la fiche véhicule : item faux, motif de la règle partagée, lancement refusé", async () => {
+    const { vehicle } = await vehicleWithStaleMirror();
+    const missionId = await assignedMission(vehicle.id);
+    const check = await readinessCheck(missionId, "doc_assurance");
+    expect(check.passed).toBe(false);
+    expect(check.blocking).toBe(true);
+    expect(check.detail).toMatch(/^Assurance .*expir/i);
+    const launched = await launch(missionId);
+    expect(launched.status).toBe(400);
+    expect(JSON.stringify(launched.body)).toMatch(/ssurance/);
+  });
+
+  it("récépissé valable : l'item repasse au vert", async () => {
+    const { vehicle, assurance } = await vehicleWithStaleMirror();
+    const missionId = await assignedMission(vehicle.id);
+    await addReceipt(vehicle.id, assurance.id, "assurance", inDays(10));
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+  });
+
+  it("visite et plaque échues sur la fiche : leurs items tombent, l'assurance reste vraie", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    await db
+      .update(vehicles)
+      .set({ technicalInspectionDate: inDays(-2), licensePlateExpiry: inDays(-2), insuranceExpiry: inDays(50) })
+      .where(eq(vehicles.id, vehicle.id));
+    const missionId = await assignedMission(vehicle.id);
+    expect((await readinessCheck(missionId, "doc_visite_technique")).passed).toBe(false);
+    expect((await readinessCheck(missionId, "doc_carte_grise")).passed).toBe(false);
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+  });
+});
