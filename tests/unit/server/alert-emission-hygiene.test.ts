@@ -27,13 +27,12 @@ const NOT_A_NEW_ALERT: Record<string, string> = {
 /**
  * Défauts connus, gelés en égalité stricte : un site corrigé doit sortir de la liste, un nouveau
  * site muet fait échouer le test.
- * - POST /api/alerts : création manuelle (chef d'atelier) ; `server/routes.ts` est gelé, la
- *   correction passe par un routeur de `server/api/`.
- * - test-date-maintenance : route de diagnostic, à retirer ou à faire émettre.
+ * Aucun défaut connu à ce jour :
+ * - POST /api/alerts et POST /api/test-date-maintenance émettent depuis le 3 novembre 2026
+ *   (émission ajoutée dans le handler existant, aucune route créée) ;
+ * - checkAndCreateStockAlerts diffuse aux admins et magasiniers après le commit (même date).
  */
-const SILENT_WRITES_FROZEN = [
-  "server/routes.ts:POST /api/alerts",
-  "server/routes.ts:POST /api/test-date-maintenance",
+const SILENT_WRITES_FROZEN: string[] = [
 ];
 
 function walk(dir: string): string[] {
