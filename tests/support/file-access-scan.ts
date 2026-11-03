@@ -17,14 +17,21 @@ import { scopeOf } from "./alert-emission-scan";
  *
  * Garde : `isInsideDirectory(dir, p)` ne borne `p` que s'il en est le **second** argument (le
  * candidat), placé **avant** l'accès et dans la **même fonction** : une garde dans un rappel ou
- * après l'appel disque ne compte pas. Méthode sur une valeur bornée : seules `find`, `filter`,
+ * après l'appel disque ne compte pas. `dir` doit être une racine `uploads` connue (`isUploadsRoot`) :
+ * `isInsideDirectory(path.dirname(p), p)` ou `isInsideDirectory(req.body.dir, p)` ne bornent rien. Méthode sur une valeur bornée : seules `find`, `filter`,
  * `at` et `slice` gardent le résultat borné (`candidates.concat(p)[0]` ne l'est pas).
  *
  * Limites connues (garde statique, pas une preuve) :
  *   - borne appelée mais résultat ignoré : `isInsideDirectory(dir, p); fs.unlinkSync(p)` est jugé
  *     borné, que le `if` refuse ou non ; une garde dans une branche (`if (x) isInsideDirectory(…)`)
  *     compte comme si elle précédait l'accès sur tous les chemins ;
- *   - une réaffectation (`p = req.body.p` après une déclaration bornée) n'est pas suivie ;
+ *   - une réaffectation (`p = req.body.p` après une déclaration bornée) n'est pas suivie, ni le
+ *     masquage par bloc (`{ const p = req.body.p; … }` : les déclarations sont lues par nom dans toute
+ *     la portée, pas par bloc) ;
+ *   - `slice` et `at` sont jugés sur des tableaux : appliqués à une chaîne bornée
+ *     (`existingUploadedFile(p)?.slice(1)`), le résultat est jugé borné à tort ;
+ *   - les écritures (`writeFile*`, `appendFile*`, `createWriteStream`, `mkdir*`) ne figurent pas dans
+ *     `ACCESS_CALLS` : non couvertes, à suivre en dette ;
  *   - un chemin passé à une autre fonction est jugé dans la portée de celle-ci, sans suivre l'appelant.
  */
 
@@ -78,6 +85,26 @@ function enclosingFunction(node: ts.Node): ts.Node {
   return node.getSourceFile();
 }
 
+/**
+ * Racine `uploads` connue : littéral contenant `uploads`, `path.join` / `path.resolve` dont un argument
+ * l'est, ou identifiant dont toutes les déclarations du fichier le sont.
+ */
+function isUploadsRoot(node: ts.Expression, seen = new Set<string>()): boolean {
+  const expr = unwrap(node);
+  if (ts.isStringLiteralLike(expr)) return /(^|[\\/.])uploads([\\/]|$)/.test(expr.text);
+  if (ts.isCallExpression(expr)) {
+    const name = calleeName(expr);
+    return (name === "join" || name === "resolve") && expr.arguments.some((arg) => isUploadsRoot(arg, seen));
+  }
+  if (ts.isIdentifier(expr)) {
+    if (seen.has(expr.text)) return false;
+    seen.add(expr.text);
+    const initializers = initializersOf(expr.text, expr.getSourceFile());
+    return initializers.length > 0 && initializers.every((init) => isUploadsRoot(init, seen));
+  }
+  return false;
+}
+
 /** Méthodes dont le résultat reste dans l'ensemble borné (sous-ensemble ou élément). */
 const BOUND_PRESERVING_METHODS = new Set(["find", "filter", "at", "slice"]);
 
@@ -123,7 +150,7 @@ function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Nod
   seen.add(name);
   // Seul isInsideDirectory est une garde : uploadedFileCandidates(p) borne son résultat, pas p.
   const guarded = boundCallsIn(scope).some((call) => {
-    if (calleeName(call) !== "isInsideDirectory" || !call.arguments[1]) return false;
+    if (calleeName(call) !== "isInsideDirectory" || !call.arguments[1] || !isUploadsRoot(call.arguments[0])) return false;
     const candidate = unwrap(call.arguments[1]);
     return (
       ts.isIdentifier(candidate) &&
@@ -183,8 +210,10 @@ function isBoundAccess(node: ts.CallExpression, call: string, scope: ts.Node): b
  * Alias d'un appel disque, qui échapperaient au scan par nom :
  * `import { unlink as del }`, `const { unlink: del } = fs`, et toute référence non appelée à un
  * membre disque : `const del = fs.unlinkSync`, `del = fs["unlinkSync"]`, `fs.unlinkSync.bind(fs)`,
- * `promisify(fs.unlink)`.
+ * `promisify(fs.unlink)`. Un accès à `fs` par clé non littérale (`fs[k](p)`) est signalé lui aussi :
+ * le scan ne peut pas savoir quel appel il vise.
  */
+const FS_OBJECTS = /^(fs|fsp|fsPromises|promises|fs\.promises)$/;
 function aliasLabel(member: ts.Expression): string {
   let node: ts.Node = member;
   // fs.unlinkSync.bind(fs) : l'alias est ce qui reçoit le résultat de bind.
@@ -221,6 +250,13 @@ export function renamedAccessImports(file: string, text: string): string[] {
     const called = !!node.parent && ts.isCallExpression(node.parent) && node.parent.expression === node;
     if (member && ACCESS_CALLS.has(member) && !called) {
       renamed.push(`${file}:${member} as ${aliasLabel(node as ts.Expression)}`);
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      !ts.isStringLiteralLike(node.argumentExpression) &&
+      FS_OBJECTS.test(node.expression.getText())
+    ) {
+      renamed.push(`${file}:${node.expression.getText()}[${node.argumentExpression.getText()}]`);
     }
     ts.forEachChild(node, visit);
   };

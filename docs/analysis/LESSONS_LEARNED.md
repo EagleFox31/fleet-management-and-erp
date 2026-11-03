@@ -2028,3 +2028,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.
+
+## 2026-11-03 — Refus de transfert silencieux : document sorti du workflow sans arriver au véhicule (#228)
+
+### Contexte
+- `transferDocumentsToVehicle` saute un document dont le fichier source manque ou dont la destination sort du dossier du véhicule. Il marquait ensuite **tous** les documents de la session `isTransferred` : le document refusé disparaissait du workflow sans exister dans `vehicle_documents`.
+
+### Cause racine
+- Classification : effet de bord appliqué au lot, pas à l'élément. Le marquage portait sur la session entière, pas sur les ids réellement copiés. Le refus de sécurité ajouté par #210 en a fait une perte silencieuse.
+- Corollaire (#231) : le rejeu n'est pas idempotent. Il ne filtre ni `isTransferred = false` ni `workflowId`, si bien qu'un second transfert duplique les lignes.
+
+### Résolution
+- Seuls les ids copiés sont marqués (`inArray`). Un refus est journalisé en `warn` avec sa raison. Le rejeu idempotent est suivi dans #231, la reprise des données déjà marquées dans #229.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-document-transfer.test.ts`, cas « fichier source disparu », rouge sans le correctif.
+- À livrer avec #231 : le test « second transfert = zéro nouvelle ligne ».
+
+### Règle Projet (obligatoire)
+- Un refus laisse l'objet **visible et rejouable** : on ne marque que ce qui a réellement abouti. Le rejeu qui suit doit être idempotent (zéro écriture une fois convergé).

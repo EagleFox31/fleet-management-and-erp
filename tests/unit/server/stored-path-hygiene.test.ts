@@ -106,7 +106,7 @@ describe("scanFileAccesses", () => {
   it("borné par chaîne de déclarations ou par garde sur la même variable", () => {
     const text = `
       function chain(p) { const all = uploadedFileCandidates(p); const hit = all.find((c) => fs.existsSync(c)); res.download(hit); }
-      function guard(dir, p) { if (!isInsideDirectory(dir, p)) throw new Error("x"); fs.rmSync(p); }
+      function guard(p) { if (!isInsideDirectory(path.join(process.cwd(), "uploads"), p)) throw new Error("x"); fs.rmSync(p); }
       function loop(p) { for (const c of uploadedFileCandidates(p)) fs.unlink(c, () => {}); }
     `;
     expect(scanFileAccesses("c.ts", text).map((s) => s.bounded)).toEqual([true, true, true]);
@@ -163,15 +163,22 @@ describe("scanFileAccesses", () => {
   it("garde : second argument seulement, avant l'accès, dans la même fonction", () => {
     const text = `
       function asDirectory(p) { if (!isInsideDirectory(p, "/tmp/x")) return; fs.rmSync(p); }
-      function after(dir, p) { fs.rmSync(p); if (!isInsideDirectory(dir, p)) throw new Error("x"); }
-      function nested(dir, p) { const check = () => isInsideDirectory(dir, p); fs.rmSync(p); }
-      function before(dir, p) { if (!isInsideDirectory(dir, p)) return; fs.rmSync(p); }
+      function after(p) { fs.rmSync(p); if (!isInsideDirectory(path.join(process.cwd(), "uploads"), p)) throw new Error("x"); }
+      function nested(p) { const check = () => isInsideDirectory(path.join(process.cwd(), "uploads"), p); fs.rmSync(p); }
+      function before(p) { if (!isInsideDirectory(path.join(process.cwd(), "uploads"), p)) return; fs.rmSync(p); }
+      const ROOT = "./uploads/documents";
+      function viaConstant(p) { if (!isInsideDirectory(ROOT, p)) return; fs.rmSync(p); }
+      function dirnameOfItself(p) { if (!isInsideDirectory(path.dirname(p), p)) return; fs.rmSync(p); }
+      router.post("/d", (req, res) => { const p = req.body.p; if (!isInsideDirectory(req.body.dir, p)) return; fs.rmSync(p); });
     `;
     expect(scanFileAccesses("h.ts", text).map((s) => [s.scope, s.bounded])).toEqual([
       ["asDirectory", false],
       ["after", false],
       ["nested", false],
       ["before", true],
+      ["viaConstant", true],
+      ["dirnameOfItself", false],
+      ["POST /d", false],
     ]);
   });
 
@@ -191,5 +198,8 @@ describe("scanFileAccesses", () => {
     expect(renamedAccessImports("j.ts", `let del; del = fs.unlinkSync;`)).toEqual(["j.ts:unlinkSync as del"]);
     expect(renamedAccessImports("j.ts", `const del = promisify(fs.unlink);`)).toEqual(["j.ts:unlink as <valeur>"]);
     expect(renamedAccessImports("j.ts", `fs.unlinkSync(p); fs["rmSync"](p);`)).toEqual([]);
+    expect(renamedAccessImports("j.ts", `const k = pick(); fs[k](p);`)).toEqual(["j.ts:fs[k]"]);
+    expect(renamedAccessImports("j.ts", `fs.promises[method](p);`)).toEqual(["j.ts:fs.promises[method]"]);
+    expect(renamedAccessImports("j.ts", `const x = items[i];`)).toEqual([]);
   });
 });

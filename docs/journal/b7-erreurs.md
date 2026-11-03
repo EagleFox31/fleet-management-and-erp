@@ -218,3 +218,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : seuls les ids réellement copiés sont marqués (`inArray`). Un refus est journalisé en `warn` avec sa raison, et le bilan en `info`. Côté scan : la garde doit porter sur le second argument, se trouver avant l'accès et dans la même fonction ; seules `find`, `filter`, `at` et `slice` conservent la borne ; toute référence non appelée à un membre disque compte comme un alias. Le `.gitkeep` effacé par les tests était déjà réglé sur main (`trackDir` / `cleanupTrackedDir`).
 - Pourquoi : un refus de sécurité ne doit pas se payer d'une perte de document silencieuse. La garde statique doit refuser ce qu'elle ne prouve pas.
 - Preuve : intégration « fichier source disparu » verte, et rouge sans le correctif du service (`isTransferred: true` sur le document perdu). Hygiène 16/16, dont 3 cas rouges sans le correctif du scan. `server/` reste vert sans nouvelle exception. tsc 0 erreur, unitaires 1944/1944.
+
+## 2026-11-03T19:10:08+01:00 — #228 : réserves de relecture sur le scan des chemins
+
+- Quoi : la garde `isInsideDirectory(dir, p)` acceptait n'importe quel `dir`, y compris `path.dirname(p)`, toujours vrai, et `req.body.dir`. `fs[k](p)` à clé non littérale échappait au scan.
+- Comment : `dir` doit être une racine `uploads` connue (`isUploadsRoot` : littéral, `path.join`/`resolve`, ou constante du fichier qui en contient). Un accès à `fs` par clé dynamique est signalé comme alias. Limites ajoutées à l'en-tête : masquage par bloc, `slice`/`at` sur une chaîne, écritures hors `ACCESS_CALLS`. Issue #231 ouverte (rejeu non idempotent), liée à #229. Leçon ajoutée dans LESSONS_LEARNED.
+- Pourquoi : une garde qui compare un chemin à son propre dossier ne borne rien.
+- Preuve : hygiène 16/16 ; sans `isUploadsRoot` ni la détection de clé dynamique, 2 cas rouges. `server/` reste vert sans nouvelle exception. tsc 0 erreur, unitaires 1944/1944.
