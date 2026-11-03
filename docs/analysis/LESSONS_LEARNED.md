@@ -1118,6 +1118,25 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Avant de classer un test « flaky », vérifier s'il dépend de la date, de l'heure ou du fuseau. Une donnée de test datée doit tomber dans la période testée quel que soit le jour d'exécution ; un montant calculé se compare au centime, jamais par `toBe`.
 
+## 2026-11-02 - Supprimer une panne ou une pièce liée répondait 500 (clé étrangère sans onDelete)
+
+### Constat
+- `fault_catalog_parts` référençait `fault_catalog` et `parts` sans `onDelete` : supprimer une panne qui avait des pièces associées, ou une pièce citée par une panne, levait une violation de clé étrangère (23503) devenue une 500 « Erreur serveur ». Les routes d'association (variantes, spécifications, pièces de panne) n'existaient pas non plus.
+
+### Cause racine
+- Table créée par `drizzle-kit push` à partir d'un schéma sans règle de suppression, jamais exercée par un test : la suppression d'un parent ayant des enfants n'avait aucun cas de contrat. Premier correctif trop large : tout passer en CASCADE aurait permis à la suppression d'une pièce d'effacer silencieusement une partie du catalogue de pannes, et un dédoublonnage groupé sur (panne, pièce) seul aurait supprimé des lignes de quantité ou d'option différentes.
+
+### Résolution
+- Panne parent : CASCADE (supprimer une panne emporte ses lignes). Pièce : RESTRICT, et `deletePart` répond 409 « Pièce utilisée dans le catalogue de pannes » avant toute écriture. Dédoublonnage limité aux lignes strictement identiques (panne, pièce, quantité, optionnel) ; si des lignes divergentes subsistent, l'index unique n'est pas posé et un WARNING le dit.
+
+### Prévention (vérifiable)
+- `tests/contract/fault-catalog-lifecycle.contract.test.ts` : suppression d'une panne avec pièces (204, liens supprimés), suppression d'une pièce liée (409, rien supprimé).
+- `tests/integration/parts-catalog-children-migration.test.ts` : cas 1/false, 4/true, 1/false (divergence conservée, index non posé, WARNING) et cas de doublons identiques.
+- `tests/unit/server/parts-catalog-children-schema.test.ts` : la migration et sa réplique dans `init-database.ts` restent identiques.
+
+### Règle Projet (obligatoire)
+- Toute clé étrangère déclare son `onDelete` en choisissant explicitement entre CASCADE (l'enfant n'a pas de sens sans le parent) et RESTRICT (le parent est une donnée de référence), avec un test de suppression du parent portant des enfants. Une migration qui supprime des lignes ne supprime que ce qu'elle peut prouver redondant.
+
 ## 2026-11-02 - vi.mock inopérant dans les contrats selon l'ordre des shards
 
 ### Constat

@@ -1,5 +1,5 @@
-import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
@@ -621,7 +621,10 @@ export const partSpecifications = pgTable("part_specifications", {
   specificationValue: text("specification_value").notNull(),
   unit: text("unit"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_part_specifications_part_id").on(table.partId),
+  uniqueIndex("ux_part_specifications_part_name").on(table.partId, sql`lower(${table.specificationName})`),
+]);
 
 // Variantes de pièces
 export const partVariants = pgTable("part_variants", {
@@ -632,22 +635,48 @@ export const partVariants = pgTable("part_variants", {
   additionalPrice: numeric("additional_price", { precision: 10, scale: 2 }).default("0"),
   isAvailable: boolean("is_available").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_part_variants_part_id").on(table.partId),
+]);
 
 export const insertPartCategorySchema = createInsertSchema(partCategories).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertPartSpecificationSchema = createInsertSchema(partSpecifications).omit({
-  id: true,
-  createdAt: true,
-});
+// `partId` vient de l'URL (/parts/:id/...) : omis, donc ignoré s'il figure dans le corps.
+export const insertPartSpecificationSchema = createInsertSchema(partSpecifications)
+  .omit({ id: true, createdAt: true, partId: true })
+  .extend({
+    specificationName: z.string().trim().min(1, "Le nom de la spécification est obligatoire."),
+    specificationValue: z.string().trim().min(1, "La valeur de la spécification est obligatoire."),
+    // Champ vide = pas d'unité : "" devient null (le client envoie "" quand la case est vidée).
+    unit: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().nullish(),
+    ),
+  });
 
-export const insertPartVariantSchema = createInsertSchema(partVariants).omit({
-  id: true,
-  createdAt: true,
-});
+export const updatePartSpecificationSchema = insertPartSpecificationSchema.partial();
+
+// Supplément de prix : nombre positif ou nul (numeric(10,2)), accepté en nombre ou en chaîne, stocké en chaîne.
+const additionalPriceSchema = z.preprocess(
+  (value) => (typeof value === "number" && Number.isFinite(value) ? String(value) : value),
+  z
+    .string({ invalid_type_error: "Le supplément de prix doit être un nombre positif ou nul." })
+    .trim()
+    .regex(/^\d{1,8}(\.\d{1,2})?$/, "Le supplément de prix doit être un nombre positif ou nul."),
+);
+
+export const insertPartVariantSchema = createInsertSchema(partVariants)
+  .omit({ id: true, createdAt: true, partId: true })
+  .extend({
+    variantName: z.string().trim().min(1, "Le nom de la variante est obligatoire."),
+    variantCode: z.string().trim().min(1, "Le code de la variante est obligatoire."),
+    additionalPrice: additionalPriceSchema.optional().default("0"),
+  });
+
+export const updatePartVariantSchema = insertPartVariantSchema.partial();
 
 // Type exports pour les nouvelles tables
 export type PartCategory = typeof partCategories.$inferSelect;
@@ -656,8 +685,11 @@ export type InsertPartCategory = z.infer<typeof insertPartCategorySchema>;
 export type PartSpecification = typeof partSpecifications.$inferSelect;
 export type InsertPartSpecification = z.infer<typeof insertPartSpecificationSchema>;
 
+export type UpdatePartSpecification = z.infer<typeof updatePartSpecificationSchema>;
+
 export type PartVariant = typeof partVariants.$inferSelect;
 export type InsertPartVariant = z.infer<typeof insertPartVariantSchema>;
+export type UpdatePartVariant = z.infer<typeof updatePartVariantSchema>;
 
 // Type exports
 export type User = typeof users.$inferSelect;
@@ -743,6 +775,7 @@ export const faultCatalog = pgTable("fault_catalog", {
 
 export const insertFaultCatalogSchema = createInsertSchema(faultCatalog).omit({
   id: true,
+  validatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -750,16 +783,35 @@ export const insertFaultCatalogSchema = createInsertSchema(faultCatalog).omit({
 // Pièces souvent utilisées pour chaque type de panne
 export const faultCatalogParts = pgTable("fault_catalog_parts", {
   id: serial("id").primaryKey(),
-  faultCatalogId: integer("fault_catalog_id").references(() => faultCatalog.id).notNull(),
-  partId: integer("part_id").references(() => parts.id).notNull(),
+  faultCatalogId: integer("fault_catalog_id").references(() => faultCatalog.id, { onDelete: "cascade" }).notNull(),
+  partId: integer("part_id").references(() => parts.id, { onDelete: "restrict" }).notNull(),
   quantity: integer("quantity").default(1),
   isOptional: boolean("is_optional").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("ux_fault_catalog_parts_fault_part").on(table.faultCatalogId, table.partId),
+  index("idx_fault_catalog_parts_part_id").on(table.partId),
+]);
 
-export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts).omit({
-  id: true,
-  createdAt: true,
+// `faultCatalogId` vient de l'URL (/fault-catalog/:id/parts) : omis, donc ignoré s'il figure dans le corps.
+const faultPartQuantitySchema = z
+  .number({ invalid_type_error: "La quantité doit être un entier d'au moins 1." })
+  .int("La quantité doit être un entier d'au moins 1.")
+  .min(1, "La quantité doit être un entier d'au moins 1.");
+const faultPartOptionalSchema = z.boolean({ invalid_type_error: "Le caractère optionnel doit être vrai ou faux." });
+
+export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts)
+  .omit({ id: true, createdAt: true, faultCatalogId: true })
+  .extend({
+    partId: z.number({ invalid_type_error: "La pièce est obligatoire." }).int("La pièce est invalide.").positive("La pièce est invalide."),
+    quantity: faultPartQuantitySchema.optional().default(1),
+    isOptional: faultPartOptionalSchema.optional().default(false),
+  });
+
+// La pièce d'un lien n'est pas modifiable : supprimer puis recréer.
+export const updateFaultCatalogPartSchema = z.object({
+  quantity: faultPartQuantitySchema.optional(),
+  isOptional: faultPartOptionalSchema.optional(),
 });
 
 export type FaultCatalog = typeof faultCatalog.$inferSelect;
@@ -767,6 +819,7 @@ export type InsertFaultCatalog = z.infer<typeof insertFaultCatalogSchema>;
 
 export type FaultCatalogPart = typeof faultCatalogParts.$inferSelect;
 export type InsertFaultCatalogPart = z.infer<typeof insertFaultCatalogPartSchema>;
+export type UpdateFaultCatalogPart = z.infer<typeof updateFaultCatalogPartSchema>;
 
 // ===== MODULE LOGS D'ACTIVITÉ =====
 
