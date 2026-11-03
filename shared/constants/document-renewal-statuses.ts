@@ -31,3 +31,6 @@ export function documentRenewalTransitionRefusal(from: string, to: DocumentRenew
   }
   return null;
 }
+
+/** Demande encore ouverte : ni terminée ni rejetée. Un récépissé ne compte que sur une demande ouverte. */
+export const OPEN_DOCUMENT_RENEWAL_STATUSES = ["pending", "in_progress"] as const satisfies readonly DocumentRenewalRequestStatus[];

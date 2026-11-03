@@ -25,7 +25,23 @@ export interface VehicleEligibilityInput {
   insuranceExpiry?: string | Date | null;
   technicalInspectionDate?: string | Date | null;
   licensePlateExpiry?: string | Date | null;
+  /**
+   * Date de validité du récépissé provisoire d'une demande de renouvellement en cours, par
+   * papier (`document_renewal_requests.receipt_valid_until`). Un papier échu reste éligible
+   * jusqu'à cette date incluse, puis de nouveau bloqué : la date entre ici, pas dans une
+   * règle locale de l'appelant. Voir `loadOpenRenewalReceipts` (server/lib/renewal-receipts.ts).
+   */
+  receipts?: Partial<Record<DocumentBlockerCode, string | Date | null>>;
 }
+
+export type DocumentBlockerCode = "insurance" | "technical_inspection" | "license_plate";
+
+/** Type de papier d'une demande de renouvellement -> motif d'éligibilité qu'un récépissé lève. */
+export const RENEWAL_DOCUMENT_BLOCKER_CODE: Readonly<Record<string, DocumentBlockerCode>> = {
+  assurance: "insurance",
+  visite_technique: "technical_inspection",
+  carte_grise: "license_plate",
+};
 
 export type EligibilityBlockerCode =
   | "maintenance"
@@ -51,6 +67,23 @@ function joursDepuis(echeance: string | Date, aujourdhui: Date): number | null {
   const a = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
   const b = Date.UTC(aujourdhui.getFullYear(), aujourdhui.getMonth(), aujourdhui.getDate());
   return Math.round((b - a) / 86_400_000);
+}
+
+/** Jour calendaire d'une valeur : `AAAA-MM-JJ` lu tel quel (sans fuseau), `Date` par ses composantes locales. */
+function jourCalendaire(valeur: string | Date): number | null {
+  const iso = typeof valeur === "string" ? /^(\d{4})-(\d{2})-(\d{2})/.exec(valeur) : null;
+  if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  const date = valeur instanceof Date ? valeur : new Date(valeur);
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** Récépissé encore valable : sa date de validité est aujourd'hui ou plus tard (jour J inclus). */
+function recepisseValide(validite: string | Date | null | undefined, aujourdhui: Date): boolean {
+  if (!validite) return false;
+  const fin = jourCalendaire(validite);
+  const jour = jourCalendaire(aujourdhui);
+  return fin !== null && jour !== null && fin >= jour;
 }
 
 function formuler(libelle: string, jours: number): string {
@@ -104,6 +137,7 @@ export function getMissionEligibility(
     if (!valeur) continue;
     const jours = joursDepuis(valeur, aujourdhui);
     if (jours === null || jours < 0) continue;
+    if (recepisseValide(vehicle.receipts?.[doc.code as DocumentBlockerCode], aujourdhui)) continue;
     blockers.push({
       code: doc.code,
       kind: "compliance",

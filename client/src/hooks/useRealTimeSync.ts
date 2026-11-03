@@ -973,6 +973,19 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       invalidateCatalogEvent("document_renewal_center_changed");
       break;
 
+    // Récépissé déposé : demande, papier du véhicule, éligibilité des missions et alertes.
+    case "document_renewal_receipt_uploaded": {
+      invalidateCatalogEvent("document_renewal_receipt_uploaded");
+      const receiptVehicleId = toNumericId(asRecord(payloadRecord)?.vehicleId);
+      if (receiptVehicleId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${receiptVehicleId}`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${receiptVehicleId}/documents`] });
+      }
+      invalidateMissionDerivedQueries(null);
+      invalidateAlertQueries();
+      break;
+    }
+
     // Lignes de travail: des heures, aucun montant. Pas d'invalidation des
     // écrans Direction (docs/plans/lignes-de-travail-ot.md, étape 6).
     case "work_order_item_changed":

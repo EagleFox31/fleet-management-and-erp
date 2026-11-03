@@ -1966,3 +1966,10 @@ soumission sans doublon.
 - **Pourquoi** : réserves 1 à 4 de fleet-relecteur, mineurs M1 et M4 de fleet-securite. M2 (`err.message` multer et `looksTechnical` sans `EACCES`) et M3 (extension non confrontée au type MIME) sont antérieurs à la PR : suite à part.
 - **Preuves** : garde-fou rouge sur l'ancien `upload.ts`, vert après ; contrats `vehicle-documents-upload-path` 7/7 et `vehicle-documents-upload` 16/16 sur le Postgres local ; unitaires `upload-vehicle-directory` et `multer-storage-hygiene` verts.
 
+
+## 2026-11-03 — P3-2 lot 2b (A) : récépissé provisoire de renouvellement
+
+- **Quoi** : dépôt du récépissé (`POST /api/document-renewals/requests/:id/receipt`) et prise en compte dans `getMissionEligibility` : papier échu éligible jusqu'à `receipt_valid_until` inclus, puis bloqué.
+- **Comment** : `tests/contract/document-renewal-receipt.contract.test.ts` (8 cas : 201 et événement en rôles, 403 technicien/chauffeur/client, remplacement, 400 date passée/illisible/fichier absent/format, jour J, 404, 409 clôturée, chemin hors `uploads/`, CHECK 23514), `tests/contract/vehicle-renewal-receipt-eligibility.contract.test.ts` (6 cas, horloge injectée) et `tests/unit/shared/vehicle-eligibility-receipt.test.ts` (5 cas).
+- **Pourquoi** : décision 3 du plan P3-2 ; une règle, une source (la date du récépissé entre dans `getMissionEligibility`).
+- **Reste** : le branchement dans `missions.routes.ts` (autre session) ; sans lui, le récépissé n'est pas encore lu à l'affectation ni au lancement.
