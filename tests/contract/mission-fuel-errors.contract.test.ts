@@ -35,7 +35,12 @@ async function missionWithVehicle(status: string) {
 }
 
 /** Coût hors de portée de toute carte : 1e6 L à 1e6 FCFA. */
-const hugeFill = (vehicleId: number) => ({ vehicleId, quantity: 1_000_000, unitPrice: 1_000_000 });
+const hugeFill = (vehicleId: number) => ({
+  vehicleId,
+  quantity: 1_000_000,
+  unitPrice: 1_000_000,
+  requestKey: uniqueTestToken("ferr-key"),
+});
 
 function expectReadableBalanceError(res: { status: number; body: any; headers: Headers }) {
   expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);

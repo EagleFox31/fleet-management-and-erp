@@ -1592,3 +1592,11 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+### Suite du 3 novembre 2026 : exceptions levées, clé obligatoire
+- **Budget et statut sous verrou de ligne** : le `PATCH` budget et la transition de statut avec modification relisent `workflowData` par `SELECT … FOR UPDATE` dans une transaction, puis fusionnent leur patch sur cette relecture. L'écriture de l'entrée de régularisation prend le même verrou de ligne. Ordre des verrous fixe : carte carburant puis ligne mission (statut et budget ne prennent que la ligne), donc pas d'interblocage. La première exception nommée ci-dessus est levée ; celle des suppressions admin reste.
+- **Clé obligatoire, unique en base** : `fuel_records.request_key` avec index unique `ux_fuel_records_request_key` (migration `20261103_fuel_records_request_key.sql`, jumelle de `FUEL_RECORDS_REQUEST_KEY_SQL` dans `init-database.ts`). Sans clé : 400 « rechargez la page ». Une violation de l'index devient 409. Les régularisations antérieures (clé dans le journal seul) restent rejouables.
+- **Plein normal couvert** : `POST /api/missions/:id/fuel-records` suit le même rejeu sous verrou.
+- **Comparaison complète** : mission, véhicule, quantité, prix, date, station et notes ou motif. Un écart avec la même clé donne 409.
+- **Client** : la clé est remise à zéro au succès, au 409 et à l'annulation. Deux onglets génèrent deux clés : c'est voulu, le verrou de carte sérialise les deux débits et chacun est un plein distinct aux yeux du serveur.
+- **Prévention** : contrat (18 tests : course statut, course budget, rejeu après clôture, plein normal double, date/station/motif = 409) et unitaire de schéma (migration = constante, idempotente). Six mutants, tous rouges : statut sur copie périmée, budget sur copie périmée, verrou sans `FOR UPDATE`, station non comparée, plein normal sans rejeu, date non comparée.

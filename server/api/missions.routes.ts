@@ -30,18 +30,82 @@ import {
   canRoleSetMissionStatus,
 } from "@shared/constants/roles";
 import { withLogContext } from "../lib/error-log-context";
-import { lockFuelCard } from "../lib/fuel-card-lock";
+import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
 import {
-  REGULARIZATION_REQUEST_KEY_PATTERN,
+  DIFFERENT_FUEL_SUBMISSION_MESSAGE,
+  MISSING_FUEL_REQUEST_KEY_MESSAGE,
+  MISSION_FUEL_REQUEST_KEY_PATTERN,
+  buildFuelConsumptionNotes,
   findMissionRegularization,
-  isSameRegularization,
+  isSameFuelSubmission,
+  type FuelSubmission,
   type MissionRegularizationEntry,
 } from "../lib/mission-fuel-regularization";
+import type { FuelRecord } from "@shared/schema";
 
 const log = moduleLogger("missions");
 
 const router = Router();
 const fuelCardService = new FuelCardService();
+
+/**
+ * workflowData de la mission relu sous verrou de ligne (SELECT … FOR UPDATE), dans la transaction
+ * qui va le réécrire. Toute écriture de workflowData part de cette lecture, jamais d'une copie lue
+ * plus tôt dans la requête : sinon une régularisation de plein validée entre-temps serait effacée,
+ * et son rejeu débiterait la carte une seconde fois. Ordre des verrous : carte carburant, puis ligne.
+ */
+async function lockMissionWorkflowData(tx: DbExecutor, missionId: number): Promise<{ workflowData: unknown } | undefined> {
+  const [row] = await tx
+    .select({ workflowData: missions.workflowData })
+    .from(missions)
+    .where(eq(missions.id, missionId))
+    .for("update");
+  return row;
+}
+
+/**
+ * Clé de requête d'un plein de mission, obligatoire : sans elle, un nouvel envoi après une coupure
+ * débiterait la carte une seconde fois. Lue avant le schéma du corps pour un message qui dit quoi faire.
+ */
+function readFuelRequestKey(body: unknown): string {
+  const raw = (body as { requestKey?: unknown } | null)?.requestKey;
+  const key = typeof raw === "string" ? raw.trim() : "";
+  if (!key) throw new AppError(400, MISSING_FUEL_REQUEST_KEY_MESSAGE);
+  if (!MISSION_FUEL_REQUEST_KEY_PATTERN.test(key)) throw new AppError(400, "Clé de saisie invalide. Rechargez la page.");
+  return key;
+}
+
+/**
+ * Plein déjà enregistré sous cette clé, lu sous le verrou de la carte (aucun débit concurrent ne
+ * peut s'intercaler). Même plein : renvoyé pour un rejeu sans débit. Autre plein : 409.
+ * `legacyRegularizations` : une régularisation enregistrée avant la colonne request_key n'a sa clé
+ * que dans le journal de la mission ; son plein est retrouvé par l'id noté dans l'entrée.
+ */
+async function findReplayedFuelSubmission(
+  tx: DbExecutor,
+  requestKey: string,
+  submission: FuelSubmission,
+  options: { legacyRegularizations?: boolean } = {},
+): Promise<FuelRecord | null> {
+  let [record] = await tx.select().from(fuelRecords).where(eq(fuelRecords.requestKey, requestKey)).limit(1);
+  if (!record && options.legacyRegularizations) {
+    const [current] = await tx
+      .select({ workflowData: missions.workflowData })
+      .from(missions)
+      .where(eq(missions.id, submission.missionId));
+    const entry = findMissionRegularization(current?.workflowData, requestKey);
+    if (!entry) return null;
+    [record] = typeof entry.id === "number"
+      ? await tx.select().from(fuelRecords).where(eq(fuelRecords.id, entry.id))
+      : [];
+    if (!record) {
+      throw new AppError(409, "Cette régularisation a déjà été enregistrée, puis son plein supprimé. Rechargez la page.");
+    }
+  }
+  if (!record) return null;
+  if (!isSameFuelSubmission(record, submission)) throw new AppError(409, DIFFERENT_FUEL_SUBMISSION_MESSAGE);
+  return record;
+}
 
 // Cloison chauffeur (DRV2-3) : toute route `/:id/...` du routeur refuse un chauffeur
 // non affecté à la mission. Le personnel n'est pas filtré. Mission inconnue : 403 aussi,
@@ -985,6 +1049,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       isPreDeparture: z.coerce.boolean().optional().default(false),
     });
 
+    const requestKey = readFuelRequestKey(req.body);
     const parsedPayload = payloadSchema.safeParse(req.body ?? {});
     if (!parsedPayload.success) {
       return res.status(400).json({
@@ -1047,7 +1112,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       }
     }
 
-    const result = await fuelCardService.recordConsumption({
+    const consumption = {
       vehicleId: payload.vehicleId,
       quantity: payload.quantity,
       unitPrice: payload.unitPrice,
@@ -1059,6 +1124,20 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       missionId,
       isPreDeparture: payload.isPreDeparture,
       userId: actorUserId,
+      requestKey,
+    };
+    // Même clé, même plein : rejoué sous le verrou de la carte, sans second débit ni diffusion.
+    const submission: FuelSubmission = {
+      missionId,
+      vehicleId: consumption.vehicleId,
+      quantity: consumption.quantity,
+      unitPrice: consumption.unitPrice,
+      date: payload.date ? consumption.date.slice(0, 10) : null,
+      stationName: consumption.stationName,
+      notes: buildFuelConsumptionNotes(consumption),
+    };
+    const result = await fuelCardService.recordConsumption(consumption, undefined, {
+      replay: (tx) => findReplayedFuelSubmission(tx, requestKey, submission),
     });
 
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
@@ -1073,6 +1152,17 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       .from(missions)
       .where(eq(missions.id, missionId))
       .limit(1);
+
+    const totals = {
+      totalQuantity: fuelData.totalQuantity,
+      totalCost: fuelData.totalCost,
+      recordsCount: fuelData.records.length,
+    };
+
+    if (result.replayed) {
+      // Rejeu : rien n'a été écrit, donc rien à diffuser. Même forme de réponse que le premier envoi.
+      return res.status(200).json({ record: result.consumption, totals, mission: updatedMission || null, replayed: true });
+    }
 
     if (updatedMission) {
       await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
@@ -1090,11 +1180,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
 
     return res.status(201).json({
       record: result.consumption,
-      totals: {
-        totalQuantity: fuelData.totalQuantity,
-        totalCost: fuelData.totalCost,
-        recordsCount: fuelData.records.length,
-      },
+      totals,
       mission: updatedMission || null,
     });
   } catch (error) {
@@ -1131,10 +1217,10 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       notes: z.string().trim().optional(),
       regularizationReason: z.string().trim().min(8, "Le motif de régularisation est obligatoire."),
       isPreDeparture: z.coerce.boolean().optional().default(false),
-      // Clé d'une soumission : un second envoi avec la même clé rejoue la première sans second débit.
-      requestKey: z.string().trim().regex(REGULARIZATION_REQUEST_KEY_PATTERN, "Clé de requête invalide.").optional(),
     });
 
+    // Clé d'une soumission : un second envoi avec la même clé rejoue la première sans second débit.
+    const requestKey = readFuelRequestKey(req.body);
     const parsedPayload = payloadSchema.safeParse(req.body ?? {});
     if (!parsedPayload.success) {
       return res.status(400).json({
@@ -1144,7 +1230,6 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     }
 
     const payload = parsedPayload.data;
-    const requestKey = payload.requestKey;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
     if (Number.isNaN(parsedDate.getTime())) {
       return res.status(400).json({ message: "Date de plein invalide." });
@@ -1196,9 +1281,9 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       : regularizationNotePrefix;
 
     // Débit et journal de régularisation dans une seule transaction, sous le verrou de la
-    // carte : un échec du journal annule le débit, et deux régularisations simultanées
-    // relisent workflowData l'une après l'autre (aucune entrée perdue). Une clé déjà
-    // journalisée est lue sous ce même verrou : le second envoi rejoue, sans second débit.
+    // carte puis le verrou de ligne de la mission : un échec du journal annule le débit, et
+    // aucune autre écriture de workflowData (statut, budget) ne peut effacer l'entrée. Une clé
+    // déjà utilisée est lue sous le verrou de la carte : le second envoi rejoue, sans second débit.
     const missionReturning = {
       id: missions.id,
       status: missions.status,
@@ -1218,48 +1303,48 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
         }
       | undefined;
     let regularizationEntry: MissionRegularizationEntry | undefined;
-    const replay = requestKey
-      ? async (tx: Parameters<typeof lockFuelCard>[0]) => {
-          const [current] = await tx.select(missionReturning).from(missions).where(eq(missions.id, missionId));
-          const existing = findMissionRegularization(current?.workflowData, requestKey);
-          if (!existing) return null;
-          if (!isSameRegularization(existing, payload)) {
-            throw new AppError(409, "Cette régularisation a déjà été enregistrée avec d'autres valeurs. Rechargez la page.");
-          }
-          const [record] = typeof existing.id === "number"
-            ? await tx.select().from(fuelRecords).where(eq(fuelRecords.id, existing.id))
-            : [];
-          if (!record) {
-            throw new AppError(409, "Cette régularisation a déjà été enregistrée, puis son plein supprimé. Rechargez la page.");
-          }
-          regularizationEntry = existing;
-          updatedMission = current;
-          return record;
-        }
-      : undefined;
+    const consumptionData = {
+      vehicleId: payload.vehicleId,
+      quantity: payload.quantity,
+      unitPrice: payload.unitPrice,
+      date: parsedDate.toISOString(),
+      stationName: payload.stationName || "MISSION",
+      destination: mission.deliveryAddress || "Mission",
+      clientName: mission.clientName || undefined,
+      notes: mergedNotes,
+      missionId,
+      isPreDeparture: payload.isPreDeparture,
+      userId: actorUserId,
+      requestKey,
+    };
+    // Comparée au plein déjà enregistré : date, station et motif (dans les notes) compris.
+    const submission: FuelSubmission = {
+      missionId,
+      vehicleId: consumptionData.vehicleId,
+      quantity: consumptionData.quantity,
+      unitPrice: consumptionData.unitPrice,
+      date: payload.date ? consumptionData.date.slice(0, 10) : null,
+      stationName: consumptionData.stationName,
+      notes: buildFuelConsumptionNotes(consumptionData),
+    };
+    const replay = async (tx: DbExecutor) => {
+      const record = await findReplayedFuelSubmission(tx, requestKey, submission, { legacyRegularizations: true });
+      if (!record) return null;
+      const [current] = await tx.select(missionReturning).from(missions).where(eq(missions.id, missionId));
+      regularizationEntry = findMissionRegularization(current?.workflowData, requestKey) ?? undefined;
+      updatedMission = current;
+      return record;
+    };
     const result = await fuelCardService.recordConsumption(
-      {
-        vehicleId: payload.vehicleId,
-        quantity: payload.quantity,
-        unitPrice: payload.unitPrice,
-        date: parsedDate.toISOString(),
-        stationName: payload.stationName || "MISSION",
-        destination: mission.deliveryAddress || "Mission",
-        clientName: mission.clientName || undefined,
-        notes: mergedNotes,
-        missionId,
-        isPreDeparture: payload.isPreDeparture,
-        userId: actorUserId,
-      },
+      consumptionData,
       async (tx, consumption, cost) => {
-        const [current] = await tx
-          .select({ workflowData: missions.workflowData })
-          .from(missions)
-          .where(eq(missions.id, missionId));
+        // Verrou de ligne : la transition de statut et le PATCH budget relisent workflowData sous ce
+        // même verrou, après ce commit ; ils ne peuvent plus réécrire une version sans cette entrée.
+        const current = await lockMissionWorkflowData(tx, missionId);
 
         regularizationEntry = {
           id: consumption?.id ?? null,
-          ...(requestKey ? { requestKey } : {}),
+          requestKey,
           vehicleId: payload.vehicleId,
           reason: payload.regularizationReason,
           createdAt: new Date().toISOString(),
@@ -1382,7 +1467,10 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
         })
         .from(missions)
         .where(eq(missions.id, missionId))
-        .limit(1);
+        .limit(1)
+        // Verrou de ligne, pris après celui de la carte (même ordre que la régularisation) :
+        // le statut et le budget ne peuvent pas réécrire workflowData entre cette lecture et l'écriture.
+        .for("update");
 
       if (!mission) {
         throw new AppError(404, "Mission non trouvée.");
@@ -2238,9 +2326,9 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
       }
     }
 
-    if (Object.keys(budgetPatch).length > 0) {
-      missionUpdates.workflowData = mergeMissionBudgetPlan(existingMission.workflowData, budgetPatch);
-    }
+    // Le budget se fusionne dans workflowData relu sous verrou de ligne, au moment d'écrire (plus bas) :
+    // la copie lue en tête de requête peut précéder une régularisation de plein qu'elle effacerait.
+    const hasBudgetPatch = Object.keys(budgetPatch).length > 0;
 
     if (hasBudgetPatchField("fuelBudget")) {
       const fuelBudget = budgetPatch.fuelBudget;
@@ -2382,11 +2470,18 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
       }
     }
 
-    const [updatedMission] = await db
-      .update(missions)
-      .set(missionUpdates)
-      .where(eq(missions.id, missionId))
-      .returning();
+    const updatedMission = await db.transaction(async (tx) => {
+      if (hasBudgetPatch) {
+        const current = await lockMissionWorkflowData(tx, missionId);
+        missionUpdates.workflowData = mergeMissionBudgetPlan(current?.workflowData ?? existingMission.workflowData, budgetPatch);
+      }
+      const [row] = await tx
+        .update(missions)
+        .set(missionUpdates)
+        .where(eq(missions.id, missionId))
+        .returning();
+      return row;
+    });
 
     await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
       source: "mission_edit",
@@ -2653,30 +2748,10 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     }
 
     const now = new Date();
-    const workflowDataForStatus = asPlainObject(mission.workflowData) ?? {};
-    const executionData = asPlainObject(workflowDataForStatus.execution) ?? {};
-    let hasExecutionDataPatch = false;
-
-    if (targetStatus === "in_progress" && !toIsoIfValid(executionData.actualStartDate)) {
-      executionData.actualStartDate = now.toISOString();
-      hasExecutionDataPatch = true;
-    }
-
-    if ((targetStatus === "delivered" || targetStatus === "completed") && !toIsoIfValid(executionData.actualDeliveryDate)) {
-      executionData.actualDeliveryDate = now.toISOString();
-      hasExecutionDataPatch = true;
-    }
-
-    if (hasExecutionDataPatch) {
-      workflowDataForStatus.execution = executionData;
-    }
-
-    let nextWorkflowData: Record<string, unknown> = workflowDataForStatus;
-    let hasWorkflowDataPatch = hasExecutionDataPatch;
+    // FDR réels à écrire à la clôture : validés ici, fusionnés plus bas dans workflowData relu sous verrou.
+    let actualFdrCost: number | null = null;
 
     if (targetStatus === "completed") {
-      let actualFdrCost: number | null = null;
-
       if (actualFdrCostBody !== undefined && actualFdrCostBody !== null && actualFdrCostBody !== "") {
         actualFdrCost = parseBudgetNumber(actualFdrCostBody);
         if (actualFdrCost === null || actualFdrCost < 0) {
@@ -2693,26 +2768,56 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           });
         }
       }
-
-      nextWorkflowData = mergeMissionActualFdrCost(nextWorkflowData, actualFdrCost);
-      hasWorkflowDataPatch = true;
     }
 
-    const [updatedMission] = await db
-      .update(missions)
-      .set({
-        status: targetStatus as any,
-        updatedAt: now,
-        currentStep: targetStatus === "in_progress"
-          ? Math.max(Number(mission.currentStep || 1), 3)
-          : mission.currentStep,
-        completedAt: targetStatus === "completed" ? now : undefined,
-        cancelledAt: targetStatus === "cancelled" ? now : undefined,
-        // Sans patch, ne pas réécrire une copie lue avant : elle écraserait une régularisation concurrente.
-        workflowData: hasWorkflowDataPatch ? nextWorkflowData : undefined,
-      })
-      .where(eq(missions.id, missionId))
-      .returning();
+    const needsExecutionDate = targetStatus === "in_progress" || targetStatus === "delivered" || targetStatus === "completed";
+    const updatedMission = await db.transaction(async (tx) => {
+      // Patch de workflowData appliqué à la version relue sous verrou de ligne, jamais à la copie lue en
+      // tête de requête : une régularisation de plein validée entre-temps n'est plus effacée. Sans patch,
+      // workflowData n'est pas réécrit du tout.
+      let nextWorkflowData: Record<string, unknown> | undefined;
+      if (needsExecutionDate || actualFdrCost !== null) {
+        const current = await lockMissionWorkflowData(tx, missionId);
+        const workflowDataForStatus = asPlainObject(current?.workflowData) ?? {};
+        const executionData = asPlainObject(workflowDataForStatus.execution) ?? {};
+        let hasWorkflowDataPatch = false;
+
+        if (targetStatus === "in_progress" && !toIsoIfValid(executionData.actualStartDate)) {
+          executionData.actualStartDate = now.toISOString();
+          hasWorkflowDataPatch = true;
+        }
+
+        if ((targetStatus === "delivered" || targetStatus === "completed") && !toIsoIfValid(executionData.actualDeliveryDate)) {
+          executionData.actualDeliveryDate = now.toISOString();
+          hasWorkflowDataPatch = true;
+        }
+
+        let merged: Record<string, unknown> = hasWorkflowDataPatch
+          ? { ...workflowDataForStatus, execution: executionData }
+          : workflowDataForStatus;
+        if (actualFdrCost !== null) {
+          merged = mergeMissionActualFdrCost(merged, actualFdrCost);
+          hasWorkflowDataPatch = true;
+        }
+        if (hasWorkflowDataPatch) nextWorkflowData = merged;
+      }
+
+      const [row] = await tx
+        .update(missions)
+        .set({
+          status: targetStatus as any,
+          updatedAt: now,
+          currentStep: targetStatus === "in_progress"
+            ? Math.max(Number(mission.currentStep || 1), 3)
+            : mission.currentStep,
+          completedAt: targetStatus === "completed" ? now : undefined,
+          cancelledAt: targetStatus === "cancelled" ? now : undefined,
+          workflowData: nextWorkflowData,
+        })
+        .where(eq(missions.id, missionId))
+        .returning();
+      return row;
+    });
 
     if (missionAssignment?.id) {
       const assignmentUpdate: Record<string, any> = {

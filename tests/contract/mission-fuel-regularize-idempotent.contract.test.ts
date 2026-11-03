@@ -7,7 +7,8 @@ import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
-import { expectWaitsForLock } from "../support/fuel-card-lock";
+import type { DbExecutor } from "../../server/lib/fuel-card-lock";
+import { expectWaitsForLock, expectWaitsForMissionRowLock } from "../support/fuel-card-lock";
 import { uniqueTestToken } from "../support/ids";
 
 /**
@@ -16,6 +17,9 @@ import { uniqueTestToken } from "../support/ids";
  * la même clé de requête, rejoue la première écriture au lieu de débiter une seconde fois.
  * Deux régularisations distinctes simultanées gardent leurs deux entrées de journal, et une
  * déclaration « sans ravitaillement » concurrente n'efface pas une régularisation.
+ * Le plein normal (POST /api/missions/:id/fuel-records) suit la même règle, et la clé est
+ * obligatoire sur les deux routes. La transition de statut et le PATCH budget relisent
+ * workflowData sous verrou de ligne : ils n'effacent plus une régularisation validée entre-temps.
  */
 
 const ACTORS = { logistics: "logistics" } as const;
@@ -48,6 +52,9 @@ async function deliveredMission() {
 
 const regularize = (missionId: number, body: Record<string, unknown>) =>
   session.call("POST", `/api/missions/${missionId}/fuel-records/regularize`, { actor: "logistics", body });
+
+const recordFuel = (missionId: number, body: Record<string, unknown>) =>
+  session.call("POST", `/api/missions/${missionId}/fuel-records`, { actor: "logistics", body });
 
 const fill = (vehicleId: number, extra: Record<string, unknown> = {}) => ({
   vehicleId,
@@ -131,6 +138,43 @@ describe("régularisation de plein mission : idempotence", { timeout: 180000 }, 
     expect(await missionDebits(missionId)).toHaveLength(1);
   });
 
+  it("sans clé (client antérieur) : 400 qui demande de recharger, aucun débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const res = await regularize(missionId, fill(vehicleId));
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(res.body.message).toMatch(/rechargez la page/i);
+    expect(await missionDebits(missionId)).toHaveLength(0);
+  });
+
+  it.each([
+    ["date", { date: "2026-10-02" }],
+    ["station", { stationName: "STATION B" }],
+    ["motif", { regularizationReason: "Autre motif de régularisation" }],
+  ])("même clé, %s différent : 409 sans second débit", async (_label, change) => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const requestKey = uniqueTestToken("regul-field");
+    const base = fill(vehicleId, { requestKey, date: "2026-10-01", stationName: "STATION A" });
+
+    expect((await regularize(missionId, base)).status).toBe(201);
+    expect((await regularize(missionId, base)).status).toBe(200);
+    const res = await regularize(missionId, { ...base, ...change });
+    expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(await missionDebits(missionId)).toHaveLength(1);
+  });
+
+  it("régularisation antérieure à la colonne (clé dans le journal seul) : rejouée, sans second débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const requestKey = uniqueTestToken("regul-legacy");
+    const first = await regularize(missionId, fill(vehicleId, { requestKey }));
+    expect(first.status).toBe(201);
+    await db.update(fuelRecords).set({ requestKey: null }).where(eq(fuelRecords.id, first.body.record.id));
+
+    const retry = await regularize(missionId, fill(vehicleId, { requestKey }));
+    expect(retry.status).toBe(200);
+    expect(retry.body.record.id).toBe(first.body.record.id);
+    expect(await missionDebits(missionId)).toHaveLength(1);
+  });
+
   it("clé invalide : 400", async () => {
     const { missionId, vehicleId } = await deliveredMission();
     const res = await regularize(missionId, fill(vehicleId, { requestKey: "court" }));
@@ -143,7 +187,7 @@ describe("régularisation de plein mission : idempotence", { timeout: 180000 }, 
 
     const responses = await Promise.all([
       regularize(missionId, fill(vehicleId, { requestKey: uniqueTestToken("regul-a") })),
-      regularize(missionId, fill(vehicleId, { quantity: 3 })), // sans clé : client antérieur
+      regularize(missionId, fill(vehicleId, { requestKey: uniqueTestToken("regul-b"), quantity: 3 })),
     ]);
 
     expect(responses.map((r) => r.status)).toEqual([201, 201]);
@@ -180,5 +224,118 @@ describe("régularisation de plein mission : idempotence", { timeout: 180000 }, 
     expect([200, 409]).toContain(declare.status);
     const entries = await regularizationEntries(missionId);
     expect(entries.map((e) => e.id)).toEqual([regul.body.record.id]);
+  });
+});
+
+describe("plein normal de mission : même mécanisme de clé", { timeout: 180000 }, () => {
+  const normal = (vehicleId: number, extra: Record<string, unknown> = {}) => ({ vehicleId, quantity: 2, unitPrice: 100, ...extra });
+
+  it("double POST simultané avec la même clé : un seul débit, le second rejoué", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const requestKey = uniqueTestToken("fill-key");
+    const balanceBefore = (await fuelCardService.getCurrentBalance()).balance;
+
+    const [a, b] = await Promise.all([
+      recordFuel(missionId, normal(vehicleId, { requestKey })),
+      recordFuel(missionId, normal(vehicleId, { requestKey })),
+    ]);
+
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    const replayed = a.status === 200 ? a : b;
+    const first = a.status === 201 ? a : b;
+    expect(replayed.body.replayed).toBe(true);
+    expect(replayed.body.record.id).toBe(first.body.record.id);
+    expect(await missionDebits(missionId)).toHaveLength(1);
+    expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(balanceBefore - 200, 2);
+  });
+
+  it("sans clé : 400 qui demande de recharger, aucun débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const res = await recordFuel(missionId, normal(vehicleId));
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(res.body.message).toMatch(/rechargez la page/i);
+    expect(await missionDebits(missionId)).toHaveLength(0);
+  });
+
+  it("même clé, autre station : 409 ; clé déjà prise par une autre mission : 409", async () => {
+    const one = await deliveredMission();
+    const two = await deliveredMission();
+    const requestKey = uniqueTestToken("fill-mismatch");
+
+    expect((await recordFuel(one.missionId, normal(one.vehicleId, { requestKey, stationName: "STATION A" }))).status).toBe(201);
+    const otherStation = await recordFuel(one.missionId, normal(one.vehicleId, { requestKey, stationName: "STATION B" }));
+    expect(apiErrorProblems(otherStation.status, otherStation.body, 409, undefined, otherStation.headers.get("x-request-id"))).toEqual([]);
+    const otherMission = await recordFuel(two.missionId, normal(two.vehicleId, { requestKey, stationName: "STATION A" }));
+    expect(otherMission.status).toBe(409);
+    expect(await missionDebits(one.missionId)).toHaveLength(1);
+    expect(await missionDebits(two.missionId)).toHaveLength(0);
+  });
+});
+
+describe("workflowData : statut et budget n'effacent plus une régularisation", { timeout: 180000 }, () => {
+  // Simule une régularisation validée pendant que l'écriture attend le verrou de ligne : l'entrée
+  // doit survivre, sinon le rejeu de sa clé ne la retrouverait plus et débiterait une seconde fois.
+  const commitConcurrentEntry = (missionId: number, requestKey: string) => async (tx: DbExecutor) => {
+    const [m] = await tx.select({ workflowData: missions.workflowData }).from(missions).where(eq(missions.id, missionId));
+    const wd = (m?.workflowData as Record<string, unknown> | null) ?? {};
+    await tx
+      .update(missions)
+      .set({ workflowData: { ...wd, fuelTracking: { regularizations: [{ id: -1, requestKey }] } } })
+      .where(eq(missions.id, missionId));
+  };
+
+  const setStatus = (missionId: number, status: string) =>
+    session.call("PUT", `/api/missions/${missionId}/status`, { actor: "logistics", body: { status, actualFdrCost: 0 } });
+
+  it("transition delivered -> completed : attend le verrou de ligne et garde l'entrée validée entre-temps", async () => {
+    const { missionId } = await deliveredMission();
+    const requestKey = uniqueTestToken("race-status");
+
+    const res = await expectWaitsForMissionRowLock(
+      missionId,
+      () => setStatus(missionId, "completed"),
+      commitConcurrentEntry(missionId, requestKey),
+    );
+
+    expect(res.status).toBe(200);
+    const [m] = await db
+      .select({ status: missions.status, workflowData: missions.workflowData })
+      .from(missions)
+      .where(eq(missions.id, missionId));
+    expect(m.status).toBe("completed");
+    expect((await regularizationEntries(missionId)).map((e) => e.requestKey)).toEqual([requestKey]);
+    // Le patch de la transition est appliqué à la version relue, pas perdu.
+    expect((m.workflowData as { execution?: { actualDeliveryDate?: string } }).execution?.actualDeliveryDate).toBeTruthy();
+  });
+
+  it("PATCH budget : attend le verrou de ligne et garde l'entrée validée entre-temps", async () => {
+    const { missionId } = await deliveredMission();
+    const requestKey = uniqueTestToken("race-budget");
+
+    const res = await expectWaitsForMissionRowLock(
+      missionId,
+      () => session.call("PATCH", `/api/missions/${missionId}`, { actor: "logistics", body: { budget: { fuelBudget: 50000 } } }),
+      commitConcurrentEntry(missionId, requestKey),
+    );
+
+    expect(res.status).toBe(200);
+    expect((await regularizationEntries(missionId)).map((e) => e.requestKey)).toEqual([requestKey]);
+    const [m] = await db.select({ workflowData: missions.workflowData }).from(missions).where(eq(missions.id, missionId));
+    expect((m.workflowData as { budgetPlan?: { fuelBudget?: number } }).budgetPlan?.fuelBudget).toBe(50000);
+  });
+
+  it("régularisation, clôture, puis rejeu de la même clé : aucun second débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const requestKey = uniqueTestToken("replay-after-close");
+
+    const first = await regularize(missionId, fill(vehicleId, { requestKey }));
+    expect(first.status).toBe(201);
+    expect((await setStatus(missionId, "completed")).status).toBe(200);
+
+    const retry = await regularize(missionId, fill(vehicleId, { requestKey }));
+    expect(retry.status).toBe(200);
+    expect(retry.body.record.id).toBe(first.body.record.id);
+    expect(await missionDebits(missionId)).toHaveLength(1);
+    expect(await regularizationEntries(missionId)).toHaveLength(1);
   });
 });

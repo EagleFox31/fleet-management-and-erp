@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { userMessageOf } from "@/lib/api-error";
+import { isApiError, userMessageOf } from "@/lib/api-error";
+import { newRequestKey } from "@/lib/request-key";
 import { driverReportOpensWorkOrder, type DriverReportType } from "@shared/contracts/incidents";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { format, isThisMonth } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -394,6 +395,10 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
       ? quantityValue * unitPriceValue
       : 0;
 
+  // Clé de ce plein : gardée jusqu'au succès, un nouvel envoi après une coupure est rejoué sans
+  // second débit. Propre à cette fiche ouverte : deux onglets font deux saisies.
+  const fuelSubmissionKeyRef = useRef<string | null>(null);
+
   const createFuelMutation = useMutation({
     mutationFn: async () => {
       const vehicleId = mission.vehicleId ?? mission.assignment?.vehicle?.id;
@@ -408,12 +413,14 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
         stationName: stationName.trim() || undefined,
         date: new Date(dateTime).toISOString(),
         notes: notes.trim() || undefined,
+        requestKey: (fuelSubmissionKeyRef.current ??= newRequestKey()),
       };
 
       const response = await apiRequest("POST", `/api/missions/${mission.id}/fuel-records`, payload);
       return parseJsonIfPresent(response);
     },
     onSuccess: () => {
+      fuelSubmissionKeyRef.current = null;
       toast({
         title: "Plein enregistré",
         description: "Le carburant de la mission a été ajouté immédiatement.",
@@ -426,14 +433,19 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/history"] });
       onClose();
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
+      // 409 : un plein existe déjà sous cette clé ; la saisie suivante est une nouvelle soumission.
+      if (isApiError(error, 409)) fuelSubmissionKeyRef.current = null;
       toast({
         variant: "destructive",
         title: "Erreur carburant",
-        description: error.message || "Impossible d'enregistrer ce plein.",
+        description: userMessageOf(error, "Impossible d'enregistrer ce plein."),
       });
     },
   });
+
+  // Débit de la carte carburant : un double clic ne doit envoyer qu'une requête.
+  const submitFuel = useSingleFlightMutate(createFuelMutation.mutate);
 
   const isFormInvalid =
     !Number.isFinite(quantityValue) ||
@@ -566,7 +578,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
           <Button
             type="button"
             disabled={isFormInvalid || createFuelMutation.isPending}
-            onClick={() => createFuelMutation.mutate()}
+            onClick={() => submitFuel()}
             className="h-12 rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700"
           >
             {createFuelMutation.isPending ? "Enregistrement..." : "Valider le plein"}

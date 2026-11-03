@@ -976,9 +976,11 @@ export default function MissionDetailsPage() {
     },
   });
 
-  // Clé de la régularisation en cours : gardée jusqu'au succès, pour qu'un nouvel envoi après
-  // une coupure soit rejoué par le serveur au lieu de débiter la carte une seconde fois.
-  const fuelRegularizationKeyRef = useRef<string | null>(null);
+  // Clé du plein en cours de saisie (normal ou régularisation) : gardée jusqu'au succès, pour
+  // qu'un nouvel envoi après une coupure soit rejoué par le serveur au lieu de débiter la carte
+  // une seconde fois. Remise à zéro au succès, à l'annulation et sur un 409. La clé vit dans
+  // l'onglet : deux onglets ouverts sur la même mission font deux saisies, donc deux débits.
+  const fuelSubmissionKeyRef = useRef<string | null>(null);
 
   const addMissionFuelMutation = useMutation({
     mutationFn: async () => {
@@ -1022,9 +1024,7 @@ export default function MissionDetailsPage() {
         notes: fuelForm.notes || undefined,
         regularizationReason: isRegularizationRequest ? fuelRegularizationReason.trim() : undefined,
         isPreDeparture: fuelForm.isPreDeparture,
-        requestKey: isRegularizationRequest
-          ? (fuelRegularizationKeyRef.current ??= newRequestKey())
-          : undefined,
+        requestKey: (fuelSubmissionKeyRef.current ??= newRequestKey()),
       });
 
       return {
@@ -1033,7 +1033,7 @@ export default function MissionDetailsPage() {
       };
     },
     onSuccess: ({ normalizedPayload: payload, isRegularizationRequest }) => {
-      if (isRegularizationRequest) fuelRegularizationKeyRef.current = null;
+      fuelSubmissionKeyRef.current = null;
       queryClient.setQueryData([`/api/missions/${missionId}/fuel-records`], (current: any) => {
         const normalizedCurrent = normalizeMissionFuelRecordsResponse(current);
         const nextRecords = payload.record
@@ -1088,6 +1088,12 @@ export default function MissionDetailsPage() {
       });
     },
     onError: (error: unknown) => {
+      if (isApiError(error) && error.status === 409) {
+        // Plein déjà enregistré sous cette clé (avec d'autres valeurs) : la saisie suivante est une
+        // nouvelle soumission, et l'écran relit les pleins pour montrer celui qui existe.
+        fuelSubmissionKeyRef.current = null;
+        queryClient.invalidateQueries({ queryKey: [`/api/missions/${missionId}/fuel-records`] });
+      }
       setErrorModal({
         title: "Échec enregistrement plein",
         description: extractApiErrorMessage(error),
@@ -3019,6 +3025,7 @@ export default function MissionDetailsPage() {
         onOpenChange={(open) => {
           setOpenFuelDialog(open);
           if (!open) {
+            fuelSubmissionKeyRef.current = null;
             setFuelDialogMode("standard");
             setFuelRegularizationReason("");
           }
@@ -3170,6 +3177,7 @@ export default function MissionDetailsPage() {
             <Button
               variant="outline"
               onClick={() => {
+                fuelSubmissionKeyRef.current = null;
                 setOpenFuelDialog(false);
                 setFuelDialogMode("standard");
                 setFuelRegularizationReason("");

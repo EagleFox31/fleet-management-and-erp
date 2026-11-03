@@ -560,6 +560,17 @@ EXCEPTION WHEN lock_not_available OR unique_violation THEN
 END $$;`;
 
 /**
+ * Clé de requête d'un plein de mission (rejeu sans second débit). Doit rester identique à
+ * server/db/migrations/20261103_fuel_records_request_key.sql : tests/unit/server/fuel-records-request-key-schema.test.ts
+ * compare les deux.
+ */
+export const FUEL_RECORDS_REQUEST_KEY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS request_key text;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fuel_records_request_key ON fuel_records (request_key);`;
+
+/**
  * Le RAISE WARNING n'atteint pas les logs applicatifs : relit pg_indexes après DRIVERS_USER_ID_UNIQUE_SQL.
  * Index absent : journalise chaque compte lié à plusieurs fiches (identifiants seulement, aucune donnée
  * personnelle) pour que la logistique choisisse la fiche gardée. Rien n'est fusionné ni supprimé ici.
@@ -996,6 +1007,8 @@ export async function initializeDatabase() {
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
+    // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
+    await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
     // Entrée en stock attribuée au réceptionnaire — doit rester ici ET dans
     // server/db/migrations/20261030_part_requirements_received_by.sql (AGENTS.md §5).
     await db.execute(sql`ALTER TABLE part_requirements ADD COLUMN IF NOT EXISTS received_by integer REFERENCES users(id)`);
