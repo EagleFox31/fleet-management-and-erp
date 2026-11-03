@@ -30,7 +30,6 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
   "server/api/purchase-orders.routes.ts": { count: 1, why: "commandes fournisseur suivies par plusieurs profils" },
   "server/api/supplier-invoices.routes.ts": { count: 1, why: "factures fournisseur suivies par plusieurs profils" },
   "server/api/suppliers.routes.ts": { count: 1, why: "fournisseurs suivis par plusieurs profils" },
-  "server/routes.ts": { count: 1, why: "recharge carte carburant (fichier gelé, ne pas en ajouter)" },
   "server/services/tires-service-simplified.ts": { count: 1, why: "pneus suivis par plusieurs profils" },
 };
 
