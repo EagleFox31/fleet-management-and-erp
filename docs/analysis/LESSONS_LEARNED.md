@@ -1600,7 +1600,7 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - FUEL3 (`vehicles-tank-capacity.test.ts`) a échoué sur `n_tup_ins` 132 au lieu de 130 : le test vérifiait l'absence d'écriture au second démarrage à l'aide du compteur `pg_stat_user_tables`. Ce compteur est global à la table, il compte aussi les écritures des fichiers lancés en parallèle, et il est mis à jour en différé.
 
 ### Cause racine
-L'assertion portait sur une donnée que le test ne contrôle pas : une valeur aléatoire incluse dans le texte contrôlé, et un compteur partagé par toute la base. 34 contrôles de fuite suivaient le même motif (`JSON.stringify(x.body)).not.toMatch`). Avec `/i`, n'importe quel mot de trois lettres (sql, NaN…) pouvait sortir.
+L'assertion portait sur une donnée que le test ne contrôle pas : une valeur aléatoire incluse dans le texte contrôlé, et un compteur partagé par toute la base. 50 contrôles de fuite, dans 34 fichiers, suivaient le même motif (`JSON.stringify(x.body)).not.toMatch`). Avec `/i`, n'importe quel mot de trois lettres (sql, NaN…) pouvait sortir.
 
 ### Classification
 Test non déterministe (flake), sans défaut produit.
