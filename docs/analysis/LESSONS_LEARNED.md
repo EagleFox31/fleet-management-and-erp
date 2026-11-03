@@ -1249,6 +1249,49 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Une garantie de sécurité se teste sur son point d'entrée réel, pas seulement sur la fonction qui la porte. Après toute fusion de main dans une branche de sécurité, relire les fichiers en conflit résolu côté main et rejouer l'e2e concerné.
 - Toute purge locale liée à l'identité a pour pendant une révocation serveur garantie (déconnexion différée rejouée avant toute reprise de session). L'identité gardée en mémoire se synchronise entre onglets (réserves R2 et S1, lot #10c).
 
+## 2026-11-03 - Une règle, une source
+
+### Constat
+- Pendant P3-2 lot 1 (PR #126), trois symptômes du même défaut, corrigés dans la branche `fix/p3-2-echeances` (75dbb99, d9a8f81, 7c12906, f16ee00) :
+  1. Un papier expiré (assurance, visite, plaque) créait un OT atelier qui immobilisait le véhicule à tort.
+  2. Le lancement de mission (`PUT /api/missions/:id/status`) et l'éligibilité à l'affectation (`getMissionEligibility`, `shared/constants/vehicle-eligibility.ts`) ne tranchaient pas le jour J de la même façon : le lancement laissait partir un véhicule dont l'échéance tombait le jour même.
+  3. Le miroir `vehicles.*` (`licensePlateExpiry`, `insuranceExpiry`, `technicalInspectionDate`) n'était pas recalculé à la suppression d'un document, et le dépôt pouvait faire reculer la date.
+
+### Cause racine
+- La même règle (« quand un papier est-il expiré, et quel document compte ? ») était écrite à plusieurs endroits : le service préventif, `alert-service`, `missions.routes.ts`, `getMissionEligibility`, et une copie locale du miroir dans `document-renewals.routes.ts`. Chaque copie avait sa propre date de référence et sa propre règle de « dernier document ».
+- Classification : source de vérité dupliquée (règle métier recopiée entre service, route et écran), défaut de contrat entre les chemins qui décident.
+
+### Résolution
+- Règle d'éligibilité unique : `getMissionEligibility` est appelée au lancement comme à l'affectation ; le lancement n'ajoute que les motifs de conformité qui ne sont pas déjà énoncés. Jour J bloqué (`isExpiredOnOrBeforeToday` dans `missions.routes.ts`, même sémantique que `joursDepuis`).
+- Par type de document, seule l'échéance la plus lointaine compte au lancement.
+- Lib unique `server/lib/vehicle-document-mirror.ts` (`syncVehicleDocumentMirror` mode `later` = GREATEST au dépôt, mode `set` pour un renouvellement ; `recomputeVehicleDocumentMirror` à la suppression). `document-renewals.routes.ts` et `vehicle-documents.routes.ts` l'utilisent ; la copie locale est supprimée.
+- Le papier ne crée plus d'OT atelier : `vehicles.status` reste inchangé, l'alerte renvoie vers le renouvellement.
+
+### Résiduel connu (non corrigé dans #126)
+- `missions.routes.ts` garde `isDateExpired` (jour J encore valide) pour le permis chauffeur (lancement, l. ~2341 ; préparation, l. ~1415) et `isDocumentTypeValid` (l. ~584, appelée l. ~1412, ~2724 et ~2860 : demandes de renouvellement et préparation). Un document qui expire aujourd'hui est donc refusé au lancement mais non réclamé par les demandes de renouvellement. Ces lignes relèvent encore de la même règle dupliquée.
+
+### Prévention (vérifiable)
+- `tests/contract/mission-document-expiry.contract.test.ts` (existe dans la branche) :
+  - « P3-2 papier dans la fenêtre d'alerte » : aucun OT atelier pour assurance, visite et plaque, alerte avec lien, statut inchangé.
+  - « jour J : un papier qui expire aujourd'hui bloque, comme l'éligibilité » : lancement refusé pour une assurance échue ce jour.
+  - « P3-2 R2 : un document saisi par erreur puis supprimé » : le miroir revient à l'échéance restante et l'affectation est refusée.
+  - Rouge avant correctif : non rejoué par moi ; le corps de #126 l'affirme pour « document orphelin » et « jour J ».
+- `tests/contract/vehicle-documents-upload.contract.test.ts` (existe) : dépôt qui met le miroir à jour, dépôt plus ancien qui ne fait pas reculer le miroir (GREATEST), second dépôt à la même échéance sans écriture ni `vehicle_updated`, parité de la lib avec `PATCH /api/documents/:id` (alias compris), échec de synchro en 500 lisible sans ligne ni fichier, suppression qui recalcule le miroir.
+- `tests/unit/shared/vehicle-eligibility.test.ts` (existe) : « accepte une échéance encore valable, refuse dès le jour J ».
+- `tests/integration/preventive-maintenance-lifecycle.test.ts` (existe) : `it.fails` « l'OT issu d'un plan échu immobilise aussi le véhicule » (sur origin/main l. 212) remplacé par `describe("P3-2")` vert : OT ouvert, véhicule opérationnel, idempotent au second passage.
+- `tests/unit/server/write-routes-ratchet.test.ts` et `tests/unit/server/support/write-routes-frozen.ts` : la liste gelée ne peut que diminuer ; #126 retire `post /api/vehicles/:vehicleId/documents`.
+- `tests/unit/server/it-fails-hygiene.test.ts` et `tests/unit/server/routes-hygiene.test.ts` (existent) : garde-fous des `it.fails` et des doublons de routes.
+- Prévention manquante, à confier à fleet-testeur :
+  - Garde-fou qui interdit `isDateExpired` (jour J valide) et toute écriture directe des colonnes miroir `vehicles.*` hors de `server/lib/vehicle-document-mirror.ts`. Écritures directes existantes : `server/routes.ts` l. 1428, 1433, 1438 (PATCH `/api/documents/:id`, fichier gelé). Aucun test de ce type n'existe.
+  - Test de lancement du permis chauffeur au jour J.
+- Non trouvé dans la branche : un garde-fou « licenseExpiry=2 » dans `missions.routes.ts`, et un verrou d'import de la lib miroir. Ils ne sont pas cités comme prévention.
+
+### Règle Projet (obligatoire)
+- Une règle métier qui décide (expiré ou non, éligible ou non, jour J) vit en une seule fonction importée par tous les chemins qui décident (service, route, alerte, écran). Une copie locale est une dette à supprimer dans la même PR.
+- Pour une règle de date, le test porte sur le jour J exact, sur chaque chemin qui décide, pas seulement sur le chemin qu'on vient de corriger.
+- Avant d'annoncer une règle unifiée, rechercher les autres occurrences de la fonction (`grep -rn <nom>`) et les lister dans la PR ; une occurrence restante se déclare comme résiduel, pas comme corrigée.
+- Récurrence : même classe que « Écran ouvert à un rôle que son API refuse » (2026-10-31) et « Borne KPI complétée par le serveur » (2026-11-02). Les corrections précédentes étaient ponctuelles ; cette entrée exige un garde-fou qui compare les chemins décideurs.
+
 ## 2026-11-03 - Garde au montage trop large, 3e occurrence : écritures des missions (#129)
 
 ### Constat

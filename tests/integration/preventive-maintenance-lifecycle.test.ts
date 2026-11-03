@@ -165,16 +165,16 @@ describe("P3 alerte a l'echeance du plan", { timeout: 120000 }, () => {
 
 describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 120000 }, () => {
   /** Echeance de maintenance du vehicule : OT preventif et immobilisation (voir MNT2). */
-  async function immobilised(label: string) {
+  async function vehicleInMaintenance(label: string) {
     const v = await newVehicle(label);
     await db.update(vehicles).set({ nextMaintenanceDate: daysFromNow(10) }).where(eq(vehicles.id, v.id));
     const [wo] = await preventiveMaintenanceService.checkDateBasedMaintenance(v.id, "maintenance");
     return { v, wo };
   }
 
-  it("l'OT genere immobilise le vehicule, le cloturer le remet operationnel", async () => {
-    const { v, wo } = await immobilised("close-one");
-    expect(await vehicleStatus(v.id)).toBe("maintenance");
+  it("l'OT genere n'immobilise pas, sa prise en charge oui, le cloturer remet operationnel", async () => {
+    const { v, wo } = await vehicleInMaintenance("close-one");
+    expect(await vehicleStatus(v.id)).toBe("operational");
     await storage.updateWorkOrder(wo.id, { status: "in_progress" });
     expect(await vehicleStatus(v.id)).toBe("maintenance");
     await storage.updateWorkOrder(wo.id, { status: "completed" });
@@ -182,35 +182,30 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
   });
 
   it("deux OT ouverts : cloturer le premier garde le vehicule en maintenance, le second le libere", async () => {
-    const { v, wo } = await immobilised("close-two");
+    const { v, wo } = await vehicleInMaintenance("close-two");
     const plan = await newSchedule(v.id, { scheduledDate: daysFromNow(-1) });
     const second = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
     expect(second.id).not.toBe(wo.id);
 
     await storage.updateWorkOrder(wo.id, { status: "in_progress" });
+    await storage.updateWorkOrder(second.id, { status: "in_progress" });
     await storage.updateWorkOrder(wo.id, { status: "completed" });
     expect(await vehicleStatus(v.id)).toBe("maintenance");
-    await storage.updateWorkOrder(second.id, { status: "in_progress" });
     await storage.updateWorkOrder(second.id, { status: "completed" });
     expect(await vehicleStatus(v.id)).toBe("operational");
   });
 
-  // P3-2 : l'OT issu d'un plan (maintenanceSchedules) ne declenche pas l'immobilisation, seul
-  // l'OT issu de vehicles.nextMaintenanceDate le fait (variable declencheur de checkDateBasedMaintenance).
+  // P3-2 : l'OT preventif ne s'immobilise plus a la generation, ni pour un plan, ni pour
+  // vehicles.nextMaintenanceDate. Le vehicule passe en maintenance a la prise en charge.
   describe("P3-2", () => {
-    let vehicleId = 0;
-    beforeAll(async () => {
+    it("plan echu : OT ouvert, vehicule operationnel", async () => {
       const v = await newVehicle("p3-2");
-      vehicleId = v.id;
       await newSchedule(v.id, { scheduledDate: daysFromNow(-1) });
-      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(v.id)).toHaveLength(1);
-    });
-    // Temoin : le vehicule existe et reste aujourd'hui operationnel. Casse quand P3-2 est tranche.
-    it("temoin P3-2 : le vehicule d'un plan echu reste operationnel", async () => {
-      expect(await vehicleStatus(vehicleId)).toBe("operational");
-    });
-    it.fails("P3-2 : l'OT issu d'un plan echu immobilise aussi le vehicule", async () => {
-      expect(await vehicleStatus(vehicleId)).toBe("maintenance");
+      const generes = await preventiveMaintenanceService.checkDateBasedMaintenance(v.id);
+      expect(generes).toHaveLength(1);
+      expect(await vehicleStatus(v.id)).toBe("operational");
+      // Idempotent : un second passage ne duplique pas l'OT.
+      expect(await preventiveMaintenanceService.checkDateBasedMaintenance(v.id)).toHaveLength(0);
     });
   });
 });
