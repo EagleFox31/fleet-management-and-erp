@@ -22,3 +22,16 @@ Modèle et règles : `docs/journal/README.md`.
   - couvert : D (statuts HTTP inchangés, contrats verts), E (§10) et Failure memory (garde-fou exécutable) ;
   - ne s'applique pas : A, I et R (rétroactif), car rien ne change en base ou à distance.
 - **Reste / risques** : les sites « log puis 500 » de `missions.routes.ts` attendent la fin du travail de c7.
+
+## 2026-11-03T14:41:20+01:00 — Correction de l'entrée précédente — renouvellement rapide
+
+- **Agent** : b7 · **Branche** : `fix/error-log-500-reserves`
+- **Statut** : fait
+- **Quoi** : dans l'entrée précédente, la justification donnée pour `document-renewals.routes.ts:1198` est **fausse**. `vehicleDocuments` ne stocke que l'échéance (`expiryDate`). Quand `finalizedRequest` est vide, aucune demande ne référence `proofFilePath`, et le justificatif restait orphelin.
+- **Comment** : `return next(…)` devient `throw new AppError(500, …)`. Le catch supprime alors le justificatif puis relaie l'AppError.
+- **Pourquoi** : réserve du relecteur sur #173.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/error-500-relay-hygiene.test.ts` → `20 passed`. Contrats `document-renewals` verts.
+- **Reste / risques** : suivi de sécurité sur les fichiers téléversés de ce handler, dans un lot à part :
+  - les 404 et 400 en 1032, 1037-1047, 1092 et 1098 laissent le fichier orphelin ;
+  - 1092 et 1098 arrivent après la mise à jour de l'échéance, hors transaction ;
+  - un échec de `createAlert` supprime un justificatif déjà référencé par la demande.

@@ -1195,7 +1195,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       }
 
       if (!finalizedRequest) {
-        return next(new AppError(500, "Impossible de finaliser la demande de renouvellement."));
+        throw new AppError(500, "Impossible de finaliser la demande de renouvellement.");
       }
 
       const documentLabel =
