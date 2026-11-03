@@ -198,3 +198,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Code : `transferDocumentsToVehicle` vérifie la destination de la copie (`isInsideDirectory(vehicleUploadDir, newPath)`).
 - Pourquoi : le relecteur a relevé que `const p = req.body.p` héritait d'une garde posée sur `req.query.x`. Leçon ajoutée dans LESSONS_LEARNED.
 - Preuve : hygiène + deleteFile 20/20, nouveaux cas de contournement rouges avec la règle précédente.
+
+## 2026-11-03T18:16:39+01:00 — Workflows abandonnés : délai de 7 jours absent du nettoyage
+
+- Quoi : `cleanupAbandonedWorkflowDocuments` ne vise plus que les workflows abandonnés depuis plus de `olderThanDays` jours (7 par défaut, `updatedAt` = date de l'abandon).
+- Comment : `lt(updatedAt, cutoff)` dans le `where`, `now` et le délai injectables. Aucun job branché : la décision de rétention revient au produit.
+- Pourquoi : la clause n'était qu'un commentaire, et un workflow abandonné la veille perdait ses documents. La fonction n'a aucun appelant : le piège était armé, mais n'avait pas encore servi (constat de fleet-securite pendant la revue de #210).
+- Preuve : `tests/integration/workflow-cleanup-retention.test.ts` (1 jour gardé, 8 jours purgé, en cours intact), rouge sans la clause.
