@@ -17,6 +17,8 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
+import { authorize } from "../middleware/auth";
+import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -170,7 +172,7 @@ const OPEN_RENEWAL_STATUSES = ["pending", "in_progress"] as const;
 const MISSION_FUEL_ALLOWED_STATUSES = ["planned", "assigned", "in_progress", "delivered"] as const;
 const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
-const MISSION_FUEL_MANAGERS = ["admin", "logistics", "secretary"] as const;
+const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
 
 const ALERT_TITLE_TO_DOCUMENT_TYPE = Object.fromEntries(
   Object.entries(DOCUMENT_ALERT_TITLES).map(([documentType, alertTitle]) => [alertTitle, documentType]),
@@ -1903,7 +1905,9 @@ const updateMissionSchema = z.object({
 });
 
 // PATCH /api/missions/:id - Mettre à jour les infos de mission
-router.patch("/:id", async (req, res) => {
+// Réservé aux gestionnaires de missions (R3) : le montage n'exige que isStaff, ce qui laissait
+// chauffeur, technicien et magasinier modifier coût carburant, dates, chauffeur et véhicule.
+router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
     if (!Number.isInteger(missionId)) {
