@@ -185,7 +185,7 @@ export class PartsService {
     updateData: Partial<InsertPart>,
     updatedBy?: number,
   ): Promise<Part> {
-    console.log(`Updating part ${id}:`, updateData);
+    log.debug({ partId: id, fields: Object.keys(updateData) }, "Modification d'une pièce");
 
     const bounds = PART_STOCK_BOUNDS.safeParse({ quantity: updateData.quantity, minQuantity: updateData.minQuantity });
     if (!bounds.success) {
@@ -224,7 +224,7 @@ export class PartsService {
       .where(eq(parts.id, id))
       .returning();
 
-    console.log("Part updated successfully:", updatedPart);
+    log.info({ partId: id, updatedBy: updatedBy ?? null }, "Pièce modifiée");
     return updatedPart;
   }
 

@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import {
   ComposedChart,
   Bar,
@@ -124,18 +125,19 @@ export default function PartDetails({ params }: PartDetailsParams) {
     // Endpoint dédié: il calcule `quantity + adjustment` côté serveur ET trace
     // le mouvement de stock. Ne pas repasser par PATCH /api/parts/:id, qui ne
     // connaît pas de champ `currentStock` et laisserait l'ajustement sans effet.
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/parts/${partId}/update-stock`, {
-        adjustment: stockUpdateAmount,
+    // Cible et quantité passent par les variables, jamais par un état lu ici (AGENTS.md §10).
+    mutationFn: async ({ id, adjustment }: { id: number; adjustment: number }) => {
+      return apiRequest("POST", `/api/parts/${id}/update-stock`, {
+        adjustment,
         reason: "Ajustement manuel depuis la fiche pièce",
       });
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id, adjustment }) => {
       toast({
         title: "Stock mis à jour",
-        description: `Le stock a été ${stockUpdateAmount >= 0 ? "augmenté" : "diminué"} de ${Math.abs(stockUpdateAmount)} unité(s).`,
+        description: `Le stock a été ${adjustment >= 0 ? "augmenté" : "diminué"} de ${Math.abs(adjustment)} unité(s).`,
       });
-      queryClient.invalidateQueries({ queryKey: [`/api/parts/${partId}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/parts/${id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
       setIsUpdateStockDialogOpen(false);
       setStockUpdateAmount(0);
@@ -154,8 +156,10 @@ export default function PartDetails({ params }: PartDetailsParams) {
     setIsDeleteDialogOpen(false);
   };
   
+  // Écrit du stock : protégé contre le double clic (AGENTS.md §10).
+  const submitStockUpdate = useSingleFlightMutate(updateStockMutation.mutate);
   const handleUpdateStock = () => {
-    updateStockMutation.mutate();
+    submitStockUpdate({ id: partId, adjustment: stockUpdateAmount });
   };
   
   if (isLoading) {

@@ -83,6 +83,13 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
 router.patch("/parts/:id([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
+    // Le stock ne change que par `update-stock`, qui trace le mouvement et son motif : une
+    // quantité dans le PATCH modifierait le stock sans aucune trace.
+    if (req.body?.quantity !== undefined) {
+      throw new AppError(400, "Le stock se modifie par un ajustement de stock, pas depuis la fiche.", {
+        fieldErrors: [{ field: "quantity", message: "Utilisez l'ajustement de stock." }],
+      });
+    }
     if (req.body?.unit !== undefined) {
       const normalizedUnit = typeof req.body.unit === "string" ? req.body.unit.trim() : "";
       if (!PART_UNITS.includes(normalizedUnit as (typeof PART_UNITS)[number])) {
