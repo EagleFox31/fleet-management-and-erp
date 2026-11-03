@@ -1478,6 +1478,9 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
+      // Création de compte depuis la fiche (#113) : la liste des utilisateurs change aussi.
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
       break;
 
     default:

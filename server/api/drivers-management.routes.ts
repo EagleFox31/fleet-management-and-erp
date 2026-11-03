@@ -466,8 +466,14 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
     });
 
     // Temps réel (AGENTS §2) : la fiche a désormais un compte, les autres profils resynchronisent.
-    const fullDriver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
-    broadcastDriverUpdate("driver_updated", fullDriver, driverId);
+    // Best effort : compte créé et lié, un échec ici ne doit pas renvoyer 500 (le nouvel essai
+    // répondrait 409 « déjà lié »). Les autres profils resynchronisent alors au refetch.
+    try {
+      const fullDriver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
+      broadcastDriverUpdate("driver_updated", fullDriver, driverId);
+    } catch (err) {
+      log.error({ err, requestId: req.requestId, driverId }, "Diffusion apres creation du compte chauffeur en echec");
+    }
 
     return res.status(201).json({ user: newUser, message: `Compte créé: ${username}` });
   } catch (error: any) {
