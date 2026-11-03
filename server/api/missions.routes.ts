@@ -719,7 +719,13 @@ function isDocumentTypeValid(
   if (!docs.length) return false;
 
   if (documentType === "carte_grise") {
-    return true;
+    // Même règle que le lancement (transition in_progress) : une carte grise sans date ne bloque
+    // pas ; datée, la plus récente échéance compte, le jour de l'échéance bloque (UTC). Le
+    // récépissé « plaque » lève l'échéance dépassée.
+    if (receiptCovers) return true;
+    const dated = docs.filter((doc) => Boolean(doc.expiryDate));
+    if (dated.length === 0) return true;
+    return dated.some((doc) => !isExpiredOnOrBeforeToday(doc.expiryDate as Date | string));
   }
 
   // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier.
@@ -1621,7 +1627,12 @@ router.get("/:id/launch-readiness", async (req, res) => {
     const readinessReceipts = missionAssignment?.vehicleId
       ? await loadOpenRenewalReceipts(missionAssignment.vehicleId)
       : {};
-    const carteGriseValid = hasVehicle && isDocumentTypeValid("carte_grise", docsByType.get("carte_grise") || []);
+    const carteGriseDocs = docsByType.get("carte_grise") || [];
+    const carteGriseValid = hasVehicle && isDocumentTypeValid(
+      "carte_grise",
+      carteGriseDocs,
+      isRenewalReceiptValid(readinessReceipts, "license_plate"),
+    );
     const assuranceDocs = docsByType.get("assurance") || [];
     const visiteDocs = docsByType.get("visite_technique") || [];
     const assuranceValid = hasVehicle && isDocumentTypeValid(
@@ -1636,6 +1647,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
     );
     // Valide grâce au seul récépissé : le dire, plutôt que « valide ».
     const assuranceParRecepisse = assuranceValid && !isDocumentTypeValid("assurance", assuranceDocs);
+    const carteGriseParRecepisse = carteGriseValid && !isDocumentTypeValid("carte_grise", carteGriseDocs);
     const visiteParRecepisse = visiteTechniqueValid && !isDocumentTypeValid("visite_technique", visiteDocs);
     const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDateExpired(missionAssignment?.driverLicenseExpiry);
     const cpcValid = hasDriver && normalizeCpcStatus(missionAssignment?.driverCpcStatus) === "FORME";
@@ -1816,7 +1828,13 @@ router.get("/:id/launch-readiness", async (req, res) => {
         label: "Carte grise conforme",
         passed: carteGriseValid,
         blocking: true,
-        detail: carteGriseValid ? "Document présent." : "Carte grise manquante.",
+        detail: carteGriseParRecepisse
+          ? "Carte grise couverte par un récépissé provisoire."
+          : carteGriseValid
+            ? "Carte grise valide."
+            : carteGriseDocs.length > 0
+              ? "Carte grise expirée."
+              : "Carte grise manquante.",
       },
       {
         key: "doc_assurance",
