@@ -299,6 +299,17 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-01-29");
     });
 
+    // Fin de mois : borne au dernier jour du mois cible, en UTC (D4), au lieu du debordement de setMonth.
+    it.each([
+      ["31/01 mensuel", { frequency: "monthly" as const, frequencyValue: 1, scheduledDate: "2026-01-31" }, "2026-02-28"],
+      ["31/01 mensuel bissextile", { frequency: "monthly" as const, frequencyValue: 1, scheduledDate: "2028-01-31" }, "2028-02-29"],
+      ["29/02 annuel", { frequency: "yearly" as const, frequencyValue: 1, scheduledDate: "2028-02-29" }, "2029-02-28"],
+      ["30/11 trimestriel", { frequency: "quarterly" as const, frequencyValue: 1, scheduledDate: "2026-11-30" }, "2027-02-28"],
+    ])("fin de mois (%s) : borne au dernier jour du mois", async (label, over, expected) => {
+      const { plan } = await closedPlan(`p3-1-eom-${label}`, over);
+      expect((await scheduleRow(plan.id)).scheduledDate).toBe(expected);
+    });
+
     it("le plan avance, le balayage ne regenere pas d'OT pour l'echeance traitee", async () => {
       const { plan } = await closedPlan("p3-1-sweep", { frequency: "monthly", frequencyValue: 6, scheduledDate: daysFromNow(-1) });
       expect(await preventiveMaintenanceService.checkDateBasedMaintenance(plan.vehicleId)).toHaveLength(0);
