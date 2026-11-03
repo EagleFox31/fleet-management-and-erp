@@ -11,6 +11,24 @@ const PART_STOCK_BOUNDS = insertPartSchema.pick({ quantity: true, minQuantity: t
 
 const log = moduleLogger("parts");
 
+/**
+ * Champs de stock qu'une modification de fiche ne touche jamais : le stock ne change que par
+ * `updateStock`, qui écrit le mouvement et son motif. `realStock` alimente le stock réel du magasin
+ * et la valeur d'inventaire. `reorderAlert` est un seuil de réglage, il reste modifiable.
+ */
+export const PART_STOCK_FIELDS = ["quantity", "realStock"] as const;
+
+/** 400 si le corps porte un champ de stock (voir `PART_STOCK_FIELDS`). */
+export function assertNoStockFields(data: unknown): void {
+  if (!data || typeof data !== "object") return;
+  const present = PART_STOCK_FIELDS.filter((field) => (data as Record<string, unknown>)[field] !== undefined);
+  if (present.length > 0) {
+    throw new AppError(400, "Le stock se modifie par un ajustement de stock, pas depuis la fiche.", {
+      fieldErrors: present.map((field) => ({ field, message: "Utilisez l'ajustement de stock." })),
+    });
+  }
+}
+
 const createdByUser = alias(users, "parts_created_by_user");
 const updatedByUser = alias(users, "parts_updated_by_user");
 
@@ -185,7 +203,8 @@ export class PartsService {
     updateData: Partial<InsertPart>,
     updatedBy?: number,
   ): Promise<Part> {
-    console.log(`Updating part ${id}:`, updateData);
+    log.debug({ partId: id, fields: Object.keys(updateData) }, "Modification d'une pièce");
+    assertNoStockFields(updateData);
 
     const bounds = PART_STOCK_BOUNDS.safeParse({ quantity: updateData.quantity, minQuantity: updateData.minQuantity });
     if (!bounds.success) {
@@ -224,7 +243,7 @@ export class PartsService {
       .where(eq(parts.id, id))
       .returning();
 
-    console.log("Part updated successfully:", updatedPart);
+    log.info({ partId: id, updatedBy: updatedBy ?? null }, "Pièce modifiée");
     return updatedPart;
   }
 

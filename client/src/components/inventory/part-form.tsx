@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -140,8 +141,12 @@ export function PartForm({ initialData, isEdit = false, partId }: PartFormProps)
         : values.category?.trim();
 
       // Convertir unitPrice en string pour correspondre au schéma backend
+      // En modification, le stock ne passe pas par la fiche : le serveur refuse `quantity`
+      // (ajustement de stock tracé depuis la fiche pièce).
+      const { quantity, ...rest } = values;
       const payload = {
-        ...values,
+        ...rest,
+        ...(isEdit ? {} : { quantity }),
         category: resolvedCategory || undefined,
         customCategory: undefined,
         responsiblePerson: values.responsiblePerson?.trim() || undefined,
@@ -405,8 +410,11 @@ export function PartForm({ initialData, isEdit = false, partId }: PartFormProps)
                   <FormItem>
                     <FormLabel>Quantité en stock</FormLabel>
                     <FormControl>
-                      <Input type="number" min={0} {...field} />
+                      <Input type="number" min={0} {...field} disabled={isEdit} />
                     </FormControl>
+                    {isEdit && (
+                      <FormDescription>Modifiable par l'ajustement de stock de la fiche pièce.</FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
