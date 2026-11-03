@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -37,7 +38,7 @@ export function MileageUpdateForm({ vehicleId, currentMileage, registrationNumbe
     onError: (error: any) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de mettre à jour le kilométrage",
+        description: userMessageOf(error, "Impossible de mettre à jour le kilométrage"),
         variant: "destructive",
       });
     },

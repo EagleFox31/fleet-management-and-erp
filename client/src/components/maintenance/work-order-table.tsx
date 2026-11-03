@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,7 +159,7 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
     onError: (error: any) => {
       appToast({
         title: "Échec de l'assignation",
-        description: error?.message || "Impossible d'assigner ce technicien.",
+        description: userMessageOf(error, "Impossible d'assigner ce technicien."),
         variant: "destructive",
       });
     },
@@ -182,7 +183,7 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
       appToast({ title: "OT démarré", description: "L'ordre de travail a été auto-assigné et démarré.", variant: "success" });
     },
     onError: (error: any) => {
-      appToast({ title: "Échec du démarrage", description: error?.message || "Impossible de démarrer cet OT.", variant: "destructive" });
+      appToast({ title: "Échec du démarrage", description: userMessageOf(error, "Impossible de démarrer cet OT."), variant: "destructive" });
     },
     onSettled: () => { setAutoStartingWorkOrderId(null); },
   });

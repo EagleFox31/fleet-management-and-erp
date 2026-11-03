@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, PRT1 : fiche pièce (CRUD, catégorie).
@@ -48,7 +49,7 @@ async function createPart(actor: Actor = "warehouse", overrides: Record<string, 
 }
 
 const rowOf = async (id: number) => (await db.select().from(parts).where(eq(parts.id, id)))[0];
-const noLeak = (res: { body: any }) => expect(JSON.stringify(res.body)).not.toMatch(/SQLSTATE|violates|duplicate key|invalid input syntax|at \S+:\d+/);
+const noLeak = (res: { body: any }) => expect(leakText(res.body)).not.toMatch(/SQLSTATE|violates|duplicate key|invalid input syntax|at \S+:\d+/);
 
 beforeAll(async () => {
   session = await startContractActors<Actor>(ACTORS, ids.userIds);

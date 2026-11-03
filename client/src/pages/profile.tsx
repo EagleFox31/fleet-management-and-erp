@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { NotificationPreferences } from "@/components/profile/notification-preferences";
 import { Button } from "@/components/ui/button";
@@ -69,7 +70,7 @@ export default function ProfilePage() {
       toast({ title: "Succès", description: "Mot de passe modifié avec succès" });
       setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (error: any) {
-      toast({ title: "Erreur", description: error.message || "Impossible de modifier le mot de passe", variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Impossible de modifier le mot de passe"), variant: "destructive" });
     } finally {
       setIsChangingPassword(false);
     }

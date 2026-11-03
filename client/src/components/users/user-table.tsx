@@ -59,7 +59,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression de l'utilisateur: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression de l'utilisateur."),
       });
     },
   });

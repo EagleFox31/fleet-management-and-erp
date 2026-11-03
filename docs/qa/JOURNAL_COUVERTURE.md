@@ -2152,3 +2152,54 @@ soumission sans doublon.
 - **Comment** : correctif dans le case client existant ; les événements de commande ne sont pas au registre `REALTIME_EVENTS` (les y inscrire toucherait la portée serveur, fermée par défaut depuis #153). Autres événements de stock relus : `part_requirement_*` invalide déjà pièces, stock bas et alertes ; l'ajustement passe par `part_catalog_changed` et `WAREHOUSE_QUERY_KEYS`. Pas d'autre trou.
 - **Pourquoi** : défaut trouvé par P6, l'alerte restait affichée chez le chef d'atelier jusqu'au rechargement.
 - **Preuves** : spec 23 deux passes 7/7 (dont la levée sans rechargement) ; rouge démontré à la PR #175 (sans les invalidations, le test échoue). tsc 0, unitaires 1768/1768.
+
+## 2026-11-03 15:28 — Flakes : requestId dans les contrôles de fuite, compteur pg_stat de FUEL3
+
+- **Quoi** : `leakText` dans `tests/support/api-error.ts`, utilisé par 50 contrôles de fuite dans 34 fichiers (30 de contrat, 4 unitaires dont le cas forcé) et par `apiErrorProblems`. Garde-fou `tests/unit/leak-check-hygiene.test.ts`. Cas déterministe `X-Request-Id: qrSqlREDR7` dans `part-scans-routes.test.ts`. FUEL3 : `vehicleVersions` (`xmin` et `md5`) remplace `pg_stat_user_tables`.
+- **Comment** : le texte contrôlé ne contient plus le `requestId`. FUEL3 mesure ses propres lignes et une sentinelle, que le test supprime à la fin.
+- **Pourquoi** : deux échecs aléatoires signalés par 0a. Le garde-fou a trouvé 7 contrôles de plus que le premier relevé.
+- **Preuves** : rouge par mutation sur les deux cas (ancien contrôle avec le requestId forcé ; `UPDATE vehicles SET brand = brand` au démarrage). tsc 0, unitaires 142/142 fichiers, contrats 127/127 fichiers, FUEL3 4/4.
+
+## 2026-11-03 16:00 — Couche 3 : table des écrans satellites et garde-fou
+
+- **Quoi** : `client/src/lib/realtime-satellites.ts`, avec 14 groupes d'écrans et une table événement -> groupes. `useRealTimeSync.ts` appelle `invalidateSatellites` avant le `switch`, et `part_used_*` rafraîchit en plus la fiche de l'OT. Nouveau test `tests/unit/client/realtime-satellites.test.ts` (11 cas).
+- **Comment** : le garde-fou balaie les émetteurs du serveur (premier argument littéral de `broadcast*`, `emit*` ou `diffuser`, et `'eventType'` SQL) et les `queryKey` du client, constantes `_PATH` des contrats comprises. Listes gelées :
+  - `UNCOVERED_SATELLITES` : `/api/invoices/monthly-stats`, appel sans route, et `/api/workflows/stats`, sans événement ;
+  - `TABLE_WITHOUT_EMITTER` : 4 événements.
+- **Pourquoi** : les 14 écarts de l'audit 0a du 3 novembre 2026. L'oubli d'un écran satellite était l'erreur la plus fréquente de la règle des 3 couches.
+- **Preuves** :
+  - rouge par mutation : retirer `parts_delivered` fait échouer le test de famille, et `warehouse_stock_movement_recorded` sans groupe stock fait échouer le test de groupe et celui de l'audit ;
+  - vert : unitaires 142 fichiers, tsc 0 ;
+  - e2e en local : 23 + 21 (10/10), 06 + 14 + 15 (4 verts, 1 skip préexistant de 06 : aucun véhicule en base).
+
+## 2026-11-03 15:31 — Couche 3 : réserves de relecture sur #179
+
+- **Quoi** : NOT_YET_IN_TABLE et UNCOVERED_SATELLITES sont figées par égalité stricte. Le groupe fuel couvre aussi `["/api/fuel-card/vehicle", id, …]` et le préfixe `/api/fuel-records/vehicle/` (fiche véhicule). La JSDoc de `invalidateCatalogEvent` est revenue au-dessus de sa fonction.
+- **Pourquoi** : réserve du relecteur. Les deux listes pouvaient grandir sans que le test échoue, ce qui contredisait leur nature de liste gelée.
+- **Preuves** : rouge si on ajoute une entrée à l'une ou l'autre liste (2 échecs). tsc 0, unitaires 142/142 fichiers.
+
+## 2026-11-03 15:36 — Ménage des comptes de test : garde-fou des FK vers users
+
+- **Quoi** : `tests/integration/cleanup-users-fk-coverage.test.ts` lit `pg_constraint` et y relève les FK vers `users` sans `ON DELETE` (59). Chacune doit être traitée de l'une de ces façons :
+  - par compte, `inArray(<table>.<colonne>, testUsers)` dans `deleteOrphanTestRows` ;
+  - par préfixe, `orphan(<table>.…)` ;
+  - par la liste gelée `NOT_YET_HANDLED` (36), comparée en égalité stricte.
+- **Pourquoi** : une FK oubliée fait échouer le hook global de tous les fichiers. C'est déjà arrivé avec alerts, missions, document_renewal_centers et status_history. Le traitement de status_history existait déjà sur main (`test-cleanup-status-history.test.ts`). Il restait le garde-fou.
+- **Preuves** : rouge si la ligne `statusHistory.updatedById` du nettoyage d'orphelins est retirée (3 échecs, dont le test existant). Vert 5/5 sur Postgres local, tsc 0.
+
+## 2026-11-03 16:47 — Scan des lectures GET : sept contournements fermés (#176)
+
+- **Quoi** : `tests/support/route-guard-scan.ts` refuse désormais sept formes qui le trompaient. Chaque refus reste en échec fermé.
+  - A : un alias d'import (`authenticate as isStaff`) vaut la garde d'origine.
+  - B : une garde connue redéclarée localement (`const`, `function`) sans être reclassée devient permissive.
+  - C : un `router.use(garde)` ne couvre que les routes déclarées après lui.
+  - D : un répartiteur `sessionGuard` qui appelle `next()` en direct est permissif.
+  - E : un marqueur de cloison placé dans une chaîne ou un gabarit ne compte pas.
+  - F : une réponse 4xx ou 5xx dont le corps n'est pas un message littéral compte comme un envoi de donnée.
+  - G : `ownerScopeOf` ou `canAccessOwned` dont le résultat est jeté ne compte pas.
+- **Où** : fixtures dans `tests/unit/server/route-guard-scan-bypass.test.ts`, avec 11 contournements refusés et 8 formes saines acceptées.
+- **Pourquoi** : la poc #176 montrait qu'une route ouverte au client pouvait passer le garde-fou sans aucune cloison.
+- **Preuves** :
+  - sur le code réel, les offenders sont identiques à `OPEN_GET_READS_FROZEN` (aucun ajout, aucun retrait) ;
+  - avec le scanner de main, le test échoue sur 11 cas (les 10 contournements et l'alias sain) ;
+  - tsc 0.

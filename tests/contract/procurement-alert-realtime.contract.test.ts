@@ -40,9 +40,15 @@ const orderIds: number[] = [];
 const workOrderIds: number[] = [];
 const frames: Frame[] = [];
 const previousBroadcast = (global as any).broadcastUpdate;
+/** Fait échouer le prochain envoi d'alert_created (panne de socket simulée). */
+let failNextAlertFrame = false;
 
 beforeAll(async () => {
   (global as any).broadcastUpdate = vi.fn((eventType: string, data: unknown) => {
+    if (eventType === "alert_created" && failNextAlertFrame) {
+      failNextAlertFrame = false;
+      throw new Error("TEST envoi impossible");
+    }
     frames.push({ eventType, data });
   });
   const app = await getContractApp();
@@ -151,6 +157,16 @@ const patch = (path: string, body: unknown) =>
 const alertFramesFor = (userId: number) =>
   frames.filter((f) => f.eventType === "alert_created" && f.data?.scope?.type === "user" && f.data.scope.userIds?.includes(userId));
 
+/** Aucune trame alert_created ne part hors portée nominative (ni broadcast, ni rôles). */
+function expectAllAlertFramesNominative() {
+  const all = frames.filter((f) => f.eventType === "alert_created");
+  expect(all.length).toBeGreaterThan(0);
+  for (const f of all) {
+    expect(f.data?.scope?.type).toBe("user");
+    expect(f.data.scope.userIds).toHaveLength(1);
+  }
+}
+
 function expectAlertFrame(userId: number, title: string) {
   const mine = alertFramesFor(userId).filter((f) => f.data.payload?.title === title);
   expect(mine).toHaveLength(1);
@@ -176,6 +192,7 @@ describe("réception de pièces : trame alert_created vers l'atelier", { timeout
     expect(rows.map((r) => r.userId).sort()).toEqual([managerId, technicianId].sort());
     // Le magasinier, qui réceptionne, n'est pas destinataire.
     expect(alertFramesFor(warehouseId)).toEqual([]);
+    expectAllAlertFramesNominative();
     expect(frames.some((f) => f.eventType === "part_received")).toBe(true);
   });
 
@@ -192,6 +209,23 @@ describe("réception de pièces : trame alert_created vers l'atelier", { timeout
     const technicianAlert = alertFramesFor(technicianId).find((f) => f.data.payload?.title === "Pièces disponibles pour vos OT");
     expect(technicianAlert?.data.payload.link).toBe(`/maintenance/work-orders/${workOrder.id}`);
     expect(alertFramesFor(warehouseId)).toEqual([]);
+    expectAllAlertFramesNominative();
+    expect(frames.some((f) => f.eventType === "parts_delivered")).toBe(true);
+  });
+
+  it("un envoi raté ne coupe ni les trames suivantes ni parts_delivered", async () => {
+    const { order } = await awaitedPartOrder();
+    frames.length = 0;
+    failNextAlertFrame = true;
+    const res = await patch(`/api/purchase-orders/${order.id}/status`, { status: "delivered", deliveryCode: "TEST-BL-RT2" });
+    expect(res.status).toBe(200);
+    for (const inv of await db.select({ id: supplierInvoices.id }).from(supplierInvoices).where(eq(supplierInvoices.purchaseOrderId, order.id))) {
+      ids.invoiceIds.push(inv.id);
+    }
+
+    expect(failNextAlertFrame).toBe(false);
+    // Au moins deux alertes (chef d'atelier, technicien) : la première échoue, la suite part.
+    expectAllAlertFramesNominative();
     expect(frames.some((f) => f.eventType === "parts_delivered")).toBe(true);
   });
 });

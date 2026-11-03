@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -86,7 +87,7 @@ export default function MyWorkOrdersPage() {
       setMileageUpdate("");
     },
     onError: (error: any) => {
-      toast({ title: "Erreur", description: error.message || "Impossible de mettre à jour le statut.", variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Impossible de mettre à jour le statut."), variant: "destructive" });
     }
   });
 

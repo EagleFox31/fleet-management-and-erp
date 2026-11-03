@@ -7,6 +7,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, facturation d'une mission (`POST /api/billing/invoices/generate`).
@@ -39,7 +40,7 @@ function expectErrorContract(res: { body: any; headers: Headers }, code: string)
   expect(res.body).toMatchObject({ code });
   expect(typeof res.body.message).toBe("string");
   expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
-  expect(JSON.stringify(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|NaN|duplicate key/);
+  expect(leakText(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|NaN|duplicate key/);
 }
 
 async function newMission() {

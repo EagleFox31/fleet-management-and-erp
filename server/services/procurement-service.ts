@@ -1203,7 +1203,7 @@ export class ProcurementService {
       throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
     }
 
-    console.log(`📦 Ligne commande #${lineId} mise à jour`);
+    log.info({ lineId }, "ligne de commande mise à jour");
 
     const newReceived = updated.quantityReceived || 0;
     const receivedDelta = Math.max(0, newReceived - previousReceived);
