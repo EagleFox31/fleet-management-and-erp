@@ -131,6 +131,37 @@ describe("Coût d'un ordre de travail (WO5)", { timeout: 120000 }, () => {
     expect(byVehicle.groups.find((g) => g.key === String(vehicle.id))).toMatchObject({ interventions: 1, totalCost: 25000 });
   });
 
+  it("aucun taux en vigueur : coût saisi + pièces + pneus, identique côté service technicien et KPI", async () => {
+    const technician = await createTestUser({ role: "technician" });
+    ids.userIds.push(technician.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const part = await createTestPart();
+    ids.partIds.push(part.id);
+
+    // Clos en 2001 : aucune suite ne pose de taux avant 2016, donc pas de taux applicable malgré les heures.
+    const [wo] = await db
+      .insert(workOrders)
+      .values({
+        vehicleId: vehicle.id, technicianId: technician.id, title: "TEST-wo5-sans-taux", status: "completed", cost: "700",
+        startDate: new Date("2001-03-04T08:00:00Z"), endDate: new Date("2001-03-05T16:00:00Z"),
+      })
+      .returning();
+    woIds.push(wo.id);
+    await db.insert(workOrderItems).values({ workOrderId: wo.id, customLabel: "TEST sans taux", actualHours: "4", status: "done" });
+    await db.insert(partsUsed).values({ workOrderId: wo.id, partId: part.id, quantity: 2, unitPrice: "50" });
+    await db.insert(tireRotations).values({
+      vehicleId: vehicle.id, workOrderId: wo.id, rotationDate: "2001-03-05", rotationMileage: 1000,
+      rotationType: "front_to_back", cost: "40",
+    });
+
+    expect(await laborRateForWorkOrder(wo.id)).toBeNull();
+    const list = await technicianWorkOrdersService.getTechnicianWorkOrders(technician.id);
+    expect(list.find((row) => row.id === wo.id)).toMatchObject({ baseCost: 700, partsCost: 100, tiresCost: 40, cost: 840 });
+    const byVehicle = await kpiService.maintenanceCosts({ from: "2001-03-05", to: "2001-03-05", groupBy: "vehicle" });
+    expect(byVehicle.groups.find((g) => g.key === String(vehicle.id))).toMatchObject({ interventions: 1, totalCost: 840 });
+  });
+
   it("liste de plusieurs OT : chaque coût reste celui de son OT (calcul groupé)", async () => {
     const technician = await createTestUser({ role: "technician" });
     ids.userIds.push(technician.id);
