@@ -376,7 +376,7 @@ sequenceDiagram
 
 ### P2 — Mission → facture client → paiement
 
-État : **Partiel** au navigateur (`e2e/13-mission-invoice-payment.spec.ts` : mission créée, facture générée depuis l'écran mission, deux paiements par la secrétaire, soldée, logistique sans bouton de paiement actif ; données créées puis supprimées). Le lancement est rejoué par `17-mission-lifecycle` (mission non posée en base : affectation, lancement, livraison, clôture, facture générée depuis l'écran) ; le règlement reste dans la spec 13, qui pose encore « livrée » en base pour isoler le paiement. Ajouts du 3 novembre dans la spec 13 : état de la facture sur l'onglet Factures de la mission, en attente puis partielle puis payée, suivi sans rechargement par la trame `client_invoice_payment_recorded` reçue par la logistique (paiements joués par la secrétaire) ; paiement refusé en 403 à la logistique, au technicien et au chauffeur, solde intact ; trop-perçu et facture soldée en 409, montant négatif, non numérique ou mode inconnu en 400, rien d'écrit.
+État : **Fait** au navigateur. `e2e/13-mission-invoice-payment.spec.ts` ne pose plus « livrée » en base : la mission y arrive par le parcours (`e2e/helpers/mission-journey.ts`, gardes de lancement comprises : papiers, CPC, solde carte). Le premier test joue à l'écran l'affectation, le lancement et la livraison, puis la facture générée depuis la mission, payée en deux fois par la secrétaire et soldée ; la logistique n'a pas de bouton de paiement actif. Les trois tests suivants mènent la mission à « livrée » par les mêmes routes API (session logistique) : état de la facture sur l'onglet Factures de la mission, en attente puis partielle puis payée, suivi sans rechargement par la trame `client_invoice_payment_recorded` reçue par la logistique ; paiement refusé en 403 à la logistique, au technicien et au chauffeur, solde intact ; trop-perçu et facture soldée en 409, montant négatif, non numérique ou mode inconnu en 400, rien d'écrit. `17-mission-lifecycle` rejoue en plus la clôture et l'observation temps réel par un second rôle ; les deux specs partagent le même helper. Données créées puis supprimées.
 
 ```mermaid
 flowchart LR
@@ -434,7 +434,7 @@ flowchart LR
 | 1 | T1, T3, T4, T7 | Sécurité et intégrité, valables partout |
 | 2 | PRT4, PRT6, TIR1–TIR4 | Traçabilité stock, dette connue, RBAC pneus déjà corrigé une fois |
 | 3 | WO2, WO3, WO5 | Lot 3 en cours, coût OT |
-| 4 | P2 (fait : spec 17), P3, P6 | Parcours métier les plus utilisés après P1 |
+| 4 | P2 (fait : specs 13 et 17), P3, P6 | Parcours métier les plus utilisés après P1 |
 | 5 | Soft delete : ADM3, VEH2, TIR2 + désactivations | Données historiques à préserver |
 | 6 | DOC, FUEL, ALR, DIR | Modules de support |
 
