@@ -247,3 +247,17 @@ Règles : `docs/journal/README.md`.
 - **3 couches** : pas d'écran pour l'instant ; instantané local et resync ciblé à livrer avec l'écran (fleet-fe). Trames déjà émises par POST/DELETE.
 - **RAIDER** : couvert non-régression (contrats voisins), failure memory (LESSONS « passage 1→N »), garde-fou automatique ; sans objet : migration.
 - **Reste / risques** : le contrôle de conflit de planning au lancement compte encore les affectations nulles des autres missions (faux blocage possible, pas une faille).
+
+## 2026-11-04 00:10 — Plusieurs chauffeurs par mission : listes chauffeur et rattrapage de main (#240)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** : fusion de `main` (base #233 fusionnée). La boucle de lancement par affectation passe sur `isDriverLicenseExpired` / `isPaperExpired` (#224, valable le jour J). `POST /:id/assignments` valide par `validateBody`. Les listes chauffeur (`GET /api/missions`, `/api/operations/missions`, `/upcoming`, `/active`) et la jointure des affectations écartent les affectations annulées ou refusées.
+- **Comment** : un filtre unique `driverLiveAssignmentFilter` / `missionsOfDriversFilter` dans `server/lib/driver-scope.ts`, repris par `canAccessMissionAsDriver`, la liste des missions et `operations-service`. Le garde-fou `assignment-write-hygiene` refuse tout `inArray(assignments.driverId` hors de `driver-scope.ts`.
+- **Pourquoi** : un chauffeur retiré de la mission recevait 403 sur le détail mais la voyait encore dans ses trois listes (preuve rouge sur l'ancien code). Une cloison doit être la même pour le détail et pour la liste.
+- **Reste tracé, non corrigé ici** :
+  - un ajout de chauffeur sur une mission `in_progress` crée une ligne `pending` sans contrôle des papiers ;
+  - au passage à `delivered`, la ligne `in_progress` d'un co-chauffeur reste active ;
+  - le PATCH lit les affectations sans verrou sur la mission.
+
+  Ces trois cas demandent une règle métier (ajout en cours de route, clôture par chauffeur). Ils sont à trancher avant d'être codés.
+- **Preuves** : 0 `error TS` ; 163 fichiers / 2033 tests unitaires ; 14 fichiers / 230 contrats (mission*, operations, fuel-card-write-guards).

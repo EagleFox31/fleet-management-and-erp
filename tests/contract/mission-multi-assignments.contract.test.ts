@@ -456,13 +456,29 @@ describe("plusieurs affectations : statut, annulation et modification n'écriven
     expect(m.status).toBe("assigned");
   });
 
-  it("chauffeur annulé : perd l'accès à la mission (403), l'autre chauffeur le garde", async () => {
+  it("chauffeur annulé : perd l'accès à la mission (403) et la voit disparaître de ses listes, l'autre chauffeur la garde", async () => {
     const { missionId, a2 } = await launchable();
+    const LISTS = ["/api/missions", "/api/operations/missions", "/api/operations/missions/upcoming"];
+    const listed = async (actor: Actor) => {
+      const seen: Record<string, boolean> = {};
+      for (const path of LISTS) {
+        const res = await session.call("GET", path, { actor });
+        expect(res.status, `${actor} ${path}`).toBe(200);
+        seen[path] = (res.body as Array<{ id: number }>).some((m) => m.id === missionId);
+      }
+      return seen;
+    };
+    const everywhere = Object.fromEntries(LISTS.map((p) => [p, true]));
     expect((await session.call("GET", `/api/missions/${missionId}`, { actor: "otherDriver" })).status).toBe(200);
+    expect(await listed("otherDriver")).toEqual(everywhere);
+
     expect((await cancel("admin", missionId, a2)).status).toBe(200);
     const lost = await session.call("GET", `/api/missions/${missionId}`, { actor: "otherDriver" });
     expect(apiErrorProblems(lost.status, lost.body, 403, undefined, lost.headers.get("x-request-id"))).toEqual([]);
+    expect(await listed("otherDriver")).toEqual(Object.fromEntries(LISTS.map((p) => [p, false])));
+
     expect((await session.call("GET", `/api/missions/${missionId}`, { actor: "driver" })).status).toBe(200);
+    expect(await listed("driver")).toEqual(everywhere);
   });
 
   it("DELETE d'une affectation refusée : 200 sans réécriture (reste rejected), sans trame", async () => {

@@ -27,11 +27,13 @@ import {
   activeDriverAssignmentsOnMission,
   canAccessMissionAsDriver,
   driverScopeOf,
+  missionsOfDriversFilter,
   missionVehicleIdsForStaff,
   OUT_OF_DRIVER_SCOPE_MESSAGE,
   pickMissionAssignment,
 } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
+import { validateBody } from "../middleware/validate-body";
 import { moduleLogger } from "../lib/logger";
 import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
@@ -830,10 +832,7 @@ router.get("/", async (req, res) => {
       .where(
         driverScope === undefined
           ? undefined
-          : inArray(
-              missions.id,
-              db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverScope)),
-            ),
+          : missionsOfDriversFilter(driverScope),
       )
       .orderBy(desc(missions.createdAt));
 
@@ -2598,13 +2597,11 @@ const editionBlockedMessage = (status: string) => `Mission ${status === "complet
 // Une mission peut avoir plusieurs chauffeurs (#227) ; le PATCH ne sait remplacer qu'une affectation.
 // Mêmes rôles que l'affectation par PATCH (MISSION_MANAGER_ROLES). La ligne mission est verrouillée
 // (FOR UPDATE) : deux ajouts concurrents du même chauffeur se serrent, le second voit le premier et reçoit 409.
-router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
+router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateBody(addAssignmentSchema), async (req, res, next) => {
   try {
     const missionId = Number(req.params.id);
     assertValidDbId(missionId, "ID mission invalide.");
-    const parsed = addAssignmentSchema.safeParse(req.body ?? {});
-    if (!parsed.success) throw new AppError(400, "Affectation invalide (véhicule/chauffeur).");
-    const { vehicleId, driverId } = parsed.data;
+    const { vehicleId, driverId } = req.body as z.infer<typeof addAssignmentSchema>;
     assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
     assertValidDbId(driverId, "Affectation invalide (véhicule/chauffeur).");
 

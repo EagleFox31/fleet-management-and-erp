@@ -61,9 +61,18 @@ export function unfilteredWritesIn(source: string): number {
   return count;
 }
 
+/**
+ * Lecture cloisonnée par chauffeur : `inArray(assignments.driverId, …)` seul garde visible la mission
+ * d'un chauffeur retiré (affectation annulée ou refusée). Le filtre vit dans `driver-scope.ts`
+ * (`driverLiveAssignmentFilter`, qui ajoute le statut) ; ailleurs, il est refusé.
+ */
+const DRIVER_SCOPE_FILE = "server/lib/driver-scope.ts";
+const RAW_DRIVER_SCOPE = /inArray\(\s*assignments\s*\.\s*driverId\b/g;
+
 function scan() {
   const unfiltered: Record<string, number> = {};
   const rawSql: string[] = [];
+  const rawDriverScope: string[] = [];
   for (const path of tsFiles(serverDir)) {
     const rel = relative(join(serverDir, ".."), path).split(sep).join("/");
     if (DEAD_CODE.test(rel)) continue;
@@ -72,8 +81,10 @@ function scan() {
     if (n > 0) unfiltered[rel] = n;
     if (RAW_SQL_WRITE.test(source)) rawSql.push(rel);
     RAW_SQL_WRITE.lastIndex = 0;
+    if (rel !== DRIVER_SCOPE_FILE && RAW_DRIVER_SCOPE.test(source)) rawDriverScope.push(rel);
+    RAW_DRIVER_SCOPE.lastIndex = 0;
   }
-  return { unfiltered, rawSql };
+  return { unfiltered, rawSql, rawDriverScope };
 }
 
 describe("écritures sur assignments : filtre de statut ou de chauffeur", () => {
@@ -83,6 +94,16 @@ describe("écritures sur assignments : filtre de statut ou de chauffeur", () => 
 
   it("aucune SQL brute UPDATE/DELETE assignments", () => {
     expect(scan().rawSql).toEqual([]);
+  });
+
+  it("cloison chauffeur : aucun inArray(assignments.driverId) hors driver-scope.ts (passer par driverLiveAssignmentFilter)", () => {
+    expect(scan().rawDriverScope).toEqual([]);
+  });
+
+  it("driverLiveAssignmentFilter écarte les affectations annulées ou refusées", () => {
+    const source = readFileSync(join(serverDir, "lib", "driver-scope.ts"), "utf8");
+    const body = source.slice(source.indexOf("export function driverLiveAssignmentFilter"));
+    expect(body.slice(0, body.indexOf("\n}"))).toMatch(/notInArray\(\s*assignments\.status\s*,\s*\[\.\.\.VOID_ASSIGNMENT_STATUSES\]/);
   });
 });
 
