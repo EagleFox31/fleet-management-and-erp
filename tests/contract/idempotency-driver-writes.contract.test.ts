@@ -53,6 +53,15 @@ async function newVehicle() {
   return v;
 }
 
+async function newMission(actor: Actor, status: string) {
+  return (await assign(actor, status)).mission;
+}
+
+/** Véhicule affecté au chauffeur (affectation active) : seul cas où il saisit le kilométrage. */
+async function assignedVehicle(actor: Actor = "driverA") {
+  return (await assign(actor, "in_progress")).vehicle;
+}
+
 const ficheOf = new Map<Actor, number>();
 /** Une seule fiche par compte (#113, `uq_drivers_user_id`). */
 async function driverFiche(actor: Actor) {
@@ -67,7 +76,7 @@ async function driverFiche(actor: Actor) {
   return driver.id;
 }
 
-async function newMission(actor: Actor, status: string) {
+async function assign(actor: Actor, status: string) {
   const vehicle = await newVehicle();
   const driver = { id: await driverFiche(actor) };
   const [mission] = await db
@@ -76,7 +85,7 @@ async function newMission(actor: Actor, status: string) {
     .returning();
   missionIds.push(mission.id);
   await db.insert(assignments).values({ missionId: mission.id, vehicleId: vehicle.id, driverId: driver.id, status: "accepted" } as any);
-  return mission;
+  return { mission, vehicle };
 }
 
 async function statusOf(missionId: number) {
@@ -112,7 +121,7 @@ afterAll(async () => {
 
 describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   it("même clé deux fois : la seconde est rejouée sans réécrire", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const key = uniqueTestToken("km");
 
     const first = await put(`/api/vehicles/${vehicle.id}/mileage`, { kilometers: 1000 }, "driverA", key);
@@ -131,7 +140,7 @@ describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   });
 
   it("même clé, autre corps : 422 lisible, rien n'est écrit", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const key = uniqueTestToken("km");
     expect((await put(`/api/vehicles/${vehicle.id}/mileage`, { kilometers: 1000 }, "driverA", key)).status).toBe(200);
 
@@ -143,7 +152,7 @@ describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   });
 
   it("un refus métier (400) est enregistré et rejoué tel quel", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const key = uniqueTestToken("km");
     const first = await put(`/api/vehicles/${vehicle.id}/mileage`, { kilometers: 50 }, "driverA", key);
     expect(first.status).toBe(400);
@@ -155,7 +164,7 @@ describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   });
 
   it("clé invalide : 400, la route ne s'exécute pas", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const res = await put(`/api/vehicles/${vehicle.id}/mileage`, { kilometers: 1000 }, "driverA", "x".repeat(256));
     expect(res.status).toBe(400);
     const [row] = await db.select({ mileage: vehicles.mileage }).from(vehicles).where(eq(vehicles.id, vehicle.id));
@@ -163,7 +172,7 @@ describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   });
 
   it("sans en-tête : comportement inchangé, aucune clé gardée", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const keysOfA = async () => (await db.select().from(idempotencyKeys).where(eq(idempotencyKeys.userId, session.userIdOf("driverA")))).length;
     const before = await keysOfA();
     const res = await put(`/api/vehicles/${vehicle.id}/mileage`, { kilometers: 1000 }, "driverA");
@@ -173,7 +182,7 @@ describe("CDC #10b : kilométrage rejouable", { timeout: 120000 }, () => {
   });
 
   it("drapeau coupé : l'en-tête est ignoré, la route s'exécute à chaque fois", async () => {
-    const vehicle = await newVehicle();
+    const vehicle = await assignedVehicle();
     const key = uniqueTestToken("km");
     process.env.FEATURE_FLAGS = "offline-writes=off";
     try {
