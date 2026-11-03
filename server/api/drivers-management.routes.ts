@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
-import { eq, desc, like } from "drizzle-orm";
+import { and, eq, desc, isNull, like } from "drizzle-orm";
 import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+// Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
+import { isUniqueViolation } from "../lib/pg-errors";
 import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
 
 const router = Router();
@@ -71,12 +73,6 @@ function parseDriverId(rawId: string): number | null {
   return parsed;
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  return (error as { code?: string }).code === "23505";
-}
 
 function broadcastDriverUpdate(
   eventType: "driver_created" | "driver_updated" | "driver_toggled",
@@ -104,29 +100,13 @@ router.get("/me", async (req, res) => {
     const userId = req.session?.userId;
     if (!userId) return res.status(401).json({ message: "Non authentifié" });
 
-    let [driver] = await db
+    // Fiche liée par le personnel seulement (#113) : plus de repli par nom, qui liait le compte au
+    // premier homonyme venu. Une fiche par compte au plus (index uq_drivers_user_id).
+    const [driver] = await db
       .select()
       .from(drivers)
       .where(eq(drivers.userId, userId))
       .limit(1);
-
-    // Fallback: si userId n'est pas encore renseigné dans drivers, chercher par le nom du user
-    if (!driver) {
-      const [currentUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-      if (currentUser?.name) {
-        const parts = currentUser.name.trim().split(" ");
-        const firstName = parts[0];
-        const lastName = parts.slice(1).join(" ");
-        const [found] = await db.select().from(drivers)
-          .where(eq(drivers.firstName, firstName))
-          .limit(1);
-        if (found && found.lastName?.toLowerCase() === lastName.toLowerCase()) {
-          driver = found;
-          // Auto-corriger le lien manquant
-          await db.update(drivers).set({ userId }).where(eq(drivers.id, found.id));
-        }
-      }
-    }
 
     if (!driver) return res.status(404).json({ message: "Profil chauffeur introuvable" });
 
@@ -426,6 +406,9 @@ router.delete("/:id", isAdmin, async (req, res) => {
   }
 });
 
+const DRIVER_ALREADY_LINKED = "Ce chauffeur a déjà un compte utilisateur";
+class DriverAlreadyLinkedError extends Error {}
+
 // POST /api/drivers/:id/create-user - Créer un compte utilisateur pour un chauffeur
 router.post("/:id/create-user", isAdmin, async (req, res) => {
   try {
@@ -441,6 +424,8 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
 
     const [driver] = await db.select().from(drivers).where(eq(drivers.id, driverId)).limit(1);
     if (!driver) return res.status(404).json({ message: "Chauffeur introuvable" });
+    // #113 : ne jamais écraser une liaison existante (l'ancien compte resterait sans fiche).
+    if (driver.userId !== null) return res.status(409).json({ message: DRIVER_ALREADY_LINKED });
 
     // Generate username from name
     const firstName = (driver.firstName || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
@@ -459,22 +444,47 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
     const bcrypt = await import("bcryptjs");
     const hashedPin = await bcrypt.hash(String(pin), 10);
 
-    // Create user
-    const [newUser] = await db.insert(users).values({
-      username,
-      password: hashedPin,
-      pin: hashedPin,
-      email,
-      name: `${driver.firstName} ${driver.lastName}`,
-      role: "driver",
-    }).returning({ id: users.id, username: users.username, name: users.name, role: users.role });
+    // Compte et liaison dans une même transaction : une liaison refusée n'y laisse pas de compte orphelin.
+    // La liaison ne vise qu'une fiche encore sans compte (course entre deux créations).
+    const newUser = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(users).values({
+        username,
+        password: hashedPin,
+        pin: hashedPin,
+        email,
+        name: `${driver.firstName} ${driver.lastName}`,
+        role: "driver",
+      }).returning({ id: users.id, username: users.username, name: users.name, role: users.role });
 
-    // Link driver record to the new user account
-    await db.update(drivers).set({ userId: newUser.id }).where(eq(drivers.id, driverId));
+      const linked = await tx
+        .update(drivers)
+        .set({ userId: created.id })
+        .where(and(eq(drivers.id, driverId), isNull(drivers.userId)))
+        .returning({ id: drivers.id });
+      if (linked.length === 0) throw new DriverAlreadyLinkedError();
+      return created;
+    });
+
+    // Temps réel (AGENTS §2) : la fiche a désormais un compte, les autres profils resynchronisent.
+    // Best effort : compte créé et lié, un échec ici ne doit pas renvoyer 500 (le nouvel essai
+    // répondrait 409 « déjà lié »). Les autres profils resynchronisent alors au refetch.
+    try {
+      const fullDriver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
+      broadcastDriverUpdate("driver_updated", fullDriver, driverId);
+    } catch (err) {
+      log.error({ err, requestId: req.requestId, driverId }, "Diffusion apres creation du compte chauffeur en echec");
+    }
 
     return res.status(201).json({ user: newUser, message: `Compte créé: ${username}` });
   } catch (error: any) {
-    console.error("Create driver user error:", error);
+    if (error instanceof DriverAlreadyLinkedError) {
+      return res.status(409).json({ message: DRIVER_ALREADY_LINKED });
+    }
+    // Dernier rempart : identifiant, email ou liaison pris entre la vérification et l'écriture.
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: "Identifiant, email ou liaison utilisateur déjà utilisé" });
+    }
+    log.error({ err: error, requestId: req.requestId, driverId: req.params.id }, "Creation du compte chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

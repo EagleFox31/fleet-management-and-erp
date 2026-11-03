@@ -11,8 +11,9 @@ import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
  * n'agit que sur les missions où il est affecté (`assignments.driver_id`, lié au compte par
  * `drivers.user_id`).
  *
- * `drivers.user_id` n'est pas unique : un compte peut porter plusieurs fiches chauffeur. La
- * portée les couvre toutes (union des affectations), sans dépendre de l'ordre de lecture.
+ * Une fiche par compte depuis #113 (index unique partiel uq_drivers_user_id, server/init-database.ts).
+ * L'index n'est pas posé tant que des doublons existent : la portée reste donc l'union des fiches du
+ * compte, sans dépendre de l'ordre de lecture. Sans danger une fois l'index posé (une seule fiche).
  *
  * Portée renvoyée par `driverScopeOf` :
  * - `undefined` : pas un chauffeur, aucun filtre ;
