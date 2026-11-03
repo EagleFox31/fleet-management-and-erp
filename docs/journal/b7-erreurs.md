@@ -144,3 +144,10 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : une quantité au-delà de 2^31-1, ou une entrée qui ferait déborder le stock, est refusée en 400 au lieu d'un 500 Postgres. Le compte de cas est corrigé dans LESSONS.
 - **Comment** : deux cas de contrat, rouges sans la borne. Total 8/8.
 - **Pourquoi** : réserves de fleet-securite et fleet-relecteur.
+
+## 2026-11-03T17:31:19+01:00 — Document de workflow : fichier orphelin quand l'INSERT échoue
+
+- Quoi : `WorkflowDocumentService.saveWorkflowDocument` supprime le fichier écrit si l'INSERT `workflow_documents` est refusé, puis relance l'erreur.
+- Comment : `.catch` sur l'INSERT, `fs.rmSync(filePath, { force: true })`, échec du ménage journalisé en `warn` sans masquer l'erreur d'origine. Route (routes.ts gelé) inchangée.
+- Pourquoi : le fichier était écrit avant l'INSERT ; sans ligne, plus rien ne permettait de le retrouver ni de le supprimer (enquête multer).
+- Preuve : `tests/integration/workflow-document-orphan.test.ts` rouge sans correctif (1 fichier restant), vert avec ; transfert 5/5, tsc 0, unitaires 1868.

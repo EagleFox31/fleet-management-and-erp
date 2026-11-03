@@ -65,7 +65,8 @@ export class WorkflowDocumentService {
       // Sauvegarder le fichier
       fs.writeFileSync(filePath, data.fileBuffer);
       
-      // Enregistrer en base de données
+      // Enregistrer en base de données. Un INSERT refusé ne doit pas laisser de fichier
+      // orphelin : aucune ligne ne permettrait plus de le retrouver ni de le supprimer.
       const [document] = await db.insert(workflowDocuments).values({
         workflowId: data.workflowId,
         sessionId: data.sessionId,
@@ -76,8 +77,15 @@ export class WorkflowDocumentService {
         fileSize: data.fileBuffer.length,
         mimeType: data.mimeType,
         uploadedBy: data.uploadedBy,
-      }).returning();
-      
+      }).returning().catch((insertError) => {
+        try {
+          fs.rmSync(filePath, { force: true });
+        } catch (err) {
+          log.warn({ err, sessionId: data.sessionId, storedName }, "fichier du document refusé non supprimé");
+        }
+        throw insertError;
+      });
+
       log.info({ documentType: data.documentType, sessionId: data.sessionId }, "document workflow sauvegardé");
       return document;
 
