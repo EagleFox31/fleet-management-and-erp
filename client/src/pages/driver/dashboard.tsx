@@ -418,8 +418,10 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
         stationName: stationName.trim() || undefined,
         date: new Date(dateTime).toISOString(),
         notes: notes.trim() || undefined,
-        // Empreinte de la saisie (sans l'heure par défaut, recalculée à chaque ouverture de la fiche).
+        // Empreinte de la saisie : le jour du plein (le serveur le compare), pas l'heure par défaut,
+        // recalculée à chaque ouverture de la fiche.
         requestKey: fuelSubmissionKeys.take({
+          day: new Date(dateTime).toISOString().slice(0, 10),
           quantity: Number.parseFloat(quantity),
           unitPrice: Number.parseFloat(effectiveUnitPrice),
           stationName: stationName.trim() || null,

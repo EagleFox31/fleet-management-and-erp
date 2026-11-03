@@ -131,6 +131,16 @@ describe("createSubmissionKeyStore", () => {
     expect(store.take(fillB)).not.toBe(next);
   });
 
+  it("issue incertaine, fiche rouverte le lendemain (autre jour) : nouvelle clé, pas de 409", () => {
+    const storage = fakeStorage();
+    const store = createSubmissionKeyStore(scope, storage);
+    const key = store.take({ day: "2026-11-03", ...fillA });
+    store.settle(networkError);
+    const reopened = createSubmissionKeyStore(scope, storage);
+    expect(reopened.take({ day: "2026-11-03", ...fillA })).toBe(key);
+    expect(reopened.take({ day: "2026-11-04", ...fillA })).not.toBe(key);
+  });
+
   it("envoi non réglé (double clic) : même clé, même si l'empreinte change", () => {
     const store = createSubmissionKeyStore(scope, fakeStorage());
     expect(store.take(fillA)).toBe(store.take(fillB));

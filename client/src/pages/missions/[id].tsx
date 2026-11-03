@@ -1027,6 +1027,7 @@ export default function MissionDetailsPage() {
         // Empreinte de la saisie : une saisie différente après une issue incertaine reçoit une nouvelle clé.
         requestKey: fuelSubmissionKeys.take({
           endpoint,
+          day: recordDate.toISOString().slice(0, 10),
           quantity,
           unitPrice,
           stationName: fuelForm.stationName || null,
