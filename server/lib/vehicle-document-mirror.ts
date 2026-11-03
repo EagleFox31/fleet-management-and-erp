@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { vehicles } from "@shared/schema";
 import { db } from "../db";
 
@@ -21,29 +21,36 @@ export function normalizeVehicleDocumentType(rawType: string | null | undefined)
   }
 }
 
+export type MirrorMode =
+  /** Dépôt d'un document : le miroir ne recule jamais (GREATEST). */
+  | "later"
+  /** Correction ou renouvellement explicite d'une date : écriture directe. */
+  | "set";
+
+const MIRROR_COLUMNS = {
+  carte_grise: { column: vehicles.licensePlateExpiry, key: "licensePlateExpiry" },
+  assurance: { column: vehicles.insuranceExpiry, key: "insuranceExpiry" },
+  visite_technique: { column: vehicles.technicalInspectionDate, key: "technicalInspectionDate" },
+} as const;
+
 /**
  * `vehicle_documents` fait foi ; les colonnes `vehicles.*` en sont le miroir lu par
  * l'éligibilité mission et par les alertes. À appeler après tout dépôt ou changement
  * de date d'un document. Sans date, ou pour un type sans miroir, ne fait rien.
+ * Renvoie `true` si une écriture a été demandée.
  */
 export async function syncVehicleDocumentMirror(
   vehicleId: number,
   documentType: string | null | undefined,
   expiryDate: string | Date | null | undefined,
-): Promise<void> {
-  if (!expiryDate) return;
+  mode: MirrorMode,
+): Promise<boolean> {
+  if (!expiryDate) return false;
   const value = expiryDate instanceof Date ? expiryDate.toISOString().slice(0, 10) : expiryDate;
-  switch (normalizeVehicleDocumentType(documentType)) {
-    case "carte_grise":
-      await db.update(vehicles).set({ licensePlateExpiry: value }).where(eq(vehicles.id, vehicleId));
-      break;
-    case "assurance":
-      await db.update(vehicles).set({ insuranceExpiry: value }).where(eq(vehicles.id, vehicleId));
-      break;
-    case "visite_technique":
-      await db.update(vehicles).set({ technicalInspectionDate: value }).where(eq(vehicles.id, vehicleId));
-      break;
-    default:
-      break;
-  }
+  const type = normalizeVehicleDocumentType(documentType);
+  if (!(type in MIRROR_COLUMNS)) return false;
+  const { column, key } = MIRROR_COLUMNS[type as keyof typeof MIRROR_COLUMNS];
+  const next = mode === "later" ? sql`GREATEST(${column}, ${value}::date)` : value;
+  await db.update(vehicles).set({ [key]: next }).where(eq(vehicles.id, vehicleId));
+  return true;
 }

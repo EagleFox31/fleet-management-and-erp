@@ -41,6 +41,15 @@ export class AlertService {
     "logistics",
   ];
 
+  // Alertes papiers (30 jours, expiré) : atelier, secrétariat et chef de parc.
+  // resolveRecipientUserIds dédoublonne un utilisateur qui cumulerait plusieurs rôles.
+  private readonly documentAlertRecipients: AlertRecipientRole[] = [
+    "admin",
+    "workshop_manager",
+    "secretary",
+    "logistics",
+  ];
+
   // Chef de parc : le rôle `logistics` (planification des missions, cf. shared/schema.ts).
   private readonly fleetChiefRecipients: AlertRecipientRole[] = [
     "logistics",
@@ -506,10 +515,10 @@ export class AlertService {
 
       const expiry = new Date(expiryDate);
       const daysUntilExpiry = Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
 
       // Document expiré
       if (expiry < today) {
+        const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
         await this.createAlertIfNotExists({
           remindDaily: true,
           vehicleId: vehicle.id,
@@ -520,7 +529,7 @@ export class AlertService {
           link: renewalLink,
           entityType: 'vehicle_document',
           entityId: vehicle.id,
-          targetRoles: this.maintenanceRecipients
+          targetRoles: this.documentAlertRecipients
         });
 
         // Papier expiré pendant une mission en cours : le chef de parc (logistique)
@@ -544,6 +553,7 @@ export class AlertService {
       }
       // Document expire dans les 30 jours
       else if (expiry <= thirtyDaysFromNow) {
+        const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
         await this.createAlertIfNotExists({
           remindDaily: true,
           vehicleId: vehicle.id,
@@ -554,7 +564,7 @@ export class AlertService {
           link: renewalLink,
           entityType: 'vehicle_document',
           entityId: vehicle.id,
-          targetRoles: this.maintenanceRecipients
+          targetRoles: this.documentAlertRecipients
         });
       }
     }

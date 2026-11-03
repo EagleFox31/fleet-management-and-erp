@@ -193,6 +193,19 @@ function isDateExpired(dateValue: Date | string | null | undefined): boolean {
   return candidate < now;
 }
 
+/**
+ * Même règle que `getMissionEligibility` : le jour de l'échéance bloque (jours écoulés >= 0).
+ * Date illisible : bloque.
+ */
+function isExpiredOnOrBeforeToday(dateValue: Date | string): boolean {
+  const candidate = new Date(dateValue);
+  if (Number.isNaN(candidate.getTime())) return true;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  candidate.setHours(0, 0, 0, 0);
+  return candidate <= today;
+}
+
 function overlaps(
   startA: Date | string | null | undefined,
   endA: Date | string | null | undefined,
@@ -2336,9 +2349,14 @@ router.put("/:id/status", async (req, res) => {
           .from(vehicleDocuments)
           .where(eq(vehicleDocuments.vehicleId, missionAssignment.vehicleId));
 
+        // Par type, la date d'expiration la plus lointaine : un ancien document
+        // échu ne masque pas le renouvellement (même règle que vehicle-documentation-service).
         const docsByType = new Map<string, { expiryDate: Date | string | null }>();
         docs.forEach((doc) => {
-          if (!docsByType.has(doc.type)) {
+          const known = docsByType.get(doc.type);
+          const candidate = doc.expiryDate ? new Date(doc.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+          const current = known?.expiryDate ? new Date(known.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+          if (!known || candidate > current) {
             docsByType.set(doc.type, { expiryDate: doc.expiryDate });
           }
         });
@@ -2352,17 +2370,17 @@ router.put("/:id/status", async (req, res) => {
         let carteGriseErreur = false;
         if (!carteGrise) {
           launchErrors.push("Carte grise manquante.");
-        } else if (carteGrise.expiryDate && isDateExpired(carteGrise.expiryDate)) {
+        } else if (carteGrise.expiryDate && isExpiredOnOrBeforeToday(carteGrise.expiryDate)) {
           launchErrors.push("Carte grise expirée.");
           carteGriseErreur = true;
         }
 
-        const assuranceErreur = !assurance || isDateExpired(assurance.expiryDate);
+        const assuranceErreur = !assurance || !assurance.expiryDate || isExpiredOnOrBeforeToday(assurance.expiryDate);
         if (assuranceErreur) {
           launchErrors.push("Assurance manquante ou expirée.");
         }
 
-        const visiteErreur = !visiteTechnique || isDateExpired(visiteTechnique.expiryDate);
+        const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || isExpiredOnOrBeforeToday(visiteTechnique.expiryDate);
         if (visiteErreur) {
           launchErrors.push("Visite technique manquante ou expirée.");
         }

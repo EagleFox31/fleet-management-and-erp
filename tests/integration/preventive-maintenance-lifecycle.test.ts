@@ -165,7 +165,7 @@ describe("P3 alerte a l'echeance du plan", { timeout: 120000 }, () => {
 
 describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 120000 }, () => {
   /** Echeance de maintenance du vehicule : OT preventif et immobilisation (voir MNT2). */
-  async function immobilised(label: string) {
+  async function vehicleInMaintenance(label: string) {
     const v = await newVehicle(label);
     await db.update(vehicles).set({ nextMaintenanceDate: daysFromNow(10) }).where(eq(vehicles.id, v.id));
     const [wo] = await preventiveMaintenanceService.checkDateBasedMaintenance(v.id, "maintenance");
@@ -173,7 +173,7 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
   }
 
   it("l'OT genere n'immobilise pas, sa prise en charge oui, le cloturer remet operationnel", async () => {
-    const { v, wo } = await immobilised("close-one");
+    const { v, wo } = await vehicleInMaintenance("close-one");
     expect(await vehicleStatus(v.id)).toBe("operational");
     await storage.updateWorkOrder(wo.id, { status: "in_progress" });
     expect(await vehicleStatus(v.id)).toBe("maintenance");
@@ -182,7 +182,7 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
   });
 
   it("deux OT ouverts : cloturer le premier garde le vehicule en maintenance, le second le libere", async () => {
-    const { v, wo } = await immobilised("close-two");
+    const { v, wo } = await vehicleInMaintenance("close-two");
     const plan = await newSchedule(v.id, { scheduledDate: daysFromNow(-1) });
     const second = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
     expect(second.id).not.toBe(wo.id);

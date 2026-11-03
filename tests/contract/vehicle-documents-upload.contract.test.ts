@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { activityLogs, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
+import { syncVehicleDocumentMirror } from "../../server/lib/vehicle-document-mirror";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -91,6 +92,50 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
       expect(res.status).toBe(201);
       const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
       expect(String(row[column])).toContain(date);
+    }
+  });
+
+  it("P3-2 : le depot d'un document plus ancien ne fait pas reculer le miroir", async () => {
+    const [before] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    const res = await upload({ name: "Ancienne assurance", type: "assurance", expiryDate: "2020-01-01" }, "workshop_manager");
+    expect(res.status).toBe(201);
+    const [after] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    expect(String(after.insuranceExpiry)).toBe(String(before.insuranceExpiry));
+    const later = await upload({ name: "Assurance renouvelee", type: "assurance", expiryDate: "2032-01-01" }, "workshop_manager");
+    expect(later.status).toBe(201);
+    const [advanced] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    expect(String(advanced.insuranceExpiry)).toContain("2032-01-01");
+  });
+
+  it("P3-2 : la lib du miroir (mode set) fait comme le PATCH /api/documents/:id de routes.ts, alias compris", async () => {
+    const cases = [
+      ["insurance", "insuranceExpiry"],
+      ["inspection", "technicalInspectionDate"],
+      ["license", "licensePlateExpiry"],
+      ["technical_inspection", "technicalInspectionDate"],
+      ["registration_card", "licensePlateExpiry"],
+      ["assurance", "insuranceExpiry"],
+    ] as const;
+    for (const [type, column] of cases) {
+      const [doc] = await db
+        .insert(vehicleDocuments)
+        .values({ vehicleId, name: `TEST alias ${type}`, type, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
+        .returning();
+      await db.update(vehicles).set({ [column]: "2040-01-01" }).where(eq(vehicles.id, vehicleId));
+      const patch = await fetch(`${baseUrl}/api/documents/${doc.id}`, {
+        method: "PATCH",
+        headers: { Cookie: cookies.get("workshop_manager")!, "Content-Type": "application/json" },
+        body: JSON.stringify({ expiryDate: "2033-03-03" }),
+      });
+      expect(patch.status).toBe(200);
+      const [viaPatch] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+
+      await db.update(vehicles).set({ [column]: "2040-01-01" }).where(eq(vehicles.id, vehicleId));
+      await syncVehicleDocumentMirror(vehicleId, type, "2033-03-03", "set");
+      const [viaLib] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+
+      expect(String(viaLib[column])).toBe(String(viaPatch[column]));
+      expect(String(viaLib[column])).toContain("2033-03-03");
     }
   });
 

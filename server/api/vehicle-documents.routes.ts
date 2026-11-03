@@ -22,6 +22,28 @@ async function removeUploaded(path: string | undefined, requestId?: string): Pro
   }
 }
 
+/** Couche 2 : le dépôt modifie `vehicles.*` (miroir) et la liste des documents. */
+function emitDocumentDeposited(
+  req: { user?: { id?: number; role?: string } },
+  vehicleId: number,
+  document: { id: number; type: string; expiryDate?: string | Date | null },
+  mirrorWritten: boolean,
+): void {
+  const broadcastUpdate = (global as any).broadcastUpdate;
+  if (typeof broadcastUpdate !== "function") return;
+  const base = {
+    version: 1,
+    scope: { type: "broadcast" },
+    actor: { userId: req.user?.id ?? null, role: req.user?.role ?? null },
+    emittedAt: new Date().toISOString(),
+  };
+  const payload = { vehicleId, documentId: document.id, documentType: document.type, newExpiryDate: document.expiryDate ?? null, source: "document_upload" };
+  broadcastUpdate("vehicle_document_updated", { ...base, entity: "vehicle_document", entityId: document.id, payload });
+  if (mirrorWritten) {
+    broadcastUpdate("vehicle_updated", { ...base, entity: "vehicle", entityId: vehicleId, payload });
+  }
+}
+
 /**
  * Téléversement d'un document véhicule (déplacé de `server/routes.ts`, T-16b).
  * Même chemin, mêmes droits, même multer et même réponse qu'avant ; en plus, le `type`
@@ -72,7 +94,20 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
           uploadedBy: req.user?.id || null,
         });
         // vehicle_documents fait foi : la colonne miroir de vehicles suit le dépôt.
-        await syncVehicleDocumentMirror(vehicleId, document.type, document.expiryDate);
+        // Dépôt : le miroir n'avance que si la date est plus récente (jamais de recul).
+        // Si la synchro échoue, la ligne document est retirée (le fichier l'est par le catch).
+        let mirrorWritten = false;
+        try {
+          mirrorWritten = await syncVehicleDocumentMirror(vehicleId, document.type, document.expiryDate, "later");
+        } catch (syncError) {
+          try {
+            await storage.deleteVehicleDocument(document.id);
+          } catch (cleanupError) {
+            log.error({ err: cleanupError, requestId: req.requestId, documentId: document.id }, "document orphelin après échec de synchro du miroir");
+          }
+          throw new AppError(500, "Le document n'a pas pu être enregistré. Réessayez.", { cause: syncError });
+        }
+        emitDocumentDeposited(req, vehicleId, document, mirrorWritten);
         return res.status(201).json(document);
       } catch (inner) {
         await removeUploaded(file.path, req.requestId);

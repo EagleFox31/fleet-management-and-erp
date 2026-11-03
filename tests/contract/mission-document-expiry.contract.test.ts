@@ -234,3 +234,88 @@ describe("P3-2 papier expiré pendant une mission en cours", () => {
     expect(refused.body.message).toContain("assurance expirée");
   }, 60000);
 });
+
+async function launch(missionId: number) {
+  return call("PUT", `/api/missions/${missionId}/status`, { actor: "logistics", body: { status: "in_progress" } });
+}
+
+/**
+ * Le lancement exige aussi des budgets et un solde carte carburant (hors sujet ici) :
+ * on vérifie que plus aucun motif ne concerne les papiers du véhicule.
+ */
+function expectNoPaperError(res: { body: { message?: string } }) {
+  expect(res.body.message ?? "").not.toMatch(/carte grise|assurance|visite technique|plaque|expir/i);
+}
+
+async function readyVehicleWithMission() {
+  const vehicle = await createTestVehicle();
+  ids.vehicleIds.push(vehicle.id);
+  const d = await driver();
+  const created = await plannedMission({ vehicleId: vehicle.id, driverId: d.id });
+  expect(created.status).toBe(201);
+  return { vehicle, missionId: created.body.id as number };
+}
+
+describe("P3-2 lancement : un seul document retenu par type, une seule règle de date", () => {
+  it("ancienne carte grise échue + nouvelle valide : lancement accepté", async () => {
+    const { vehicle, missionId } = await readyVehicleWithMission();
+    await addDoc(vehicle.id, "carte_grise", inDays(-400));
+    await addDoc(vehicle.id, "carte_grise", inDays(300));
+    await addDoc(vehicle.id, "carte_grise", inDays(-30));
+    await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    const res = await launch(missionId);
+    expectNoPaperError(res);
+  }, 60000);
+
+  it("jour J : un papier qui expire aujourd'hui bloque, comme l'éligibilité", async () => {
+    const { vehicle, missionId } = await readyVehicleWithMission();
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(0));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    const res = await launch(missionId);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/ssurance/);
+  }, 60000);
+
+  it("régularisation : nouvelle date future sur le document et le miroir, le lancement passe", async () => {
+    const { vehicle, missionId } = await readyVehicleWithMission();
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(-5));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(-5) }).where(eq(vehicles.id, vehicle.id));
+    const refused = await launch(missionId);
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toMatch(/ssurance/);
+
+    await addDoc(vehicle.id, "assurance", inDays(365));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(365) }).where(eq(vehicles.id, vehicle.id));
+    expectNoPaperError(await launch(missionId));
+  }, 60000);
+});
+
+describe("P3-2 alertes papiers : chef de parc et idempotence", () => {
+  it("un utilisateur logistics reçoit l'alerte à 30 jours, une seule malgré deux passages", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "assurance", inDays(12));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(12) }).where(eq(vehicles.id, vehicle.id));
+
+    await (alertService as any).checkVehicleDocumentAlerts(await vehicleRow(vehicle.id));
+    await (alertService as any).checkVehicleDocumentAlerts(await vehicleRow(vehicle.id));
+
+    for (const actor of ["logistics", "atelier"] as const) {
+      const rows = await db
+        .select()
+        .from(alerts)
+        .where(
+          and(
+            eq(alerts.userId, session.userIdOf(actor)),
+            like(alerts.link, `%vehicleId=${vehicle.id}&%`),
+            eq(alerts.title, "Document expire bientôt"),
+          ),
+        );
+      expect(rows).toHaveLength(1);
+    }
+  }, 60000);
+});
