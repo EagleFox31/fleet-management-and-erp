@@ -9,11 +9,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const spy = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
 vi.mock("../../../server/lib/logger", () => ({
   logger: spy,
-  moduleLogger: () => spy,
+  // Mêmes espions pour tous les modules ; `bindings` comme le child pino réel.
+  moduleLogger: (module: string) => ({ ...spy, bindings: () => ({ module }) }),
 }));
 
 import { AppError, errorHandler, errorResponseGuard } from "../../../server/middleware/error-handler";
 import { logContextOf, withLogContext } from "../../../server/lib/error-log-context";
+import { makeFailWith } from "../../../server/lib/route-helpers";
+import { moduleLogger } from "../../../server/lib/logger";
 
 function fakeRes() {
   return {
@@ -74,15 +77,27 @@ describe("journal unique d'une erreur relayée", () => {
     expect(spy.warn.mock.calls[0][0]).toMatchObject({ event: "refus", status: 403 });
   });
 
-  it("erreur après envoi des en-têtes : une ligne error avec contexte, puis relais à Express", () => {
-    const res = { ...fakeRes(), headersSent: true, statusCode: 200 };
+  it("erreur après envoi des en-têtes : une ligne error avec contexte, connexion fermée sans relais à Express", () => {
+    const res = { ...fakeRes(), headersSent: true, statusCode: 200, destroy: vi.fn() };
     const next = vi.fn();
     const err = withLogContext(new Error("flux coupé"), { event: "Export en echec", exportId: 7 });
     errorHandler(err, req, res as never, next);
     expect(spy.error).toHaveBeenCalledTimes(1);
     expect(spy.error.mock.calls[0][0]).toMatchObject({ event: "Export en echec", exportId: 7, requestId: "req-1", status: 200 });
-    expect(next).toHaveBeenCalledWith(err);
+    // `next(err)` ferait écrire au finalhandler d'Express une seconde trace, sans requestId.
+    expect(next).not.toHaveBeenCalled();
+    expect(res.destroy).toHaveBeenCalledTimes(1);
     expect(res.body).toBeUndefined();
+  });
+
+  it("makeFailWith : aucune ligne propre, le contexte du routeur passe dans la ligne unique", () => {
+    const failWith = makeFailWith(moduleLogger("drivers"));
+    let relayed: unknown;
+    failWith(new Error("db down"), req, (e?: unknown) => { relayed = e; }, "Liste des chauffeurs en echec");
+    expect(spy.error).not.toHaveBeenCalled();
+    relay(relayed);
+    expect(spy.error).toHaveBeenCalledTimes(1);
+    expect(spy.error.mock.calls[0][0]).toMatchObject({ event: "Liste des chauffeurs en echec", routeModule: "drivers", status: 500 });
   });
 
   it("route historique qui répond 500 elle-même : la garde garde son log (aucune perte)", () => {
