@@ -10,19 +10,16 @@ import { describe, expect, it } from "vitest";
  *    première, la seconde est du code mort qui a l'air vivant. Le premier
  *    `PATCH /api/maintenance-schedules/:id` n'écrivait que `isActive` : toute
  *    modification du formulaire était perdue en silence. Liste gelée, elle ne
- *    peut que rétrécir.
+ *    peut que rétrécir : vidée le 3 novembre 2026 (les six doublons restants
+ *    ont été supprimés, comportement servi figé par contrat :
+ *    `fleet-history`, `part-usage-history`, `check-all-maintenance`,
+ *    `maintenance-schedules`, et `warehouse.routes.ts` pour les deux routes
+ *    magasin). Toute nouvelle entrée est une régression.
  * 2. `POST /api/users` journalisait `req.body` par `console.log`, donc le mot de
  *    passe en clair. Un corps de requête ne se journalise que par
  *    `moduleLogger`, dont la configuration masque `*.password`.
  */
-const KNOWN_DUPLICATE_ROUTES = [
-  "get /api/maintenance-schedules",
-  "get /api/parts/:id/usage-history",
-  "get /api/statistics/fleet-history",
-  "get /api/warehouse/stock-value-history",
-  "get /api/warehouse/top-consumed-parts",
-  "post /api/check-all-maintenance",
-];
+const KNOWN_DUPLICATE_ROUTES: string[] = [];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 

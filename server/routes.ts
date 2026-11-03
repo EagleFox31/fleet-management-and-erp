@@ -399,39 +399,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Warehouse Routes - Session-aware routes for chart data
-  // These routes are placed here instead of warehouse.routes.ts to ensure proper session propagation
-  
-  // Pièces les plus consommées pour graphique
-  app.get("/api/warehouse/top-consumed-parts", authenticate, async (req: Request, res: Response) => {
-    try {
-      console.log('🔐 [AUTH] GET /api/warehouse/top-consumed-parts - Session exists:', !!req.session, 'UserId:', req.session?.userId);
-      const limit = parseInt(req.query.limit as string) || 10;
-      const topConsumed = await stockAlertsService.getTopConsumedParts(limit);
-
-      console.log(`📊 Top consumed parts (${topConsumed.length} items):`, topConsumed);
-      return res.status(200).json(topConsumed);
-    } catch (error) {
-      console.error("Get top consumed parts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Historique de la valeur du stock
-  app.get("/api/warehouse/stock-value-history", authenticate, async (req: Request, res: Response) => {
-    try {
-      console.log('🔐 [AUTH] GET /api/warehouse/stock-value-history - Session exists:', !!req.session, 'UserId:', req.session?.userId);
-      const days = parseInt(req.query.days as string) || 30;
-      const history = await stockAlertsService.getStockValueHistory(days);
-
-      console.log(`📈 Stock value history (${history.length} days):`, history.slice(0, 3));
-      return res.status(200).json(history);
-    } catch (error) {
-      console.error("Get stock value history error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Routes pour la gestion des utilisateurs
   // Obtenir la liste des utilisateurs - Administrateurs voient tout, chefs d'atelier voient techniciens/clients uniquement
   app.get("/api/users", authenticate, async (req, res) => {
@@ -1684,50 +1651,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ 
         message: "Erreur lors de la création de la planification de maintenance",
         details: error instanceof Error ? error.message : "Erreur inconnue"
-      });
-    }
-  });
-
-  // Récupérer toutes les planifications de maintenance
-  app.get("/api/maintenance-schedules", authenticate, async (req, res) => {
-    try {
-      const { vehicleId, active } = req.query;
-
-      const filters: any[] = [];
-
-      if (vehicleId) {
-        const parsedVehicleId = parseInt(vehicleId as string);
-        if (!isNaN(parsedVehicleId)) {
-          filters.push(eq(maintenanceSchedules.vehicleId, parsedVehicleId));
-        }
-      }
-
-      if (active !== undefined) {
-        filters.push(eq(maintenanceSchedules.isActive, active === "true"));
-      }
-
-      const whereClause = filters.length === 0
-        ? undefined
-        : filters.length === 1
-          ? filters[0]
-          : and(...filters);
-
-      const schedules = whereClause
-        ? await db
-            .select()
-            .from(maintenanceSchedules)
-            .where(whereClause)
-            .orderBy(desc(maintenanceSchedules.createdAt))
-        : await db
-            .select()
-            .from(maintenanceSchedules)
-            .orderBy(desc(maintenanceSchedules.createdAt));
-      
-      return res.json(schedules);
-    } catch (error) {
-      console.error('Get maintenance schedules error:', error);
-      return res.status(500).json({
-        message: "Erreur lors de la récupération des planifications"
       });
     }
   });
@@ -3142,23 +3065,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/parts/:id/usage-history", authenticate, async (req, res) => {
-    try {
-      const partId = parseInt(req.params.id);
-      
-      if (isNaN(partId)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-      
-      const usageHistory = await storage.getPartUsageHistory(partId);
-      
-      return res.status(200).json(usageHistory);
-    } catch (error) {
-      console.error("Get part usage history error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // === WAREHOUSE & STOCK ALERTS ROUTES (Sprint 1 - Phase 2) ===
   
   // Valeur totale de l'inventaire (94,4M FCFA de pièces)
@@ -3260,43 +3166,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Top parts consumed - formatted for chart
-  app.get("/api/warehouse/top-consumed-parts", authenticate, async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 10;
-      
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const mostUsedParts = await stockAlertsService.getMostUsedParts(limit);
-      
-      // Format data for the chart component
-      const formattedData = mostUsedParts.map(part => ({
-        partName: part.name,
-        quantity: part.totalUsed,
-        totalValue: part.totalValue
-      }));
-      
-      return res.status(200).json(formattedData);
-    } catch (error) {
-      console.error("Get top consumed parts error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Stock value history - for historical chart
-  app.get("/api/warehouse/stock-value-history", authenticate, async (req, res) => {
-    try {
-      const days = parseInt(req.query.days as string) || 30;
-
-      const { stockAlertsService } = await import("./services/stock-alerts-service");
-      const history = await stockAlertsService.getStockValueHistory(days);
-
-      return res.status(200).json(history);
-    } catch (error) {
-      console.error("Get stock value history error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Statistiques globales du magasin
   app.get("/api/warehouse/statistics", authenticate, async (_req, res) => {
     try {
@@ -4536,22 +4405,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Historique du statut de la flotte basé sur les données réelles de la table status_history
-  app.get("/api/statistics/fleet-history", authenticate, async (req, res) => {
-    try {
-      const period = req.query.period as string || 'month';
-      
-      // Utiliser le nouveau service de statistiques de flotte
-      const { fleetStatisticsService } = await import('./services/fleet-statistics-service');
-      const history = await fleetStatisticsService.getFleetStatusHistory(period as 'week' | 'month' | 'quarter' | 'year');
-      
-      res.json(history);
-    } catch (error) {
-      console.error('Error getting fleet history:', error);
-      res.status(500).json({ message: 'Erreur lors de la récupération de l\'historique de la flotte' });
-    }
-  });
-
 
   // Statistiques spécifiques pour les techniciens
   app.get("/api/dashboard/technician-stats", authenticate, async (req, res) => {
@@ -5322,23 +5175,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Test date maintenance error:', error);
       return res.status(500).json({ message: "Erreur lors du test de maintenance basée sur la date" });
-    }
-  });
-
-  // Vérification globale de toutes les maintenances (tâche cron)
-  app.post("/api/check-all-maintenance", isWorkshopManager, async (req, res) => {
-    try {
-      const dateWorkOrders = await preventiveMaintenanceService.checkDateBasedMaintenance();
-      
-      return res.json({
-        message: `Vérification globale terminée`,
-        totalWorkOrdersGenerated: dateWorkOrders.length,
-        dateBasedWorkOrders: dateWorkOrders.length,
-        workOrders: dateWorkOrders
-      });
-    } catch (error) {
-      console.error('Test global maintenance error:', error);
-      return res.status(500).json({ message: "Erreur lors de la vérification globale de maintenance" });
     }
   });
 
