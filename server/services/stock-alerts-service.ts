@@ -5,6 +5,8 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("stock-alerts-service");
+/** Borne de la colonne `integer` : au-delà, Postgres lèverait une erreur rendue en 500. */
+const MAX_STOCK = 2147483647;
 
 /**
  * Service Stock & Alertes
@@ -175,13 +177,8 @@ export class StockAlertsService {
   }) {
     log.debug({ partId: data.partId, type: data.type, quantity: data.quantity, workOrderId: data.workOrderId, userId: data.userId }, "Enregistrement d'un mouvement de stock");
 
-    const [part] = await db
-      .select()
-      .from(parts)
-      .where(eq(parts.id, data.partId));
-
-    if (!part) {
-      throw new AppError(404, "Pièce introuvable.");
+    if (!Number.isInteger(data.quantity) || data.quantity <= 0 || data.quantity > MAX_STOCK) {
+      throw new AppError(400, "La quantité doit être un entier strictement positif.");
     }
 
     if (data.workOrderId !== undefined) {
@@ -191,48 +188,70 @@ export class StockAlertsService {
       }
     }
 
-    const previousStock = part.quantity;
-    const adjustment = data.type === 'in' ? data.quantity : -data.quantity;
-    const newStock = Math.max(0, previousStock + adjustment);
+    // Lecture puis écriture dans une seule transaction, ligne verrouillée :
+    // deux sorties concurrentes ne peuvent plus lire le même stock initial.
+    const result = await db.transaction(async (tx) => {
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(eq(parts.id, data.partId))
+        .for("update");
 
-    // Créer le mouvement
-    const [movement] = await db
-      .insert(partsStockMovements)
-      .values({
-        partId: data.partId,
-        movementType: data.type,
-        quantity: data.quantity,
-        previousStock: previousStock,
-        newStock: newStock,
-        reason: data.reason,
-        workOrderId: data.workOrderId,
-        createdBy: data.userId,
-        createdAt: new Date()
-      })
-      .returning();
+      if (!part) {
+        throw new AppError(404, "Pièce introuvable.");
+      }
 
-    // Mettre à jour le stock
-    const shouldReorder = newStock <= part.minQuantity;
+      const previousStock = part.quantity;
+      if (data.type === 'out' && data.quantity > previousStock) {
+        throw new AppError(
+          409,
+          `Sortie impossible : ${previousStock} unité(s) en stock, ${data.quantity} demandée(s).`,
+        );
+      }
+      const newStock = data.type === 'in' ? previousStock + data.quantity : previousStock - data.quantity;
+      if (newStock > MAX_STOCK) {
+        throw new AppError(400, "Entrée impossible : le stock dépasserait la capacité enregistrable.");
+      }
 
-    await db
-      .update(parts)
-      .set({
-        quantity: newStock,
-        realStock: newStock,
-        reorderAlert: shouldReorder,
-        responsiblePerson: data.responsiblePerson || part.responsiblePerson,
-        deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber
-      })
-      .where(eq(parts.id, data.partId));
+      const [movement] = await tx
+        .insert(partsStockMovements)
+        .values({
+          partId: data.partId,
+          movementType: data.type,
+          quantity: data.quantity,
+          previousStock,
+          newStock,
+          reason: data.reason,
+          workOrderId: data.workOrderId,
+          createdBy: data.userId,
+          createdAt: new Date()
+        })
+        .returning();
 
-    log.debug(`Stock movement recorded: ${previousStock} → ${newStock}, reorder alert: ${shouldReorder}`);
+      const shouldReorder = newStock <= part.minQuantity;
 
-    return {
-      movement,
-      previousStock,
-      newStock,
-      reorderAlert: shouldReorder
-    };
+      await tx
+        .update(parts)
+        .set({
+          quantity: newStock,
+          realStock: newStock,
+          reorderAlert: shouldReorder,
+          responsiblePerson: data.responsiblePerson || part.responsiblePerson,
+          deliveryReceiptNumber: data.deliveryReceiptNumber || part.deliveryReceiptNumber,
+          updatedBy: data.userId,
+          updatedAt: new Date()
+        })
+        .where(eq(parts.id, data.partId));
+
+      return { movement, previousStock, newStock, reorderAlert: shouldReorder };
+    });
+
+    log.debug(
+      { partId: data.partId, previousStock: result.previousStock, newStock: result.newStock, reorderAlert: result.reorderAlert },
+      "mouvement de stock enregistré",
+    );
+
+    return result;
   }
 
   /**
