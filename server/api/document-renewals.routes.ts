@@ -17,6 +17,7 @@ import {
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
+import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
 import { alertInboxService } from "../services/alert-inbox-service";
 import {
@@ -51,27 +52,6 @@ const DOCUMENT_LABELS: Record<(typeof REQUESTABLE_DOCUMENT_TYPES)[number], strin
   visite_technique: "Visite technique",
   taxe: "Taxe",
   autre: "Document",
-};
-
-const normalizeDocumentType = (rawType: string | null | undefined): string => {
-  const normalized = String(rawType || "")
-    .trim()
-    .toLowerCase();
-
-  switch (normalized) {
-    case "insurance":
-      return "assurance";
-    case "inspection":
-    case "technical_inspection":
-    case "controle_technique":
-      return "visite_technique";
-    case "license":
-    case "registration":
-    case "registration_card":
-      return "carte_grise";
-    default:
-      return normalized;
-  }
 };
 
 const normalizeRole = (role: string | null | undefined): string => {
@@ -230,37 +210,6 @@ const buildCenterAccreditationFallback = (centerId: number): string => {
 const resolveCenterAccreditation = (center: { id: number; accreditationNumber?: string | null }): string => {
   const raw = center.accreditationNumber?.trim();
   return raw && raw.length > 0 ? raw : buildCenterAccreditationFallback(center.id);
-};
-
-const syncVehicleMasterDocumentExpiry = async (
-  vehicleId: number,
-  documentType: string,
-  newExpiryDate: string,
-): Promise<void> => {
-  const normalizedType = normalizeDocumentType(documentType);
-
-  switch (normalizedType) {
-    case "carte_grise":
-      await db
-        .update(vehicles)
-        .set({ licensePlateExpiry: newExpiryDate })
-        .where(eq(vehicles.id, vehicleId));
-      break;
-    case "assurance":
-      await db
-        .update(vehicles)
-        .set({ insuranceExpiry: newExpiryDate })
-        .where(eq(vehicles.id, vehicleId));
-      break;
-    case "visite_technique":
-      await db
-        .update(vehicles)
-        .set({ technicalInspectionDate: newExpiryDate })
-        .where(eq(vehicles.id, vehicleId));
-      break;
-    default:
-      break;
-  }
 };
 
 router.get("/centers", async (req, res) => {
@@ -931,10 +880,11 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         .where(eq(vehicleDocuments.id, payload.vehicleDocumentId))
         .returning();
 
-      await syncVehicleMasterDocumentExpiry(
+      await syncVehicleDocumentMirror(
         payload.vehicleId,
         String(documentRow.documentType || ""),
         payload.newExpiryDate,
+        "set",
       );
 
       // DOC3 : l'échéance renouvelée lève les alertes d'échéance de ce document.

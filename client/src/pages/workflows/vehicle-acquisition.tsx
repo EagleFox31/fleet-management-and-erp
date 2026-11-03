@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useWorkflowPersistence } from '@/hooks/use-workflow-persistence';
 import { apiRequest } from '@/lib/queryClient';
+import { invalidateVehicleDocumentQueries } from '@/lib/vehicle-document-cache';
 import { uploadFile } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
@@ -274,7 +275,7 @@ export function VehicleAcquisitionWorkflow() {
         formData.append('name', docConfig.label);
         formData.append('type', docConfig.apiType);
         await uploadFile(`/api/vehicles/${vehicleId}/documents`, formData);
-        await queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${vehicleId}/documents`] });
+        invalidateVehicleDocumentQueries(queryClient, vehicleId);
       } else if (savedWorkflow?.id) {
         const formData = new FormData();
         formData.append('document', file);
