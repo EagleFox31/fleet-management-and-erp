@@ -71,7 +71,7 @@ import ProfilePage from "@/pages/profile";
 import UsersIndex from "@/pages/users/index";
 import AdminUsersPage from "@/pages/admin/users";
 import DocumentationPage from "@/pages/admin/documentation";
-import { DRIVER_MANAGER_ROLES, PROCUREMENT_ROLES } from "@shared/constants/roles";
+import { DRIVER_MANAGER_ROLES, MISSION_MANAGER_ROLES, PROCUREMENT_ROLES } from "@shared/constants/roles";
 import ImportBackup from "@/pages/admin/import-backup";
 import { WorkflowsIndex } from "@/pages/workflows/index";
 import { VehicleAcquisitionWorkflow } from "@/pages/workflows/vehicle-acquisition";
@@ -551,7 +551,7 @@ function App() {
             
             <Route path="/missions/new">
               <AppLayout>
-                <PrivateRoute component={MissionNew} />
+                <RoleRoute component={MissionNew} allowedRoles={MISSION_MANAGER_ROLES} />
               </AppLayout>
             </Route>
             

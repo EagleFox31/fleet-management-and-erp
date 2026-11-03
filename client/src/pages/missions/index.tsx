@@ -7,6 +7,8 @@ import { Plus, Search, Package, MapPin, Truck, Calendar, Eye, AlertTriangle } fr
 import { formatPrice } from "@/lib/utils";
 import { format } from "date-fns";
 import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
+import { useAuth } from "@/hooks/useAuth";
+import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -32,6 +34,9 @@ export default function MissionsPage() {
   const [, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const { user } = useAuth();
+  // POST /missions est réservé aux gestionnaires : ne pas proposer une création vouée au 403.
+  const canManageMission = (MISSION_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
 
   const { data: missions, isLoading } = useQuery<any>({
     queryKey: ["/api/missions"],
@@ -75,9 +80,11 @@ export default function MissionsPage() {
         subtitle="Planification et suivi des missions de transport"
         icon={<Truck className="h-5 w-5" />}
         actions={
-          <Button size="sm" onClick={() => setLocation("/missions/new")} className="gap-2 h-8 text-xs" data-testid="btn-new-mission">
-            <Plus className="h-3.5 w-3.5" /> Nouvelle Mission
-          </Button>
+          canManageMission ? (
+            <Button size="sm" onClick={() => setLocation("/missions/new")} className="gap-2 h-8 text-xs" data-testid="btn-new-mission">
+              <Plus className="h-3.5 w-3.5" /> Nouvelle Mission
+            </Button>
+          ) : undefined
         }
       >
         <KpiGrid columns={4}>

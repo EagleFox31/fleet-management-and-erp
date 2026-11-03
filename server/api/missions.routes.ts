@@ -18,7 +18,10 @@ import {
 import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
-import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
+import { moduleLogger } from "../lib/logger";
+import { MISSION_MANAGER_ROLES, MISSION_STATUS_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
+
+const log = moduleLogger("missions");
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -1733,8 +1736,28 @@ router.get("/:id/launch-readiness", async (req, res) => {
   }
 });
 
+/**
+ * Création : une mission naît en brouillon ou planifiée (l'écran de création envoie `planned`),
+ * puis avance par PUT /:id/status. Le coût réel et les budgets (`workflowData.budgetPlan`) se
+ * saisissent ensuite par PATCH /:id : Zod les retire du corps (relecture de #129, lot 2).
+ */
+const createMissionSchema = insertMissionSchema
+  .omit({
+    status: true,
+    actualFuelCost: true,
+    workflowData: true,
+    // Posés par le cycle de vie (validation, POD, clôture, étape), jamais à la création.
+    validatedBy: true,
+    validatedAt: true,
+    podUploadedAt: true,
+    actualDistance: true,
+    actualFuelQuantity: true,
+    currentStep: true,
+  })
+  .extend({ status: z.enum(["draft", "planned"]).optional() });
+
 // POST /api/missions - Créer une nouvelle mission
-router.post("/", async (req, res) => {
+router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
   try {
     // Le routeur est monté derrière authenticate: la session porte toujours
     // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
@@ -1746,10 +1769,17 @@ router.post("/", async (req, res) => {
     const missionData = req.body;
 
     // Validate mission data
-    const validatedData = insertMissionSchema.parse({
+    const parsed = createMissionSchema.safeParse({
       ...missionData,
       createdBy: userId,
     });
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Mission invalide : une mission se crée en brouillon ou planifiée.",
+        errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
+      });
+    }
+    const validatedData = parsed.data;
 
     const hasAssignment =
       missionData.assignment &&
@@ -1875,7 +1905,7 @@ router.post("/", async (req, res) => {
 
     return res.status(201).json(newMission);
   } catch (error) {
-    console.error("Create mission error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
 });
@@ -2243,7 +2273,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 });
 
 // PUT /api/missions/:id/status - Mettre à jour le statut d'une mission
-router.put("/:id/status", async (req, res) => {
+router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
     const { status, actualFdrCost: actualFdrCostBody } = req.body || {};
@@ -2255,6 +2285,12 @@ router.put("/:id/status", async (req, res) => {
 
     if (!Object.prototype.hasOwnProperty.call(MISSION_STATUS_TRANSITIONS, targetStatus)) {
       return res.status(400).json({ message: "Statut mission invalide." });
+    }
+
+    // Le chauffeur affecté démarre et livre ; clôture et annulation restent aux gestionnaires.
+    if (!canRoleSetMissionStatus(req.user?.role, targetStatus)) {
+      // Réponse directe : le catch du handler transformerait une exception en 500.
+      return res.status(403).json({ message: "Seul un gestionnaire peut clôturer ou annuler une mission." });
     }
 
     const [mission] = await db

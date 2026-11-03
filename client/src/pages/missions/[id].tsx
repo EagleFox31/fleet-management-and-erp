@@ -19,7 +19,7 @@ import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
-import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
 import { isApiError } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -1446,6 +1446,12 @@ export default function MissionDetailsPage() {
   const canManageMission = (MISSION_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Carburant de mission : mêmes gestionnaires que la mission (MISSION_FUEL_MANAGERS côté serveur).
   const canManageMissionFuel = canManageMission;
+  // PUT /status : gestionnaires, plus le chauffeur affecté. Un chauffeur ne charge cette page
+  // que pour ses propres missions (cloison serveur), le rôle suffit donc ici. Il démarre et livre ;
+  // « Clôturer » (coût réel) et l'annulation restent aux gestionnaires, comme côté serveur.
+  const canChangeMissionStatus = Boolean(
+    primaryMissionAction && canRoleSetMissionStatus(user?.role, primaryMissionAction.nextStatus),
+  );
   const isMissionCompleted = String(mission?.status || "") === "completed";
   const canDeclareMissionWithoutFuel =
     canManageMissionFuel &&
@@ -1553,9 +1559,15 @@ export default function MissionDetailsPage() {
   const launchFuelUnitPriceSource =
     launchReadiness?.fuel?.fuelUnitPriceSource === "real" ? "real" : "fallback";
 
+  // Décision utilisateur (3 novembre 2026) : seuls les gestionnaires saisissent les budgets.
+  // Le chauffeur affecté qui lance une mission incomplète voit ce qui manque, sans champ de saisie.
+  const budgetEntryAllowed = canManageMission;
+
   const launchHint =
     budgetDialogMode === "launch"
-      ? "Complétez uniquement les budgets manquants pour lancer la mission."
+      ? budgetEntryAllowed
+        ? "Complétez uniquement les budgets manquants pour lancer la mission."
+        : "La mission ne peut pas partir tant que ces budgets ne sont pas renseignés."
       : "Renseignez ou ajustez les budgets prévisionnels de mission.";
 
   const hasMissingBudgetWarning =
@@ -1976,7 +1988,7 @@ export default function MissionDetailsPage() {
               >
                 <Package className="h-3.5 w-3.5" /> POD {(mission.status === "delivered" || mission.status === "completed") ? "" : "non disponible"}
               </Button>
-              {primaryMissionAction && (
+              {primaryMissionAction && canChangeMissionStatus && (
                 <Button
                   size="sm"
                   className="h-8 px-3 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
@@ -3442,10 +3454,15 @@ export default function MissionDetailsPage() {
                 <p className="text-xs font-semibold text-amber-700">
                   Budgets manquants: {launchMissingBudgetLabels.join(", ")}
                 </p>
+                {!budgetEntryAllowed && (
+                  <p className="mt-1 text-xs text-amber-700" data-testid="text-budget-ask-manager">
+                    Demandez à un gestionnaire (administrateur, logistique ou secrétariat) de les saisir.
+                  </p>
+                )}
               </div>
             )}
 
-            {hasBudgetSuggestion && (
+            {budgetEntryAllowed && hasBudgetSuggestion && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -3469,6 +3486,7 @@ export default function MissionDetailsPage() {
               </div>
             )}
 
+            {budgetEntryAllowed && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {missionBudgetFieldsInDialog.map((field) => (
                 <div key={field} className="space-y-2">
@@ -3498,7 +3516,9 @@ export default function MissionDetailsPage() {
                 </div>
               ))}
             </div>
+            )}
 
+            {budgetEntryAllowed && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <div className="space-y-1">
                 <p className="text-xs font-medium text-amber-700">
@@ -3523,6 +3543,7 @@ export default function MissionDetailsPage() {
                 </p>
               </div>
             </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
@@ -3531,8 +3552,9 @@ export default function MissionDetailsPage() {
               onClick={() => setOpenMissionBudgetDialog(false)}
               disabled={saveMissionBudgetsMutation.isPending || updateMissionStatusMutation.isPending}
             >
-              Annuler
+              {budgetEntryAllowed ? "Annuler" : "Fermer"}
             </Button>
+            {budgetEntryAllowed && (
             <Button
               onClick={handleSaveMissionBudgets}
               disabled={saveMissionBudgetsMutation.isPending || updateMissionStatusMutation.isPending}
@@ -3540,6 +3562,7 @@ export default function MissionDetailsPage() {
             >
               {saveMissionBudgetsMutation.isPending ? launchActionPendingLabel : launchActionLabel}
             </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
