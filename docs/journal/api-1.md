@@ -135,3 +135,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : le detail mission est lu par tout le personnel ; la saisie CPC revient a l'exploitation.
 - **Comment tester (QA)** : technicien sur `GET /api/missions/:id` : `assignment.driver` sans permis ; technicien, magasinier ou direction sur `update-cpc` : 403, date inchangee.
 - **Preuve** : contrat `driver-personal-data-scope` 13 verts (base dediee fleet_test_b7), garde-fou 2 verts, `tsc` global a zero ; suites completes : voir le corps de la PR.
+
+## 2026-11-03 12:55 - Portée temps réel fermée par défaut
+- **Statut** : fait
+- **Quoi** : portée WebSocket absente ou invalide = aucun destinataire ; broadcast seulement explicite.
+- **Comment** : module pur `server/lib/realtime-scope.ts`, appelé par `server/index.ts` ; 20 points d'émission sans portée rendus explicitement broadcast ; tests `realtime-scope` et `broadcast-hygiene`.
+- **Pourquoi** : cause commune de trois fuites vers des clients (#53, #127, #151).
+- **Comment tester (QA)** : sans objet côté écran ; comportement identique pour les événements déjà scopés ou broadcast.
+- **Preuve automatisée** : voir la PR.
+- **RAIDER** : couvert fermé par défaut, non-régression ; sans objet : migration.
+- **Reste / risques** : les événements d'OT restent en broadcast explicite (décision produit pour les restreindre).

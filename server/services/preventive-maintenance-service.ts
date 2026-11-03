@@ -41,6 +41,7 @@ function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
   }
 
   broadcastUpdate("work_order_created", {
+    scope: { type: "broadcast" },
     workOrderId: workOrder.id,
     workOrder,
     source,
