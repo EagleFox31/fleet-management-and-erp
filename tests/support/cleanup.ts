@@ -192,9 +192,9 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
-  // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
+  // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));
 }
