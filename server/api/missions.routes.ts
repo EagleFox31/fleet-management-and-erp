@@ -1077,9 +1077,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
     const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db
@@ -1250,9 +1248,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
     const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db

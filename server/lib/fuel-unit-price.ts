@@ -1,5 +1,6 @@
 import { canWriteFuelPrice } from "@shared/constants/roles";
 import { getFuelPriceAt } from "../services/fuel-price-service";
+import { AppError } from "./app-error";
 
 /**
  * Prix du litre retenu pour un débit de carte carburant.
@@ -10,16 +11,17 @@ import { getFuelPriceAt } from "../services/fuel-price-service";
  * ignoré, comme l'écran le fait déjà (champ en lecture seule). Sans cela, un appel direct à
  * l'API débitait la carte au prix choisi par l'appelant.
  *
- * Les routes gardent le prix obligatoire (contrat inchangé) ; un prix non exploitable d'un rôle
- * autorisé retombe aussi sur le prix du jour.
+ * Les routes gardent le prix obligatoire (contrat inchangé). Un prix illisible envoyé par un
+ * rôle autorisé est refusé (400) plutôt que remplacé en silence par le prix du jour.
  */
 export async function resolveFuelUnitPrice(
   role: string | null | undefined,
   submitted: number | null | undefined,
   fillDate: Date,
 ): Promise<number> {
-  if (canWriteFuelPrice(role) && typeof submitted === "number" && Number.isFinite(submitted) && submitted > 0) {
-    return submitted;
+  if (canWriteFuelPrice(role)) {
+    if (typeof submitted === "number" && Number.isFinite(submitted) && submitted > 0) return submitted;
+    throw new AppError(400, "Prix du litre invalide.");
   }
   return getFuelPriceAt(fillDate.toISOString().slice(0, 10));
 }

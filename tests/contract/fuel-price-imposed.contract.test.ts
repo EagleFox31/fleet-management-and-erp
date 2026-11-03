@@ -102,6 +102,24 @@ describe("prix du carburant imposé aux rôles qui ne le fixent pas", { timeout:
     expect(res.status).toBe(400);
   });
 
+  it("carte : logistique avec un prix illisible -> 400 lisible, pas de repli silencieux", async () => {
+    const res = await session.call("POST", "/api/fuel-card/consumption", {
+      actor: "logistics",
+      body: { ...consumption(await fundedVehicle()), unitPrice: "abc" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Prix du litre invalide.");
+  });
+
+  it("carte : date illisible -> 400 lisible", async () => {
+    const res = await session.call("POST", "/api/fuel-card/consumption", {
+      actor: "logistics",
+      body: { ...consumption(await fundedVehicle()), date: "pas-une-date" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Date de plein invalide.");
+  });
+
   it("plein de mission : secrétariat -> débit au prix du jour", async () => {
     const official = await getFuelPriceAt(TODAY);
     const { missionId, vehicleId } = await deliveredMission();
