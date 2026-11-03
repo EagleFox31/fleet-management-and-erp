@@ -77,4 +77,56 @@ describe("FuelCardService", () => {
     expect(result.month).toBe(1);
     expect(result.balance).toBeCloseTo(result.totalCredits - result.totalDebits, 0);
   });
+
+  it("pleins simultanés ne font pas passer le solde sous zéro", async () => {
+    const user = await createTestUser();
+    ids.userIds.push(user.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+
+    // Le solde est une somme sur toute la table : on le ramène à 1 000 FCFA
+    // par une écriture d'ajustement, quel que soit l'état de la base de test.
+    const target = 1_000;
+    const { balance: before } = await fuelCardService.getCurrentBalance();
+    const delta = target - before;
+    if (Math.abs(delta) > 0.001) {
+      const adjust = await createTestFuelRecord({
+        createdBy: user.id,
+        creditAmount: delta > 0 ? delta.toFixed(2) : "0",
+        debitAmount: delta < 0 ? (-delta).toFixed(2) : "0",
+        cost: "0",
+        quantity: 0,
+      });
+      ids.fuelRecordIds.push(adjust.id);
+    }
+    expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(target, 2);
+
+    // Connexions du pool ouvertes d'avance : sans cela, l'ouverture d'une
+    // connexion décale le second plein et masque la course.
+    await Promise.all(Array.from({ length: 4 }, () => fuelCardService.getCurrentBalance()));
+
+    // Pleins simultanés de 600 FCFA chacun : un seul tient dans le solde.
+    const fill = () =>
+      fuelCardService.recordConsumption({
+        vehicleId: vehicle.id,
+        quantity: 6,
+        unitPrice: 100,
+        date: "2026-01-15",
+        stationName: "TEST-Station",
+        destination: "TEST-Concurrence",
+        userId: user.id,
+      });
+    const results = await Promise.allSettled([fill(), fill(), fill()]);
+
+    for (const r of results) {
+      if (r.status === "fulfilled") ids.fuelRecordIds.push(r.value.consumption.id);
+    }
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(2);
+    for (const r of rejected) expect(r.reason).toMatchObject({ code: "INSUFFICIENT_BALANCE" });
+    expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(target - 600, 2);
+  });
 });
