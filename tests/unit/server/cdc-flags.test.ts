@@ -32,6 +32,11 @@ describe("drapeaux CDC", () => {
     }
   });
 
+  it("offline-writes (lot #10b) : protection serveur coupée par défaut, distincte des drapeaux d'écran", () => {
+    expect(FEATURE_FLAGS["offline-writes"]).toEqual({ level: "should", defaultEnabled: false, label: "Écritures rejouables sans doublon" });
+    expect(resolveFeatureFlags("technician-offline=on")["offline-writes"]).toBe(false);
+  });
+
   it("gps n'est pas dupliqué et reste coupé", () => {
     expect(Object.keys(FEATURE_FLAGS).filter((key) => key === "gps")).toHaveLength(1);
     expect(resolveFeatureFlags(undefined).gps).toBe(false);
