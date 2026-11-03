@@ -87,6 +87,20 @@ function recepisseValide(validite: string | Date | null | undefined, aujourdhui:
   return fin !== null && jour !== null && fin >= jour;
 }
 
+/**
+ * Un récépissé provisoire couvre-t-il ce papier aujourd'hui ? Pour les contrôles qui lisent
+ * `vehicle_documents` plutôt que les colonnes miroir (lancement de mission) : même règle que
+ * `getMissionEligibility`, jour J inclus. Le récépissé lève une échéance dépassée, jamais un
+ * papier manquant.
+ */
+export function isRenewalReceiptValid(
+  receipts: VehicleEligibilityInput["receipts"],
+  code: DocumentBlockerCode,
+  aujourdhui: Date = new Date(),
+): boolean {
+  return recepisseValide(receipts?.[code], aujourdhui);
+}
+
 function formuler(libelle: string, jours: number): string {
   if (jours === 0) return `${libelle} expire aujourd'hui`;
   if (jours === 1) return `${libelle} expirée depuis 1 jour`;
