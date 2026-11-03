@@ -2,6 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { assignments, clients, drivers, missions } from "../../shared/schema";
+import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -18,6 +19,7 @@ const ACTORS = {
   logistics: "logistics",
   driverA: "driver",
   driverB: "driver",
+  driverSansFiche: "driver",
   client: "client",
 } as const;
 type Actor = keyof typeof ACTORS;
@@ -32,6 +34,8 @@ const call = (...args: Parameters<typeof session.call>) => session.call(...args)
 let clientName = "";
 let own: { id: number };
 let foreign: { id: number };
+let shared: { id: number };
+let driverAId = 0;
 
 /** Une fiche chauffeur par compte (uq_drivers_user_id). */
 async function driverOf(userId: number) {
@@ -63,10 +67,7 @@ async function missionFor(driverId: number, status: string) {
 }
 
 function expectCleanError(res: { status: number; body: any }, status: number) {
-  expect(res.status).toBe(status);
-  expect(typeof res.body?.message).toBe("string");
-  expect(typeof res.body?.code).toBe("string");
-  expect(JSON.stringify(res.body)).not.toMatch(/select |insert |stack|at .*\.ts|ECONN|relation "/i);
+  expect(apiErrorProblems(res.status, res.body, status)).toEqual([]);
 }
 
 const idsOf = (body: unknown) => (body as { id?: number; mission?: { id: number } }[]).map((m) => m.id ?? m.mission?.id);
@@ -78,8 +79,13 @@ beforeAll(async () => {
   clientIds.push(c.id);
   const dA = await driverOf(session.userIdOf("driverA"));
   const dB = await driverOf(session.userIdOf("driverB"));
+  driverAId = dA.id;
   own = await missionFor(dA.id, "assigned");
   foreign = await missionFor(dB.id, "in_progress");
+  // Mission réaffectée : une affectation de B puis une de A.
+  shared = await missionFor(dB.id, "assigned");
+  const [{ vehicleId: sharedVehicle }] = await db.select({ vehicleId: assignments.vehicleId }).from(assignments).where(eq(assignments.missionId, shared.id));
+  await db.insert(assignments).values({ missionId: shared.id, vehicleId: sharedVehicle, driverId: dA.id, status: "accepted" } as any);
 }, 120000);
 
 afterAll(async () => {
@@ -129,6 +135,28 @@ describe("cloison chauffeur sur GET /api/operations", { timeout: 180000 }, () =>
     expectCleanError(await call("GET", `/api/operations/missions/by-client/${clientName}`, { actor: "driverA" }), 403);
     expectCleanError(await call("GET", "/api/operations/stats/by-client", { actor: "driverA" }), 403);
     expectCleanError(await call("GET", "/api/operations/stats/by-destination", { actor: "driverA" }), 403);
+  });
+
+  it("mission réaffectée : A ne reçoit que sa propre affectation, sans prix d'achat", async () => {
+    const res = await call("GET", "/api/operations/missions", { actor: "driverA" });
+    const rows = (res.body as any[]).filter((m) => m.id === shared.id);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.assignment?.driverId).toBe(driverAId);
+      expect(row.vehicle?.purchasePrice ?? null).toBeNull();
+    }
+    const up = await call("GET", "/api/operations/missions/upcoming", { actor: "driverA" });
+    expect((up.body as any[]).filter((m) => m.id === shared.id)).toHaveLength(1);
+  });
+
+  it("compte chauffeur sans fiche : listes vides, coûts et agrégats en 403", async () => {
+    for (const path of ["/missions", "/missions/upcoming", "/missions/active"]) {
+      const res = await call("GET", `/api/operations${path}`, { actor: "driverSansFiche" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    }
+    expectCleanError(await call("GET", `/api/operations/missions/${own.id}/costs`, { actor: "driverSansFiche" }), 403);
+    expectCleanError(await call("GET", "/api/operations/stats/by-client", { actor: "driverSansFiche" }), 403);
   });
 
   it("le personnel lit tout", async () => {

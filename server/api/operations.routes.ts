@@ -4,7 +4,7 @@ import { operationsService } from "../services/operations-service";
 import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
-import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 
 const log = moduleLogger("operations");
@@ -18,7 +18,8 @@ const router = Router();
  */
 const OPERATIONS_COSTS_DRIVER_MESSAGE = "Accès refusé : les coûts et statistiques d'exploitation sont réservés au personnel de gestion.";
 const refuseDriver = (req: Request, _res: Response, next: NextFunction) => {
-  if (req.user?.role === "driver") return next(new AppError(403, OPERATIONS_COSTS_DRIVER_MESSAGE));
+  const role = req.user?.role as AppRole | undefined;
+  if (!role || !OPERATIONS_COST_READ_ROLES.includes(role)) return next(new AppError(403, OPERATIONS_COSTS_DRIVER_MESSAGE));
   next();
 };
 

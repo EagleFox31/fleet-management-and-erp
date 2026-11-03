@@ -30,6 +30,15 @@ function missionsOfDrivers(driverIds: number[]) {
   );
 }
 
+/**
+ * Jointure des affectations : pour un chauffeur, ses seules affectations. Une mission réaffectée
+ * porte aussi celle d'un autre chauffeur (nom, véhicule), qu'il n'a pas à lire.
+ */
+function assignmentsJoin(driverScope?: number[]) {
+  const onMission = eq(missions.id, assignments.missionId);
+  return driverScope ? and(onMission, inArray(assignments.driverId, driverScope))! : onMission;
+}
+
 export class OperationsService {
   
   /**
@@ -323,7 +332,7 @@ export class OperationsService {
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(missions.id, assignments.missionId))
+      .leftJoin(assignments, assignmentsJoin(driverScope))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id));
 
     if (conditions.length > 0) {
@@ -335,7 +344,8 @@ export class OperationsService {
     const missionsList = results.map(r => ({
       ...r.mission,
       client: r.client,
-      vehicle: r.vehicle,
+      // Le prix d'achat nourrit l'amortissement des coûts, refusés au chauffeur (décision du 3 novembre 2026).
+      vehicle: driverScope && r.vehicle ? { ...r.vehicle, purchasePrice: null } : r.vehicle,
       assignment: r.assignment,
     }));
 
@@ -362,7 +372,7 @@ export class OperationsService {
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(missions.id, assignments.missionId))
+      .leftJoin(assignments, assignmentsJoin(driverScope))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(
@@ -395,7 +405,7 @@ export class OperationsService {
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(missions.id, assignments.missionId))
+      .leftJoin(assignments, assignmentsJoin(driverScope))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(
