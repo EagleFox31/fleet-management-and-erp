@@ -339,3 +339,51 @@ describe("workflowData : statut et budget n'effacent plus une régularisation", 
     expect(await regularizationEntries(missionId)).toHaveLength(1);
   });
 });
+
+describe("plein normal de mission : statut relu sous le verrou de ligne", { timeout: 180000 }, () => {
+  const setStatus = (missionId: number, status: string) =>
+    session.call("PUT", `/api/missions/${missionId}/status`, { actor: "logistics", body: { status, actualFdrCost: 0 } });
+  const normalFill = (vehicleId: number, requestKey: string) => ({ vehicleId, quantity: 2, unitPrice: 100, requestKey });
+
+  it("plein, clôture, puis rejeu de la même clé : le plein enregistré est renvoyé, sans second débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    const requestKey = uniqueTestToken("normal-replay-closed");
+
+    const first = await recordFuel(missionId, normalFill(vehicleId, requestKey));
+    expect(first.status).toBe(201);
+    expect((await setStatus(missionId, "completed")).status).toBe(200);
+
+    const retry = await recordFuel(missionId, normalFill(vehicleId, requestKey));
+    expect(retry.status).toBe(200);
+    expect(retry.body.replayed).toBe(true);
+    expect(retry.body.record.id).toBe(first.body.record.id);
+    expect(await missionDebits(missionId)).toHaveLength(1);
+  });
+
+  it("nouveau plein sur une mission clôturée : 400 lisible, aucun débit", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+    expect((await setStatus(missionId, "completed")).status).toBe(200);
+
+    const res = await recordFuel(missionId, normalFill(vehicleId, uniqueTestToken("normal-closed")));
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Enregistrement carburant impossible pour une mission completed.");
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(await missionDebits(missionId)).toHaveLength(0);
+  });
+
+  it("clôture concurrente : le plein attend le verrou de ligne, voit la mission clôturée et ne débite pas", async () => {
+    const { missionId, vehicleId } = await deliveredMission();
+
+    const res = await expectWaitsForMissionRowLock(
+      missionId,
+      () => recordFuel(missionId, normalFill(vehicleId, uniqueTestToken("normal-race-close"))),
+      async (tx: DbExecutor) => {
+        await tx.update(missions).set({ status: "completed" } as any).where(eq(missions.id, missionId));
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(await missionDebits(missionId)).toHaveLength(0);
+  });
+});
+

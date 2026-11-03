@@ -22,11 +22,11 @@
   "surfaces": {
     "e2e": {
       "paths": ["e2e/**", "playwright.config.ts"],
-      "gates": ["typecheck"]
+      "gates": ["typecheck", "unit"]
     },
     "scripts": {
       "paths": ["scripts/**", "drizzle.config.ts"],
-      "gates": ["typecheck"]
+      "gates": ["typecheck", "unit"]
     },
     "mobile": {
       "paths": ["android/**", "capacitor.config.ts", ".github/workflows/build-android-apk.yml"],

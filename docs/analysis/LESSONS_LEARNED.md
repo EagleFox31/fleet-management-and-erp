@@ -1593,6 +1593,30 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
 
+## 2026-11-03 — Parc tronqué à 10 véhicules dans les totaux du personnel
+
+### Contexte
+- `storage.getVehicles()` pagine avec `limit = 10` par défaut. Sept appels sans argument l'employaient pour « tout le parc » :
+  - pleins (`GET /api/fuel-records`), statistiques carburant, historique de consommation, statistiques technicien ;
+  - trois contrôles d'alertes (`alert-service` : véhicules, plans de maintenance, consommation).
+- Au-delà de 10 véhicules, les totaux du personnel et les alertes ignoraient en silence les plus anciens. Le côté client (`getVehiclesByOwner`) n'était pas touché.
+
+### Cause racine
+- Classification : valeur par défaut de pagination reprise par des appelants qui voulaient l'ensemble, sans erreur ni signal.
+
+### Résolution
+- `storage.listAllVehicles()` : tout le parc non supprimé, sans pagination, sans repli silencieux sur une liste vide. Les sept appels y passent.
+- `getVehicles` garde son contrat paginé pour `GET /api/vehicles`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/vehicles-unbounded-hygiene.test.ts` : aucun `getVehicles()` sans argument dans `server/`.
+- `tests/integration/storage-list-all-vehicles.test.ts` : le véhicule hors première page est rendu, le supprimé exclu.
+- `tests/contract/fuel-staff-whole-fleet.contract.test.ts` : le plein et les statistiques d'un véhicule hors des 10 plus récents sont présents.
+- Mutant (retour à `getVehicles()`) : contrat 2/2 rouge, hygiène rouge.
+
+### Règle Projet
+- Une lecture « de tout le parc » appelle une méthode sans pagination nommée comme telle, jamais une méthode paginée sans argument.
+
 ### Suite du 3 novembre 2026 : exceptions levées, clé obligatoire
 - **Budget et statut sous verrou de ligne** : le `PATCH` budget et la transition de statut avec modification relisent `workflowData` par `SELECT … FOR UPDATE` dans une transaction, puis fusionnent leur patch sur cette relecture. L'écriture de l'entrée de régularisation prend le même verrou de ligne. Ordre des verrous fixe : carte carburant puis ligne mission (statut et budget ne prennent que la ligne), donc pas d'interblocage. La première exception nommée ci-dessus est levée ; celle des suppressions admin reste.
 - **Clé obligatoire, unique en base** : `fuel_records.request_key` avec index unique `ux_fuel_records_request_key` (migration `20261103_fuel_records_request_key.sql`, jumelle de `FUEL_RECORDS_REQUEST_KEY_SQL` dans `init-database.ts`). Sans clé : 400 « rechargez la page ». Une violation de l'index devient 409. Les régularisations antérieures (clé dans le journal seul) restent rejouables.
@@ -1746,6 +1770,13 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
 
+### Suite : statut du plein normal relu sous le verrou de ligne
+
+- **Cause** : `POST /api/missions/:id/fuel-records` contrôlait le statut sur une lecture faite avant les verrous. Deux effets : un rejeu après clôture recevait 400 au lieu du plein enregistré, et une clôture concurrente laissait passer un débit sur une mission clôturée.
+- **Résolution** : `assertMissionAcceptsFuel(tx)` relit le statut avec `FOR UPDATE` dans la transaction du débit, après le rejeu et avant le solde. Ordre des verrous : carte, puis ligne.
+- **Clé incertaine et nouvelle saisie** : la clé incertaine n’est reprise que pour la même saisie (empreinte sans l’heure par défaut). L’empreinte contient le jour du plein, que le serveur compare, mais pas l’heure par défaut : une fiche rouverte le lendemain prend une nouvelle clé au lieu d’un 409. Une saisie corrigée après une issue incertaine (autre quantité, autre prix, autre jour) est une nouvelle intention et prend une nouvelle clé. Si le premier envoi avait abouti, il y a deux pleins : les deux écrans relisent les pleins après une issue incertaine, donc le premier est affiché avant la correction.
+- **Prévention** : trois contrats (rejeu après clôture, plein neuf sur mission clôturée, clôture concurrente), dont deux rouges contre main ; unitaires de l’empreinte.
+
 ## 2026-11-03 — Mouvement de stock magasin : sortie ramenée à 0 et course de lecture (récidive)
 
 ### Contexte
@@ -1806,3 +1837,29 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Une route qui écrit du stock ou de l'argent et qui n'est pas rejouable sans risque déclare `keepKeyOnUncertainOutcome: true` et `staleSeconds: null`. Le client garde la clé tant que l'issue est inconnue, et change de clé à chaque nouvelle intention.
+
+## 2026-11-03 — Main rouge en unitaire après une PR e2e seule (#194)
+
+### Contexte
+- #194 n'ajoutait qu'une spec e2e. Elle contenait `getByText("Erreur carburant")` sans `{ exact: true }`, que refuse la garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts` (#155).
+- La CI de la PR, puis celle de main, étaient vertes. Toutes les PR suivantes ont échoué en unitaire.
+
+### Cause racine
+- Classification : carte d'impact incomplète (exécution ciblée).
+- Dans `.github/appfactory-impact.json`, les surfaces `e2e` et `scripts` n'activaient que `typecheck`. Or des gardes unitaires lisent ces répertoires :
+  - les gardes de `tests/unit/e2e/` ;
+  - les parcours `repoFiles` de `it-fails-hygiene` et de `leak-check-hygiene`.
+- Un changement limité à ces répertoires ne lançait donc pas les tests qui les contrôlent.
+- Facteur humain : l'auteur n'avait lancé que tsc, pas la suite unitaire, en se fiant au périmètre « e2e seul ».
+
+### Résolution
+- Spec corrigée dans #195 (`exact: true`).
+- Les surfaces `e2e` et `scripts` activent aussi `unit`.
+
+### Prévention (vérifiable)
+- Les surfaces `e2e` et `scripts` portent maintenant la porte `unit` dans la carte d'impact.
+
+### Règle Projet (obligatoire)
+- Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
+- Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
+- En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
