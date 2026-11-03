@@ -39,7 +39,7 @@ Toutes les données sont fictives : véhicules RCT-001 à RCT-012. Il y a un com
 
 Tous ces comptes ont le mot de passe `SITE_DEMO_PASSWORD` défini à l'étape 3. Le compte `recette_admin` a tous les droits : ne communiquez ce mot de passe qu'aux participants de la démonstration.
 
-Premier administrateur : sur le serveur de site, c'est `recette_admin`. Aucun compte `admin` / `admin123` n'est créé (le serveur tourne en production). Pour un compte `admin` en plus, ajouter `ADMIN_INITIAL_PASSWORD` (12 caractères minimum) à l'environnement de `app-site` avant le premier lancement.
+Premier administrateur : sur le serveur de site, c'est `recette_admin`. Aucun compte `admin` / `admin123` n'est créé (le serveur tourne en production). Pour un compte `admin` en plus, ajouter `ADMIN_INITIAL_PASSWORD=<12 caractères minimum>` dans `deploy\.env` avant le premier lancement.
 
 ## 3. Trouver l'adresse IP du PC
 

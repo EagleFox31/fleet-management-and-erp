@@ -1258,7 +1258,7 @@ export async function initializeDatabase() {
     }
 
     // Créer un utilisateur administrateur par défaut
-    console.log('👥 Création de l\'utilisateur administrateur...');
+    initLog.info('Base sans utilisateur : création de l\'administrateur initial');
     // Administrateur initial : jamais admin/admin123 hors développement et test (server/lib/initial-admin.ts).
     const adminPlan = planInitialAdmin(process.env);
     if (!adminPlan.create) {

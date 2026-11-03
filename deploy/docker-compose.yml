@@ -97,6 +97,9 @@ services:
       # http:// : cookie de session non « secure », sinon refusé par le navigateur sur le LAN.
       APP_URL: ${SITE_APP_URL:-http://localhost:5000}
       BACKUP_ENABLED: "0"
+      # Optionnel : compte « admin » en plus de recette_admin (12+ caractères, lu dans deploy/.env).
+      # Pas sur app-prod / app-recette : leur env_file le transmet déjà, et une entrée ici l'écraserait.
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
     ports:
       - "${SITE_PORT:-5000}:5000"
     volumes:
