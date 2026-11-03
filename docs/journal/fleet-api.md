@@ -151,3 +151,16 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : tout socket connecté, comptes client d'autres clients compris, recevait fiches client, factures et véhicules de la flotte.
 - **RAIDER** : couvert réutilisable (constantes de rôles partagées), non-régression (contrats voisins), garde-fou à égalité stricte ; sans objet : migration, nouvel événement ou queryKey.
 - **Reste / risques** : lot B (OT, pont NOTIFY) ; chauffeur : trame réduite sur le kilométrage, son écran se resynchronise par requête.
+
+## 2026-11-03 — Lot A5 : gardes de rôle (stock, tableau technicien, personnel, barème)
+- **Agent** : fleet-api · **Branche** : `fix/a5-role-guards`
+- **Quoi** : `POST /api/warehouse/stock-movement` réservé à `isPartsCatalogManager` (admin, warehouse), données validées, erreurs `AppError`, logs migrés ; `GET /api/dashboard/technician-stats` en `isTechnician` ; `GET /api/users/technicians` et `GET /labor-catalog` en `isStaff` (requêtes client désactivées dans `work-orders/[id].tsx` et `work-order-items-panel.tsx`) ; `assertValidDbId` sur `GET /api/vehicles/:id/tires` ; `GET /api/work-orders/:id` passe par `assertWorkOrderReadable` (règle du technicien conservée) ; handlers morts `GET /api/vehicles` et `/all` supprimés de `routes.ts`.
+- **Comment** : `server/api/warehouse.routes.ts`, `server/services/stock-alerts-service.ts` (pièce inconnue en 404, logs migrés), `server/routes.ts` (handlers en place), `server/api/work-order-items.routes.ts`, `tests/contract/a5-role-guards.contract.test.ts` (45 cas, 19 rouges sur `main`), listes gelées réduites.
+- **Pourquoi** : une écriture de stock jugée suffisante sous `isStaff` au montage ; un client lisait la flotte, le personnel et le barème. Voir la leçon du 2026-11-03 de `docs/analysis/LESSONS_LEARNED.md`.
+- **Reste / risques** : une sortie de stock supérieure au stock ramène la quantité à 0 sans refus ; doublon masqué `POST /api/warehouse/stock-movement` et autres `/api/warehouse/*` de `routes.ts` encore présents ; lectures de `warehouse.routes.ts` ouvertes à tout le personnel (signalé).
+
+## 2026-11-03 — Lot A5, suite de relecture sécurité
+- **Quoi** : quantité du mouvement de stock entière (400 sur 1.5), `workOrderId` doit exister (404), retrait des 5 GET `/api/warehouse/*` et du POST `stock-movement` masqués de `routes.ts` (`GET /api/parts/:id/real-stock` conservé, chemin distinct), journal de debug sans `responsiblePerson`, contrôle `isNaN` redondant retiré sur les pneus.
+- **Comment** : `warehouse.routes.ts`, `stock-alerts-service.ts`, `routes.ts`, contrat a5 (2 cas de plus).
+- **Pourquoi** : retours de fleet-securite et du relecteur sur #184 ; les 6 chemins retirés sont servis plus tôt par le routeur monté avant `registerRoutes`.
+- **Reste** : transaction et plancher `Math.max` du mouvement de stock au lot suivant.

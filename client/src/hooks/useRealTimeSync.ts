@@ -4,11 +4,11 @@ import { queryClient } from "@/lib/queryClient";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
 import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
-import { satelliteTargetsOf } from "@/lib/realtime-satellites";
+import { satelliteTargetsOf, type SatellitePayload } from "@/lib/realtime-satellites";
 
 /** Couche 3, écrans satellites : groupes déclarés pour l'événement (`client/src/lib/realtime-satellites.ts`). */
-function invalidateSatellites(event: string): void {
-  const { keys, prefixes } = satelliteTargetsOf(event);
+function invalidateSatellites(event: string, payload?: SatellitePayload): void {
+  const { keys, prefixes } = satelliteTargetsOf(event, payload);
   for (const key of keys) queryClient.invalidateQueries({ queryKey: [key] });
   if (prefixes.length > 0) {
     queryClient.invalidateQueries({
@@ -676,7 +676,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
   const payload = update.payload ?? update.data;
   const payloadRecord = asRecord(payload) ?? {};
 
-  invalidateSatellites(update.type);
+  invalidateSatellites(update.type, payloadRecord as SatellitePayload);
 
   switch (update.type) {
     case "work_order_created": {

@@ -18,8 +18,6 @@ import { describe, expect, it } from "vitest";
  */
 const KNOWN_AUTHENTICATE_ONLY = [
   // Contrôle de rôle et de propriétaire fait dans le handler (tests : vehicles-lists-client-scope).
-  "get /api/vehicles",
-  "get /api/vehicles/all",
   "get /api/vehicles/:id",
   // Contrôle de rôle fait dans le handler (lecture de l'utilisateur).
   "get /api/maintenance-schedules/vehicle/:vehicleId",
