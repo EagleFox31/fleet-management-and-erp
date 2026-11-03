@@ -1,18 +1,25 @@
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+import { ALL_APP_ROLES } from "../../../shared/constants/roles";
 import {
   T1_WITHOUT_ROLE_GUARD,
   T3_WITHOUT_BODY_VALIDATION,
   T4_WITHOUT_SERVER_FIELD_PROTECTION,
 } from "./support/write-routes-frozen";
 import {
+  AUTH_ROLE_GUARDS,
+  LOCAL_ROLE_GUARDS,
+  MOUNT_ROLE_GUARDS,
   PUBLIC_BY_DESIGN,
+  resolveRoles,
   serverDir,
   allWriteRoutes,
   hasRoleGuard,
   isPassThrough,
   mountOrder,
+  mountPrefixes,
+  unreadableDeclarations,
   protectsServerFields,
   readsBody,
   validatesBody,
@@ -144,12 +151,142 @@ router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (re
     expect(src(code).map(protectsServerFields)).toEqual([true, false, true]);
   });
 
-  it("selfScoped vaut garde T1 seulement si le handler ne lit pas req.params", () => {
-    const [self, byId] = src(
-      `router.patch("/me", selfScoped, async (req, res) => { await update(req.user.id, req.body); });
-       router.patch("/:id", selfScoped, async (req, res) => { await update(Number(req.params.id), req.body); });`,
+  it("T1 : liste positive, un middleware inconnu ne vaut pas garde", () => {
+    for (const mw of ["[isAnyUser]", "...guards", "anyone", "authorize([...ALL_ROLES])", "checkWritePermission", "isAnyUser", "selfScoped", "isAdminLike"]) {
+      const [r] = src(`router.post("/y", ${mw}, async (req, res) => { res.json({}); });`);
+      expect(hasRoleGuard(r), mw).toBe(false);
+    }
+    for (const mw of ["isAdmin", "isStaff", "isWorkshopManager", 'authorize(["admin"])', "authorize([...PROCUREMENT_ROLES])"]) {
+      const [r] = src(`router.post("/y", ${mw}, async (req, res) => { res.json({}); });`);
+      expect(hasRoleGuard(r), mw).toBe(true);
+    }
+    expect(AUTH_ROLE_GUARDS.has("isAdmin")).toBe(true);
+    expect(AUTH_ROLE_GUARDS.has("isAnyUser")).toBe(false);
+  });
+
+  it("T1 : authorize juge l'ensemble de rôles résolu, pas le nom de la constante (NO-GO n°3)", () => {
+    const code = `const EVERYONE = ALL_APP_ROLES;
+const anyone = [...ALL_APP_ROLES];
+const STAFF_PLUS_CLIENT = [...STAFF_ROLES, "client"];
+const FEW = ["admin", "warehouse"];
+router.post("/a", authorize([...ALL_APP_ROLES]), async (req, res) => { res.json({}); });
+router.post("/b", authorize(ALL_APP_ROLES), async (req, res) => { res.json({}); });
+router.post("/c", authorize([...EVERYONE]), async (req, res) => { res.json({}); });
+router.post("/d", authorize(anyone), async (req, res) => { res.json({}); });
+router.post("/e", authorize([...STAFF_PLUS_CLIENT]), async (req, res) => { res.json({}); });
+router.post("/f", authorize([...STAFF_ROLES, ...CLIENT_ONLY]), async (req, res) => { res.json({}); });
+router.post("/g", authorize(roles.ALL_APP_ROLES), async (req, res) => { res.json({}); });
+router.post("/h", authorize([...FEW]), async (req, res) => { res.json({}); });
+router.post("/i", authorize([...STAFF_ROLES]), async (req, res) => { res.json({}); });`;
+    expect(src(code).map(hasRoleGuard)).toEqual([false, false, false, false, false, false, false, true, true]);
+    expect(resolveRoles("[...STAFF_ROLES, \"client\"]", "")).toEqual(new Set(ALL_APP_ROLES));
+  });
+
+  it("T1 : une garde locale ou un export is* qui admet tous les rôles ne vaut pas garde", () => {
+    const local = `const writers = authorize([...ALL_APP_ROLES]);
+router.post("/y", writers, async (req, res) => { res.json({}); });`;
+    const [r] = src(local);
+    expect(hasRoleGuard({ ...r, file: "api/time-tracking.routes.ts" })).toBe(false);
+    const alias = `const writers = isAnyUser;
+router.post("/y", writers, async (req, res) => { res.json({}); });`;
+    const [a] = src(alias);
+    expect(hasRoleGuard({ ...a, file: "api/time-tracking.routes.ts" })).toBe(false);
+    const [kept] = src(`const writers = authorize(["admin"]);
+router.post("/y", writers, async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard({ ...kept, file: "api/time-tracking.routes.ts" })).toBe(true);
+    const mount = mountPrefixes(
+      `import tRoutes from "./t.routes";
+const gardeApprovisionnement = authorize([...ALL_APP_ROLES]);
+apiRouter.use("/t", gardeApprovisionnement, tRoutes);`,
     );
-    expect([self, byId].map(hasRoleGuard)).toEqual([true, false]);
+    expect(mount.get("api/t.routes.ts")?.guarded).toBe(false);
+    for (const name of AUTH_ROLE_GUARDS) expect(name).not.toBe("isAnyUser");
+    expect(AUTH_ROLE_GUARDS.has("isStaff")).toBe(true);
+  });
+
+  it("T1 : une garde locale ne vaut que dans son fichier", () => {
+    const [r] = src(
+      `const checkWritePermission = (req, res, next) => { if (!PROCUREMENT.has(req.user.role)) return next(denied()); next(); };
+router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`,
+    );
+    expect(hasRoleGuard({ ...r, file: "api/purchase-orders.routes.ts" })).toBe(true);
+    // Nom listé mais non défini dans la source : pas de garde.
+    const [undefinedGuard] = src(`router.post("/y", checkWritePermission, async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard({ ...undefinedGuard, file: "api/purchase-orders.routes.ts" })).toBe(false);
+    expect(hasRoleGuard({ ...r, file: "api/vehicles.routes.ts" })).toBe(false);
+  });
+
+  it("T1 : chaque garde locale de la liste est définie dans son fichier et ne vaut pas isAnyUser", () => {
+    for (const [file, names] of Object.entries(LOCAL_ROLE_GUARDS)) {
+      const source = readFileSync(join(serverDir, file), "utf8");
+      for (const name of names) {
+        const def = new RegExp(`\\bconst\\s+${name}\\s*=\\s*([^\\n]*)`).exec(source)?.[1];
+        expect(def, `${name} absent de ${file}`).toBeDefined();
+        expect(def, `${name} (${file})`).not.toMatch(/\bisAnyUser\b|\bALL_ROLES\b|\bauthenticate\b/);
+      }
+    }
+    const index = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+    for (const name of MOUNT_ROLE_GUARDS.map((n) => n.replace(/^\.\.\./, ""))) {
+      expect(new RegExp(`\\bconst\\s+${name}\\s*=|\\bimport\\s*\\{[^}]*\\b${name}\\b`).test(index), name).toBe(true);
+    }
+  });
+
+  it("T1 : montage gardé par un drapeau seul = non gardé ; router.use(garde) garde les déclarations suivantes", () => {
+    const flagOnly = mountPrefixes(`import tRoutes from "./t.routes";\napiRouter.use("/t", requireFeature("gps"), tRoutes);`);
+    expect(flagOnly.get("api/t.routes.ts")?.guarded).toBe(false);
+    const staff = mountPrefixes(`import tRoutes from "./t.routes";\napiRouter.use("/t", isStaff, tRoutes);`);
+    expect(staff.get("api/t.routes.ts")?.guarded).toBe(true);
+    const [before, after] = src(
+      `router.post("/a", async (req, res) => { res.json({}); });
+       router.use(isAdmin);
+       router.post("/b", async (req, res) => { res.json({}); });`,
+    );
+    expect([before, after].map(hasRoleGuard)).toEqual([false, true]);
+    const [flag] = src(`router.use(requireFeature("x"));\nrouter.post("/c", async (req, res) => { res.json({}); });`);
+    expect(hasRoleGuard(flag)).toBe(false);
+  });
+
+  it("déclarations illisibles (.route, .all, apostrophes, routeur non reconnu) : repérées", () => {
+    expect(unreadableDeclarations(`router.route("/a").post(isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.all("/a", h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.post('/a', isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`router.patch(path, isAdmin, h);`)).toHaveLength(1);
+    expect(unreadableDeclarations(`const r = Router();\nr.post("/a", isAdmin, h);`).length).toBeGreaterThan(0);
+    expect(unreadableDeclarations(`const router = Router();\nrouter.post("/a", isAdmin, h);\nrouter.get(p, h);`)).toEqual([]);
+  });
+
+  it("aucune déclaration illisible dans server/api ni server/routes.ts", () => {
+    const files = [...readdirSync(join(serverDir, "api")).filter((f) => f.endsWith(".ts")).map((f) => join("api", f)), "routes.ts"];
+    const found = files.flatMap((f) => unreadableDeclarations(readFileSync(join(serverDir, f), "utf8")).map((u) => `${f} : ${u}`));
+    expect(found, "Écris la route sous la forme router.post(\"/chemin\", garde, handler) : sinon elle échappe aux cliquets.").toEqual([]);
+  });
+
+  it("B1 : ownedBy n'est pas une garde T1, et sa fonction interne ne coupe pas l'en-tête", () => {
+    const [owned] = src(
+      `router.patch("/:id", ...ownedBy((req) => ownerOf(Number(req.params.id))), validateBody(leakSchema, { keep: ["cost"] }), async (req, res) => { await save(req.body); });`,
+    );
+    expect(hasRoleGuard(owned)).toBe(false);
+    expect(owned.middlewares.map((m) => m.split("(")[0])).toEqual(["...ownedBy", "validateBody"]);
+  });
+
+  it("T4 : validateBody avec schéma permissif ou options en variable ne vaut pas protection", () => {
+    const code = `const openSchema = z.object({ name: z.string() }).passthrough();
+const okSchema = z.object({ name: z.string() });
+router.post("/a", isAdmin, validateBody(openSchema), async (req, res) => { await save(req.body); });
+router.post("/b", isAdmin, validateBody(okSchema.passthrough()), async (req, res) => { await save(req.body); });
+router.post("/c", isAdmin, validateBody(okSchema, opts), async (req, res) => { await save(req.body); });
+router.post("/d", isAdmin, validateBody(okSchema, { serverFields: ["status"] }), async (req, res) => { await save(req.body); });`;
+    const routes = src(code);
+    expect(routes.map(protectsServerFields)).toEqual([false, false, false, true]);
+  });
+
+  it("T4 : keep en forme abrégée et options en spread ne valent pas retrait garanti", () => {
+    const code = `const leakSchema = z.object({ name: z.string(), cost: z.number() });
+router.post("/a", isAdmin, validateBody(leakSchema, { keep }), async (req, res) => { await save(req.body); });
+router.post("/b", isAdmin, validateBody(leakSchema, { ...opts }), async (req, res) => { await save(req.body); });
+router.post("/c", isAdmin, validateBody(leakSchema, { serverFields: ["x"], ...opts }), async (req, res) => { await save(req.body); });
+router.post("/d", isAdmin, validateBody(leakSchema), async (req, res) => { await save(req.body); });`;
+    expect(src(code).map(protectsServerFields)).toEqual([false, false, false, true]);
   });
 
   it("l'analyse voit bien les déclarations des sources", () => {

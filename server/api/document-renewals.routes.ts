@@ -491,6 +491,7 @@ const quickRenewPayloadSchema = z.object({
 
 router.post("/requests", isDocumentRenewalWriter, async (req, res, next) => {
   try {
+    const role = normalizeRole(req.user?.role);
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
     if (!actorUserId) {
@@ -699,6 +700,7 @@ router.post("/requests", isDocumentRenewalWriter, async (req, res, next) => {
  */
 router.patch("/requests/:id/status", isDocumentRenewalWriter, async (req, res, next) => {
   try {
+    const role = normalizeRole(req.user?.role);
 
     const id = Number.parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id <= 0) {

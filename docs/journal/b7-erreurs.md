@@ -219,3 +219,48 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : même service (`vatBillingService.getSuppliersSummary`), erreurs relayées par `withLogContext`. Accès : garde de montage du routeur (lecture fournisseurs), le client reste en 403.
 - Pourquoi : `useBilling` recevait un 400 « ID invalide », la synthèse n'était jamais servie.
 - Preuve : contrat rouge sans le correctif, vert avec ; `client-read-scope-tires` (client 403 au montage) vert ; tsc 0 ; unitaires 1933.
+
+## 2026-11-03T19:00:57+01:00 — Suivi de #210 : refus de transfert silencieux et limites du scan des chemins
+
+- Quoi : `transferDocumentsToVehicle` sautait un document dont le fichier source manquait ou dont la destination sortait du dossier du véhicule, puis marquait **tous** les documents de la session `isTransferred`. Le document perdu disparaissait du workflow sans être arrivé sur le véhicule. Le scan `file-access-scan` acceptait aussi une garde `isInsideDirectory` placée sur n'importe quel argument, après l'accès ou dans un rappel imbriqué, une méthode quelconque (`concat`) sur une valeur bornée, et ne voyait pas les alias `fs["unlinkSync"]`, `.bind(fs)`, `del = fs.unlinkSync` ni `promisify(fs.unlink)`.
+- Comment : seuls les ids réellement copiés sont marqués (`inArray`). Un refus est journalisé en `warn` avec sa raison, et le bilan en `info`. Côté scan : la garde doit porter sur le second argument, se trouver avant l'accès et dans la même fonction ; seules `find`, `filter`, `at` et `slice` conservent la borne ; toute référence non appelée à un membre disque compte comme un alias. Le `.gitkeep` effacé par les tests était déjà réglé sur main (`trackDir` / `cleanupTrackedDir`).
+- Pourquoi : un refus de sécurité ne doit pas se payer d'une perte de document silencieuse. La garde statique doit refuser ce qu'elle ne prouve pas.
+- Preuve : intégration « fichier source disparu » verte, et rouge sans le correctif du service (`isTransferred: true` sur le document perdu). Hygiène 16/16, dont 3 cas rouges sans le correctif du scan. `server/` reste vert sans nouvelle exception. tsc 0 erreur, unitaires 1944/1944.
+
+## 2026-11-03T19:10:08+01:00 — #228 : réserves de relecture sur le scan des chemins
+
+- Quoi : la garde `isInsideDirectory(dir, p)` acceptait n'importe quel `dir`, y compris `path.dirname(p)`, toujours vrai, et `req.body.dir`. `fs[k](p)` à clé non littérale échappait au scan.
+- Comment : `dir` doit être une racine `uploads` connue (`isUploadsRoot` : littéral, `path.join`/`resolve`, ou constante du fichier qui en contient). Un accès à `fs` par clé dynamique est signalé comme alias. Limites ajoutées à l'en-tête : masquage par bloc, `slice`/`at` sur une chaîne, écritures hors `ACCESS_CALLS`. Issue #231 ouverte (rejeu non idempotent), liée à #229. Leçon ajoutée dans LESSONS_LEARNED.
+- Pourquoi : une garde qui compare un chemin à son propre dossier ne borne rien.
+- Preuve : hygiène 16/16 ; sans `isUploadsRoot` ni la détection de clé dynamique, 2 cas rouges. `server/` reste vert sans nouvelle exception. tsc 0 erreur, unitaires 1944/1944.
+
+## 2026-11-03T19:21:40+01:00 — #228 : racine uploads exigée sur tous les arguments de join/resolve (relecture 0a)
+
+- Quoi : `isUploadsRoot` acceptait `path.join`/`path.resolve` dès qu'un argument nommait `uploads`. `path.join(req.body.dir, "uploads")` et `path.resolve("uploads", req.body.dir)` passaient pour bornés alors que la racine vient de la requête.
+- Comment : `rootKind` classe chaque morceau (`uploads`, `neutral` = littéral, `process.cwd()`, `__dirname`, constante qui l'est, sinon `unknown`). Join/resolve bornent seulement si tous leurs arguments sont sûrs et qu'au moins un nomme `uploads`. Un `..` placé après `uploads` en sort. Effet sur `server/` : la copie de `transferDocumentsToVehicle` (destination `vehicle-${vehicleId}`, gabarit interpolé) n'est plus jugée bornée, d'où une entrée justifiée dans la liste gelée.
+- Pourquoi : une racine dont un seul morceau est sûr ne borne rien.
+- Preuve : 4 cas ajoutés (`/e`, `/f`, `..` après uploads, `__dirname/../uploads` qui reste borné). Ils sont rouges avec l'ancien scan et verts avec le nouveau. Hygiène 16/16, tsc 0 erreur.
+
+## 2026-11-03T19:10:23+01:00 — Import de backup : erreur relayée, mineurs de relecture (#222, #223)
+
+- Quoi : le catch de `POST /api/admin/import-backup` (`server/routes.ts`) répondait `500 { error: error.message }` et journalisait par `console.error` avec un emoji. Ses deux `console.log` faisaient de même.
+- Comment : `next(withLogContext(AppError 500, { event: "admin.import_backup.failed" }))`, et les deux logs migrés vers `log.info` avec `requestId`. Seules des lignes du handler changent, aucune route n'est ajoutée. Garde ajoutée dans `error-500-relay-hygiene`. Mineurs :
+  - ligne PRT1 du plan réécrite (anciens défauts corrigés, références des contrats) ;
+  - 201 vérifié sur les POST de mise en place de `parts-catalog-children-patch` ;
+  - commentaire de `server/api/index.ts` sur les routes fournisseurs corrigé ;
+  - leçon « `/:id` avant un littéral frère » dans LESSONS_LEARNED.
+- Pourquoi : AGENTS.md §10, ni message brut ni `console.*`.
+- Preuve : garde rouge sans le correctif, verte avec ; contrat PRT1 6/6 ; tsc 0 erreur ; unitaires 1945/1945.
+
+## 2026-11-03T19:22:28+01:00 — garde statique : littéral masqué par un /:param déclaré avant lui (prévention de #222)
+
+- Quoi : `GET /api/suppliers/:id`, déclaré dans un routeur monté avant `routes.ts`, capturait `summary` (#222). Aucune garde ne détectait ce motif.
+- Comment : `tests/support/route-order-scan.ts` reconstitue l'ordre de service : les routeurs de `server/api/` dans l'ordre des `apiRouter.use`, puis `app.*` de `routes.ts`. Il signale toute route littérale dont un prédécesseur de même méthode et de même longueur porte un `:param` simple en face d'un littéral. `tests/unit/server/route-order-hygiene.test.ts` fige la liste des exceptions, vide aujourd'hui, en égalité stricte. Limites documentées dans l'en-tête : garde `next()`, paramètres contraints, optionnels ou jokers, sous-routeurs hors index, `router.all` et `route()`.
+- Pourquoi : Express sert la première route qui correspond, et l'ordre réel dépend des montages, pas du fichier.
+- Preuve : sur main, 356 routes et 0 littéral masqué. Sur le code d'avant #222 (`0bd9756^`), exactement 1 : `GET /api/suppliers/summary <- GET /api/suppliers/:id`. Sans la détection de capture, 4 cas sont rouges. Hygiène 9/9, tsc 0 erreur, unitaires 1958/1958.
+
+## 2026-11-03T19:24:00+01:00 — #232 : phrase de prévention de la leçon /:id complétée (relecture 0a)
+
+- Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.
+- Comment : elle nomme maintenant la garde (`route-order-hygiene.test.ts`, PR séparée) et ce qu'elle vérifie.
+- Pourquoi : une prévention doit être vérifiable, pas renvoyée à une personne.

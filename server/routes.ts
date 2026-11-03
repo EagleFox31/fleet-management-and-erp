@@ -2,7 +2,6 @@ import express, { type Express, Request, Response, NextFunction } from "express"
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
-import { selfScoped } from "./middleware/owned-by";
 import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
@@ -37,6 +36,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
+import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
@@ -833,7 +833,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, selfScoped, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -3785,7 +3785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route spéciale pour importer les données après déploiement
-  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response) => {
+  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const fs = await import("fs");
       const path = await import("path");
@@ -3807,7 +3807,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backupFilePath = path.join(backupDir, backupFile);
       const backupData = JSON.parse(fs.readFileSync(backupFilePath, 'utf8'));
 
-      console.log('📥 Import des données de backup en cours...');
+      log.info({ requestId: req.requestId, backupFile }, "import de backup en cours");
 
       // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
       const { db } = await import("../server/db");
@@ -3878,7 +3878,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         importStats.alerts = backupData.alerts.length;
       }
 
-      console.log('✅ Import terminé!', importStats);
+      log.info({ requestId: req.requestId, backupFile, importStats }, "import de backup terminé");
 
       res.json({
         success: true,
@@ -3889,13 +3889,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
     } catch (error) {
-      console.error('❌ Erreur lors de l\'import:', error);
-      const errorMessage = error instanceof Error ? error.message : "Erreur inconnue";
-      res.status(500).json({ 
-        success: false,
-        message: "Erreur lors de l'import des données",
-        error: errorMessage
-      });
+      // Message générique + référence par le gestionnaire central ; le détail reste dans le log (AGENTS.md §10).
+      next(
+        withLogContext(
+          error instanceof AppError ? error : new AppError(500, "Erreur lors de l'import des données.", { cause: error }),
+          { event: "admin.import_backup.failed" },
+        ),
+      );
     }
   });
 
@@ -4742,7 +4742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, selfScoped, validateBody(onboardingStepRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4768,7 +4768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, selfScoped, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4793,7 +4793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, selfScoped, validateBody(onboardingMascotRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;

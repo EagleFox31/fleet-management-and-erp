@@ -57,6 +57,39 @@ describe("validateBody", () => {
     expect(req.body).toBe(body);
   });
 
+  it("schéma permissif refusé à la déclaration (passthrough, catchall, any, record)", () => {
+    for (const permissive of [schema.passthrough(), schema.catchall(z.string()), z.any(), z.record(z.string()), schema.passthrough().optional()]) {
+      expect(() => validateBody(permissive)).toThrow(/permissif/);
+    }
+    expect(() => validateBody(schema.strict())).not.toThrow();
+  });
+
+  it("schéma permissif refusé jusque dans union, and, lazy, pipe et brand", () => {
+    const open = schema.passthrough();
+    const nested = [
+      z.union([schema, open]),
+      z.discriminatedUnion("k", [z.object({ k: z.literal("a") }), z.object({ k: z.literal("b") }).passthrough()]),
+      schema.and(open),
+      z.intersection(schema, z.record(z.string())),
+      z.lazy(() => open),
+      schema.pipe(open),
+      open.brand<"X">(),
+      schema.refine(() => true).or(z.any()),
+      open.transform((v) => v).optional(),
+    ];
+    for (const permissive of nested) {
+      expect(() => validateBody(permissive)).toThrow(/permissif/);
+    }
+    const strictOnes = [z.union([schema, schema.strict()]), schema.and(z.object({ b: z.number() })), z.lazy(() => schema), schema.brand<"Y">()];
+    for (const strict of strictOnes) {
+      expect(() => validateBody(strict)).not.toThrow();
+    }
+    // Schéma récursif : pas de boucle infinie.
+    type Node = { name: string; children?: Node[] };
+    const node: z.ZodType<Node> = z.lazy(() => z.object({ name: z.string(), children: z.array(node).optional() }));
+    expect(() => validateBody(node)).not.toThrow();
+  });
+
   it("corps absent : validé comme objet vide", () => {
     const { passed } = run(undefined);
     expect((passed as AppError).status).toBe(400);
