@@ -312,3 +312,44 @@ describe("colonnes miroir de vehicles : préparation alignée sur le lancement",
     expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
   });
 });
+
+describe("jour de l'échéance : même règle à la préparation et au lancement", { timeout: 60000 }, () => {
+  /** Papiers valides, sauf `type` qui expire aujourd'hui (jour UTC) ; colonnes miroir futures. */
+  async function vehicleExpiringToday(type: "assurance" | "visite_technique") {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    for (const t of ["carte_grise", "assurance", "visite_technique"] as const) {
+      await addDoc(vehicle.id, t, t === type ? inDays(0) : inDays(100));
+    }
+    await db
+      .update(vehicles)
+      .set({ insuranceExpiry: inDays(100), technicalInspectionDate: inDays(100), licensePlateExpiry: inDays(100) })
+      .where(eq(vehicles.id, vehicle.id));
+    return vehicle;
+  }
+
+  for (const [type, key, motif] of [
+    ["assurance", "doc_assurance", "Assurance manquante ou expirée."],
+    ["visite_technique", "doc_visite_technique", "Visite technique manquante ou expirée."],
+  ] as const) {
+    it(`${type} qui expire aujourd'hui : item faux, et le lancement la refuse`, async () => {
+      const vehicle = await vehicleExpiringToday(type);
+      const missionId = await assignedMission(vehicle.id);
+      expect((await readinessCheck(missionId, key)).passed).toBe(false);
+      const launched = await launch(missionId);
+      expect(launched.status).toBe(400);
+      expect(JSON.stringify(launched.body)).toContain(motif);
+    });
+  }
+
+  it("échéance demain : item vrai", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(1));
+    await addDoc(vehicle.id, "visite_technique", inDays(1));
+    const missionId = await assignedMission(vehicle.id);
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+    expect((await readinessCheck(missionId, "doc_visite_technique")).passed).toBe(true);
+  });
+});

@@ -2028,3 +2028,17 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Un garde-fou statique se prouve par ses cas de contournement, pas seulement par le code actuel : chaque règle de détection est livrée avec au moins un cas qui doit rester rouge. Ses limites (ici : résultat de la borne ignoré, réaffectation non suivie) sont écrites dans son en-tête.
+
+### Assurance et visite : la check-list jugeait l'échéance un jour plus tard que le lancement (2026-11-03)
+
+- **Contexte** : une assurance ou une visite technique qui expire aujourd'hui était « conforme » dans `GET /api/missions/:id/launch-readiness`, puis refusée au lancement (`PUT /status` → `in_progress`). Même écart autour de minuit UTC.
+- **Cause racine** : la check-list passait par `isDateExpired`, qui compare en jour local avec un `<` strict. C'est la règle du permis chauffeur. Le lancement passe par `isExpiredOnOrBeforeToday` (jour UTC, le jour de l'échéance bloque, `shared/constants/expiry-day.ts`). C'est la deuxième divergence entre ces deux chemins, après la carte grise.
+- **Classification** : règle métier dupliquée, divergence de calcul de date.
+- **Résolution** :
+  - la check-list juge tous les papiers véhicule par `isExpiredOnOrBeforeToday` ;
+  - un papier sans date reste invalide, sauf la carte grise ;
+  - l'ancienne fonction est renommée `isDriverLicenseExpired`, réservée au permis.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-renewal-receipt.contract.test.ts`, bloc « jour de l'échéance » : 2 cas passent au rouge sur l'ancienne règle ;
+  - `tests/unit/server/mission-expiry-day-hygiene.test.ts` échoue si `isDocumentTypeValid` compare des dates elle-même, ou si la règle du permis sert à autre chose qu'au permis.
+- **Leçon** : une règle de date se nomme d'après le papier qu'elle juge. Une fonction générique `isDateExpired` invite à la réutiliser pour un papier dont la règle est différente.

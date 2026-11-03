@@ -328,7 +328,12 @@ function normalizeCpcStatus(value: string | null | undefined): string {
     .toUpperCase();
 }
 
-function isDateExpired(dateValue: Date | string | null | undefined): boolean {
+/**
+ * Permis chauffeur uniquement : jour local, le jour de l'échéance passe. Règle propre au
+ * permis, identique à la check-list et au lancement. Les papiers véhicule passent par
+ * isExpiredOnOrBeforeToday.
+ */
+function isDriverLicenseExpired(dateValue: Date | string | null | undefined): boolean {
   if (!dateValue) return true;
   const candidate = new Date(dateValue);
   if (Number.isNaN(candidate.getTime())) return true;
@@ -729,8 +734,11 @@ function isDocumentTypeValid(
     return expiries.some((expiry) => !isExpiredOnOrBeforeToday(expiry));
   }
 
-  // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier.
-  return receiptCovers || docs.some((doc) => !isDateExpired(doc.expiryDate));
+  // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier. Même jour
+  // d'échéance que le lancement : jour UTC, le jour de l'échéance bloque, papier sans date
+  // invalide (isExpiredOnOrBeforeToday, jamais la règle du permis).
+  if (receiptCovers) return true;
+  return docs.some((doc) => doc.expiryDate !== null && !isExpiredOnOrBeforeToday(doc.expiryDate));
 }
 
 /** Exporté pour le contrat de portée. */
@@ -1671,7 +1679,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
     const assuranceParRecepisse = assuranceValid && !isDocumentTypeValid("assurance", assuranceDocs);
     const carteGriseParRecepisse = carteGriseValid && !isDocumentTypeValid("carte_grise", carteGriseDocs);
     const visiteParRecepisse = visiteTechniqueValid && !isDocumentTypeValid("visite_technique", visiteDocs);
-    const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDateExpired(missionAssignment?.driverLicenseExpiry);
+    const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDriverLicenseExpired(missionAssignment?.driverLicenseExpiry);
     const cpcValid = hasDriver && normalizeCpcStatus(missionAssignment?.driverCpcStatus) === "FORME";
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
     const vehicleOperational = hasVehicle && missionAssignment?.vehicleStatus === "operational";
@@ -2656,7 +2664,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           );
         }
 
-        if (missionAssignment.driverLicenseExpiry && isDateExpired(missionAssignment.driverLicenseExpiry)) {
+        if (missionAssignment.driverLicenseExpiry && isDriverLicenseExpired(missionAssignment.driverLicenseExpiry)) {
           launchErrors.push("Permis chauffeur expiré.");
         }
 
