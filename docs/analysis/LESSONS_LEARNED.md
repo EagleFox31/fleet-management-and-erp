@@ -2050,7 +2050,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Prévention (vérifiable)
 - `tests/contract/suppliers-summary-capture.contract.test.ts`.
-- Garde statique à venir : étendre le scan des routes masquées (`routes-hygiene`) au cas « `/:param` déclaré avant un littéral frère », confiée à la session de.
+- Garde statique : `tests/unit/server/route-order-hygiene.test.ts` (PR séparée, session b7) reconstitue l'ordre de service (routeurs de `server/api/` dans l'ordre des montages, puis `routes.ts`) et échoue sur tout littéral masqué par un `/:param` déclaré avant lui. Sur le code d'avant #222, il trouve exactement `GET /api/suppliers/summary`.
 
 ### Règle Projet (obligatoire)
 - Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.

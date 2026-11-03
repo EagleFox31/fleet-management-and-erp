@@ -230,3 +230,9 @@ Modèle et règles : `docs/journal/README.md`.
   - leçon « `/:id` avant un littéral frère » dans LESSONS_LEARNED.
 - Pourquoi : AGENTS.md §10, ni message brut ni `console.*`.
 - Preuve : garde rouge sans le correctif, verte avec ; contrat PRT1 6/6 ; tsc 0 erreur ; unitaires 1945/1945.
+
+## 2026-11-03T19:24:00+01:00 — #232 : phrase de prévention de la leçon /:id complétée (relecture 0a)
+
+- Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.
+- Comment : elle nomme maintenant la garde (`route-order-hygiene.test.ts`, PR séparée) et ce qu'elle vérifie.
+- Pourquoi : une prévention doit être vérifiable, pas renvoyée à une personne.
