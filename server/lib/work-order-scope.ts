@@ -13,7 +13,17 @@ import { canAccessOwned, OUT_OF_SCOPE_MESSAGE, type ScopeReader } from "./client
  * Écart connu : GET /api/work-orders/:id bloque aussi un technicien sur l'OT
  * d'un autre technicien (routes.ts ~1851). Ce helper ne le fait pas.
  */
+export const MAX_DB_INTEGER_ID = 2147483647;
+
+/** Un id de colonne `integer` : entier strictement positif tenant sur 32 bits (sinon Postgres répond 500). */
+export function assertValidDbId(value: number, message: string): void {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_DB_INTEGER_ID) {
+    throw new AppError(400, message);
+  }
+}
+
 export async function assertWorkOrderReadable(reader: ScopeReader | undefined, workOrderId: number): Promise<void> {
+  assertValidDbId(workOrderId, "ID d'ordre de travail invalide");
   const workOrder = await storage.getWorkOrder(workOrderId);
   if (!workOrder) {
     throw new AppError(404, "Ordre de travail non trouvé.");
