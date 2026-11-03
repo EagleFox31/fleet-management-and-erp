@@ -694,6 +694,54 @@ END $$`,
   UNIQUE (user_id, key)
 )`,
   `CREATE INDEX IF NOT EXISTS idempotency_keys_expires_at_idx ON idempotency_keys (expires_at)`,
+  `DO $$
+DECLARE
+  c record;
+  existing text;
+  duplicates integer;
+BEGIN
+  -- Base dont les tables CDC ont été créées par drizzle-kit push avant que Drizzle déclare
+  -- ces contraintes : CREATE TABLE IF NOT EXISTS a été sauté, elles manquent. Rien à faire sinon.
+  -- CHECK en NOT VALID : les lignes existantes ne bloquent pas le démarrage.
+  FOR c IN SELECT * FROM (VALUES
+    ('workshop_labor_rates', 'workshop_labor_rates_hourly_rate_ht_check', 'CHECK (hourly_rate_ht >= 0)'),
+    ('import_batches', 'import_batches_kind_check', 'CHECK (kind IN (''vehicles'', ''interventions''))'),
+    ('import_batches', 'import_batches_status_check', 'CHECK (status IN (''applied'', ''failed''))'),
+    ('idempotency_keys', 'idempotency_keys_state_check', 'CHECK (state IN (''in_progress'', ''completed''))')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+  END LOOP;
+  -- UNIQUE sous le nom attendu par les services (409 sur conflit) : une unicité posée sous un
+  -- autre nom sur les mêmes colonnes est renommée ; des doublons existants laissent la base en
+  -- l'état, avec un WARNING, plutôt que de bloquer le démarrage.
+  FOR c IN SELECT * FROM (VALUES
+    ('workshop_labor_rates', 'workshop_labor_rates_effective_from_key', ARRAY['effective_from']),
+    ('idempotency_keys', 'idempotency_keys_user_id_key_key', ARRAY['key', 'user_id'])
+  ) AS v(tbl, name, cols) LOOP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      CONTINUE;
+    END IF;
+    existing := NULL;
+    SELECT k.conname INTO existing FROM pg_constraint k
+    WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
+      AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)) = c.cols
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
+      CONTINUE;
+    END IF;
+    EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM %I GROUP BY %s HAVING count(*) > 1) d',
+      c.tbl, array_to_string(c.cols, ', ')) INTO duplicates;
+    IF duplicates > 0 THEN
+      RAISE WARNING '% : % doublon(s), contrainte % non posée', c.tbl, duplicates, c.name;
+    ELSE
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I UNIQUE (%s)', c.tbl, c.name, array_to_string(c.cols, ', '));
+    END IF;
+  END LOOP;
+END $$`,
 ];
 
 async function applyCdcSchema() {
