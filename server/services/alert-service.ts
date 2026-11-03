@@ -513,18 +513,25 @@ export class AlertService {
       const expiryDate = vehicle[doc.field];
       if (!expiryDate) continue;
 
+      // Même règle que isExpiredOnOrBeforeToday (missions.routes) et getMissionEligibility :
+      // comparaison au jour, le jour de l'échéance bloque déjà le lancement.
       const expiry = new Date(expiryDate);
-      const daysUntilExpiry = Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      expiry.setHours(0, 0, 0, 0);
+      const todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      const daysUntilExpiry = Math.round((expiry.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Document expiré
-      if (expiry < today) {
+      // Document expiré (échéance aujourd'hui comprise)
+      if (daysUntilExpiry <= 0) {
         const renewalLink = await this.documentRenewalLink(vehicle.id, doc.documentType);
         await this.createAlertIfNotExists({
           remindDaily: true,
           vehicleId: vehicle.id,
           type: 'maintenance',
           title: 'Document expiré',
-          message: `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jours`,
+          message: daysUntilExpiry === 0
+            ? `Véhicule ${vehicle.registrationNumber} - ${doc.name} expire aujourd'hui : lancement de mission bloqué jusqu'à régularisation`
+            : `Véhicule ${vehicle.registrationNumber} - ${doc.name} expirée depuis ${Math.abs(daysUntilExpiry)} jours : lancement de mission bloqué`,
           priority: 'critical',
           link: renewalLink,
           entityType: 'vehicle_document',

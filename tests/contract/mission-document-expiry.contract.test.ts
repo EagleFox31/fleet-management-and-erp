@@ -137,6 +137,27 @@ describe("P3-2 papier dans la fenêtre d'alerte", () => {
   }, 60000);
 });
 
+describe("P3-2 papier échu aujourd'hui", () => {
+  it("l'échéance du jour produit l'alerte « expiré » (lancement bloqué), pas « expire bientôt »", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const today = new Date().toLocaleDateString("en-CA");
+    await addDoc(vehicle.id, "assurance", today);
+    await db.update(vehicles).set({ insuranceExpiry: today }).where(eq(vehicles.id, vehicle.id));
+
+    await (alertService as any).checkVehicleDocumentAlerts(await vehicleRow(vehicle.id));
+    const rows = await db
+      .select()
+      .from(alerts)
+      .where(and(eq(alerts.userId, session.userIdOf("atelier")), like(alerts.link, `%vehicleId=${vehicle.id}&%`)));
+    expect(rows.filter((r) => r.title === "Document expire bientôt")).toHaveLength(0);
+    const expired = rows.filter((r) => r.title === "Document expiré");
+    expect(expired).toHaveLength(1);
+    expect(expired[0].priority).toBe("critical");
+    expect(expired[0].message).toContain("lancement de mission bloqué");
+  }, 60000);
+});
+
 describe("P3-2 papier expiré : affectation et lancement refusés", () => {
   it("affectation refusée pour une assurance expirée (colonne miroir)", async () => {
     const vehicle = await createTestVehicle();
