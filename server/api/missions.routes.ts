@@ -798,7 +798,8 @@ router.get("/:id", async (req, res) => {
           firstName: drivers.firstName,
           lastName: drivers.lastName,
           employeeNumber: drivers.employeeNumber,
-          licenseNumber: drivers.licenseNumber,
+          // Pas de donnée personnelle ici (permis, CNI...) : le détail mission est lu par tout le
+          // personnel. La fiche complète passe par /api/drivers/:id, qui applique la rédaction.
           cpcStatus: drivers.cpcStatus,
         },
       })

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth";
+import { authenticate, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
@@ -92,26 +92,33 @@ router.get("/expiring-cpc", async (req, res, next) => {
  * POST /api/drivers/:id/update-cpc
  * Mise à jour certification CPC chauffeur
  */
-router.post("/:id/update-cpc", async (req, res, next) => {
-  // Un chauffeur ne certifie pas sa propre formation : la saisie revient à l'exploitation.
+router.post("/:id/update-cpc", (req, res, next) => {
+  // Un chauffeur ne certifie pas sa propre formation : message dédié avant la garde générale.
   if (req.user?.role === "driver") {
     return next(new AppError(403, DRIVER_CPC_FORBIDDEN_MESSAGE));
   }
+  next();
+}, isDriverManager, async (req, res, next) => {
   try {
     const driverId = parseInt(req.params.id);
     const { cpcDate } = req.body;
-    
+
     if (isNaN(driverId)) {
       return res.status(400).json({ message: "ID de chauffeur invalide" });
     }
-    
+
     if (!cpcDate) {
       return res.status(400).json({ message: "Date CPC requise" });
     }
-    
+
+    const parsedCpcDate = new Date(cpcDate);
+    if (Number.isNaN(parsedCpcDate.getTime())) {
+      return next(new AppError(400, "Date CPC invalide."));
+    }
+
     const driver = await cpcTrainingService.updateCPCCertification(
       driverId,
-      new Date(cpcDate)
+      parsedCpcDate
     );
 
     broadcastDriverCpcUpdate(
@@ -138,15 +145,13 @@ router.post("/:id/update-cpc", async (req, res, next) => {
  * GET /api/drivers/cpc-statistics
  * Statistiques formations CPC
  */
-router.get("/cpc-statistics", async (req, res) => {
+router.get("/cpc-statistics", async (req, res, next) => {
   try {
     const stats = await cpcTrainingService.getCPCStatistics();
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get CPC statistics error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Statistiques CPC en echec");
+    return next(new AppError(500, "Impossible de charger les statistiques CPC.", { cause: error }));
   }
 });
 
@@ -174,7 +179,7 @@ router.get("/:id/cpc-status", async (req, res, next) => {
  * POST /api/drivers/sync-cpc-statuses
  * Synchronise tous les statuts CPC (maintenance)
  */
-router.post("/sync-cpc-statuses", async (req, res) => {
+router.post("/sync-cpc-statuses", async (req, res, next) => {
   try {
     const result = await cpcTrainingService.syncAllCPCStatuses();
 
@@ -191,10 +196,8 @@ router.post("/sync-cpc-statuses", async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error("Sync CPC statuses error:", error);
-    return res.status(500).json({ 
-      message: error instanceof Error ? error.message : "Erreur serveur" 
-    });
+    log.error({ err: error, requestId: req.requestId }, "Synchronisation des statuts CPC en echec");
+    return next(new AppError(500, "Impossible de synchroniser les statuts CPC.", { cause: error }));
   }
 });
 

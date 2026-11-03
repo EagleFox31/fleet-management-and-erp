@@ -1,7 +1,8 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { drivers } from "../../shared/schema";
+import { DRIVER_PERSONAL_FIELDS } from "../../server/lib/driver-scope";
+import { assignments, drivers, missions } from "../../shared/schema";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
 
@@ -13,9 +14,10 @@ import { uniqueTestToken } from "../support/ids";
  * - la diffusion temps réel d'une fiche ne porte aucune donnée personnelle.
  */
 
-type Actor = "admin" | "logistics" | "management" | "driver" | "technician";
+type Actor = "admin" | "logistics" | "management" | "driver" | "technician" | "warehouse";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const driverIds: number[] = [];
+const missionIds: number[] = [];
 let ownId = 0;
 let otherId = 0;
 
@@ -47,12 +49,17 @@ beforeAll(async () => {
     management: "management",
     driver: "driver",
     technician: "technician",
+    warehouse: "warehouse",
   });
   ownId = await newDriver(session.userId("driver"));
   otherId = await newDriver(null);
 }, 60000);
 
 afterAll(async () => {
+  if (missionIds.length > 0) {
+    await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
+    await db.delete(missions).where(inArray(missions.id, missionIds));
+  }
   if (driverIds.length > 0) await db.delete(drivers).where(inArray(drivers.id, driverIds));
   await session.stop();
 });
@@ -66,6 +73,26 @@ describe("POST /api/drivers/:id/update-cpc", () => {
     expect(res.status).toBe(403);
     const after = await session.call("GET", `/api/drivers/${otherId}`, { actor: "admin" });
     expect(after.body.cpcTrainingDate ?? null).not.toBe("2026-01-01");
+  });
+
+  it("refuse technicien, magasinier et direction (403) sans rien écrire", async () => {
+    for (const actor of ["technician", "warehouse", "management"] as const) {
+      const res = await session.call("POST", `/api/drivers/${otherId}/update-cpc`, {
+        actor,
+        body: { cpcDate: "2026-02-02" },
+      });
+      expect(res.status, actor).toBe(403);
+    }
+    const [row] = await db.select().from(drivers).where(eq(drivers.id, otherId));
+    expect(row.cpcTrainingDate ?? null).not.toBe("2026-02-02");
+  });
+
+  it("date CPC invalide : 400, pas 500", async () => {
+    const res = await session.call("POST", `/api/drivers/${otherId}/update-cpc`, {
+      actor: "logistics",
+      body: { cpcDate: "pas-une-date" },
+    });
+    expect(res.status).toBe(400);
   });
 
   it("accepte la logistique et ne renvoie que la fiche utile", async () => {
@@ -135,6 +162,28 @@ describe("fiche chauffeur : données personnelles", () => {
 
       const asTech = await session.call("GET", path, { actor: "technician" });
       expect(asTech.body.every((d: any) => hasPii(d).length === 0)).toBe(true);
+    }
+  });
+
+  it("GET /api/missions/:id : l'affectation ne porte aucune donnée personnelle du chauffeur", async () => {
+    const [mission] = await db
+      .insert(missions)
+      .values({
+        orderNumber: uniqueTestToken("MIS"),
+        pickupAddress: "TEST A",
+        deliveryAddress: "TEST B",
+        status: "assigned",
+      } as any)
+      .returning();
+    missionIds.push(mission.id);
+    await db.insert(assignments).values({ missionId: mission.id, driverId: otherId, status: "accepted" } as any);
+
+    for (const actor of ["technician", "admin"] as const) {
+      const res = await session.call("GET", `/api/missions/${mission.id}`, { actor });
+      expect(res.status, actor).toBe(200);
+      expect(res.body.assignment.driver.id).toBe(otherId);
+      const keys = Object.keys(res.body.assignment.driver);
+      expect(keys.filter((k) => (DRIVER_PERSONAL_FIELDS as readonly string[]).includes(k))).toEqual([]);
     }
   });
 

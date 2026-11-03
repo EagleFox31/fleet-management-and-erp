@@ -47,7 +47,8 @@ export const DRIVER_CPC_FORBIDDEN_MESSAGE = "Accès refusé : la certification C
 
 /**
  * Données personnelles de la fiche chauffeur : lisibles par les gestionnaires et la direction
- * (`DRIVER_MANAGER_ROLES`) et par le chauffeur concerné, retirées pour tout autre lecteur.
+ * (`DRIVER_PERSONAL_DATA_READER_ROLES`) et par le chauffeur concerné, retirées pour tout autre
+ * lecteur.
  */
 export const DRIVER_PERSONAL_FIELDS = [
   "birthDate",

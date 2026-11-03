@@ -125,3 +125,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : AGENTS §11 ; les ecrans resynchronisent par invalidation, ils n'utilisent pas la fiche diffusee.
 - **Comment tester (QA)** : chauffeur sur `/api/drivers` (sa fiche complete, les autres sans CNI/permis) ; chauffeur sur `update-cpc` (403) ; logistique (complet).
 - **Preuve** : contrat `driver-personal-data-scope` 8 verts, integration `fuel-stats-owner-scope` 2 verts, non-regression 68 verts, unitaires 1473, `tsc` global a zero.
+
+## 2026-11-03T09:40:00+01:00 - R-03/R-13 suite - Reserves securite et relecture de #127
+
+- **Agent** : b7 · **Branche** : `lot/api/R-03-R-13-suite`
+- **Statut** : fait ; corrige l'entree precedente (« 8 verts », lecture limitee a admin/logistique/secretariat)
+- **Quoi** : (R1) `GET /api/missions/:id` ne selectionne plus `drivers.licenseNumber` dans l'affectation ; (R2) `update-cpc` porte `isDriverManager` (admin, logistique, secretariat) : technicien, magasinier et direction recoivent 403, decision de l'utilisateur ; `cpcDate` invalide renvoie 400 au lieu de 500 ; `/cpc-statistics` et `/sync-cpc-statuses` passent par `AppError` et `moduleLogger` (plus de `error.message` renvoye, §10). La direction (`management`) lit les donnees personnelles via `DRIVER_PERSONAL_DATA_READER_ROLES` sans entrer dans `isDriverManager`.
+- **Comment** : garde-fou `tests/unit/server/driver-personal-data-hygiene.test.ts` : `drivers.<champ personnel>` interdit dans `server/` hors `driver-scope.ts`, `cpc-training-service.ts`, `drivers-management.routes.ts`, plus deux controles internes de validite du permis dans `missions.routes.ts` (liste gelee).
+- **Pourquoi** : le detail mission est lu par tout le personnel ; la saisie CPC revient a l'exploitation.
+- **Comment tester (QA)** : technicien sur `GET /api/missions/:id` : `assignment.driver` sans permis ; technicien, magasinier ou direction sur `update-cpc` : 403, date inchangee.
+- **Preuve** : contrat `driver-personal-data-scope` 13 verts (base dediee fleet_test_b7), garde-fou 2 verts, `tsc` global a zero ; suites completes : voir le corps de la PR.

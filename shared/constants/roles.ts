@@ -35,7 +35,10 @@ export function canManageDrivers(role: string | null | undefined): boolean {
  * gestionnaires, plus la direction qui lit sans gérer (elle n'entre pas dans `DRIVER_MANAGER_ROLES`,
  * donc `isDriverManager` lui reste fermé).
  */
-export const DRIVER_PERSONAL_DATA_READER_ROLES = [...DRIVER_MANAGER_ROLES, "management"] as const;
+export const DRIVER_PERSONAL_DATA_READER_ROLES = [
+  ...DRIVER_MANAGER_ROLES,
+  "management",
+] as const satisfies readonly AppRole[];
 
 export function canReadDriverPersonalData(role: string | null | undefined): boolean {
   return (DRIVER_PERSONAL_DATA_READER_ROLES as readonly string[]).includes(String(role ?? ""));
