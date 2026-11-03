@@ -54,18 +54,61 @@ describe("P3-2 : récépissé de renouvellement, init-database et migration jume
       expect(column!.hasDefault, name).toBe(false);
       expect(sql).toContain(`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS ${name} ${type};`);
     }
-    expect(sql).not.toMatch(/NOT NULL|DEFAULT|UPDATE |DELETE |DROP /);
+    expect(sql).not.toMatch(/NOT NULL|DEFAULT|UPDATE |DELETE |DROP COLUMN|DROP TABLE/);
+    // Seul DROP admis : l'ancienne CHECK de même nom, dans le bloc qui la repose aussitôt.
+    expect(sql.match(/DROP /g)).toHaveLength(1);
+    expect(sql).toContain("DROP CONSTRAINT document_renewal_requests_receipt_complete;");
   });
 
-  it("contraintes posées seulement si absentes, mêmes noms et même expression que Drizzle", () => {
+  it("FK et CHECK dans deux blocs DO distincts, chacun posé seulement si absent", () => {
+    const blocks = fromMigration().split("DO $$").slice(1).map((b) => b.replace(/\s+/g, " "));
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toMatch(/ADD COLUMN IF NOT EXISTS receipt_valid_until/);
+    expect(blocks[0]).not.toMatch(/CONSTRAINT/);
+    expect(blocks[1]).toMatch(/conname = 'document_renewal_requests_receipt_uploaded_by_users_id_fk' \) THEN/);
+    expect(blocks[1]).not.toMatch(/receipt_complete/);
+    expect(blocks[2]).toMatch(/IF NOT EXISTS \( SELECT 1 FROM pg_constraint .* conname = 'document_renewal_requests_receipt_complete' \) THEN/);
+    expect(blocks[2]).not.toMatch(/FOREIGN KEY/);
+    // Chaque avertissement cite la contrainte par son nom.
+    expect(blocks[1].match(/RAISE WARNING '([^']*)'/g)!.every((w) => w.includes("receipt_uploaded_by_users_id_fk"))).toBe(true);
+    expect(blocks[2].match(/RAISE WARNING '([^']*)'/g)!.every((w) => w.includes("receipt_complete"))).toBe(true);
+    // Violation piégée seulement autour du VALIDATE, dans un sous-bloc (patron #124) : la contrainte reste
+    // posée NOT VALID, l'autre bloc n'est pas concerné.
+    expect(blocks[1]).toMatch(
+      /BEGIN ALTER TABLE document_renewal_requests VALIDATE CONSTRAINT document_renewal_requests_receipt_uploaded_by_users_id_fk; EXCEPTION WHEN foreign_key_violation THEN/,
+    );
+    expect(blocks[2]).toMatch(
+      /BEGIN ALTER TABLE document_renewal_requests VALIDATE CONSTRAINT document_renewal_requests_receipt_complete; EXCEPTION WHEN check_violation THEN/,
+    );
+    expect(blocks[1].match(/foreign_key_violation/g)).toHaveLength(1);
+    expect(blocks[2].match(/check_violation/g)).toHaveLength(1);
+    // Un verrou de table indisponible ne fait pas échouer le démarrage.
+    for (const block of blocks) expect(block).toMatch(/lock_not_available/);
+  });
+
+  it("lock_timeout posé dans la transaction, avant tout ALTER TABLE", () => {
+    const sql = fromMigration();
+    const timeout = sql.indexOf("SET LOCAL lock_timeout = '5s';");
+    expect(timeout).toBeGreaterThan(sql.indexOf("pg_advisory_xact_lock"));
+    expect(timeout).toBeLessThan(sql.indexOf("ALTER TABLE"));
+  });
+
+  it("mêmes noms et même expression que Drizzle ; receipt_uploaded_by hors CHECK", () => {
     const sql = fromMigration().replace(/\s+/g, " ");
     const { checks, foreignKeys } = getTableConfig(documentRenewalRequests);
     expect(checks.map((c) => c.name)).toContain("document_renewal_requests_receipt_complete");
     const fk = foreignKeys.find((f) => f.reference().columns[0].name === "receipt_uploaded_by");
     expect(fk?.getName()).toBe("document_renewal_requests_receipt_uploaded_by_users_id_fk");
-    expect(sql).toMatch(/conname = 'document_renewal_requests_receipt_uploaded_by_users_id_fk' \) THEN/);
-    expect(sql).toMatch(/conname = 'document_renewal_requests_receipt_complete' \) THEN/);
-    expect(sql).toContain("CHECK ((receipt_valid_until IS NULL) = (receipt_file_path IS NULL))");
+    const expr = "num_nulls(receipt_valid_until, receipt_file_path, receipt_file_name, receipt_uploaded_at) IN (0, 4)";
+    expect(sql).toContain(`CHECK (${expr})`);
+    expect(expr).not.toMatch(/receipt_uploaded_by/);
+  });
+
+  it("init-database relit les contraintes après le SQL et journalise l'écart", () => {
+    const src = norm(readFileSync("server/init-database.ts", "utf8"));
+    expect(src).toMatch(
+      /await pool\.query\(DOCUMENT_RENEWAL_RECEIPT_SQL\);\n\s*await reportDocumentRenewalReceiptGaps\(pool\);/,
+    );
   });
 });
 

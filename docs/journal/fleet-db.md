@@ -31,3 +31,18 @@ Règles : `docs/journal/README.md`.
   - Preuve automatisée : `tests/unit/server/document-renewal-receipt-schema.test.ts`, `tests/integration/document-renewal-receipt.test.ts`.
 - **RAIDER** : Idempotent (migration rejouée = NOTICE skipping, init rejoué sans changement de catalogue ni de lignes, second `drizzle-kit push` sans ordre sur ces objets, OID stables) ; Retroactive (7 demandes réelles toutes `completed`, colonnes à NULL, aucune reprise) ; Durable (insertion sans récépissé inchangée).
 - **Reste / risques** : le second `drizzle-kit push` rejoue encore des ordres préexistants (FK aux noms tronqués à 63 caractères, défaut `idempotency_keys.expires_at`), sans lien avec ce lot.
+
+## 2026-11-03T08:19:23+01:00 — P3-2 lot 2a — Réserves de relecture #125
+
+- **Agent** : fleet-db · **Branche** : `fix/p3-2-receipt-columns` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la CHECK `document_renewal_requests_receipt_complete` couvre les quatre champs du récépissé (date, chemin, nom, date de dépôt : tous NULL ou tous renseignés) ; `receipt_uploaded_by` reste hors CHECK. Une CHECK de même nom à l'ancienne définition est remplacée.
+- **Comment** : `SET LOCAL lock_timeout = '5s'` ; trois blocs `DO` (colonnes, FK, CHECK) ; contraintes posées `NOT VALID` puis validées dans un sous-bloc qui ne piège que la violation (patron #124) ; `reportDocumentRenewalReceiptGaps` relit `pg_constraint` et journalise par `moduleLogger` toute contrainte absente, non validée ou périmée, citée par son nom. Migration et init restent identiques (test unitaire).
+- **Pourquoi** : un `RAISE WARNING` n'atteint pas les logs ; un seul bloc piégé annulait FK et CHECK ensemble ; un verrou de table tenu bloquait le démarrage.
+- **Comment tester (QA)** :
+  - Prérequis : base de test dédiée, schéma poussé.
+  - Étapes : supprimer FK et CHECK, insérer une demande hors CHECK (ou un auteur inexistant), redémarrer.
+  - Attendu : seule la contrainte violée reste `NOT VALID`, l'autre est validée, un avertissement `init-database` la nomme.
+  - Preuve automatisée : `tests/integration/document-renewal-receipt.test.ts` (4 échecs avec le SQL de 77b4700, 7/7 avec le correctif).
+- **RAIDER** : Idempotent (second démarrage sans changement, double `drizzle-kit push` sans ordre receipt, OID stables) ; Durable (insertion sans récépissé inchangée) ; failure memory (le patron #124 est repris, pas réinventé).
+- **Reste / risques** : avec `lock_timeout` atteint, colonnes ou contraintes peuvent manquer jusqu'au démarrage suivant ; le journal le signale.

@@ -256,7 +256,8 @@ export const documentRenewalRequests = pgTable("document_renewal_requests", {
   proofFilePath: text("proof_file_path"),
   // Récépissé provisoire téléversé pendant la demande (P3-2) : rend le véhicule éligible
   // jusqu'à receiptValidUntil inclus. Distinct de proofFile*, la preuve de clôture (completed).
-  // Date et fichier vont ensemble (CHECK document_renewal_requests_receipt_complete).
+  // Date, chemin, nom et date de dépôt : tous NULL ou tous renseignés (CHECK
+  // document_renewal_requests_receipt_complete) ; receiptUploadedBy peut rester NULL.
   receiptValidUntil: date("receipt_valid_until"),
   receiptFileName: text("receipt_file_name"),
   receiptFilePath: text("receipt_file_path"),
@@ -269,7 +270,7 @@ export const documentRenewalRequests = pgTable("document_renewal_requests", {
 }, (table) => [
   check(
     "document_renewal_requests_receipt_complete",
-    sql`(${table.receiptValidUntil} IS NULL) = (${table.receiptFilePath} IS NULL)`,
+    sql`num_nulls(${table.receiptValidUntil}, ${table.receiptFilePath}, ${table.receiptFileName}, ${table.receiptUploadedAt}) IN (0, 4)`,
   ),
 ]);
 
