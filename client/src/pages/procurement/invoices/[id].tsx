@@ -182,7 +182,7 @@ export default function SupplierInvoiceDetailsPage() {
       toast({ title: "Facture validée", description: "La facture a été validée avec succès" });
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."), variant: "destructive" });
     },
   });
 
@@ -201,7 +201,7 @@ export default function SupplierInvoiceDetailsPage() {
       toast({ title: "Facture approuvée", description: "La facture a été approuvée avec succès" });
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."), variant: "destructive" });
     },
   });
 
@@ -250,7 +250,7 @@ export default function SupplierInvoiceDetailsPage() {
       toast({ title: "Règlement saisi", description: "Le règlement est enregistré. Il doit être rapproché pour solder la facture." });
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."), variant: "destructive" });
     },
   });
 
@@ -274,7 +274,7 @@ export default function SupplierInvoiceDetailsPage() {
       toast({ title: "Règlement rapproché", description: "Le rapprochement bancaire a été enregistré." });
     },
     onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ title: "Erreur", description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."), variant: "destructive" });
     },
     onSettled: () => {
       setReconcilingSettlementId(null);

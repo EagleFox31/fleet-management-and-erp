@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -23,7 +24,7 @@ export default function ImportBackup() {
     onError: (error: any) => {
       toast({
         title: "Erreur d'import",
-        description: error.message || "Une erreur est survenue lors de l'import",
+        description: userMessageOf(error, "Une erreur est survenue lors de l'import"),
         variant: "destructive",
       });
     },

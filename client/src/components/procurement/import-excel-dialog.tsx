@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Upload, FileSpreadsheet, CheckCircle, XCircle, AlertCircle, Download } from "lucide-react";
@@ -118,7 +119,7 @@ export function ImportExcelDialog({ open, onOpenChange }: ImportExcelDialogProps
     onError: (error: Error) => {
       toast({
         title: "Erreur d'import",
-        description: error.message || "Une erreur s'est produite lors de l'import.",
+        description: userMessageOf(error, "Une erreur s'est produite lors de l'import."),
         variant: "destructive",
       });
     },

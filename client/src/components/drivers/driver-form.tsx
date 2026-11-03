@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -174,7 +175,7 @@ export function DriverForm({ initialData, isEdit = false, onSuccess, onCancel }:
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: error.message || "Impossible d'enregistrer le chauffeur.",
+        description: userMessageOf(error, "Impossible d'enregistrer le chauffeur."),
       });
     },
     onSettled: () => {

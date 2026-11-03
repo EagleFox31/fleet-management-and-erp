@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -41,7 +42,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
     onError: (error: any) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de mettre à jour la formation CPC",
+        description: userMessageOf(error, "Impossible de mettre à jour la formation CPC"),
         variant: "destructive",
       });
     },

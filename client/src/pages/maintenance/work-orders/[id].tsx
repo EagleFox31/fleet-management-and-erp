@@ -407,7 +407,7 @@ export default function WorkOrderDetails({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression."),
       });
     },
   });
@@ -534,7 +534,7 @@ export default function WorkOrderDetails({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression."),
       });
     },
   });
@@ -601,7 +601,7 @@ export default function WorkOrderDetails({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur: ${error.message}`,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
       });
     },
   });

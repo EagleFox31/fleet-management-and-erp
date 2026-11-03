@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -213,7 +214,7 @@ export function ClientsPanel() {
     onError: (error: unknown) => {
       toast({
         title: "Erreur création client",
-        description: error instanceof Error ? error.message : "Erreur inconnue",
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },
@@ -243,7 +244,7 @@ export function ClientsPanel() {
     onError: (error: unknown) => {
       toast({
         title: "Erreur mise à jour client",
-        description: error instanceof Error ? error.message : "Erreur inconnue",
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },
@@ -264,7 +265,7 @@ export function ClientsPanel() {
     onError: (error: unknown) => {
       toast({
         title: "Erreur archivage client",
-        description: error instanceof Error ? error.message : "Erreur inconnue",
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },
@@ -285,7 +286,7 @@ export function ClientsPanel() {
     onError: (error: unknown) => {
       toast({
         title: "Erreur restauration client",
-        description: error instanceof Error ? error.message : "Erreur inconnue",
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },

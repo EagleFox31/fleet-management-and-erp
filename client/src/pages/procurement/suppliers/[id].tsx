@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
@@ -302,7 +303,7 @@ export default function SupplierDetailsPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de mettre à jour les notes.",
+        description: userMessageOf(error, "Impossible de mettre à jour les notes."),
         variant: "destructive",
       });
     },
@@ -326,7 +327,7 @@ export default function SupplierDetailsPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de recalculer les notes.",
+        description: userMessageOf(error, "Impossible de recalculer les notes."),
         variant: "destructive",
       });
     },
@@ -352,7 +353,7 @@ export default function SupplierDetailsPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Une erreur est survenue.",
+        description: userMessageOf(error, "Une erreur est survenue."),
         variant: "destructive",
       });
     },
