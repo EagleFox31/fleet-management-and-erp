@@ -41,7 +41,7 @@ Le brief te donne : numéro de PR ou branche, worktree où la lire, mission conf
    - **R rétroactif** : données existantes préservées, aucun reset destructif.
    Une case non applicable se dit, avec la raison.
 4. Cherche les bugs de logique : cas limites, rôle refusé, liste vide, erreur réseau, double clic, fuseau horaire, données d'un autre client.
-5. Rejoue les preuves sans écrire en base : `node node_modules/typescript/bin/tsc --noEmit -p .` (0 `error TS` global) et `node node_modules/vitest/vitest.mjs run --reporter=dot`. Tests de contrat seulement si le brief l'autorise, sous `node ../lot-tools/db-lock.mjs relecteur -- …`, jamais de log brut sur disque.
+5. Rejoue les preuves sans écrire en base : `node node_modules/typescript/bin/tsc --noEmit -p .` (0 `error TS` global) et `node node_modules/vitest/vitest.mjs run --reporter=dot`. Tests de contrat seulement si le brief l'autorise, lancés directement (le verrou de la base de test est pris par le globalSetup vitest (`tests/support/global-setup-db-lock.ts`), sans script à lancer), jamais de log brut sur disque.
 
 ## Verdict (court)
 - **Verdict** : `fusionnable`, `fusionnable après corrections mineures` ou `à reprendre`.
