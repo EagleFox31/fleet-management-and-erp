@@ -289,6 +289,14 @@ DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PR
 npm run test:db:down    # supprime aussi le volume
 ```
 
+- **`DATABASE_URL_TEST` s'exporte** : les scripts `test:integration` et `test:contract` ne
+  chargent plus `.env`, et la variable n'est plus lue depuis ce fichier. Absente, les suites
+  refusent de démarrer (aucun repli sur `DATABASE_URL`).
+- **`unset DATABASE_URL` avant intégration ou contrat** (PowerShell : `Remove-Item Env:DATABASE_URL`).
+  Un `DATABASE_URL` (ou `DATABASE_URL_LISTENER` / `DATABASE_URL_DIRECT`) différent de
+  `DATABASE_URL_TEST` fait échouer le démarrage : c'est le garde-fou contre un `.env` de production
+  chargé dans le runner (`tests/README.md`).
+- PowerShell : `Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue; $env:DATABASE_URL_TEST="postgres://fleet:fleet@postgres:5432/fleet_test"; $env:DATABASE_WS_PROXY="localhost:5433/v1"; npm run test:contract`.
 - **Neon seulement pour les e2e** (Playwright), qui ont besoin d'un serveur
   complet sur une base réelle, et jamais contre la production.
 - La CI fait de même sur toute PR vers `main`.

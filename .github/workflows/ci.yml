@@ -96,9 +96,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --no-audit --no-fund
-      # Les scripts chargent `.env` via node --env-file : le fichier doit exister, les variables
-      # d'environnement du job priment sur son contenu.
-      - run: touch .env
       # Schéma Drizzle sur la base vide (initializeDatabase() ne crée pas les tables), via le port TCP direct.
       - run: npm run test:db:schema
       - run: npm run test:integration -- --reporter=dot
@@ -140,6 +137,5 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: touch .env
       - run: npm run test:db:schema
       - run: npm run test:contract -- --reporter=dot --shard=${{ matrix.shard }}/${{ strategy.job-total }}

@@ -112,8 +112,9 @@ Les OT en conflit (43, 44, 54, 58) sont tous sans `end_date` : le chevauchement 
 - Une branche Neon par worktree qui lance des suites, créée depuis la branche de dev : `test-sol`,
   `test-db-1`, `test-db-2`, `test-be-1`, `test-be-2`, `test-api-1`, `test-api-2`, `test-fe-1`, `test-fe-2`.
   Si le quota manque, regrouper par rôle (`test-db`, `test-be`, `test-api`, `test-fe`) sous verrou.
-- Dans le `.env` de chaque worktree : `DATABASE_URL_TEST` = chaîne **directe** de sa branche. La
-  `DATABASE_URL` de dev reste distincte de `DATABASE_URL_TEST` (corrige le constat 1.1).
+- Exporter dans le shell de chaque worktree (et non dans `.env`, que les scripts de test ne lisent plus,
+  novembre 2026) : `DATABASE_URL_TEST` = chaîne **directe** de sa branche. La `DATABASE_URL` de dev doit être
+  absente ou identique pendant les tests : la garde de `tests/support/setup-db.ts` refuse sinon (corrige le constat 1.1).
 - Branche `recette` depuis la dev, puis `recette-golden` figée après T-62 (plan 03, T-26b / T-60).
 - Cycle de vie : réinitialiser une branche de test depuis son parent (« reset from parent ») après une
   suite qui s'est mal nettoyée ; supprimer les branches `test-*` au gel du lot.
