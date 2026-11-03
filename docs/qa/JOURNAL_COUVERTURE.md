@@ -2126,3 +2126,15 @@ soumission sans doublon.
 - **Comment** : le PDF jsPDF n'est pas compressé et `pdf-parse` n'est pas installé (non ajouté) : le test lit les opérandes `Tj` du flux et prend la chaîne qui suit « TOTAL ». Les formules ne divergent que par l'arrondi (KPI au FCFA par composante, écran au centime) : même règle de main-d'oeuvre via `laborCost`, aucun défaut produit constaté. Données TEST-, supprimées en fin de spec (OT, lignes, pièces, rotations, taux).
 - **Pourquoi** : ligne WO5 du plan, un seul coût pour l'écran, le PDF et le KPI. Les unitaires et l'intégration prouvaient la formule, pas ce que le navigateur affiche ni ce que le PDF imprime.
 - **Preuves** : rouge sur code fautif : PDF sans taux (`laborRate: null` ligne 892 de la page de l'OT, rétabli) -> `pdfTotal` 14 999 au lieu de 35 000. Vert : spec 22 trois passes (2/2), spec 21 (3/3), intégration `work-order-cost` + `kpi-service*` 15/15, tsc 0, unitaires 1730/1730.
+
+## 2026-11-03 14:58 — P6 : stock bas -> réapprovisionnement au navigateur (niveau E)
+
+- **Quoi** : `e2e/23-low-stock-restock.spec.ts` (7 cas, série) : pièce TEST- sous son seuil, alerte au magasinier et compteur du chef d'atelier ; commande brouillon -> envoyée -> confirmée par l'écran du magasinier, alerte et stock inchangés ; réception par l'écran (+10, entrée de stock à son nom, relus en base) avec la trame `purchase_order_status_updated(delivered)` vérifiée chez le chef d'atelier ; technicien sans bouton, API 403, stock inchangé ; après rechargement l'alerte est levée.
+- **Comment** : parcours joué une fois dans un beforeAll, observations dans `seen`, un maillon par test. La levée de l'alerte sans rechargement est un défaut produit figé en `test.fail` (mise en place hors du corps, témoin présent : garde #159). Libellés lus dans `shared/constants/purchase-order-statuses.ts`. Données TEST- supprimées en fin de spec (0 reste).
+- **Pourquoi** : le contrat prouvait l'API, pas ce que voit le second profil. Le client ignore la réception pour l'alerte : `useRealTimeSync.ts` n'invalide pas les requêtes d'alerte sur cette trame. Non corrigé ici, à rendre à fleet-fe.
+- **Preuves** : trois passes 7/7 ; rouge si l'émission serveur est retirée (`purchase-orders.routes.ts`, rétabli) : test de réception en échec faute de trame ; avec les quatre invalidations ajoutées côté client (rétabli), le `test.fail` passe au vert donc échoue (« Expected to fail »). tsc 0, unitaires 1763/1763.
+
+## 2026-11-03 14:59 — WO5 : réserves de relecture sur e2e/22
+
+- **Quoi** : `e2e/22-work-order-cost.spec.ts` : sondage direct vers 35 000 et 840 (plus de `toBeGreaterThan(0)`), `GET /api/work-orders/:id/labor-rate` vérifié nul avant le cas sans taux, import `node:fs` en tête.
+- **Comment** : `readThreeCosts` reçoit le total attendu. **Pourquoi** : réserves du relecteur de #171 (un sondage > 0 pouvait valider un montant partiel). **Preuves** : spec 22 rejouée 2/2, tsc 0.

@@ -1556,3 +1556,32 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Fermer une fuite de lecture, c'est fermer la classe : tous les chemins qui servent la même donnée (par objet, par liste, par agrégat). La garde qui l'empêche de revenir cible la classe des GET, pas la route corrigée, et se prouve par un cas négatif par contournement.
+
+## 2026-11-03 — Régularisation de plein de mission : un rejeu débitait deux fois
+
+### Contexte
+- Suite de la leçon « Carte carburant : contrôle du solde hors transaction ». `POST /api/missions/:id/fuel-records/regularize` débite la carte. Un double clic, ou un nouvel envoi après une coupure réseau, créait un second débit et une seconde entrée au journal de régularisation. Le bouton n'avait pas `useSingleFlightMutate`.
+- Deux écritures concurrentes du journal pouvaient aussi s'effacer : `declare-no-refuel` contrôlait « aucun plein » hors verrou, et la transition de statut réécrivait `workflowData` à partir d'une copie lue avant.
+
+### Cause racine
+- Classification : écriture d'argent non idempotente (rejeu = nouvelle écriture), et lecture-modification-écriture de `missions.workflowData` sans sérialisation.
+- `idempotencyGuard` (en-tête `Idempotency-Key`) n'a pas été repris : il est coupé par défaut (indicateur d'écritures hors ligne) et libère une clé périmée au bout de 60 s, ce qui ne suffit pas pour de l'argent.
+
+### Résolution
+- Clé de requête métier `requestKey` (générée par le client à la première tentative, conservée jusqu'au succès) enregistrée dans l'entrée de régularisation, donc atomique avec le débit. `recordConsumption(data, withinTransaction, { replay })` appelle `replay(tx)` sous le verrou de la carte, avant tout contrôle de solde : une entrée trouvée renvoie le plein existant (200, `replayed: true`, pas de diffusion), une même clé avec d'autres valeurs renvoie 409, et un plein supprimé depuis renvoie 409.
+- Bouton « Ajouter le plein » envoyé par `useSingleFlightMutate`.
+- `declare-no-refuel` relit la mission et contrôle l'absence de plein dans une transaction qui prend `lockFuelCard`.
+- La transition de statut n'écrit `workflowData` que si la requête le modifie.
+
+### Exceptions nommées (non couvertes par le verrou)
+- `PATCH` budget de mission (`mergeMissionBudgetPlan`) et transition de statut **avec** modification de `workflowData` : lecture-modification-écriture sans verrou. Une entrée de régularisation écrite entre la lecture et l'écriture peut être perdue (le débit, lui, reste). Suite proposée : verrou de ligne `SELECT … FOR UPDATE` sur la mission, ou fusion `jsonb` en SQL.
+- Restauration de sauvegarde (`server/routes.ts`, `db.delete(fuelRecords)` puis réinsertion) et suppression d'un véhicule en cascade (`server/storage.ts:937`) : suppressions de pleins hors verrou. Opérations admin rares, qui remplacent ou retirent l'historique entier : un débit concurrent n'y a pas de sens métier.
+
+### Prévention (vérifiable)
+- `tests/contract/mission-fuel-regularize-idempotent.contract.test.ts` : double POST simultané avec la même clé = un débit, une entrée, solde −200 ; nouvel envoi séquentiel rejoué ; même clé et autres valeurs = 409 ; clé invalide = 400 ; deux régularisations distinctes simultanées = deux entrées ; `declare-no-refuel` attend le verrou ; déclaration concurrente n'efface pas la régularisation.
+- `tests/integration/fuel-card-lock-coverage.test.ts` : le rejeu est lu une seule fois, sous le verrou (`holdsAdvisoryLock`), sans débit ni écriture liée ; un échec de l'écriture liée annule le débit.
+- Preuve par mutation, chaque mutant rend la suite rouge : sans rejeu (3 échecs), relecture de la copie périmée de `workflowData` (1), déclaration hors verrou (1), écriture liée hors transaction (2), rejeu avant le verrou (1). Aides partagées : `tests/support/fuel-card-lock.ts`.
+
+### Règle Projet (obligatoire)
+- Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
+- Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.

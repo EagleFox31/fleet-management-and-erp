@@ -1,12 +1,12 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { lockFuelCard } from "../../server/lib/fuel-card-lock";
 import { fuelCardService } from "../../server/services/fuel-card-service";
 import { FuelService } from "../../server/services/fuel-service";
 import { fuelRecords } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestFuelRecord, createTestUser, createTestVehicle } from "../support/factories";
+import { expectWaitsForLock, holdsAdvisoryLock } from "../support/fuel-card-lock";
 import { uniqueTestToken } from "../support/ids";
 
 /**
@@ -18,7 +18,6 @@ import { uniqueTestToken } from "../support/ids";
 
 const ids = createIdBag();
 const fuelService = new FuelService();
-const BLOCK_WINDOW_MS = 400;
 
 afterEach(async () => {
   // Un plein créé par un test en échec n'est pas dans le sac : il bloquerait la suppression du véhicule.
@@ -30,45 +29,6 @@ afterEach(async () => {
   ids.vehicleIds.length = 0;
   ids.fuelRecordIds.length = 0;
 });
-
-function holdFuelCardLock() {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  let markAcquired!: () => void;
-  const acquired = new Promise<void>((resolve) => (markAcquired = resolve));
-  const done = db.transaction(async (tx) => {
-    await lockFuelCard(tx);
-    markAcquired();
-    await gate;
-  });
-  return {
-    acquired,
-    release: async () => {
-      release();
-      await done;
-    },
-  };
-}
-
-/** Lance l'écriture pendant que le verrou est tenu ; elle ne doit aboutir qu'après libération. */
-async function expectWaitsForLock<T>(write: () => Promise<T>): Promise<T> {
-  // Connexions du pool ouvertes d'avance : l'ouverture d'une connexion à froid dépasse la
-  // fenêtre d'observation et ferait passer une écriture non verrouillée pour bloquée.
-  await Promise.all(Array.from({ length: 4 }, () => db.execute(sql`SELECT 1`)));
-  const holder = holdFuelCardLock();
-  await holder.acquired;
-  let settled = false;
-  const pending = write().finally(() => {
-    settled = true;
-  });
-  try {
-    await new Promise((resolve) => setTimeout(resolve, BLOCK_WINDOW_MS));
-    expect(settled, "l'écriture a abouti sans attendre le verrou de la carte").toBe(false);
-  } finally {
-    await holder.release();
-  }
-  return pending;
-}
 
 async function newVehicle() {
   const vehicle = await createTestVehicle();
@@ -149,6 +109,49 @@ describe("recordConsumption : écriture liée dans la même transaction", { time
     const leaked = await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicle.id));
     for (const row of leaked) ids.fuelRecordIds.push(row.id);
     expect(leaked).toHaveLength(0);
+    expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(balanceBefore, 2);
+  });
+
+  it("un rejeu trouvé sous le verrou n'écrit aucun débit et renvoie le plein existant", async () => {
+    const user = await createTestUser();
+    ids.userIds.push(user.id);
+    const vehicle = await newVehicle();
+    const existing = await createTestFuelRecord({ vehicleId: vehicle.id, debitAmount: "200.00", cost: "200.00", quantity: 2 });
+    ids.fuelRecordIds.push(existing.id);
+    const balanceBefore = (await fuelCardService.getCurrentBalance()).balance;
+    let hookCalled = false;
+    const lockHeldPerReplay: boolean[] = [];
+
+    const result = await expectWaitsForLock(() =>
+      fuelCardService.recordConsumption(
+        {
+          vehicleId: vehicle.id,
+          quantity: 2,
+          unitPrice: 100,
+          date: "2026-01-15",
+          stationName: "TEST-Station",
+          destination: "TEST-Rejeu",
+          userId: user.id,
+        },
+        async () => {
+          hookCalled = true;
+        },
+        {
+          replay: async (tx) => {
+            lockHeldPerReplay.push(await holdsAdvisoryLock(tx));
+            return existing;
+          },
+        },
+      ),
+    );
+
+    // Un seul appel, et sous le verrou : un rejeu lu avant le verrou pourrait manquer un débit en cours.
+    expect(lockHeldPerReplay, "le rejeu doit être lu une fois, sous le verrou de la carte").toEqual([true]);
+    expect(result.replayed).toBe(true);
+    expect(result.consumption.id).toBe(existing.id);
+    expect(result.cost).toBe(200);
+    expect(hookCalled).toBe(false);
+    expect(await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicle.id))).toHaveLength(1);
     expect((await fuelCardService.getCurrentBalance()).balance).toBeCloseTo(balanceBefore, 2);
   });
 });
