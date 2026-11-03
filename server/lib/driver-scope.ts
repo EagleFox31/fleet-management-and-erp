@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { assignments, drivers } from "@shared/schema";
-import { canManageDrivers } from "@shared/constants/roles";
+import { canReadDriverPersonalData } from "@shared/constants/roles";
 
 /**
  * Cloison des chauffeurs (AGENTS §11, pendant de `client-scope.ts`).
@@ -46,7 +46,7 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
 export const DRIVER_CPC_FORBIDDEN_MESSAGE = "Accès refusé : la certification CPC est saisie par l'exploitation.";
 
 /**
- * Données personnelles de la fiche chauffeur : lisibles par les gestionnaires
+ * Données personnelles de la fiche chauffeur : lisibles par les gestionnaires et la direction
  * (`DRIVER_MANAGER_ROLES`) et par le chauffeur concerné, retirées pour tout autre lecteur.
  */
 export const DRIVER_PERSONAL_FIELDS = [
@@ -81,7 +81,7 @@ export async function redactDriverPersonalData<T extends { id: number } & Record
   reader: DriverScopeReader | undefined,
   data: T | T[],
 ): Promise<T | T[]> {
-  if (reader && canManageDrivers(reader.role)) return data;
+  if (reader && canReadDriverPersonalData(reader.role)) return data;
   const own = new Set((await driverScopeOf(reader)) ?? []);
   const apply = (row: T): T => (own.has(row.id) ? row : stripDriverPersonalData(row));
   return Array.isArray(data) ? data.map(apply) : apply(data);

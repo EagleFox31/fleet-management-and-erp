@@ -13,7 +13,7 @@ import { uniqueTestToken } from "../support/ids";
  * - la diffusion temps réel d'une fiche ne porte aucune donnée personnelle.
  */
 
-type Actor = "admin" | "logistics" | "driver" | "technician";
+type Actor = "admin" | "logistics" | "management" | "driver" | "technician";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const driverIds: number[] = [];
 let ownId = 0;
@@ -44,6 +44,7 @@ beforeAll(async () => {
   session = await startContractSession<Actor>({
     admin: "admin",
     logistics: "logistics",
+    management: "management",
     driver: "driver",
     technician: "technician",
   });
@@ -74,6 +75,22 @@ describe("POST /api/drivers/:id/update-cpc", () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.cpcTrainingDate).toBe("2026-01-01");
+  });
+});
+
+describe("direction (management) : lit sans gérer", () => {
+  it("voit les données personnelles en détail et en liste", async () => {
+    const detail = await session.call("GET", `/api/drivers/${otherId}`, { actor: "management" });
+    expect(detail.status).toBe(200);
+    expect(detail.body.cniNumber).toBe(PII.cniNumber);
+    expect(detail.body.birthDate).toBe(PII.birthDate);
+    const list = await session.call("GET", "/api/drivers", { actor: "management" });
+    expect(list.body.find((d: any) => d.id === otherId).licenseNumber).toBe(PII.licenseNumber);
+  });
+
+  it("reçoit 403 sur une écriture de gestion (PATCH fiche)", async () => {
+    const res = await session.call("PATCH", `/api/drivers/${otherId}`, { actor: "management", body: { firstName: "Refuse" } });
+    expect(res.status).toBe(403);
   });
 });
 
