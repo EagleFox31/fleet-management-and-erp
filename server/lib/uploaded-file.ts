@@ -12,10 +12,17 @@ export function uploadedFileCandidates(storedPath: string | null | undefined, ro
   if (!storedPath) return [];
   const uploadsDir = path.resolve(root, "uploads");
   const candidates = [path.resolve(root, storedPath), path.resolve(root, storedPath.replace(/^[/\\]+/, ""))];
-  return [...new Set(candidates)].filter((candidate) => {
-    const relative = path.relative(uploadsDir, candidate);
-    return relative !== "" && !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
-  });
+  return [...new Set(candidates)].filter((candidate) => isInsideDirectory(uploadsDir, candidate));
+}
+
+/**
+ * `candidate` est strictement sous `directory` une fois les deux chemins résolus.
+ * Comparaison par `path.relative`, pas par préfixe de chaîne : `uploads/documents-x`
+ * n'est pas sous `uploads/documents`.
+ */
+export function isInsideDirectory(directory: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(directory), path.resolve(candidate));
+  return relative !== "" && !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }
 
 /**

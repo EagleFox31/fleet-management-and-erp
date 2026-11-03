@@ -1,7 +1,7 @@
 import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { inArray } from "drizzle-orm";
 import { activityLogs } from "../../shared/schema";
 import { db } from "../../server/db";
@@ -22,6 +22,7 @@ const marker = `pwn130-${Date.now().toString(36)}`;
 // Toutes les cibles que `path.join("./uploads/documents", "vehicle-<id>")` atteint selon la profondeur.
 const escapeTargets = () => [path.resolve(marker), path.resolve("uploads", marker), path.resolve("uploads/documents", marker)];
 const suffixedDir = () => path.resolve("uploads/documents/vehicle-12abc");
+const rejectedDirs = () => ["vehicle-007", "vehicle-99999999999"].map((d) => path.resolve("uploads/documents", d));
 
 /** Contrat `ApiErrorBody` (shared/errors.ts) : message lisible, code, requestId, aucun détail technique. */
 function expectApiError400(res: { status: number; body: any }) {
@@ -62,7 +63,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  for (const target of [...escapeTargets(), suffixedDir()]) fs.rmSync(target, { recursive: true, force: true });
+  for (const target of [...escapeTargets(), suffixedDir(), ...rejectedDirs()]) fs.rmSync(target, { recursive: true, force: true });
   if (ids.userIds.length) await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
@@ -83,5 +84,26 @@ describe("POST /api/vehicles/:vehicleId/documents — identifiant hors chiffres"
     const res = await post("12abc");
     expectApiError400(res);
     expect(fs.existsSync(suffixedDir())).toBe(false);
+  });
+
+  it.each(["007", "99999999999"])("`%s` (zéro en tête, hors int Postgres) : 400, aucun dossier créé", async (rawId) => {
+    const res = await post(rawId);
+    expectApiError400(res);
+    for (const dir of rejectedDirs()) expect(fs.existsSync(dir), dir).toBe(false);
+  });
+});
+
+describe("POST /api/vehicles/:vehicleId/documents — échec disque à la création du dossier", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("500 générique avec référence, sans chemin ni code système", async () => {
+    vi.spyOn(fs, "mkdirSync").mockImplementationOnce(() => {
+      throw Object.assign(new Error("EACCES: permission denied, mkdir '/app/uploads/documents/vehicle-1'"), { code: "EACCES" });
+    });
+    const res = await post("1");
+    expect(res.status).toBe(500);
+    expect(res.body.message).toContain(`Référence : ${res.body.requestId}`);
+    expect(res.body.code).toBeTruthy();
+    expect(JSON.stringify(res.body)).not.toMatch(/EACCES|uploads|mkdir|stack/i);
   });
 });

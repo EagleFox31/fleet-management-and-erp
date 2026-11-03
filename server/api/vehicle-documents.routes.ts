@@ -73,6 +73,7 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
 
   uploadVehicleDocument(req, res, async (err: unknown) => {
     try {
+      if (err instanceof AppError) throw err;
       if (err) {
         const message =
           err instanceof multer.MulterError
