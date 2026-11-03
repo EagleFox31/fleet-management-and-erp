@@ -1966,3 +1966,11 @@ soumission sans doublon.
 - **Pourquoi** : réserves 1 à 4 de fleet-relecteur, mineurs M1 et M4 de fleet-securite. M2 (`err.message` multer et `looksTechnical` sans `EACCES`) et M3 (extension non confrontée au type MIME) sont antérieurs à la PR : suite à part.
 - **Preuves** : garde-fou rouge sur l'ancien `upload.ts`, vert après ; contrats `vehicle-documents-upload-path` 7/7 et `vehicle-documents-upload` 16/16 sur le Postgres local ; unitaires `upload-vehicle-directory` et `multer-storage-hygiene` verts.
 
+## 2026-11-03 10:20 — FUEL3 constaté OK, PRT1 : accès, erreurs et suppression d'une pièce référencée
+
+- **Quoi** : FUEL3 passe de « À faire » à OK : la couverture existait déjà sur main et recouvre point par point le cadrage (limites exactes, plein sans kilométrage, premier plein, hors ordre, contrat de la liste, capacité par rôle), aucun test ajouté. PRT1 reste Partiel avec 14 cas de plus ; deux défauts produit sont figés.
+- **Comment** : `tests/contract/parts-catalog-access-errors.contract.test.ts` : 401 anonyme sur POST, PATCH, DELETE et enfants, 403 client, technicien et magasinier, corps `ApiErrorBody` (code, message, rien de technique) sur 400/401/403/404/409, double création simultanée, pièce citée par le catalogue de pannes. Deux `it.fails` avec test témoin et mise en place dans `beforeAll` (garde-fou `it-fails-hygiene`).
+- **Pourquoi** : les erreurs de la fiche pièce n'étaient vérifiées que par statut ; AGENTS.md §10 exige le contrat unique. Il n'existe pas de CRUD de catégorie : `parts.category` est un texte libre.
+- **Défauts figés (non corrigés)** : (1) `PATCH /api/parts/:id` accepte `quantity: -3` (200) alors que la création refuse (400) ; (2) `DELETE /api/parts/:id` d'une pièce citée par `part_requirements` : `deletePart` ne contrôle que le catalogue de pannes, la FK échoue et la route (`server/routes.ts`, catch du DELETE) renvoie 500 avec `error.message` brut. Correctif à fleet-api.
+- **Preuves** : contrats `fuel-anomaly-rules`, `parts-catalog-crud`, `parts-catalog-access-errors` 78/78 et intégration `fuel-anomaly-rules` 20/20 sur `fleet_test_cov` ; `npm test` 1585/1585 ; `tsc` 0 erreur. Les deux `it.fails` sont rouges sur le produit actuel (le premier observé en 200, vérifié par sonde) et passeront en échec dès le correctif, signal pour les retirer.
+
