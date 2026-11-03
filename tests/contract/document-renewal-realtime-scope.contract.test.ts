@@ -144,9 +144,11 @@ describe("Renouvellement rapide : portée des trames temps réel (§11)", { time
     form.append("newExpiryDate", "2028-01-31");
     form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-justificatif.pdf");
 
+    // Seules les diffusions émises après l'écriture du document et de la demande échouent.
+    const POST_WRITE_EVENTS = ["document_renewal_quick_completed", "vehicle_document_updated", "vehicle_updated"];
     const spy = (global as any).broadcastUpdate;
     (global as any).broadcastUpdate = (eventType: string) => {
-      if (eventType !== "alert_created") throw new Error("TEST socket indisponible");
+      if (POST_WRITE_EVENTS.includes(eventType)) throw new Error("TEST socket indisponible");
     };
     try {
       const response = await fetch(`${actors.baseUrl}/api/document-renewals/quick-renew`, {
