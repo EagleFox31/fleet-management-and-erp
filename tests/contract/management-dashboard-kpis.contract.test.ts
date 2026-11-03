@@ -1,7 +1,7 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { fuelRecords, workOrders } from "../../shared/schema";
+import { assignments, clientInvoices, fuelRecords, missions, workOrders } from "../../shared/schema";
 import { toIsoDateOnly } from "@shared/constants/management-dashboard";
 import { createTestSupplier, createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
@@ -178,5 +178,61 @@ describe("DIR1 : facture fournisseur", { timeout: 60000 }, () => {
     const after = await dashboard();
     expect(after.expenses.suppliers - before.expenses.suppliers).toBe(40000);
     expect(after.executiveKpis.prk.directChargesHT - before.executiveKpis.prk.directChargesHT).toBe(40000);
+  });
+});
+
+describe("DIR1 : partage du CA d'une mission à plusieurs affectations (#227)", { timeout: 60000 }, () => {
+  it("parts égales entre véhicules distincts ; affectation annulée ou refusée exclue, terminée comptée", async () => {
+    // Montant hors d'atteinte des données partagées : les deux véhicules comptés sont en tête de marge.
+    const amountHT = 4_000_000_000_000;
+    const [relay, done, cancelled, rejected] = [await newVehicle(), await newVehicle(), await newVehicle(), await newVehicle()];
+    const [mission] = await db
+      .insert(missions)
+      .values({
+        orderNumber: uniqueTestToken("CA"),
+        pickupAddress: "TEST A",
+        deliveryAddress: "TEST B",
+        status: "completed",
+        deliveryDate: new Date(),
+      } as any)
+      .returning();
+    const rows = await db
+      .insert(assignments)
+      .values([
+        // Relais : deux affectations sur le même camion = un seul véhicule, une seule part.
+        { missionId: mission.id, vehicleId: relay.id, status: "accepted" },
+        { missionId: mission.id, vehicleId: relay.id, status: "in_progress" },
+        { missionId: mission.id, vehicleId: done.id, status: "completed" },
+        { missionId: mission.id, vehicleId: cancelled.id, status: "cancelled" },
+        { missionId: mission.id, vehicleId: rejected.id, status: "rejected" },
+      ] as any)
+      .returning({ id: assignments.id });
+    const [invoice] = await db
+      .insert(clientInvoices)
+      .values({
+        missionId: mission.id,
+        invoiceNumber: uniqueTestToken("inv-ca"),
+        invoiceDate: TODAY(),
+        dueDate: TODAY(),
+        amountHT: String(amountHT),
+        amountTTC: String(amountHT),
+        balance: String(amountHT),
+      })
+      .returning({ id: clientInvoices.id });
+
+    try {
+      const tco = (await dashboard()).vehicleTco;
+      const items = [...tco.topByMargin, ...tco.worstByMargin] as Array<{ vehicleId: number; revenueHT: number; missionCount: number }>;
+      const itemOf = (vehicleId: number) => items.find((item) => item.vehicleId === vehicleId);
+
+      expect(itemOf(relay.id)).toMatchObject({ revenueHT: amountHT / 2, missionCount: 1 });
+      expect(itemOf(done.id)).toMatchObject({ revenueHT: amountHT / 2, missionCount: 1 });
+      expect(itemOf(cancelled.id)).toBeUndefined();
+      expect(itemOf(rejected.id)).toBeUndefined();
+    } finally {
+      await db.delete(clientInvoices).where(eq(clientInvoices.id, invoice.id));
+      await db.delete(assignments).where(inArray(assignments.id, rows.map((r) => r.id)));
+      await db.delete(missions).where(eq(missions.id, mission.id));
+    }
   });
 });
