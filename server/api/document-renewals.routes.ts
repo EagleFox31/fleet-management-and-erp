@@ -39,6 +39,7 @@ import {
   vehicleDocuments,
   vehicles,
 } from "@shared/schema";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("document-renewals");
 const router = Router();
@@ -909,10 +910,7 @@ router.post(
       return res.status(201).json(request);
     } catch (error) {
       discardUpload();
-      if (!(error instanceof AppError)) {
-        log.error({ err: error, requestId: req.requestId }, "dépôt du récépissé d'une demande de renouvellement");
-      }
-      next(error);
+      next(withLogContext(error, { event: "dépôt du récépissé d'une demande de renouvellement" }));
     }
   },
 );

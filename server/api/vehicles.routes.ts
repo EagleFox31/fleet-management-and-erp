@@ -9,6 +9,7 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from "../lib/driver-scope";
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
+import { withLogContext } from "../lib/error-log-context";
 
 const router = Router();
 const log = moduleLogger("vehicles-routes");
@@ -69,8 +70,7 @@ router.get("/", isAnyUser, async (req, res, next) => {
     return res.status(200).json(result);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "lecture de la liste des véhicules en échec");
-    return next(new AppError(500, "Erreur serveur", { cause: error }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de la liste des véhicules en échec" }));
   }
 });
 
@@ -81,8 +81,7 @@ router.get("/all", isAnyUser, async (req, res, next) => {
     return res.status(200).json(result.vehicles);
   } catch (error) {
     if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "lecture de tous les véhicules en échec");
-    return next(new AppError(500, "Erreur serveur", { cause: error }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de tous les véhicules en échec" }));
   }
 });
 
@@ -179,8 +178,7 @@ router.get("/check-alerts", isAnyUser, async (req, res, next) => {
     }
     return res.status(200).json(alerts);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "contrôle des alertes véhicules en échec");
-    return next(new AppError(500, "Impossible de calculer les alertes des véhicules.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de calculer les alertes des véhicules.", { cause: error }), { event: "contrôle des alertes véhicules en échec" }));
   }
 });
 
@@ -206,8 +204,7 @@ router.get("/archived", isAdmin, async (req, res, next) => {
       .orderBy(desc(vehicles.deletedAt));
     return res.status(200).json(rows);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "lecture des véhicules archivés en échec");
-    return next(new AppError(500, "Impossible de lire les véhicules archivés.", { cause: error }));
+    return next(withLogContext(new AppError(500, "Impossible de lire les véhicules archivés.", { cause: error }), { event: "lecture des véhicules archivés en échec" }));
   }
 });
 

@@ -5,6 +5,7 @@ import { users } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("pin-auth");
 const router = Router();
@@ -74,8 +75,7 @@ router.post("/auth/pin-login", async (req, res, next) => {
     });
   } catch (err) {
     if (!(err instanceof AppError)) {
-      log.error({ err, requestId: req.requestId }, "Échec de la connexion par PIN");
-      return next(new AppError(500, "Erreur serveur", { cause: err }));
+      return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la connexion par PIN" }));
     }
     return next(err);
   }
@@ -89,8 +89,7 @@ router.get("/auth/drivers-list", async (req, res, next) => {
       .where(and(eq(users.role, "driver"), isNull(users.deletedAt), sql`not ${ficheChauffeurDesactivee}`));
     return res.status(200).json(rows);
   } catch (err) {
-    log.error({ err, requestId: req.requestId }, "Échec de la liste des chauffeurs PIN");
-    return next(new AppError(500, "Erreur serveur", { cause: err }));
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la liste des chauffeurs PIN" }));
   }
 });
 

@@ -3,6 +3,7 @@ import { authenticate, isFuelCardManager } from "../middleware/auth";
 import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { moduleLogger } from "../lib/logger";
 import { ownerScopeOf } from "../lib/client-scope";
+import { withLogContext } from "../lib/error-log-context";
 
 const log = moduleLogger("fuel-card");
 
@@ -111,8 +112,7 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
     
     return res.status(201).json(result);
   } catch (error) {
-    log.error({ err: error, requestId: (req as any).requestId }, "recharge de la carte carburant en échec");
-    return next(toFuelCardAppError(error));
+    return next(withLogContext(toFuelCardAppError(error), { event: "recharge de la carte carburant en échec" }));
   }
 });
 
@@ -152,8 +152,7 @@ router.post("/consumption", async (req, res, next) => {
     
     return res.status(201).json(result);
   } catch (error) {
-    log.error({ err: error, requestId: (req as any).requestId }, "enregistrement de la consommation en échec");
-    return next(toFuelCardAppError(error));
+    return next(withLogContext(toFuelCardAppError(error), { event: "enregistrement de la consommation en échec" }));
   }
 });
 
@@ -193,8 +192,7 @@ router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
     
     return res.status(200).json(stats);
   } catch (error) {
-    log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant du véhicule en échec");
-    return next(toFuelCardAppError(error));
+    return next(withLogContext(toFuelCardAppError(error), { event: "statistiques carburant du véhicule en échec" }));
   }
 });
 
@@ -211,8 +209,7 @@ router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
     
     return res.status(200).json(anomalies);
   } catch (error) {
-    log.error({ err: error, requestId: (req as any).requestId }, "détection des anomalies carburant en échec");
-    return next(toFuelCardAppError(error));
+    return next(withLogContext(toFuelCardAppError(error), { event: "détection des anomalies carburant en échec" }));
   }
 });
 
@@ -224,8 +221,7 @@ router.get("/stats-by-client", async (req, res, next) => {
 
     return res.status(200).json(stats);
   } catch (error) {
-    log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant par client en échec");
-    return next(toFuelCardAppError(error));
+    return next(withLogContext(toFuelCardAppError(error), { event: "statistiques carburant par client en échec" }));
   }
 });
 
