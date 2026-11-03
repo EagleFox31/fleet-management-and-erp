@@ -4,6 +4,7 @@ import { operationsService } from "../services/operations-service";
 import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
+import { withLogContext } from "../lib/error-log-context";
 import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 
@@ -122,8 +123,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
   } catch (error: any) {
     // Enregistrement carburant inconnu (404) : le gestionnaire central rend l'ApiErrorBody.
     if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Error creating mission from fuel:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error creating mission from fuel:" }));
   }
 });
 
@@ -131,13 +131,12 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
  * GET /api/operations/missions/upcoming
  * Missions planifiées / assignées (pas encore démarrées)
  */
-router.get("/missions/upcoming", authenticate, async (req: Request, res: Response) => {
+router.get("/missions/upcoming", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getUpcomingMissions(await driverScopeOf(req.user));
     res.json(missions);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching upcoming missions:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching upcoming missions:" }));
   }
 });
 
@@ -145,13 +144,12 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
  * GET /api/operations/missions/active
  * Missions en cours (in_progress)
  */
-router.get("/missions/active", authenticate, async (req: Request, res: Response) => {
+router.get("/missions/active", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getActiveMissions(await driverScopeOf(req.user));
     res.json(missions);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching active missions:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching active missions:" }));
   }
 });
 
@@ -159,7 +157,7 @@ router.get("/missions/active", authenticate, async (req: Request, res: Response)
  * GET /api/operations/missions
  * Liste toutes les missions avec filtres optionnels
  */
-router.get("/missions", authenticate, async (req: Request, res: Response) => {
+router.get("/missions", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, clientId, startDate, endDate } = req.query;
 
@@ -174,8 +172,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response) => {
 
     res.json(missions);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching missions:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions:" }));
   }
 });
 
@@ -183,7 +180,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response) => {
  * GET /api/operations/missions/by-client/:clientName
  * Récupérer missions et statistiques pour un client spécifique
  */
-router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async (req: Request, res: Response) => {
+router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName } = req.params;
     const { status, startDate, endDate } = req.query;
@@ -197,8 +194,7 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
 
     res.json(result);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching missions by client:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions by client:" }));
   }
 });
 
@@ -206,13 +202,12 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
  * GET /api/operations/stats/by-client
  * Statistiques globales par client (MAERSK, CNPCC, AGL, SODECOTON)
  */
-router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response) => {
+router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByClient();
     res.json(stats);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching stats by client:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching stats by client:" }));
   }
 });
 
@@ -220,13 +215,12 @@ router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, 
  * GET /api/operations/stats/by-destination
  * Statistiques par destination (NDJAMENA, DLA-NDERE, TOUBORO)
  */
-router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Request, res: Response) => {
+router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByDestination();
     res.json(stats);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error fetching stats by destination:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching stats by destination:" }));
   }
 });
 
@@ -234,14 +228,13 @@ router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Requ
  * GET /api/operations/missions/:id/costs
  * Calculer les coûts détaillés d'une mission
  */
-router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response) => {
+router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const costs = await operationsService.calculateMissionCosts(parseInt(id));
     res.json(costs);
   } catch (error: any) {
-    log.error({ err: error, requestId: req.requestId }, "Error calculating mission costs:");
-    res.status(500).json({ message: "Erreur serveur." });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error calculating mission costs:" }));
   }
 });
 
