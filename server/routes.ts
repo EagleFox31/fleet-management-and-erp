@@ -2932,7 +2932,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Note: Dans une application réelle, il faudrait paginer les résultats
         // Cloison client : un client ne lit que les pleins de ses propres véhicules.
         const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
@@ -3033,7 +3033,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Cloison client : les statistiques d'un client ne portent que sur ses véhicules.
       const ownerScope = ownerScopeOf(req.user);
-      const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+      const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
       log.debug({ vehicleCount: vehicles.vehicles.length, requestId: req.requestId }, "véhicules retenus pour les statistiques carburant");
       
       let totalFuel = 0;
@@ -3167,7 +3167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Récupérer pour tous les véhicules (un client : les siens seulement)
         const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.getVehicles() : await storage.getVehiclesByOwner(ownerScope);
+        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
         
         for (const vehicle of vehicles.vehicles) {
           const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
@@ -3302,40 +3302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Enregistrer une consommation de carburant (débit)
-  app.post("/api/fuel-card/consumption", authenticate, async (req, res, next) => {
-    try {
-      const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
-      
-      if (!vehicleId || !quantity || !unitPrice || !date || !stationName || !destination) {
-        return res.status(400).json({ message: "Données de consommation incomplètes" });
-      }
-
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const result = await fuelCardService.recordConsumption({
-        vehicleId: parseInt(vehicleId),
-        quantity: parseFloat(quantity),
-        unitPrice: parseFloat(unitPrice),
-        date,
-        stationName,
-        destination,
-        clientName,
-        notes,
-        userId
-      });
-      
-      return res.status(201).json(result);
-    } catch (error) {
-      log.error({ err: error, requestId: (req as any).requestId }, "enregistrement de la consommation en échec");
-      return next(toFuelCardAppError(error));
-    }
-  });
-  
+  // POST /api/fuel-card/consumption : servi par server/api/fuel-card.routes.ts (monté avant).
   // Historique carburant avec filtres (année, mois, véhicule, type)
   app.get("/api/fuel-card/history", authenticate, async (req, res) => {
     try {
@@ -3960,7 +3927,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Statistiques des véhicules - utilise les données existantes
-      const vehiclesData = await storage.getVehicles();
+      const vehiclesData = await storage.listAllVehicles();
       const vehicles = vehiclesData.vehicles || [];
       const vehicleStats = {
         total: vehicles.length,

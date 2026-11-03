@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { formatPrice } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { IDEMPOTENCY_HEADER, partStockKeyScope, sendWithSubmissionKey } from "@/lib/submission-key";
 import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -197,10 +198,14 @@ export function PartTable({ onRowClick }: PartTableProps) {
     // Endpoint dédié: calcule `quantity + adjustment` côté serveur et trace le
     // mouvement de stock. Un PATCH direct sur la pièce ne tracerait rien.
     mutationFn: ({ id, adjustment }: { id: number; adjustment: number }) =>
-      apiRequest("POST", `/api/parts/${id}/update-stock`, {
-        adjustment,
-        reason: "Ajustement manuel depuis la liste des pièces",
-      }),
+      // Clé d'idempotence : un réessai après coupure ou 5xx ne rejoue pas l'ajustement.
+      sendWithSubmissionKey(partStockKeyScope(id, adjustment), (key) =>
+        apiRequest(`/api/parts/${id}/update-stock`, {
+          method: "POST",
+          headers: { [IDEMPOTENCY_HEADER]: key },
+          body: { adjustment, reason: "Ajustement manuel depuis la liste des pièces" },
+        }),
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/parts/statistics"] });

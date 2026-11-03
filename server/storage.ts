@@ -200,6 +200,8 @@ export interface IStorage {
   getVehicleByRegistration(registrationNumber: string): Promise<Vehicle | undefined>;
   getVehicles(search?: string, status?: string, vehicleType?: string, limit?: number, offset?: number, sortBy?: string, sortOrder?: 'asc' | 'desc'): Promise<{ vehicles: Vehicle[], total: number }>;
   getVehiclesByOwner(ownerId: number): Promise<{ vehicles: Vehicle[], total: number }>;
+  /** Tout le parc non supprimé, sans pagination (agrégats, alertes). `getVehicles` pagine à 10 par défaut. */
+  listAllVehicles(): Promise<{ vehicles: Vehicle[], total: number }>;
   createVehicle(vehicle: InsertVehicle, createdById?: number): Promise<Vehicle>;
   updateVehicle(id: number, vehicle: Partial<InsertVehicle>, updatedById?: number): Promise<Vehicle | undefined>;
   deleteVehicle(id: number): Promise<boolean>;
@@ -843,6 +845,15 @@ export class DatabaseStorage implements IStorage {
       console.error('🚗 Error in getVehicles:', error);
       return { vehicles: [], total: 0 };
     }
+  }
+  async listAllVehicles(): Promise<{ vehicles: Vehicle[]; total: number }> {
+    // Pas de repli silencieux sur une liste vide : un total faux est pire qu'une erreur.
+    const allVehicles = await db
+      .select()
+      .from(vehicles)
+      .where(isNull(vehicles.deletedAt))
+      .orderBy(asc(vehicles.id));
+    return { vehicles: allVehicles, total: allVehicles.length };
   }
   async getVehiclesByOwner(ownerId: number): Promise<{ vehicles: Vehicle[]; total: number }> {
     try {

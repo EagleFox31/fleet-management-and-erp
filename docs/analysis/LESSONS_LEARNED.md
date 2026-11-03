@@ -1593,6 +1593,30 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
 
+## 2026-11-03 — Parc tronqué à 10 véhicules dans les totaux du personnel
+
+### Contexte
+- `storage.getVehicles()` pagine avec `limit = 10` par défaut. Sept appels sans argument l'employaient pour « tout le parc » :
+  - pleins (`GET /api/fuel-records`), statistiques carburant, historique de consommation, statistiques technicien ;
+  - trois contrôles d'alertes (`alert-service` : véhicules, plans de maintenance, consommation).
+- Au-delà de 10 véhicules, les totaux du personnel et les alertes ignoraient en silence les plus anciens. Le côté client (`getVehiclesByOwner`) n'était pas touché.
+
+### Cause racine
+- Classification : valeur par défaut de pagination reprise par des appelants qui voulaient l'ensemble, sans erreur ni signal.
+
+### Résolution
+- `storage.listAllVehicles()` : tout le parc non supprimé, sans pagination, sans repli silencieux sur une liste vide. Les sept appels y passent.
+- `getVehicles` garde son contrat paginé pour `GET /api/vehicles`.
+
+### Prévention (vérifiable)
+- `tests/unit/server/vehicles-unbounded-hygiene.test.ts` : aucun `getVehicles()` sans argument dans `server/`.
+- `tests/integration/storage-list-all-vehicles.test.ts` : le véhicule hors première page est rendu, le supprimé exclu.
+- `tests/contract/fuel-staff-whole-fleet.contract.test.ts` : le plein et les statistiques d'un véhicule hors des 10 plus récents sont présents.
+- Mutant (retour à `getVehicles()`) : contrat 2/2 rouge, hygiène rouge.
+
+### Règle Projet
+- Une lecture « de tout le parc » appelle une méthode sans pagination nommée comme telle, jamais une méthode paginée sans argument.
+
 ### Suite du 3 novembre 2026 : exceptions levées, clé obligatoire
 - **Budget et statut sous verrou de ligne** : le `PATCH` budget et la transition de statut avec modification relisent `workflowData` par `SELECT … FOR UPDATE` dans une transaction, puis fusionnent leur patch sur cette relecture. L'écriture de l'entrée de régularisation prend le même verrou de ligne. Ordre des verrous fixe : carte carburant puis ligne mission (statut et budget ne prennent que la ligne), donc pas d'interblocage. La première exception nommée ci-dessus est levée ; celle des suppressions admin reste.
 - **Clé obligatoire, unique en base** : `fuel_records.request_key` avec index unique `ux_fuel_records_request_key` (migration `20261103_fuel_records_request_key.sql`, jumelle de `FUEL_RECORDS_REQUEST_KEY_SQL` dans `init-database.ts`). Sans clé : 400 « rechargez la page ». Une violation de l'index devient 409. Les régularisations antérieures (clé dans le journal seul) restent rejouables.
@@ -1746,6 +1770,13 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
 
+### Suite : statut du plein normal relu sous le verrou de ligne
+
+- **Cause** : `POST /api/missions/:id/fuel-records` contrôlait le statut sur une lecture faite avant les verrous. Deux effets : un rejeu après clôture recevait 400 au lieu du plein enregistré, et une clôture concurrente laissait passer un débit sur une mission clôturée.
+- **Résolution** : `assertMissionAcceptsFuel(tx)` relit le statut avec `FOR UPDATE` dans la transaction du débit, après le rejeu et avant le solde. Ordre des verrous : carte, puis ligne.
+- **Clé incertaine et nouvelle saisie** : la clé incertaine n’est reprise que pour la même saisie (empreinte sans l’heure par défaut). L’empreinte contient le jour du plein, que le serveur compare, mais pas l’heure par défaut : une fiche rouverte le lendemain prend une nouvelle clé au lieu d’un 409. Une saisie corrigée après une issue incertaine (autre quantité, autre prix, autre jour) est une nouvelle intention et prend une nouvelle clé. Si le premier envoi avait abouti, il y a deux pleins : les deux écrans relisent les pleins après une issue incertaine, donc le premier est affiché avant la correction.
+- **Prévention** : trois contrats (rejeu après clôture, plein neuf sur mission clôturée, clôture concurrente), dont deux rouges contre main ; unitaires de l’empreinte.
+
 ## 2026-11-03 — Mouvement de stock magasin : sortie ramenée à 0 et course de lecture (récidive)
 
 ### Contexte
@@ -1769,3 +1800,93 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute écriture de `parts.quantity` relit la pièce `FOR UPDATE` dans la transaction qui écrit, et refuse en 409 un stock insuffisant. Ne jamais ramener un stock à 0 en silence.
+
+### Prix du carburant : imposé côté serveur, pas seulement à l’écran (2026-11-03)
+
+- **Contexte** : seuls admin et logistique fixent le prix du litre (décision du 31 octobre 2026). L’écran affichait le prix du jour en lecture seule pour les autres rôles, mais trois routes de débit (`POST /api/fuel-card/consumption`, `POST /api/missions/:id/fuel-records` et `/regularize`) prenaient le `unitPrice` du corps de la requête tel quel.
+- **Cause racine** : la règle métier vivait dans l’interface seule. Un appel direct à l’API, par un chauffeur ou un secrétaire, débitait la carte au prix choisi par l’appelant.
+- **Classification** : contrôle d’accès côté client seulement (argent).
+- **Résolution** : `resolveFuelUnitPrice(role, prixEnvoyé, datePlein)` (`server/lib/fuel-unit-price.ts`). Le prix envoyé est retenu si `canWriteFuelPrice(role)`, sinon c’est `getFuelPriceAt(jour du plein)`. Le prix reste obligatoire dans le corps (contrat inchangé). L’empreinte de rejeu compare le prix retenu, donc un prix forgé différent sous la même clé est rejoué, pas refusé.
+- **Prévention vérifiable** : `tests/contract/fuel-price-imposed.contract.test.ts`. Sans le contrôle du rôle, quatre cas passent au rouge.
+- **Leçon** : une restriction affichée par l’écran (champ en lecture seule, bouton masqué) doit avoir son équivalent dans la route qui écrit. `declare-no-refuel` n’a pas de prix, il n’est pas concerné.
+- **Limite connue** : le jour du prix est le jour UTC du plein, alors que l’écran prend le jour local (UTC+1). Cela n’a d’effet qu’entre minuit et 1 h, le jour d’un changement de prix.
+
+## 2026-11-03 — Ajustement de stock rejoué au réessai (idempotence absente, puis clé libérée sur une issue incertaine)
+
+### Contexte
+- `POST /api/parts/:id/update-stock` n'était pas protégé : un réessai après une coupure réseau ou un 5xx appliquait l'ajustement une seconde fois.
+- La garde d'idempotence existante (`server/middleware/idempotency-guard.ts`) libère la clé quand l'enregistrement de la réponse échoue, et reprend une clé restée « en cours » au bout de 60 s. Pour le stock, ces deux comportements rejouent l'ajustement : le commit a déjà eu lieu.
+
+### Cause racine
+- Classification : contrat implicite non outillé (la garde supposait que toute route pouvait être réexécutée une fois l'issue inconnue).
+- Les options vivaient au niveau global : drapeau `idempotency`, délai de reprise, libération sur échec. Aucune route ne pouvait dire « une issue inconnue n'est jamais rejouée ».
+
+### Résolution
+- Options par route dans `server/lib/idempotency-config.ts` :
+  - `keepKeyOnUncertainOutcome` garde la clé si l'enregistrement de la réponse échoue, sur toute 5xx et sur une fin sans JSON. Seuls 401, 403, 408 et 429, qui arrivent avant l'écriture, la libèrent ;
+  - `staleSeconds: null` : la clé n'est jamais reprise, seule son expiration la libère ;
+  - `ignoreFeatureFlag` : la route est protégée quel que soit le drapeau ;
+  - `inProgressMessage` : 409 lisible « vérifiez le stock avant de réessayer ».
+- Côté client, `sendWithSubmissionKey` (`client/src/lib/submission-key.ts`) et la portée `partStockKeyScope(id, delta)` :
+  - le réessai de la même intention renvoie la même clé ;
+  - une nouvelle intention (autre pièce, autre quantité, succès ou refus connu) en prend une nouvelle.
+- Les deux écrans d'ajustement (fiche pièce, liste des pièces) envoient l'en-tête. Leurs envois passent par `useSingleFlightMutate`, donc un double clic ne peut pas envoyer deux fois la même clé en vol. Leurs toasts d'erreur affichent `userMessageOf`, c'est-à-dire le texte du 409.
+- Compromis assumé, le même que pour le plein carburant : le 409 « vérifiez le stock » est une issue connue, donc il libère la clé côté client. Si la personne passe outre le message et renvoie le même delta, l'envoi part avec une nouvelle clé et ajuste le stock. La clé restée « en cours » côté serveur ne sert plus et n'est jamais purgée avant son expiration : une ligne par incident, sans risque.
+
+### Prévention (vérifiable)
+- `tests/contract/parts-update-stock-idempotency.contract.test.ts` :
+  - même clé : rejeu, un seul mouvement ;
+  - l'enregistrement de la réponse échoue après le commit : le réessai reçoit un 409 sans ajustement et la clé reste « en cours » ;
+  - nouvelle clé : l'ajustement s'applique ;
+  - sans clé : comportement inchangé.
+  - Rouge sans le correctif serveur : 2 sur 4.
+- Tests unitaires :
+  - `tests/unit/server/idempotency-guard.test.ts` : drapeau coupé, statuts 5xx et 4xx avant écriture, fin sans JSON ;
+  - `tests/unit/client/submission-key.test.ts` : même intention, nouvelle intention, en-tête aligné sur le serveur.
+- `tests/integration/idempotency-store.test.ts` : `staleSeconds: null` ne reprend jamais une clé en cours.
+
+### Règle Projet (obligatoire)
+- Une route qui écrit du stock ou de l'argent et qui n'est pas rejouable sans risque déclare `keepKeyOnUncertainOutcome: true` et `staleSeconds: null`. Le client garde la clé tant que l'issue est inconnue, et change de clé à chaque nouvelle intention.
+
+## 2026-11-03 — Main rouge en unitaire après une PR e2e seule (#194)
+
+### Contexte
+- #194 n'ajoutait qu'une spec e2e. Elle contenait `getByText("Erreur carburant")` sans `{ exact: true }`, que refuse la garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts` (#155).
+- La CI de la PR, puis celle de main, étaient vertes. Toutes les PR suivantes ont échoué en unitaire.
+
+### Cause racine
+- Classification : carte d'impact incomplète (exécution ciblée).
+- Dans `.github/appfactory-impact.json`, les surfaces `e2e` et `scripts` n'activaient que `typecheck`. Or des gardes unitaires lisent ces répertoires :
+  - les gardes de `tests/unit/e2e/` ;
+  - les parcours `repoFiles` de `it-fails-hygiene` et de `leak-check-hygiene`.
+- Un changement limité à ces répertoires ne lançait donc pas les tests qui les contrôlent.
+- Facteur humain : l'auteur n'avait lancé que tsc, pas la suite unitaire, en se fiant au périmètre « e2e seul ».
+
+### Résolution
+- Spec corrigée dans #195 (`exact: true`).
+- Les surfaces `e2e` et `scripts` activent aussi `unit`.
+
+### Prévention (vérifiable)
+- Les surfaces `e2e` et `scripts` portent maintenant la porte `unit` dans la carte d'impact.
+
+### Règle Projet (obligatoire)
+- Un répertoire lu par une garde unitaire déclenche la porte `unit` dans la carte d'impact.
+- Quand on ajoute une garde qui lit un nouveau répertoire, on vérifie la surface de ce répertoire.
+- En local, `tests/unit` se lance en entier avant toute PR, même limitée à e2e/.
+
+## 2026-11-03 — Fichier de workflow orphelin quand l'enregistrement en base échoue
+
+### Contexte
+- `WorkflowDocumentService.saveWorkflowDocument` écrivait le fichier sous `uploads/workflows/<session>/` puis insérait la ligne `workflow_documents`. Un INSERT refusé (workflow supprimé entre-temps, contrainte) laissait le fichier sans ligne.
+
+### Cause racine
+- Classification : effet de bord non compensé. Deux écritures (disque, base) sans transaction commune, et aucune compensation de la première quand la seconde échoue.
+
+### Résolution
+- L'INSERT échoué supprime le fichier écrit (`fs.rmSync`, `force`), puis l'erreur d'origine remonte. Un échec du ménage est journalisé en `warn`, il ne masque pas l'erreur.
+
+### Prévention (vérifiable)
+- `tests/integration/workflow-document-orphan.test.ts` : workflow inexistant -> rejet et dossier de session vide. Rouge sans le correctif.
+
+### Règle Projet (obligatoire)
+- Un service qui écrit un fichier avant une ligne en base supprime ce fichier si l'écriture en base échoue. Les autres cas déjà couverts : documents véhicule, récépissé de renouvellement, preuves de règlement fournisseur.

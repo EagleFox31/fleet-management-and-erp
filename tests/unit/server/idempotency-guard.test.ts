@@ -112,7 +112,7 @@ describe("garde d'idempotence : conditions d'entrée", () => {
   it("chemin normalisé (casse, encodage) avant comparaison et empreinte", async () => {
     const { store } = fakeStore();
     await guard(store)(fakeReq({ url: "/api/Missions/%37/STATUS/" }), fakeRes() as never, vi.fn());
-    expect(store.reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: 3, key: "k-1", method: "PUT", path: "/missions/7/status" }));
+    expect(store.reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: 3, key: "k-1", method: "PUT", path: "/missions/7/status" }), undefined);
   });
 });
 
@@ -260,5 +260,105 @@ describe("empreinte et statuts rejouables", () => {
   it("2xx et 4xx métier rejoués ; 5xx et refus de session ou de débit libérés", () => {
     for (const s of [200, 201, 400, 404, 409, 422]) expect(isReplayableStatus(s), String(s)).toBe(true);
     for (const s of [401, 403, 408, 429, 500, 503]) expect(isReplayableStatus(s), String(s)).toBe(false);
+  });
+});
+
+/**
+ * Options par route : écriture de stock, qui ne se rejoue pas à l'identique.
+ * Toute issue incertaine garde la clé ; seul un refus avant écriture la libère.
+ */
+describe("garde d'idempotence : route qui garde sa clé (stock)", () => {
+  const STOCK_ROUTES = [
+    {
+      method: "POST",
+      pattern: /^\/parts\/\d+\/update-stock$/,
+      staleSeconds: null,
+      keepKeyOnUncertainOutcome: true,
+      ignoreFeatureFlag: true,
+      inProgressMessage: "Opération en cours ou au résultat incertain : vérifiez le stock avant de réessayer.",
+    },
+  ] as const;
+  const stockReq = (over: Parameters<typeof fakeReq>[0] = {}) =>
+    fakeReq({ method: "POST", url: "/api/parts/9/update-stock", body: { adjustment: -2, reason: "TEST" }, ...over });
+  const stockGuard = (store: IdempotencyStore) => idempotencyGuard(STOCK_ROUTES, store, async (id) => ({ id }));
+
+  it("drapeau offline-writes coupé : la route reste protégée", async () => {
+    delete process.env.FEATURE_FLAGS;
+    const { store } = fakeStore();
+    await stockGuard(store)(stockReq(), fakeRes() as never, vi.fn());
+    expect(store.reserve).toHaveBeenCalled();
+  });
+
+  it("réservation sans reprise d'une clé en cours (staleSeconds null)", async () => {
+    const { store } = fakeStore();
+    await stockGuard(store)(stockReq(), fakeRes() as never, vi.fn());
+    expect(store.reserve).toHaveBeenCalledWith(expect.objectContaining({ path: "/parts/9/update-stock" }), { staleSeconds: null });
+  });
+
+  it("route sans option : réservation au délai par défaut", async () => {
+    const { store } = fakeStore();
+    await guard(store)(fakeReq(), fakeRes() as never, vi.fn());
+    expect(store.reserve).toHaveBeenCalledWith(expect.anything(), undefined);
+  });
+
+  it.each([500, 503])("%i (commit possible, réponse perdue) : clé conservée", async (status) => {
+    const { store, calls } = fakeStore();
+    const res = fakeRes();
+    await stockGuard(store)(stockReq(), res as never, vi.fn());
+    res.status(status).json({ message: "x" });
+    await flush();
+    expect(calls).toEqual(["reserve"]);
+    expect(res.sent).toHaveLength(1);
+  });
+
+  it.each([401, 403, 408, 429])("%i (refus avant écriture) : clé libérée", async (status) => {
+    const { store, calls } = fakeStore();
+    const res = fakeRes();
+    await stockGuard(store)(stockReq(), res as never, vi.fn());
+    res.status(status).json({ message: "x" });
+    await flush();
+    expect(calls).toEqual(["reserve", "release"]);
+  });
+
+  it("réponse terminée sans JSON : clé conservée", async () => {
+    const { store, calls } = fakeStore();
+    const res = fakeRes();
+    await stockGuard(store)(stockReq(), res as never, vi.fn());
+    res.emit("finish");
+    await flush();
+    expect(calls).toEqual(["reserve"]);
+  });
+
+  it("ajustement validé puis enregistrement en échec : le réessai ne rejoue pas l'ajustement", async () => {
+    const { store, calls } = memoryStore();
+    store.complete = vi.fn(async () => {
+      calls.push("complete:failed");
+      throw new Error("write failed");
+    });
+    const res = fakeRes();
+    const route = vi.fn();
+    await stockGuard(store)(stockReq(), res as never, route);
+    expect(route).toHaveBeenCalledTimes(1);
+    res.status(200).json({ quantity: 8 });
+    await flush();
+    expect(calls).toEqual(["reserve", "complete:failed"]);
+    expect(res.sent).toEqual([{ quantity: 8 }]);
+
+    const retryNext = vi.fn();
+    await stockGuard(store)(stockReq(), fakeRes() as never, retryNext);
+    expect(retryNext).toHaveBeenCalledTimes(1);
+    const err = retryNext.mock.calls[0][0] as AppError;
+    expect(err).toBeInstanceOf(AppError);
+    expect(err.status).toBe(409);
+    expect(err.message).toContain("vérifiez le stock");
+  });
+
+  it("nouvelle intention, nouvelle clé : l'ajustement suivant s'exécute", async () => {
+    const stuck = memoryStore();
+    await stockGuard(stuck.store)(stockReq({ key: "k-1" }), fakeRes() as never, vi.fn());
+    const fresh = memoryStore();
+    const route = vi.fn();
+    await stockGuard(fresh.store)(stockReq({ key: "k-2" }), fakeRes() as never, route);
+    expect(route).toHaveBeenCalledWith();
   });
 });

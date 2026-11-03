@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api-error";
-import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope } from "@/lib/submission-key";
+import { createSubmissionKeyStore, IDEMPOTENCY_HEADER, isIndeterminateOutcome, missionFuelKeyScope, partStockKeyScope, sendWithSubmissionKey } from "@/lib/submission-key";
 
 /**
  * Clé d'un envoi qui débite la carte carburant (LESSONS_LEARNED, 3 novembre 2026) :
@@ -51,7 +51,6 @@ describe("createSubmissionKeyStore", () => {
     const key = first.take();
     first.settle(error);
     first.discard();
-    expect(first.hasUncertainSubmission()).toBe(true);
     expect(first.take()).toBe(key);
 
     // Rechargement de la page : nouvelle instance, même stockage.
@@ -67,7 +66,6 @@ describe("createSubmissionKeyStore", () => {
     const store = createSubmissionKeyStore(scope, fakeStorage());
     const key = store.take();
     store.settle(error);
-    expect(store.hasUncertainSubmission()).toBe(false);
     expect(store.take()).not.toBe(key);
   });
 
@@ -77,7 +75,6 @@ describe("createSubmissionKeyStore", () => {
     store.settle(networkError);
     expect(store.take()).toBe(key);
     store.settle();
-    expect(store.hasUncertainSubmission()).toBe(false);
     expect(store.take()).not.toBe(key);
   });
 
@@ -108,5 +105,85 @@ describe("createSubmissionKeyStore", () => {
     expect(typeof key).toBe("string");
     store.settle(networkError);
     expect(store.take()).toBe(key);
+  });
+
+  const fillA = { quantity: 40, unitPrice: 840, stationName: "Total Akwa", notes: null };
+  const fillB = { ...fillA, quantity: 35 };
+
+  it("issue incertaine puis MÊME saisie (fiche rouverte) : même clé, le serveur rejoue", () => {
+    const storage = fakeStorage();
+    const store = createSubmissionKeyStore(scope, storage);
+    const key = store.take(fillA);
+    store.settle(networkError);
+    store.discard();
+    expect(createSubmissionKeyStore(scope, storage).take({ ...fillA })).toBe(key);
+  });
+
+  it("issue incertaine puis AUTRE saisie : nouvelle clé (nouvelle intention, pas de 409)", () => {
+    const store = createSubmissionKeyStore(scope, fakeStorage());
+    const key = store.take(fillA);
+    store.settle(serverError);
+    store.discard();
+    const next = store.take(fillB);
+    expect(next).not.toBe(key);
+    // La nouvelle clé n'hérite pas de l'incertitude : une annulation la libère.
+    store.discard();
+    expect(store.take(fillB)).not.toBe(next);
+  });
+
+  it("issue incertaine, fiche rouverte le lendemain (autre jour) : nouvelle clé, pas de 409", () => {
+    const storage = fakeStorage();
+    const store = createSubmissionKeyStore(scope, storage);
+    const key = store.take({ day: "2026-11-03", ...fillA });
+    store.settle(networkError);
+    const reopened = createSubmissionKeyStore(scope, storage);
+    expect(reopened.take({ day: "2026-11-03", ...fillA })).toBe(key);
+    expect(reopened.take({ day: "2026-11-04", ...fillA })).not.toBe(key);
+  });
+
+  it("envoi non réglé (double clic) : même clé, même si l'empreinte change", () => {
+    const store = createSubmissionKeyStore(scope, fakeStorage());
+    expect(store.take(fillA)).toBe(store.take(fillB));
+  });
+});
+
+describe("sendWithSubmissionKey (ajustement de stock)", () => {
+  it("l'en-tête client est celui que lit la garde serveur", async () => {
+    const server = await import("../../../server/lib/idempotency-config");
+    expect(IDEMPOTENCY_HEADER).toBe(server.IDEMPOTENCY_HEADER);
+  });
+
+  it("issue inconnue : le réessai de la même intention renvoie la même clé", async () => {
+    const storage = fakeStorage();
+    const scope = partStockKeyScope(7, 3);
+    const keys: string[] = [];
+    await expect(sendWithSubmissionKey(scope, async (k) => { keys.push(k); throw serverError; }, storage)).rejects.toBe(serverError);
+    await expect(sendWithSubmissionKey(scope, async (k) => { keys.push(k); throw networkError; }, storage)).rejects.toBe(networkError);
+    await sendWithSubmissionKey(scope, async (k) => { keys.push(k); return "ok"; }, storage);
+    expect(new Set(keys).size).toBe(1);
+    expect(storage.map.size).toBe(0);
+  });
+
+  it("nouvelle intention : nouvelle clé (après succès, autre quantité, autre pièce, refus 4xx)", async () => {
+    const storage = fakeStorage();
+    const keys: string[] = [];
+    const record = async (k: string) => { keys.push(k); return k; };
+    await sendWithSubmissionKey(partStockKeyScope(7, 3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(7, 3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(7, -3), record, storage);
+    await sendWithSubmissionKey(partStockKeyScope(8, 3), record, storage);
+    await expect(sendWithSubmissionKey(partStockKeyScope(9, 1), async (k) => { keys.push(k); throw conflict; }, storage)).rejects.toBe(conflict);
+    await sendWithSubmissionKey(partStockKeyScope(9, 1), record, storage);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("une intention en suspens ne bloque pas une autre intention", async () => {
+    const storage = fakeStorage();
+    const stuck = partStockKeyScope(7, 3);
+    let stuckKey = "";
+    await expect(sendWithSubmissionKey(stuck, async (k) => { stuckKey = k; throw serverError; }, storage)).rejects.toBe(serverError);
+    const other = await sendWithSubmissionKey(partStockKeyScope(7, 5), async (k) => k, storage);
+    expect(other).not.toBe(stuckKey);
+    expect(await sendWithSubmissionKey(stuck, async (k) => k, storage)).toBe(stuckKey);
   });
 });

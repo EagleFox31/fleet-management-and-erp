@@ -1,4 +1,5 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
+import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
@@ -297,6 +298,21 @@ const DOCUMENT_ALERT_TITLES: Record<VehicleDocumentRequirementType, string> = {
 
 const OPEN_RENEWAL_STATUSES = ["pending", "in_progress"] as const;
 const MISSION_FUEL_ALLOWED_STATUSES = ["planned", "assigned", "in_progress", "delivered"] as const;
+
+/**
+ * Statut de la mission relu sous verrou de ligne, dans la transaction du débit (après le verrou de
+ * la carte, avant le contrôle du solde). Une clôture concurrente attend ce verrou, ou le débit attend
+ * la clôture et la voit : aucun plein normal ne passe sur une mission clôturée. Appelé après le rejeu,
+ * pour qu'un nouvel envoi après une coupure renvoie le plein déjà enregistré même si la mission a été
+ * clôturée entre-temps.
+ */
+async function assertMissionAcceptsFuel(tx: DbExecutor, missionId: number): Promise<void> {
+  const [row] = await tx.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId)).for("update");
+  if (!row) throw new AppError(404, "Mission non trouvée.");
+  if (!MISSION_FUEL_ALLOWED_STATUSES.includes(row.status as (typeof MISSION_FUEL_ALLOWED_STATUSES)[number])) {
+    throw new AppError(400, `Enregistrement carburant impossible pour une mission ${row.status}.`);
+  }
+}
 const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
@@ -1042,6 +1058,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     const payloadSchema = z.object({
       vehicleId: z.coerce.number().int().positive(),
       quantity: z.coerce.number().positive(),
+      // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
       date: z.string().trim().min(1).optional(),
       stationName: z.string().trim().min(1).optional(),
@@ -1060,9 +1077,8 @@ router.post("/:id/fuel-records", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
+    const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db
       .select({
@@ -1086,12 +1102,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
-    if (!MISSION_FUEL_ALLOWED_STATUSES.includes(mission.status as (typeof MISSION_FUEL_ALLOWED_STATUSES)[number])) {
-      return res.status(400).json({
-        message: `Enregistrement carburant impossible pour une mission ${mission.status}.`,
-      });
-    }
-
+    // Statut : contrôlé sous le verrou de ligne, après le rejeu (assertMissionAcceptsFuel), pas ici.
     if (!mission.assignmentId || !mission.assignmentVehicleId) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
     }
@@ -1115,7 +1126,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
     const consumption = {
       vehicleId: payload.vehicleId,
       quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
+      unitPrice,
       date: parsedDate.toISOString(),
       stationName: payload.stationName || "MISSION",
       destination: mission.deliveryAddress || "Mission",
@@ -1126,7 +1137,8 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       userId: actorUserId,
       requestKey,
     };
-    // Même clé, même plein : rejoué sous le verrou de la carte, sans second débit ni diffusion.
+    // Même clé, même plein : rejoué sous le verrou de la carte, sans second débit ni diffusion, quel
+    // que soit le statut actuel. Sinon le statut est relu sous le verrou de ligne avant tout débit.
     const submission: FuelSubmission = {
       missionId,
       vehicleId: consumption.vehicleId,
@@ -1137,7 +1149,11 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       notes: buildEnteredFuelNotes(consumption),
     };
     const result = await fuelCardService.recordConsumption(consumption, undefined, {
-      replay: (tx) => findReplayedFuelSubmission(tx, requestKey, submission),
+      replay: async (tx) => {
+        const replayed = await findReplayedFuelSubmission(tx, requestKey, submission);
+        if (!replayed) await assertMissionAcceptsFuel(tx, missionId);
+        return replayed;
+      },
     });
 
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
@@ -1211,6 +1227,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     const payloadSchema = z.object({
       vehicleId: z.coerce.number().int().positive(),
       quantity: z.coerce.number().positive(),
+      // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
       date: z.string().trim().min(1).optional(),
       stationName: z.string().trim().min(1).optional(),
@@ -1231,9 +1248,8 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 
     const payload = parsedPayload.data;
     const parsedDate = payload.date ? new Date(payload.date) : new Date();
-    if (Number.isNaN(parsedDate.getTime())) {
-      return res.status(400).json({ message: "Date de plein invalide." });
-    }
+    if (Number.isNaN(parsedDate.getTime())) throw new AppError(400, "Date de plein invalide.");
+    const unitPrice = await resolveFuelUnitPrice(actorRole, payload.unitPrice, parsedDate);
 
     const [mission] = await db
       .select({
@@ -1306,7 +1322,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     const consumptionData = {
       vehicleId: payload.vehicleId,
       quantity: payload.quantity,
-      unitPrice: payload.unitPrice,
+      unitPrice,
       date: parsedDate.toISOString(),
       stationName: payload.stationName || "MISSION",
       destination: mission.deliveryAddress || "Mission",
@@ -1351,7 +1367,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
           createdBy: actorUserId,
           createdRole: actorRole || null,
           quantity: payload.quantity,
-          unitPrice: payload.unitPrice,
+          unitPrice,
           debitAmount: cost,
         };
 
