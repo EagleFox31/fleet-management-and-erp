@@ -126,3 +126,21 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : 62 sites dans 42 fichiers client affichaient `error.message` brut (dont `instanceof Error ? error.message` et les gabarits `${error.message}`). Ils passent désormais par `userMessageOf(error, repli)`.
 - **Comment** : garde `tests/unit/client/toast-error-message-hygiene.test.ts`, compte par fichier à égalité stricte. Rouge sur main. Deux sites restent gelés, chez c7 (#181) : driver/dashboard.tsx et missions/[id].tsx.
 - **Pourquoi** : AGENTS.md §10. Le message brut peut être technique (réseau, JSON, exception JS) et n'a ni repli ni référence.
+
+## 2026-11-03T16:50:08+01:00 — Mouvement de stock magasin transactionnel
+
+- **Quoi** : `recordStockMovement` lit la pièce `FOR UPDATE` et écrit mouvement et stock dans la même transaction. Sortie au-delà du stock : 409, plus de remise à 0. Pièce absente : 404. Quantité non entière : 400. La route passe par `next` au lieu de renvoyer `error.message`. Les console.* du service et de la route sont migrés vers moduleLogger.
+- **Comment** : test de contrat `warehouse-stock-movement`, 5 cas dont trois sorties concurrentes. Rouge 5 sur 5 sur main, vert avec le correctif.
+- **Pourquoi** : même défaut que `update-stock`, corrigé plus tôt sur l'autre route. Rebase prévu après #184 (même route : garde de rôle, validation).
+
+## 2026-11-03T16:55:14+01:00 — Trame du mouvement de stock en portée personnel
+
+- **Quoi** : `warehouse_stock_movement_recorded` est envoyée aux rôles `PART_CATALOG_EVENT_ROLES` (personnel sauf chauffeur), plus en broadcast. L'entrée `warehouse.routes.ts` sort de la liste gelée de `broadcast-hygiene`.
+- **Comment** : un cas de contrat vérifie que la trame atteint admin, magasinier et technicien, et pas le chauffeur ni le client. Il vérifie aussi qu'un 409 n'émet aucune trame. Rouge sans le correctif de la route.
+- **Pourquoi** : AGENTS.md §11, demande de 0a sur #188. Le stock et les prix ne regardent pas un client.
+
+## 2026-11-03T17:00:51+01:00 — Réserves de relecture sur #188
+
+- **Quoi** : une quantité au-delà de 2^31-1, ou une entrée qui ferait déborder le stock, est refusée en 400 au lieu d'un 500 Postgres. Le compte de cas est corrigé dans LESSONS.
+- **Comment** : deux cas de contrat, rouges sans la borne. Total 8/8.
+- **Pourquoi** : réserves de fleet-securite et fleet-relecteur.
