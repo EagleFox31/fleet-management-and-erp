@@ -35,7 +35,7 @@ import {
   DIFFERENT_FUEL_SUBMISSION_MESSAGE,
   MISSING_FUEL_REQUEST_KEY_MESSAGE,
   MISSION_FUEL_REQUEST_KEY_PATTERN,
-  buildFuelConsumptionNotes,
+  buildEnteredFuelNotes,
   findMissionRegularization,
   isSameFuelSubmission,
   type FuelSubmission,
@@ -1134,7 +1134,7 @@ router.post("/:id/fuel-records", async (req, res, next) => {
       unitPrice: consumption.unitPrice,
       date: payload.date ? consumption.date.slice(0, 10) : null,
       stationName: consumption.stationName,
-      notes: buildFuelConsumptionNotes(consumption),
+      notes: buildEnteredFuelNotes(consumption),
     };
     const result = await fuelCardService.recordConsumption(consumption, undefined, {
       replay: (tx) => findReplayedFuelSubmission(tx, requestKey, submission),
@@ -1325,7 +1325,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       unitPrice: consumptionData.unitPrice,
       date: payload.date ? consumptionData.date.slice(0, 10) : null,
       stationName: consumptionData.stationName,
-      notes: buildFuelConsumptionNotes(consumptionData),
+      notes: buildEnteredFuelNotes(consumptionData),
     };
     const replay = async (tx: DbExecutor) => {
       const record = await findReplayedFuelSubmission(tx, requestKey, submission, { legacyRegularizations: true });

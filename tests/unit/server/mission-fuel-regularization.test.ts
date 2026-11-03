@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MISSION_FUEL_REQUEST_KEY_PATTERN,
+  buildEnteredFuelNotes,
   buildFuelConsumptionNotes,
+  enteredFuelNotes,
   findMissionRegularization,
   isSameFuelSubmission,
   type FuelSubmission,
@@ -51,7 +53,7 @@ describe("rejeu d'un plein : même soumission ou 409", () => {
     unitPrice: 650.555,
     date: "2026-11-03",
     stationName: "TOTAL BONABERI",
-    notes,
+    notes: buildEnteredFuelNotes({ notes: "[REGULARISATION] ticket retrouvé" }),
   };
 
   it("même plein, prix comparé à la précision stockée", () => {
@@ -69,7 +71,8 @@ describe("rejeu d'un plein : même soumission ou 409", () => {
     ["prix", { unitPrice: 651 }],
     ["date", { date: "2026-11-02" }],
     ["station", { stationName: "TOTAL AKWA" }],
-    ["motif (notes)", { notes: buildFuelConsumptionNotes({ notes: "[REGULARISATION] autre motif", destination: "Douala" }) }],
+    ["motif (notes)", { notes: buildEnteredFuelNotes({ notes: "[REGULARISATION] autre motif" }) }],
+    ["marqueur de départ", { notes: buildEnteredFuelNotes({ isPreDeparture: true, notes: "[REGULARISATION] ticket retrouvé" }) }],
   ])("%s différent : autre plein", (_label, change) => {
     expect(isSameFuelSubmission(stored, { ...sent, ...change })).toBe(false);
   });
@@ -77,6 +80,20 @@ describe("rejeu d'un plein : même soumission ou 409", () => {
   it("notes écrites comme par le service (départ, notes, destination, client)", () => {
     expect(buildFuelConsumptionNotes({ isPreDeparture: true, notes: "  n ", destination: "Kribi", clientName: "ACME" }))
       .toBe("[PRE_DEPART] | n | Destination: Kribi - Client: ACME");
+  });
+
+  it("mission modifiée entre deux envois (destination, client) : toujours le même plein", () => {
+    const moved = { ...stored, notes: buildFuelConsumptionNotes({ notes: "[REGULARISATION] ticket retrouvé", destination: "Yaoundé", clientName: "Autre" }) };
+    expect(isSameFuelSubmission(moved, sent)).toBe(true);
+  });
+
+  it.each([
+    [{ destination: "Kribi", clientName: "ACME" }],
+    [{ isPreDeparture: true, destination: "Kribi" }],
+    [{ notes: "a | Destination: piège", destination: "Kribi" }],
+    [{ isPreDeparture: true, notes: "x", destination: "Kribi", clientName: "C" }],
+  ])("partie saisie relue depuis les notes stockées : %o", (data) => {
+    expect(enteredFuelNotes(buildFuelConsumptionNotes(data))).toBe(buildEnteredFuelNotes(data));
   });
 });
 

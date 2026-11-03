@@ -51,6 +51,7 @@ export type FuelSubmission = {
   /** AAAA-MM-JJ, seulement si le client a fourni la date (sinon le serveur prend « maintenant »). */
   date: string | null;
   stationName: string;
+  /** Partie saisie des notes (`buildEnteredFuelNotes`), sans la destination ni le client de la mission. */
   notes: string;
 };
 
@@ -61,7 +62,9 @@ const samePrice = (stored: unknown, sent: number) => Math.abs(Number(stored) - s
 
 /**
  * Vrai si la soumission décrit le même plein que celui déjà enregistré sous sa clé : mission, véhicule,
- * quantité, prix, date (si fournie), station et notes (motif compris pour une régularisation).
+ * quantité, prix, date (si fournie), station et partie saisie des notes (motif compris pour une
+ * régularisation). La destination et le client, recopiés de la mission, ne sont pas comparés : une
+ * mission modifiée entre deux envois ne doit pas transformer un rejeu en 409.
  * Faux : le second envoi est refusé (409), jamais rejoué ni débité.
  */
 export function isSameFuelSubmission(record: StoredFuelRecord, submission: FuelSubmission): boolean {
@@ -72,22 +75,35 @@ export function isSameFuelSubmission(record: StoredFuelRecord, submission: FuelS
     samePrice(record.unitPrice, submission.unitPrice) &&
     (submission.date === null || String(record.date ?? "").slice(0, 10) === submission.date) &&
     (record.stationName ?? "") === submission.stationName &&
-    (record.notes ?? "") === submission.notes
+    enteredFuelNotes(record.notes) === submission.notes
   );
 }
 
-/** Notes d'un débit telles qu'écrites dans fuel_records.notes (une seule source pour l'écriture et le rejeu). */
+const DESTINATION_PREFIX = "Destination: ";
+const SEGMENT_SEPARATOR = " | ";
+
+/** Partie saisie par l'utilisateur : marqueur de départ et notes (motif compris). */
+export function buildEnteredFuelNotes(data: { isPreDeparture?: boolean; notes?: string }): string {
+  return [data.isPreDeparture ? "[PRE_DEPART]" : null, data.notes?.trim() || null]
+    .filter((segment): segment is string => Boolean(segment && segment.trim()))
+    .join(SEGMENT_SEPARATOR);
+}
+
+/** Notes d'un débit telles qu'écrites dans fuel_records.notes : partie saisie, puis destination et client. */
 export function buildFuelConsumptionNotes(data: {
   isPreDeparture?: boolean;
   notes?: string;
   destination: string;
   clientName?: string;
 }): string {
-  return [
-    data.isPreDeparture ? "[PRE_DEPART]" : null,
-    data.notes?.trim() || null,
-    `Destination: ${data.destination}${data.clientName ? ` - Client: ${data.clientName}` : ""}`,
-  ]
-    .filter((segment): segment is string => Boolean(segment && segment.trim()))
-    .join(" | ");
+  const destination = `${DESTINATION_PREFIX}${data.destination}${data.clientName ? ` - Client: ${data.clientName}` : ""}`;
+  return [buildEnteredFuelNotes(data), destination].filter(Boolean).join(SEGMENT_SEPARATOR);
+}
+
+/** Inverse de buildFuelConsumptionNotes : retire le dernier segment « Destination: … » recopié de la mission. */
+export function enteredFuelNotes(stored: string | null): string {
+  const notes = stored ?? "";
+  if (notes.startsWith(DESTINATION_PREFIX)) return "";
+  const at = notes.lastIndexOf(SEGMENT_SEPARATOR + DESTINATION_PREFIX);
+  return at >= 0 ? notes.slice(0, at) : notes;
 }

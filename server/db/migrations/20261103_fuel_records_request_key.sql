@@ -11,4 +11,11 @@ SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS request_key text;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_fuel_records_request_key ON fuel_records (request_key);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key') THEN
+    CREATE UNIQUE INDEX ux_fuel_records_request_key ON fuel_records (request_key);
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'ux_fuel_records_request_key non posé : verrou indisponible ou doublon, nouvel essai au démarrage suivant';
+END $$;

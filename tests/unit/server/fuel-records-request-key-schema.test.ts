@@ -36,7 +36,10 @@ describe("Clé de requête des pleins de mission : init-database et migration ju
   it("colonne et index unique idempotents, sans rien supprimer", () => {
     const sql = fromMigration();
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS request_key text;");
-    expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS ux_fuel_records_request_key ON fuel_records (request_key);");
+    expect(sql).toContain("CREATE UNIQUE INDEX ux_fuel_records_request_key ON fuel_records (request_key);");
+    // Verrou de table indisponible au démarrage : avertissement, pas d'échec (aligné sur DRIVERS_USER_ID_UNIQUE_SQL).
+    expect(sql).toContain("indexname = 'ux_fuel_records_request_key'");
+    expect(sql).toContain("EXCEPTION WHEN lock_not_available OR unique_violation THEN");
     expect(sql).toContain("pg_advisory_xact_lock(hashtext('fleetmaster_migrations'))");
     expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
   });

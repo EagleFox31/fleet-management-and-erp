@@ -568,7 +568,14 @@ export const FUEL_RECORDS_REQUEST_KEY_SQL = `SELECT pg_advisory_xact_lock(hashte
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS request_key text;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_fuel_records_request_key ON fuel_records (request_key);`;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key') THEN
+    CREATE UNIQUE INDEX ux_fuel_records_request_key ON fuel_records (request_key);
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'ux_fuel_records_request_key non posé : verrou indisponible ou doublon, nouvel essai au démarrage suivant';
+END $$;`;
 
 /**
  * Le RAISE WARNING n'atteint pas les logs applicatifs : relit pg_indexes après DRIVERS_USER_ID_UNIQUE_SQL.
@@ -1009,6 +1016,16 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
+    // Le RAISE WARNING n'atteint pas les logs applicatifs : relire pg_indexes.
+    const { rows: requestKeyIndex } = await pool.query(
+      `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key'`,
+    );
+    if (!requestKeyIndex.length) {
+      initLog.warn(
+        "Index ux_fuel_records_request_key non posé (verrou de table indisponible) : le rejeu reste contrôlé sous le " +
+          "verrou de la carte carburant ; nouvel essai au démarrage suivant.",
+      );
+    }
     // Entrée en stock attribuée au réceptionnaire — doit rester ici ET dans
     // server/db/migrations/20261030_part_requirements_received_by.sql (AGENTS.md §5).
     await db.execute(sql`ALTER TABLE part_requirements ADD COLUMN IF NOT EXISTS received_by integer REFERENCES users(id)`);
