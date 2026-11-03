@@ -14,6 +14,7 @@ import {
   parts,
   partsStockMovements,
   partsUsed,
+  statusHistory,
   supplierInvoices,
   suppliers,
   tireRotations,
@@ -83,6 +84,9 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       await db.delete(alerts).where(inArray(alerts.userId, ids.userIds));
       await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
       await db.delete(vehicleAcquisitionWorkflows).where(inArray(vehicleAcquisitionWorkflows.userId, ids.userIds));
+      // Un changement de statut tracé par un compte de test sur un véhicule hors du lot
+      // survit à la cascade vehicle_id : status_history_updated_by_id_users_id_fk bloque.
+      await db.delete(statusHistory).where(inArray(statusHistory.updatedById, ids.userIds));
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -188,6 +192,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
+  // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
+  await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));
