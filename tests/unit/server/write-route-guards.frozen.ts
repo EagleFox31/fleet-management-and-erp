@@ -1,8 +1,13 @@
 /**
  * Routes d'écriture de server/api sans garde de rôle sur leur déclaration, gelées le 3 novembre 2026.
+ * Complétée le même jour quand le scanner a vu isAnyUser, les receveurs `xxxRoutes` et les
+ * déclarations sur plusieurs lignes (relecture de #129).
  * Cette liste ne peut que diminuer : voir write-route-guards.test.ts.
  */
 export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
+  "alerts.routes.ts DELETE relative(alertPath(\":id\"))",
+  "alerts.routes.ts PATCH `${relative(alertPath(\":id\"))}/read`",
+  "alerts.routes.ts POST relative(ALERT_READ_ALL_PATH)",
   "billing.routes.ts POST /invoices/:id/payments",
   "billing.routes.ts POST /invoices/generate",
   "document-renewals.routes.ts PATCH /requests/:id/status",
@@ -10,14 +15,16 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "drivers.routes.ts POST /:id/update-cpc",
   "drivers.routes.ts POST /sync-cpc-statuses",
   "fuel-card.routes.ts POST /consumption",
-  "index.ts POST /auth/login",
-  "index.ts POST /auth/pin-login",
+  "incidents.routes.ts POST /incidents",
+  "index.ts POST /auth/login (apiRouter)",
+  "index.ts POST /auth/pin-login (apiRouter)",
   "missions.routes.ts POST /",
   "missions.routes.ts POST /:id/document-renewal-requests",
   "missions.routes.ts POST /:id/fuel-records",
   "missions.routes.ts POST /:id/fuel-records/declare-no-refuel",
   "missions.routes.ts POST /:id/fuel-records/regularize",
   "missions.routes.ts PUT /:id/status",
+  "notification-settings.routes.ts PATCH /notifications/settings",
   "operations.routes.ts POST /missions/from-fuel",
   "pin-auth.routes.ts POST /auth/pin-login",
   "purchase-orders.routes.ts PATCH /:id/lines/:lineId",
@@ -45,6 +52,10 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "vehicle-document-types.routes.ts PATCH /vehicle-document-types/:code",
   "vehicle-document-types.routes.ts POST /vehicle-document-types",
   "warehouse.routes.ts POST /stock-movement",
+  "work-order-items.routes.ts DELETE /:id (workOrderItemDetailRoutes)",
+  "work-order-items.routes.ts PATCH /:id (laborCatalogWriteRoutes)",
+  "work-order-items.routes.ts PATCH /:id (workOrderItemDetailRoutes)",
+  "work-order-items.routes.ts POST / (laborCatalogWriteRoutes)",
   "workflows.routes.ts PATCH /workflows/vehicle-acquisition/:sessionId",
   "workflows.routes.ts POST /workflows/vehicle-acquisition",
   "workshop-labor-rates.routes.ts POST /",

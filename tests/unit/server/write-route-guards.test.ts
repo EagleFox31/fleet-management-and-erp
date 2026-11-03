@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { API_DIR, findUnguardedWriteRoutes, WRITE_ROUTE } from "../../support/write-route-scan";
+import {
+  API_DIR,
+  countAnyWriteCalls,
+  findUnguardedWriteRoutes,
+  findWriteRoutes,
+  findWriteRoutesIn,
+  WRITE_ROUTE,
+} from "../../support/write-route-scan";
 import { FROZEN_UNGUARDED_WRITE_ROUTES } from "./write-route-guards.frozen";
 
 /**
@@ -31,5 +38,35 @@ describe("routes d'écriture de server/api : rôles déclarés sur la route", ()
   it("la liste gelée ne garde que des routes encore sans garde (elle ne fait que diminuer)", () => {
     const stale = FROZEN_UNGUARDED_WRITE_ROUTES.filter((route) => !found.includes(route));
     expect(stale, "Retirer ces lignes de write-route-guards.frozen.ts").toEqual([]);
+  });
+
+  it("le scanner voit autant de routes qu'un compte grossier des .post/.put/.patch/.delete", () => {
+    // Un écart signale un receveur ou une forme de déclaration que WRITE_ROUTE ne reconnaît pas.
+    expect(findWriteRoutes().length).toBe(countAnyWriteCalls());
+  });
+});
+
+describe("scanner des routes d'écriture : faux verts connus", () => {
+  const scan = (source: string) => findWriteRoutesIn("x.routes.ts", source);
+
+  it("isAnyUser et authenticate ne sont pas des gardes de rôle", () => {
+    expect(scan(`router.post("/a", isAnyUser, async (req, res) => {});`)).toEqual([
+      { id: "x.routes.ts POST /a", guarded: false },
+    ]);
+    expect(scan(`router.patch("/b", authenticate, handler);`)[0].guarded).toBe(false);
+    expect(scan(`router.delete("/c", isAnyUser, isStaff, async (req, res) => {});`)[0].guarded).toBe(true);
+  });
+
+  it("un receveur xxxRoutes est scanné", () => {
+    expect(scan(`laborCatalogWriteRoutes.patch("/:id", async (req, res) => {});`)).toEqual([
+      { id: "x.routes.ts PATCH /:id (laborCatalogWriteRoutes)", guarded: false },
+    ]);
+  });
+
+  it("une déclaration sur plusieurs lignes est lue jusqu'au handler", () => {
+    const multi = `router.put(\n  "/d",\n  authorize(["admin"]),\n  async (req, res) => {},\n);`;
+    expect(scan(multi)).toEqual([{ id: "x.routes.ts PUT /d", guarded: true }]);
+    const late = `router.put(\n  "/e",\n  async (req, res) => { isStaff; },\n);`;
+    expect(scan(late)[0].guarded).toBe(false);
   });
 });
