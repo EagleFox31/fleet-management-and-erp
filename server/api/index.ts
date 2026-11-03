@@ -5,6 +5,7 @@ import vehiclesRoutes from "./vehicles.routes";
 import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
+import fuelRecordsRoutes from "./fuel-records.routes";
 import clientsRoutes from "./clients.routes";
 import operationsRoutes from "./operations.routes";
 import billingRoutes from "./billing.routes";
@@ -123,6 +124,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(adminUsersGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   apiRouter.use(workflowsRoutes);
+  // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
+  apiRouter.use(fuelRecordsRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
