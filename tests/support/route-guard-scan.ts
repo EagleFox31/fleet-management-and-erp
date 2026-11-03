@@ -184,25 +184,49 @@ export function extendKinds(base: GuardKinds, rawSource: string): GuardKinds {
     roles: base.roles,
   };
   const src = stripComments(rawSource);
-  for (const m of src.matchAll(/(?:^|[\s;])(?:export\s+)?const\s+(\w+)\s*(?::[^=\n]+)?=\s*/g)) {
+  const setKind = (name: string, kind: "restrictive" | "permissive" | "neutral") => {
+    kinds.restrictive.delete(name);
+    kinds.permissive.delete(name);
+    kinds.neutral.delete(name);
+    kinds[kind].add(name);
+  };
+  // Nom de garde connue redéclaré localement sans être reclassé : il ne vaut plus garde (échec fermé).
+  const shadow = (name: string) => {
+    if (kinds.restrictive.has(name) || kinds.neutral.has(name)) setKind(name, "permissive");
+  };
+  // `import { a as b }` : b vaut ce que vaut a, jamais ce que son nom laisse croire.
+  for (const m of src.matchAll(/\bimport\s+(?:type\s+)?\{([^}]*)\}\s*from/g)) {
+    for (const spec of m[1].split(",")) {
+      const alias = spec.trim().match(/^(\w+)\s+as\s+(\w+)$/);
+      if (!alias || alias[1] === alias[2]) continue;
+      const [, original, local] = alias;
+      setKind(local, kinds.restrictive.has(original) ? "restrictive" : kinds.neutral.has(original) ? "neutral" : "permissive");
+    }
+  }
+  for (const m of src.matchAll(/\bfunction\s+(\w+)\s*\(/g)) shadow(m[1]);
+  for (const m of src.matchAll(/(?:^|[\s;])(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*/g)) {
     const name = m[1];
     const at = m.index! + m[0].length;
     const call = src.slice(at).match(/^([\w.]+)\s*\(/);
     if (call) {
       const open = at + call[0].length - 1;
       const close = matchingClose(src, open);
-      if (close === -1) continue;
+      if (close === -1) {
+        shadow(name);
+        continue;
+      }
       const inner = src.slice(open + 1, close);
-      if (call[1] === "authorize") (rolesExcludeClient(inner, kinds.roles) ? kinds.restrictive : kinds.permissive).add(name);
-      else if (NEUTRAL_CALLEES.has(call[1])) kinds.neutral.add(name);
+      if (call[1] === "authorize") setKind(name, rolesExcludeClient(inner, kinds.roles) ? "restrictive" : "permissive");
+      else if (NEUTRAL_CALLEES.has(call[1])) setKind(name, "neutral");
       else if (call[1] === "sessionGuard") {
         const kind = classifyDispatcher(inner, kinds);
-        if (kind) kinds[kind].add(name);
-      }
+        if (kind) setKind(name, kind);
+        else shadow(name);
+      } else shadow(name);
     } else if (src[at] === "[") {
       const close = matchingClose(src, at);
       if (close !== -1) kinds.arrays.set(name, splitTopLevel(src.slice(at + 1, close)));
-    }
+    } else shadow(name);
   }
   return kinds;
 }
@@ -211,6 +235,8 @@ export function extendKinds(base: GuardKinds, rawSource: string): GuardKinds {
 function classifyDispatcher(inner: string, kinds: GuardKinds): "restrictive" | "permissive" | null {
   const cited = [...new Set(inner.match(/\b\w+\b/g) ?? [])].filter((w) => kinds.restrictive.has(w) || kinds.permissive.has(w));
   if (cited.length === 0) return null;
+  // `next()` appelé en direct : une branche laisse passer sans aucune des gardes citées.
+  if (/\bnext\s*\(\s*\)/.test(inner)) return "permissive";
   return cited.every((w) => kinds.restrictive.has(w)) ? "restrictive" : "permissive";
 }
 
@@ -267,7 +293,11 @@ export function classifyAuthGuards(authSource: string, roleConstants: RoleConsta
   const base = emptyKinds(roleConstants);
   base.restrictive.add("isAdmin");
   base.permissive.add("authenticate");
-  return extendKinds(base, authSource);
+  const kinds = extendKinds(base, authSource);
+  // `isAdmin = sessionGuard(...)` contrôle le rôle sans citer de garde : sa lecture dans auth.ts le déclasse.
+  kinds.permissive.delete("isAdmin");
+  kinds.restrictive.add("isAdmin");
+  return kinds;
 }
 
 /** Contrôles de cloison reconnus (propriétaire, OT lisible). */
@@ -287,9 +317,47 @@ export function firstDataSend(body: string): number {
     const close = matchingClose(body, open);
     const code = close === -1 ? "" : body.slice(open + 1, close).trim();
     if (!/^[45]\d\d$/.test(code)) return m.index!;
+    // une réponse d'erreur qui porte autre chose qu'un message littéral peut porter la donnée
+    const chained = body.slice(close + 1).match(/^\s*\.\s*(json|send)\s*\(/);
+    if (chained) {
+      const payloadOpen = close + 1 + chained[0].length - 1;
+      const payloadClose = matchingClose(body, payloadOpen);
+      const payload = payloadClose === -1 ? "?" : body.slice(payloadOpen + 1, payloadClose).trim();
+      if (!isMessagePayload(payload)) return m.index!;
+    }
   }
   const pipe = body.search(/\.\s*pipe\(\s*res\b/);
   return pipe;
+}
+
+/** Corps d'erreur sans donnée : vide, chaîne littérale, ou objet littéral sans `await`, appel ni spread. */
+function isMessagePayload(payload: string): boolean {
+  if (payload === "" || /^(["'])[^"']*\1$/.test(payload)) return true;
+  return payload.startsWith("{") && payload.endsWith("}") && !/\bawait\b|\.\.\.|\w\s*\(/.test(blankStrings(payload));
+}
+
+/** Vide le contenu des chaînes (positions conservées) : un mot dans un message n'est pas du code. */
+export function blankStrings(source: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === "\\") {
+        out += "  ";
+        i++;
+        continue;
+      }
+      if (c === quote) {
+        quote = null;
+        out += c;
+      } else out += c === "\n" ? "\n" : " ";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    out += c;
+  }
+  return out;
 }
 
 export type GetRoute = {
@@ -302,6 +370,8 @@ export type GetRoute = {
   headerArgs: string[];
   mountPrefix: string;
   routerVar: string;
+  /** Position de la déclaration dans le source sans commentaires (pour les `use` posés avant). */
+  at: number;
 };
 
 function routerVarsOf(source: string): Set<string> {
@@ -335,6 +405,7 @@ export function extractGetRoutes(file: string, rawSource: string, mounts: Map<st
       headerArgs,
       mountPrefix,
       routerVar: m[1],
+      at: m.index!,
     });
   }
   return out;
@@ -369,11 +440,28 @@ export function isWorkOrderRead(route: Pick<GetRoute, "path" | "mountPrefix">): 
 
 /** Le contrôle de cloison apparaît-il avant le premier envoi de donnée ? */
 export function scopeCheckedBeforeSend(body: string, markers: RegExp[]): boolean {
-  const sendAt = firstDataSend(body);
+  const code = blankStrings(body);
+  const sendAt = firstDataSend(code);
   return markers.some((marker) => {
-    const at = body.search(marker);
-    return at !== -1 && (sendAt === -1 || at < sendAt);
+    const global = new RegExp(marker.source, marker.flags.includes("g") ? marker.flags : `${marker.flags}g`);
+    // cherché dans le source (le marqueur `role === "client"` contient une chaîne), retenu seulement s'il commence hors chaîne
+    return [...body.matchAll(global)].some(
+      (m) => code[m.index!] === body[m.index!] && (sendAt === -1 || m.index! < sendAt) && markerUsed(code, m.index!, m[0]),
+    );
   });
+}
+
+/**
+ * Un contrôle dont le résultat est jeté ne protège rien : `const s = ownerScopeOf(...)` sans usage
+ * de `s`, ou `canAccessOwned(...)` / `ownerScopeOf(...)` en instruction seule.
+ * `assertWorkOrderReadable(...)` lève une erreur : en instruction seule, il protège.
+ */
+function markerUsed(code: string, at: number, word: string): boolean {
+  if (word === "assertWorkOrderReadable" || !/^\w+$/.test(word)) return true;
+  const before = code.slice(0, at);
+  const assigned = before.match(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:await\s+)?$/);
+  if (assigned) return new RegExp(String.raw`\b${assigned[1]}\b`).test(code.slice(at + word.length));
+  return !/(?:^|[;{}])\s*(?:await\s+)?$/.test(before);
 }
 
 /**
@@ -402,12 +490,14 @@ export function sourceFiles(dir: string): string[] {
  * Gardes posées sur tout un routeur par `router.use(garde)` (sans chemin) : identifiants nus,
  * `authorize(...)`, `sessionGuard(...)` et spreads. Les autres appels (`express.json()`) sont du bruit.
  */
-export function routerLevelGuards(rawSource: string, kinds: GuardKinds): Map<string, string[]> {
+export function routerLevelGuards(rawSource: string, kinds: GuardKinds, before: number = Number.POSITIVE_INFINITY): Map<string, string[]> {
   // un identifiant nu n'est lu que s'il est une garde connue : `use(sessionMiddleware)`, `use(unRouteur)` sont du bruit
   const known = (a: string) => !/^\w+$/.test(a) || kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
   const source = stripComments(rawSource);
   const out = new Map<string, string[]>();
   for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(/g)) {
+    // Express applique les `use` dans l'ordre : un `use` posé après la route ne la couvre pas.
+    if (m.index! >= before) break;
     const open = m.index! + m[0].length - 1;
     const close = matchingClose(source, open);
     if (close === -1) continue;
@@ -460,8 +550,12 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
   const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
   // gardes locales de index.ts et des middlewares qu'il importe (ex. `exportsGuard`)
   let indexKinds = extendKinds(baseKinds, "");
-  for (const name of RESTRICTIVE_ALLOWLIST["server/middleware/exports-guard.ts"]) indexKinds.restrictive.add(name);
   for (const path of sourceFiles(join(serverDir, "middleware"))) indexKinds = extendKinds(indexKinds, readFileSync(path, "utf8"));
+  // classements faits à la main, reposés après la lecture des fichiers où ces gardes sont définies
+  for (const name of [...RESTRICTIVE_ALLOWLIST["server/middleware/exports-guard.ts"], ...baseKinds.restrictive]) {
+    indexKinds.permissive.delete(name);
+    indexKinds.restrictive.add(name);
+  }
   const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
   indexKinds = extendKinds(indexKinds, indexSource);
   const mounts = parseMounts(indexSource, indexKinds);
@@ -476,8 +570,8 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
     const kinds = extendKinds(baseKinds, raw);
     for (const name of RESTRICTIVE_ALLOWLIST[file] ?? []) kinds.restrictive.add(name);
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
-    const routerGuards = routerLevelGuards(raw, kinds);
     for (const route of extractGetRoutes(file, raw)) {
+      const routerGuards = routerLevelGuards(raw, kinds, route.at);
       // un fichier peut exporter plusieurs routeurs : on rattache par variable, sinon au seul montage connu
       const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
       const prefix = own?.prefix ?? "";

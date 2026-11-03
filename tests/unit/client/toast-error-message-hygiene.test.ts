@@ -16,10 +16,7 @@ import { describe, expect, it } from "vitest";
  * d'occurrences. Égalité stricte : la liste ne peut que diminuer, et un site corrigé doit
  * en sortir.
  */
-const FROZEN: Record<string, number> = {
-  "client/src/pages/driver/dashboard.tsx": 1,
-  "client/src/pages/missions/[id].tsx": 1,
-};
+const FROZEN: Record<string, number> = {};
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 const clientDir = join(root, "client", "src");

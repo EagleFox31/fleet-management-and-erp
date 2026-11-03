@@ -58,3 +58,39 @@ export async function holdsAdvisoryLock(tx: DbExecutor): Promise<boolean> {
   const rows = (result as unknown as { rows?: Array<{ n: number }> }).rows ?? (result as unknown as Array<{ n: number }>);
   return Number(rows[0]?.n ?? 0) > 0;
 }
+
+/**
+ * Une transaction de test tient le verrou de ligne de la mission (SELECT … FOR UPDATE) ; l'écriture
+ * lancée pendant ce temps doit attendre. `during(tx)` joue, sous ce verrou, une écriture concurrente
+ * (ex. une régularisation validée) que l'écriture attendue ne doit pas effacer.
+ */
+export async function expectWaitsForMissionRowLock<T>(
+  missionId: number,
+  write: () => Promise<T>,
+  during?: (tx: DbExecutor) => Promise<void>,
+): Promise<T> {
+  await Promise.all(Array.from({ length: 4 }, () => db.execute(sql`SELECT 1`)));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let markAcquired!: () => void;
+  const acquired = new Promise<void>((resolve) => (markAcquired = resolve));
+  const done = db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM missions WHERE id = ${missionId} FOR UPDATE`);
+    markAcquired();
+    await gate;
+    if (during) await during(tx);
+  });
+  await acquired;
+  let settled = false;
+  const pending = write().finally(() => {
+    settled = true;
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, BLOCK_WINDOW_MS));
+    expect(settled, "l'écriture a abouti sans attendre le verrou de ligne de la mission").toBe(false);
+  } finally {
+    release();
+    await done;
+  }
+  return pending;
+}
