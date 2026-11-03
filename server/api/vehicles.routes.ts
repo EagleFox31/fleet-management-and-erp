@@ -48,7 +48,7 @@ const broadcastVehicleUpdate = (
   broadcastUpdate(eventType, { ...envelope, payload, scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] } });
   broadcastUpdate(eventType, { ...envelope, payload: reducedPayload, scope: { type: "roles", roles: ["driver"] } });
   if (typeof ownerId === "number" && Number.isInteger(ownerId) && ownerId > 0) {
-    broadcastUpdate(eventType, { ...envelope, payload: reducedPayload, scope: { type: "user", userIds: [ownerId] } });
+    broadcastUpdate(eventType, { ...envelope, actor: null, payload: reducedPayload, scope: { type: "user", userIds: [ownerId] } });
   }
 };
 

@@ -120,7 +120,7 @@ const normalizeInvoiceItems = (value: unknown): InvoicePdfItem[] | undefined => 
 // Admin: accès complet
 // Secretary: créer, consulter, enregistrer paiements  
 // Logistics: créer, consulter
-const canAccessBilling = authorize(['admin', 'secretary', 'logistics']);
+const canAccessBilling = authorize([...CLIENT_BILLING_EVENT_ROLES]);
 const canRecordPayment = authorize(['admin', 'secretary']);
 
 const broadcastClientInvoiceUpdate = (

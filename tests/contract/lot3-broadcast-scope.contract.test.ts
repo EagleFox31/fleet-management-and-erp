@@ -11,7 +11,7 @@ import { resolveRecipients, normalizeScope } from "../../server/lib/realtime-sco
  * personnel : l'événement de A atteint le personnel et A, jamais B. Les destinataires sont
  * calculés par `resolveRecipients`, le même module que le serveur WebSocket.
  */
-const ACTORS = { admin: "admin", staff: "workshop_manager", driver: "driver", clientA: "client", clientB: "client" } as const;
+const ACTORS = { admin: "admin", secretary: "secretary", logistics: "logistics", staff: "workshop_manager", driver: "driver", clientA: "client", clientB: "client" } as const;
 type Actor = keyof typeof ACTORS;
 const ids = createIdBag();
 const token = uniqueTestToken("l3bs");
@@ -21,7 +21,7 @@ let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 let vehicleA = 0;
 
 /** Qui reçoit chaque trame émise depuis le dernier `beforeEach`, par acteur. */
-function receivers(eventType: string): { actors: Actor[][]; payloads: any[] } {
+function receivers(eventType: string): { actors: Actor[][]; payloads: any[]; datas: any[] } {
   const index = { byUser: new Map<number, Set<Actor>>(), byRole: new Map<string, Set<Actor>>() };
   (Object.keys(ACTORS) as Actor[]).forEach((actor) => {
     index.byUser.set(session.userIdOf(actor), new Set([actor]));
@@ -32,6 +32,7 @@ function receivers(eventType: string): { actors: Actor[][]; payloads: any[] } {
   return {
     actors: calls.map(([, data]) => [...resolveRecipients(normalizeScope(data.scope, null), index)].sort()),
     payloads: calls.map(([, data]) => data.payload),
+    datas: calls.map(([, data]) => data),
   };
 }
 
@@ -74,9 +75,18 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
   it("vehicle_maintenance_position_updated : jamais B", async () => {
     const res = await session.call("PUT", `/api/vehicles/${vehicleA}/maintenance-position`, { actor: "staff", body: { position: "Zone A" } });
     expect(res.status).toBe(200);
-    const flat = receivers("vehicle_maintenance_position_updated").actors.flat();
-    expect(flat).toEqual(expect.arrayContaining(["admin", "staff", "clientA"]));
+    const { actors, payloads, datas } = receivers("vehicle_maintenance_position_updated");
+    const flat = actors.flat();
+    expect(flat).toEqual(expect.arrayContaining(["admin", "staff", "clientA", "driver"]));
     expect(flat).not.toContain("clientB");
+    actors.forEach((list, i) => {
+      if (list.includes("clientA") || list.includes("driver")) {
+        expect(payloads[i].vehicle).toBeUndefined();
+        expect(payloads[i].vehicleId).toBe(vehicleA);
+      }
+      // La trame du propriétaire ne nomme pas l'acteur du personnel.
+      if (list.includes("clientA")) expect(datas[i].actor).toBeNull();
+    });
   });
 
   it("client_created : personnel seul, aucun compte client", async () => {
@@ -100,7 +110,7 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     });
     expect(res.status).toBe(200);
     const flat = receivers("client_invoice_payment_recorded").actors.flat();
-    expect(flat).toContain("admin");
+    expect(flat).toEqual(expect.arrayContaining(["admin", "secretary", "logistics"]));
     expect(flat).not.toContain("clientA");
     expect(flat).not.toContain("clientB");
     expect(flat).not.toContain("driver");
