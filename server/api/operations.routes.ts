@@ -7,6 +7,7 @@ import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
 import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
+import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 
 const log = moduleLogger("operations");
 const router = Router();
@@ -134,7 +135,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
 router.get("/missions/upcoming", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getUpcomingMissions(await driverScopeOf(req.user));
-    res.json(missions);
+    res.json(redactVehiclePriceDeep(req.user, missions));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching upcoming missions:" }));
   }
@@ -147,7 +148,7 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
 router.get("/missions/active", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getActiveMissions(await driverScopeOf(req.user));
-    res.json(missions);
+    res.json(redactVehiclePriceDeep(req.user, missions));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching active missions:" }));
   }
@@ -170,7 +171,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
 
     const missions = await operationsService.getAllMissions(filters, await driverScopeOf(req.user));
 
-    res.json(missions);
+    res.json(redactVehiclePriceDeep(req.user, missions));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions:" }));
   }
@@ -192,7 +193,7 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
 
     const result = await operationsService.getMissionsByClient(clientName, filters);
 
-    res.json(result);
+    res.json(redactVehiclePriceDeep(req.user, result));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions by client:" }));
   }

@@ -38,6 +38,7 @@ import { AppError, isAppError } from "./lib/app-error";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { redactVehiclePrice } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
@@ -994,7 +995,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
       }
       
-      return res.status(200).json(vehicle);
+      return res.status(200).json(redactVehiclePrice(user, vehicle));
     } catch (error) {
       console.error("Get vehicle error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
@@ -1014,7 +1015,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // `createVehicle` consigne déjà le statut initial dans l'historique : ne pas le doubler ici.
       const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
       
-      return res.status(201).json(vehicle);
+      return res.status(201).json(redactVehiclePrice(req.user, vehicle));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ 
@@ -1075,7 +1076,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `Véhicule créé via workflow d'acquisition`
       );
       
-      return res.status(201).json(vehicle);
+      return res.status(201).json(redactVehiclePrice(req.user, vehicle));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ 
@@ -1142,7 +1143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         broadcastVehicleTankCapacityChanged(id, req.requestId);
       }
 
-      return res.status(200).json(updatedVehicle);
+      return res.status(200).json(redactVehiclePrice(req.user, updatedVehicle));
     } catch (error) {
       // Filet : la contrainte de capacité refusée par la base (storage.updateVehicle remonte les CHECK).
       if (isCheckViolation(error) && pgConstraintOf(error) === "vehicles_tank_capacity_l_positive") {
@@ -2529,11 +2530,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ====== ENDPOINTS D'EXPORT DE DONNÉES ======
 
   // Export des véhicules en XLSX
-  app.get("/api/exports/vehicles", authenticate, async (req, res) => {
+  app.get("/api/exports/vehicles", isAnyUser, async (req, res) => {
     try {
       console.log('Exporting vehicles data to XLSX...');
       const { exportService } = await import("./services/export-service");
-      const xlsxBuffer = await exportService.exportVehiclesXLSX();
+      const xlsxBuffer = await exportService.exportVehiclesXLSX(req.user);
       
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=vehicules_${new Date().toISOString().split('T')[0]}.xlsx`);

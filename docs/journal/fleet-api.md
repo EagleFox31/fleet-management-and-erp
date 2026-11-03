@@ -164,3 +164,10 @@ Règles : `docs/journal/README.md`.
 - **Comment** : `warehouse.routes.ts`, `stock-alerts-service.ts`, `routes.ts`, contrat a5 (2 cas de plus).
 - **Pourquoi** : retours de fleet-securite et du relecteur sur #184 ; les 6 chemins retirés sont servis plus tôt par le routeur monté avant `registerRoutes`.
 - **Reste** : transaction et plancher `Math.max` du mouvement de stock au lot suivant.
+
+## 2026-11-03 — Prix d'achat du véhicule réservé à admin, logistique et secrétariat
+- **Agent** : fleet-api · **Branche** : `fix/vehicle-purchase-price-scope`
+- **Quoi** : `vehicles.purchasePrice` n'est plus servi qu'à admin, logistics, secretary (`VEHICLE_PURCHASE_PRICE_READ_ROLES`) ; tout autre rôle le reçoit à `null` (clé conservée) en réponse comme en trame WebSocket. Colonne « Prix d'achat » retirée de l'export XLSX pour les autres rôles ; champ du formulaire véhicule masqué.
+- **Comment** : `shared/constants/roles.ts` (constante + `canReadVehiclePurchasePrice`), `server/lib/vehicle-price-scope.ts` (`redactVehiclePrice`, `redactVehiclePriceDeep`, remplace le masquage chauffeur de `operations-service`), application explicite sur `vehicles.routes.ts` (liste, all, expiring/expired, stats, all-with-status, PUT kilométrage et position, trame temps réel scindée par rôle), `operations.routes.ts` (4 lectures de missions), `routes.ts` en place (GET/POST/PATCH véhicule, activate-from-workflow, export en `isAnyUser`), `vehicle-form.tsx`. Contrat `vehicle-purchase-price-scope` (50 cas), unitaire du helper, entrée retirée de `vehicle-routes-guard` (export désormais gardé).
+- **Pourquoi** : décision métier du 3 novembre 2026. Pas de middleware global sur `res.json` : `authenticate` ne charge pas `req.user` et les fiches pneu portent aussi un `purchasePrice`.
+- **Reste / risques** : KPI direction `acquisitionHT` (contrat partagé figé) non expurgé, décision à prendre ; toute nouvelle sortie qui joint `vehicles` doit passer par le helper.

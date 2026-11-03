@@ -191,6 +191,19 @@ export function canEditTankCapacity(role: string | null | undefined): boolean {
   return (VEHICLE_PATCH_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
+/**
+ * Lecture du prix d'achat d'un véhicule (`vehicles.purchasePrice`), décision du 3 novembre 2026 :
+ * administrateur, logistique et secrétariat seulement. Tout autre rôle (chauffeur, client, chef
+ * d'atelier, technicien, magasinier, direction…) ne le reçoit dans aucune réponse ni trame temps réel.
+ * Le serveur le retire par `redactVehiclePrice` (server/lib/vehicle-price-scope.ts) ; l'interface
+ * masque le bloc avec `canReadVehiclePurchasePrice`.
+ */
+export const VEHICLE_PURCHASE_PRICE_READ_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+
+export function canReadVehiclePurchasePrice(role: string | null | undefined): boolean {
+  return (VEHICLE_PURCHASE_PRICE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 

@@ -344,8 +344,8 @@ export class OperationsService {
     const missionsList = results.map(r => ({
       ...r.mission,
       client: r.client,
-      // Le prix d'achat nourrit l'amortissement des coûts, refusés au chauffeur (décision du 3 novembre 2026).
-      vehicle: driverScope && r.vehicle ? { ...r.vehicle, purchasePrice: null } : r.vehicle,
+      // Prix d'achat expurgé par les routes (redactVehiclePriceDeep), selon le rôle du lecteur.
+      vehicle: r.vehicle,
       assignment: r.assignment,
     }));
 
