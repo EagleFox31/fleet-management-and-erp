@@ -14,7 +14,7 @@ import { uniqueTestToken } from "../support/ids";
  * sur tout véhicule. Un refus n'écrit rien : ni kilométrage, ni clé d'idempotence.
  */
 
-const ACTORS = { driver: "driver", logistics: "logistics" } as const;
+const ACTORS = { driver: "driver", unlinked: "driver", logistics: "logistics" } as const;
 type Actor = keyof typeof ACTORS;
 
 const MESSAGE = "Vous ne pouvez saisir le kilométrage que du véhicule qui vous est affecté.";
@@ -78,11 +78,11 @@ async function mileageOf(vehicleId: number) {
   return row.mileage;
 }
 
-async function keyRow(key: string) {
+async function keyRow(key: string, actor: Actor = "driver") {
   const [row] = await db
     .select()
     .from(idempotencyKeys)
-    .where(and(eq(idempotencyKeys.userId, session.userIdOf("driver")), eq(idempotencyKeys.key, key)));
+    .where(and(eq(idempotencyKeys.userId, session.userIdOf(actor)), eq(idempotencyKeys.key, key)));
   return row;
 }
 
@@ -129,6 +129,18 @@ describe("Kilométrage : un chauffeur ne saisit que son véhicule affecté", { t
     expect(res.status).toBe(403);
     expect(res.body?.message).toBe(MESSAGE);
     expect(await mileageOf(closed.id)).toBe(100);
+  });
+
+  it("compte chauffeur sans fiche : 403 lisible, kilométrage et clé inchangés", async () => {
+    // Véhicule bien affecté, mais à la fiche d'un autre compte : sans fiche, aucun véhicule n'est le sien.
+    const assigned = await vehicleAssignedToDriver("in_progress");
+    const key = uniqueTestToken("km");
+
+    const res = await put(assigned.id, 1000, "unlinked", key);
+    expect(res.status).toBe(403);
+    expect(res.body?.message).toBe(MESSAGE);
+    expect(await mileageOf(assigned.id)).toBe(100);
+    expect(await keyRow(key, "unlinked")).toBeUndefined();
   });
 
   it("personnel : 200 sur un véhicule sans affectation", async () => {
