@@ -45,3 +45,11 @@ export function renewalReceiptErrorOf(error: unknown): AppError | null {
   if (code !== "23514") return null;
   return new AppError(400, "Le récépissé est incomplet : fichier et date de validité sont obligatoires ensemble.", { cause: error });
 }
+
+/**
+ * Copie d'une ligne de demande (ou de document) sans aucun chemin disque : `receiptFilePath`,
+ * `proofFilePath`, `filePath`. Seule porte de sortie des lignes vers les réponses et les diffusions.
+ */
+export function withoutDiskPaths<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !/file_?path$/i.test(key)));
+}

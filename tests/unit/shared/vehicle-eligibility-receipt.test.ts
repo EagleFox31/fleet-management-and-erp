@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 
-// Horloge injectée, composantes locales : indépendant du fuseau de la machine.
-const jour = (d: number) => new Date(2026, 10, d, 12, 0, 0);
+// Horloge injectée en UTC : indépendant du fuseau de la machine.
+const jour = (d: number) => new Date(Date.UTC(2026, 10, d, 12, 0, 0));
 const base = { status: "operational", insuranceExpiry: "2026-10-01" } as const;
 
 describe("récépissé dans l'éligibilité (règle unique)", () => {

@@ -14,8 +14,8 @@ import { createTestVehicle } from "../support/factories";
  */
 
 const ids = createIdBag();
-const JOUR_J = new Date(2026, 10, 3, 12, 0, 0); // 3 novembre 2026, midi local
-const LENDEMAIN = new Date(2026, 10, 4, 12, 0, 0);
+const JOUR_J = new Date(Date.UTC(2026, 10, 3, 12, 0, 0)); // 3 novembre 2026, midi UTC
+const LENDEMAIN = new Date(Date.UTC(2026, 10, 4, 12, 0, 0));
 const ECHEANCE = "2026-10-01";
 
 type Status = "pending" | "in_progress" | "completed" | "rejected";
@@ -63,7 +63,7 @@ afterAll(async () => {
 describe("éligibilité et récépissé de renouvellement", { timeout: 120000 }, () => {
   beforeAll(() => {
     // Le fuseau de la machine ne doit rien changer : l'horloge est locale par construction.
-    expect(JOUR_J.getDate()).toBe(3);
+    expect(JOUR_J.toISOString().slice(0, 10)).toBe("2026-11-03");
   });
 
   it("papier échu sans demande : refusé", async () => {
@@ -100,6 +100,15 @@ describe("éligibilité et récépissé de renouvellement", { timeout: 120000 },
     await addRequest(vehicle.id, document.id, { validUntil: "2026-11-20", status: "completed" });
     await addRequest(vehicle.id, document.id, { validUntil: "2026-11-20", status: "rejected" });
     expect((await eligibilityAt(vehicle.id, JOUR_J)).eligible).toBe(false);
+  });
+
+  it("deux demandes ouvertes pour le même papier : la validité la plus lointaine l'emporte (max)", async () => {
+    const { vehicle, document } = await vehicleWithExpiredInsurance();
+    await addRequest(vehicle.id, document.id, { validUntil: "2026-11-05" });
+    await addRequest(vehicle.id, document.id, { validUntil: "2026-11-20", status: "in_progress" });
+    const receipts = await loadOpenRenewalReceipts(vehicle.id);
+    expect(String(receipts.insurance)).toBe("2026-11-20");
+    expect((await eligibilityAt(vehicle.id, new Date(Date.UTC(2026, 10, 10, 12)))).eligible).toBe(true);
   });
 
   it("le récépissé ne lève pas l'état mécanique", async () => {

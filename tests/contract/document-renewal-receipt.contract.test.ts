@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { documentRenewalRequests, vehicleDocuments } from "../../shared/schema";
+import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
+import { todayUtcDateOnly } from "../../shared/lib/utc-day";
 import { REALTIME_EVENTS } from "../../shared/contracts/realtime-events";
 import { renewalReceiptErrorOf } from "../../server/lib/renewal-receipts";
 import { startContractActors } from "../support/contract-actors";
@@ -27,12 +29,8 @@ let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "secretary" 
 let vehicleId = 0;
 let documentId = 0;
 
-const isoDay = (offsetDays: number) => {
-  // Jour calendaire Africa/Douala (UTC+1, sans heure d'été), comme la route.
-  const base = new Date(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Douala" }).format(new Date()) + "T00:00:00Z");
-  base.setUTCDate(base.getUTCDate() + offsetDays);
-  return base.toISOString().slice(0, 10);
-};
+// Jour UTC, comme la route : un seul calcul du jour.
+const isoDay = (offsetDays: number) => addDaysToIsoDate(todayUtcDateOnly(), offsetDays);
 
 async function newRequest(status: "pending" | "in_progress" | "completed" | "rejected" = "pending") {
   const [row] = await db
@@ -172,6 +170,8 @@ describe("dépôt du récépissé provisoire", { timeout: 180000 }, () => {
       const id = await newRequest(status);
       const res = await deposit(id, "admin", { validUntil: isoDay(4) });
       expect(res.status, status).toBe(409);
+      // Message de la garde explicite, pas celui de l'écriture conditionnelle.
+      expect(res.body.message, status).toMatch(/clôturée/);
       expect(res.row!.receiptFilePath).toBeNull();
     }
   });

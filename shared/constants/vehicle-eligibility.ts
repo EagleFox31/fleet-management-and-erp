@@ -1,3 +1,4 @@
+import { todayUtcDateOnly, utcDateOnly } from "../lib/utc-day";
 /**
  * Éligibilité d'un véhicule à partir en mission.
  *
@@ -69,20 +70,20 @@ function joursDepuis(echeance: string | Date, aujourdhui: Date): number | null {
   return Math.round((b - a) / 86_400_000);
 }
 
-/** Jour calendaire d'une valeur : `AAAA-MM-JJ` lu tel quel (sans fuseau), `Date` par ses composantes locales. */
+/** Jour calendaire d'une valeur, en UTC : `AAAA-MM-JJ` lu tel quel, `Date` par son jour UTC. */
 function jourCalendaire(valeur: string | Date): number | null {
   const iso = typeof valeur === "string" ? /^(\d{4})-(\d{2})-(\d{2})/.exec(valeur) : null;
   if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
   const date = valeur instanceof Date ? valeur : new Date(valeur);
   if (Number.isNaN(date.getTime())) return null;
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return jourCalendaire(utcDateOnly(date));
 }
 
 /** Récépissé encore valable : sa date de validité est aujourd'hui ou plus tard (jour J inclus). */
 function recepisseValide(validite: string | Date | null | undefined, aujourdhui: Date): boolean {
   if (!validite) return false;
   const fin = jourCalendaire(validite);
-  const jour = jourCalendaire(aujourdhui);
+  const jour = jourCalendaire(todayUtcDateOnly(aujourdhui));
   return fin !== null && jour !== null && fin >= jour;
 }
 

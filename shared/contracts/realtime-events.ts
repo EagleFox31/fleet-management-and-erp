@@ -130,10 +130,10 @@ export const REALTIME_EVENTS = {
   } as EventDefinition<{ id: number }>,
 
   // Récépissé provisoire déposé sur une demande de renouvellement (P3-2) : la demande, le papier
-  // du véhicule et son éligibilité à partir en mission changent. Personnel hors chauffeur : ni
-  // client ni chauffeur (le récépissé porte véhicule, papier et acteur de toute la flotte).
+  // du véhicule et son éligibilité à partir en mission changent. Rôles qui lisent les demandes :
+  // ni client ni chauffeur (le récépissé porte véhicule, papier et acteur de toute la flotte).
   document_renewal_receipt_uploaded: {
-    scope: { type: "roles", roles: VEHICLE_DOCUMENT_EVENT_ROLES },
+    scope: { type: "roles", roles: DOCUMENT_RENEWAL_VIEWER_ROLES },
     invalidates: ["/api/document-renewals/requests", "/api/vehicles", "/api/missions", "/api/alerts"],
   } as EventDefinition<{ requestId: number; vehicleId: number }>,
 
