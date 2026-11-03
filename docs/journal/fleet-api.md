@@ -218,6 +218,17 @@ Règles : `docs/journal/README.md`.
 - **RAIDER** : couvert non-régression (contrats voisins verts), réutilisation (`driver-scope.ts`, `ACTIVE_ASSIGNMENT_STATUSES`), failure memory (leçon ajoutée) ; sans objet : migration, aucune colonne.
 - **Reste** : voir le commentaire de suivi sur #227 (édition des affectations, contrôles de départ, documents véhicule, coût de mission, écrans client).
 
+## 2026-11-03 — SESSION_SECRET : refus de démarrer en production sans secret propre (#243)
+- **Agent** : fleet-api · **Branche** : `fix/session-secret-production`
+- **Statut** : fait, en relecture
+- **Quoi** : le serveur refuse de démarrer hors `development`/`test` si `SESSION_SECRET` est absent, fait moins de 32 caractères ou vaut une valeur publique du dépôt.
+- **Comment** : `resolveSessionSecret(env, warn)` dans `server/lib/session-secret.ts`, appelé par `server/middleware/session.ts`. Liste d'autorisation `SESSION_SECRET_FALLBACK_ENVS` ; la signature utilise la valeur brute (le rognage sert seulement à mesurer, pour ne pas invalider les sessions d'un secret actuel entouré d'espaces).
+- **Pourquoi** : le repli `"YaroFleetOSSecretKey"` est public ; un déploiement sans secret permettait de forger un cookie de session.
+- **Comment tester (QA)** : `NODE_ENV=production` sans `SESSION_SECRET` → le serveur s'arrête avec un message qui dit comment générer un secret ; avec 48 octets aléatoires en base64 → démarrage normal.
+- **Preuve automatisée** : `tests/unit/server/session-secret.test.ts`, 17 tests dont la garde statique sur `session.ts`.
+- **RAIDER** : couvert durable (dev et test inchangés), failure memory (LESSONS_LEARNED), erreur actionnable sans secret journalisé ; sans objet : migration.
+- **Reste / risques** : la démo Replit (`npm run start`) doit avoir `SESSION_SECRET` dans ses Secrets avant le déploiement. `sameSite: "none"` en production (APK Capacitor) suivi à part.
+
 ## 2026-11-03 19:35 — Plusieurs chauffeurs par mission : écriture (suite de #227, empilée sur #233)
 
 - **Quoi** : `POST /api/missions/:id/assignments` (ajout d'un chauffeur et de son véhicule) et `DELETE /api/missions/:id/assignments/:assignmentId` (annulation : statut `cancelled`, ligne conservée) dans `server/api/missions.routes.ts`.

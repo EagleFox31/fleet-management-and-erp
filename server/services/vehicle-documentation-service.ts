@@ -31,7 +31,7 @@ const addDaysToDateOnly = (baseDateOnly: string, days: number): string => {
   return base.toISOString().slice(0, 10);
 };
 
-/** Expiré dès le jour J : règle unique de `shared/constants/expiry-day.ts`. */
+/** Expiré à J+1, le jour J valable : règle unique de `shared/constants/expiry-day.ts`. */
 const isDateExpired = (value: DateValue, todayDateOnly: string): boolean =>
   isExpiredOn(toDateOnly(value), todayDateOnly);
 
@@ -41,7 +41,7 @@ const isDateExpiringSoon = (
   limitDateOnly: string,
 ): boolean => {
   const dateOnly = toDateOnly(value);
-  return dateOnly !== null && dateOnly > todayDateOnly && dateOnly <= limitDateOnly;
+  return dateOnly !== null && dateOnly >= todayDateOnly && dateOnly <= limitDateOnly;
 };
 
 /**
@@ -165,8 +165,7 @@ export class VehicleDocumentationService {
     log.debug({ ownerId }, "documents expirés : lecture");
 
     const allVehicles = await this.getVehiclesWithEffectiveDocumentDates(ownerId);
-    const now = new Date();
-    const nowStr = todayUtcDateOnly(now);
+    const nowStr = todayUtcDateOnly();
 
     const expiredVehicles = allVehicles.filter((v) =>
       isDateExpired(v.licensePlateExpiry, nowStr) ||
@@ -177,13 +176,13 @@ export class VehicleDocumentationService {
     const result = expiredVehicles.map(vehicle => ({
       ...vehicle,
       expiredDocuments: [
-        vehicle.licensePlateExpiry && new Date(vehicle.licensePlateExpiry) < now
+        isDateExpired(vehicle.licensePlateExpiry, nowStr)
           ? { type: 'carte_grise', expiryDate: vehicle.licensePlateExpiry }
           : null,
-        vehicle.insuranceExpiry && new Date(vehicle.insuranceExpiry) < now
+        isDateExpired(vehicle.insuranceExpiry, nowStr)
           ? { type: 'assurance', expiryDate: vehicle.insuranceExpiry }
           : null,
-        vehicle.technicalInspectionDate && new Date(vehicle.technicalInspectionDate) < now
+        isDateExpired(vehicle.technicalInspectionDate, nowStr)
           ? { type: 'visite_technique', expiryDate: vehicle.technicalInspectionDate }
           : null,
       ].filter(Boolean)

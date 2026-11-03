@@ -2092,6 +2092,94 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.
 
+## 2026-11-03 — Cliquet T1 : exclusion par nom contournée par alias, et liste négative (NO-GO n°2 et n°3, #235)
+
+### Contexte
+- Le cliquet T1 (`tests/unit/server/write-routes-ratchet.test.ts`) vérifie que chaque route d'écriture porte une garde de rôle. Deux relectures successives de #235 ont refusé la fusion.
+  - NO-GO n°2 : le scanner refusait une liste de noms connus pour ne pas être des gardes (`authenticate`, `isAnyUser`...). Tout middleware absent de cette liste comptait comme garde : un alias `anyone`, un tableau `[isAnyUser]` ou un spread passaient.
+  - NO-GO n°3 : la liste était devenue positive, mais `authorize([...])` sur place restait admis sauf s'il contenait le NOM `ALL_ROLES`. `authorize([...ALL_APP_ROLES])`, ou un alias local de tous les rôles, comptait comme garde alors qu'il vaut `isAnyUser`.
+
+### Cause racine
+- Classification : règle de sécurité appuyée sur un nom plutôt que sur une valeur.
+  - Une liste négative ne contient que ce qu'on a pensé à refuser.
+  - Une exclusion sur le nom d'une constante se contourne par une autre constante de même valeur, ou par un alias.
+- Aggravant : selfScoped, une garde « tous rôles, compte de session seul », vérifiée par analyse du handler, a ouvert une surface d'analyse que chaque relecture trouvait contournable. Aucune route n'en avait encore besoin.
+
+### Résolution
+- Le scanner résout l'ensemble de rôles par valeur (`resolveRoles`). Il suit les littéraux, les spreads, les constantes locales et les alias, puis les exports de `shared/constants/roles`.
+- `authorize(...)` n'est une garde que si cet ensemble exclut au moins un rôle de `ALL_APP_ROLES`. Un ensemble non résolu ne compte pas comme garde.
+- La règle vaut pour :
+  - `authorize` écrit sur place ;
+  - les exports `is*` de `auth.ts` (`isAnyUser` est écarté par sa valeur) ;
+  - les gardes locales et les gardes de montage, jugées sur leur définition dans leur fichier.
+- selfScoped est retiré de la PR (YAGNI). Il fera l'objet d'une PR dédiée.
+
+### Prévention (vérifiable)
+- Cas rouges dans `write-routes-ratchet.test.ts` :
+  - `authorize([...ALL_APP_ROLES])`, `authorize(ALL_APP_ROLES)` ;
+  - alias local de tous les rôles, `[...STAFF_ROLES, "client"]`, ensemble non résolu ;
+  - garde locale définie par `authorize([...ALL_APP_ROLES])` ou par `isAnyUser` ;
+  - garde de montage sur tous les rôles ;
+  - nom listé mais non défini dans son fichier.
+
+### Règle Projet (obligatoire)
+- Un contrôle d'accès se juge sur la valeur résolue, jamais sur le nom d'une constante.
+- Une liste de gardes est positive : ce qui n'est pas reconnu ne protège pas.
+- Une garde dont la validité dépend d'une analyse du handler n'entre qu'avec une route qui en a besoin, dans une PR dédiée.
+- Un scanner de gardes se fonde sur l'origine du symbole (import résolu, définition unique et non mutée) et sur le source débarrassé de ses commentaires, jamais sur un nom. Écarts restants de ce scanner : issue #244.
+
+## 2026-11-03 — Secret de session public par défaut : le serveur démarrait avec une clé connue de tous (#243)
+
+### Contexte
+- `server/middleware/session.ts` signait les cookies avec `process.env.SESSION_SECRET || "YaroFleetOSSecretKey"`. La valeur de repli figure dans le dépôt : un déploiement sans `SESSION_SECRET` démarrait sans alerte, et quiconque lit le code pouvait forger un cookie de session valide, donc se connecter sous n'importe quel compte.
+
+### Cause racine
+- Classification : configuration de sécurité par défaut non sûre (fail-open). Un repli pratique en développement s'appliquait aussi en production, et rien ne distinguait « secret absent » de « secret fourni ».
+- Aggravant : Express sert le build de production dès que `NODE_ENV` n'est pas `development` ; un test sur `NODE_ENV === "production"` aurait laissé passer `Production`, `staging` ou une variable absente.
+- Near miss lors de la correction : rogner le secret avant de signer aurait changé la clé d'un secret actuel entouré d'espaces et invalidé toutes les sessions ouvertes.
+
+### Résolution
+- `resolveSessionSecret` (`server/lib/session-secret.ts`) : repli seulement pour `NODE_ENV` dans une liste d'autorisation (`development`, `test`) ; ailleurs, démarrage refusé si le secret est absent, de moins de 32 caractères ou égal à une valeur publique du dépôt. Le message dit comment corriger et ne contient jamais la valeur. Le rognage sert à mesurer, la signature utilise la valeur brute.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-secret.test.ts` : refus en production (absent, vide, court, public), `NODE_ENV` hors liste traité comme la production, valeur brute conservée.
+- Garde statique dans le même fichier : `session.ts` doit passer par `resolveSessionSecret(process.env` et ne contenir ni `SESSION_SECRET ||`/`??` ni le repli littéral.
+
+### Règle Projet (obligatoire)
+- Un secret n'a jamais de valeur par défaut hors d'une liste d'autorisation d'environnements de développement. En production, secret absent ou public = refus de démarrer, avec un message actionnable.
+- Un environnement se teste par liste d'autorisation, jamais par `=== "production"`.
+- Ne jamais normaliser (trim, casse) une clé de signature existante : on ne normalise que pour valider.
+
+### Assurance et visite : la check-list jugeait l'échéance un jour plus tard que le lancement (2026-11-03)
+
+- **Contexte** : une assurance ou une visite technique qui expire aujourd'hui était « conforme » dans `GET /api/missions/:id/launch-readiness`, puis refusée au lancement (`PUT /status` → `in_progress`). Même écart autour de minuit UTC.
+- **Cause racine** : la check-list passait par `isDateExpired`, qui compare en jour local avec un `<` strict. C'est la règle du permis chauffeur. Le lancement passe par `isExpiredOnOrBeforeToday` (jour UTC, le jour de l'échéance bloque, `shared/constants/expiry-day.ts`). C'est la deuxième divergence entre ces deux chemins, après la carte grise.
+- **Classification** : règle métier dupliquée, divergence de calcul de date.
+- **Résolution** :
+  - la check-list juge tous les papiers véhicule par `isExpiredOnOrBeforeToday` ;
+  - un papier sans date reste invalide, sauf la carte grise ;
+  - l'ancienne fonction est renommée `isDriverLicenseExpired`, réservée au permis.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-renewal-receipt.contract.test.ts`, bloc « jour de l'échéance » : 2 cas passent au rouge sur l'ancienne règle ;
+  - `tests/unit/server/mission-expiry-day-hygiene.test.ts` échoue si `isDocumentTypeValid` compare des dates elle-même, ou si la règle du permis sert à autre chose qu'au permis.
+- **Leçon** : une règle de date se nomme d'après le papier qu'elle juge. Une fonction générique `isDateExpired` invite à la réutiliser pour un papier dont la règle est différente.
+
+### Jour de l'échéance : une règle partagée renversée sans divergence (2026-11-03, #224)
+
+- **Contexte** : décision produit (#224) : un papier est valable le jour de son échéance et expiré le lendemain, comme le permis. Jusque-là, P3-2 (D1, D2) rendait le jour J expiré pour les papiers, et le permis suivait sa propre règle au jour local.
+- **Cause racine** : la règle du jour J existait en trois écritures : la source partagée (`isExpiredOn`, `<= 0`), deux calculs locaux qui la recopiaient (`alert-service.checkVehicleDocumentAlerts`, `GET /api/vehicles/alerts`, au jour local avec `setHours` et `Math.ceil`) et le permis (`isDriverLicenseExpired`, jour local, `<` strict). Basculer seulement la source aurait laissé les alertes dire « expiré » un jour où le lancement passe.
+- **Classification** : règle métier dupliquée, changement de décision produit.
+- **Résolution** :
+  - `shared/constants/expiry-day.ts` : `isExpiredOn` à `days < 0`, nouveau `isDriverLicenseExpiredOn` ;
+  - alertes (`alert-service`, `vehicles.routes`) rebranchées sur `toExpiryDateOnly` + `daysBetweenDateOnly`, jour UTC ;
+  - `isExpiredOnOrBeforeToday` renommée `isPaperExpired` : son nom contredisait la nouvelle règle ;
+  - le jour J reste signalé : alerte « expire bientôt », priorité haute, « dernier jour de validité ».
+- **Prévention vérifiable** :
+  - `tests/unit/server/document-expiry-day-j.test.ts` : J-1, J, J+1 sur les cinq verdicts papiers (éligibilité, statut, statistiques, liste, règle typée) et sur le permis, plus la bascule à minuit UTC sous Africa/Douala et UTC ;
+  - contrats `mission-document-expiry` et `mission-renewal-receipt` : alertes, check-list et lancement à J et J+1, permis à J-1, J, J+1.
+  - relecture : une troisième recopie (`getExpiredDocuments`, liste `expiredDocuments`, `new Date(échéance) < now`) avait échappé à la bascule. `tests/unit/server/expiry-day-local-math-hygiene.test.ts` échoue désormais sur toute comparaison locale d'une échéance dans `server/`, `client/src` et `shared/` (liste gelée de 6 fichiers client/CPC, qui ne peut que rétrécir).
+- **Leçon** : un changement de règle partagée se fait sur la source ET sur chaque recopie. Avant de basculer, chercher les calculs qui reproduisent la règle sans l'importer (`setHours(0`, `<= 0` sur un nombre de jours) ; une fonction dont le nom décrit l'ancienne règle se renomme dans le même changement.
+
 ## 2026-11-03 — Passage 1→N : tout `limit(1)` sur la table enfant devient une écriture sur la mauvaise ligne (#240)
 
 ### Contexte

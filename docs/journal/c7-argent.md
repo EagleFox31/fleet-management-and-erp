@@ -34,6 +34,21 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R : règle unique réutilisée ;
   - D : contrat `checks[]` inchangé.
 
+## 2026-11-03T18:35:16+01:00 — Check-list de lancement : même jour d'échéance que le lancement
+
+- **Agent** : c7 · **Branche** : `fix/readiness-expiry-day` (empilée sur `fix/readiness-mirror-columns`) · **Commit** : voir `git log` de la branche
+- **Statut** : fait, en relecture
+- **Quoi** : l'assurance et la visite technique de la check-list sont jugées par `isExpiredOnOrBeforeToday`, comme au lancement : jour UTC, le jour de l'échéance bloque. `isDateExpired` devient `isDriverLicenseExpired`, réservée au permis, dont le comportement est inchangé.
+- **Pourquoi** : un papier expirant aujourd'hui était « conforme » à la préparation et refusé au lancement.
+- **Comment tester** : une assurance dont l'échéance est aujourd'hui donne l'item « Assurance conforme » rouge, et le lancement la refuse. Une échéance demain donne l'item vert.
+- **Preuve automatisée** :
+  - contrat `mission-renewal-receipt`, bloc « jour de l'échéance » (3 cas ; mutant : 2 rouges) ;
+  - garde-fou `mission-expiry-day-hygiene.test.ts`.
+- **RAIDER** :
+  - R : une seule règle de date pour les papiers véhicule ;
+  - D : permis inchangé, `checks[]` inchangé ;
+  - failure memory : entrée LESSONS.
+
 ## 2026-11-03T19:03:17+01:00 — P2 : règlement de facture rejoué depuis une mission livrée par le parcours
 
 - **Agent** : c7 · **Branche** : `test/p2-delivered-by-journey` · **Commit** : voir `git log` de la branche

@@ -252,6 +252,13 @@ Modèle et règles : `docs/journal/README.md`.
 - Pourquoi : AGENTS.md §10, ni message brut ni `console.*`.
 - Preuve : garde rouge sans le correctif, verte avec ; contrat PRT1 6/6 ; tsc 0 erreur ; unitaires 1945/1945.
 
+## 2026-11-03T19:22:28+01:00 — garde statique : littéral masqué par un /:param déclaré avant lui (prévention de #222)
+
+- Quoi : `GET /api/suppliers/:id`, déclaré dans un routeur monté avant `routes.ts`, capturait `summary` (#222). Aucune garde ne détectait ce motif.
+- Comment : `tests/support/route-order-scan.ts` reconstitue l'ordre de service : les routeurs de `server/api/` dans l'ordre des `apiRouter.use`, puis `app.*` de `routes.ts`. Il signale toute route littérale dont un prédécesseur de même méthode et de même longueur porte un `:param` simple en face d'un littéral. `tests/unit/server/route-order-hygiene.test.ts` fige la liste des exceptions, vide aujourd'hui, en égalité stricte. Limites documentées dans l'en-tête : garde `next()`, paramètres contraints, optionnels ou jokers, sous-routeurs hors index, `router.all` et `route()`.
+- Pourquoi : Express sert la première route qui correspond, et l'ordre réel dépend des montages, pas du fichier.
+- Preuve : sur main, 356 routes et 0 littéral masqué. Sur le code d'avant #222 (`0bd9756^`), exactement 1 : `GET /api/suppliers/summary <- GET /api/suppliers/:id`. Sans la détection de capture, 4 cas sont rouges. Hygiène 9/9, tsc 0 erreur, unitaires 1958/1958.
+
 ## 2026-11-03T19:24:00+01:00 — #232 : phrase de prévention de la leçon /:id complétée (relecture 0a)
 
 - Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.

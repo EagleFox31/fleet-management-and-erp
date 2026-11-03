@@ -49,7 +49,7 @@ describe("getMissionEligibility", () => {
     expect(verdict.eligible).toBe(true);
   });
 
-  it("accepte une échéance encore valable, refuse dès le jour J", () => {
+  it("accepte une échéance encore valable, jour J compris, refuse à J+1", () => {
     const demain = getMissionEligibility(
       { status: "operational", insuranceExpiry: "2026-03-16" },
       LE_15_MARS,
@@ -60,8 +60,14 @@ describe("getMissionEligibility", () => {
       { status: "operational", insuranceExpiry: "2026-03-15" },
       LE_15_MARS,
     );
-    expect(aujourdhui.eligible).toBe(false);
-    expect(aujourdhui.blockers[0].reason).toBe("assurance expire aujourd'hui");
+    expect(aujourdhui.eligible).toBe(true);
+
+    const hier = getMissionEligibility(
+      { status: "operational", insuranceExpiry: "2026-03-14" },
+      LE_15_MARS,
+    );
+    expect(hier.eligible).toBe(false);
+    expect(hier.blockers[0].reason).toBe("assurance expirée depuis 1 jour");
   });
 
   it("cumule tous les motifs plutôt que de s'arrêter au premier", () => {
