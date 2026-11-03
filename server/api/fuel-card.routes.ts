@@ -6,6 +6,8 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
+import { toFieldErrors } from "@shared/errors";
+import { z } from "zod";
 
 const log = moduleLogger("fuel-card");
 
@@ -118,23 +120,39 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   }
 });
 
+// Corps de POST /consumption : les nombres peuvent arriver en chaîne (formulaires), jamais en NaN.
+const consumptionBodySchema = z.object({
+  vehicleId: z.coerce.number().int().positive(),
+  quantity: z.coerce.number().positive().finite(),
+  // Présent seulement : la lecture du prix (« Prix du litre invalide. ») reste à resolveFuelUnitPrice.
+  unitPrice: z.union([z.string().trim().min(1), z.number()]),
+  date: z.string().trim().min(1),
+  stationName: z.string().trim().min(1),
+  destination: z.string().trim().min(1),
+  clientName: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+});
+
 // Enregistrer une consommation de carburant (débit)
 router.post("/consumption", isFuelCardManager, async (req, res, next) => {
   try {
-    const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
-    
-    if (!vehicleId || !quantity || !unitPrice || !date || !stationName || !destination) {
-      return res.status(400).json({ message: "Données de consommation incomplètes" });
+    const parsedBody = consumptionBodySchema.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+      throw new AppError(400, "Données de consommation invalides.", {
+        fieldErrors: toFieldErrors(parsedBody.error.issues),
+        cause: parsedBody.error,
+      });
     }
+    const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = parsedBody.data;
     const fillDate = new Date(date);
     if (Number.isNaN(fillDate.getTime())) throw new AppError(400, "Date de plein invalide.");
     // Prix obligatoire (contrat), retenu pour admin et logistique seulement ; sinon prix du jour imposé.
     const actorRole = String((req as any).user?.role ?? "").trim().toLowerCase();
-    const resolvedUnitPrice = await resolveFuelUnitPrice(actorRole, Number.parseFloat(unitPrice), fillDate);
+    const resolvedUnitPrice = await resolveFuelUnitPrice(actorRole, Number.parseFloat(String(unitPrice)), fillDate);
     
     const result = await fuelCardService.recordConsumption({
-      vehicleId: parseInt(vehicleId),
-      quantity: parseFloat(quantity),
+      vehicleId,
+      quantity,
       unitPrice: resolvedUnitPrice,
       date,
       stationName,
@@ -148,7 +166,7 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
       "fuel_card_consumption_recorded",
       {
         consumption: result,
-        vehicleId: parseInt(vehicleId),
+        vehicleId,
       },
       {
         entityId: typeof result?.consumption?.id === "number" ? result.consumption.id : null,

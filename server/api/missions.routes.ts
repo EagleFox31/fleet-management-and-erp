@@ -1041,7 +1041,8 @@ router.get("/:id/fuel-records", async (req, res) => {
 });
 
 // POST /api/missions/:id/fuel-records - Enregistrer un plein lié à une mission
-router.post("/:id/fuel-records", async (req, res, next) => {
+// Débite la carte de l'entreprise : gestionnaires de mission et chauffeur affecté seulement (contrôle du chauffeur plus bas).
+router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"]), async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {

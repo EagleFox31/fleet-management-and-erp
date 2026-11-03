@@ -175,3 +175,15 @@ Règles : `docs/journal/README.md`.
 - **Preuve automatisée** : contrat 44 tests, 2 rouges sur `main` puis verts ; voir PR.
 - **RAIDER** : couvert non-régression et liste gelée réduite ; sans objet : migration.
 - **Reste / risques** : `isFuelRecordWriter` (chef d'atelier) non retenu, aucun écran d'atelier n'appelle la route.
+
+## 2026-11-03 — Carte carburant, lot 2 : garde du plein de mission et corps de /consumption validé
+- **Agent** : fleet-api · **Branche** : `fix/fuel-card-lot2` (empilée sur `fix/fuel-card-consumption-guard`, #207)
+- **Statut** : fait
+- **Quoi** : `POST /api/missions/:id/fuel-records` réservé aux gestionnaires de mission (admin, logistics, secretary) et au chauffeur affecté ; `POST /api/fuel-card/consumption` valide son corps (Zod), 400 lisible avec `errors` au lieu de NaN puis 500.
+- **Comment** : `authorize([...MISSION_FUEL_MANAGERS, "driver"])` sur la route, contrôle du chauffeur affecté conservé ; schéma `consumptionBodySchema` + `AppError(400, ..., { fieldErrors })` ; entrée retirée de `write-route-guards.frozen.ts`.
+- **Pourquoi** : le plein de mission débite la carte de l'entreprise et n'avait que `isStaff` au montage (leçon A5, récurrence ajoutée).
+- **Appelants vérifiés** : `client/src/pages/missions/[id].tsx` (bouton visible aux seuls `MISSION_MANAGER_ROLES`), `client/src/pages/driver/dashboard.tsx` (chauffeur), `e2e/21-mission-fuel-double-debit.spec.ts` (chauffeur), contrats existants (logistics) ; aucun écran technicien, magasin ou atelier.
+- **Comment tester (QA)** : en technicien, POST /api/missions/:id/fuel-records, attendu 403 ; POST /api/fuel-card/consumption avec quantity "abc", attendu 400.
+- **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 15 tests, 9 rouges sur la base d'avant puis 15 verts.
+- **RAIDER** : couvert non-régression, liste gelée réduite, failure memory ; sans objet : migration.
+- **Reste / risques** : `/regularize` et `/declare-no-refuel` gardés dans le handler, pas en garde de route ; DELETE /fuel-records/:id et idempotence de /consumption hors périmètre.
