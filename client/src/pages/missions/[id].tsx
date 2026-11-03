@@ -14,17 +14,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
-import { isApiError } from "@/lib/api-error";
+import { isApiError, userMessageOf } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
-import { newRequestKey } from "@/lib/request-key";
+import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope } from "@/lib/submission-key";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -696,7 +696,7 @@ export default function MissionDetailsPage() {
       setLocation(`/operations/invoices/${data.invoice.id}`);
     },
     onError: (error: Error) => {
-      setErrorModal({ title: "Erreur facturation", description: error.message });
+      setErrorModal({ title: "Erreur facturation", description: userMessageOf(error, "La facturation de la mission a échoué.") });
     },
   });
   // Un double clic créait deux factures pour la même saisie.
@@ -976,9 +976,11 @@ export default function MissionDetailsPage() {
     },
   });
 
-  // Clé de la régularisation en cours : gardée jusqu'au succès, pour qu'un nouvel envoi après
-  // une coupure soit rejoué par le serveur au lieu de débiter la carte une seconde fois.
-  const fuelRegularizationKeyRef = useRef<string | null>(null);
+  // Clé du plein en cours de saisie (normal ou régularisation), par mission, en sessionStorage :
+  // libérée au succès, sur un 4xx et à l'annulation ; CONSERVÉE sur une issue inconnue (réseau,
+  // 5xx), même si la fiche est fermée puis rouverte, pour que le serveur rejoue au lieu de débiter
+  // une seconde fois. Deux onglets ont deux stockages : deux saisies, donc deux débits (voulu).
+  const fuelSubmissionKeys = useMemo(() => createSubmissionKeyStore(missionFuelKeyScope(missionId ?? "inconnue")), [missionId]);
 
   const addMissionFuelMutation = useMutation({
     mutationFn: async () => {
@@ -1022,9 +1024,7 @@ export default function MissionDetailsPage() {
         notes: fuelForm.notes || undefined,
         regularizationReason: isRegularizationRequest ? fuelRegularizationReason.trim() : undefined,
         isPreDeparture: fuelForm.isPreDeparture,
-        requestKey: isRegularizationRequest
-          ? (fuelRegularizationKeyRef.current ??= newRequestKey())
-          : undefined,
+        requestKey: fuelSubmissionKeys.take(),
       });
 
       return {
@@ -1033,7 +1033,7 @@ export default function MissionDetailsPage() {
       };
     },
     onSuccess: ({ normalizedPayload: payload, isRegularizationRequest }) => {
-      if (isRegularizationRequest) fuelRegularizationKeyRef.current = null;
+      fuelSubmissionKeys.settle();
       queryClient.setQueryData([`/api/missions/${missionId}/fuel-records`], (current: any) => {
         const normalizedCurrent = normalizeMissionFuelRecordsResponse(current);
         const nextRecords = payload.record
@@ -1088,6 +1088,12 @@ export default function MissionDetailsPage() {
       });
     },
     onError: (error: unknown) => {
+      // 4xx : clé libérée. Réseau ou 5xx : clé conservée, le prochain envoi sera rejoué.
+      fuelSubmissionKeys.settle(error);
+      if ((isApiError(error) && error.status === 409) || isIndeterminateOutcome(error)) {
+        // Plein peut-être déjà enregistré : l'écran relit les pleins pour le montrer.
+        queryClient.invalidateQueries({ queryKey: [`/api/missions/${missionId}/fuel-records`] });
+      }
       setErrorModal({
         title: "Échec enregistrement plein",
         description: extractApiErrorMessage(error),
@@ -3019,6 +3025,7 @@ export default function MissionDetailsPage() {
         onOpenChange={(open) => {
           setOpenFuelDialog(open);
           if (!open) {
+            fuelSubmissionKeys.discard();
             setFuelDialogMode("standard");
             setFuelRegularizationReason("");
           }
@@ -3170,6 +3177,7 @@ export default function MissionDetailsPage() {
             <Button
               variant="outline"
               onClick={() => {
+                fuelSubmissionKeys.discard();
                 setOpenFuelDialog(false);
                 setFuelDialogMode("standard");
                 setFuelRegularizationReason("");

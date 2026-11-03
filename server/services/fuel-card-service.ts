@@ -2,6 +2,7 @@ import { getFuelPriceAt } from "./fuel-price-service";
 import { AppError } from "../lib/app-error";
 import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
 import { moduleLogger } from "../lib/logger";
+import { buildFuelConsumptionNotes } from "../lib/mission-fuel-regularization";
 import { db } from "../db";
 import { fuelRecords, users, vehicles, type FuelRecord } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
@@ -16,8 +17,23 @@ const log = moduleLogger("fuel-card-service");
  * inconnu, 409 solde insuffisant. Toute autre erreur devient une 500 générique (la cause
  * reste dans les logs, jamais dans la réponse).
  */
+/** Message d'un plein refusé parce que sa clé de requête porte déjà un autre plein. */
+export const FUEL_REQUEST_KEY_CONFLICT_MESSAGE =
+  "Un autre plein a déjà été enregistré pour cette saisie. Rechargez la page pour voir les pleins enregistrés.";
+
+/** Vrai si l'erreur (ou sa cause, le pilote étant parfois enveloppé) est l'index unique de la clé de requête. */
+function isRequestKeyUniqueViolation(error: unknown): boolean {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 4; depth++) {
+    const { code, constraint, cause } = current as { code?: string; constraint?: string; cause?: unknown };
+    if (code === "23505" && constraint === "ux_fuel_records_request_key") return true;
+    current = cause;
+  }
+  return false;
+}
+
 export function toFuelCardAppError(error: unknown): AppError {
   if (error instanceof AppError) return error;
+  if (isRequestKeyUniqueViolation(error)) return new AppError(409, FUEL_REQUEST_KEY_CONFLICT_MESSAGE, { cause: error });
   const code = (error as { code?: string } | null)?.code;
   const message = error instanceof Error ? error.message : "";
   if (code === "INVALID_INPUT") return new AppError(400, message, { cause: error });
@@ -239,6 +255,8 @@ export class FuelCardService {
     missionId?: number;
     isPreDeparture?: boolean;
     userId: number;
+    /** Clé de requête de la soumission (index unique) : un second plein sous la même clé échoue en 409. */
+    requestKey?: string;
   },
   /**
    * Écriture liée au débit (ex. journal de régularisation d'une mission), jouée dans la même
@@ -281,11 +299,7 @@ export class FuelCardService {
     // Calculer coût et nouveau solde
     const cost = data.quantity * data.unitPrice;
 
-    const noteSegments = [
-      data.isPreDeparture ? "[PRE_DEPART]" : null,
-      data.notes?.trim() || null,
-      `Destination: ${data.destination}${data.clientName ? ` - Client: ${data.clientName}` : ""}`,
-    ].filter((segment): segment is string => Boolean(segment && segment.trim()));
+    const consumptionNotes = buildFuelConsumptionNotes(data);
 
     // Contrôle du solde et débit atomiques : deux pleins simultanés ne peuvent
     // plus lire le même solde et passer tous deux sous zéro.
@@ -323,10 +337,11 @@ export class FuelCardService {
           debitAmount: cost.toString(),
           balance: newBalance.toString(),
           fuelBalance: Math.max(0, newFuelBalance).toString(),
-          notes: noteSegments.join(" | "),
+          notes: consumptionNotes,
           year: new Date(data.date).getFullYear(),
           month: new Date(data.date).getMonth() + 1,
-          createdBy: data.userId
+          createdBy: data.userId,
+          requestKey: data.requestKey ?? null,
         })
         .returning();
       if (withinTransaction) await withinTransaction(tx, consumption, cost);
