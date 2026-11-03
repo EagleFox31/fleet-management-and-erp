@@ -116,3 +116,22 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Pourquoi** : T-16 reste (validation a l'upload), sans aggraver la dette de `routes.ts` (AGENTS §9). Les anciens documents au type hors liste restent lisibles.
 - **Comment tester (QA)** : en responsable atelier, televerser un PDF avec `type=carte_grise` (201), puis avec `type=nimporte` (400 lisible, rien sur disque) ; en technicien, 403.
 - **Preuve** : `tsc` global a zero ; unitaires 541 verts ; premier passage des contrats `vehicle-documents-upload` (4) et `vehicle-documents-client-scope` (16) : 20 tests verts. Les suites echouent ensuite au teardown/setup sur la base partagee : des lignes `activity_logs` d'utilisateurs TEST laissees par mes premiers passages (l'intercepteur d'audit journalise l'upload) bloquent `cleanupOrphanTestRows`. Le test supprime desormais ces lignes ; le menage des restes anterieurs reste a faire.
+## 2026-11-03T09:00:00+01:00 - R-03/R-13 suite - Cloison chauffeur et client : CPC, donnees personnelles, diffusion, carburant
+
+- **Agent** : api · **Branche** : `lot/api/R-03-R-13-suite` · **Commit** : voir `git log` de la branche
+- **Statut** : fait ; remplace la PR #53 (non rebasee)
+- **Quoi** : (1) `POST /api/drivers/:id/update-cpc` refuse le chauffeur (403) ; (2) CNI, permis, date de naissance, validites et embauche retires des fiches (detail et listes `server/api/drivers*.ts`) pour tout lecteur hors admin/logistique/secretariat, sauf le chauffeur pour sa propre fiche ; (3) `broadcastDriverUpdate` et `driver_cpc_updated` ne diffusent plus de donnees personnelles ; (4) `getStatsByClient(ownerId)` filtre sur `vehicles.ownerId` via `ownerScopeOf` ; (5) bouton « Modifier » de la mission masque au chauffeur.
+- **Comment** : `server/lib/driver-scope.ts` etendu (`redactDriverPersonalData`, `stripDriverPersonalData`) ; handlers touches migres vers `moduleLogger` et `AppError`.
+- **Pourquoi** : AGENTS §11 ; les ecrans resynchronisent par invalidation, ils n'utilisent pas la fiche diffusee.
+- **Comment tester (QA)** : chauffeur sur `/api/drivers` (sa fiche complete, les autres sans CNI/permis) ; chauffeur sur `update-cpc` (403) ; logistique (complet).
+- **Preuve** : contrat `driver-personal-data-scope` 8 verts, integration `fuel-stats-owner-scope` 2 verts, non-regression 68 verts, unitaires 1473, `tsc` global a zero.
+
+## 2026-11-03T09:40:00+01:00 - R-03/R-13 suite - Reserves securite et relecture de #127
+
+- **Agent** : b7 · **Branche** : `lot/api/R-03-R-13-suite`
+- **Statut** : fait ; corrige l'entree precedente (« 8 verts », lecture limitee a admin/logistique/secretariat)
+- **Quoi** : (R1) `GET /api/missions/:id` ne selectionne plus `drivers.licenseNumber` dans l'affectation ; (R2) `update-cpc` porte `isDriverManager` (admin, logistique, secretariat) : technicien, magasinier et direction recoivent 403, decision de l'utilisateur ; `cpcDate` invalide renvoie 400 au lieu de 500 ; `/cpc-statistics` et `/sync-cpc-statuses` passent par `AppError` et `moduleLogger` (plus de `error.message` renvoye, §10). La direction (`management`) lit les donnees personnelles via `DRIVER_PERSONAL_DATA_READER_ROLES` sans entrer dans `isDriverManager`.
+- **Comment** : garde-fou `tests/unit/server/driver-personal-data-hygiene.test.ts` : `drivers.<champ personnel>` interdit dans `server/` hors `driver-scope.ts`, `cpc-training-service.ts`, `drivers-management.routes.ts`, plus deux controles internes de validite du permis dans `missions.routes.ts` (liste gelee).
+- **Pourquoi** : le detail mission est lu par tout le personnel ; la saisie CPC revient a l'exploitation.
+- **Comment tester (QA)** : technicien sur `GET /api/missions/:id` : `assignment.driver` sans permis ; technicien, magasinier ou direction sur `update-cpc` : 403, date inchangee.
+- **Preuve** : contrat `driver-personal-data-scope` 13 verts (base dediee fleet_test_b7), garde-fou 2 verts, `tsc` global a zero ; suites completes : voir le corps de la PR.

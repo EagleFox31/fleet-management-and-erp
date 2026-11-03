@@ -5,7 +5,9 @@ import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
-import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE } from "../lib/driver-scope";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
 
 const router = Router();
 router.use(authenticate);
@@ -55,6 +57,8 @@ const updateDriverSchema = createDriverSchema
     message: "Aucune donnée de mise à jour fournie",
   });
 
+const log = moduleLogger("drivers-management");
+
 const toggleDriverSchema = z.object({
   isActive: z.boolean(),
 });
@@ -76,7 +80,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 function broadcastDriverUpdate(
   eventType: "driver_created" | "driver_updated" | "driver_toggled",
-  driver: unknown,
+  driver: Record<string, any> | null | undefined,
   driverId: number,
 ): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -87,7 +91,9 @@ function broadcastDriverUpdate(
   broadcastUpdate(eventType, {
     entity: "driver",
     entityId: driverId,
-    payload: { driver },
+    // Diffusion à tous les profils : ni CNI, ni permis, ni date de naissance. Les écrans
+    // resynchronisent par invalidation (useRealTimeSync), ils n'exploitent pas la fiche diffusée.
+    payload: { driver: driver ? stripDriverPersonalData(driver) : driver },
     scope: { type: "broadcast" },
   });
 }
@@ -200,7 +206,7 @@ router.get("/:id/missions", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) {
@@ -208,12 +214,10 @@ router.get("/:id", async (req, res) => {
     }
 
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
-    return res.status(200).json(driver);
+    return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
-    console.error("Get driver details error:", error);
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : "Erreur serveur",
-    });
+    log.error({ err: error, requestId: req.requestId }, "Fiche chauffeur en echec");
+    return next(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }));
   }
 });
 
