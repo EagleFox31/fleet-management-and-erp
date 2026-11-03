@@ -4,6 +4,7 @@ import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
+import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 
@@ -119,7 +120,7 @@ const normalizeInvoiceItems = (value: unknown): InvoicePdfItem[] | undefined => 
 // Admin: accès complet
 // Secretary: créer, consulter, enregistrer paiements  
 // Logistics: créer, consulter
-const canAccessBilling = authorize(['admin', 'secretary', 'logistics']);
+const canAccessBilling = authorize([...CLIENT_BILLING_EVENT_ROLES]);
 const canRecordPayment = authorize(['admin', 'secretary']);
 
 const broadcastClientInvoiceUpdate = (
@@ -141,7 +142,7 @@ const broadcastClientInvoiceUpdate = (
     entity: "client_invoice",
     entityId: options?.invoiceId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...CLIENT_BILLING_EVENT_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,

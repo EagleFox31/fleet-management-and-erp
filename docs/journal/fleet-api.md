@@ -144,6 +144,14 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : un client lisait encore les pneus montés, inspections et rotations de toute la flotte ; la garde se laissait tromper par un nom de garde ou une garde locale.
 - **Reste / risques** : alertes, workflows et les autres lectures gelées faute de contrat (22 entrées) ; `exports.routes.ts` `router.get(path, ...)` non analysable (gelé, justifié) ; le scan ne vérifie pas la valeur d'un contrôle de propriétaire. Décision par défaut : `workshop_manager`, `technician`, `driver` n'ont plus accès à la lecture de règlement fournisseur.
 
+## 2026-11-03 — Lot 3 : portée des événements véhicule, client et facturation client
+- **Agent** : fleet-api · **Branche** : `fix/lot3-broadcast-scope`
+- **Quoi** : `client_*` au personnel (`STAFF_ROLES`) ; `client_invoice_*` et `client_invoices_overdue` aux rôles de facturation (`CLIENT_BILLING_EVENT_ROLES`) ; `vehicle_mileage_updated` et `vehicle_maintenance_position_updated` : fiche complète au personnel hors chauffeur, trame réduite (sans la fiche, donc sans prix d'achat) au chauffeur et au seul propriétaire `vehicles.ownerId`. Les émetteurs `vehicle_updated` des renouvellements et l'alerte étaient déjà cloisonnés sur main ; `server/routes.ts` non modifié.
+- **Comment** : `tests/contract/lot3-broadcast-scope.contract.test.ts` (rouge 4/4 contre main, vert après) ; `tests/unit/server/broadcast-hygiene.test.ts` (liste gelée à égalité stricte, entrées OT marquées « lot B », entrepôt « #188 »).
+- **Pourquoi** : tout socket connecté, comptes client d'autres clients compris, recevait fiches client, factures et véhicules de la flotte.
+- **RAIDER** : couvert réutilisable (constantes de rôles partagées), non-régression (contrats voisins), garde-fou à égalité stricte ; sans objet : migration, nouvel événement ou queryKey.
+- **Reste / risques** : lot B (OT, pont NOTIFY) ; chauffeur : trame réduite sur le kilométrage, son écran se resynchronise par requête.
+
 ## 2026-11-03 — Lot A5 : gardes de rôle (stock, tableau technicien, personnel, barème)
 - **Agent** : fleet-api · **Branche** : `fix/a5-role-guards`
 - **Quoi** : `POST /api/warehouse/stock-movement` réservé à `isPartsCatalogManager` (admin, warehouse), données validées, erreurs `AppError`, logs migrés ; `GET /api/dashboard/technician-stats` en `isTechnician` ; `GET /api/users/technicians` et `GET /labor-catalog` en `isStaff` (requêtes client désactivées dans `work-orders/[id].tsx` et `work-order-items-panel.tsx`) ; `assertValidDbId` sur `GET /api/vehicles/:id/tires` ; `GET /api/work-orders/:id` passe par `assertWorkOrderReadable` (règle du technicien conservée) ; handlers morts `GET /api/vehicles` et `/all` supprimés de `routes.ts`.
