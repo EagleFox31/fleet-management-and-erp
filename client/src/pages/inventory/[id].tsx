@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { IDEMPOTENCY_HEADER, partStockKeyScope, sendWithSubmissionKey } from "@/lib/submission-key";
 import { useAuth } from "@/hooks/useAuth";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import {
@@ -128,10 +129,14 @@ export default function PartDetails({ params }: PartDetailsParams) {
     // connaît pas de champ `currentStock` et laisserait l'ajustement sans effet.
     // Cible et quantité passent par les variables, jamais par un état lu ici (AGENTS.md §10).
     mutationFn: async ({ id, adjustment }: { id: number; adjustment: number }) => {
-      return apiRequest("POST", `/api/parts/${id}/update-stock`, {
-        adjustment,
-        reason: "Ajustement manuel depuis la fiche pièce",
-      });
+      // Clé d'idempotence : un réessai après coupure ou 5xx ne rejoue pas l'ajustement.
+      return sendWithSubmissionKey(partStockKeyScope(id, adjustment), (key) =>
+        apiRequest(`/api/parts/${id}/update-stock`, {
+          method: "POST",
+          headers: { [IDEMPOTENCY_HEADER]: key },
+          body: { adjustment, reason: "Ajustement manuel depuis la fiche pièce" },
+        }),
+      );
     },
     onSuccess: (_data, { id, adjustment }) => {
       toast({

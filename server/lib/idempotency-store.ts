@@ -20,7 +20,8 @@ export type ReserveOutcome =
 
 /** Accès à `idempotency_keys`. Injecté dans le garde pour le tester sans base. */
 export type IdempotencyStore = {
-  reserve(request: IdempotencyRequest): Promise<ReserveOutcome>;
+  /** `staleSeconds` : délai de reprise d'une clé en cours ; `null` = jamais. Défaut : `IDEMPOTENCY_STALE_SECONDS`. */
+  reserve(request: IdempotencyRequest, options?: { staleSeconds?: number | null }): Promise<ReserveOutcome>;
   complete(userId: number, key: string, status: number, body: unknown): Promise<void>;
   release(userId: number, key: string): Promise<void>;
   purgeExpired(): Promise<number>;
@@ -49,21 +50,25 @@ export function createIdempotencyStore(getDb: () => Promise<Db>): IdempotencySto
   const keyOf = (userId: number, key: string) => and(eq(idempotencyKeys.userId, userId), eq(idempotencyKeys.key, key));
 
   return {
-    async reserve(request) {
+    async reserve(request, options) {
       const db = await getDb();
-      // Clé expirée ou restée en cours après un arrêt du serveur : reprise.
+      const staleSeconds = options?.staleSeconds === undefined ? IDEMPOTENCY_STALE_SECONDS : options.staleSeconds;
+      // Clé expirée, ou restée en cours après un arrêt du serveur (sauf `staleSeconds: null`) : reprise.
+      const expired = lt(idempotencyKeys.expiresAt, sql`now()`);
       await db
         .delete(idempotencyKeys)
         .where(
           and(
             keyOf(request.userId, request.key),
-            or(
-              lt(idempotencyKeys.expiresAt, sql`now()`),
-              and(
-                eq(idempotencyKeys.state, "in_progress"),
-                lt(idempotencyKeys.createdAt, sql`now() - make_interval(secs => ${IDEMPOTENCY_STALE_SECONDS})`),
-              ),
-            ),
+            staleSeconds === null
+              ? expired
+              : or(
+                  expired,
+                  and(
+                    eq(idempotencyKeys.state, "in_progress"),
+                    lt(idempotencyKeys.createdAt, sql`now() - make_interval(secs => ${staleSeconds})`),
+                  ),
+                ),
           ),
         );
 
