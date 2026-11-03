@@ -13,6 +13,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { craftZip, zip64Extra, type CraftedEntry } from "../support/zip-craft";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, durcissement de l'import Excel (SheetJS 0.20.3) :
@@ -110,7 +111,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(Buffer.alloc(5 * 1024 * 1024 + 1024, 7));
     expect(status).toBe(400);
     expect(body.message).toMatch(/5 Mo/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
   });
 
   it("plus de lignes que le maximum : 400 lisible, aucune facture créée", async () => {
@@ -120,7 +121,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet(rows)));
     expect(status).toBe(400);
     expect(body.message).toMatch(new RegExp(String(SUPPLIER_INVOICE_IMPORT_MAX_ROWS)));
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
     expect((await rowsFor(`${number}-0`)).length).toBe(0);
   }, 120000);
 
@@ -130,7 +131,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(corrupted);
     expect(status).toBe(400);
     expect(body.message).toMatch(/illisible/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
   });
 
   it("décompression excessive (zip bomb sous 5 Mo) : 400 lisible", async () => {
@@ -139,7 +140,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(bomb);
     expect(status).toBe(400);
     expect(body.message).toMatch(/décompressé/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
   });
 
   it("taille décompressée sous-déclarée (central = 1, local = 0) : 400 lisible, pas de décompression sans limite", async () => {
@@ -159,7 +160,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(z);
     expect(status).toBe(400);
     expect(body.message).toMatch(/illisible|décompressé/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
   });
 
   it("data descriptor (bit 3) + taille locale 300 Mo, central honnête : 400 lisible, sans pic mémoire", async () => {
@@ -174,7 +175,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(100 * 1024 * 1024);
     expect(status).toBe(400);
     expect(body.message).toMatch(/illisible/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
     expect((await rowsFor(number)).length).toBe(0);
   });
 
@@ -185,7 +186,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(craftZip(entries));
     expect(status).toBe(400);
     expect(body.message).toMatch(/illisible/);
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
   });
 
   it("exactement le maximum de lignes : accepté (lu en entier)", async () => {
@@ -209,7 +210,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet(rows)));
     expect(status).toBe(400);
     expect(body.message).toMatch(new RegExp(String(SUPPLIER_INVOICE_IMPORT_MAX_ROWS)));
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
     expect((await rowsFor(`${number}-0`)).length).toBe(0);
   });
 
@@ -297,7 +298,7 @@ describe("Import Excel de factures : durcissement", { timeout: 120000 }, () => {
     const { status, body } = await importFile(toBuffer(XLSX.utils.aoa_to_sheet([misspelled, validValues(number)])));
     expect(status).toBe(400);
     expect(body.message).toMatch("Colonnes obligatoires absentes de l'en-tête : Numéro Facture.");
-    expect(JSON.stringify(body)).not.toMatch(TECHNICAL);
+    expect(leakText(body)).not.toMatch(TECHNICAL);
     expect((await rowsFor(number)).length).toBe(0);
   });
 });

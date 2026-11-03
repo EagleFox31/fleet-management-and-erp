@@ -2,7 +2,7 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { assignments, missions } from "../../shared/schema";
-import { apiErrorProblems } from "../support/api-error";
+import { apiErrorProblems, leakText } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -40,7 +40,7 @@ const hugeFill = (vehicleId: number) => ({ vehicleId, quantity: 1_000_000, unitP
 function expectReadableBalanceError(res: { status: number; body: any; headers: Headers }) {
   expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);
   expect(res.body.message).toBe("Solde de la carte carburant insuffisant.");
-  expect(JSON.stringify(res.body)).not.toMatch(/FCFA|\d{6,}/);
+  expect(leakText(res.body)).not.toMatch(/FCFA|\d{6,}/);
 }
 
 beforeAll(async () => {

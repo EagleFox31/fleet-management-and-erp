@@ -6,6 +6,7 @@ import { faultCatalog, parts, partRequirements, tires, vehicles, workOrders } fr
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestPart, createTestSupplier, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, sessions réelles par rôle.
@@ -58,7 +59,7 @@ function expectErrorContract(res: { body: any; headers: Headers }, code: string)
   expect(typeof res.body.message).toBe("string");
   expect(res.body.message.length).toBeGreaterThan(0);
   expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
-  expect(JSON.stringify(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|null value/);
+  expect(leakText(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|null value/);
 }
 
 beforeAll(async () => {

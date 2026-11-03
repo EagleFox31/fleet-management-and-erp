@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, CAT2 : catalogue de pannes, cycle `draft -> validated -> archived`.
@@ -223,7 +224,7 @@ describe("CAT2 : pièces associées à une panne", { timeout: 60000 }, () => {
     const faultId = await createFault();
     const res = await call("POST", `/api/fault-catalog/${faultId}/parts`, { actor: "admin", body: { partId: 2147483000 } });
     expect(res.status).toBe(404);
-    expect(JSON.stringify(res.body)).not.toMatch(/SQLSTATE|violates|foreign key/i);
+    expect(leakText(res.body)).not.toMatch(/SQLSTATE|violates|foreign key/i);
   });
 
   it("même pièce deux fois : 409", async () => {

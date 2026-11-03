@@ -9,6 +9,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestSupplierInvoice, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * T7 niveau C : le formulaire de règlement d'une facture fournisseur soumis
@@ -115,7 +116,7 @@ describe("T7 : règlement fournisseur soumis deux fois", { timeout: 120000 }, ()
     expect(second.body).toMatchObject({ code: "CONFLICT" });
     expect(second.body.message).toMatch(/reste à régler/);
     expect(second.body.requestId).toBe(second.headers.get("x-request-id"));
-    expect(JSON.stringify(second.body)).not.toMatch(/stack|SQLSTATE|violates/);
+    expect(leakText(second.body)).not.toMatch(/stack|SQLSTATE|violates/);
     // Le justificatif du règlement refusé ne reste pas sur disque.
     expect(proofFiles().length).toBe(before + 1);
   });

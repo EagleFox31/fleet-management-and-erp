@@ -1592,3 +1592,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Toute écriture d'argent déclenchée par un bouton porte une clé de requête métier, contrôlée sous le même verrou que l'écriture et enregistrée dans la même transaction. `useSingleFlightMutate` ne protège que du double clic, pas du nouvel envoi après coupure.
 - Un écrivain de `workflowData` n'écrit que ce qu'il modifie. Une réécriture complète à partir d'une copie lue plus tôt est une exception nommée dans cette leçon.
+
+## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
+
+### Contexte
+- `part-scans-routes.test.ts` (404 normalisé) a échoué une fois sur `/sql/i` : le corps entier était contrôlé, et le `requestId` tiré par `nanoid(10)` valait « qrSqlREDR7 ».
+- FUEL3 (`vehicles-tank-capacity.test.ts`) a échoué sur `n_tup_ins` 132 au lieu de 130 : le test vérifiait l'absence d'écriture au second démarrage à l'aide du compteur `pg_stat_user_tables`. Ce compteur est global à la table, il compte aussi les écritures des fichiers lancés en parallèle, et il est mis à jour en différé.
+
+### Cause racine
+L'assertion portait sur une donnée que le test ne contrôle pas : une valeur aléatoire incluse dans le texte contrôlé, et un compteur partagé par toute la base. 50 contrôles de fuite, dans 34 fichiers, suivaient le même motif (`JSON.stringify(x.body)).not.toMatch`). Avec `/i`, n'importe quel mot de trois lettres (sql, NaN…) pouvait sortir.
+
+### Classification
+Test non déterministe (flake), sans défaut produit.
+
+### Résolution
+- `leakText(body)` (`tests/support/api-error.ts`) retire le `requestId` du texte contrôlé, y compris dans « Référence : … ». `apiErrorProblems` s'en sert aussi.
+- FUEL3 compare `xmin` et `md5` des lignes, hors lignes `TEST%` des autres fichiers, plus une sentinelle propre au test.
+
+### Prévention (vérifiable)
+- `tests/unit/leak-check-hygiene.test.ts` échoue sur tout `JSON.stringify(<x>.body)).not.toMatch` dans `tests/` ou `e2e/`.
+- `part-scans-routes.test.ts` force `X-Request-Id: qrSqlREDR7` : l'ancien contrôle échoue de façon déterministe (mutation prouvée).
+- Mutation FUEL3 : `UPDATE vehicles SET brand = brand` au démarrage rend le test rouge.
+
+### Leçon généralisée
+Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
