@@ -60,3 +60,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - sw.js : les requêtes d'une autre origine ne sont plus mises en cache.
 - Pourquoi : relecture NO-GO (fleet-relecteur, fleet-securite) ; leçon dans `docs/analysis/LESSONS_LEARNED.md`.
 - Preuve : tsc 0 erreur, unitaires 1521/1521 (118 fichiers), dont `session-resume.test.ts` (6). e2e 13 non rejoué (la base du `.env` est la production).
+
+## 2026-11-03T08:06:16+01:00 — CDC-10a — La déconnexion garde la file des autres comptes (98fbe8b)
+
+- Quoi : `purgeAll` vide entièrement le magasin du compte sortant ; les autres comptes ne perdent que leur cache de lecture, leur file d'écritures est gardée (même règle que `purgeOthers`). Le nombre d'écritures détruites ne compte que le compte sortant, journalisé avec son userId.
+- Pourquoi : réserve de b7, sur une tablette partagée la déconnexion de A détruisait la file de B.
+- Preuve : tsc 0, unitaires 1521/1521, CI verte. Relecture aa : GO sous réserve.
+- Réserves reportées au lot #10c (avant la production du hors ligne, pas avant la fusion) :
+  - R2 : déconnexion interrompue (purger avant le POST /logout, ou dans la branche « pending » de session-resume) ;
+  - S1 : synchronisation de la déconnexion entre onglets (BroadcastChannel) et vérification par /me du propriétaire avant rejeu de la file ;
+  - tests : session-resume avec un autre utilisateur et en concurrence, sw.js sur une autre origine ; logout différé sans délai ni traitement du 403 ; clé globale currentVehicleRegistration.
