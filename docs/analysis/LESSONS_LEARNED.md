@@ -1181,3 +1181,25 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un mock de module suppose un cache de modules isolé par fichier. Avant d'en écrire un, vérifier `isolate` dans la config de la suite ; sinon simuler la panne au niveau de la ressource (base, réseau) ou injecter la dépendance.
+
+## 2026-11-03 - Contraintes CDC posées en SQL seulement, absentes après drizzle-kit push
+
+### Constat
+- CI de #119 sur 8ee48b2 : jobs integration et contract (1) rouges (`cdc-schema-idempotence`, `kpi-cdc` : « ok » ou 500 reçus au lieu de 23514 / 23505 / 409). La PR annonçait pourtant des contrats verts : la preuve venait d'une base locale préparée autrement, la CI n'avait pas été relue.
+
+### Cause racine
+- Les CHECK de `workshop_labor_rates`, `import_batches`, `idempotency_keys`, l'UNIQUE `(user_id, key)` et `work_orders_due_mileage_check` n'étaient déclarés que dans `20261101_cdc_ecarts.sql`. La recette des tests et de la CI fait `drizzle-kit push` puis `initializeDatabase()` : les tables existent déjà, `CREATE TABLE IF NOT EXISTS` et `ADD COLUMN IF NOT EXISTS` sont sautés avec leurs contraintes. Drizzle nommait en outre l'unique de date `..._effective_from_unique`, alors que le service attend `..._effective_from_key` pour répondre 409.
+
+### Classification
+- Dérive de schéma entre Drizzle et SQL, plus défaut de preuve (CI non vérifiée avant de l'annoncer).
+
+### Résolution
+- 0ed84c5 : CHECK et UNIQUE déclarés aussi dans `shared/schema.ts` sous le nom que Postgres leur donne. `work_orders` étant déclarée deux fois dans le schéma, `work_orders_due_mileage_check` est réconciliée par un bloc DO idempotent (`pg_constraint`, `NOT VALID`) dans la migration et `init-database.ts`. CI 8/8.
+
+### Prévention (vérifiable)
+- Les jobs CI integration et contract partent d'un `drizzle-kit push` sur base neuve : toute contrainte absente de Drizzle fait échouer `cdc-schema-idempotence.test.ts` (cas refusés 23514 / 23505).
+- `tests/unit/server/cdc-schema-drift.test.ts` garde la migration et `CDC_SCHEMA_STATEMENTS` identiques.
+- Reste ouvert : une base déjà poussée avec un schéma antérieur à 0ed84c5 n'a pas ces contraintes ; réconciliation au démarrage à faire avant d'activer `maintenance-report`, `excel-import` ou `technician-offline` (go/no-go fleet-release, condition C1).
+
+### Règle Projet (obligatoire)
+- Une contrainte écrite en SQL est aussi déclarée dans Drizzle, sous le même nom, ou réconciliée par un bloc DO idempotent. Une PR n'annonce « CI verte » qu'après `gh pr checks` sur sa tête.
