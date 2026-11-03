@@ -10,6 +10,8 @@ import type { PendingLogoutOutcome } from "./pending-logout";
  * 2. une session restaurée désigne le magasin hors ligne de son compte ;
  * 3. un 401 expire la session du compte actif au départ de la requête (sa file
  *    d'écritures est gardée pour sa prochaine connexion).
+ * Une déconnexion trouvée en attente au démarrage (onglet fermé pendant le
+ * POST /logout) refait d'abord la purge locale : elle a pu ne pas aboutir.
  *
  * Les dépendances sont injectées pour tester la composition sans navigateur.
  */
@@ -19,11 +21,15 @@ export interface SessionResumeDeps {
   getActiveUserId(): number | null;
   activateUser(userId: number): void;
   expireUser(userId: number): Promise<void>;
+  /** Purge locale de la déconnexion (cache TanStack, magasins hors ligne, état navigateur). */
+  purgeLocal(): Promise<void>;
 }
 
 export function createSessionResume(deps: SessionResumeDeps): () => Promise<SessionCheck> {
   return async function resumeSession(): Promise<SessionCheck> {
-    if ((await deps.flushPendingLogout()) === "pending") {
+    const pending = await deps.flushPendingLogout();
+    if (pending !== "none") await deps.purgeLocal();
+    if (pending === "pending") {
       // La déconnexion n'a pas pu partir : l'utilisateur reste déconnecté localement.
       return { status: "anonymous" };
     }
@@ -39,5 +45,27 @@ export function createSessionResume(deps: SessionResumeDeps): () => Promise<Sess
       await deps.expireUser(activeAtStart);
     }
     return result;
+  };
+}
+
+export interface LogoutDeps {
+  markPending(): void;
+  clearPending(): void;
+  purgeLocal(): Promise<void>;
+  postLogout(): Promise<void>;
+}
+
+/**
+ * Déconnexion : repère posé, purge locale AVANT l'appel serveur (un onglet fermé
+ * pendant le POST ne laisse aucune donnée lue sur l'appareil), puis POST /logout.
+ * Si le serveur ne répond pas, le repère reste : la déconnexion part au démarrage
+ * suivant ou au retour du réseau. L'erreur réseau est relancée à l'appelant.
+ */
+export function createLogout(deps: LogoutDeps): () => Promise<void> {
+  return async function logout(): Promise<void> {
+    deps.markPending();
+    await deps.purgeLocal();
+    await deps.postLogout();
+    deps.clearPending();
   };
 }

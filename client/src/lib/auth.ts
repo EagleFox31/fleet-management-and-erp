@@ -3,7 +3,7 @@ import { activateOfflineUser, expireOfflineSession, purgeOfflineSession } from "
 import { getActiveOfflineUserId } from "@/lib/offline-user-scope";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import { checkSession } from "@/lib/session-check";
-import { createSessionResume } from "@/lib/session-resume";
+import { createLogout, createSessionResume } from "@/lib/session-resume";
 import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 
 export interface LoginCredentials {
@@ -71,23 +71,27 @@ export async function register(data: RegistrationData): Promise<User> {
   return await response.json();
 }
 
-/**
- * Déconnexion. Que le serveur réponde ou non (réseau coupé), le stockage hors
- * ligne et le cache TanStack de ce compte sont purgés : le compte suivant sur
- * le même appareil ne doit rien en relire. Si le serveur n'a pas pu être joint, un
- * repère local garde la déconnexion à envoyer (démarrage suivant ou retour du
- * réseau), sinon le cookie de session reconnecterait ce compte.
- */
-export async function logout(): Promise<void> {
-  pendingServerLogout.mark();
-  try {
-    await apiRequest("POST", "/api/auth/logout");
-    pendingServerLogout.clear();
-  } finally {
-    await purgeOfflineSession(queryClient);
-    purgeBrowserUserState();
-  }
+/** Purge locale d'une déconnexion : cache TanStack, magasins hors ligne, état navigateur. Ne lève pas. */
+async function purgeLocalSession(): Promise<void> {
+  await purgeOfflineSession(queryClient);
+  purgeBrowserUserState();
 }
+
+/**
+ * Déconnexion. Le stockage hors ligne et le cache TanStack de ce compte sont purgés
+ * avant l'appel serveur : le compte suivant sur le même appareil ne doit rien en
+ * relire, même si l'onglet se ferme pendant l'appel. Si le serveur n'a pas pu être
+ * joint, un repère local garde la déconnexion à envoyer (démarrage suivant ou retour
+ * du réseau), sinon le cookie de session reconnecterait ce compte. Voir `session-resume.ts`.
+ */
+export const logout = createLogout({
+  markPending: () => pendingServerLogout.mark(),
+  clearPending: () => pendingServerLogout.clear(),
+  purgeLocal: purgeLocalSession,
+  postLogout: async () => {
+    await apiRequest("POST", "/api/auth/logout");
+  },
+});
 
 /**
  * Amorçage de session : déconnexion différée envoyée d'abord, puis /api/auth/me,
@@ -99,6 +103,7 @@ export const resumeSession = createSessionResume({
   getActiveUserId: getActiveOfflineUserId,
   activateUser: (userId) => activateOfflineUser(queryClient, userId),
   expireUser: (userId) => expireOfflineSession(queryClient, userId),
+  purgeLocal: purgeLocalSession,
 });
 
 export function isAdmin(user: User | null): boolean {
