@@ -623,7 +623,8 @@ export const partSpecifications = pgTable("part_specifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("idx_part_specifications_part_id").on(table.partId),
-  uniqueIndex("ux_part_specifications_part_name").on(table.partId, sql`lower(${table.specificationName})`),
+  // Colonnes écrites en sql`` dans un index à expression : voir tests/unit/shared/schema-index-introspection.test.ts.
+  uniqueIndex("ux_part_specifications_name_part").on(sql`lower(${table.specificationName})`, sql`${table.partId}`),
 ]);
 
 // Variantes de pièces

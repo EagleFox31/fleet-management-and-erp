@@ -312,10 +312,13 @@ Notes :
 
 ## 9. Dette connue à ne pas aggraver
 
-- `server/routes.ts` (~5 700 lignes) contient des routes dupliquées. Ne rien y
-  ajouter : créer un routeur dans `server/api/` et le monter dans `server/api/index.ts`.
-  Express sert la **première** déclaration : avant de corriger une route, chercher
-  son double. Liste gelée dans `tests/unit/server/routes-hygiene.test.ts`.
+- `server/routes.ts` (~5 700 lignes) est gelé. Ne rien y ajouter : créer un routeur
+  dans `server/api/` et le monter dans `server/api/index.ts`. Express sert la
+  **première** déclaration d'un chemin : les six routes qui y étaient déclarées deux
+  fois ont été dédoublonnées le 3 novembre 2026, et `tests/unit/server/routes-hygiene.test.ts`
+  échoue désormais sur tout nouveau doublon (liste gelée vide). Un routeur de
+  `server/api/` monté avant `registerRoutes` masque aussi toute déclaration du même
+  chemin dans `routes.ts` (cas `/api/warehouse/*`).
 - `server/storage.ts` contient des méthodes bouchons (`{ return undefined; }`,
   `{ return { items: [], total: 0 }; }`). Aucune n'est appelée depuis le
   30 octobre 2026 : la liste gelée de `tests/unit/server/storage-stubs.test.ts`
