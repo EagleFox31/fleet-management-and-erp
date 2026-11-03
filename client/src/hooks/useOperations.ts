@@ -2,6 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { operationsService, type MissionFormData } from "@/services/operationsService";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { userMessageOf } from "@/lib/api-error";
 
 export function useOperations() {
   const { toast } = useToast();
@@ -53,7 +54,7 @@ export function useOperations() {
     onError: (error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Impossible de créer la mission."),
         variant: "destructive",
       });
     },
@@ -72,7 +73,7 @@ export function useOperations() {
     onError: (error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Impossible de terminer la mission."),
         variant: "destructive",
       });
     },
