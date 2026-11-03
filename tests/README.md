@@ -19,6 +19,8 @@ npm run test:all         # unit + integration + contract (pas e2e)
 npm run test:e2e         # Playwright
 ```
 
+`npm test` refuse de démarrer si un `DATABASE_URL` Neon est encore exporté dans le shell (garde de #159). Le désactiver avant de lancer les tests : `unset DATABASE_URL` (bash), ou `Remove-Item Env:DATABASE_URL` (PowerShell).
+
 ## Base utilisée
 
 Même Neon que `npm run dev` (`DATABASE_URL`). Pas de copie, pas de « branche » Neon.
