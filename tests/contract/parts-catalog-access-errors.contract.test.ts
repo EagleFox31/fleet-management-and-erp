@@ -71,8 +71,9 @@ describe("PRT1 : écritures sans session ou hors rôle", { timeout: 60000 }, () 
   it("anonyme : 401 ApiErrorBody sur POST, PATCH, DELETE et sur les enfants, rien n'est écrit", async () => {
     const partId = await newPartId();
     const before = await rowOf(partId);
+    const created = partBody();
     const attempts: Array<[string, string, unknown]> = [
-      ["POST", "/api/parts", partBody()],
+      ["POST", "/api/parts", created],
       ["PATCH", `/api/parts/${partId}`, { category: "Pirate" }],
       ["DELETE", `/api/parts/${partId}`, undefined],
       ["POST", `/api/parts/${partId}/specifications`, { specificationName: "a", specificationValue: "b" }],
@@ -84,6 +85,7 @@ describe("PRT1 : écritures sans session ou hors rôle", { timeout: 60000 }, () 
       const res = await call(method, path, { body });
       expectApiError(res, 401, "UNAUTHENTICATED");
     }
+    expect(await db.select().from(parts).where(eq(parts.reference, created.reference))).toHaveLength(0);
     const after = await rowOf(partId);
     expect(after.category).toBe(before.category);
   });
@@ -160,9 +162,9 @@ describe("PRT1 : forme des erreurs (ApiErrorBody)", { timeout: 60000 }, () => {
     expectApiError(res, 400, "VALIDATION");
   });
 
-  it("identifiant non numérique : la route n'existe pas (404), pas de 500", async () => {
-    const res = await call("GET", "/api/parts/abc", { actor: "admin" });
-    expect(res.status).toBeLessThan(500);
+  // Le statut seul : aucune route `/api` inconnue n'a de gestionnaire, le 404 d'Express sort hors ApiErrorBody (backlog).
+  it("identifiant non numérique : aucune route ne répond, statut 404 exact", async () => {
+    expect((await call("GET", "/api/parts/abc", { actor: "admin" })).status).toBe(404);
   });
 });
 
