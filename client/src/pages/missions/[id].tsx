@@ -1024,7 +1024,16 @@ export default function MissionDetailsPage() {
         notes: fuelForm.notes || undefined,
         regularizationReason: isRegularizationRequest ? fuelRegularizationReason.trim() : undefined,
         isPreDeparture: fuelForm.isPreDeparture,
-        requestKey: fuelSubmissionKeys.take(),
+        // Empreinte de la saisie : une saisie différente après une issue incertaine reçoit une nouvelle clé.
+        requestKey: fuelSubmissionKeys.take({
+          endpoint,
+          quantity,
+          unitPrice,
+          stationName: fuelForm.stationName || null,
+          notes: fuelForm.notes || null,
+          reason: isRegularizationRequest ? fuelRegularizationReason.trim() : null,
+          isPreDeparture: fuelForm.isPreDeparture,
+        }),
       });
 
       return {

@@ -1723,3 +1723,10 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.
+
+### Suite : statut du plein normal relu sous le verrou de ligne
+
+- **Cause** : `POST /api/missions/:id/fuel-records` contrôlait le statut sur une lecture faite avant les verrous. Deux effets : un rejeu après clôture recevait 400 au lieu du plein enregistré, et une clôture concurrente laissait passer un débit sur une mission clôturée.
+- **Résolution** : `assertMissionAcceptsFuel(tx)` relit le statut avec `FOR UPDATE` dans la transaction du débit, après le rejeu et avant le solde. Ordre des verrous : carte, puis ligne.
+- **Clé incertaine et nouvelle saisie** : la clé incertaine n’est reprise que pour la même saisie (empreinte sans l’heure par défaut). Une saisie différente reçoit une nouvelle clé au lieu d’un 409.
+- **Prévention** : trois contrats (rejeu après clôture, plein neuf sur mission clôturée, clôture concurrente), dont deux rouges contre main ; unitaires de l’empreinte.

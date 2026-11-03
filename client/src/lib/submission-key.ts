@@ -7,7 +7,10 @@ import { newRequestKey } from "@/lib/request-key";
  * fiche, ou recharger la page, doit renvoyer la MÊME clé, pour que le serveur rejoue au lieu de
  * débiter une seconde fois.
  *
- * - `take()` : clé de l'envoi (la clé conservée, sinon une nouvelle).
+ * - `take(fingerprint)` : clé de l'envoi. Une clé incertaine n'est reprise que pour la même saisie
+ *   (même empreinte) ; une saisie différente est une nouvelle intention et reçoit une nouvelle clé,
+ *   au lieu d'un 409. L'empreinte ne contient que ce que l'utilisateur saisit (pas l'heure par défaut
+ *   du formulaire, recalculée à chaque ouverture).
  * - `settle(error?)` : issue connue (succès, 4xx) -> clé libérée ; issue inconnue -> clé conservée.
  * - `discard()` : annulation par l'utilisateur -> clé libérée, sauf si une issue reste inconnue.
  *
@@ -16,7 +19,7 @@ import { newRequestKey } from "@/lib/request-key";
  */
 type KeyStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-type StoredKey = { key: string; uncertain: boolean };
+type StoredKey = { key: string; uncertain: boolean; fingerprint: string };
 
 const memory = new Map<string, string>();
 const memoryStorage: KeyStorage = {
@@ -48,12 +51,20 @@ export function createSubmissionKeyStore(scope: string, storage: KeyStorage = de
   const read = (): StoredKey | null => {
     try {
       const parsed = JSON.parse(storage.getItem(storageKey) ?? "null");
-      return parsed && typeof parsed.key === "string" ? { key: parsed.key, uncertain: parsed.uncertain === true } : null;
+      if (parsed && typeof parsed.key === "string") {
+        return {
+          key: parsed.key,
+          uncertain: parsed.uncertain === true,
+          fingerprint: typeof parsed.fingerprint === "string" ? parsed.fingerprint : "",
+        };
+      }
     } catch {
-      return null;
+      // Valeur illisible : repli sur la copie en mémoire.
     }
+    return current;
   };
   const write = (value: StoredKey | null) => {
+    current = value;
     try {
       if (value) storage.setItem(storageKey, JSON.stringify(value));
       else storage.removeItem(storageKey);
@@ -62,32 +73,32 @@ export function createSubmissionKeyStore(scope: string, storage: KeyStorage = de
     }
   };
 
-  let inFlight: string | null = null;
+  // Copie en mémoire : la clé reste valable pour cet écran même si le stockage refuse l'écriture.
+  let current: StoredKey | null = null;
 
   return {
-    take(): string {
-      const key = inFlight ?? read()?.key ?? newRequestKey();
-      inFlight = key;
-      write({ key, uncertain: read()?.uncertain ?? false });
+    take(fingerprint: unknown = null): string {
+      const print = JSON.stringify(fingerprint ?? null);
+      const stored = read();
+      if (stored && (!stored.uncertain || stored.fingerprint === print)) {
+        write({ ...stored, fingerprint: print });
+        return stored.key;
+      }
+      const key = newRequestKey();
+      write({ key, uncertain: false, fingerprint: print });
       return key;
     },
     settle(error?: unknown): void {
       if (error !== undefined && isIndeterminateOutcome(error)) {
-        const key = inFlight ?? read()?.key;
-        if (key) write({ key, uncertain: true });
+        const stored = read();
+        if (stored) write({ ...stored, uncertain: true });
         return;
       }
-      inFlight = null;
       write(null);
     },
     discard(): void {
       if (read()?.uncertain) return;
-      inFlight = null;
       write(null);
-    },
-    /** Vrai si un envoi précédent n'a pas eu d'issue connue (à signaler avant une nouvelle saisie). */
-    hasUncertainSubmission(): boolean {
-      return read()?.uncertain === true;
     },
   };
 }
