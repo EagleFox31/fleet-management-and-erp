@@ -23,6 +23,15 @@ const marker = `pwn130-${Date.now().toString(36)}`;
 const escapeTargets = () => [path.resolve(marker), path.resolve("uploads", marker), path.resolve("uploads/documents", marker)];
 const suffixedDir = () => path.resolve("uploads/documents/vehicle-12abc");
 
+/** Contrat `ApiErrorBody` (shared/errors.ts) : message lisible, code, requestId, aucun détail technique. */
+function expectApiError400(res: { status: number; body: any }) {
+  expect(res.status).toBe(400);
+  expect(res.body.message).toBe("ID de véhicule invalide");
+  expect(res.body.code).toBeTruthy();
+  expect(res.body.requestId).toBeTruthy();
+  expect(JSON.stringify(res.body)).not.toMatch(/stack|ENOENT|EACCES|uploads|\.\.\//i);
+}
+
 async function post(rawVehicleId: string) {
   const form = new FormData();
   form.append("name", "Traversée");
@@ -67,14 +76,12 @@ describe("POST /api/vehicles/:vehicleId/documents — identifiant hors chiffres"
   ])("%s : 400 lisible, aucun dossier créé hors de uploads/documents/vehicle-<id>", async (_label, rawId) => {
     const res = await post(rawId);
     for (const target of escapeTargets()) expect(fs.existsSync(target), target).toBe(false);
-    expect(res.status).toBe(400);
-    expect(res.body.message).toBe("ID de véhicule invalide");
+    expectApiError400(res);
   });
 
   it("un identifiant suivi d'un suffixe (`12abc`) est refusé, pas tronqué par parseInt", async () => {
     const res = await post("12abc");
-    expect(res.status).toBe(400);
-    expect(res.body.message).toBe("ID de véhicule invalide");
+    expectApiError400(res);
     expect(fs.existsSync(suffixedDir())).toBe(false);
   });
 });
