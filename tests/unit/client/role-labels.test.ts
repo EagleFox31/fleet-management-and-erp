@@ -1,6 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "fs";
-import { join, relative } from "path";
 import { describe, expect, it } from "vitest";
+import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../../support/repo-files";
 import { ALL_APP_ROLES } from "../../../shared/constants/roles";
 import { getRoleLabel, normalizeRole } from "../../../client/src/lib/contextual-help/roles";
 import { APP_ROLES } from "../../../client/src/lib/contextual-help/types";
@@ -13,16 +12,7 @@ import { APP_ROLES } from "../../../client/src/lib/contextual-help/types";
  * un membre de la direction y apparaissait « Utilisateur ».
  */
 
-const CLIENT_SRC = join(__dirname, "../../../client/src");
-const SOURCE_OF_TRUTH = "lib/contextual-help/roles.ts";
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return /\.(ts|tsx)$/.test(entry) ? [full] : [];
-  });
-}
+const SOURCE_OF_TRUTH = "client/src/lib/contextual-help/roles.ts";
 
 describe("libellés de rôle", () => {
   it("la liste client des rôles suit le schéma", () => {
@@ -38,11 +28,12 @@ describe("libellés de rôle", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("aucun écran ne redéclare sa table de libellés de rôle", () => {
-    const offenders = sourceFiles(CLIENT_SRC)
-      .filter((file) => relative(CLIENT_SRC, file).replace(/\\/g, "/") !== SOURCE_OF_TRUTH)
-      .filter((file) => /\b(const|function|let)\s+getRoleLabel\b/.test(readFileSync(file, "utf8")))
-      .map((file) => relative(CLIENT_SRC, file).replace(/\\/g, "/"));
+  it("aucun écran ne redéclare sa table de libellés de rôle", async () => {
+    const files = repoFiles({ under: ["client/src"], match: /\.tsx?$/ }).filter((f) => f !== SOURCE_OF_TRUTH);
+    expect(files.length).toBeGreaterThan(100);
+    const offenders = (await readRepoFiles(files))
+      .filter(([, text]) => /\b(const|function|let)\s+getRoleLabel\b/.test(text))
+      .map(([file]) => file.replace(/^client\/src\//, ""));
     expect(offenders).toEqual([]);
-  });
+  }, REPO_SCAN_TIMEOUT_MS);
 });
