@@ -48,6 +48,23 @@ export type AppRole = NonNullable<typeof users.$inferSelect>["role"];
 export const ALL_APP_ROLES = users.role.enumValues as readonly AppRole[];
 
 /**
+ * Libellés français des rôles : source unique (UI et exports).
+ * `Record<AppRole, string>` : un rôle ajouté au schéma sans libellé casse `tsc`.
+ */
+export const ROLE_LABELS: Record<AppRole, string> = {
+  admin: "Administrateur",
+  workshop_manager: "Chef d'atelier",
+  technician: "Technicien",
+  secretary: "Secrétaire",
+  logistics: "Logisticien",
+  warehouse: "Magasinier",
+  management: "Direction",
+  client: "Client",
+  driver: "Chauffeur",
+  user: "Utilisateur",
+};
+
+/**
  * Approvisionnement — fournisseurs, commandes, factures fournisseur.
  *
  * Le chef d'atelier et le technicien en sont exclus: ils **demandent** des

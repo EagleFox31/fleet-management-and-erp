@@ -106,3 +106,13 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve automatisée : unitaire (2 passed), intégration `notification-preferences-service` (2 passed) ; `tsc --noEmit` 0 erreur.
 - **RAIDER** : couvert défaut non-régressif, repli sûr, une seule requête ; sans objet : migration.
 - **Reste / risques** : chevauche `alert-service.ts` avec BE T-17a (non poussée) : résoudre à la fusion. Canal e-mail non branché (hors périmètre).
+## 2026-11-03 — DIR3 libellés d'export
+- **Agent** : api-2 · **Branche** : `fix/dir3-export-labels` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : les exports utilisateurs et ordres de travail sortent des libellés français (rôles magasinier, secrétaire, logisticien, direction ; statut « Attente pièces » ; priorité « Critique »).
+- **Comment** : `ROLE_LABELS` déplacé dans `shared/constants/roles.ts` (`Record<AppRole,string>`), nouveau `shared/constants/work-orders.ts` (statuts et priorités d'OT), `export-service.ts` les importe avec repli `label ?? raw`. Build : Adapt.
+- **Pourquoi** : défauts DIR3-1/2/3 ; une table locale divergente de l'enum du schéma.
+- **Comment tester (QA)** : Exporter les ordres de travail et les utilisateurs ; attendu : plus d'identifiant technique brut dans Rôle, Statut, Priorité.
+- **Preuve automatisée** : contrat exports 221 passed (6 fichiers), unitaires 1470 passed, `tsc --noEmit` 0 erreur.
+- **RAIDER** : couvert source unique, non-régression (libellés UI inchangés) ; sans objet : migration.
+- **Reste / risques** : tables client divergentes pour « attente pièces » (voir PR).
