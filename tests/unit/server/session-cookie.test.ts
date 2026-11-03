@@ -18,6 +18,25 @@ describe("sessionCookieFlags", () => {
   });
 });
 
+describe("sessionCookieFlags : secure=false seulement si APP_URL commence par http://", () => {
+  it.each([
+    "https://app.example.com",
+    "HTTPS://app.example.com",
+    "https://app.example.com/?next=http://x",
+    " http://192.168.1.20:5000",
+    "ftp://192.168.1.20",
+  ])("APP_URL %s en production : cookie secure", (APP_URL) => {
+    expect(sessionCookieFlags({ NODE_ENV: "production", APP_URL }).secure).toBe(true);
+  });
+
+  it.each(["http://192.168.1.20:5000", "HTTP://10.0.0.5:5000", "http://localhost:5000"])(
+    "APP_URL %s en production : cookie non secure, sameSite lax",
+    (APP_URL) => {
+      expect(sessionCookieFlags({ NODE_ENV: "production", APP_URL })).toEqual({ secure: false, sameSite: "lax" });
+    },
+  );
+});
+
 describe("requireSessionSecret", () => {
   it("production sans secret, ou avec l'ancienne valeur publique : refus de démarrer", () => {
     expect(() => requireSessionSecret({ NODE_ENV: "production" })).toThrow(/SESSION_SECRET/);

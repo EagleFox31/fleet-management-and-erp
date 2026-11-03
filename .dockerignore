@@ -13,4 +13,5 @@ backup
 .env.*
 *.log
 docs
-attached_assets
+# attached_assets reste dans le contexte : le client en importe des images (écran de connexion)
+# et le serveur y lit le papier à en-tête TAY (PDF, Word).

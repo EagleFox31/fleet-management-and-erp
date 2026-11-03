@@ -53,4 +53,4 @@ jobs:
           fi
           DIR="${DEPLOY_DIR:-fleet-management-and-erp}"
           ssh -i ~/.ssh/id_deploy "$SSH_USER@$SSH_HOST" \
-            "cd '$DIR' && git pull --ff-only && cd deploy && docker compose build app-recette && docker compose up -d app-recette"
+            "cd '$DIR' && git pull --ff-only && cd deploy && docker compose --profile recette build app-recette && docker compose --profile recette up -d app-recette"

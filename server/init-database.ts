@@ -35,8 +35,10 @@ async function applyMigrationSqlFiles() {
     files = (await readdir(migrationsDir))
       .filter((file) => file.endsWith('.sql'))
       .sort();
-  } catch {
-    return;
+  } catch (error) {
+    // Dossier absent (image Docker incomplète) : échouer au démarrage plutôt que de servir une base
+    // à laquelle il manque migrations et triggers sans le savoir (LESSONS_LEARNED, 4 novembre 2026).
+    throw new Error(`Migrations introuvables (${migrationsDir}) : le démarrage est interrompu.`, { cause: error });
   }
 
   for (const file of files) {
