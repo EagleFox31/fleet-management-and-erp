@@ -45,13 +45,13 @@ async function switchUser(page: Page, user: E2ECredentials) {
   await loginWithSession(page, user);
 }
 
-/** Trame de pièce (hors part_used_* et part_requirement_*) qui vise cette pièce. */
+/** Trame de pièce (hors part_used_* et part_requirement_*) qui vise cette pièce ; accepte part_catalog_changed. */
 function isPartFrameFor(frame: string, reference: string, partId: number): boolean {
   try {
     const message = JSON.parse(frame) as { type?: string };
     return (
-      /^parts?_(created|updated|changed|deleted)/.test(message.type ?? "") &&
-      (frame.includes(reference) || new RegExp(String.raw`"(id|entityId)":\s*${partId}\b`).test(frame))
+      /^parts?_(catalog_)?(created|updated|changed|deleted)/.test(message.type ?? "") &&
+      (frame.includes(reference) || new RegExp(String.raw`"(id|entityId|partId)":\s*${partId}\b`).test(frame))
     );
   } catch {
     return false;
