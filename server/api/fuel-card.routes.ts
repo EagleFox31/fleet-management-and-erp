@@ -4,6 +4,8 @@ import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-servi
 import { moduleLogger } from "../lib/logger";
 import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
+import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
+import { AppError } from "../lib/app-error";
 
 const log = moduleLogger("fuel-card");
 
@@ -124,11 +126,16 @@ router.post("/consumption", async (req, res, next) => {
     if (!vehicleId || !quantity || !unitPrice || !date || !stationName || !destination) {
       return res.status(400).json({ message: "Données de consommation incomplètes" });
     }
+    const fillDate = new Date(date);
+    if (Number.isNaN(fillDate.getTime())) throw new AppError(400, "Date de plein invalide.");
+    // Prix obligatoire (contrat), retenu pour admin et logistique seulement ; sinon prix du jour imposé.
+    const actorRole = String((req as any).user?.role ?? "").trim().toLowerCase();
+    const resolvedUnitPrice = await resolveFuelUnitPrice(actorRole, Number.parseFloat(unitPrice), fillDate);
     
     const result = await fuelCardService.recordConsumption({
       vehicleId: parseInt(vehicleId),
       quantity: parseFloat(quantity),
-      unitPrice: parseFloat(unitPrice),
+      unitPrice: resolvedUnitPrice,
       date,
       stationName,
       destination,
