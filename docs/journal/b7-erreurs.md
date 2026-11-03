@@ -205,3 +205,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `lt(updatedAt, cutoff)` dans le `where`, `now` et le délai injectables. Aucun job branché : la décision de rétention revient au produit.
 - Pourquoi : la clause n'était qu'un commentaire, et un workflow abandonné la veille perdait ses documents. La fonction n'a aucun appelant : le piège était armé, mais n'avait pas encore servi (constat de fleet-securite pendant la revue de #210).
 - Preuve : `tests/integration/workflow-cleanup-retention.test.ts` (1 jour gardé, 8 jours purgé, en cours intact), rouge sans la clause.
+
+## 2026-11-03T18:45:54+01:00 — /api/suppliers/summary servi avant /:id
+
+- Quoi : `GET /summary` déclaré dans `server/api/suppliers.routes.ts` avant `/:id` ; la déclaration morte de `server/routes.ts` est supprimée (commentaire de renvoi à la place). Le témoin `it.fails` de `suppliers-summary-capture` devient le contrat.
+- Comment : même service (`vatBillingService.getSuppliersSummary`), erreurs relayées par `withLogContext`. Accès : garde de montage du routeur (lecture fournisseurs), le client reste en 403.
+- Pourquoi : `useBilling` recevait un 400 « ID invalide », la synthèse n'était jamais servie.
+- Preuve : contrat rouge sans le correctif, vert avec ; `client-read-scope-tires` (client 403 au montage) vert ; tsc 0 ; unitaires 1933.
