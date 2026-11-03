@@ -913,6 +913,18 @@ router.post(
 
 router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Response, next: NextFunction) => {
   uploadRenewalProof(req, res, async (uploadError) => {
+    // Le justificatif n'est gardé qu'une fois référencé par la demande enregistrée :
+    // tout refus ou échec avant ce point le supprime (bloc finally), aucun orphelin dans uploads/.
+    let proofRecorded = false;
+    const removeUploadedProof = () => {
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (unlinkError) {
+          log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif du renouvellement rapide non enregistré impossible");
+        }
+      }
+    };
     try {
       if (uploadError) {
         return res.status(400).json({
@@ -958,13 +970,6 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
 
       const parsedPayload = quickRenewPayloadSchema.safeParse(normalizedPayload);
       if (!parsedPayload.success) {
-        if (req.file?.path && fs.existsSync(req.file.path)) {
-          try {
-            fs.unlinkSync(req.file.path);
-          } catch (unlinkError) {
-            log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après payload invalide impossible");
-          }
-        }
         return res.status(400).json({
           message: "Payload invalide.",
           errors: parsedPayload.error.errors,
@@ -977,16 +982,6 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       let centerNameSnapshot: string | null = null;
       let centerAccreditationSnapshot: string | null = null;
 
-      const removeUploadedProof = () => {
-        if (req.file?.path && fs.existsSync(req.file.path)) {
-          try {
-            fs.unlinkSync(req.file.path);
-          } catch (unlinkError) {
-            log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après refus du centre impossible");
-          }
-        }
-      };
-
       const resolvedCenter = await resolveRenewalCenter({
         centerId,
         centerName: payload.centerName,
@@ -997,11 +992,9 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         actorUserId,
       });
       if (!resolvedCenter) {
-        removeUploadedProof();
         return res.status(400).json({ message: "Centre agréé obligatoire." });
       }
       if (!resolvedCenter.ok) {
-        removeUploadedProof();
         return res.status(resolvedCenter.status).json({ message: resolvedCenter.message });
       }
       centerId = resolvedCenter.id;
@@ -1050,33 +1043,7 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         }
       }
 
-      const proofFileName = req.file.originalname;
-      const proofFilePath = `/uploads/document-renewals/proofs/${req.file.filename}`;
-
-      const now = new Date();
-
-      const [updatedDocument] = await db
-        .update(vehicleDocuments)
-        .set({
-          expiryDate: payload.newExpiryDate,
-          updatedBy: actorUserId,
-          updatedAt: now,
-        })
-        .where(eq(vehicleDocuments.id, payload.vehicleDocumentId))
-        .returning();
-
-      await syncVehicleDocumentMirror(
-        payload.vehicleId,
-        String(documentRow.documentType || ""),
-        payload.newExpiryDate,
-        "set",
-      );
-
-      // DOC3 : l'échéance renouvelée lève les alertes d'échéance de ce document.
-      await alertInboxService.clearDocumentExpiryAlerts(payload.vehicleDocumentId);
-
-      let finalizedRequest: typeof documentRenewalRequests.$inferSelect | undefined;
-
+      // Contrôles de la demande ciblée AVANT toute écriture : un refus ne laisse pas l'échéance avancée.
       if (payload.requestId) {
         const [existingRequest] = await db
           .select({
@@ -1097,106 +1064,97 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         ) {
           return res.status(400).json({ message: "La demande ne correspond pas au document ciblé." });
         }
+      }
 
-        const [updatedRequest] = await db
-          .update(documentRenewalRequests)
+      const proofFileName = req.file.originalname;
+      const proofFilePath = `/uploads/document-renewals/proofs/${req.file.filename}`;
+
+      const now = new Date();
+      const completion = {
+        status: "completed" as const,
+        assignedRole: payload.assignedRole ?? null,
+        centerId,
+        centerNameSnapshot,
+        centerAccreditationSnapshot,
+        comment: payload.comment,
+        newExpiryDate: payload.newExpiryDate,
+        renewalReference: payload.visitReference ?? null,
+        renewalVisitDate: payload.visitDate ?? null,
+        inspectorName: payload.inspectorName ?? null,
+        inspectorCode: payload.inspectorCode ?? null,
+        proofFileName,
+        proofFilePath,
+        completedBy: actorUserId,
+        completedAt: now,
+      };
+
+      // Échéance, miroir véhicule, levée des alertes et demande : tout ou rien.
+      const { updatedDocument, finalizedRequest } = await db.transaction(async (tx) => {
+        const [updatedDocument] = await tx
+          .update(vehicleDocuments)
           .set({
-            status: "completed",
-            assignedRole: payload.assignedRole ?? null,
-            centerId,
-            centerNameSnapshot,
-            centerAccreditationSnapshot,
-            comment: payload.comment,
-            newExpiryDate: payload.newExpiryDate,
-            renewalReference: payload.visitReference ?? null,
-            renewalVisitDate: payload.visitDate ?? null,
-            inspectorName: payload.inspectorName ?? null,
-            inspectorCode: payload.inspectorCode ?? null,
-            proofFileName,
-            proofFilePath,
-            completedBy: actorUserId,
-            completedAt: now,
+            expiryDate: payload.newExpiryDate,
+            updatedBy: actorUserId,
             updatedAt: now,
           })
-          .where(eq(documentRenewalRequests.id, payload.requestId))
+          .where(eq(vehicleDocuments.id, payload.vehicleDocumentId))
           .returning();
 
-        finalizedRequest = updatedRequest;
-      } else {
-        const [openRequest] = await db
-          .select({
-            id: documentRenewalRequests.id,
-          })
-          .from(documentRenewalRequests)
-          .where(
-            and(
-              eq(documentRenewalRequests.vehicleId, payload.vehicleId),
-              eq(documentRenewalRequests.vehicleDocumentId, payload.vehicleDocumentId),
-              inArray(documentRenewalRequests.status, ["pending", "in_progress"]),
-            ),
-          )
-          .orderBy(desc(documentRenewalRequests.createdAt))
-          .limit(1);
+        await syncVehicleDocumentMirror(
+          payload.vehicleId,
+          String(documentRow.documentType || ""),
+          payload.newExpiryDate,
+          "set",
+          tx,
+        );
 
-        if (openRequest) {
-          const [updatedRequest] = await db
+        // DOC3 : l'échéance renouvelée lève les alertes d'échéance de ce document.
+        await alertInboxService.clearDocumentExpiryAlerts(payload.vehicleDocumentId, tx);
+
+        let finalizedRequest: typeof documentRenewalRequests.$inferSelect | undefined;
+        const targetRequestId =
+          payload.requestId ??
+          (
+            await tx
+              .select({ id: documentRenewalRequests.id })
+              .from(documentRenewalRequests)
+              .where(
+                and(
+                  eq(documentRenewalRequests.vehicleId, payload.vehicleId),
+                  eq(documentRenewalRequests.vehicleDocumentId, payload.vehicleDocumentId),
+                  inArray(documentRenewalRequests.status, ["pending", "in_progress"]),
+                ),
+              )
+              .orderBy(desc(documentRenewalRequests.createdAt))
+              .limit(1)
+          )[0]?.id;
+
+        if (targetRequestId) {
+          [finalizedRequest] = await tx
             .update(documentRenewalRequests)
-            .set({
-              status: "completed",
-              assignedRole: payload.assignedRole ?? null,
-              centerId,
-              centerNameSnapshot,
-              centerAccreditationSnapshot,
-              comment: payload.comment,
-              newExpiryDate: payload.newExpiryDate,
-              renewalReference: payload.visitReference ?? null,
-              renewalVisitDate: payload.visitDate ?? null,
-              inspectorName: payload.inspectorName ?? null,
-              inspectorCode: payload.inspectorCode ?? null,
-              proofFileName,
-              proofFilePath,
-              completedBy: actorUserId,
-              completedAt: now,
-              updatedAt: now,
-            })
-            .where(eq(documentRenewalRequests.id, openRequest.id))
+            .set({ ...completion, updatedAt: now })
+            .where(eq(documentRenewalRequests.id, targetRequestId))
             .returning();
-
-          finalizedRequest = updatedRequest;
         } else {
-          const [createdRequest] = await db
+          [finalizedRequest] = await tx
             .insert(documentRenewalRequests)
             .values({
+              ...completion,
               vehicleId: payload.vehicleId,
               vehicleDocumentId: payload.vehicleDocumentId,
               documentType: documentRow.documentType as any,
-              status: "completed",
               requestedBy: actorUserId,
-              assignedRole: payload.assignedRole ?? null,
-              centerId,
-              centerNameSnapshot,
-              centerAccreditationSnapshot,
-              comment: payload.comment,
               source: "vehicle_document_quick_renew",
-              newExpiryDate: payload.newExpiryDate,
-              renewalReference: payload.visitReference ?? null,
-              renewalVisitDate: payload.visitDate ?? null,
-              inspectorName: payload.inspectorName ?? null,
-              inspectorCode: payload.inspectorCode ?? null,
-              proofFileName,
-              proofFilePath,
-              completedBy: actorUserId,
-              completedAt: now,
             })
             .returning();
-
-          finalizedRequest = createdRequest;
         }
-      }
 
-      if (!finalizedRequest) {
-        throw new AppError(500, "Impossible de finaliser la demande de renouvellement.");
-      }
+        if (!updatedDocument || !finalizedRequest) {
+          throw new AppError(500, "Impossible de finaliser la demande de renouvellement.");
+        }
+        return { updatedDocument, finalizedRequest };
+      });
+      proofRecorded = true;
 
       const documentLabel =
         DOCUMENT_LABELS[(documentRow.documentType as keyof typeof DOCUMENT_LABELS) || "autre"] || "Document";
@@ -1206,33 +1164,39 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         centerAccreditationSnapshot ? ` (${centerAccreditationSnapshot})` : ""
       }. Nouvelle échéance: ${payload.newExpiryDate}.`;
 
-      const recipients = [
-        ...(await storage.getUsersByRole("admin")),
-        ...(await storage.getUsersByRole("workshop_manager")),
-        ...(await storage.getUsersByRole("secretary")),
-        ...(await storage.getUsersByRole("logistics")),
-        actorUserId ? ({ id: actorUserId } as any) : null,
-      ].filter(Boolean) as Array<{ id: number }>;
+      // Notifications au mieux : le renouvellement est enregistré, le justificatif est référencé.
+      // Un échec ici ne renvoie pas 500 et ne supprime rien.
+      try {
+        const recipients = [
+          ...(await storage.getUsersByRole("admin")),
+          ...(await storage.getUsersByRole("workshop_manager")),
+          ...(await storage.getUsersByRole("secretary")),
+          ...(await storage.getUsersByRole("logistics")),
+          actorUserId ? ({ id: actorUserId } as any) : null,
+        ].filter(Boolean) as Array<{ id: number }>;
 
-      for (const recipient of recipients) {
-        const alert = await storage.createAlert({
-          userId: recipient.id,
-          title: `${documentLabel} renouvelé`,
-          message: infoMessage,
-          type: "maintenance",
-          priority: "medium",
-          link: `/vehicles/${payload.vehicleId}`,
-        });
+        for (const recipient of recipients) {
+          const alert = await storage.createAlert({
+            userId: recipient.id,
+            title: `${documentLabel} renouvelé`,
+            message: infoMessage,
+            type: "maintenance",
+            priority: "medium",
+            link: `/vehicles/${payload.vehicleId}`,
+          });
 
-        broadcastAlertCreated({
-          id: alert.id,
-          userId: alert.userId ?? null,
-          title: alert.title,
-          type: alert.type,
-          priority: alert.priority,
-          link: alert.link ?? null,
-          message: alert.message,
-        });
+          broadcastAlertCreated({
+            id: alert.id,
+            userId: alert.userId ?? null,
+            title: alert.title,
+            type: alert.type,
+            priority: alert.priority,
+            link: alert.link ?? null,
+            message: alert.message,
+          });
+        }
+      } catch (alertError) {
+        log.error({ err: alertError, requestId: req.requestId }, "notification du renouvellement rapide");
       }
 
       // Diffusion au mieux : document et demande sont écrits ; un échec d'envoi ne renvoie pas 500
@@ -1292,15 +1256,10 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
         document: withoutDiskPaths(updatedDocument),
       });
     } catch (error) {
-      if (req.file?.path && fs.existsSync(req.file.path)) {
-        try {
-          fs.unlinkSync(req.file.path);
-        } catch (unlinkError) {
-          log.error({ err: unlinkError, requestId: req.requestId }, "Suppression du justificatif après échec du renouvellement rapide impossible");
-        }
-      }
       if (error instanceof AppError) return next(error);
       return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "renouvellement rapide d'un document" }));
+    } finally {
+      if (!proofRecorded) removeUploadedProof();
     }
   });
 });
