@@ -16,6 +16,20 @@ export interface ScheduleCatchUp {
 }
 
 const toDay = (d: string | Date): string => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
+
+/**
+ * Ajoute des mois en UTC (décision D4) en bornant au dernier jour du mois cible :
+ * 31/01 + 1 mois = 28/02 (ou 29/02), et non 03/03 comme `setMonth`.
+ */
+export function addMonthsUtc(date: Date, months: number): Date {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + months;
+  const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const out = new Date(date);
+  out.setUTCFullYear(y, m, Math.min(date.getUTCDate(), lastDay));
+  return out;
+}
+
 const OPEN_WORK_ORDER_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
 
 function broadcastWorkOrderCreated(workOrder: WorkOrder, source: string): void {
@@ -99,26 +113,22 @@ export class PreventiveMaintenanceService {
     
     switch (frequencyType) {
       case 'daily':
-        nextDate.setDate(nextDate.getDate() + frequencyValue);
+        nextDate.setUTCDate(nextDate.getUTCDate() + frequencyValue);
         break;
       case 'weekly':
-        nextDate.setDate(nextDate.getDate() + frequencyValue * 7);
+        nextDate.setUTCDate(nextDate.getUTCDate() + frequencyValue * 7);
         break;
       case 'monthly':
-        nextDate.setMonth(nextDate.getMonth() + frequencyValue);
-        break;
+        return addMonthsUtc(baseDate, frequencyValue);
       case 'quarterly':
-        nextDate.setMonth(nextDate.getMonth() + (frequencyValue * 3));
-        break;
+        return addMonthsUtc(baseDate, frequencyValue * 3);
       case 'yearly':
-        nextDate.setFullYear(nextDate.getFullYear() + frequencyValue);
-        break;
+        return addMonthsUtc(baseDate, frequencyValue * 12);
       case 'mileage':
         // Pour le kilométrage, on estime une date basée sur l'usage moyen
         // (ex: 1000km/mois en moyenne)
         const estimatedMonths = Math.ceil(frequencyValue / 1000);
-        nextDate.setMonth(nextDate.getMonth() + estimatedMonths);
-        break;
+        return addMonthsUtc(baseDate, estimatedMonths);
       default:
         throw new Error(`Type de fréquence non supporté: ${frequencyType}`);
     }
