@@ -17,11 +17,8 @@ import { describe, expect, it } from "vitest";
  * Tout nouvel emplacement fait échouer le test.
  *
  * Dette connue, listes à vider :
- *  - `server/routes.ts` est gelé (AGENTS.md §9). Son PATCH /api/documents/:id écrit
- *    le miroir en direct, sans passer par la lib (3 écritures, une par type). Backlog :
- *    déplacer la route dans `server/api/` et appeler `syncVehicleDocumentMirror(..., "set")`.
- *    Une fois fait, `FROZEN_DIRECT_WRITES` doit se vider ; le test échoue dans l'autre
- *    sens (liste périmée) pour qu'on la réduise.
+ *  - D3 fait : le PATCH /api/documents/:id vit dans server/api/vehicle-documents.routes.ts
+ *    et passe par la lib du miroir ; `FROZEN_DIRECT_WRITES` est vide et le reste.
  *  - `storage.updateVehicle` fait `.set(vehicle)` sur un objet quelconque : la clé n'est
  *    pas lisible statiquement. C'est le chemin des fiches véhicule (PATCH /api/vehicles/:id).
  *    Gelé aussi : un nouvel appelant générique de ce type doit être décidé consciemment.
@@ -34,7 +31,7 @@ const SANCTIONED = ["server/lib/vehicle-document-mirror.ts"];
 
 /** Écritures directes de colonnes miroir hors lib : fichier -> nombre d'`UPDATE`. */
 const FROZEN_DIRECT_WRITES: Record<string, number> = {
-  "server/routes.ts": 3,
+
 };
 
 /** `.set(<variable>)` sur `vehicles` : clés invisibles au scan. */
@@ -109,7 +106,6 @@ describe("écriture directe du miroir de documents véhicule (hygiène)", () => 
 
   it("la détection voit le chemin prévu et les écritures gelées", () => {
     expect(hits.filter((h) => SANCTIONED.includes(h.file)).length).toBeGreaterThanOrEqual(2);
-    expect(hits.some((h) => h.file === "server/routes.ts" && h.kind === "mirror")).toBe(true);
   });
 
   it("aucune écriture d'une colonne miroir hors de la lib, hors liste gelée", () => {

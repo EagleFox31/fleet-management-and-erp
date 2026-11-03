@@ -1413,3 +1413,22 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Une route qui change un statut contrôle le couple (rôle, transition), pas seulement le rôle.
 - La matrice des transitions par rôle vit dans une constante partagée, consommée par le serveur et par le contrat.
+
+## 2026-11-03 - « Aujourd'hui » compté de trois façons : jour J et fuseau des échéances (P3-2 lot 2b)
+
+### Constat
+- Pour une même échéance, le service de documentation, l'éligibilité mission et les alertes ne répondaient pas pareil : le jour J était « valide » ici, « expiré » là, et la date du jour était tantôt UTC (`toISOString`), tantôt locale (`getDate`). À 23:30Z (00:30 à Douala), une assurance échéant le lendemain bloquait l'un et pas l'autre.
+
+### Cause racine
+- La règle « qu'est-ce qu'un document expiré » et « quel est le jour courant » était recopiée dans chaque module (comparaisons `<` / `<=`, accesseurs locaux ou UTC), sans source unique ni test croisant les chemins.
+- Classification : règle métier dupliquée, dérive silencieuse entre copies.
+
+### Résolution
+- Source unique `shared/constants/expiry-day.ts` (jour J expiré, `isExpiredOn`) bâtie sur `shared/lib/utc-day.ts` (`utcDateOnly`, `todayUtcDateOnly`) : la date du jour est la date UTC partout (service, éligibilité, statistiques, alertes, lancement de mission).
+- Décalage accepté (décision produit) : le jour change à minuit UTC, soit 01:00 à Douala. De 00:00 à 01:00 à Douala, le jour J est encore la veille.
+
+### Prévention (vérifiable)
+- `tests/unit/server/document-expiry-day-j.test.ts` : temps figé à 23:30Z le 3/11 (expiré nulle part) et 00:00Z le 4/11 (expiré partout), sous `TZ=Africa/Douala` et `TZ=UTC`, sur les cinq chemins. Rouge démontré avec les anciens fichiers de production.
+
+### Règle Projet (obligatoire)
+- Une règle d'échéance et la date du jour passent par `shared/constants/expiry-day.ts`. Jamais de `new Date().toISOString().slice(0, 10)` ni d'accesseur local (`getDate`, `getFullYear`) pour comparer une échéance.

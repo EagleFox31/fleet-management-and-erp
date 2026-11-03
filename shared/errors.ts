@@ -61,7 +61,7 @@ export function looksTechnical(text: string): boolean {
   if (!t) return true;
   if (t.length > 300) return true;
   if (/^[[{<]/.test(t)) return true;
-  return /\b(at \S+:\d+|Error:|TypeError|ReferenceError|SyntaxError|ECONN\w+|ETIMEDOUT|ENOTFOUND|SQLSTATE|violates|constraint|relation "|column "|duplicate key|null value|undefined|stack|Expected \w+, received|Required|Invalid (input|enum|type|date)|Cannot read propert)/i.test(
+  return /\b(at \S+:\d+|Error:|TypeError|ReferenceError|SyntaxError|ECONN\w+|ETIMEDOUT|ENOTFOUND|EACCES|ENOSPC|EPERM|SQLSTATE|violates|constraint|relation "|column "|duplicate key|null value|undefined|stack|Expected \w+, received|Required|Invalid (input|enum|type|date)|Cannot read propert)/i.test(
     t,
   );
 }

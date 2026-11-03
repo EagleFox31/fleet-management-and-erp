@@ -3,22 +3,25 @@
  * Pure: pas d'accès base, testable sans DB. L'horloge est injectée.
  */
 
+import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
+
+export { todayUtcDateOnly };
+
 export const DEFAULT_ALERT_DAYS = 30;
 
 export type DocumentExpiryStatus = "none" | "due" | "expired";
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/** Jours calendaires entre `today` et une date `YYYY-MM-DD` (UTC, sans heure). Négatif = échu. */
+/** Jours calendaires entre `today` et une date `YYYY-MM-DD` (date UTC, sans heure). Négatif = échu, 0 = jour J. */
 export function daysUntilExpiry(expiryDate: string, today: Date): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(expiryDate);
-  if (!match) return null;
-  const expiry = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  const base = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  return Math.round((expiry - base) / MS_PER_DAY);
+  const expiry = toExpiryDateOnly(expiryDate);
+  return expiry === null ? null : daysBetweenDateOnly(expiry, todayUtcDateOnly(today));
 }
 
-/** `due` de J+0 à J+alertDays inclus, `expired` si échu, `none` au-delà ou date invalide. */
+/**
+ * `expired` dès le jour J (`days <= 0` : une échéance aujourd'hui bloque, D2), `due` de
+ * J+1 à J+alertDays inclus, `none` au-delà ou date invalide. La clé de dédoublonnage
+ * passe donc de `due` à `expired` le jour J : l'alerte critique est émise ce jour-là.
+ */
 export function classifyDocumentExpiry(
   expiryDate: string | null | undefined,
   today: Date,
@@ -27,7 +30,7 @@ export function classifyDocumentExpiry(
   if (!expiryDate) return { status: "none", days: null };
   const days = daysUntilExpiry(expiryDate, today);
   if (days === null) return { status: "none", days: null };
-  if (days < 0) return { status: "expired", days };
+  if (days <= 0) return { status: "expired", days };
   if (days <= alertDays) return { status: "due", days };
   return { status: "none", days };
 }

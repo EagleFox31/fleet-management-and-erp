@@ -106,6 +106,13 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : réserves « avant fusion » de la relecture du delta c6d3c0c..092f983 ; retrait du code mort demandé par l'orchestrateur.
 - **Preuve** : 2 tests de contrat ajoutés dans `vehicle-documents-upload`, rouges sur 092f983 ; contrats `vehicle-documents-upload`, `mission-document-expiry`, `former-storage-stubs`, `vehicle-documents-client-scope` 57/57 ; tsc 0 ; unitaires 1537/1537 (dont `routes-hygiene`).
 
+## 2026-11-03T12:30:00+01:00 — Échéances (P3-2, lot 2b partie B) : jour J, UTC, PATCH documents, téléversement
+
+- **Quoi** : (D1/D2) le jour J est expiré partout, `alert-service` dit « expire aujourd'hui, lancement de mission bloqué » à J. (D4) date du jour UTC unique : `shared/lib/utc-day.ts` + `shared/constants/expiry-day.ts`, utilisés par le service, l'éligibilité, les alertes et `isExpiredOnOrBeforeToday` (`missions.routes.ts`, corps seul, accord b7). (D3) `PATCH /api/documents/:id` dans `vehicle-documents.routes.ts`, miroir via `syncVehicleDocumentMirrorFromDocuments` ; événements en scope personnel (cloison §11) au lieu de broadcast. (M2) erreurs multer en `AppError(400)` générique avec `cause` et `moduleLogger` ; `EACCES|ENOSPC|EPERM` dans `looksTechnical`. (M3) extension confrontée au MIME (`isAllowedUpload`).
+- **Comment** : `isDateExpiringSoon` devient strictement après aujourd'hui pour ne plus recouvrir « expiré » ; la clé de dédoublonnage de l'alerte passe de « échéance proche » à « expiré » au jour J.
+- **Pourquoi** : une règle, une source ; décisions produit D2 et D4. Décalage accepté : 00:00-01:00 à Douala, le jour J est encore la veille.
+- **Preuve** : rouges démontrés (7 unitaires D1/D2/D4, 16 unitaires et 4 contrats M2/M3/D3) ; `tsc` 0 ; unitaires 1629/1629 ; contrats voisins 83/83 sur fleet_test_p32c.
+- **RAIDER** : Durable (chemin, rôles et réponse du PATCH inchangés), Idempotent (recalage du miroir rejouable), Retroactive (aucune donnée migrée).
 ## 2026-11-03 — P3-2 lot 2b (A) : récépissé provisoire
 - **Agent** : fleet-api · **Branche** : `feat/p3-2-lot2b-recepisse` · **Commit** : voir l'historique de la branche
 - **Statut** : fait côté serveur, branchement missions à faire (autre session)

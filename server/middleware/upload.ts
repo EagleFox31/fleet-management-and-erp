@@ -41,7 +41,7 @@ const vehicleDocumentStorage = multer.diskStorage({
     // Créer un dossier pour chaque véhicule
     const vehicleDirectory = vehicleDocumentDirectory(req.params.vehicleId);
     if (!vehicleDirectory) {
-      cb(new Error("ID de véhicule invalide"), "");
+      cb(new AppError(400, "ID de véhicule invalide"), "");
       return;
     }
 
@@ -65,24 +65,32 @@ const vehicleDocumentStorage = multer.diskStorage({
   }
 });
 
+/** Extensions admises par type MIME : l'extension doit correspondre au type déclaré (M3). */
+export const ALLOWED_EXTENSIONS_BY_MIME: Record<string, readonly string[]> = {
+  "application/pdf": [".pdf"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/jpg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "application/msword": [".doc"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/vnd.ms-excel": [".xls"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+};
+
+/** Vrai si le type MIME est admis ET l'extension du nom cohérente avec lui. */
+export function isAllowedUpload(mimetype: string, originalName: string): boolean {
+  const extensions = ALLOWED_EXTENSIONS_BY_MIME[mimetype];
+  return !!extensions && extensions.includes(path.extname(originalName).toLowerCase());
+}
+
 // Filtre pour vérifier les types de fichiers acceptés
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  // Types de fichiers autorisés
-  const allowedMimeTypes = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-    'image/jpg',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  ];
-  
-  if (allowedMimeTypes.includes(file.mimetype)) {
-    cb(null, true);
+  if (!ALLOWED_EXTENSIONS_BY_MIME[file.mimetype]) {
+    cb(new AppError(400, "Type de fichier non supporté. Veuillez télécharger un PDF, image, Word ou Excel."));
+  } else if (!isAllowedUpload(file.mimetype, file.originalname)) {
+    cb(new AppError(400, "L'extension du fichier ne correspond pas à son type. Vérifiez le fichier téléversé."));
   } else {
-    cb(new Error('Type de fichier non supporté. Veuillez télécharger un PDF, image, Word ou Excel.'));
+    cb(null, true);
   }
 };
 
