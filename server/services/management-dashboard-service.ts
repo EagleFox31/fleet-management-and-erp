@@ -1,4 +1,4 @@
-import { and, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   computeTrendPercent,
   extractCargoLabel,
@@ -227,7 +227,7 @@ export class ManagementDashboardService {
             total: sql<string>`COALESCE(SUM(COALESCE(${fuelRecords.debitAmount}, ${fuelRecords.cost}, 0)), 0)`,
           })
           .from(fuelRecords)
-          .where(and(gte(fuelRecords.date, startIso), lte(fuelRecords.date, endIso))),
+          .where(and(gte(fuelRecords.date, startIso), lte(fuelRecords.date, endIso), isNull(fuelRecords.deletedAt))),
         db
           .select({
             total: sql<string>`COALESCE(SUM(COALESCE(${workOrders.cost}, 0)), 0)`,
@@ -336,7 +336,7 @@ export class ManagementDashboardService {
           total: sql<string>`COALESCE(SUM(COALESCE(${fuelRecords.debitAmount}, ${fuelRecords.cost}, 0)), 0)`,
         })
         .from(fuelRecords)
-        .where(inArray(fuelRecords.missionId, missionIds))
+        .where(and(inArray(fuelRecords.missionId, missionIds), isNull(fuelRecords.deletedAt)))
         .groupBy(fuelRecords.missionId),
     ]);
 
@@ -405,6 +405,7 @@ export class ManagementDashboardService {
           and(
             gte(fuelRecords.date, startIso),
             lte(fuelRecords.date, endIso),
+            isNull(fuelRecords.deletedAt),
             sql`${fuelRecords.vehicleId} IS NOT NULL`,
           ),
         )
@@ -780,7 +781,7 @@ export class ManagementDashboardService {
           total: sql<string>`COALESCE(SUM(COALESCE(${fuelRecords.debitAmount}, ${fuelRecords.cost}, 0)), 0)`,
         })
         .from(fuelRecords)
-        .where(and(gte(fuelRecords.date, startIso), lte(fuelRecords.date, endIso))),
+        .where(and(gte(fuelRecords.date, startIso), lte(fuelRecords.date, endIso), isNull(fuelRecords.deletedAt))),
       db
         .select({
           total: sql<string>`COALESCE(SUM(COALESCE(${workOrders.cost}, 0)), 0)`,

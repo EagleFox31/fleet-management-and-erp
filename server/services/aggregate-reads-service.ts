@@ -60,7 +60,7 @@ export const aggregateReadsService = {
       LEFT JOIN (
         SELECT SUM(cost) AS fuel, SUM(quantity) AS liters
         FROM fuel_records
-        WHERE vehicle_id = ${vehicleId}
+        WHERE vehicle_id = ${vehicleId} AND deleted_at IS NULL
           AND date >= ${from}::date AND date < ${toExclusive}::date
       ) fu ON true`);
     const r = rowsOf<Record<string, number>>(res)[0] ?? {};

@@ -58,7 +58,7 @@ export class OperationsService {
     const [fuelRecord] = await db
       .select()
       .from(fuelRecords)
-      .where(eq(fuelRecords.id, fuelRecordId))
+      .where(and(eq(fuelRecords.id, fuelRecordId), isNull(fuelRecords.deletedAt)))
       .limit(1);
 
     if (!fuelRecord) {

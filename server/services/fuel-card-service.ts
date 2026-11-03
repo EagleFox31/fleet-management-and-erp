@@ -91,7 +91,8 @@ export class FuelCardService {
         totalDebits: sql<string>`COALESCE(SUM(${fuelRecords.debitAmount}), 0)`,
         totalLiters: sql<string>`COALESCE(SUM(CASE WHEN ${fuelRecords.debitAmount} > 0 THEN ${fuelRecords.quantity} ELSE 0 END), 0)`
       })
-      .from(fuelRecords);
+      .from(fuelRecords)
+      .where(isNull(fuelRecords.deletedAt));
     
     const credits = parseFloat(totals.totalCredits || "0");
     const debits = parseFloat(totals.totalDebits || "0");
@@ -102,14 +103,14 @@ export class FuelCardService {
     const [lastCredit] = await executor
       .select()
       .from(fuelRecords)
-      .where(sql`${fuelRecords.creditAmount} > 0`)
+      .where(and(sql`${fuelRecords.creditAmount} > 0`, isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date))
       .limit(1);
     
     const [lastDebit] = await executor
       .select()
       .from(fuelRecords)
-      .where(sql`${fuelRecords.debitAmount} > 0`)
+      .where(and(sql`${fuelRecords.debitAmount} > 0`, isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date))
       .limit(1);
     
@@ -385,7 +386,7 @@ export class FuelCardService {
     const records = await db
       .select()
       .from(fuelRecords)
-      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`))
+      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`, isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date), desc(fuelRecords.id));
 
     const [totals] = await db
@@ -394,7 +395,7 @@ export class FuelCardService {
         totalCost: sql<string>`COALESCE(SUM(${fuelRecords.debitAmount}), 0)`,
       })
       .from(fuelRecords)
-      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`));
+      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`, isNull(fuelRecords.deletedAt)));
 
     const creatorIds: number[] = Array.from(
       new Set(
@@ -450,7 +451,7 @@ export class FuelCardService {
         count: sql<string>`COUNT(*)`,
       })
       .from(fuelRecords)
-      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`));
+      .where(and(eq(fuelRecords.missionId, missionId), sql`${fuelRecords.debitAmount} > 0`, isNull(fuelRecords.deletedAt)));
 
     return Number(result?.count || 0) > 0;
   }
@@ -468,7 +469,7 @@ export class FuelCardService {
     
     let query: any = db.select().from(fuelRecords);
     
-    const conditions: any[] = [];
+    const conditions: any[] = [isNull(fuelRecords.deletedAt)];
     
     if (filters.year) {
       conditions.push(eq(fuelRecords.year, filters.year));

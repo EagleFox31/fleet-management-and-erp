@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { FuelVoucher, FuelVouchersQuery, FuelVoucherValidationResponse } from "@shared/contracts/fuel-vouchers";
 import { fuelRecords } from "@shared/schema";
 import { db } from "../db";
@@ -22,11 +22,11 @@ export async function validateFuelVoucher(userId: number, id: number): Promise<F
   const [updated] = await db
     .update(fuelRecords)
     .set({ validationStatus: "validated", validatedBy: userId, validatedAt: new Date() })
-    .where(and(eq(fuelRecords.id, id), eq(fuelRecords.validationStatus, "pending")))
+    .where(and(eq(fuelRecords.id, id), eq(fuelRecords.validationStatus, "pending"), isNull(fuelRecords.deletedAt)))
     .returning();
   if (updated) return toResponse(updated);
 
-  const [existing] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, id)).limit(1);
+  const [existing] = await db.select().from(fuelRecords).where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt))).limit(1);
   if (!existing) throw new AppError(404, "Bon de carburant introuvable.");
   return toResponse(existing);
 }
@@ -59,7 +59,7 @@ export async function listFuelVouchers(query: FuelVouchersQuery): Promise<FuelVo
       FROM fuel_records fr
       LEFT JOIN vehicles v ON v.id = fr.vehicle_id
       LEFT JOIN users u ON u.id = fr.validated_by
-     WHERE fr.vehicle_id IS NOT NULL ${status}
+     WHERE fr.vehicle_id IS NOT NULL AND fr.deleted_at IS NULL ${status}
      ORDER BY fr.date DESC NULLS LAST, fr.id DESC
      LIMIT ${LIST_LIMIT}`);
   const rows = ((res as unknown as { rows?: VoucherRow[] }).rows ?? (res as unknown as VoucherRow[])) as VoucherRow[];

@@ -194,3 +194,8 @@ Règles : `docs/journal/README.md`.
 - **Preuve automatisée** : contrat 44 tests, 2 rouges sur `main` puis verts ; voir PR.
 - **RAIDER** : couvert non-régression et liste gelée réduite ; sans objet : migration.
 - **Reste / risques** : `isFuelRecordWriter` (chef d'atelier) non retenu, aucun écran d'atelier n'appelle la route.
+
+## 2026-11-03 - fix/fuel-record-soft-delete (etape 1, en pause)
+Quoi : colonnes fuel_records.deleted_at / deleted_by (schema, init-database, migration 20261103_fuel_records_soft_delete.sql) et exclusion des lignes supprimees dans solde, listes et sommes des services (carte, fuel-service, dashboard direction, exports, anomalies, bons, kilometrage, rentabilite vehicule).
+Pourquoi : la suppression d un plein qui a mouvemente la carte sera douce et reservee aux gestionnaires de la carte ; le solde ne doit plus compter ces lignes.
+Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), PATCH 404, filtre GET /api/fuel-records dans routes.ts, trigger mission-fuel, contrat, listes gelees, LESSONS A5.

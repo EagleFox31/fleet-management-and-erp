@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
-import { eq, desc, count, sum, avg } from "drizzle-orm";
+import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
 
 /** Année et mois (calendaires) d'une date `AAAA-MM-JJ`, pour les colonnes `year` / `month`. */
@@ -17,7 +17,7 @@ export class FuelService {
     const [fuelRecord] = await db
       .select()
       .from(fuelRecords)
-      .where(eq(fuelRecords.id, id));
+      .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)));
     return fuelRecord;
   }
 
@@ -28,7 +28,7 @@ export class FuelService {
     const records = await db
       .select()
       .from(fuelRecords)
-      .where(eq(fuelRecords.vehicleId, vehicleId))
+      .where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date));
     
     // Enrichir avec le prix par litre calculé
@@ -103,7 +103,7 @@ export class FuelService {
         totalQuantity: sum(fuelRecords.quantity),
         recordsCount: count(fuelRecords.id),
         averageCost: avg(fuelRecords.cost)
-      }).from(fuelRecords);
+      }).from(fuelRecords).where(isNull(fuelRecords.deletedAt));
 
       return {
         totalCost: Number(stats.totalCost || 0),
