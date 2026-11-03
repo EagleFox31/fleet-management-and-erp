@@ -106,10 +106,18 @@ export const uploadVehicleDocument = multer({
   }
 }).single('document');
 
-// Fonction utilitaire pour supprimer un fichier
-export function deleteFile(filePath: string): Promise<void> {
+/**
+ * Supprime un fichier téléversé. Refuse tout chemin hors de `<root>/uploads` (rejet sans
+ * suppression, message sans le chemin) : un chemin lu en base ne doit jamais atteindre un
+ * fichier que l'application n'a pas déposé (AGENTS.md §9).
+ */
+export function deleteFile(filePath: string, root = process.cwd()): Promise<void> {
   return new Promise((resolve, reject) => {
-    fs.unlink(filePath, (err) => {
+    if (!filePath || !isInsideDirectory(path.resolve(root, 'uploads'), path.resolve(root, filePath))) {
+      reject(new Error('suppression refusée : fichier hors du dossier des téléversements'));
+      return;
+    }
+    fs.unlink(path.resolve(root, filePath), (err) => {
       if (err) {
         reject(err);
       } else {

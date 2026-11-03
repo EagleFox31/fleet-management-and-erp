@@ -164,3 +164,10 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : `.catch` sur l'INSERT, `fs.rmSync(filePath, { force: true })`, échec du ménage journalisé en `warn` sans masquer l'erreur d'origine. Route (routes.ts gelé) inchangée.
 - Pourquoi : le fichier était écrit avant l'INSERT ; sans ligne, plus rien ne permettait de le retrouver ni de le supprimer (enquête multer).
 - Preuve : `tests/integration/workflow-document-orphan.test.ts` rouge sans correctif (1 fichier restant), vert avec ; transfert 5/5, tsc 0, unitaires 1868.
+
+## 2026-11-03T18:04:13+01:00 — Chemins stockés : deleteFile borné à uploads/, garde d'hygiène des accès disque
+
+- Quoi : `deleteFile` (`server/middleware/upload.ts`) refuse tout chemin hors de `<root>/uploads`. Un test d'hygiène recense les accès disque de `server/` et exige une borne (`uploadedFileCandidates`, `existingUploadedFile`, `isInsideDirectory`) ou une entrée justifiée dans une liste gelée. Ligne périmée de AGENTS.md §9 remplacée.
+- Comment : `tests/support/file-access-scan.ts` (AST, portée partagée avec `alert-emission-scan`), `tests/unit/server/stored-path-hygiene.test.ts` (14 exceptions : multer, fichiers livrés, sauvegardes, vite), `tests/unit/server/upload-delete-file.test.ts`.
+- Pourquoi : dette §9. La revue montre que tous les chemins lus en base sont déjà bornés, sauf la primitive `deleteFile`, appelée avec une valeur brute par `services/documentStorage.ts` (code mort, laissé en place).
+- Preuve : deleteFile 6/6 (3 rouges sans correctif), hygiène 6/6 (2 rouges sans correctif), tsc 0, unitaires 1898.
