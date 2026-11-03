@@ -32,6 +32,7 @@ import {
   normalizeRole,
 } from "../../../server/middleware/auth";
 import { ALL_APP_ROLES, DRIVER_MANAGER_ROLES } from "../../../shared/constants/roles";
+import { leakText } from "../../support/api-error";
 
 /**
  * Matrice RBAC des gardes serveur (plan de couverture, T1 niveau U).
@@ -150,7 +151,7 @@ describe("authenticate", () => {
     expect(selectUsers).toHaveBeenCalledOnce();
     expect(getUser).not.toHaveBeenCalled();
     expect(failed.res.statusCode).toBe(500);
-    expect(JSON.stringify(failed.res.body)).not.toMatch(/SELECT|connexion/);
+    expect(leakText(failed.res.body)).not.toMatch(/SELECT|connexion/);
     expect(failed.next).not.toHaveBeenCalled();
   });
 });
@@ -192,7 +193,7 @@ describe.each(Object.entries(MATRIX))("%s", (_name, { guard, allowed }) => {
     selectUsers.mockRejectedValue(new Error("connexion perdue : SELECT secret"));
     const { res, next } = await run(guard, { userId: 7 });
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).not.toMatch(/SELECT|connexion/);
+    expect(leakText(res.body)).not.toMatch(/SELECT|connexion/);
     expect(next).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });

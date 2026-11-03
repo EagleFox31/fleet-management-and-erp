@@ -8,6 +8,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, PO2 : rapprochement commande / facture fournisseur.
@@ -197,7 +198,7 @@ describe("PO2 rapprochement commande / facture", { timeout: 120000 }, () => {
     });
     expect(res.status).toBe(404);
     expect(res.body.message).toBe("Commande fournisseur introuvable.");
-    expect(JSON.stringify(res.body)).not.toMatch(/violates|SQLSTATE|foreign key|stack/i);
+    expect(leakText(res.body)).not.toMatch(/violates|SQLSTATE|foreign key|stack/i);
     expect(await db.select().from(supplierInvoices).where(eq(supplierInvoices.invoiceNumber, number))).toHaveLength(0);
   });
 

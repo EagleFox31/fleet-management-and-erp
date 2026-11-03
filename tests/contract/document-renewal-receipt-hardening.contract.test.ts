@@ -11,6 +11,7 @@ import { todayUtcDateOnly } from "../../shared/lib/utc-day";
 import { startContractActors } from "../support/contract-actors";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * P3-2 lot 2b, durcissement : pas de chemin disque dans les réponses ni les diffusions, portée
@@ -93,7 +94,7 @@ describe("récépissé : durcissement", { timeout: 180000 }, () => {
     });
     const body = await response.json();
     expect(response.status).toBe(200);
-    expect(JSON.stringify(body)).not.toMatch(/FilePath/);
+    expect(leakText(body)).not.toMatch(/FilePath/);
     expect(body.receiptFileName).toBe("recepisse.pdf");
     const events = spy.mock.calls.filter(([event]) => event === "document_renewal_request_status_updated");
     expect(events).toHaveLength(1);

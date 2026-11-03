@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart, createTestSupplier, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Niveau C, T8 : listes principales (véhicules, ordres de travail, pièces, fournisseurs).
@@ -23,7 +24,7 @@ let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 const get = (path: string, actor: Actor = "admin") => session.call("GET", path, { actor });
 const q = (params: Record<string, string | number | undefined>) =>
   new URLSearchParams(Object.entries(params).filter((e): e is [string, string | number] => e[1] !== undefined).map(([k, v]) => [k, String(v)])).toString();
-const noLeak = (res: { body: any }) => expect(JSON.stringify(res.body)).not.toMatch(/SQLSTATE|violates|invalid input syntax|at \S+:\d+/);
+const noLeak = (res: { body: any }) => expect(leakText(res.body)).not.toMatch(/SQLSTATE|violates|invalid input syntax|at \S+:\d+/);
 
 beforeAll(async () => {
   session = await startContractActors(ACTORS, ids.userIds);

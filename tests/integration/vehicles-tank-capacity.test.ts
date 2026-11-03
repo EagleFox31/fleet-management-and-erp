@@ -4,7 +4,8 @@ import { initializeDatabase } from "../../server/init-database";
 
 /**
  * FUEL3 : vehicles.tank_capacity_l et sa contrainte vehicles_tank_capacity_l_positive.
- * Les écritures de test se font dans une transaction annulée : aucune ligne ne reste en base.
+ * Les écritures de test se font dans une transaction annulée, ou sur une sentinelle supprimée
+ * en fin de test : aucune ligne ne reste en base.
  */
 
 async function catalog() {
@@ -20,12 +21,21 @@ async function catalog() {
   return rows;
 }
 
-async function vehicleCounters() {
-  await pool.query("SELECT pg_stat_force_next_flush()").catch(() => undefined);
+/**
+ * Version de chaque ligne de vehicles hors données d'autres tests : `xmin` change à toute
+ * écriture, même un `UPDATE … SET x = x`. Les lignes `TEST%` des autres fichiers, écrites en
+ * parallèle, sont écartées, sauf la sentinelle de ce fichier. Le compteur global
+ * `pg_stat_user_tables` comptait ces écritures concurrentes, en différé : échec aléatoire.
+ */
+async function vehicleVersions(sentinel: string) {
   const { rows } = await pool.query(
-    `SELECT n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables WHERE relname = 'vehicles'`,
+    `SELECT id, xmin::text AS version, md5(v::text) AS content
+       FROM vehicles v
+      WHERE registration_number NOT LIKE 'TEST%' OR registration_number = $1
+      ORDER BY id`,
+    [sentinel],
   );
-  return rows[0];
+  return rows;
 }
 
 describe("FUEL3 : capacité des réservoirs en base", { timeout: 120_000 }, () => {
@@ -99,11 +109,21 @@ describe("FUEL3 : capacité des réservoirs en base", { timeout: 120_000 }, () =
   });
 
   it("un second démarrage ne change ni le catalogue ni les lignes de vehicles", async () => {
+    const sentinel = `TEST-FUEL3-SENTINEL-${Date.now()}`;
     await initializeDatabase();
-    const catalogBefore = await catalog();
-    const countersBefore = await vehicleCounters();
-    await initializeDatabase();
-    expect(await catalog()).toEqual(catalogBefore);
-    expect(await vehicleCounters()).toEqual(countersBefore);
+    await pool.query(
+      `INSERT INTO vehicles (registration_number, brand, model, year) VALUES ($1, 'TEST', 'FUEL3', 2020)`,
+      [sentinel],
+    );
+    try {
+      const catalogBefore = await catalog();
+      const versionsBefore = await vehicleVersions(sentinel);
+      expect(versionsBefore.length).toBeGreaterThan(0);
+      await initializeDatabase();
+      expect(await catalog()).toEqual(catalogBefore);
+      expect(await vehicleVersions(sentinel)).toEqual(versionsBefore);
+    } finally {
+      await pool.query(`DELETE FROM vehicles WHERE registration_number = $1`, [sentinel]);
+    }
   });
 });
