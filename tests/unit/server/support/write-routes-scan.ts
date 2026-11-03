@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
+import { SERVER_FIELDS } from "../../../../shared/constants/server-fields";
 import * as schema from "../../../../shared/schema";
 
 /**
@@ -193,11 +194,21 @@ export const PUBLIC_BY_DESIGN = new Set(["post /api/auth/login", "post /api/auth
  * le rôle, `isAnyUser` charge l'utilisateur sans le restreindre), drapeau de fonctionnalité,
  * téléversement.
  */
-const NOT_A_ROLE_GUARD = /^(?:authenticate|requireAuth|checkAuth|isAnyUser|feature|requireFeature\(|upload\b)/;
+const NOT_A_ROLE_GUARD = /^(?:authenticate|requireAuth|checkAuth|isAnyUser|feature|requireFeature\(|upload\b|validateBody\()/;
 
 /** T1 : un garde de rôle ou de permission dans la déclaration, ou un garde au montage du routeur. */
+/** `selfScoped` : garde d'une route qui n'agit que sur l'utilisateur connecté, sans identifiant pris dans l'URL. */
+const SELF_SCOPED = /^selfScoped$/;
+const READS_PARAMS = /\breq\.params\b/;
+
 export function hasRoleGuard(r: WriteRoute): boolean {
-  return r.mountGuarded || r.middlewares.some((m) => !NOT_A_ROLE_GUARD.test(m));
+  if (r.mountGuarded) return true;
+  return r.middlewares.some((m) => {
+    if (NOT_A_ROLE_GUARD.test(m)) return false;
+    // `selfScoped` admet tous les rôles : il ne vaut garde que si la route n'agit pas sur un objet désigné par l'URL.
+    if (SELF_SCOPED.test(m)) return !READS_PARAMS.test(r.body);
+    return true;
+  });
 }
 
 /* ---------------------------------------------------------------- T3 / T4 */
@@ -213,23 +224,15 @@ const VALIDATION = /\.(?:safeParse|parse|parseAsync)\(|\bprepareColumnUpdate\(|\
 
 /** T3 : le corps passe par Zod ou par `prepareColumnUpdate` / `columnTypeErrors`, dans le handler ou en middleware. */
 export function validatesBody(r: WriteRoute): boolean {
-  return VALIDATION.test(r.body) || r.middlewares.some((m) => /valid|schema/i.test(m));
+  return VALIDATION.test(r.body) || r.middlewares.some((m) => VALIDATE_BODY.test(m) || /valid|schema/i.test(m));
 }
 
-export const SERVER_FIELDS = [
-  "id",
-  "createdBy",
-  "updatedBy",
-  "createdAt",
-  "updatedAt",
-  "recordedBy",
-  "approvedBy",
-  "requestedBy",
-  "receivedBy",
-  "issuedBy",
-  "totalAmount",
-  "cost",
-] as const;
+/** Brique `validateBody(schema, options?)` de `server/middleware/validate-body.ts`. */
+const VALIDATE_BODY = /^validateBody\(/;
+/** Sans `keep:`, `validateBody` retire tous les `SERVER_FIELDS` ; avec `keep:`, le schéma est analysé comme ailleurs. */
+const VALIDATE_BODY_KEEP = /\bkeep\s*:/;
+
+export { SERVER_FIELDS };
 const SERVER_FIELD_ALT = SERVER_FIELDS.join("|");
 
 function exportedSchemaIsClean(name: string): boolean | undefined {
@@ -258,10 +261,13 @@ const SERVER_FIELD_KEY = new RegExp(`\\b(?:${SERVER_FIELD_ALT})\\s*:`);
  *  - le handler valide avec un schéma exporté de `shared/schema` qui ne les expose pas, ou un
  *    schéma local `z.object` qui ne les déclare pas ;
  *  - ou il les écrase / les retire explicitement (`createdBy: req.user.id`, `delete body.updatedBy`) ;
- *  - ou il ne retient que des champs nommés (`const { a, b } = req.body`).
+ *  - ou il ne retient que des champs nommés (`const { a, b } = req.body`) ;
+ *  - ou la déclaration passe par `validateBody(schéma)` sans `keep:` (les champs serveur sont retirés).
  */
 export function protectsServerFields(r: WriteRoute): boolean {
-  const names = [...new Set([...r.body.matchAll(/\b([A-Za-z]\w*Schema)\b/g)].map((m) => m[1]))];
+  if (r.middlewares.some((m) => VALIDATE_BODY.test(m) && !VALIDATE_BODY_KEEP.test(m))) return true;
+  const declared = [...r.middlewares.filter((m) => VALIDATE_BODY.test(m)), r.body].join("\n");
+  const names = [...new Set([...declared.matchAll(/\b([A-Za-z]\w*Schema)\b/g)].map((m) => m[1]))];
   for (const n of names) {
     const exported = exportedSchemaIsClean(n);
     if (exported === true) return true;

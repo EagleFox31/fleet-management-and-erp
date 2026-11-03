@@ -126,6 +126,32 @@ router.post("/b", isAdmin, async (req, res) => { leakSchema.parse(req.body); });
     expect(protectsServerFields(leak)).toBe(false);
   });
 
+  it("validateBody seul n'est pas une garde de rôle (T1), mais vaut validation (T3)", () => {
+    const [bare, guarded] = src(
+      `router.post("/a", validateBody(insertVehicleSchema), async (req, res) => { await save(req.body); });
+       router.post("/b", isAdmin, validateBody(insertVehicleSchema), async (req, res) => { await save(req.body); });`,
+    );
+    expect([bare, guarded].map(hasRoleGuard)).toEqual([false, true]);
+    expect([bare, guarded].map(validatesBody)).toEqual([true, true]);
+  });
+
+  it("T4 : validateBody sans keep protège ; avec keep, le schéma est jugé", () => {
+    const code = `const leakSchema = z.object({ name: z.string(), cost: z.number() });
+const okSchema = z.object({ name: z.string() });
+router.post("/a", isAdmin, validateBody(leakSchema), async (req, res) => { await save(req.body); });
+router.post("/b", isAdmin, validateBody(leakSchema, { keep: ["cost"] }), async (req, res) => { await save(req.body); });
+router.post("/c", isAdmin, validateBody(okSchema, { keep: ["cost"] }), async (req, res) => { await save(req.body); });`;
+    expect(src(code).map(protectsServerFields)).toEqual([true, false, true]);
+  });
+
+  it("selfScoped vaut garde T1 seulement si le handler ne lit pas req.params", () => {
+    const [self, byId] = src(
+      `router.patch("/me", selfScoped, async (req, res) => { await update(req.user.id, req.body); });
+       router.patch("/:id", selfScoped, async (req, res) => { await update(Number(req.params.id), req.body); });`,
+    );
+    expect([self, byId].map(hasRoleGuard)).toEqual([true, false]);
+  });
+
   it("l'analyse voit bien les déclarations des sources", () => {
     expect(routes.length).toBeGreaterThan(100);
     expect(withBody.length).toBeGreaterThan(60);
