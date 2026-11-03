@@ -241,9 +241,26 @@ Modèle et règles : `docs/journal/README.md`.
 - Pourquoi : une racine dont un seul morceau est sûr ne borne rien.
 - Preuve : 4 cas ajoutés (`/e`, `/f`, `..` après uploads, `__dirname/../uploads` qui reste borné). Ils sont rouges avec l'ancien scan et verts avec le nouveau. Hygiène 16/16, tsc 0 erreur.
 
+## 2026-11-03T19:10:23+01:00 — Import de backup : erreur relayée, mineurs de relecture (#222, #223)
+
+- Quoi : le catch de `POST /api/admin/import-backup` (`server/routes.ts`) répondait `500 { error: error.message }` et journalisait par `console.error` avec un emoji. Ses deux `console.log` faisaient de même.
+- Comment : `next(withLogContext(AppError 500, { event: "admin.import_backup.failed" }))`, et les deux logs migrés vers `log.info` avec `requestId`. Seules des lignes du handler changent, aucune route n'est ajoutée. Garde ajoutée dans `error-500-relay-hygiene`. Mineurs :
+  - ligne PRT1 du plan réécrite (anciens défauts corrigés, références des contrats) ;
+  - 201 vérifié sur les POST de mise en place de `parts-catalog-children-patch` ;
+  - commentaire de `server/api/index.ts` sur les routes fournisseurs corrigé ;
+  - leçon « `/:id` avant un littéral frère » dans LESSONS_LEARNED.
+- Pourquoi : AGENTS.md §10, ni message brut ni `console.*`.
+- Preuve : garde rouge sans le correctif, verte avec ; contrat PRT1 6/6 ; tsc 0 erreur ; unitaires 1945/1945.
+
 ## 2026-11-03T19:22:28+01:00 — garde statique : littéral masqué par un /:param déclaré avant lui (prévention de #222)
 
 - Quoi : `GET /api/suppliers/:id`, déclaré dans un routeur monté avant `routes.ts`, capturait `summary` (#222). Aucune garde ne détectait ce motif.
 - Comment : `tests/support/route-order-scan.ts` reconstitue l'ordre de service : les routeurs de `server/api/` dans l'ordre des `apiRouter.use`, puis `app.*` de `routes.ts`. Il signale toute route littérale dont un prédécesseur de même méthode et de même longueur porte un `:param` simple en face d'un littéral. `tests/unit/server/route-order-hygiene.test.ts` fige la liste des exceptions, vide aujourd'hui, en égalité stricte. Limites documentées dans l'en-tête : garde `next()`, paramètres contraints, optionnels ou jokers, sous-routeurs hors index, `router.all` et `route()`.
 - Pourquoi : Express sert la première route qui correspond, et l'ordre réel dépend des montages, pas du fichier.
 - Preuve : sur main, 356 routes et 0 littéral masqué. Sur le code d'avant #222 (`0bd9756^`), exactement 1 : `GET /api/suppliers/summary <- GET /api/suppliers/:id`. Sans la détection de capture, 4 cas sont rouges. Hygiène 9/9, tsc 0 erreur, unitaires 1958/1958.
+
+## 2026-11-03T19:24:00+01:00 — #232 : phrase de prévention de la leçon /:id complétée (relecture 0a)
+
+- Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.
+- Comment : elle nomme maintenant la garde (`route-order-hygiene.test.ts`, PR séparée) et ce qu'elle vérifie.
+- Pourquoi : une prévention doit être vérifiable, pas renvoyée à une personne.
