@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { fuelCardService } from "../../server/services/fuel-card-service";
-import { assignments, drivers, fuelRecords, missions } from "../../shared/schema";
+import { assignments, clientInvoices, drivers, fuelRecords, missions, vehicleDocuments } from "../../shared/schema";
 import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -24,6 +24,7 @@ const ACTORS = {
   otherDriver: "driver",
   client: "client",
   technician: "technician",
+  management: "management",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -331,5 +332,169 @@ describe("PATCH /api/missions/:id : ancien format à une seule affectation, inch
     expect(cleared.status).toBe(200);
     expect(cleared.body.status).toBe("planned");
     expect(await rowsOf(missionId)).toHaveLength(0);
+  });
+});
+
+/**
+ * Passage de 1 à N affectations (NO-GO sécurité de #240) : toute écriture qui visait « la » ligne
+ * d'affectation doit viser les lignes vivantes, et jamais ressusciter une ligne annulée ou refusée.
+ */
+describe("plusieurs affectations : statut, annulation et modification n'écrivent que sur les lignes vivantes", { timeout: 240000 }, () => {
+  const inDays = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const BUDGET = { budgetPlan: { fuelBudget: 1, roadExpensesBudget: 0, contingencyBudget: 0 } };
+
+  async function papers(vehicleId: number) {
+    for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
+      await db.insert(vehicleDocuments).values({
+        vehicleId,
+        name: `TEST ${type}`,
+        type,
+        filename: "x.pdf",
+        filesize: 1,
+        fileType: "application/pdf",
+        filePath: "uploads/x.pdf",
+        expiryDate: inDays(300),
+      } as any);
+    }
+  }
+
+  /** Mission prête au lancement : A1 (driver) et A2 (otherDriver), chacun sur son véhicule en règle. */
+  async function launchable(opts: { paperless?: "A2" } = {}) {
+    const [m] = await db
+      .insert(missions)
+      .values({
+        orderNumber: uniqueTestToken("MAS"),
+        pickupAddress: "TEST A",
+        deliveryAddress: "TEST B",
+        status: "assigned",
+        deliveryDate: new Date(),
+        workflowData: BUDGET,
+      } as any)
+      .returning();
+    missionIds.push(m.id);
+    const [vehicleA1, vehicleA2] = [await vehicle(), await vehicle()];
+    await papers(vehicleA1);
+    if (opts.paperless !== "A2") await papers(vehicleA2);
+    const [a1] = await db
+      .insert(assignments)
+      .values({ missionId: m.id, vehicleId: vehicleA1, driverId: await fiche("driver"), status: "accepted" } as any)
+      .returning();
+    const [a2] = await db
+      .insert(assignments)
+      .values({ missionId: m.id, vehicleId: vehicleA2, driverId: await fiche("otherDriver"), status: "accepted" } as any)
+      .returning();
+    return { missionId: m.id as number, vehicleA1, vehicleA2, a1: a1.id as number, a2: a2.id as number };
+  }
+
+  const setStatus = (actor: Actor, missionId: number, status: string, extra: Record<string, unknown> = {}) =>
+    session.call("PUT", `/api/missions/${missionId}/status`, { actor, body: { status, ...extra } });
+  const statuses = async (missionId: number) => (await rowsOf(missionId)).map((r) => r.status);
+
+  it("A1 annulée : le chauffeur A ne lance plus (403), A1 reste cancelled ; B lance, seule A2 passe in_progress", async () => {
+    const { missionId, a1 } = await launchable();
+    expect((await cancel("admin", missionId, a1)).status).toBe(200);
+
+    const asA = await setStatus("driver", missionId, "in_progress");
+    expect(apiErrorProblems(asA.status, asA.body, 403, undefined, asA.headers.get("x-request-id"))).toEqual([]);
+    expect(await statuses(missionId)).toEqual(["cancelled", "accepted"]);
+
+    const asB = await setStatus("otherDriver", missionId, "in_progress");
+    expect(asB.status, JSON.stringify(asB.body)).toBe(200);
+    expect(await statuses(missionId)).toEqual(["cancelled", "in_progress"]);
+  });
+
+  it("A1 annulée puis mission menée à terme par le personnel : A1 reste cancelled, le CA va tout entier au véhicule de A2", async () => {
+    const { missionId, a1, vehicleA1, vehicleA2 } = await launchable();
+    expect((await cancel("admin", missionId, a1)).status).toBe(200);
+    const steps: Array<[string, Record<string, unknown>]> = [["in_progress", {}], ["delivered", {}], ["completed", { actualFdrCost: 0 }]];
+    for (const [status, extra] of steps) {
+      const res = await setStatus("logistics", missionId, status, extra);
+      expect(res.status, `${status} ${JSON.stringify(res.body)}`).toBe(200);
+      expect((await statuses(missionId))[0]).toBe("cancelled");
+    }
+
+    const amountHT = 4_100_000_000_000;
+    const [invoice] = await db
+      .insert(clientInvoices)
+      .values({
+        missionId,
+        invoiceNumber: uniqueTestToken("inv-mas"),
+        invoiceDate: TODAY,
+        dueDate: TODAY,
+        amountHT: String(amountHT),
+        amountTTC: String(amountHT),
+        balance: String(amountHT),
+      } as any)
+      .returning({ id: clientInvoices.id });
+    try {
+      const res = await session.call("GET", "/api/management/dashboard?period=month", { actor: "management" });
+      expect(res.status).toBe(200);
+      const tco = res.body.vehicleTco;
+      const items = [...tco.topByMargin, ...tco.worstByMargin] as Array<{ vehicleId: number; revenueHT: number }>;
+      expect(items.find((i) => i.vehicleId === vehicleA1)).toBeUndefined();
+      expect(items.find((i) => i.vehicleId === vehicleA2)).toMatchObject({ revenueHT: amountHT });
+    } finally {
+      await db.delete(clientInvoices).where(eq(clientInvoices.id, invoice.id));
+    }
+  });
+
+  it("personnel : lance toutes les lignes actives, jamais une ligne refusée", async () => {
+    const { missionId, a2 } = await launchable();
+    await db.update(assignments).set({ status: "rejected" } as any).where(eq(assignments.id, a2));
+    const res = await setStatus("logistics", missionId, "in_progress");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await statuses(missionId)).toEqual(["in_progress", "rejected"]);
+  });
+
+  it("contrôles de lancement sur chaque affectation active : le second véhicule sans papiers bloque (400), rien n'est écrit", async () => {
+    const { missionId } = await launchable({ paperless: "A2" });
+    const res = await setStatus("logistics", missionId, "in_progress");
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(res.body.message).toMatch(/Véhicule .* : Carte grise manquante/);
+    expect(await statuses(missionId)).toEqual(["accepted", "accepted"]);
+    const [m] = await db.select().from(missions).where(eq(missions.id, missionId));
+    expect(m.status).toBe("assigned");
+  });
+
+  it("chauffeur annulé : perd l'accès à la mission (403), l'autre chauffeur le garde", async () => {
+    const { missionId, a2 } = await launchable();
+    expect((await session.call("GET", `/api/missions/${missionId}`, { actor: "otherDriver" })).status).toBe(200);
+    expect((await cancel("admin", missionId, a2)).status).toBe(200);
+    const lost = await session.call("GET", `/api/missions/${missionId}`, { actor: "otherDriver" });
+    expect(apiErrorProblems(lost.status, lost.body, 403, undefined, lost.headers.get("x-request-id"))).toEqual([]);
+    expect((await session.call("GET", `/api/missions/${missionId}`, { actor: "driver" })).status).toBe(200);
+  });
+
+  it("DELETE d'une affectation refusée : 200 sans réécriture (reste rejected), sans trame", async () => {
+    const { missionId, a2 } = await launchable();
+    await db.update(assignments).set({ status: "rejected" } as any).where(eq(assignments.id, a2));
+    frames.length = 0;
+    const res = await cancel("admin", missionId, a2);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await statuses(missionId)).toEqual(["accepted", "rejected"]);
+    expect(frames.filter((f) => f.data?.entityId === missionId)).toEqual([]);
+  });
+
+  it("PATCH { assignment } sur une mission à deux chauffeurs : 409, lignes inchangées", async () => {
+    const { missionId } = await launchable();
+    const before = await rowsOf(missionId);
+    for (const assignment of [{ driverId: await freeDriver(), vehicleId: await vehicle() }, null]) {
+      const res = await session.call("PATCH", `/api/missions/${missionId}`, { actor: "logistics", body: { assignment } });
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    }
+    expect(await rowsOf(missionId)).toEqual(before);
+  });
+
+  it("PATCH { assignment } avec une ligne vivante et une annulée : remplace la vivante, l'annulée reste cancelled", async () => {
+    const { missionId, a1 } = await launchable();
+    expect((await cancel("admin", missionId, a1)).status).toBe(200);
+    const driverId = await freeDriver();
+    const vehicleId = await vehicle();
+    const res = await session.call("PATCH", `/api/missions/${missionId}`, { actor: "logistics", body: { assignment: { driverId, vehicleId } } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows = await rowsOf(missionId);
+    expect(rows[0].status).toBe("cancelled");
+    expect(rows.filter((r) => r.status !== "cancelled")).toMatchObject([{ driverId, vehicleId }]);
   });
 });

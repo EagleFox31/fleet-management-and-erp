@@ -2227,7 +2227,7 @@ const updateMissionSchema = z.object({
 // PATCH /api/missions/:id - Mettre à jour les infos de mission
 // Réservé aux gestionnaires de missions (R3) : le montage n'exige que isStaff, ce qui laissait
 // chauffeur, technicien et magasinier modifier coût carburant, dates, chauffeur et véhicule.
-router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
+router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id);
     if (!Number.isInteger(missionId)) {
@@ -2579,8 +2579,9 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 
     return res.json(updatedMission);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Update mission error");
-    return res.status(500).json({ message: "Erreur lors de la mise à jour de la mission" });
+    // Une AppError (409 plusieurs chauffeurs, 403…) garde son statut ; le reste devient une 5xx normalisée.
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Update mission error");
+    next(error);
   }
 });
 
@@ -2637,7 +2638,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), async (re
         .limit(1);
       if (!vehicle) throw new AppError(400, "Véhicule introuvable pour l'affectation.");
 
-      const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id) });
+      const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id, tx) });
       if (!eligibilite.eligible) {
         throw new AppError(400, formatEligibilityRefusal(vehicle.registrationNumber, eligibilite.blockers));
       }

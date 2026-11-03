@@ -2091,3 +2091,25 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.
+
+## 2026-11-03 — Passage 1→N : tout `limit(1)` sur la table enfant devient une écriture sur la mauvaise ligne (#240)
+
+### Contexte
+- #240 ouvre l'ajout et l'annulation d'affectations sur une mission (N chauffeurs). Les routes existantes lisaient « l'affectation » de la mission par `limit(1)` puis écrivaient sur son id.
+- Effets relevés à la relecture sécurité (NO-GO) : `PUT /:id/status` réécrivait une affectation **annulée** en `in_progress` (elle reprenait sa part du CA et ses droits de saisie) ; un chauffeur annulé gardait l'accès à la mission et pouvait la lancer ; les contrôles de lancement ne portaient que sur le premier camion ; `PATCH /:id { assignment }` remplaçait « la première » ligne d'une mission à deux chauffeurs ; `DELETE` d'une affectation refusée la réécrivait en `cancelled`.
+- Near miss pendant la correction : le `catch` du PATCH convertissait toute `AppError` en 500, le 409 prévu n'arrivait jamais. Seul le contrat l'a montré.
+
+### Cause racine
+- Classification : invariant de cardinalité implicite (suite de la leçon #227). Le code lecteur avait été revu pour N lignes, pas le code écrivain. Une écriture filtrée sur l'id seul ne revérifie pas l'état qui justifiait l'écriture.
+
+### Résolution
+- Statut : chauffeur → ses lignes actives (403 s'il n'en a aucune) ; personnel → toutes les lignes actives ; contrôles de lancement par ligne. Écritures conditionnées au statut lu. `canAccessMissionAsDriver` ignore les lignes `cancelled`/`rejected`. DELETE sous `FOR UPDATE`, no-op sur une ligne déjà nulle. PATCH : 409 au-delà d'une ligne vivante, erreurs passées au gestionnaire central.
+
+### Prévention (vérifiable)
+- `tests/contract/mission-multi-assignments.contract.test.ts` : 8 cas (7 rouges sur le code d'avant), dont le CA de la mission menée à terme sans la ligne annulée.
+- `tests/unit/server/assignment-write-hygiene.test.ts` : échoue sur tout `update(assignments)` / `delete(assignments)` sans filtre `assignments.status` ou `assignments.driverId` (même coupé sur plusieurs lignes), et sur toute SQL brute ; 4 écritures relevées sur le code d'avant.
+
+### Règle Projet (obligatoire)
+- Quand une relation passe de 1 à N, recenser **toutes** les écritures sur la table enfant, pas seulement les lectures : chaque `limit(1)` suivi d'une écriture vise désormais une ligne arbitraire.
+- Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
+- Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
