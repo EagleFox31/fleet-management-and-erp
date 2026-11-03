@@ -1,5 +1,4 @@
 import os from 'os';
-import { workOrderStaffScope } from "./lib/work-order-realtime-scope";
 import type { IncomingMessage } from "http";
 import { randomUUID } from "crypto";
 import { setupVite, serveStatic } from "./vite";
@@ -10,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { sessionMiddleware } from "./middleware/session";
 import { findActiveSessionUser } from "./services/session-user";
 import { moduleLogger } from "./lib/logger";
+import { relayDatabaseEvent } from "./lib/db-event-relay";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
 import { dbAuditSink } from "./lib/audit-db-sink";
@@ -432,35 +432,14 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
           return;
         }
 
-        const payload =
-          parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
-            ? (parsed.payload as Record<string, unknown>)
-            : {};
-        const fallbackEntityId =
-          toPositiveInteger(payload.workOrderId) ??
-          toPositiveInteger(payload.vehicleId) ??
-          null;
-        const entityId = parsed.entityId ?? fallbackEntityId;
+        console.log(`[DB-EVENTS] ${parsed.eventType} (entityId=${String(parsed.entityId ?? "n/a")})`);
 
-        console.log(`[DB-EVENTS] ${parsed.eventType} (entityId=${String(entityId ?? "n/a")})`);
-
-        (global as any).broadcastUpdate(parsed.eventType, {
-          version: typeof parsed.version === "number" ? parsed.version : 1,
-          entity: typeof parsed.entity === "string" ? parsed.entity : inferEntityFromEvent(parsed.eventType),
-          entityId,
-          payload,
-          // Les triggers de `fleet_events` ne relaient que des changements d'OT (work_order_* et le
-          // statut du véhicule immobilisé par un OT) : titre, technicien, statut, aucun montant.
-          // Personnel seulement ; un client n'en reçoit aucun (§11).
-          scope: workOrderStaffScope(),
-          actor: null,
-          emittedAt:
-            typeof parsed.emittedAt === "string"
-              ? parsed.emittedAt
-              : new Date().toISOString(),
-          correlationId: randomUUID(),
-          causationId: null,
-          tenantId: null,
+        // Portées : voir `server/lib/db-event-relay.ts` (personnel, coûts d'OT, propriétaire du véhicule).
+        void relayDatabaseEvent(parsed, {
+          broadcast: (event, data) => (global as any).broadcastUpdate(event, data),
+          inferEntity: inferEntityFromEvent,
+        }).catch((err) => {
+          moduleLogger("db-event-relay").error({ err, eventType: parsed.eventType }, "relais d'un événement de base en échec");
         });
       });
 

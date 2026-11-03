@@ -1,4 +1,3 @@
-import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
@@ -48,6 +47,7 @@ import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
+import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 
 const log = moduleLogger("routes");
 

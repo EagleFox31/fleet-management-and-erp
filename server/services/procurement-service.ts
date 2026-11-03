@@ -1,4 +1,3 @@
-import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { db } from "../db";
 import { 
   purchaseOrders, 
@@ -23,6 +22,7 @@ import { AppError } from "../lib/app-error";
 import { broadcastAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
 import { moduleLogger } from "../lib/logger";
 import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 /**
  * Service de gestion des commandes d'achat groupées

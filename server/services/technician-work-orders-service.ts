@@ -1,10 +1,10 @@
-import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { db } from '../db';
 import { workOrders, vehicles, users, partsUsed, parts, tireRotations, workOrderItems } from '../../shared/schema';
 import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
 import { computeWorkOrderCost } from '@shared/work-order-cost';
 import { moduleLogger } from '../lib/logger';
 import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger('technician-work-orders');
 

@@ -1,10 +1,10 @@
-import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
 import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("preventive-maintenance");
 

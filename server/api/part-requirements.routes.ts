@@ -1,4 +1,3 @@
-import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { Router } from "express";
 import {
   authenticate,
@@ -11,6 +10,7 @@ import { PartRequirementWorkflow } from "../services/part-requirements-workflow"
 import { insertPartRequirementSchema } from "@shared/schema";
 import { ZodError } from "zod";
 import { moduleLogger } from "../lib/logger";
+import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("part-requirements-routes");
 const router = Router();

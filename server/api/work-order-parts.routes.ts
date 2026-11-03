@@ -1,4 +1,3 @@
-import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { Router, type Request } from "express";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
@@ -25,6 +24,7 @@ import { moduleLogger } from "../lib/logger";
 const log = moduleLogger("work-order-parts");
 import { partRequirements, parts, users } from "@shared/schema";
 import { alertService } from "../services/alert-service";
+import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const router = Router();
 

@@ -1,4 +1,3 @@
-import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import {
@@ -10,6 +9,7 @@ import { moduleLogger } from "../lib/logger";
 import { authenticate } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
 import { storage } from "../storage";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("technician-work-orders");
 

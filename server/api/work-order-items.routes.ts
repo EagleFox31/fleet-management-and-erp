@@ -1,4 +1,3 @@
-import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 import { Router } from "express";
 import { authenticate, isAnyUser, isStaff, isTechnician } from "../middleware/auth";
 import { assertWorkOrderReadable } from "../lib/work-order-scope";
@@ -8,6 +7,7 @@ const log = moduleLogger("work-order-items");
 import { storage } from "../storage";
 import { AppError, isAppError } from "../lib/app-error";
 import { workOrderItemsService } from "../services/work-order-items-service";
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 /**
  * Lignes de travail d'un ordre de travail — heures passées, sans valorisation.
