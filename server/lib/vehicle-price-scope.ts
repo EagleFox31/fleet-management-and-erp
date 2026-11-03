@@ -23,7 +23,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-/** Un véhicule porte `registrationNumber` ; une fiche pneu, elle aussi dotée d'un `purchasePrice`, non. */
+/**
+ * Un véhicule porte `registrationNumber` ; une fiche pneu, elle aussi dotée d'un `purchasePrice`, non.
+ * Limite : une projection qui ne prendrait que `purchasePrice` (sans l'immatriculation) n'est pas
+ * reconnue et ne serait pas masquée. Garde-fou : tests/unit/server/vehicle-select-hygiene.test.ts
+ * gèle les lectures entières de `vehicles` et impose de les déclarer.
+ */
 function isVehicleLike(value: Record<string, unknown>): boolean {
   return "purchasePrice" in value && "registrationNumber" in value;
 }

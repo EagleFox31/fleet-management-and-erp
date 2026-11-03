@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { useWorkflowPersistence } from "@/hooks/use-workflow-persistence";
 import { useAuth } from "@/hooks/useAuth";
-import { canReadVehiclePurchasePrice } from "@shared/constants/roles";
+import { canWriteVehiclePurchasePrice } from "@shared/constants/roles";
 import { CardShell, SectionLabel } from "@/components/design-system";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
@@ -85,7 +85,8 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
   // Prix d'achat : lisible par admin, logistique et secrétariat seulement (décision du 3 novembre 2026).
   // Les autres rôles ne voient pas le champ, et la valeur n'est pas renvoyée au PATCH.
   const { user: currentUser } = useAuth();
-  const canSeePurchasePrice = canReadVehiclePurchasePrice(currentUser?.role);
+  // Le champ n'est offert qu'aux rôles qui peuvent écrire le prix : le serveur refuse la clé aux autres.
+  const canSeePurchasePrice = canWriteVehiclePurchasePrice(currentUser?.role);
 
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
@@ -196,7 +197,8 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
           axleCount: values.axleCount || 2,
           engineSpec: values.engineSpec || '',
           purchaseDate: values.purchaseDate || '',
-          purchasePrice: values.purchasePrice || 0,
+          // Un rôle qui ne lit pas le prix ne l'envoie pas : sans la clé, il n'écrase rien et n'écrit pas 0.
+          ...(canSeePurchasePrice ? { purchasePrice: values.purchasePrice || 0 } : {}),
           fuelType: values.fuelType,
           status: values.status,
           mileage: values.mileage,

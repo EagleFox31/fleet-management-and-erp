@@ -11,6 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { canReadPurchasePrice, type PriceReader } from "../lib/vehicle-price-scope";
 
 /**
  * Service Opérations & Missions
@@ -421,7 +422,7 @@ export class OperationsService {
   /**
    * Calculer les coûts d'une mission
    */
-  async calculateMissionCosts(missionId: number) {
+  async calculateMissionCosts(missionId: number, reader?: PriceReader) {
     console.log(`Calculating costs for mission ${missionId}...`);
 
     const [mission] = await db
@@ -441,16 +442,31 @@ export class OperationsService {
     const [assignment] = await db
       .select({
         assignment: assignments,
-        vehicle: vehicles,
+        purchasePrice: vehicles.purchasePrice,
       })
       .from(assignments)
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(eq(assignments.missionId, missionId))
       .limit(1);
 
-    if (assignment?.vehicle?.purchasePrice) {
+    if (assignment?.purchasePrice) {
       // Amortissement simple: prix achat / 1000 jours * 1 jour
-      vehicleCost = parseFloat(String(assignment.vehicle.purchasePrice)) / 1000;
+      vehicleCost = parseFloat(String(assignment.purchasePrice)) / 1000;
+    }
+
+    // Le coût véhicule est le prix d'achat divisé par 1000 : le renvoyer à un lecteur
+    // non autorisé le lui livrerait. Pour lui, le terme est absent (null) et le total
+    // ne le compte pas.
+    if (!canReadPurchasePrice(reader)) {
+      return {
+        fuelCost,
+        vehicleCost: null,
+        totalCost: fuelCost,
+        breakdown: {
+          fuel: fuelCost,
+          vehicle: null,
+        },
+      };
     }
 
     const totalCost = fuelCost + vehicleCost;

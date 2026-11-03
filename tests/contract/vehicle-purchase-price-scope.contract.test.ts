@@ -2,7 +2,7 @@ import { inArray } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { assignments, drivers, missions, vehicles } from "../../shared/schema";
+import { assignments, drivers, fuelRecords, missions, tires, vehicleTires, vehicles } from "../../shared/schema";
 import { ALL_APP_ROLES, VEHICLE_PURCHASE_PRICE_READ_ROLES, type AppRole } from "../../shared/constants/roles";
 import { startContractSession } from "../support/contract-session";
 import { createTestVehicle } from "../support/factories";
@@ -150,6 +150,125 @@ describe("trame temps réel vehicle_mileage_updated", () => {
     expect(Number(toAllowed[0].data.payload.vehicle.purchasePrice)).toBe(Number(PRICE));
     // Aucune trame ne vise tous les rôles ni un rôle refusé avec la valeur.
     expect(frames.some((f) => (f.data.scope?.roles ?? []).some((r: string) => DENIED.includes(r)) && leaks(f.data))).toBe(false);
+  });
+});
+
+describe("GET /api/vehicles/:id/tires (jointure sur le véhicule entier)", () => {
+  let tireId = 0;
+  let vehicleTireId = 0;
+  beforeAll(async () => {
+    const [tire] = await db
+      .insert(tires)
+      .values({ brand: "TESTMarque", model: uniqueTestToken("pneu"), size: "315/80R22.5", purchasePrice: "1234.00" } as any)
+      .returning();
+    tireId = tire.id;
+    const [mounted] = await db
+      .insert(vehicleTires)
+      .values({ vehicleId, tireId, position: "front_left", installationDate: "2026-01-01", installationMileage: 0 })
+      .returning();
+    vehicleTireId = mounted.id;
+  }, 60000);
+  afterAll(async () => {
+    await db.delete(vehicleTires).where(inArray(vehicleTires.id, [vehicleTireId]));
+    await db.delete(tires).where(inArray(tires.id, [tireId]));
+  });
+
+  it.each(ROLES)("%s", async (role) => {
+    const res = await session.call("GET", `/api/vehicles/${vehicleId}/tires`, { actor: role });
+    expect(res.status).toBe(200);
+    const row = res.body.find((r: any) => r.id === vehicleTireId);
+    expect(row, "le pneu monté doit figurer dans la réponse").toBeDefined();
+    // Le prix du pneu (autre objet) n'est pas concerné.
+    expect(Number(row.tire.purchasePrice)).toBe(1234);
+    if (ALLOWED.includes(role)) expect(Number(row.vehicle.purchasePrice)).toBe(Number(PRICE));
+    else {
+      expect(row.vehicle.purchasePrice).toBeNull();
+      expect(leaks(res.body)).toBe(false);
+    }
+  });
+});
+
+describe("GET /api/operations/missions/:id/costs (prix / 1000 récupérable)", () => {
+  const derived = String(Number(PRICE) / 1000);
+  it.each(ROLES)("%s", async (role) => {
+    const res = await session.call("GET", `/api/operations/missions/${missionId}/costs`, { actor: role });
+    if (role === "driver" || role === "client") {
+      expect(res.status).toBe(403);
+      return;
+    }
+    expect(res.status).toBe(200);
+    if (ALLOWED.includes(role)) {
+      expect(res.body.vehicleCost).toBe(Number(derived));
+      expect(res.body.totalCost).toBe(res.body.fuelCost + Number(derived));
+    } else {
+      expect(res.body.vehicleCost).toBeNull();
+      expect(res.body.breakdown.vehicle).toBeNull();
+      expect(res.body.totalCost).toBe(res.body.fuelCost);
+      expect(JSON.stringify(res.body)).not.toContain(derived);
+    }
+  });
+});
+
+describe("tableau de bord Direction : acquisitionHT reste visible pour management", () => {
+  let fuelRecordId = 0;
+  beforeAll(async () => {
+    // Un coût de carburant écrasant place le véhicule en tête des moins bonnes marges (5 lignes seulement).
+    const [record] = await db
+      .insert(fuelRecords)
+      .values({ vehicleId, date: new Date().toISOString().slice(0, 10), quantity: 1, cost: "9000000000000.00" } as any)
+      .returning();
+    fuelRecordId = record.id;
+  }, 60000);
+  afterAll(async () => {
+    await db.delete(fuelRecords).where(inArray(fuelRecords.id, [fuelRecordId]));
+  });
+
+  it("management reçoit la valeur d'acquisition du véhicule", async () => {
+    const res = await session.call("GET", "/api/management/dashboard?period=month", { actor: "management" });
+    expect(res.status).toBe(200);
+    const item = res.body.vehicleTco.worstByMargin.find((v: any) => v.vehicleId === vehicleId);
+    expect(item, "le véhicule de test doit figurer dans les pires marges").toBeDefined();
+    expect(item.acquisitionHT).toBe(Number(PRICE));
+  });
+});
+
+describe("écriture du prix d'achat (PATCH /api/vehicles/:id)", () => {
+  const priceInDb = async () => {
+    const [row] = await db.select({ price: vehicles.purchasePrice, model: vehicles.model, mileage: vehicles.mileage }).from(vehicles).where(inArray(vehicles.id, [vehicleId]));
+    return row;
+  };
+  afterAll(async () => {
+    await db.update(vehicles).set({ purchasePrice: PRICE }).where(inArray(vehicles.id, [vehicleId]));
+  });
+
+  it.each(["management", "technician"])("%s + purchasePrice : 403, prix inchangé", async (actor) => {
+    const res = await session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor, body: { purchasePrice: 17000000 } });
+    expect(res.status).toBe(403);
+    expect(Number((await priceInDb()).price)).toBe(Number(PRICE));
+  });
+
+  it("workshop_manager + purchasePrice : 403, prix inchangé", async () => {
+    const res = await session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor: "workshop_manager", body: { purchasePrice: 17000000 } });
+    expect(res.status).toBe(403);
+    expect(Number((await priceInDb()).price)).toBe(Number(PRICE));
+  });
+
+  it("workshop_manager garde les autres champs", async () => {
+    const res = await session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor: "workshop_manager", body: { notes: "TESTnote" } });
+    expect(res.status).toBe(200);
+    expect(res.body.purchasePrice ?? null).toBeNull();
+  });
+
+  it("admin + purchasePrice : 200, prix modifié et rendu", async () => {
+    const res = await session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor: "admin", body: { purchasePrice: 16500000 } });
+    expect(res.status).toBe(200);
+    expect(Number(res.body.purchasePrice)).toBe(16500000);
+    await db.update(vehicles).set({ purchasePrice: PRICE }).where(inArray(vehicles.id, [vehicleId]));
+  });
+
+  it("workshop_manager + purchasePrice à la création : 403", async () => {
+    const res = await session.call("POST", "/api/vehicles", { actor: "workshop_manager", body: { registrationNumber: uniqueTestToken("TST"), purchasePrice: 1 } });
+    expect(res.status).toBe(403);
   });
 });
 

@@ -232,7 +232,7 @@ router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Requ
 router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const costs = await operationsService.calculateMissionCosts(parseInt(id));
+    const costs = await operationsService.calculateMissionCosts(parseInt(id), req.user);
     res.json(costs);
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error calculating mission costs:" }));

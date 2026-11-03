@@ -1,5 +1,20 @@
-import { VEHICLE_EDIT_ROLES } from "@shared/constants/roles";
+import { VEHICLE_EDIT_ROLES, canWriteVehiclePurchasePrice } from "@shared/constants/roles";
 import { AppError } from "./app-error";
+
+export const VEHICLE_PURCHASE_PRICE_WRITE_MESSAGE =
+  "Votre rôle ne peut pas renseigner ni modifier le prix d'achat du véhicule.";
+
+/**
+ * Un rôle hors VEHICLE_PURCHASE_PRICE_WRITE_ROLES qui envoie la clé `purchasePrice` est refusé
+ * (403), la clé n'est pas ignorée en silence. Rend l'erreur à transmettre à `next()`, ou null.
+ */
+export function vehiclePriceWriteRefusal(role: string | null | undefined, body: unknown): AppError | null {
+  if (canWriteVehiclePurchasePrice(role)) return null;
+  if (body && typeof body === "object" && "purchasePrice" in (body as Record<string, unknown>)) {
+    return new AppError(403, VEHICLE_PURCHASE_PRICE_WRITE_MESSAGE);
+  }
+  return null;
+}
 
 export const VEHICLE_TANK_CAPACITY_ONLY_MESSAGE =
   "Votre rôle peut seulement renseigner la capacité des réservoirs du véhicule.";
