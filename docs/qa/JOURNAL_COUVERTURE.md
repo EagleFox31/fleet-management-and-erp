@@ -2011,6 +2011,14 @@ soumission sans doublon.
 - **Pourquoi** : réserves a et b de b7 ; une assertion d'écran au-delà du `refetchInterval` est satisfaite par le polling (AGENTS.md §3), un statut seul ne prouve pas le contrat d'erreur (§10).
 - **Preuves** : e2e 13 et 19 sur `fleet_test_cov` (serveur port 5177, msedge) : 18/19 au premier passage, DRV2-1 vert au rejeu isolé (2/2), instable, sans lien avec le delta ; tsc 0.
 
+## 2026-11-03 11:57 — Contrôle ApiErrorBody partagé entre contrats et e2e
+
+- **Quoi** : `TECHNICAL` et le contrôle du corps d'erreur vivent dans `tests/support/api-error.ts` (`apiErrorProblems`). Le contrat PRT1 (`parts-catalog-access-errors`) et la spec 13 l'importent. Leurs deux copies du filtre et de la fonction sont retirées.
+- **Comment** : la fonction ne dépend d'aucun framework. Elle renvoie la liste des écarts, et chaque appelant garde un `expect(...).toEqual([])` d'une ligne avec son propre `expect` (Vitest ou Playwright). Le code attendu par défaut est `codeForStatus`, un code explicite le remplace. Corps décodé ou texte brut ; un corps non JSON ou vide est signalé, il ne lève pas d'exception.
+- **Pourquoi** : les deux copies étaient identiques ; une troisième aurait pu diverger, comme les tables de libellés de statut (AGENTS.md §1). Rien à faire côté `playwright.config.ts` : `trace: "retain-on-failure"` y est déjà, ce qui garde la trace d'un échec rare comme DRV2-1 (rouge non reproduit en 3 passages complets de la spec 19).
+- **Preuves** : test unitaire `tests/unit/e2e/api-error-support.test.ts` (conforme, code par défaut ou explicite, statut, message vide, détail technique, corps non JSON ou absent) ; unit 1614/1614 ; tsc 0 ; contrat PRT1 14/14 sur le Postgres local `fleet_test`. Spec 13 non rejouée au navigateur : seul le corps de son assertion change, et le fichier compile.
+- **Piège** : sur la base partagée `fleet_test`, `cleanupOrphanTestRows` (`tests/support/cleanup.ts:193`) échoue sur `status_history_updated_by_id_users_id_fk` quand une autre session a laissé un historique de statut lié à un utilisateur de test. Le fichier est alors marqué en échec alors que ses 14 cas passent. À corriger à part.
+
 ## 2026-11-03 12:10 — Cloison chauffeur sur les GET de /api/operations (DRV2-3, suite)
 
 - **Quoi** : un chauffeur lisait toutes les missions et leurs coûts par `/api/operations/*`, ce qui contournait le `router.param` de missions.routes.ts. Listes (`/missions`, `/missions/upcoming`, `/missions/active`) filtrées sur ses affectations (`driverScopeOf`, `assignments.driver_id`, fiche liée par `drivers.user_id`) ; `/missions/:id/costs`, `/missions/by-client/:clientName`, `/stats/by-client` et `/stats/by-destination` refusés en 403 (`AppError`). Personnel inchangé ; le client reste fermé par `isStaff` au montage (`STAFF_ROLES` exclut `client`), rien changé pour lui.

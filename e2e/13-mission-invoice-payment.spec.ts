@@ -1,8 +1,8 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../server/db";
-import { codeForStatus } from "../shared/errors";
 import { clientInvoices, clientPayments, missions } from "../shared/schema";
+import { apiErrorProblems } from "../tests/support/api-error";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient } from "../tests/support/factories";
 import { uniqueTestToken } from "../tests/support/ids";
@@ -31,17 +31,9 @@ const HT = 100000;
 const TTC = 119250; // TVA 19,25 %
 const ids = createIdBag();
 
-/** Détail technique interdit dans une réponse d'erreur (AGENTS.md §10, même filtre que PRT1). */
-const TECHNICAL = /SQLSTATE|violates|duplicate key|invalid input syntax|foreign key|constraint|at \S+:\d+|ZodError|"path":|\binvalid_type\b/i;
-
-/** Corps conforme à ApiErrorBody : statut attendu, code du statut, message lisible, rien de technique. */
+/** Corps conforme à ApiErrorBody (tests/support/api-error.ts, même contrôle que les contrats). */
 function expectApiError(status: number, text: string, expected: number, label: string) {
-  expect(status, `${label} : ${text}`).toBe(expected);
-  const body = JSON.parse(text) as { message?: unknown; code?: unknown };
-  expect(typeof body.message, label).toBe("string");
-  expect(String(body.message).length, label).toBeGreaterThan(0);
-  expect(body.code, label).toBe(codeForStatus(expected));
-  expect(text, label).not.toMatch(TECHNICAL);
+  expect(apiErrorProblems(status, text, expected), label).toEqual([]);
 }
 const missionIds: number[] = [];
 let logistics: E2ECredentials;
