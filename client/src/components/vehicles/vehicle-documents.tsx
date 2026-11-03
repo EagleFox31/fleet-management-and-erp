@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { uploadFile } from "@/lib/api";
+import { invalidateVehicleDocumentQueries } from "@/lib/vehicle-document-cache";
 import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -237,8 +238,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
         expiryDate: '',
         file: null
       });
-      // Invalider la requête pour recharger les documents
-      queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${vehicleId}/documents`] });
+      // Documents + miroir vehicles.* (éligibilité mission) + écrans satellites.
+      invalidateVehicleDocumentQueries(queryClient, vehicleId);
     },
     onError: (error: any) => {
       toast({

@@ -193,6 +193,19 @@ function isDateExpired(dateValue: Date | string | null | undefined): boolean {
   return candidate < now;
 }
 
+/**
+ * Même règle que `getMissionEligibility` : le jour de l'échéance bloque (jours écoulés >= 0).
+ * Date illisible : bloque.
+ */
+function isExpiredOnOrBeforeToday(dateValue: Date | string): boolean {
+  const candidate = new Date(dateValue);
+  if (Number.isNaN(candidate.getTime())) return true;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  candidate.setHours(0, 0, 0, 0);
+  return candidate <= today;
+}
+
 function overlaps(
   startA: Date | string | null | undefined,
   endA: Date | string | null | undefined,
@@ -2280,6 +2293,9 @@ router.put("/:id/status", async (req, res) => {
         completedAt: assignments.completedAt,
         vehicleRegistration: vehicles.registrationNumber,
         vehicleStatus: vehicles.status,
+        vehicleInsuranceExpiry: vehicles.insuranceExpiry,
+        vehicleTechnicalInspectionDate: vehicles.technicalInspectionDate,
+        vehicleLicensePlateExpiry: vehicles.licensePlateExpiry,
         driverFirstName: drivers.firstName,
         driverLastName: drivers.lastName,
         driverIsActive: drivers.isActive,
@@ -2334,9 +2350,14 @@ router.put("/:id/status", async (req, res) => {
           .from(vehicleDocuments)
           .where(eq(vehicleDocuments.vehicleId, missionAssignment.vehicleId));
 
+        // Par type, la date d'expiration la plus lointaine : un ancien document
+        // échu ne masque pas le renouvellement (même règle que vehicle-documentation-service).
         const docsByType = new Map<string, { expiryDate: Date | string | null }>();
         docs.forEach((doc) => {
-          if (!docsByType.has(doc.type)) {
+          const known = docsByType.get(doc.type);
+          const candidate = doc.expiryDate ? new Date(doc.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+          const current = known?.expiryDate ? new Date(known.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+          if (!known || candidate > current) {
             docsByType.set(doc.type, { expiryDate: doc.expiryDate });
           }
         });
@@ -2345,16 +2366,42 @@ router.put("/:id/status", async (req, res) => {
         const assurance = docsByType.get("assurance");
         const visiteTechnique = docsByType.get("visite_technique");
 
+        // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
+        // comme dans getMissionEligibility).
+        let carteGriseErreur = false;
         if (!carteGrise) {
           launchErrors.push("Carte grise manquante.");
+        } else if (carteGrise.expiryDate && isExpiredOnOrBeforeToday(carteGrise.expiryDate)) {
+          launchErrors.push("Carte grise expirée.");
+          carteGriseErreur = true;
         }
 
-        if (!assurance || isDateExpired(assurance.expiryDate)) {
+        const assuranceErreur = !assurance || !assurance.expiryDate || isExpiredOnOrBeforeToday(assurance.expiryDate);
+        if (assuranceErreur) {
           launchErrors.push("Assurance manquante ou expirée.");
         }
 
-        if (!visiteTechnique || isDateExpired(visiteTechnique.expiryDate)) {
+        const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || isExpiredOnOrBeforeToday(visiteTechnique.expiryDate);
+        if (visiteErreur) {
           launchErrors.push("Visite technique manquante ou expirée.");
+        }
+
+        // Règle unique d'éligibilité, la même qu'à l'affectation : couvre les
+        // colonnes miroir de `vehicles` (assurance, visite, plaque). L'état
+        // mécanique est déjà refusé plus haut ; on n'ajoute que les motifs de
+        // conformité qui ne sont pas déjà énoncés.
+        const eligibilite = getMissionEligibility({
+          status: missionAssignment.vehicleStatus,
+          insuranceExpiry: missionAssignment.vehicleInsuranceExpiry,
+          technicalInspectionDate: missionAssignment.vehicleTechnicalInspectionDate,
+          licensePlateExpiry: missionAssignment.vehicleLicensePlateExpiry,
+        });
+        for (const blocker of eligibilite.blockers) {
+          if (blocker.kind !== "compliance") continue;
+          if (blocker.code === "insurance" && assuranceErreur) continue;
+          if (blocker.code === "technical_inspection" && visiteErreur) continue;
+          if (blocker.code === "license_plate" && carteGriseErreur) continue;
+          launchErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
         }
 
         if (mission.pickupDate && mission.deliveryDate) {
