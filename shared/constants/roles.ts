@@ -238,6 +238,13 @@ export const VEHICLE_DOCUMENT_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filt
 export const MISSION_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
 /**
+ * Destinataires des événements du catalogue pièces (création, modification, suppression, ajustement
+ * de stock) : le personnel qui lit le stock et ses prix, sans le chauffeur ni le client
+ * (AGENTS.md §11).
+ */
+export const PART_CATALOG_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+
+/**
  * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : le
  * personnel sauf le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
  * agrégats de toute la flotte). Décision du 3 novembre 2026.

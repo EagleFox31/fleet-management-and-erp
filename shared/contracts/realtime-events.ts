@@ -14,6 +14,7 @@ import {
   FUEL_READ_ROLES,
   GPS_VIEW_ROLES,
   MISSION_ADVISORY_ROLES,
+  PART_CATALOG_EVENT_ROLES,
   PART_SALE_READ_ROLES,
   STAFF_ROLES,
   VEHICLE_DOCUMENT_EVENT_ROLES,
@@ -140,6 +141,13 @@ export const REALTIME_EVENTS = {
   // Écarts du cahier des charges (chantier CDC, lot CDC-0b). Déclarés ici ; l'émetteur
   // est livré par le lot fonctionnel concerné.
   // Vente de pièces : le stock, l'entrepôt et les tuiles KPI changent avec la vente.
+  part_catalog_changed: {
+    // Fiche pièce créée, modifiée, supprimée ou stock ajusté : liste, stock bas, statistiques et
+    // écrans du magasin. Le détail `/api/parts/:id` porte l'identifiant dans sa clé : il est
+    // invalidé par useRealTimeSync à partir de `id`.
+    scope: { type: "roles", roles: PART_CATALOG_EVENT_ROLES },
+    invalidates: ["/api/parts", "/api/parts/low-on-stock", "/api/parts/statistics", "/api/parts/stock-movements", ...WAREHOUSE_QUERY_KEYS],
+  } as EventDefinition<{ id: number; action: "created" | "updated" | "deleted" | "stock_adjusted" }>,
   part_sale_validated: {
     scope: { type: "roles", roles: PART_SALE_READ_ROLES },
     invalidates: PART_SALE_INVALIDATES,
