@@ -2061,6 +2061,13 @@ soumission sans doublon.
 - **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
 - **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
 
+## 2026-11-03 13:40 — PRT1 en e2e : catalogue de pièces et trame WebSocket absente
+
+- **Quoi** : `e2e/21-parts-catalog.spec.ts`. Parcours navigateur du magasinier (création par le formulaire avec catégorie libre, recherche dans le tableau, modification catégorie et prix, `createdBy`/`updatedBy` relus en base, corbeille absente et DELETE 403), suppression par l'admin à l'écran avec cascade des variante et spécification. Cas temps réel figé en `test.fail` : un second profil (chef d'atelier) sur `/inventory/parts` ne reçoit aucune trame de pièce.
+- **Comment** : comptes créés par `createE2EUser` (warehouse, workshop_manager, admin), références `TEST-prt1-*`, nettoyage par `cleanupCreated`. Variante et spécification par l'API dans la session du magasinier : `parts-database.tsx`, seul écran qui les porte, n'est montée par aucune route. Base locale `fleet_test_de_rid`, serveur port 5137, msedge.
+- **Pourquoi** : le contrat couvre les routes ; restait ce que l'écran affirme et la règle des 3 couches. `POST/PATCH/DELETE /api/parts` (`server/routes.ts`, gelé) n'émettent aucun événement et `useRealTimeSync.ts` n'invalide `/api/parts` que sur `part_used_*` et `part_requirement_*`.
+- **Preuves** : le cas temps réel, sans `test.fail`, échoue sur « aucune trame WebSocket de pièce reçue par le profil observateur » (`auth_success` reçu, création 201 et modification 200 vérifiées avant) : cause bien l'absence de trame, pas un sélecteur. Mise en place hors du `test.fail` (garde `it-fails-hygiene`) : un témoin vérifie socket, création 201 et modification 200. Trois passages consécutifs verts (3/3 tests chaque fois), tsc 0, unit verts. Une PR corrective émet `part_catalog_changed` : la première des deux à fusionner laisse le `test.fail` en place, la seconde le retire.
+
 ## 2026-11-03 13:35 — Tests : refuser de démarrer sur une base de production
 
 - **Quoi** : intégration, contrat et unitaires refusent de démarrer si `DATABASE_URL` (ou `_LISTENER`, `_DIRECT`) diffère de `DATABASE_URL_TEST`, si celui-ci manque (plus de repli), ou si l'hôte est interdit (`TEST_DB_FORBIDDEN_HOSTS`, `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`).
@@ -2092,3 +2099,9 @@ soumission sans doublon.
 - **Comment** : cinquième paramètre optionnel `requestIdHeader`, signature existante inchangée. `contract-session.call` expose `headers` (ajout, même forme que `contract-actors`).
 - **Pourquoi** : contrat `ApiErrorBody` (`shared/errors.ts`). Le requestId est la référence que l'utilisateur donne au support (AGENTS.md §10), et rien ne le gardait.
 - **Preuves** : unitaire 6/6, rouge à 2/6 avec l'ancien contrôle. Mutation serveur (`normalizeErrorBody` sans requestId) : 17 tests de contrat rouges sur les 3 suites consommatrices, verts une fois le serveur rétabli. Contrats complets 1340/1340 sur fleet_test_de_rid. Unit 1660/1660, tsc 0. Aucune route sans requestId parmi celles qu'appellent ces suites.
+
+## 2026-11-03 14:05 — PRT1 : test.fail du temps réel levé après #165
+
+- **Quoi** : le cas deux profils de `e2e/21-parts-catalog.spec.ts` passe en `test` ordinaire ; la ligne PRT1 du plan note le défaut corrigé.
+- **Comment** : #165 émet `part_catalog_changed` sur POST, PATCH, DELETE et update-stock ; la reconnaissance de trame de la spec l'acceptait déjà.
+- **Pourquoi** : la PR qui fusionne en second lève le `test.fail` (Playwright signalerait sinon l'échec inverse).
