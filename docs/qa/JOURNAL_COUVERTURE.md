@@ -2025,3 +2025,11 @@ soumission sans doublon.
 - **Pourquoi** : les deux copies étaient identiques ; une troisième aurait pu diverger, comme les tables de libellés de statut (AGENTS.md §1). Rien à faire côté `playwright.config.ts` : `trace: "retain-on-failure"` y est déjà, ce qui garde la trace d'un échec rare comme DRV2-1 (rouge non reproduit en 3 passages complets de la spec 19).
 - **Preuves** : test unitaire `tests/unit/e2e/api-error-support.test.ts` (conforme, code par défaut ou explicite, statut, message vide, détail technique, corps non JSON ou absent) ; unit 1614/1614 ; tsc 0 ; contrat PRT1 14/14 sur le Postgres local `fleet_test`. Spec 13 non rejouée au navigateur : seul le corps de son assertion change, et le fichier compile.
 - **Piège** : sur la base partagée `fleet_test`, `cleanupOrphanTestRows` (`tests/support/cleanup.ts:193`) échoue sur `status_history_updated_by_id_users_id_fk` quand une autre session a laissé un historique de statut lié à un utilisateur de test. Le fichier est alors marqué en échec alors que ses 14 cas passent. À corriger à part.
+
+## 2026-11-03 13:20 — DRV2-1 qualifié : localisateur de toast ambigu
+
+- **Quoi** : DRV2-1 (spec 19) n'est plus instable. `getByText("Problème signalé", { exact: true })` ; le corps de la réponse figure dans le message d'échec (lu seulement en échec, borné à 5 s). Nouveau garde `tests/unit/e2e/toast-title-exact-hygiene.test.ts`.
+- **Comment** : base locale dédiée `fleet_test_c7`, serveur sur le port 5177, msedge. Rejeux spec 19 ×5 puis 13 + 19 ×3 : 147 verts, rouge non reproduit. Reproduit ensuite 1 fois sur 3 avec trace : POST 201, toast affiché, `strict mode violation` (titre + `<span aria-live>` du Toast Radix).
+- **Pourquoi** : `getByText` sans `exact` cherche une sous-chaîne ; l'annonce passagère « Notification Problème signalé… » la contient. Défaut du test, pas du produit.
+- **Preuves** : garde rouge sur la spec d'origine (`e2e/19-driver-space.spec.ts:196`), vert après ; spec 19 ×5 après correctif (voir PR) ; tsc 0.
+- **Piège** : `response.text()` sur une réponse servie via le service worker PWA ne rend jamais la main (test bloqué 180 s sur un 201).
