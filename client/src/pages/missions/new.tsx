@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
+import { userMessageOf } from "@/lib/api-error";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 
 const WORKFLOW_STEPS = [
@@ -87,10 +88,10 @@ export default function NewMission() {
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
       setLocation("/missions");
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Erreur",
-        description: error.message || "Impossible de créer la mission",
+        description: userMessageOf(error, "Impossible de créer la mission."),
         variant: "destructive",
       });
     },
