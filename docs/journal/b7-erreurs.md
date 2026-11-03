@@ -107,3 +107,16 @@ Modèle et règles : `docs/journal/README.md`.
 - **Pourquoi** : règle des 3 couches (AGENTS.md §2), couche 2.
 - **Comment tester (QA)** : contrat `procurement-alert-realtime`, 3 cas. Les trames sont reçues par deux rôles (chef d'atelier, technicien) et le magasinier n'en reçoit aucune. Sans le correctif, 3 échecs sur 3.
 - **Reste** : migrer `missions.routes.ts:139` sur l'émetteur partagé après la PR de c7.
+
+## 2026-11-03T15:24:48+01:00 — Suivis de #178 et de #180
+
+- **Quoi** :
+  - quick-renew résout le centre agréé après les contrôles, sans centre orphelin en cas de refus ;
+  - le toast de document-renew passe par userMessageOf ;
+  - broadcastAlertCreated ne lève plus, avec un échec journalisé par alerte ;
+  - un console.log de procurement-service est migré ;
+  - deux entrées LESSONS_LEARNED.
+- **Comment** :
+  - test de contrat quick-renew : les cas 404 et 409 vérifient l'absence de centre (rouge 2 sans le correctif) ;
+  - test de contrat procurement-alert-realtime : portée user sur toute trame, et un cas « envoi raté » (rouge 1 sur 4 sans le try/catch).
+- **Pourquoi** : réserves du relecteur sur #178 et #180, transmises par 0a.
