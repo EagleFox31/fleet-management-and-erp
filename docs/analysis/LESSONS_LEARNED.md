@@ -1400,7 +1400,11 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Classification : contrôle d'accès vertical incomplet. C'est une variante de « garde au montage trop large » (#129), déplacée de la route vers la transition.
 
 ### Résolution
-- Correctif sur #141 : une matrice rôle × transition côté serveur. Le chauffeur n'a que les transitions de son exécution de mission. Annulation et clôture administrative restent réservées aux gestionnaires.
+- Correctif sur #141 : 6c1c56f, soit 102c610 après la fusion de `main`.
+  - `shared/constants/roles.ts` reçoit `DRIVER_MISSION_STATUS_TARGETS` (`in_progress`, `delivered`) et `canRoleSetMissionStatus(role, targetStatus)`.
+  - La route consulte cette fonction pour chaque statut visé.
+  - Le chauffeur affecté peut démarrer et livrer. Clôturer (`completed`, qui écrit le coût réel) et annuler restent aux gestionnaires.
+  - Contrats ajoutés : `mission-lot2-roles` et `mission-from-fuel-roles`.
 
 ### Prévention (vérifiable)
 - Un contrat par rôle et par transition interdite : pour chaque rôle de `MISSION_STATUS_ROLES` et chaque transition hors de sa liste, la réponse attendue est 403 `ApiErrorBody`, avec le statut en base inchangé.
