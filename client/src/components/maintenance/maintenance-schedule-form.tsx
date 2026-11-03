@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -153,7 +154,7 @@ export function MaintenanceScheduleForm({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de l'enregistrement: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de l'enregistrement."),
       });
     },
   });

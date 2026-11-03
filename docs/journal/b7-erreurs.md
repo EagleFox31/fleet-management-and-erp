@@ -120,3 +120,9 @@ Modèle et règles : `docs/journal/README.md`.
   - test de contrat quick-renew : les cas 404 et 409 vérifient l'absence de centre (rouge 2 sans le correctif) ;
   - test de contrat procurement-alert-realtime : portée user sur toute trame, et un cas « envoi raté » (rouge 1 sur 4 sans le try/catch).
 - **Pourquoi** : réserves du relecteur sur #178 et #180, transmises par 0a.
+
+## 2026-11-03T16:38:35+01:00 — Balayage des toasts error.message (§10)
+
+- **Quoi** : 56 sites dans 41 fichiers client affichaient `error.message` brut (dont `instanceof Error ? error.message` et les gabarits `${error.message}`). Ils passent désormais par `userMessageOf(error, repli)`.
+- **Comment** : garde `tests/unit/client/toast-error-message-hygiene.test.ts`, compte par fichier à égalité stricte. Rouge sur main, avec 23 fichiers hors liste. Deux sites restent gelés, chez c7 (#181) : driver/dashboard.tsx et missions/[id].tsx.
+- **Pourquoi** : AGENTS.md §10. Le message brut peut être technique (réseau, JSON, exception JS) et n'a ni repli ni référence.

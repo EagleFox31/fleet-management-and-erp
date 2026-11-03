@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -168,7 +169,7 @@ export default function PreventiveMaintenancePage() {
     onError: (error: any) => {
       toast({
         title: "Erreur",
-        description: error?.message || "Impossible de creer la planification.",
+        description: userMessageOf(error, "Impossible de creer la planification."),
         variant: "destructive",
       });
     },

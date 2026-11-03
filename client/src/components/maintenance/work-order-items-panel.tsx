@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -167,7 +168,7 @@ export function WorkOrderItemsPanel({ workOrderId, userId, canEdit, defaultTechn
   const onError = (error: unknown) => {
     toast({
       title: "Ligne non enregistrée",
-      description: error instanceof Error ? error.message : "Erreur inconnue",
+      description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
       variant: "destructive",
     });
   };

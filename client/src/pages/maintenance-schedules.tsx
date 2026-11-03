@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -191,7 +192,7 @@ export default function MaintenanceSchedulesPage() {
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la suppression: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la suppression."),
       });
     },
   });

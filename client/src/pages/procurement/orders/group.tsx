@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -80,7 +81,7 @@ export default function GroupPurchaseOrdersPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },

@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useMemo, useState } from "react";
 import { canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -569,7 +570,7 @@ export default function ReportsIndex() {
       console.error("Erreur génération rapport:", error);
       toast({
         title: "❌ Erreur",
-        description: error instanceof Error ? error.message : "Une erreur est survenue lors de la génération du rapport.",
+        description: userMessageOf(error, "Une erreur est survenue lors de la génération du rapport."),
         variant: "destructive",
       });
     } finally {

@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState, useEffect } from "react";
 import { PART_REQUIREMENT_STATUS_LABELS } from "@shared/constants/part-requirements";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -235,7 +236,7 @@ export default function NewPurchaseOrderPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },

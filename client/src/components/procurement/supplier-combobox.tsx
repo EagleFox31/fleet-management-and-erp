@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { Check, ChevronsUpDown, Plus, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -102,7 +103,7 @@ export function SupplierCombobox({ value, legacyName, onChange, disabled }: Supp
     onError: (error: Error) => {
       toast({
         title: "Création impossible",
-        description: error.message,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },
