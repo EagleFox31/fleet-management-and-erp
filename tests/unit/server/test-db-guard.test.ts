@@ -80,10 +80,71 @@ describe("garde-fou base de test (intégration, contrat)", () => {
   });
 });
 
+describe("garde-fou base de test : identifiants jamais cités", () => {
+  const TRICKY = [
+    "postgres://u:pa#ss@ep-x.neon.tech/db",
+    "postgres://u:pa/ss@ep-x.neon.tech/db",
+    "postgres://u:12/ss@ep-x.neon.tech/db",
+    "postgres://u:pa?ss@ep-x.neon.tech/db",
+  ];
+
+  it("refuse une URL illisible (# ou / non encodé) sans citer aucun morceau du mot de passe", () => {
+    for (const url of TRICKY) {
+      for (const e of [
+        env({ DATABASE_URL_TEST: url }),
+        env({ DATABASE_URL_TEST: LOCAL, DATABASE_URL: url }),
+      ]) {
+        const msg = messageOf(() => assertSafeTestDatabase(e));
+        expect(msg, url).toContain("hôte illisible");
+        expect(msg, url).not.toMatch(/ss@|#ss|\/ss|12\/|u:pa|u:12|postgres:\/\//);
+      }
+    }
+  });
+
+  it("le garde-fou unitaire refuse aussi une URL illisible", () => {
+    const msg = messageOf(() => assertUnitDatabaseNotProduction(env({ DATABASE_URL: TRICKY[0] })));
+    expect(msg).toContain("hôte illisible");
+    expect(msg).not.toMatch(/pa#|#ss/);
+  });
+
+  it("n'affiche que l'hôte d'une URL lisible", () => {
+    const msg = messageOf(() => assertSafeTestDatabase(env({ DATABASE_URL_TEST: PROD_NEON })));
+    expect(msg).toContain("ep-x.neon.tech");
+    expect(msg).not.toMatch(/s3cr3t|u:/);
+  });
+});
+
+describe("garde-fou base de test : message actionnable", () => {
+  it("donne la commande bash et la commande PowerShell pour retirer la variable", () => {
+    const msg = messageOf(() => assertSafeTestDatabase(env({ DATABASE_URL_TEST: LOCAL, DATABASE_URL: PROD_NEON })));
+    expect(msg).toContain("unset DATABASE_URL");
+    expect(msg).toContain("Remove-Item Env:DATABASE_URL");
+  });
+});
+
 describe("garde-fou base de test (unitaires)", () => {
   it("accepte l'absence de DATABASE_URL et une base locale", () => {
     expect(() => assertUnitDatabaseNotProduction(env({}))).not.toThrow();
     expect(() => assertUnitDatabaseNotProduction(env({ DATABASE_URL: LOCAL }))).not.toThrow();
+  });
+
+  it("accepte le placeholder local que posent certains tests unitaires", () => {
+    const e = env({ DATABASE_URL: "postgres://x:x@127.0.0.1:1/x" });
+    expect(() => assertUnitDatabaseNotProduction(e)).not.toThrow();
+  });
+
+  it("refuse un hôte *.neon.tech sans ALLOW_NEON_TEST_DB, l'accepte avec", () => {
+    const base = { DATABASE_URL: "postgres://u:p@ep-test.neon.tech/db" };
+    expect(() => assertUnitDatabaseNotProduction(env(base))).toThrow(/neon\.tech/);
+    expect(() => assertUnitDatabaseNotProduction(env({ ...base, ALLOW_NEON_TEST_DB: "1" }))).not.toThrow();
+  });
+
+  it("vérifie aussi DATABASE_URL_LISTENER et DATABASE_URL_DIRECT", () => {
+    for (const name of ["DATABASE_URL_LISTENER", "DATABASE_URL_DIRECT"]) {
+      const msg = messageOf(() => assertUnitDatabaseNotProduction(env({ [name]: PROD_NEON })));
+      expect(msg, name).toContain(name);
+      expect(msg).not.toContain("s3cr3t");
+    }
   });
 
   it("refuse un DATABASE_URL qui porte un marqueur de production", () => {

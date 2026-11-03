@@ -21,11 +21,11 @@ npm run test:e2e         # Playwright
 
 ## Base utilisée
 
-Même Neon que `npm run dev` (`DATABASE_URL`). Pas de copie, pas de « branche » Neon.
+Intégration et contrat : le Postgres local Docker (voir plus bas), jamais le Neon de `npm run dev` (`DATABASE_URL`). Seuls les e2e écrivent sur la base pointée par `DATABASE_URL`.
 
 Les factories créent des lignes préfixées `TEST-` (username, immat, référence pièce…). `afterEach` les supprime ; un filet `afterAll` enlève d'éventuels orphelins `TEST-*` si un test a crashé.
 
-`DATABASE_URL_TEST` doit viser une **branche Neon de test**, passée en variable d'environnement au lancement (sans modifier `.env`). Si la variable manque, les suites **refusent de démarrer** (aucun repli sur `DATABASE_URL`).
+`DATABASE_URL_TEST` vise le Postgres local (ou, exceptionnellement, une **branche Neon dédiée aux tests** avec `ALLOW_NEON_TEST_DB=1`). Elle est passée en variable d'environnement au lancement, jamais lue depuis `.env`. Si elle manque, les suites **refusent de démarrer** (aucun repli sur `DATABASE_URL`).
 
 ### Postgres local (plus rapide que Neon)
 
@@ -64,7 +64,7 @@ Repousser le schéma à chaque changement de branche. Supprimer la base en fin d
 
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
-- Les variables d'environnement priment sur `.env` (`node --env-file`), pas besoin de modifier le fichier.
+- Les scripts `test:integration` et `test:contract` ne chargent pas `.env` : tout passe par l'environnement du shell.
 - Le `tmpfs` du conteneur repart vide à chaque `up` : les tables sont recréées par `test:db:schema`
   (appelé par `test:db:up`), pas par `initializeDatabase()`, qui suppose le schéma déjà poussé.
 

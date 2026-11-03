@@ -1492,3 +1492,28 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Ne jamais charger le `.env` de production dans un lanceur de tests. Les suites reçoivent `DATABASE_URL_TEST` par variable d'environnement, jamais par repli sur `DATABASE_URL`.
+
+### Forme générale de la leçon
+- **Pas de repli implicite vers une base (ou une ressource) plus privilégiée.** Une valeur manquante se traduit par un refus explicite, pas par la valeur voisine disponible.
+- **Refuser par défaut plutôt que par liste noire.** Un marqueur d'hôte interdit (liste noire) ne couvre que ce qu'on a pensé à nommer : l'URL illisible, le second hôte (`_LISTENER`, `_DIRECT`), l'autre branche Neon passaient. La garde exige ici une base de test explicite, identique pour toutes les variables, et traite tout ce qu'elle ne sait pas lire comme interdit. La liste noire n'est qu'une ceinture en plus.
+- **Un message d'erreur est une sortie : ne jamais y recopier une entrée non vérifiée.** L'ancien extracteur d'hôte découpait l'URL à la main et citait un morceau de mot de passe quand celui-ci contenait `#` ou `/` ; l'hôte est maintenant lu par `new URL`, et « hôte illisible » remplace tout doute (`tests/unit/server/test-db-guard.test.ts`).
+
+---
+
+## 2026-11-03 — Carte carburant : contrôle du solde hors transaction (course check-then-act)
+
+### Contexte
+- Constat de fleet-securite : `recordConsumption` lisait le solde, le comparait au coût, puis insérait le débit, en trois allers-retours indépendants. Trois pleins simultanés de 600 FCFA sur un solde de 1 000 passaient tous (solde final −800).
+
+### Cause racine
+- Le solde n'est stocké nulle part : c'est `SUM(credit_amount) − SUM(debit_amount)` sur `fuel_records`. Il n'y a donc ni ligne à verrouiller (`SELECT … FOR UPDATE`) ni colonne à décrémenter par `UPDATE … WHERE balance >= montant`.
+- Classification : course de concurrence (check-then-act) sur un agrégat dérivé. Un `CHECK (balance >= 0)` sur la colonne `fuel_records.balance` n'aurait rien empêché : cette colonne est un instantané, et chaque écriture concurrente y aurait mis un instantané positif mais faux.
+
+### Résolution
+- Contrôle et débit dans une même transaction, sérialisés par `pg_advisory_xact_lock(hashtext('fleetmaster_fuel_card'))`. La recharge prend le même verrou, pour que l'instantané `balance` de chaque ligne reste juste. Le 409 `INSUFFICIENT_BALANCE` reste le contrat.
+
+### Prévention (vérifiable)
+- `tests/integration/fuel-card-service.test.ts` « pleins simultanés… » : solde ramené à 1 000, trois pleins de 600 en parallèle, un seul passe et le solde final vaut 400. Rouge démontré avant la correction (3 réussites sur 3).
+
+### Règle Projet (obligatoire)
+- Tout contrôle de solde ou de stock suivi d'une écriture se fait dans une transaction avec un verrou (ligne, ou verrou consultatif si la valeur est un agrégat). Pour la carte carburant : toute écriture touchant `debit_amount` / `credit_amount`, suppression comprise, prend `lockFuelCard` dans sa transaction (restent hors verrou au 3/11 : `DELETE /api/fuel-records/:id` de `server/routes.ts`, `fuel-service.ts` (create, update, delete d'un plein), `fuel-voucher-service.ts` (update) et la régularisation de mission, suivis à part). Un test de concurrence en est la preuve. Il ouvre les connexions du pool d'avance, sinon l'ouverture de connexion étale les appels et masque la course.

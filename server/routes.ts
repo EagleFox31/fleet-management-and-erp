@@ -34,7 +34,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
-import { AppError } from "./lib/app-error";
+import { AppError, isAppError } from "./lib/app-error";
+import { assertWorkOrderReadable } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -2554,7 +2555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-orders/:workOrderId/parts", authenticate, async (req, res) => {
+  app.get("/api/work-orders/:workOrderId/parts", isAnyUser, async (req, res, next) => {
     try {
       const workOrderId = parseInt(req.params.workOrderId);
       
@@ -2562,12 +2563,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID d'ordre de travail invalide" });
       }
       
+      await assertWorkOrderReadable(req.user, workOrderId);
       const partsUsed = await storage.getPartsUsedForWorkOrder(workOrderId);
-      console.log(`Pièces récupérées pour l'ordre ${workOrderId}:`, JSON.stringify(partsUsed, null, 2));
+      log.debug({ workOrderId, count: partsUsed.length, requestId: req.requestId }, "Pièces récupérées pour l'ordre de travail");
       
       return res.status(200).json(partsUsed);
     } catch (error) {
-      console.error("Get parts used error:", error);
+      if (isAppError(error)) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Get parts used error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
