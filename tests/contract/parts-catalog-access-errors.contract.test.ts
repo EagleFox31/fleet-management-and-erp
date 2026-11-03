@@ -167,6 +167,17 @@ describe("PRT1 : forme des erreurs (ApiErrorBody)", { timeout: 60000 }, () => {
     expect(after.location).toBe(before.location);
   });
 
+  it("modification : un stock réel est refusé en 400, la ligne ne change pas (stock réel et valeur d'inventaire)", async () => {
+    const partId = await newPartId();
+    const before = await rowOf(partId);
+    const res = await call("PATCH", `/api/parts/${partId}`, { actor: "warehouse", body: { realStock: 9999, location: "TEST-REAL" } });
+    expectApiError(res, 400, "VALIDATION");
+    expect(res.body.errors).toEqual([expect.objectContaining({ field: "realStock" })]);
+    const after = await rowOf(partId);
+    expect(after.realStock).toBe(before.realStock);
+    expect(after.location).toBe(before.location);
+  });
+
   // Le statut seul : aucune route `/api` inconnue n'a de gestionnaire, le 404 d'Express sort hors ApiErrorBody (backlog).
   it("identifiant non numérique : aucune route ne répond, statut 404 exact", async () => {
     expect((await call("GET", "/api/parts/abc", { actor: "admin" })).status).toBe(404);
