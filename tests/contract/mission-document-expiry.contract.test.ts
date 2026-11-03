@@ -1,6 +1,7 @@
 import { and, eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { syncVehicleDocumentMirror } from "../../server/lib/vehicle-document-mirror";
 import { alertService } from "../../server/services/alert-service";
 import { preventiveMaintenanceService } from "../../server/services/preventive-maintenance-service";
 import { alerts, assignments, drivers, missions, vehicleDocuments, vehicles, workOrders } from "../../shared/schema";
@@ -17,7 +18,7 @@ import { uniqueTestToken } from "../support/ids";
  *   mission non interrompue, nouvelle affectation refusée.
  */
 
-const ACTORS = { logistics: "logistics", atelier: "workshop_manager" } as const;
+const ACTORS = { logistics: "logistics", atelier: "workshop_manager", client: "client", driver: "driver" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -267,6 +268,45 @@ describe("P3-2 papier expiré pendant une mission en cours", () => {
     const refused = await plannedMission({ vehicleId: vehicle.id, driverId: d2.id });
     expect(refused.status).toBe(400);
     expect(refused.body.message).toContain("assurance expirée");
+  }, 60000);
+});
+
+describe("P3-2 R2 : un document saisi par erreur puis supprimé ne laisse pas le véhicule éligible", () => {
+  it("dépôt à 2062 puis suppression : le miroir revient à l'échéance expirée, l'affectation est refusée", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "assurance", inDays(-3));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(-3) }).where(eq(vehicles.id, vehicle.id));
+    const [wrong] = await db
+      .insert(vehicleDocuments)
+      .values({ vehicleId: vehicle.id, name: "TEST saisi par erreur", type: "assurance", filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf", expiryDate: "2062-01-01" })
+      .returning();
+    await syncVehicleDocumentMirror(vehicle.id, "assurance", "2062-01-01", "later");
+    expect(String((await vehicleRow(vehicle.id)).insuranceExpiry)).toContain("2062-01-01");
+
+    const del = await call("DELETE", `/api/documents/${wrong.id}`, { actor: "atelier" });
+    expect(del.status).toBe(204);
+    expect(String((await vehicleRow(vehicle.id)).insuranceExpiry)).toContain(inDays(-3));
+
+    const d = await driver();
+    const refused = await plannedMission({ vehicleId: vehicle.id, driverId: d.id });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toContain("assurance expirée");
+  }, 60000);
+});
+
+describe("P3-2 les alertes de papier expiré ne vont ni au client ni au chauffeur", () => {
+  it("aucune alerte pour client et driver, le personnel concerné la reçoit", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "assurance", inDays(-2));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(-2) }).where(eq(vehicles.id, vehicle.id));
+    await (alertService as any).checkVehicleDocumentAlerts(await vehicleRow(vehicle.id));
+    const forUser = (actor: Actor) =>
+      db.select().from(alerts).where(and(eq(alerts.userId, session.userIdOf(actor)), like(alerts.link, `%vehicleId=${vehicle.id}&%`)));
+    expect((await forUser("atelier")).length).toBeGreaterThan(0);
+    expect(await forUser("client")).toHaveLength(0);
+    expect(await forUser("driver")).toHaveLength(0);
   }, 60000);
 });
 

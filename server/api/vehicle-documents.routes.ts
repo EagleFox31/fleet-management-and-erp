@@ -1,6 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
+import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentTypes } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
@@ -8,7 +10,7 @@ import { moduleLogger } from "../lib/logger";
 import { isWorkshopManager } from "../middleware/auth";
 import { deleteFile, uploadVehicleDocument } from "../middleware/upload";
 import { storage } from "../storage";
-import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
+import { recomputeVehicleDocumentMirror, syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 
 const log = moduleLogger("vehicle-documents");
 const router = Router();
@@ -22,6 +24,20 @@ async function removeUploaded(path: string | undefined, requestId?: string): Pro
   }
 }
 
+/**
+ * Cloison (AGENTS.md §11) : ces événements portent véhicule, type de papier, échéance et
+ * acteur. Seul le personnel les reçoit, ni client ni chauffeur : jamais en broadcast.
+ */
+const STAFF_SCOPE = { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] } as const;
+
+const expiryDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  });
+
 /** Couche 2 : le dépôt modifie `vehicles.*` (miroir) et la liste des documents. */
 function emitDocumentDeposited(
   req: { user?: { id?: number; role?: string } },
@@ -33,7 +49,7 @@ function emitDocumentDeposited(
   if (typeof broadcastUpdate !== "function") return;
   const base = {
     version: 1,
-    scope: { type: "broadcast" },
+    scope: STAFF_SCOPE,
     actor: { userId: req.user?.id ?? null, role: req.user?.role ?? null },
     emittedAt: new Date().toISOString(),
   };
@@ -73,6 +89,9 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
       try {
         const { name, type, description, expiryDate } = req.body;
         if (!name || !type) throw new AppError(400, "Nom et type de document requis");
+        if (expiryDate && !expiryDateSchema.safeParse(expiryDate).success) {
+          throw new AppError(400, "La date d'échéance est invalide (format attendu : AAAA-MM-JJ).");
+        }
 
         const [known] = await db
           .select({ code: vehicleDocumentTypes.code })
@@ -117,6 +136,56 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
       next(error);
     }
   });
+});
+
+/**
+ * Suppression d'un document véhicule (déplacée de `server/routes.ts`, qui reste gelé : ce
+ * routeur est monté avant et masque l'ancien handler). Mêmes droits, même réponse 204/404.
+ * En plus : le miroir `vehicles.*` est recalé sur les documents restants du type, car le
+ * dépôt ne le fait qu'avancer ; un document saisi par erreur ne laisse plus le véhicule éligible.
+ */
+router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new AppError(400, "ID de document invalide");
+    const document = await storage.getVehicleDocument(id);
+    if (!document) throw new AppError(404, "Document non trouvé");
+    // Faux si un autre utilisateur l'a supprimé entre la lecture et la suppression.
+    const deleted = await storage.deleteVehicleDocument(id);
+    if (!deleted) throw new AppError(404, "Document non trouvé");
+
+    let mirrorChanged = false;
+    try {
+      mirrorChanged = await recomputeVehicleDocumentMirror(document.vehicleId, document.type);
+    } catch (err) {
+      log.error({ err, requestId: req.requestId, documentId: id, vehicleId: document.vehicleId }, "recalcul du miroir après suppression en échec");
+      throw new AppError(500, "Le document est supprimé mais les échéances du véhicule n'ont pas pu être recalculées. Signalez-le à un administrateur.", { cause: err });
+    }
+
+    // `documentId` dans un `vehicle_updated` : le client resynchronise la liste des
+    // documents, les KPI conformité et les alertes d'échéance.
+    const broadcastUpdate = (global as any).broadcastUpdate;
+    if (typeof broadcastUpdate === "function") {
+      broadcastUpdate("vehicle_updated", {
+        version: 1,
+        entity: "vehicle",
+        entityId: document.vehicleId,
+        payload: {
+          vehicleId: document.vehicleId,
+          documentId: document.id,
+          documentType: document.type,
+          source: "document_deleted",
+          mirrorChanged,
+        },
+        scope: STAFF_SCOPE,
+        actor: { userId: req.user?.id ?? null, role: req.user?.role ?? null },
+        emittedAt: new Date().toISOString(),
+      });
+    }
+    return res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

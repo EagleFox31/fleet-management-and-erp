@@ -84,3 +84,17 @@ Règles : `docs/journal/README.md`.
 - **Comment tester (QA)** : carte grise périmée + nouvelle valide : le lancement ne cite plus la carte grise ; assurance expirant aujourd hui : lancement refusé ; dépôt d une assurance plus ancienne : date du véhicule inchangée ; un logisticien reçoit l alerte à 30 jours.
 - **Preuve** : `mission-document-expiry` (10), `vehicle-documents-upload` (équivalence PATCH, pas de recul), test de renommage `vehicleInMaintenance`. Front à faire : `vehicle-documents.tsx` n invalide que la liste des documents au dépôt (la synchro temps réel `vehicle_updated` existe).
 - **RAIDER** : Durable (contrats inchangés), Idempotent (deux passages = une alerte), Retroactive (aucune donnée touchée).
+
+## 2026-11-03T09:02:00+01:00 — Correction de l'entrée de 14:00 (P3-2, lot 1)
+
+- **Quoi** : l'entrée « Échéances (P3-2, lot 1) : corrections de relecture de #126 » (14:00, seconde) indique « Front à faire » pour `vehicle-documents.tsx`. C'est fait depuis le commit 87b8d3d.
+- **Pourquoi** : une info devenue fausse se corrige par une nouvelle entrée, pas en effaçant l'ancienne.
+
+## 2026-11-03T09:05:00+01:00 — Échéances (P3-2, lot 1) : réserves de sécurité R1 et R2 de #126
+
+- **Quoi** : (R1) `vehicle_document_updated` et `vehicle_updated` du dépôt ne sont plus en `broadcast` : scope `roles` limité à `VEHICLE_DOCUMENT_EVENT_ROLES` (personnel hors chauffeur, `shared/constants/roles.ts`). (R2) `DELETE /api/documents/:id` déménage dans `server/api/vehicle-documents.routes.ts` (monté avant `routes.ts`, qui reste gelé et garde un handler masqué) et recale le miroir `vehicles.*` sur la plus lointaine échéance des documents restants du type (`recomputeVehicleDocumentMirror`) ; `vehicle_updated` en scope personnel. Mineurs : date d'échéance invalide au dépôt en 400 lisible (Zod), `AlertRecipientRole` dérivé d'un tableau `satisfies AppRole`.
+- **Comment** : le dépôt garde GREATEST. Sans autre document daté du type, le miroir n'est pas touché (peut porter une saisie directe sur le véhicule, rien ne permet de savoir la bonne valeur). Le `PATCH /api/documents/:id` (routes.ts) écrit déjà la valeur patchée directement : non modifié.
+- **Pourquoi** : le dépôt diffusait véhicule, type, échéance et acteur aux clients et chauffeurs (cloison §11) ; un document saisi en 2062 puis supprimé laissait le véhicule éligible.
+- **Comment tester (QA)** : déposer une visite technique en 2062, la supprimer : l'échéance du véhicule revient à celle du document restant, l'affectation d'une mission est refusée si elle est échue.
+- **Preuve** : `vehicle-documents-upload` et `mission-document-expiry` (rouges démontrés avant correctif).
+- **RAIDER** : Durable (204/404 de la suppression inchangés), Idempotent (second dépôt à la même date : aucune écriture ni événement, testé), Retroactive (aucune donnée migrée).

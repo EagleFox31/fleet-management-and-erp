@@ -9,6 +9,7 @@ import * as mirrorLib from "../../server/lib/vehicle-document-mirror";
 import { syncVehicleDocumentMirror } from "../../server/lib/vehicle-document-mirror";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { VEHICLE_DOCUMENT_EVENT_ROLES } from "../../shared/constants/roles";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 
 /** Niveau C, T-16b : upload d'un document vehicule (route deplacee dans server/api) et type valide. */
@@ -52,6 +53,8 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
   await login("workshop_manager");
   await login("technician");
+  await login("client");
+  await login("driver");
   const vehicle = await createTestVehicle();
   vehicleId = vehicle.id;
   ids.vehicleIds.push(vehicle.id);
@@ -76,6 +79,8 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
   it("refuse sans session (401) et un role non autorise (403), sans rien stocker", async () => {
     expect((await upload({ name: "n", type: "carte_grise" })).status).toBe(401);
     expect((await upload({ name: "n", type: "carte_grise" }, "technician")).status).toBe(403);
+    expect((await upload({ name: "n", type: "carte_grise" }, "client")).status).toBe(403);
+    expect((await upload({ name: "n", type: "carte_grise" }, "driver")).status).toBe(403);
     expect(filesOnDisk()).toEqual([]);
   });
 
@@ -194,5 +199,98 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     } finally {
       (global as any).broadcastUpdate = previous;
     }
+  });
+
+  it("P3-2 : un second depot a la meme echeance n'ecrit rien sur vehicles.* et n'emet pas vehicle_updated", async () => {
+    const first = await upload({ name: "Carte grise a", type: "carte_grise", expiryDate: "2047-08-09" }, "workshop_manager");
+    expect(first.status).toBe(201);
+    const [before] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    const spy = vi.fn();
+    const previous = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = spy;
+    try {
+      const second = await upload({ name: "Carte grise b", type: "carte_grise", expiryDate: "2047-08-09" }, "workshop_manager");
+      expect(second.status).toBe(201);
+      expect(spy.mock.calls.map((c) => c[0])).toEqual(["vehicle_document_updated"]);
+    } finally {
+      (global as any).broadcastUpdate = previous;
+    }
+    const [after] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    expect(after).toEqual(before);
+  });
+
+  it("P3-2 R1 : les evenements du depot sont limites au personnel (jamais broadcast, ni client ni chauffeur)", async () => {
+    const spy = vi.fn();
+    const previous = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = spy;
+    try {
+      await db.update(vehicles).set({ insuranceExpiry: "2042-01-01" }).where(eq(vehicles.id, vehicleId));
+      const res = await upload({ name: "Assurance cloison", type: "assurance", expiryDate: "2043-01-01" }, "workshop_manager");
+      expect(res.status).toBe(201);
+      expect(spy.mock.calls.map((c) => c[0])).toEqual(["vehicle_document_updated", "vehicle_updated"]);
+      for (const [, data] of spy.mock.calls) {
+        expect(data.scope.type).toBe("roles");
+        expect([...data.scope.roles].sort()).toEqual([...VEHICLE_DOCUMENT_EVENT_ROLES].sort());
+        expect(data.scope.roles).not.toContain("client");
+        expect(data.scope.roles).not.toContain("driver");
+      }
+    } finally {
+      (global as any).broadcastUpdate = previous;
+    }
+  });
+
+  it("P3-2 : une date d'echeance illisible est refusee en 400 lisible, sans fichier conserve", async () => {
+    const before = filesOnDisk().length;
+    for (const expiryDate of ["pas-une-date", "2031-02-31", "31/12/2031"]) {
+      const res = await upload({ name: "Date illisible", type: "assurance", expiryDate }, "workshop_manager");
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("La date d'échéance est invalide (format attendu : AAAA-MM-JJ).");
+    }
+    expect(filesOnDisk()).toHaveLength(before);
+  });
+
+  it("P3-2 R2 : supprimer le document saisi par erreur (2062) ramene le miroir a l'echeance restante et previent le personnel", async () => {
+    const del = (id: number, role = "workshop_manager") =>
+      fetch(`${baseUrl}/api/documents/${id}`, { method: "DELETE", headers: { Cookie: cookies.get(role)! } });
+    const mirror = async () => String((await db.select().from(vehicles).where(eq(vehicles.id, vehicleId)))[0].technicalInspectionDate);
+    const kept = await upload({ name: "Visite valide", type: "visite_technique", expiryDate: "2050-03-04" }, "workshop_manager");
+    expect(kept.status).toBe(201);
+    const wrong = await upload({ name: "Visite saisie par erreur", type: "visite_technique", expiryDate: "2062-01-01" }, "workshop_manager");
+    expect(wrong.status).toBe(201);
+    expect(await mirror()).toContain("2062-01-01");
+
+    expect((await del(wrong.body.id, "technician")).status).toBe(403);
+    expect((await del(wrong.body.id, "client")).status).toBe(403);
+    expect(await mirror()).toContain("2062-01-01");
+
+    const spy = vi.fn();
+    const previous = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = spy;
+    try {
+      expect((await del(wrong.body.id)).status).toBe(204);
+    } finally {
+      (global as any).broadcastUpdate = previous;
+    }
+    expect(await mirror()).toContain("2050-03-04");
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
+    for (const [type, data] of spy.mock.calls) {
+      expect(type).toBe("vehicle_updated");
+      expect(data.scope.type).toBe("roles");
+      expect(data.scope.roles).not.toContain("client");
+    }
+    expect((await del(wrong.body.id)).status).toBe(404);
+  });
+
+  it("P3-2 R2 : sans autre document date du type, le miroir (saisie directe) n'est pas ecrase", async () => {
+    await db.update(vehicles).set({ licensePlateExpiry: "2061-01-01" }).where(eq(vehicles.id, vehicleId));
+    await db.delete(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    const [doc] = await db
+      .insert(vehicleDocuments)
+      .values({ vehicleId, name: "TEST carte seule", type: "carte_grise", filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf", expiryDate: "2061-01-01" })
+      .returning();
+    const res = await fetch(`${baseUrl}/api/documents/${doc.id}`, { method: "DELETE", headers: { Cookie: cookies.get("workshop_manager")! } });
+    expect(res.status).toBe(204);
+    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId));
+    expect(String(row.licensePlateExpiry)).toContain("2061-01-01");
   });
 });

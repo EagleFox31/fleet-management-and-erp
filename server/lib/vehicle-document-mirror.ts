@@ -1,5 +1,5 @@
-import { and, eq, isNull, or, sql } from "drizzle-orm";
-import { vehicles } from "@shared/schema";
+import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { vehicleDocuments, vehicles } from "@shared/schema";
 import { db } from "../db";
 
 /** Normalise les anciens codes de type de document vers ceux de `vehicle_documents`. */
@@ -62,4 +62,37 @@ export async function syncVehicleDocumentMirror(
     .where(and(eq(vehicles.id, vehicleId), or(isNull(column), sql`${column} < ${value}::date`)))
     .returning({ id: vehicles.id });
   return advanced.length > 0;
+}
+
+/**
+ * Après la suppression d'un document : recale le miroir sur la plus lointaine échéance des
+ * documents restants du même type (alias de type compris). Le dépôt ne fait qu'avancer
+ * (GREATEST), donc sans ce recalcul un document saisi par erreur (2062) puis supprimé
+ * laisserait le véhicule éligible.
+ * Choix : s'il ne reste aucun document daté de ce type, la colonne n'est pas touchée. Elle
+ * peut porter une valeur saisie directement sur le véhicule, sans document, et rien ne
+ * permet de savoir laquelle était la bonne. Renvoie `true` si la colonne a changé.
+ */
+export async function recomputeVehicleDocumentMirror(
+  vehicleId: number,
+  documentType: string | null | undefined,
+): Promise<boolean> {
+  const type = normalizeVehicleDocumentType(documentType);
+  if (!(type in MIRROR_COLUMNS)) return false;
+  const { column, key } = MIRROR_COLUMNS[type as keyof typeof MIRROR_COLUMNS];
+  const remaining = await db
+    .select({ type: vehicleDocuments.type, expiryDate: vehicleDocuments.expiryDate })
+    .from(vehicleDocuments)
+    .where(and(eq(vehicleDocuments.vehicleId, vehicleId), isNotNull(vehicleDocuments.expiryDate)));
+  const dates = remaining
+    .filter((row) => normalizeVehicleDocumentType(row.type) === type && row.expiryDate)
+    .map((row) => String(row.expiryDate).slice(0, 10));
+  if (dates.length === 0) return false;
+  const latest = dates.reduce((a, b) => (a >= b ? a : b));
+  const changed = await db
+    .update(vehicles)
+    .set({ [key]: latest })
+    .where(and(eq(vehicles.id, vehicleId), or(isNull(column), sql`${column} <> ${latest}::date`)))
+    .returning({ id: vehicles.id });
+  return changed.length > 0;
 }

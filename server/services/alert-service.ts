@@ -1,4 +1,5 @@
 import type { NotificationTopic } from "@shared/contracts/notification-settings";
+import type { AppRole } from "@shared/constants/roles";
 import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
@@ -15,13 +16,9 @@ export function dailyReminderDedupeKey(type: string, title: string, link: string
   return `daily:${now.toISOString().slice(0, 10)}:${type}:${link}:${title}`;
 }
 
-type AlertRecipientRole =
-  | "admin"
-  | "workshop_manager"
-  | "technician"
-  | "secretary"
-  | "logistics"
-  | "warehouse";
+/** `satisfies` : un rôle retiré du schéma fait échouer la compilation ici. */
+const ALERT_RECIPIENT_ROLES = ["admin", "workshop_manager", "technician", "secretary", "logistics", "warehouse"] as const satisfies readonly AppRole[];
+type AlertRecipientRole = (typeof ALERT_RECIPIENT_ROLES)[number];
 
 export class AlertService {
   private readonly maintenanceRecipients: AlertRecipientRole[] = [
