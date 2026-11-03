@@ -196,15 +196,17 @@ describe("cloison entre deux comptes sur le même appareil", () => {
     expect((await scope.loadCache(22)).length).toBe(1);
   });
 
-  it("déconnexion : renvoie le nombre d'écritures non synchronisées détruites", async () => {
+  it("déconnexion : file du compte sortant détruite et comptée, file des autres comptes gardée", async () => {
     const { kv } = memoryKv();
     const scope = createOfflineScope(kv);
     await scope.writeQueue(11, [{ id: "a" }, { id: "b" }], scope.epochOf(11));
     await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+    await scope.saveCache(22, [myWorkOrders({ id: 70, vehicleId: 15 })]);
 
-    expect(await scope.purgeAll(11)).toBe(3);
+    expect(await scope.purgeAll(11)).toBe(2);
     expect(await scope.readQueue(11)).toEqual([]);
-    expect(await scope.readQueue(22)).toEqual([]);
+    expect(await scope.readQueue(22)).toEqual([{ id: "c" }]);
+    expect(await scope.loadCache(22)).toEqual([]);
   });
 
   it("une sauvegarde en cours pendant la déconnexion ne ressuscite pas le magasin", async () => {
@@ -340,7 +342,7 @@ describe("registre des magasins (navigateur sans indexedDB.databases)", () => {
     expect(registry.list()).toEqual(["fleetos-offline-u9"]);
   });
 
-  it("la déconnexion vide le magasin d'un autre compte connu seulement par le registre", async () => {
+  it("la déconnexion atteint le magasin d'un autre compte connu seulement par le registre", async () => {
     const { kv, dbs } = memoryKv();
     const { storage } = fakeStorage();
     const registry = createDbRegistry(() => storage);
@@ -355,11 +357,14 @@ describe("registre des magasins (navigateur sans indexedDB.databases)", () => {
     };
     const scope = createOfflineScope(registered);
     await scope.writeQueue(5, [{ label: "file de A" }], scope.epochOf(5));
+    await scope.saveCache(5, [myWorkOrders({ id: 62, vehicleId: 13 })]);
     await scope.writeQueue(6, [{ label: "file de B" }], scope.epochOf(6));
 
     await scope.purgeAll(6);
 
-    expect(Array.from(dbs.get("fleetos-offline-u5")!.values())).toEqual([]);
+    // Compte sortant (6) : tout vidé. Autre compte (5) : cache supprimé, file gardée.
     expect(Array.from(dbs.get("fleetos-offline-u6")!.values())).toEqual([]);
+    expect(await scope.loadCache(5)).toEqual([]);
+    expect(await scope.readQueue(5)).toEqual([{ label: "file de A" }]);
   });
 });

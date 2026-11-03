@@ -338,20 +338,22 @@ export function createOfflineScope(kv: OfflineKv) {
     },
 
     /**
-     * Déconnexion : tous les magasins sont vidés, file comprise, ainsi que l'ancien format global.
-     * Renvoie le nombre d'écritures non synchronisées détruites (journalisé ; avertissement : lot #10c).
+     * Déconnexion : le magasin du compte qui se déconnecte est vidé, file comprise ; les
+     * autres comptes perdent leur cache de lecture mais gardent leur file (même règle que
+     * `purgeOthers` : tablette partagée). L'ancien format global est détruit.
+     * Renvoie le nombre d'écritures du compte sortant détruites (journalisé ; avertissement : lot #10c).
      */
     async purgeAll(activeUserId: number | null = getActiveOfflineUserId()): Promise<number> {
-      const targets = Array.from(new Set([
-        ...((await listOfflineDbs()) ?? []),
-        ...(activeUserId !== null ? [offlineDbName(activeUserId)] : []),
-      ]));
-      const counts = await Promise.all(targets.map(countQueued));
-      await Promise.all(targets.map(clearDb));
+      const own = activeUserId !== null ? offlineDbName(activeUserId) : null;
+      const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
+      const lost = own ? await countQueued(own) : 0;
+      await Promise.all([...(own ? [clearDb(own)] : []), ...others.map(dropReadCache)]);
       await purgeLegacy();
-      const lost = counts.reduce((a, b) => a + b, 0);
       if (lost > 0) {
-        clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", { lost });
+        clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", {
+          lost,
+          userId: activeUserId,
+        });
       }
       return lost;
     },
