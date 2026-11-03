@@ -1443,8 +1443,9 @@ export default function MissionDetailsPage() {
       ? (missionFuelTotalQuantity / missionDistanceReelle) * 100
       : null;
 
-  const canManageMissionFuel = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
   const canManageMission = (MISSION_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
+  // Carburant de mission : mêmes gestionnaires que la mission (MISSION_FUEL_MANAGERS côté serveur).
+  const canManageMissionFuel = canManageMission;
   const isMissionCompleted = String(mission?.status || "") === "completed";
   const canDeclareMissionWithoutFuel =
     canManageMissionFuel &&

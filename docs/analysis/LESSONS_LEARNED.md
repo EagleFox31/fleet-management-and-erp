@@ -1248,3 +1248,25 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Une garantie de sécurité se teste sur son point d'entrée réel, pas seulement sur la fonction qui la porte. Après toute fusion de main dans une branche de sécurité, relire les fichiers en conflit résolu côté main et rejouer l'e2e concerné.
 - Toute purge locale liée à l'identité a pour pendant une révocation serveur garantie (déconnexion différée rejouée avant toute reprise de session). L'identité gardée en mémoire se synchronise entre onglets (réserves R2 et S1, lot #10c).
+
+## 2026-11-03 - Garde au montage trop large, 3e occurrence : écritures des missions (#129)
+
+### Constat
+- `PATCH /api/missions/:id` n'avait aucune garde de rôle : le routeur `missions` est monté derrière `authenticate` et `isStaff`. Chauffeur, technicien, magasinier, direction et chef d'atelier modifiaient coût carburant, budgets, dates, chauffeur et véhicule d'une mission (200, écriture constatée par le contrat avant correctif).
+- La relecture (c7) a relevé la même ouverture sur `POST /api/missions` (le schéma d'insertion accepte `status` et `workflowData.budgetPlan`), `PUT /api/missions/:id/status` et `POST /api/operations/missions/from-fuel`.
+
+### Cause racine
+- Même classe que les entrées « cloison client » (30 octobre et 2 novembre) : la garde du montage (`isStaff`) répond à « est-ce du personnel ? », pas à « ce rôle peut-il écrire ici ? ». Chaque route d'écriture devait ajouter sa propre garde, par convention, sans contrôle automatique.
+- Les deux préventions précédentes étaient ciblées (lecture de `session.role`, routes véhicule) et ne couvraient pas les écritures des autres routeurs.
+- Classification : contrôle d'accès vertical manquant ; 3e occurrence de la classe « garde au montage trop large ».
+
+### Résolution
+- `authorize([...MISSION_MANAGER_ROLES])` sur `PATCH /:id` ; listes de rôles dérivées de `MISSION_MANAGER_ROLES` (serveur, client, test).
+- Lot 2 (après #131) : `POST /` réservé aux gestionnaires, `PUT /:id/status` aux gestionnaires et au chauffeur affecté (constante `MISSION_STATUS_ROLES`, cloison `router.param("id")`), `from-fuel` réservé aux gestionnaires.
+
+### Prévention (vérifiable)
+- Contrôle renforcé exigé par la récidive : `tests/unit/server/write-route-guards.test.ts`. Toute route `post|put|patch|delete` de `server/api/` doit déclarer `authorize(...)` ou un middleware `isXxx` sur sa déclaration ; les 45 routes existantes sans garde sont gelées dans `write-route-guards.frozen.ts`, la liste ne peut que diminuer. Prouvé par mutation : retirer la garde de `PATCH /missions/:id` fait échouer le test.
+- Contrat `tests/contract/mission-patch-roles.contract.test.ts` : les rôles refusés sont dérivés de `ALL_APP_ROLES`, un rôle ajouté au schéma est testé d'office.
+
+### Règle Projet (obligatoire)
+- Une route d'écriture déclare ses rôles sur la route elle-même, même si le montage filtre déjà. Une garde de montage n'est qu'un plancher.

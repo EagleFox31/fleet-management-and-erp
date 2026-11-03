@@ -172,7 +172,7 @@ const OPEN_RENEWAL_STATUSES = ["pending", "in_progress"] as const;
 const MISSION_FUEL_ALLOWED_STATUSES = ["planned", "assigned", "in_progress", "delivered"] as const;
 const MISSION_FUEL_REGULARIZATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
 const MISSION_FUEL_DECLARATION_ALLOWED_STATUSES = ["delivered", "completed"] as const;
-const MISSION_FUEL_MANAGERS = ["admin", "logistics", "secretary"] as const;
+const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
 
 const ALERT_TITLE_TO_DOCUMENT_TYPE = Object.fromEntries(
   Object.entries(DOCUMENT_ALERT_TITLES).map(([documentType, alertTitle]) => [alertTitle, documentType]),

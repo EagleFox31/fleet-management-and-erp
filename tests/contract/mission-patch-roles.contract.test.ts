@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { MISSION_MANAGER_ROLES } from "../../shared/constants/roles";
+import { ALL_APP_ROLES, MISSION_MANAGER_ROLES, type AppRole } from "../../shared/constants/roles";
 import { assignments, drivers, missions } from "../../shared/schema";
 import { startContractSession } from "../support/contract-session";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -11,10 +11,14 @@ import { uniqueTestToken } from "../support/ids";
 /**
  * R3 : `PATCH /api/missions/:id` réservé aux gestionnaires de missions (MISSION_MANAGER_ROLES).
  * Le chauffeur affecté n'y a aucune écriture légitime (ni statut ni kilométrage dans le schéma) :
- * coût carburant, dates, chauffeur et véhicule lui sont fermés. Le client est déjà refusé au montage.
+ * coût carburant, budgets, dates, chauffeur et véhicule lui sont fermés. Le client est déjà refusé au montage.
+ * Décision utilisateur (option a, 3 novembre 2026) : le chauffeur n'écrit pas les budgets.
+ *
+ * Les rôles refusés se dérivent du schéma : un rôle ajouté plus tard est testé sans retoucher ce fichier.
  */
 
-type Actor = "admin" | "logistics" | "secretary" | "management" | "workshop_manager" | "driver" | "technician" | "warehouse" | "client";
+type Actor = AppRole;
+const REFUSED_ROLES = ALL_APP_ROLES.filter((role) => !(MISSION_MANAGER_ROLES as readonly string[]).includes(role));
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const driverIds: number[] = [];
 const missionIds: number[] = [];
@@ -34,6 +38,7 @@ const hostileBody = () => ({
   pickupDate: "2031-07-01T08:00:00.000Z",
   deliveryDate: "2031-07-02T08:00:00.000Z",
   assignment: { vehicleId: otherVehicleId, driverId: otherDriverId },
+  budget: { fuelBudget: 1, roadExpensesBudget: 1, contingencyBudget: 1 },
 });
 
 async function snapshot() {
@@ -44,23 +49,16 @@ async function snapshot() {
     pickupDate: m.pickupDate?.toISOString(),
     deliveryDate: m.deliveryDate?.toISOString(),
     specialInstructions: m.specialInstructions,
+    budgetPlan: (m.workflowData as any)?.budgetPlan ?? null,
     driverId: a.driverId,
     vehicleId: a.vehicleId,
   };
 }
 
 beforeAll(async () => {
-  session = await startContractSession<Actor>({
-    admin: "admin",
-    logistics: "logistics",
-    secretary: "secretary",
-    management: "management",
-    workshop_manager: "workshop_manager",
-    driver: "driver",
-    technician: "technician",
-    warehouse: "warehouse",
-    client: "client",
-  });
+  session = await startContractSession<Actor>(
+    Object.fromEntries(ALL_APP_ROLES.map((role) => [role, role])) as Record<Actor, Actor>,
+  );
   const [own] = await db
     .insert(drivers)
     .values({ firstName: "TEST", lastName: uniqueTestToken("drv"), userId: session.userId("driver") } as any)
@@ -112,8 +110,12 @@ describe("R3 : PATCH /api/missions/:id réservé aux gestionnaires de missions",
     expect([...MISSION_MANAGER_ROLES].sort()).toEqual(["admin", "logistics", "secretary"]);
   });
 
-  it.each(["driver", "technician", "warehouse", "management", "workshop_manager", "client"] as const)(
-    "%s : 403 sans aucune écriture (coût carburant, dates, chauffeur, véhicule)",
+  it("au moins le chauffeur, la direction et le client sont refusés", () => {
+    expect(REFUSED_ROLES).toEqual(expect.arrayContaining(["driver", "management", "client"]));
+  });
+
+  it.each(REFUSED_ROLES)(
+    "%s : 403 sans aucune écriture (coût carburant, budgets, dates, chauffeur, véhicule)",
     async (actor) => {
       const before = await snapshot();
       const res = await session.call("PATCH", `/api/missions/${missionId}`, { actor, body: hostileBody() });
@@ -124,7 +126,7 @@ describe("R3 : PATCH /api/missions/:id réservé aux gestionnaires de missions",
 
   // Contre-épreuve : le même corps passe pour un gestionnaire. Sans elle, un 403 ne prouverait
   // pas que la garde bloque une écriture qui aurait réellement eu lieu.
-  it("le même corps est appliqué pour la logistique (200, coût, dates, chauffeur et véhicule changés)", async () => {
+  it("le même corps est appliqué pour la logistique (200, coût, budgets, dates, chauffeur et véhicule changés)", async () => {
     const res = await session.call("PATCH", `/api/missions/${missionId}`, { actor: "logistics", body: hostileBody() });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const after = await snapshot();
@@ -132,6 +134,7 @@ describe("R3 : PATCH /api/missions/:id réservé aux gestionnaires de missions",
     expect(after.pickupDate).toBe("2031-07-01T08:00:00.000Z");
     expect(after.driverId).toBe(otherDriverId);
     expect(after.vehicleId).toBe(otherVehicleId);
+    expect(after.budgetPlan).toMatchObject({ fuelBudget: 1, roadExpensesBudget: 1, contingencyBudget: 1 });
   });
 
   it.each(["admin", "logistics", "secretary"] as const)("%s : 200 et modification enregistrée", async (actor) => {
