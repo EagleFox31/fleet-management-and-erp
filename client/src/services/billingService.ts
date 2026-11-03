@@ -54,15 +54,6 @@ export interface UnpaidInvoice {
   daysOverdue: number;
 }
 
-export interface MonthlyBillingStats {
-  month: string;
-  invoiceCount: number;
-  totalAmount: number;
-  totalVAT: number;
-  totalPaid: number;
-  unpaidBalance: number;
-}
-
 export const billingService = {
   async getSuppliersSummary(): Promise<SupplierSummary[]> {
     const response = await billingApi.getSuppliersSummary();
@@ -98,12 +89,6 @@ export const billingService = {
 
   async getUnpaidInvoices(): Promise<UnpaidInvoice[]> {
     const response = await billingApi.getUnpaidInvoices();
-    const data = await response.json();
-    return data;
-  },
-
-  async getMonthlyStats(): Promise<MonthlyBillingStats[]> {
-    const response = await billingApi.getMonthlyStats();
     const data = await response.json();
     return data;
   },
