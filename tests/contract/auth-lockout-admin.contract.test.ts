@@ -13,6 +13,7 @@ import { DbLockoutStore } from "../../server/services/login-lockout-db-store";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /** Niveau C, T-13 : liste des comptes verrouilles et deverrouillage admin. */
 let server: Server;
@@ -75,7 +76,7 @@ describe("/api/admin/users/locked et /unlock", { timeout: 120000 }, () => {
     expect(lockedUsersResponseSchema.safeParse(list.body).success).toBe(true);
     const mine = (list.body as { id: number; failedLoginCount: number }[]).find((u) => u.id === target.id);
     expect(mine?.failedLoginCount).toBe(LOCKOUT_DEFAULTS.maxAttempts);
-    expect(JSON.stringify(list.body)).not.toMatch(/password|token/i);
+    expect(leakText(list.body)).not.toMatch(/password|token/i);
 
     const unlock = await call("POST", unlockUserPath(target.id), "admin");
     expect(unlock.status).toBe(200);

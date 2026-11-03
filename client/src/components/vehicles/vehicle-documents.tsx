@@ -244,7 +244,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
     onError: (error: any) => {
       toast({
         title: "Erreur lors du téléchargement",
-        description: error.message || "Une erreur s'est produite. Veuillez réessayer.",
+        description: userMessageOf(error, "Une erreur s'est produite. Veuillez réessayer."),
         variant: "destructive",
       });
     }
@@ -386,7 +386,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
     onError: (error: any) => {
       toast({
         title: "Échec de la demande",
-      description: error?.message || "Impossible de renouveler ce document.",
+      description: userMessageOf(error, "Impossible de renouveler ce document."),
         variant: "destructive",
       });
     },

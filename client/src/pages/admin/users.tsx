@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -294,7 +295,7 @@ export default function UsersAdminPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
     },
     onError: (error: any) =>
-      toast({ variant: "destructive", title: "Erreur", description: error.message || "Erreur lors de la modification du statut" }),
+      toast({ variant: "destructive", title: "Erreur", description: userMessageOf(error, "Erreur lors de la modification du statut") }),
   });
 
   const deleteUserMutation = useMutation({
@@ -305,7 +306,7 @@ export default function UsersAdminPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
     },
     onError: (error: any) =>
-      toast({ variant: "destructive", title: "Erreur", description: error.message || "Erreur lors de la suppression" }),
+      toast({ variant: "destructive", title: "Erreur", description: userMessageOf(error, "Erreur lors de la suppression") }),
   });
 
   const toggleDriverMutation = useMutation({
@@ -319,7 +320,7 @@ export default function UsersAdminPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
     },
     onError: (error: any) =>
-      toast({ variant: "destructive", title: "Erreur", description: error.message || "Impossible de modifier le statut du chauffeur." }),
+      toast({ variant: "destructive", title: "Erreur", description: userMessageOf(error, "Impossible de modifier le statut du chauffeur.") }),
   });
 
   const handleEditUser = (u: User) => setEditingUser(u);

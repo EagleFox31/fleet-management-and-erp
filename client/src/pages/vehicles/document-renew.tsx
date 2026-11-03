@@ -17,6 +17,7 @@ import {
   User,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -384,8 +385,8 @@ export default function VehicleDocumentRenewPage() {
       toast({ title: "Document renouvelé", description: payload?.message || "Mise à jour enregistrée." });
       setLocation(returnTo);
     },
-    onError: (error: any) => {
-      toast({ title: "Échec", description: error?.message || "Impossible d'enregistrer.", variant: "destructive" });
+    onError: (error: unknown) => {
+      toast({ title: "Échec", description: userMessageOf(error, "Impossible d'enregistrer."), variant: "destructive" });
     },
   });
 

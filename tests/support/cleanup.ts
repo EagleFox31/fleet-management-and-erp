@@ -164,6 +164,9 @@ async function deleteOrphanTestRows(): Promise<void> {
     .from(vehicles)
     .where(orphan(vehicles.registrationNumber, vehicles.createdAt));
   const orphanWorkOrders = db.select({ id: workOrders.id }).from(workOrders).where(inArray(workOrders.vehicleId, orphanVehicles));
+  // Pleins d'un véhicule orphelin dont les notes ne portent pas le préfixe : fuel_records_vehicle_id_vehicles_id_fk
+  // bloquait la suppression du véhicule et faisait échouer le hook global de chaque fichier de contrat.
+  await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, orphanVehicles));
   await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
   await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, orphanWorkOrders));

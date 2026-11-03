@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -81,7 +82,7 @@ export default function EditSupplierPage() {
     onError: (error: Error) => {
       toast({
         title: "Erreur",
-        description: error.message || "Une erreur est survenue lors de la modification.",
+        description: userMessageOf(error, "Une erreur est survenue lors de la modification."),
         variant: "destructive",
       });
     },

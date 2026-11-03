@@ -1616,3 +1616,134 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet
 - Une lecture « de tout le parc » appelle une méthode sans pagination nommée comme telle, jamais une méthode paginée sans argument.
+
+### Suite du 3 novembre 2026 : exceptions levées, clé obligatoire
+- **Budget et statut sous verrou de ligne** : le `PATCH` budget et la transition de statut avec modification relisent `workflowData` par `SELECT … FOR UPDATE` dans une transaction, puis fusionnent leur patch sur cette relecture. L'écriture de l'entrée de régularisation prend le même verrou de ligne. Ordre des verrous fixe : carte carburant puis ligne mission (statut et budget ne prennent que la ligne), donc pas d'interblocage. La première exception nommée ci-dessus est levée ; celle des suppressions admin reste.
+- **Clé obligatoire, unique en base** : `fuel_records.request_key` avec index unique `ux_fuel_records_request_key` (migration `20261103_fuel_records_request_key.sql`, jumelle de `FUEL_RECORDS_REQUEST_KEY_SQL` dans `init-database.ts`). Sans clé : 400 « rechargez la page ». Une violation de l'index devient 409. Les régularisations antérieures (clé dans le journal seul) restent rejouables.
+- **Plein normal couvert** : `POST /api/missions/:id/fuel-records` suit le même rejeu sous verrou.
+- **Comparaison complète** : mission, véhicule, quantité, prix, date, station et notes ou motif. Un écart avec la même clé donne 409.
+- **Client** : la clé est remise à zéro au succès, au 409 et à l'annulation. Deux onglets génèrent deux clés : c'est voulu, le verrou de carte sérialise les deux débits et chacun est un plein distinct aux yeux du serveur.
+- **Prévention** : contrat (18 tests : course statut, course budget, rejeu après clôture, plein normal double, date/station/motif = 409) et unitaire de schéma (migration = constante, idempotente). Six mutants, tous rouges : statut sur copie périmée, budget sur copie périmée, verrou sans `FOR UPDATE`, station non comparée, plein normal sans rejeu, date non comparée.
+
+### Suite (relecture sécurité) : une issue indéterminée conserve la clé
+
+- **Contexte** : la première version remettait la clé à zéro à la fermeture de la fiche, quelle que soit l’issue de l’envoi.
+- **Risque (sécurité, moyen)** : coupure réseau ou 5xx après l’écriture en base, puis le chauffeur ferme la fiche, la rouvre et renvoie. Une clé neuve donne un second débit de la carte. Le rejeu ne protège que si la clé survit à l’incertitude.
+- **Règle générale** : une issue indéterminée doit conserver la clé. Seule une issue connue la libère : un succès ou un 4xx. L’annulation explicite ne libère pas une clé incertaine.
+- **Résolution** : `client/src/lib/submission-key.ts` (`createSubmissionKeyStore`). La clé est rangée en `sessionStorage` par mission, partagée par la fiche mission et le tableau de bord chauffeur, et survit au rechargement. `isIndeterminateOutcome` couvre le réseau et le 5xx. Sur un 409 ou une issue incertaine, les deux écrans relisent les pleins, la mission et le solde.
+- **Autres réserves levées** :
+  - les notes comparées sont la seule partie saisie (`buildEnteredFuelNotes`) : une mission dont la destination ou le client a changé ne transforme plus un rejeu en 409 ;
+  - l’index unique est posé dans un bloc `DO` qui avale `lock_not_available` et `unique_violation`, avec un avertissement au démarrage, comme `DRIVERS_USER_ID_UNIQUE_SQL` ;
+  - un test d’intégration déclenche la vraie violation de `ux_fuel_records_request_key` et attend un 409 sans détail SQL. Il passe par le service sans rejeu, car en HTTP la recherche précède toujours l’insertion sous le verrou de carte.
+- **Prévention** : unitaire `tests/unit/client/submission-key.test.ts`. Le mutant « 5xx traité comme connu » le fait échouer (3 tests).
+- **Suivi (hors de cette correction)** : le statut de mission est contrôlé avant le verrou. Un plein normal rejoué après la clôture reçoit donc un 400 au lieu du rejeu.
+
+## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
+
+### Contexte
+- `part-scans-routes.test.ts` (404 normalisé) a échoué une fois sur `/sql/i` : le corps entier était contrôlé, et le `requestId` tiré par `nanoid(10)` valait « qrSqlREDR7 ».
+- FUEL3 (`vehicles-tank-capacity.test.ts`) a échoué sur `n_tup_ins` 132 au lieu de 130 : le test vérifiait l'absence d'écriture au second démarrage à l'aide du compteur `pg_stat_user_tables`. Ce compteur est global à la table, il compte aussi les écritures des fichiers lancés en parallèle, et il est mis à jour en différé.
+
+### Cause racine
+L'assertion portait sur une donnée que le test ne contrôle pas : une valeur aléatoire incluse dans le texte contrôlé, et un compteur partagé par toute la base. 50 contrôles de fuite, dans 34 fichiers, suivaient le même motif (`JSON.stringify(x.body)).not.toMatch`). Avec `/i`, n'importe quel mot de trois lettres (sql, NaN…) pouvait sortir.
+
+### Classification
+Test non déterministe (flake), sans défaut produit.
+
+### Résolution
+- `leakText(body)` (`tests/support/api-error.ts`) retire le `requestId` du texte contrôlé, y compris dans « Référence : … ». `apiErrorProblems` s'en sert aussi.
+- FUEL3 compare `xmin` et `md5` des lignes, hors lignes `TEST%` des autres fichiers, plus une sentinelle propre au test.
+
+### Prévention (vérifiable)
+- `tests/unit/leak-check-hygiene.test.ts` échoue sur tout `JSON.stringify(<x>.body)).not.toMatch` dans `tests/` ou `e2e/`.
+- `part-scans-routes.test.ts` force `X-Request-Id: qrSqlREDR7` : l'ancien contrôle échoue de façon déterministe (mutation prouvée).
+- Mutation FUEL3 : `UPDATE vehicles SET brand = brand` au démarrage rend le test rouge.
+
+### Leçon généralisée
+Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
+
+## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
+
+### Contexte
+L'e2e P6 a montré que la réception d'une commande fournisseur laissait l'alerte stock bas affichée chez le chef d'atelier jusqu'au rechargement (#177). L'audit qui a suivi a trouvé quatorze autres écarts, dont sept hauts : stock, carburant, tableau de bord de gestion.
+
+### Cause racine
+Chaque `case` de `useRealTimeSync.ts` listait ses clés à la main. Un écran de compteur ajouté plus tard n'était rattaché à aucun événement, et `staleTime` (5 min, sans polling) le laissait périmé. Les clés TanStack se comparent élément par élément : `["/api/fuel-card"]` n'atteint pas `["/api/fuel-card/balance"]`.
+
+Classification : oubli de contrat, récidive de la règle des 3 couches (AGENTS.md §2).
+
+### Résolution
+`client/src/lib/realtime-satellites.ts` : des groupes d'écrans par fait métier, et une table événement -> groupes, appliquée avant le `switch`. `parts_delivered`, `part_received`, `vehicle_mileage_updated`, `vehicle_maintenance_position_updated` et `work_order_awaiting_parts` sont désormais rafraîchis. L'émission de `alert_created` par ces flux est côté serveur.
+
+### Prévention (vérifiable)
+`tests/unit/client/realtime-satellites.test.ts` échoue dans ces cas :
+- un événement de stock, d'argent ou de statut émis par le serveur est absent de la table ;
+- un événement de stock ou d'argent ne porte pas de groupe de sa famille ;
+- un écran satellite (compteur, statistique, tableau de bord) n'est rafraîchi par aucun événement ;
+- une clé de groupe n'est posée par aucun écran.
+
+Les listes gelées ne peuvent que diminuer. La preuve par mutation rend la suite rouge : entrée retirée ; groupe de stock remplacé.
+
+### Règle Projet
+Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-satellites.ts` dans la PR qui le crée.
+
+## 2026-11-03 — Renouvellement rapide : justificatif orphelin, ou supprimé alors que référencé
+
+### Contexte
+- `POST /api/document-renewals/quick-renew` reçoit un justificatif par multer, qui l'écrit dans `uploads/` avant le handler.
+- Sur main avant #178 :
+  - plusieurs refus (404 document, 400 visite technique, 404 et 400 demande) renvoyaient la réponse sans supprimer le fichier, qui restait orphelin ;
+  - à l'inverse, un échec de `createAlert` APRÈS l'enregistrement passait par le `catch`, qui supprimait le fichier alors que la demande le référençait déjà. La demande affichait alors une preuve introuvable ;
+  - les écritures (échéance, miroir véhicule, levée des alertes, demande) n'étaient pas en transaction : un échec au milieu laissait l'échéance avancée avec une réponse 500 ;
+  - le centre agréé était créé avant les contrôles et restait en base même en cas de refus.
+
+### Cause racine
+- Classification : cycle de vie d'une ressource externe (un fichier) non lié au commit qui la référence.
+- La suppression était écrite au cas par cas, refus par refus, au lieu de découler d'un seul fait : « une écriture validée référence-t-elle le fichier ? ».
+
+### Résolution
+- Drapeau `proofRecorded`, posé juste après le `db.transaction` qui écrit la demande. Le `finally` supprime le fichier tant qu'il est faux, quel que soit le chemin de sortie.
+- Contrôles de la demande, puis résolution du centre, avant toute écriture. Une seule transaction couvre l'échéance, le miroir, la levée des alertes et la demande (`executor` optionnel sur `syncVehicleDocumentMirror` et `clearDocumentExpiryAlerts`).
+- Alertes et diffusions au mieux après le commit : leur échec ne touche plus au fichier.
+
+### Exceptions nommées
+- Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
+- Les autres routes multer (récépissé, preuves) n'ont pas encore été revues selon ce patron.
+
+### Prévention (vérifiable)
+- `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
+- Copié sur main (3a7c0e3) : 8 rouges sur 8. Les deux assertions « aucun centre » échouent sans la résolution déplacée.
+
+### Règle Projet (obligatoire)
+- Un fichier téléversé n'est conservé qu'une fois qu'une écriture validée le référence. Supprimer dans un `finally` gardé par un drapeau posé après le commit, jamais refus par refus ; les effets de bord après le commit n'y touchent pas.
+
+## 2026-11-03 — Alertes écrites en base sans trame temps réel (couche 2 oubliée, récidive)
+
+### Contexte
+- À la réception de pièces, `procurement-service` (`notifyDeliveryReceived` et `notifyPartReceived`) insérait des alertes pour le chef d'atelier et le technicien, sans émettre `alert_created`. La cloche et le toast restaient muets jusqu'au rechargement.
+- Le renouvellement de document émettait bien la trame, mais avec une charge imbriquée `{ alert }` alors que `useRealTimeSync` lit une charge à plat : toast vide.
+- Ce n'est pas la première fois : la couche 2 des transitions (AGENTS.md §2) avait déjà été oubliée sur d'autres écrans.
+
+### Cause racine
+- Classification : contrat implicite non outillé.
+- Chaque site écrivait `db.insert(alerts)` puis construisait sa trame à la main, ou l'oubliait. Rien ne liait l'insertion à l'émission, et la forme attendue par le client n'était écrite nulle part côté serveur.
+- Un envoi qui levait au milieu de la boucle coupait aussi les trames suivantes et `parts_delivered`.
+
+### Résolution
+- Un helper unique, `server/lib/alert-broadcast.ts` (`broadcastAlertCreated`) :
+  - charge à plat ;
+  - portée nominative, ou repli sur des rôles explicites, jamais de broadcast ;
+  - ne lève jamais : un échec est journalisé par alerte.
+- Les sites de procurement et de renouvellement passent par lui, avec `.returning()` sur l'insertion.
+
+### Prévention (vérifiable)
+- `tests/contract/procurement-alert-realtime.contract.test.ts` vérifie quatre points :
+  - la trame est reçue par deux rôles distincts, et non par le magasinier ;
+  - toute trame `alert_created` a une portée `user` ;
+  - un envoi raté ne coupe pas la suite ;
+  - la charge du renouvellement est à plat.
+- Rouge sans le correctif : 3 sur 3 pour le lot initial (#180), puis 1 sur 4 pour le try/catch par alerte.
+- À venir (backlog de) : un garde d'hygiène qui échoue sur tout `insert(alerts)` d'un fichier qui n'appelle ni `broadcastAlertCreated` ni `alert-service`.
+
+### Règle Projet (obligatoire)
+- Toute alerte écrite en base passe par `broadcastAlertCreated` après le commit (ou par `alert-service`, qui le fait). Ne jamais construire une trame `alert_created` à la main.

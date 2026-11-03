@@ -14,6 +14,7 @@ import { VEHICLE_TANK_CAPACITY_ONLY_MESSAGE } from "../../server/lib/vehicle-pat
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /** FUEL3, niveau C : règles dans la liste, compteur, capacité du véhicule (PATCH) et temps réel des pleins. */
 process.env.FEATURE_FLAGS = "fuel-anomalies=on";
@@ -127,7 +128,7 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
     const res = await patchCapacity(bad, "workshopManager");
     expect(res.status).toBe(400);
     expect(res.body.message).toBe(VEHICLE_TANK_CAPACITY_MESSAGE);
-    expect(JSON.stringify(res.body)).not.toMatch(/constraint|vehicles_tank|violates|SQL/i);
+    expect(leakText(res.body)).not.toMatch(/constraint|vehicles_tank|violates|SQL/i);
     const [row] = await db.select({ c: vehicles.tankCapacityL }).from(vehicles).where(eq(vehicles.id, vehicleId));
     expect(row.c).toBe(90);
   });
@@ -184,7 +185,7 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
       const res = await refusalOf({ tankCapacityL: 55, notes: "TEST logistique" });
       expect(res.status).toBe(403);
       expect(res.body.message).toBe(VEHICLE_TANK_CAPACITY_ONLY_MESSAGE);
-      expect(JSON.stringify(res.body)).not.toMatch(/constraint|SQL|stack/i);
+      expect(leakText(res.body)).not.toMatch(/constraint|SQL|stack/i);
       expect(await stored()).toEqual(before);
     });
 

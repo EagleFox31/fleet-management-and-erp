@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -204,7 +205,7 @@ export function FuelRecordForm({
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de ${isEdit ? "la mise à jour" : "l'enregistrement"} du plein: ${error.message}`,
+        description: userMessageOf(error, `Erreur lors de ${isEdit ? "la mise à jour" : "l'enregistrement"} du plein.`),
       });
     },
   });

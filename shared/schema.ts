@@ -520,12 +520,16 @@ export const fuelRecords = pgTable("fuel_records", {
   validationStatus: text("validation_status", { enum: ["pending", "validated"] }).notNull().default("pending"),
   validatedBy: integer("validated_by").references(() => users.id),
   validatedAt: timestamp("validated_at"),
+  // Clé de requête d'un plein de mission, posée par le serveur seul : un nouvel envoi est rejoué
+  // au lieu de débiter deux fois (server/db/migrations/20261103_fuel_records_request_key.sql).
+  requestKey: text("request_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [uniqueIndex("ux_fuel_records_request_key").on(table.requestKey)]);
 
 export const insertFuelRecordSchema = createInsertSchema(fuelRecords).omit({
   id: true,
+  requestKey: true,
   validatedBy: true,
   validatedAt: true,
   createdAt: true,

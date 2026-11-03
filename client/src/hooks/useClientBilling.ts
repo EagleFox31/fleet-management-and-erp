@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   clientBillingService, 
@@ -42,7 +43,7 @@ export function useClientBilling() {
     onError: (error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },
@@ -61,7 +62,7 @@ export function useClientBilling() {
     onError: (error) => {
       toast({
         title: "Erreur",
-        description: error.message,
+        description: userMessageOf(error, "Une erreur est survenue. Veuillez réessayer."),
         variant: "destructive",
       });
     },

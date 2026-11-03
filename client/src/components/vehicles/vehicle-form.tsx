@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -133,7 +134,7 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de l'ajout du véhicule: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de l'ajout du véhicule."),
       });
     },
   });
@@ -154,7 +155,7 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de la mise à jour du véhicule: ${error.message}`,
+        description: userMessageOf(error, "Erreur lors de la mise à jour du véhicule."),
       });
     },
   });

@@ -11,6 +11,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { VEHICLE_DOCUMENT_EVENT_ROLES } from "../../shared/constants/roles";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /** Niveau C, T-16b : upload d'un document vehicule (route deplacee dans server/api) et type valide. */
 let server: Server;
@@ -179,7 +180,7 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     expect(res.body.message).toContain(`Référence : ${res.body.requestId}`);
     expect(res.body.code).toBeTruthy();
     expect(res.body.requestId).toBeTruthy();
-    expect(JSON.stringify(res.body)).not.toMatch(/SQL|secret|relation|stack/i);
+    expect(leakText(res.body)).not.toMatch(/SQL|secret|relation|stack/i);
     const rowsAfter = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(rowsAfter).toHaveLength(rowsBefore.length);
     expect(rowsAfter.some((r) => r.name === "Echec miroir")).toBe(false);

@@ -56,6 +56,7 @@ vi.mock("../../../server/db", async (importOriginal) => {
 import { createApiRouter } from "../../../server/api";
 import { errorHandler, errorResponseGuard, requestContext } from "../../../server/middleware/error-handler";
 import { ALL_APP_ROLES, PART_LABEL_ROLES, PART_SCAN_ROLES, type AppRole } from "../../../shared/constants/roles";
+import { leakText } from "../../support/api-error";
 
 /**
  * Routes `/api/part-scans` (CDC-3), HTTP in-process sans base : drapeau coupé, 401, 403 par rôle,
@@ -105,8 +106,8 @@ afterEach(() => {
   delete process.env.FEATURE_FLAGS;
 });
 
-async function get(path: string, role?: AppRole) {
-  const response = await fetch(baseUrl + path, { headers: role ? { "x-test-role": role } : {} });
+async function get(path: string, role?: AppRole, headers: Record<string, string> = {}) {
+  const response = await fetch(baseUrl + path, { headers: { ...(role ? { "x-test-role": role } : {}), ...headers } });
   const text = await response.text();
   let body: any = null;
   try {
@@ -211,7 +212,16 @@ describe("GET /api/part-scans/resolve", () => {
     expect(status).toBe(404);
     expect(body).toMatchObject({ code: "NOT_FOUND", message: "Aucune pièce ne correspond à ce code." });
     expect(body.requestId).toEqual(expect.any(String));
-    expect(JSON.stringify(body)).not.toMatch(/sans résultat|select|sql/i);
+    expect(leakText(body)).not.toMatch(/sans résultat|select|sql/i);
+  });
+
+  // Échec aléatoire du 3 novembre 2026 : le requestId tiré valait « qrSqlREDR7 ».
+  it("code inconnu : le contrôle de fuite ignore un requestId qui contient « Sql »", async () => {
+    dbState.rows = [];
+    const { status, body } = await get(RESOLVE + "FM1:999", "warehouse", { "x-request-id": "qrSqlREDR7" });
+    expect(status).toBe(404);
+    expect(body.requestId).toBe("qrSqlREDR7");
+    expect(leakText(body)).not.toMatch(/sans résultat|select|sql/i);
   });
 
   it("référence portée par deux pièces : 409 lisible", async () => {
@@ -219,7 +229,7 @@ describe("GET /api/part-scans/resolve", () => {
     const { status, body } = await get(RESOLVE + "FIL-001", "admin");
     expect(status).toBe(409);
     expect(body.message).toMatch(/Plusieurs pièces/);
-    expect(JSON.stringify(body)).not.toMatch(/ambiguë/);
+    expect(leakText(body)).not.toMatch(/ambiguë/);
   });
 
   it.each([

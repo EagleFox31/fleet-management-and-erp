@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -217,7 +218,7 @@ export default function FuelPage() {
     onError: (error: any) => {
       toast({
         title: "Erreur recharge",
-        description: error?.message || "Impossible de recharger la carte carburant.",
+        description: userMessageOf(error, "Impossible de recharger la carte carburant."),
         variant: "destructive",
       });
     },
@@ -239,7 +240,7 @@ export default function FuelPage() {
     onError: (error: any) => {
       toast({
         title: "Erreur",
-        description: error?.message || "Impossible de supprimer ce plein.",
+        description: userMessageOf(error, "Impossible de supprimer ce plein."),
         variant: "destructive",
       });
     },

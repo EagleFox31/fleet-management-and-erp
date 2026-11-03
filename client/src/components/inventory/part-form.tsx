@@ -1,3 +1,4 @@
+import { userMessageOf } from "@/lib/api-error";
 import React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -179,7 +180,7 @@ export function PartForm({ initialData, isEdit = false, partId }: PartFormProps)
       toast({
         variant: "destructive",
         title: "Erreur",
-        description: `Erreur lors de ${isEdit ? "la mise à jour" : "l'ajout"} de la pièce: ${error.message}`,
+        description: userMessageOf(error, `Erreur lors de ${isEdit ? "la mise à jour" : "l'ajout"} de la pièce.`),
       });
     },
   });

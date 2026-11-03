@@ -9,6 +9,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestSupplierInvoice, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * SINV1 niveau C : un règlement fournisseur saisi peut être rapproché ou
@@ -148,7 +149,7 @@ describe("SINV1 : rejet d'un règlement fournisseur", { timeout: 120000 }, () =>
     const late = await reject(a.invoice.id, a.settlement.id);
     expect(late.status).toBe(409);
     expect(late.body.message).toMatch(/rapproché/);
-    expect(JSON.stringify(late.body)).not.toMatch(/stack|SQLSTATE/);
+    expect(leakText(late.body)).not.toMatch(/stack|SQLSTATE/);
 
     const b = await approvedInvoiceWithSettlement();
     expect((await reject(b.invoice.id, b.settlement.id)).status).toBe(200);
