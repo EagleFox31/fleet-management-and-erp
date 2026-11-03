@@ -1156,3 +1156,23 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un mock de module suppose un cache de modules isolé par fichier. Avant d'en écrire un, vérifier `isolate` dans la config de la suite ; sinon simuler la panne au niveau de la ressource (base, réseau) ou injecter la dépendance.
+
+## 2026-11-03 - Second drizzle-kit push en échec (index colonne puis expression)
+
+### Constat
+- Signalé par la session CDC : sur une base déjà poussée, `drizzle-kit push` plante en ZodError (« Expected string, received null »). Reproduit sur origin/main seul : le premier push sur base neuve passe, le second échoue. La CI ne le voyait pas (un seul push par base neuve) ; le push d'une base existante (Neon, dev) était cassé depuis #116.
+
+### Cause racine
+- `ux_part_specifications_part_name` sur `(part_id, lower(specification_name))`. drizzle-kit 0.30.6 relit les index en découpant `pg_get_expr(indexprs)` en tableau et l'indexe par la position de la colonne dans l'index : l'expression en position 2 lit l'élément 2 d'un tableau qui n'en a qu'un, donc null. Une virgule dans une expression casserait aussi ce découpage.
+
+### Classification
+- Défaut d'outillage (bug drizzle-kit) révélé par un choix de schéma ; aucun effet sur les données ni sur l'API.
+
+### Résolution
+- Index remplacé par `ux_part_specifications_name_part` sur `(lower(specification_name), part_id)` : même unicité, `idx_part_specifications_part_id` sert déjà les lectures par pièce. La migration rejouée pose le nouvel index puis retire l'ancien (pas de fenêtre sans unicité). Vérifié : base existante convergée, trois push successifs verts, contrat `parts-catalog-crud` (homonyme insensible à la casse → 409) vert.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/schema-index-introspection.test.ts` parcourt tous les index de `shared/schema.ts` et échoue sur une colonne simple avant une expression ou une virgule dans une expression ; vérifié rouge sur l'ancien index.
+
+### Règle Projet (obligatoire)
+- Un index mêlant colonnes et expressions place les expressions en tête. Le garde-fou sera retiré quand drizzle-kit corrigera son introspection, preuve par un double push à l'appui.

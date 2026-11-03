@@ -414,10 +414,11 @@ END $$;
 
 DO $$
 BEGIN
-  CREATE UNIQUE INDEX IF NOT EXISTS ux_part_specifications_part_name ON part_specifications (part_id, lower(specification_name));
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_part_specifications_name_part ON part_specifications (lower(specification_name), part_id);
 EXCEPTION WHEN unique_violation THEN
-  RAISE WARNING 'ux_part_specifications_part_name non posé : spécifications homonymes existantes pour une même pièce';
-END $$;`;
+  RAISE WARNING 'ux_part_specifications_name_part non posé : spécifications homonymes existantes pour une même pièce';
+END $$;
+DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
 
 /**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger

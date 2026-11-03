@@ -10,7 +10,7 @@
 -- signalé par NOTICE) ; si des lignes divergentes subsistent, l'index n'est pas posé et un WARNING le signale.
 -- part_specifications : unicité (pièce, nom insensible à la casse), non posée avec un WARNING si des homonymes existent.
 -- Retour arrière : retirer PARTS_CATALOG_CHILDREN_SQL de init-database.ts et ce fichier, puis
---   DROP INDEX IF EXISTS ux_fault_catalog_parts_fault_part, ux_part_specifications_part_name ;
+--   DROP INDEX IF EXISTS ux_fault_catalog_parts_fault_part, ux_part_specifications_name_part ;
 --   (les FK peuvent rester ; les doublons identiques supprimés ne sont pas restitués).
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 
@@ -115,9 +115,12 @@ BEGIN
   END IF;
 END $$;
 
+-- L'expression vient en tête : drizzle-kit 0.30 lit mal un index où une colonne simple précède une expression
+-- (expression null, ZodError au second push). L'ancien index (part_id, lower(...)) est retiré après la pose du nouveau.
 DO $$
 BEGIN
-  CREATE UNIQUE INDEX IF NOT EXISTS ux_part_specifications_part_name ON part_specifications (part_id, lower(specification_name));
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_part_specifications_name_part ON part_specifications (lower(specification_name), part_id);
 EXCEPTION WHEN unique_violation THEN
-  RAISE WARNING 'ux_part_specifications_part_name non posé : spécifications homonymes existantes pour une même pièce';
+  RAISE WARNING 'ux_part_specifications_name_part non posé : spécifications homonymes existantes pour une même pièce';
 END $$;
+DROP INDEX IF EXISTS ux_part_specifications_part_name;
