@@ -15,6 +15,8 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/contract/**/*.test.ts"],
+    // Verrou en base : deux passages sur la même base de test s'enchaînent (tests/support/test-db-lock.ts).
+    globalSetup: ["tests/support/global-setup-db-lock.ts"],
     setupFiles: ["tests/support/setup-contract.ts"],
     fileParallelism: false,
     pool: "forks",

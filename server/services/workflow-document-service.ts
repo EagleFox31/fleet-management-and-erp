@@ -1,11 +1,11 @@
 import { db } from "../db";
 import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
-import { eq, and, inArray, type SQL } from "drizzle-orm";
+import { eq, and, inArray, lt, type SQL } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
+import { isInsideDirectory, isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
 
@@ -147,8 +147,8 @@ export class WorkflowDocumentService {
         const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
 
-        // Copier le fichier
-        if (originalPath) {
+        // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
+        if (originalPath && isInsideDirectory(vehicleUploadDir, newPath)) {
           fs.copyFileSync(originalPath, newPath);
 
           // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
@@ -244,12 +244,15 @@ export class WorkflowDocumentService {
   }
   
   /**
-   * Nettoie les documents des workflows abandonnés (plus de 7 jours)
+   * Nettoie les documents des workflows abandonnés depuis plus de `olderThanDays` jours
+   * (7 par défaut). `updatedAt` porte la date de l'abandon (`abandonWorkflow`). Sans cette
+   * borne, un workflow abandonné la veille perdait ses documents.
    */
-  static async cleanupAbandonedWorkflowDocuments(): Promise<void> {
+  static async cleanupAbandonedWorkflowDocuments(
+    { olderThanDays = 7, now = new Date() }: { olderThanDays?: number; now?: Date } = {},
+  ): Promise<void> {
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const cutoff = new Date(now.getTime() - olderThanDays * 24 * 60 * 60 * 1000);
       
       // Récupérer les workflows abandonnés
       const abandonedWorkflows = await db
@@ -258,7 +261,7 @@ export class WorkflowDocumentService {
         .where(
           and(
             eq(vehicleAcquisitionWorkflows.status, 'abandoned'),
-            // Workflows abandonnés depuis plus de 7 jours
+            lt(vehicleAcquisitionWorkflows.updatedAt, cutoff),
           )
         );
       

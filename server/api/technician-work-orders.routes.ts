@@ -9,6 +9,7 @@ import { moduleLogger } from "../lib/logger";
 import { authenticate } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
 import { storage } from "../storage";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("technician-work-orders");
 
@@ -115,7 +116,7 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
     const broadcast = (global as any).broadcastUpdate;
     if (typeof broadcast === "function") {
       broadcast("work_order_updated", {
-        scope: { type: "broadcast" },
+        scope: workOrderCostScope(),
         workOrderId,
         updates: updateData,
         workOrder: updatedOrder,

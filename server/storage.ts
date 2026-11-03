@@ -299,7 +299,6 @@ export interface IStorage {
   // Fault Catalog methods
   getFaultCatalogs(): Promise<FaultCatalog[]>;
   createFaultCatalog(catalog: InsertFaultCatalog): Promise<FaultCatalog>;
-  updateFaultCatalog(id: number, catalog: Partial<InsertFaultCatalog>): Promise<FaultCatalog | undefined>;
   deleteFaultCatalog(id: number): Promise<boolean>;
 }
 
@@ -2391,20 +2390,6 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error('Error creating fault catalog:', error);
       throw new Error('Erreur lors de la création du catalogue d\'intervention');
-    }
-  }
-
-  async updateFaultCatalog(id: number, catalog: Partial<InsertFaultCatalog>): Promise<FaultCatalog | undefined> {
-    try {
-      const [updatedCatalog] = await db
-        .update(faultCatalog)
-        .set(catalog)
-        .where(eq(faultCatalog.id, id))
-        .returning();
-      return updatedCatalog;
-    } catch (error) {
-      console.error('Error updating fault catalog:', error);
-      throw new Error('Erreur lors de la mise à jour du catalogue d\'intervention');
     }
   }
 
