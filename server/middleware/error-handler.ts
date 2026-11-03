@@ -159,7 +159,10 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
       "erreur après envoi des en-têtes",
     );
     if (res.locals) res.locals.errorLogged = true;
-    return next(err);
+    // Pas de `next(err)` : le finalhandler d'Express écrirait une seconde trace (stack sur stderr,
+    // sans requestId). Il ne ferait que fermer la connexion, ce que l'on fait ici.
+    res.destroy();
+    return;
   }
   const { status, message, fieldErrors, details } = toHttpError(err);
   // Seule ligne de journal d'une erreur relayée : la route y ajoute son contexte (withLogContext)
