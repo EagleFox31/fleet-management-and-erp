@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { parts, partsStockMovements } from "../../shared/schema";
 import { getContractApp } from "../support/app";
@@ -16,7 +16,24 @@ import { leakText } from "../support/api-error";
  * - Quantité décimale -> 400 lisible, rien n'est écrit.
  * - Sorties concurrentes : jamais plus que le stock, chaîne previous -> new continue.
  *   Avant : lecture hors transaction, chaque sortie partait du même stock initial.
+ * - Trame `warehouse_stock_movement_recorded` (§2, §11) : personnel lisant le stock, ni chauffeur
+ *   ni client connecté ; aucune trame sur un refus. Avant : broadcast à tous les profils.
+ *   Les trames sont capturées à `broadcastUpdate`, leur portée résolue comme `realtime-scope.ts`.
  */
+
+type Scope = { type: string; userIds?: number[]; roles?: string[] };
+type Captured = { eventType: string; scope?: Scope; entityId?: unknown };
+const captured: Captured[] = [];
+const previousBroadcast = (global as any).broadcastUpdate;
+const frames = () => captured.filter((f) => f.eventType === "warehouse_stock_movement_recorded");
+const reachesRole = (scope: Scope | undefined, role: string, userId: number): boolean => {
+  if (!scope) return false;
+  if (scope.type === "broadcast") return true;
+  if (scope.type === "user") return (scope.userIds ?? []).includes(userId);
+  if (scope.type === "roles") return (scope.roles ?? []).map((r) => r.trim().toLowerCase()).includes(role);
+  return false;
+};
+const roleUsers = new Map<string, number>();
 
 let server: Server;
 let baseUrl = "";
@@ -70,14 +87,24 @@ beforeAll(async () => {
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
 
+  (global as any).broadcastUpdate = vi.fn((eventType: string, data: Omit<Captured, "eventType">) => {
+    captured.push({ eventType, scope: data?.scope, entityId: data?.entityId });
+  });
+  for (const role of ["admin", "technician", "driver", "client"] as const) {
+    const other = await createTestUser({ role });
+    ids.userIds.push(other.id);
+    roleUsers.set(role, other.id);
+  }
   const user = await createTestUser({ role: "warehouse" });
   ids.userIds.push(user.id);
+  roleUsers.set("warehouse", user.id);
   const res = await call("POST", "/api/auth/login", { username: user.username, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   cookie = res.headers.get("set-cookie")!.split(";")[0];
 }, 120000);
 
 afterAll(async () => {
+  (global as any).broadcastUpdate = previousBroadcast;
   if (ids.partIds.length > 0) {
     await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   }
@@ -86,9 +113,24 @@ afterAll(async () => {
 });
 
 describe("Mouvement de stock magasin : contrat", { timeout: 120000 }, () => {
-  it("sortie au-delà du stock -> 409 lisible, stock et journal intacts", async () => {
+  it("trame : personnel lisant le stock, ni chauffeur ni client connecté", async () => {
     const part = await newPart(5);
+    captured.length = 0;
+    const res = await move(part.id, "in", 2);
+    expect(res.status).toBe(201);
+    const all = frames();
+    expect(all).toHaveLength(1);
+    expect(all[0].entityId).toBe(part.id);
+    expect(all[0].scope?.type).toBe("roles");
+    for (const role of ["admin", "warehouse", "technician"]) expect(reachesRole(all[0].scope, role, roleUsers.get(role)!)).toBe(true);
+    for (const role of ["driver", "client"]) expect(reachesRole(all[0].scope, role, roleUsers.get(role)!)).toBe(false);
+  });
+
+  it("sortie au-delà du stock -> 409 lisible, stock et journal intacts, aucune trame", async () => {
+    const part = await newPart(5);
+    captured.length = 0;
     const res = await move(part.id, "out", 8);
+    expect(frames()).toHaveLength(0);
     expect(res.status).toBe(409);
     expectErrorContract(res, "CONFLICT");
     expect(res.body.message).toContain("5 unité(s) en stock");

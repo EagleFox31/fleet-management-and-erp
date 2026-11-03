@@ -132,3 +132,9 @@ Modèle et règles : `docs/journal/README.md`.
 - **Quoi** : `recordStockMovement` lit la pièce `FOR UPDATE` et écrit mouvement et stock dans la même transaction. Sortie au-delà du stock : 409, plus de remise à 0. Pièce absente : 404. Quantité non entière : 400. La route passe par `next` au lieu de renvoyer `error.message`. Les console.* du service et de la route sont migrés vers moduleLogger.
 - **Comment** : test de contrat `warehouse-stock-movement`, 5 cas dont trois sorties concurrentes. Rouge 5 sur 5 sur main, vert avec le correctif.
 - **Pourquoi** : même défaut que `update-stock`, corrigé plus tôt sur l'autre route. Rebase prévu après #184 (même route : garde de rôle, validation).
+
+## 2026-11-03T16:55:14+01:00 — Trame du mouvement de stock en portée personnel
+
+- **Quoi** : `warehouse_stock_movement_recorded` est envoyée aux rôles `PART_CATALOG_EVENT_ROLES` (personnel sauf chauffeur), plus en broadcast. L'entrée `warehouse.routes.ts` sort de la liste gelée de `broadcast-hygiene`.
+- **Comment** : un cas de contrat vérifie que la trame atteint admin, magasinier et technicien, et pas le chauffeur ni le client. Il vérifie aussi qu'un 409 n'émet aucune trame. Rouge sans le correctif de la route.
+- **Pourquoi** : AGENTS.md §11, demande de 0a sur #188. Le stock et les prix ne regardent pas un client.
