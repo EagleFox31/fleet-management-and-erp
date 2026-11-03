@@ -851,6 +851,7 @@ export class AlertService {
           ? dailyReminderDedupeKey(alertData.type, alertData.title, resolvedLink)
           : undefined);
 
+      let createdCount = 0;
       for (const userId of recipientUserIds) {
         const candidateAlerts = dedupeKey
           ? await storage.getAlertsByUserId(userId)
@@ -896,6 +897,7 @@ export class AlertService {
           continue;
         }
         if (!created) continue;
+        createdCount++;
 
         // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
         // n'apparaissait qu'au prochain rafraîchissement, sans rien signaler.
@@ -919,9 +921,9 @@ export class AlertService {
         }
       }
 
-      console.log(`✅ Alerte créée: ${alertData.title}`);
+      log.info({ title: alertData.title, type: alertData.type, createdCount }, "alertes créées");
     } catch (error) {
-      console.error('Erreur création alerte:', error);
+      log.error({ err: error, title: alertData.title, type: alertData.type }, "création d'alerte en échec");
     }
   }
 
