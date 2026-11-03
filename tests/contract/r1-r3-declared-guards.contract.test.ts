@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 
 /**
@@ -43,7 +44,7 @@ describe("R3 : garde déclarée, 403 pour un rôle hors périmètre", { timeout:
       const refused = await session.call(method, path, { actor: denied, body });
       expect(refused.status).toBe(403);
       expect(typeof refused.body.message).toBe("string");
-      expect(JSON.stringify(refused.body)).not.toMatch(/stack|SELECT|Error:/);
+      expect(leakText(refused.body)).not.toMatch(/stack|SELECT|Error:/);
 
       const passed = await session.call(method, path, { actor: allowed, body });
       expect(passed.status, JSON.stringify(passed.body)).not.toBe(403);
