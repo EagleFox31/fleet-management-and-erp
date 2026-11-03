@@ -1,7 +1,10 @@
 import { Router, Request, Response } from "express";
 import { operationsService } from "../services/operations-service";
-import { authenticate } from "../middleware/auth";
+import { authenticate, authorize } from "../middleware/auth";
+import { moduleLogger } from "../lib/logger";
+import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
 
+const log = moduleLogger("operations");
 const router = Router();
 
 const broadcastOperationMissionUpdate = (
@@ -48,7 +51,7 @@ const broadcastOperationMissionUpdate = (
  * POST /api/operations/missions/from-fuel
  * Créer une mission depuis un enregistrement carburant
  */
-router.post("/missions/from-fuel", authenticate, async (req: Request, res: Response) => {
+router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async (req: Request, res: Response) => {
   try {
     const { fuelRecordId, clientName, orderNumber, pickupAddress, roadExpenses } = req.body;
 
@@ -63,7 +66,8 @@ router.post("/missions/from-fuel", authenticate, async (req: Request, res: Respo
         orderNumber,
         pickupAddress,
         roadExpenses,
-        userId: (req as any).user?.id || 1,
+        // authorize charge req.user : plus de repli sur l'utilisateur 1, qui attribuait la mission à l'admin.
+        userId: req.user!.id,
       }
     );
 
@@ -89,8 +93,8 @@ router.post("/missions/from-fuel", authenticate, async (req: Request, res: Respo
 
     res.json(result);
   } catch (error: any) {
-    console.error("Error creating mission from fuel:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error creating mission from fuel:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -103,8 +107,8 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
     const missions = await operationsService.getUpcomingMissions();
     res.json(missions);
   } catch (error: any) {
-    console.error("Error fetching upcoming missions:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching upcoming missions:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -117,8 +121,8 @@ router.get("/missions/active", authenticate, async (req: Request, res: Response)
     const missions = await operationsService.getActiveMissions();
     res.json(missions);
   } catch (error: any) {
-    console.error("Error fetching active missions:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching active missions:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -141,8 +145,8 @@ router.get("/missions", authenticate, async (req: Request, res: Response) => {
 
     res.json(missions);
   } catch (error: any) {
-    console.error("Error fetching missions:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching missions:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -164,8 +168,8 @@ router.get("/missions/by-client/:clientName", authenticate, async (req: Request,
 
     res.json(result);
   } catch (error: any) {
-    console.error("Error fetching missions by client:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching missions by client:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -178,8 +182,8 @@ router.get("/stats/by-client", authenticate, async (req: Request, res: Response)
     const stats = await operationsService.getStatsByClient();
     res.json(stats);
   } catch (error: any) {
-    console.error("Error fetching stats by client:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching stats by client:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -192,8 +196,8 @@ router.get("/stats/by-destination", authenticate, async (req: Request, res: Resp
     const stats = await operationsService.getStatsByDestination();
     res.json(stats);
   } catch (error: any) {
-    console.error("Error fetching stats by destination:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error fetching stats by destination:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 
@@ -207,8 +211,8 @@ router.get("/missions/:id/costs", authenticate, async (req: Request, res: Respon
     const costs = await operationsService.calculateMissionCosts(parseInt(id));
     res.json(costs);
   } catch (error: any) {
-    console.error("Error calculating mission costs:", error);
-    res.status(500).json({ error: error.message });
+    log.error({ err: error, requestId: req.requestId }, "Error calculating mission costs:");
+    res.status(500).json({ message: "Erreur serveur." });
   }
 });
 

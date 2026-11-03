@@ -275,5 +275,11 @@ export const MAINTENANCE_REPORT_ROLES = ["admin", "workshop_manager", "managemen
  */
 export const MISSION_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
 
+/**
+ * Changement de statut d'une mission (`PUT /api/missions/:id/status`) : gestionnaires et chauffeur.
+ * Le chauffeur n'agit que sur ses missions : la cloison `router.param("id")` du routeur le garantit.
+ */
+export const MISSION_STATUS_ROLES = [...MISSION_MANAGER_ROLES, "driver"] as const satisfies readonly AppRole[];
+
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];

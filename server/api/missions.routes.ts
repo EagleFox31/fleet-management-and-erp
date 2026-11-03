@@ -18,7 +18,7 @@ import {
 import { AppError } from "../lib/app-error";
 import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
-import { MISSION_MANAGER_ROLES } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, MISSION_STATUS_ROLES } from "@shared/constants/roles";
 
 const router = Router();
 const fuelCardService = new FuelCardService();
@@ -1733,8 +1733,17 @@ router.get("/:id/launch-readiness", async (req, res) => {
   }
 });
 
+/**
+ * Création : une mission naît en brouillon ou planifiée (l'écran de création envoie `planned`),
+ * puis avance par PUT /:id/status. Le coût réel et les budgets (`workflowData.budgetPlan`) se
+ * saisissent ensuite par PATCH /:id : Zod les retire du corps (relecture de #129, lot 2).
+ */
+const createMissionSchema = insertMissionSchema
+  .omit({ status: true, actualFuelCost: true, workflowData: true })
+  .extend({ status: z.enum(["draft", "planned"]).optional() });
+
 // POST /api/missions - Créer une nouvelle mission
-router.post("/", async (req, res) => {
+router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
   try {
     // Le routeur est monté derrière authenticate: la session porte toujours
     // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
@@ -1746,10 +1755,17 @@ router.post("/", async (req, res) => {
     const missionData = req.body;
 
     // Validate mission data
-    const validatedData = insertMissionSchema.parse({
+    const parsed = createMissionSchema.safeParse({
       ...missionData,
       createdBy: userId,
     });
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Mission invalide : une mission se crée en brouillon ou planifiée.",
+        errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
+      });
+    }
+    const validatedData = parsed.data;
 
     const hasAssignment =
       missionData.assignment &&
@@ -2243,7 +2259,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 });
 
 // PUT /api/missions/:id/status - Mettre à jour le statut d'une mission
-router.put("/:id/status", async (req, res) => {
+router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res) => {
   try {
     const missionId = parseInt(req.params.id);
     const { status, actualFdrCost: actualFdrCostBody } = req.body || {};

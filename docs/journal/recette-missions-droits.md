@@ -17,3 +17,27 @@
 - **Comment tester (QA)** : `npx vitest run tests/unit/server/write-route-guards.test.ts` (7 tests).
 - **RAIDER** : D (unitaires 1544/1544, tsc 0) ; failure memory (le cliquet couvre désormais les formes de déclaration réelles) ; R, A, I sans objet.
 - **Reste/risques** : une garde nommée autrement qu'`authorize`/`isXxx` reste comptée comme absente (faux rouge, pas faux vert).
+
+## 2026-11-03T10:32:00+01:00 — Lot 2 : création, statut et from-fuel gardés par rôle (#114)
+
+- **Quoi** :
+  - `POST /api/missions` et `POST /api/operations/missions/from-fuel` sont réservés aux gestionnaires de missions (`MISSION_MANAGER_ROLES`).
+  - `PUT /api/missions/:id/status` est ouvert aux gestionnaires et au chauffeur (`MISSION_STATUS_ROLES`).
+  - À la création, la mission naît en brouillon ou planifiée : un statut avancé est refusé en 400 lisible, et coût réel, budgets et `workflowData` sont ignorés.
+  - Les catch de `operations.routes.ts` journalisent par `moduleLogger` et ne renvoient plus `error.message`.
+  - Côté client : bouton « Nouvelle Mission » et route `/missions/new` réservés aux gestionnaires ; boutons de statut filtrés par rôle.
+- **Comment** : `authorize([...])` sur la déclaration de chaque route. Les 3 routes sortent de la liste gelée du garde-fou d'écriture. `userId` de from-fuel lu dans `req.user`.
+- **Pourquoi** : recette R3, #114. Le montage `isStaff` laissait tout le personnel créer des missions et faire avancer leur statut.
+- **Comment tester (QA)** :
+  - En technicien : `/missions/new` est inaccessible et le POST renvoie 403.
+  - En logistique : la création passe en statut planifié.
+  - Contrats : `mission-lot2-roles` (20 tests), `mission-from-fuel-roles`.
+- **RAIDER** :
+  - R : rôles issus de `shared/constants/roles.ts`.
+  - D : tsc 0, unitaires 1610/1610, contrat 1269/1269 sur main 9a42cd4.
+  - Failure memory : le cliquet du garde-fou a diminué de 3 lignes.
+  - E : AppError et logs, aucun message technique renvoyé.
+  - I, A, R rétroactif : sans objet (aucune donnée, aucune migration).
+- **Reste/risques** :
+  - `actorRole` de from-fuel lit encore `req.session.role` (entrée gelée « audit » conservée).
+  - Branchement du récépissé (#138) : petite PR après sa fusion.
