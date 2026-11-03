@@ -176,4 +176,23 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     expect(rowsAfter.some((r) => r.name === "Echec miroir")).toBe(false);
     expect(filesOnDisk()).toHaveLength(filesBefore);
   });
+
+  it("P3-2 : le depot emet vehicle_document_updated, et vehicle_updated seulement si le miroir avance", async () => {
+    const spy = vi.fn();
+    const previous = (global as any).broadcastUpdate;
+    (global as any).broadcastUpdate = spy;
+    try {
+      const types = () => spy.mock.calls.map((c) => c[0]);
+      await db.update(vehicles).set({ insuranceExpiry: "2040-01-01" }).where(eq(vehicles.id, vehicleId));
+      const older = await upload({ name: "Assurance ancienne", type: "assurance", expiryDate: "2030-01-01" }, "workshop_manager");
+      expect(older.status).toBe(201);
+      expect(types()).toEqual(["vehicle_document_updated"]);
+      spy.mockClear();
+      const newer = await upload({ name: "Assurance recente", type: "assurance", expiryDate: "2041-01-01" }, "workshop_manager");
+      expect(newer.status).toBe(201);
+      expect(types()).toEqual(["vehicle_document_updated", "vehicle_updated"]);
+    } finally {
+      (global as any).broadcastUpdate = previous;
+    }
+  });
 });

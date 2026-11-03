@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { vehicles } from "@shared/schema";
 import { db } from "../db";
 
@@ -37,7 +37,8 @@ const MIRROR_COLUMNS = {
  * `vehicle_documents` fait foi ; les colonnes `vehicles.*` en sont le miroir lu par
  * l'éligibilité mission et par les alertes. À appeler après tout dépôt ou changement
  * de date d'un document. Sans date, ou pour un type sans miroir, ne fait rien.
- * Renvoie `true` si une écriture a été demandée.
+ * Renvoie `true` si la colonne miroir a changé (mode `later` : seulement si la date avance ;
+ * mode `set` : dès qu'une écriture a lieu).
  */
 export async function syncVehicleDocumentMirror(
   vehicleId: number,
@@ -50,7 +51,15 @@ export async function syncVehicleDocumentMirror(
   const type = normalizeVehicleDocumentType(documentType);
   if (!(type in MIRROR_COLUMNS)) return false;
   const { column, key } = MIRROR_COLUMNS[type as keyof typeof MIRROR_COLUMNS];
-  const next = mode === "later" ? sql`GREATEST(${column}, ${value}::date)` : value;
-  await db.update(vehicles).set({ [key]: next }).where(eq(vehicles.id, vehicleId));
-  return true;
+  if (mode === "set") {
+    await db.update(vehicles).set({ [key]: value }).where(eq(vehicles.id, vehicleId));
+    return true;
+  }
+  // Dépôt : la colonne n'avance que si la date est plus récente (équivalent de GREATEST).
+  const advanced = await db
+    .update(vehicles)
+    .set({ [key]: value })
+    .where(and(eq(vehicles.id, vehicleId), or(isNull(column), sql`${column} < ${value}::date`)))
+    .returning({ id: vehicles.id });
+  return advanced.length > 0;
 }
