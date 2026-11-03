@@ -1136,3 +1136,23 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Toute clé étrangère déclare son `onDelete` en choisissant explicitement entre CASCADE (l'enfant n'a pas de sens sans le parent) et RESTRICT (le parent est une donnée de référence), avec un test de suppression du parent portant des enfants. Une migration qui supprime des lignes ne supprime que ce qu'elle peut prouver redondant.
+
+## 2026-11-02 - vi.mock inopérant dans les contrats selon l'ordre des shards
+
+### Constat
+- CI de #117 (tests seuls, sans rapport) : `document-renewal-centers.contract.test.ts` échoue sur le shard contract 4, « un 409 levé par le résolveur reste un 409 », 201 reçu au lieu de 409. main verte, même code.
+
+### Cause racine
+- Le test forçait le 409 par `vi.mock` du résolveur. `vitest.contract.config.ts` tourne en `isolate: false` + un worker (volontaire, #109) : le cache de modules est partagé entre fichiers. Si un fichier précédent du shard a déjà chargé les routes, elles gardent le vrai résolveur, le mock ne s'applique pas, le centre est créé. #117 ajoutait des fichiers, la répartition des shards a changé.
+
+### Classification
+- Défaut de test (isolation), pas défaut produit : l'unicité normalisée et la course réelle étaient couvertes par d'autres cas, verts.
+
+### Résolution
+- Panne provoquée en base : trigger `BEFORE INSERT` temporaire levant `23505` pour le seul nom du test, supprimé dans le `finally`. Le vrai résolveur prend son chemin de course (`isUniqueViolation` → AppError 409). Le test vérifie aussi qu'aucun centre n'est créé.
+
+### Prévention (vérifiable)
+- `tests/unit/server/contract-no-vi-mock.test.ts` échoue sur tout `vi.mock` / `vi.doMock` sous `tests/contract`. Règle dans `tests/README.md` § Pattern.
+
+### Règle Projet (obligatoire)
+- Un mock de module suppose un cache de modules isolé par fichier. Avant d'en écrire un, vérifier `isolate` dans la config de la suite ; sinon simuler la panne au niveau de la ressource (base, réseau) ou injecter la dépendance.
