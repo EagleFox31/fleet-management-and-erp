@@ -275,5 +275,26 @@ export const MAINTENANCE_REPORT_ROLES = ["admin", "workshop_manager", "managemen
  */
 export const MISSION_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
 
+/**
+ * Changement de statut d'une mission (`PUT /api/missions/:id/status`) : gestionnaires et chauffeur.
+ * Le chauffeur n'agit que sur ses missions : la cloison `router.param("id")` du routeur le garantit.
+ */
+export const MISSION_STATUS_ROLES = [...MISSION_MANAGER_ROLES, "driver"] as const satisfies readonly AppRole[];
+
+/**
+ * Statuts qu'un rôle hors `MISSION_MANAGER_ROLES` (le chauffeur affecté) peut viser par
+ * `PUT /api/missions/:id/status` : démarrer et livrer. Clôturer (`completed`, qui écrit le coût
+ * réel) et annuler restent aux gestionnaires : le chauffeur n'écrit aucun montant (décision du 3/11).
+ */
+export const DRIVER_MISSION_STATUS_TARGETS = ["in_progress", "delivered"] as const;
+
+/** Vrai si `role` peut viser `targetStatus` par `PUT /api/missions/:id/status`. */
+export function canRoleSetMissionStatus(role: string | null | undefined, targetStatus: string): boolean {
+  const r = String(role || "");
+  if ((MISSION_MANAGER_ROLES as readonly string[]).includes(r)) return true;
+  if (!(MISSION_STATUS_ROLES as readonly string[]).includes(r)) return false;
+  return (DRIVER_MISSION_STATUS_TARGETS as readonly string[]).includes(targetStatus);
+}
+
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];

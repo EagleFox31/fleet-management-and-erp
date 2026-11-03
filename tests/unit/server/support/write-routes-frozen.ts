@@ -46,7 +46,6 @@ export const T3_WITHOUT_BODY_VALIDATION: readonly string[] = [
   "post /api/fuel-card/recharge",
   "post /api/invoices/calculate-vat",
   "post /api/labor-catalog",
-  "post /api/operations/missions/from-fuel",
   "post /api/supplier-invoices/:id/payment",
   "post /api/users/change-password",
   "post /api/warehouse/stock-movement",
