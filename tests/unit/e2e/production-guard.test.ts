@@ -117,9 +117,8 @@ describe("production-guard (vitest intégration et contrat)", () => {
     expect(() => assertTestDatabaseNotProduction(TEST, env({ E2E_PRODUCTION_DB_MARKERS: "ep-plain-lake" }))).toThrow();
   });
 
-  it("est branché dans tests/support/setup-db.ts avant la redirection de DATABASE_URL", () => {
-    const src = readFileSync("tests/support/setup-db.ts", "utf8");
-    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeGreaterThan(-1);
-    expect(src.indexOf("assertTestDatabaseNotProduction(testUrl)")).toBeLessThan(src.indexOf("process.env.DATABASE_URL = testUrl"));
+  it("est repris par le garde-fou de e2e/helpers/production-guard.ts, appelé par setup-db.ts", () => {
+    expect(readFileSync("e2e/helpers/production-guard.ts", "utf8")).toContain("productionMarkers(");
+    expect(readFileSync("tests/support/setup-db.ts", "utf8")).toContain("assertSafeTestDatabase()");
   });
 });

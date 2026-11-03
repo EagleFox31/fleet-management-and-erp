@@ -25,7 +25,7 @@ Même Neon que `npm run dev` (`DATABASE_URL`). Pas de copie, pas de « branche �
 
 Les factories créent des lignes préfixées `TEST-` (username, immat, référence pièce…). `afterEach` les supprime ; un filet `afterAll` enlève d'éventuels orphelins `TEST-*` si un test a crashé.
 
-`DATABASE_URL_TEST` doit viser une **branche Neon de test**, passée en variable d'environnement au lancement (sans modifier `.env`). Si la variable manque, on retombe sur `DATABASE_URL`.
+`DATABASE_URL_TEST` doit viser une **branche Neon de test**, passée en variable d'environnement au lancement (sans modifier `.env`). Si la variable manque, les suites **refusent de démarrer** (aucun repli sur `DATABASE_URL`).
 
 ### Postgres local (plus rapide que Neon)
 
@@ -63,7 +63,7 @@ Repousser le schéma à chaque changement de branche. Supprimer la base en fin d
 La CI (`.github/workflows/ci.yml`) utilise le même montage en `services:`, avec le contrat découpé en shards vitest
 (`--shard=i/n`), une base par shard.
 
-**Garde-fou** : `tests/support/setup-db.ts` refuse de démarrer (intégration et contrat) quand l'URL effective vise la production (endpoint Neon de production ou marqueur de `E2E_PRODUCTION_DB_MARKERS`). Même détection que pour les e2e : `e2e/helpers/production-guard.ts`, cas unitaires dans `tests/unit/e2e/production-guard.test.ts`.
+**Garde-fou** : `tests/support/setup-db.ts` (intégration, contrat) et `tests/support/setup-unit.ts` (unitaires) appellent `e2e/helpers/production-guard.ts` et refusent de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` diffère de `DATABASE_URL_TEST`, si `DATABASE_URL_TEST` manque, ou si l'hôte est interdit : `TEST_DB_FORBIDDEN_HOSTS` (liste à virgules), `E2E_PRODUCTION_DB_MARKERS`, ou tout `*.neon.tech` sauf `ALLOW_NEON_TEST_DB=1`. Les scripts `test:integration` et `test:contract` ne chargent plus `.env` : ne jamais l'ajouter. Cas : `tests/unit/server/test-db-guard.test.ts`.
 
 ## Pattern
 
