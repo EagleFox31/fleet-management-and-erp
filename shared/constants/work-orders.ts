@@ -1,4 +1,5 @@
 import { workOrders } from "@shared/schema";
+import { WORK_ORDER_STATUSES, type WorkOrderStatus } from "./work-order-transitions";
 
 /**
  * Libellés français du statut et de la priorité des ordres de travail :
@@ -8,7 +9,6 @@ import { workOrders } from "@shared/schema";
  * `Record<enum, string>` dérivé du schéma : une valeur d'enum ajoutée sans
  * libellé casse `tsc`.
  */
-export type WorkOrderStatus = NonNullable<typeof workOrders.$inferSelect>["status"];
 export type WorkOrderPriority = NonNullable<typeof workOrders.$inferSelect>["priority"];
 
 export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
@@ -26,6 +26,9 @@ export const WORK_ORDER_PRIORITY_LABELS: Record<WorkOrderPriority, string> = {
   critical: "Critique",
 };
 
-/** Valeurs de l'enum du schéma, à l'exécution. */
-export const WORK_ORDER_STATUSES = workOrders.status.enumValues as readonly WorkOrderStatus[];
+/**
+ * Statuts : source unique dans work-order-transitions.ts (réexportés ici).
+ * Priorités : valeurs de l'enum du schéma, à l'exécution.
+ */
+export { WORK_ORDER_STATUSES, type WorkOrderStatus };
 export const WORK_ORDER_PRIORITIES = workOrders.priority.enumValues as readonly WorkOrderPriority[];

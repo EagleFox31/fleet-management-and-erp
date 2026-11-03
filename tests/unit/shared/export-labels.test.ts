@@ -6,6 +6,7 @@ import {
   WORK_ORDER_STATUSES,
   WORK_ORDER_STATUS_LABELS,
 } from "@shared/constants/work-orders";
+import { workOrders } from "@shared/schema";
 
 /** Chaque valeur d'enum du schema a un libelle francais non vide (exports et UI). */
 describe("libelles d'enums partages", () => {
@@ -20,6 +21,10 @@ describe("libelles d'enums partages", () => {
       expect(label?.trim(), v).toBeTruthy();
     }
     expect(Object.keys(labels).sort()).toEqual([...valeurs].sort());
+  });
+
+  it("la liste des statuts (work-order-transitions.ts) reste celle de l'enum du schema", () => {
+    expect([...WORK_ORDER_STATUSES].sort()).toEqual([...workOrders.status.enumValues].sort());
   });
 
   it("couvre les valeurs reelles de l'ancien defaut", () => {
