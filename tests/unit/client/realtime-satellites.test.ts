@@ -86,8 +86,6 @@ const SATELLITE_KEY = /(dashboard|statistics|stats|kpi|alerts|low-on-stock|low-s
  * qu'un événement la couvre ; ne jamais en ajouter sans événement serveur à venir nommé.
  */
 const UNCOVERED_SATELLITES: string[] = [
-  // useBilling.ts : aucune route serveur ne répond à ce chemin (appel mort, à retirer côté client).
-  "/api/invoices/monthly-stats",
   // Relances d'acquisition véhicule : aucun événement serveur, l'écran invalide lui-même après action.
   "/api/workflows/stats",
 ];
@@ -182,7 +180,7 @@ describe("couche 3 : table des écrans satellites", () => {
 
   it("les listes gelées ne grandissent pas (égalité stricte)", () => {
     expect([...NOT_YET_IN_TABLE].sort()).toEqual([]);
-    expect([...UNCOVERED_SATELLITES].sort()).toEqual(["/api/invoices/monthly-stats", "/api/workflows/stats"]);
+    expect([...UNCOVERED_SATELLITES].sort()).toEqual(["/api/workflows/stats"]);
   });
 
   it("le carburant d'un véhicule (fiche véhicule) suit les événements carburant", () => {
