@@ -424,6 +424,43 @@ END $$;
 DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
 
 /**
+ * P3-2 : récépissé provisoire d'une demande de renouvellement (date de validité, fichier, qui et quand).
+ * Rend le véhicule éligible jusqu'à receipt_valid_until inclus ; distinct de proof_file_*, preuve de clôture.
+ * CHECK document_renewal_requests_receipt_complete : date et fichier vont ensemble. Doit rester identique à
+ * server/db/migrations/20261103_document_renewal_receipt.sql : tests/unit/server/document-renewal-receipt-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const DOCUMENT_RENEWAL_RECEIPT_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_valid_until date;
+ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_file_name text;
+ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_file_path text;
+ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_uploaded_at timestamp;
+ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS receipt_uploaded_by integer;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_uploaded_by_users_id_fk'
+  ) THEN
+    ALTER TABLE document_renewal_requests ADD CONSTRAINT document_renewal_requests_receipt_uploaded_by_users_id_fk
+      FOREIGN KEY (receipt_uploaded_by) REFERENCES users(id);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'document_renewal_requests'::regclass
+      AND conname = 'document_renewal_requests_receipt_complete'
+  ) THEN
+    ALTER TABLE document_renewal_requests ADD CONSTRAINT document_renewal_requests_receipt_complete
+      CHECK ((receipt_valid_until IS NULL) = (receipt_file_path IS NULL));
+  END IF;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'document_renewal_requests_receipt_complete non posée : récépissés sans date ou sans fichier dans document_renewal_requests';
+END $$;`;
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -977,6 +1014,8 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS center_accreditation_snapshot text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS inspector_name text`);
     await db.execute(sql`ALTER TABLE document_renewal_requests ADD COLUMN IF NOT EXISTS inspector_code text`);
+    // Récépissé de renouvellement (P3-2) — jumelle de server/db/migrations/20261103_document_renewal_receipt.sql.
+    await pool.query(DOCUMENT_RENEWAL_RECEIPT_SQL);
     await db.execute(sql`
       UPDATE document_renewal_centers
       SET accreditation_number = 'AGR-' || LPAD(id::text, 4, '0')
