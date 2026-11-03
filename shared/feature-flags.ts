@@ -43,6 +43,9 @@ export const FEATURE_FLAGS = {
   "maintenance-report": { level: "should", defaultEnabled: false, label: "Rapport de maintenance" },
   "excel-import": { level: "should", defaultEnabled: false, label: "Import Excel" },
   "technician-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du technicien" },
+  // Protection serveur contre les doublons des écritures rejouées (lot #10b), indépendante du rôle.
+  // Un drapeau d'écran hors ligne (technician-offline, driver-offline) exige celui-ci.
+  "offline-writes": { level: "should", defaultEnabled: false, label: "Écritures rejouables sans doublon" },
 
   "email-notifications": { level: "later", defaultEnabled: false, label: "Alertes par e-mail" },
   finance: { level: "later", defaultEnabled: false, label: "Trésorerie et recouvrement" },

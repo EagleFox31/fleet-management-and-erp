@@ -33,7 +33,7 @@ Base d'intégration `lot/int/CDC-0-base` : fusion de DB-1 et CDC-0a, créée par
 | #2 avertissement mission/entretien api puis fe | `lot/api/CDC-2-avertissement-entretien`, `lot/fe/CDC-2-avertissement-entretien` | fleet-api, fleet-fe | CDC-0b | - | à lancer | - |
 | #3 QR pièces api puis fe | `lot/api/CDC-3-qr-pieces`, `lot/fe/CDC-3-qr-pieces` | fleet-api, fleet-fe | CDC-0b | - | à lancer | - |
 | #9 import Excel api puis fe | `lot/api/CDC-9-import-excel`, `lot/fe/CDC-9-import-excel` | fleet-api, fleet-fe | CDC-0b | - | à lancer | - |
-| #10b idempotence serveur | `lot/api/CDC-10-idempotence` | fleet-api | CDC-0b | - | à lancer | - |
+| #10b idempotence serveur | `lot/api/CDC-10-idempotence` | fleet-api | CDC-0b | - | PR brouillon | - |
 | #10c hors ligne technicien | `lot/fe/CDC-10-hors-ligne-technicien` | fleet-fe | 10a + 10b | - | à lancer | - |
 | #8 rapport de maintenance Word api puis fe | `lot/api/CDC-8-rapport-maintenance`, `lot/fe/CDC-8-rapport-maintenance` | fleet-api, fleet-fe | CDC-7 api | - | à lancer | - |
 | DB-2 ventes + GPS | `lot/db/CDC-0b-ventes-gps` | fleet-db | DB-1 | - | attend décisions #4 et #6 | - |
@@ -83,6 +83,12 @@ Base d'intégration `lot/int/CDC-0-base` : fusion de DB-1 et CDC-0a, créée par
 - **Décisions ajoutées** : 11 (force push de #56 ou nouvelle branche), 12 (correctif du service worker d406368 avant la recette, par dérogation au gel), 13 (amendement par la session de tests des tests existants que #7 rend rouges).
 
 ## Lot #10c — périmètre obligatoire hérité de la relecture de #56 (2026-11-03)
+
+Règle posée par #10b : **un drapeau d'écran hors ligne (`technician-offline`, `driver-offline`) exige
+`offline-writes`**. Sans lui, le serveur ignore `Idempotency-Key` et un rejeu de la file peut écrire
+deux fois. Routes rejouables : `IDEMPOTENCY_ROUTES` dans `server/lib/idempotency-config.ts` ; une route
+de #10c s'y ajoute, jamais dans le garde. Le client envoie une clé par écriture (UUID), stable entre
+les rejeux, et traite 409 (encore en cours : réessayer plus tard) et 422 (clé réutilisée : bogue client).
 
 Réserves d'aa (fleet-relecteur + fleet-securite) sur CDC-10a, à livrer avant la mise en production du hors ligne :
 

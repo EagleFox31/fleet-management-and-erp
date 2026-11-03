@@ -30,13 +30,16 @@ describe("journal d'audit des ressources CDC", () => {
   });
 });
 
-describe("garde d'idempotence (squelette)", () => {
-  it("liste de routes vide", () => {
-    expect(IDEMPOTENCY_ROUTES).toHaveLength(0);
+describe("garde d'idempotence (socle)", () => {
+  it("lot #10b : périmètre chauffeur seulement (statut de mission, kilométrage)", () => {
+    expect(IDEMPOTENCY_ROUTES.map((r) => `${r.method} ${r.pattern.source}`)).toEqual([
+      "PUT ^\\/missions\\/\\d+\\/status$",
+      "PUT ^\\/vehicles\\/\\d+\\/mileage$",
+    ]);
   });
 
-  it("transmet toujours la requête, drapeau coupé ou allumé", () => {
-    for (const flags of [undefined, "technician-offline=on"]) {
+  it("transmet une route non listée, drapeau coupé ou allumé", () => {
+    for (const flags of [undefined, "offline-writes=on"]) {
       if (flags) process.env.FEATURE_FLAGS = flags;
       const next = vi.fn();
       idempotencyGuard()({ method: "POST", originalUrl: "/api/work-orders/1/parts" } as never, {} as never, next);

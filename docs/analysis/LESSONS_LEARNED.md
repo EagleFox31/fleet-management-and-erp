@@ -1292,6 +1292,27 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Avant d'annoncer une règle unifiée, rechercher les autres occurrences de la fonction (`grep -rn <nom>`) et les lister dans la PR ; une occurrence restante se déclare comme résiduel, pas comme corrigée.
 - Récurrence : même classe que « Écran ouvert à un rôle que son API refuse » (2026-10-31) et « Borne KPI complétée par le serveur » (2026-11-02). Les corrections précédentes étaient ponctuelles ; cette entrée exige un garde-fou qui compare les chemins décideurs.
 
+## 2026-11-03 - Garde d'idempotence : clé libérée sur une connexion coupée (#131)
+
+### Contexte
+- `server/middleware/idempotency-guard.ts` libérait la clé sur `close`. Si la connexion coupait pendant que la route écrivait, la réponse partait ensuite sans être enregistrée, et le réessai du client réexécutait l'écriture : le doublon que la garde devait empêcher.
+
+### Cause racine
+- `close` ne dit pas « la route a échoué » mais « le client n'écoute plus ». La garde confondait perte de connexion et échec connu.
+
+### Classification
+- Near miss, intégrité des écritures (doublon hors ligne), relevé en relecture avant fusion.
+
+### Résolution
+- Rien n'est libéré sur `close` ; sur `finish`, la clé n'est libérée que si aucune réponse n'a été enregistrée ; une route qui ne répond jamais laisse expirer la réservation (arrêt du serveur compris).
+- Même passage : `.catch` journalisé sur l'envoi différé (M1) ; compte supprimé → 401 avant toute réservation (B3).
+
+### Prévention (vérifiable)
+- `tests/unit/server/idempotency-guard.test.ts` : « connexion coupée puis réponse 200 » (reserve puis complete, le second passage rejoue sans exécuter la route) ; rouge avec l'ancienne garde.
+
+### Règle Projet (obligatoire)
+- Une garde d'idempotence ne libère une clé que sur une réponse connue (5xx, 401, 403, 408, 429, ou fin sans réponse enregistrée), jamais sur une perte de connexion.
+
 ## 2026-11-03 - Valider une valeur, en employer une autre (#130)
 
 ### Contexte
