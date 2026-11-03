@@ -115,3 +115,8 @@ par fleet-db d'abord, puis fleet-api.
 - Blocage de mission pour les entretiens de sécurité en retard (freins, pneus), délai de grâce,
   dérogation tracée.
 - Fenêtre d'alerte par type d'entretien (30 j pour tous aujourd'hui).
+
+## Statut (2026-11-03)
+
+- **Lot 1 livré** : PR #126 (alertes avant échéance, blocage à l'expiration, source `vehicle_documents`, miroir `vehicles.*`, alerte au chef de parc en cours de mission).
+- **Lot 2b** : tous les points **récépissé** (point 3 des décisions, colonnes du récépissé provisoire, éligibilité qui reconnaît un récépissé valide, blocage à sa date de validité) sont renvoyés au lot 2b. Le lot 1 ne les traite pas.
