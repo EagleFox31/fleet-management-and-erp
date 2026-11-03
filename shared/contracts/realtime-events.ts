@@ -9,7 +9,16 @@
  * Réutilisés sans redéclaration : `work_order_updated` (contrôle qualité),
  * `part_requirement_updated` (réception), `alert_created`.
  */
-import { DOCUMENT_RENEWAL_VIEWER_ROLES, FUEL_READ_ROLES, type AppRole } from "../constants/roles";
+import {
+  DOCUMENT_RENEWAL_VIEWER_ROLES,
+  FUEL_READ_ROLES,
+  GPS_VIEW_ROLES,
+  MISSION_ADVISORY_ROLES,
+  PART_SALE_READ_ROLES,
+  STAFF_ROLES,
+  WORK_ORDER_COST_READ_ROLES,
+  type AppRole,
+} from "../constants/roles";
 
 export type RealtimeScope =
   | { type: "broadcast" }
@@ -27,10 +36,43 @@ type EventDefinition<TPayload> = {
 
 const WORKSHOP_SUPERVISORS = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 
+/**
+ * Clés de query réelles, pas des préfixes de chemin : TanStack compare les clés élément par
+ * élément, `["/api/kpi"]` n'invalide donc pas `["/api/kpi/failures"]`. Chaque entrée est le
+ * premier élément d'une `queryKey` posée par un écran
+ * (`tests/unit/client/realtime-invalidation-keys.test.ts`).
+ */
+export const KPI_QUERY_KEYS = [
+  "/api/kpi/incidents-per-month",
+  "/api/kpi/preventive-compliance",
+  "/api/kpi/avg-cost-per-intervention",
+  "/api/kpi/maintenance-costs",
+  "/api/kpi/failures",
+] as const;
+
+/** Écrans du magasin que le stock fait bouger (alertes de réapprovisionnement, valeur, consommation). */
+export const WAREHOUSE_QUERY_KEYS = [
+  "/api/warehouse/reorder-alerts",
+  "/api/warehouse/statistics",
+  "/api/warehouse/top-consumed-parts",
+  "/api/warehouse/stock-value-history",
+  "/api/warehouse/inventory-value",
+] as const;
+
+const PART_SALE_INVALIDATES = [
+  "/api/part-sales",
+  "/api/parts",
+  "/api/parts/low-on-stock",
+  "/api/parts/statistics",
+  ...WAREHOUSE_QUERY_KEYS,
+  ...KPI_QUERY_KEYS,
+] as const;
+
 export const REALTIME_EVENTS = {
   incident_reported: {
-    scope: { type: "roles", roles: WORKSHOP_SUPERVISORS },
-    invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts"],
+    // Atelier et logistique : les avis de maintenance de mission sont lus par MISSION_ADVISORY_ROLES.
+    scope: { type: "roles", roles: [...new Set<AppRole>([...WORKSHOP_SUPERVISORS, ...MISSION_ADVISORY_ROLES])] },
+    invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts", "/api/mission-advisories"],
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
     scope: { type: "roles", roles: FUEL_READ_ROLES },
@@ -64,6 +106,13 @@ export const REALTIME_EVENTS = {
     scope: { type: "broadcast" },
     invalidates: ["/api/vehicle-document-types"],
   } as EventDefinition<{ code: string }>,
+  workshop_labor_rate_created: {
+    // Un nouveau taux change le coût des OT clos après sa date d'effet : KPI, listes du
+    // technicien et taux d'un OT ouvert (clé `/api/work-orders/:id/labor-rate`, invalidée
+    // par prédicat dans useRealTimeSync, la clé portant l'identifiant).
+    scope: { type: "roles", roles: [...WORK_ORDER_COST_READ_ROLES] },
+    invalidates: [...KPI_QUERY_KEYS, "/api/technician/work-orders", "/api/technician/my-work-orders"],
+  } as EventDefinition<{ effectiveFrom: string }>,
   alerts_read: {
     // Nominatif : les autres onglets du même compte remettent cloche et compteur à jour.
     scope: "user",
@@ -78,6 +127,33 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: DOCUMENT_RENEWAL_VIEWER_ROLES },
     invalidates: ["/api/document-renewals/centers"],
   } as EventDefinition<{ id: number }>,
+
+  // Écarts du cahier des charges (chantier CDC, lot CDC-0b). Déclarés ici ; l'émetteur
+  // est livré par le lot fonctionnel concerné.
+  // Vente de pièces : le stock, l'entrepôt et les tuiles KPI changent avec la vente.
+  part_sale_validated: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: PART_SALE_INVALIDATES,
+  } as EventDefinition<{ id: number }>,
+  part_sale_cancelled: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: PART_SALE_INVALIDATES,
+  } as EventDefinition<{ id: number }>,
+  part_sale_invoiced: {
+    scope: { type: "roles", roles: PART_SALE_READ_ROLES },
+    invalidates: PART_SALE_INVALIDATES,
+  } as EventDefinition<{ id: number; invoiceId: number }>,
+  vehicle_position_updated: {
+    scope: { type: "roles", roles: GPS_VIEW_ROLES },
+    invalidates: ["/api/vehicle-positions"],
+  } as EventDefinition<{ vehicleId: number }>,
+  // Import Excel appliqué : véhicules, ordres de travail et KPI changent. Sans toast.
+  import_batch_applied: {
+    // Tout le personnel lit les véhicules et les ordres de travail (AGENTS.md section 11) ;
+    // le client est exclu, il revoit ses véhicules à sa prochaine navigation.
+    scope: { type: "roles", roles: STAFF_ROLES },
+    invalidates: ["/api/vehicles", "/api/work-orders", ...KPI_QUERY_KEYS],
+  } as EventDefinition<{ batchId: number; kind: string }>,
 } as const;
 
 export type RealtimeEventName = keyof typeof REALTIME_EVENTS;

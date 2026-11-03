@@ -1,6 +1,7 @@
 import { alertService } from "./services/alert-service";
 import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
+import { idempotencyPurgeTick } from "./jobs/idempotency-purge";
 import { clientBillingService } from "./services/client-billing-service";
 
 const log = moduleLogger("scheduler");
@@ -28,11 +29,14 @@ const INITIAL_DELAY_MS = 2_000;
 const ALERT_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 /** Au-delà, le cycle risque de chevaucher le suivant: on le signale. */
 const SLOW_CYCLE_THRESHOLD_MS = ALERT_CHECK_INTERVAL_MS * 0.5;
+const IDEMPOTENCY_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 let schedulerStarted = false;
 let alertCycleRunning = false;
 let alertCycleSkipped = 0;
 let backupTickRunning = false;
+let idempotencyPurgeRunning = false;
+let idempotencyPurgeLastRunAt = 0;
 
 /**
  * Exécute un cycle d'alertes en interdisant le chevauchement.
@@ -106,6 +110,22 @@ async function runBackupTick(reason: string): Promise<void> {
   }
 }
 
+/**
+ * Purge des clés d'idempotence, au plus une fois par heure. Sans effet tant que le drapeau
+ * `technician-offline` est coupé ou que la table `idempotency_keys` n'existe pas (lot DB-1).
+ */
+async function runIdempotencyPurgeTick(): Promise<void> {
+  if (idempotencyPurgeRunning) return;
+  if (Date.now() - idempotencyPurgeLastRunAt < IDEMPOTENCY_PURGE_INTERVAL_MS) return;
+  idempotencyPurgeRunning = true;
+  idempotencyPurgeLastRunAt = Date.now();
+  try {
+    await idempotencyPurgeTick();
+  } finally {
+    idempotencyPurgeRunning = false;
+  }
+}
+
 /** Démarre les tâches de fond. Idempotent: un second appel est sans effet. */
 export function startBackgroundJobs(): void {
   if (schedulerStarted) {
@@ -116,11 +136,13 @@ export function startBackgroundJobs(): void {
   setTimeout(() => {
     void runAlertCycle("démarrage");
     void runBackupTick("démarrage");
+    void runIdempotencyPurgeTick();
   }, INITIAL_DELAY_MS);
 
   setInterval(() => {
     void runAlertCycle("périodique");
     void runBackupTick("périodique");
+    void runIdempotencyPurgeTick();
   }, ALERT_CHECK_INTERVAL_MS);
 
   log.info({ intervalSeconds: ALERT_CHECK_INTERVAL_MS / 1000 }, "cycle d'alertes et sauvegarde planifiés");

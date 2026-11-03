@@ -1,4 +1,4 @@
-import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -1851,3 +1851,99 @@ export const partRequirementReceipts = pgTable("part_requirements", {
   receivedBy: integer("received_by").references(() => users.id),
   receivedAt: timestamp("received_at"), // P-16 : posé dans onTransition(tx)
 });
+
+// --- Chantier CDC (écarts du cahier des charges) ------------------------------------------
+// SQL : server/db/migrations/20261101_cdc_ecarts.sql et CDC_SCHEMA_STATEMENTS
+// (server/init-database.ts). Index partiels posés en SQL seulement ; CHECK et UNIQUE sont
+// aussi déclarés ici, sous le nom que Postgres leur donne, pour qu'un `drizzle-kit push`
+// (recette des tests et de la CI) crée le même schéma que la migration.
+
+// Taux horaire atelier daté (CDC #7). Aucune valeur semée : le taux en vigueur à une date est
+// la ligne au plus grand `effective_from` inférieur ou égal à cette date.
+export const workshopLaborRates = pgTable("workshop_labor_rates", {
+  id: serial("id").primaryKey(),
+  effectiveFrom: date("effective_from").notNull(),
+  hourlyRateHt: numeric("hourly_rate_ht", { precision: 15, scale: 2 }).notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("workshop_labor_rates_effective_from_key").on(table.effectiveFrom),
+  check("workshop_labor_rates_hourly_rate_ht_check", sql`${table.hourlyRateHt} >= 0`),
+]);
+
+export const insertWorkshopLaborRateSchema = createInsertSchema(workshopLaborRates).omit({
+  id: true,
+  createdBy: true,
+  createdAt: true,
+});
+
+export const IMPORT_BATCH_KINDS = ["vehicles", "interventions"] as const;
+export const IMPORT_BATCH_STATUSES = ["applied", "failed"] as const;
+
+// Lot d'import (CDC #9). Index unique partiel import_batches_applied_file_uidx :
+// un même fichier (kind, file_sha256) n'est appliqué qu'une fois.
+export const importBatches = pgTable("import_batches", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: IMPORT_BATCH_KINDS }).notNull(),
+  fileName: text("file_name"),
+  fileSha256: text("file_sha256").notNull(),
+  status: text("status", { enum: IMPORT_BATCH_STATUSES }).notNull().default("applied"),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  check("import_batches_kind_check", sql`${table.kind} IN ('vehicles', 'interventions')`),
+  check("import_batches_status_check", sql`${table.status} IN ('applied', 'failed')`),
+]);
+
+export const IDEMPOTENCY_KEY_STATES = ["in_progress", "completed"] as const;
+
+// Clés d'idempotence des écritures (CDC #10), écrites par le serveur seulement.
+// Unicité (user_id, key) ; purge sur `expires_at` (index idempotency_keys_expires_at_idx).
+export const idempotencyKeys = pgTable("idempotency_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+  requestHash: text("request_hash").notNull(),
+  state: text("state", { enum: IDEMPOTENCY_KEY_STATES }).notNull().default("in_progress"),
+  responseStatus: integer("response_status"),
+  responseBody: jsonb("response_body"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`(now() + interval '7 days')`),
+}, (table) => [
+  unique("idempotency_keys_user_id_key_key").on(table.userId, table.key),
+  check("idempotency_keys_state_check", sql`${table.state} IN ('in_progress', 'completed')`),
+]);
+
+// Colonnes CDC ajoutées à work_orders et vehicles, déclarées à part comme `workOrderQuality` :
+// `WorkOrder` est construit à la main dans server/storage.ts, et ces colonnes ne doivent pas
+// entrer dans `insertWorkOrderSchema` / `insertVehicleSchema` (écrites par le serveur).
+// `origin` : NULL = saisie dans l'application, 'history_import' = reprise d'historique.
+export const WORK_ORDER_ORIGINS = ["history_import"] as const;
+
+export const workOrderPlanning = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  dueDate: date("due_date"), // CDC #7, index partiel work_orders_preventive_due_idx
+  dueMileage: integer("due_mileage"), // CHECK work_orders_due_mileage_check, posé en SQL (work_orders est déclarée deux fois)
+  origin: text("origin", { enum: WORK_ORDER_ORIGINS }),
+  externalRef: text("external_ref"), // unique si non nul (work_orders_external_ref_uidx)
+  importFingerprint: text("import_fingerprint"), // unique si non nul (work_orders_import_fingerprint_uidx)
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export const vehicleImports = pgTable("vehicles", {
+  id: serial("id").primaryKey(),
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "set null" }),
+});
+
+export type WorkshopLaborRateRow = typeof workshopLaborRates.$inferSelect;
+export type InsertWorkshopLaborRate = z.infer<typeof insertWorkshopLaborRateSchema>;
+export type ImportBatchRow = typeof importBatches.$inferSelect;
+export type NewImportBatch = typeof importBatches.$inferInsert;
+export type ImportBatchKind = (typeof IMPORT_BATCH_KINDS)[number];
+export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
+export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
+export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
+export type VehicleImportRow = typeof vehicleImports.$inferSelect;

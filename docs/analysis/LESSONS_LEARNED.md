@@ -996,6 +996,31 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 ### Règle Projet (obligatoire)
 - Une sonde qui écrit une valeur capable de fausser un agrégat global (NaN, négatif) supprime sa ligne dans la minute, enregistre son id avant, et le fichier balaie sa plage de dates réservée en `afterAll`.
 
+## 2026-11-02 - Période KPI démesurée : plusieurs secondes de calcul puis 500
+
+### Constat
+- `GET /api/kpi/*` et `GET /api/exports/kpi-report` acceptaient `to=9999-12-30` ou `2026-02-31`. Le calcul des mois de la période bouclait plusieurs secondes avant une 500.
+
+### Cause racine
+- `isoDateSchema` ne contrôle que la forme `AAAA-MM-JJ`, pas la date ni son étendue. La boucle `monthKeysBetween` (`server/lib/kpi-rules.ts`) est linéaire en nombre de mois. Classification : entrée utilisateur non bornée qui pilote un coût de calcul.
+
+### Résolution
+- `shared/contracts/kpi-period.ts` : date réelle du calendrier, années 2000-2100, 36 mois civils au plus ; réponse 400 lisible.
+
+### Prévention (vérifiable)
+- `tests/unit/shared/kpi-period.test.ts` : les quatre schémas refusent période démesurée, date inexistante et années hors bornes.
+- `tests/contract/kpi-cdc.contract.test.ts` : 400 sans détail technique sur ces cas, pour les KPI et le rapport.
+
+### Règle Projet (obligatoire)
+- Tout paramètre de requête qui fixe la taille d'un calcul (période, pagination, profondeur) est borné dans son schéma Zod partagé ; `isoDateSchema` seul ne suffit pas pour une période.
+
+### Suite (relecture de #108) : borne implicite et fuseau
+- Constat : (1) `from` seul laissait le serveur compléter `to` par aujourd'hui, donc `from=2001-01-01` contournait le plafond de 36 mois ; (2) le contrôle ajouté pour cela lisait « aujourd'hui » en UTC alors que le serveur le lit à Douala : entre 00:00 et 01:00 à Douala, `?from=<jour de Douala>` sans `to` donnait un 400 (`from > to`).
+- Cause racine : une borne complétée par le serveur n'était pas contrôlée avec la même valeur que celle qu'il utilise ; le jour courant était calculé à deux endroits, dans deux fuseaux. Classification : règle dupliquée entre contrat et serveur.
+- Résolution : `kpiPeriodIssue` contrôle la période réelle (`to` = jour courant) ; `KPI_TIME_ZONE` et `isoDateInZone` vivent dans `shared/contracts/kpi-period.ts`, `server/lib/kpi-rules.ts` les importe, plus aucune redéclaration.
+- Prévention (vérifiable) : `tests/unit/shared/kpi-period.test.ts` (`from` seul au-delà de 36 mois refusé ; à 00:30 Douala, soit 23:30 UTC la veille, `from` = jour de Douala accepté, lendemain refusé).
+- Règle : une valeur par défaut complétée côté serveur se contrôle avec la même fonction, importée du contrat, et un jour métier se calcule une seule fois, dans un fuseau nommé.
+
 ## 2026-11-02 - Brouillon d'acquisition recréé après la clôture, abandon qui touchait l'acquisition terminée
 
 ### Constat
@@ -1156,6 +1181,28 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 
 ### Règle Projet (obligatoire)
 - Un mock de module suppose un cache de modules isolé par fichier. Avant d'en écrire un, vérifier `isolate` dans la config de la suite ; sinon simuler la panne au niveau de la ressource (base, réseau) ou injecter la dépendance.
+
+## 2026-11-03 - Contraintes CDC posées en SQL seulement, absentes après drizzle-kit push
+
+### Constat
+- CI de #119 sur 8ee48b2 : jobs integration et contract (1) rouges (`cdc-schema-idempotence`, `kpi-cdc` : « ok » ou 500 reçus au lieu de 23514 / 23505 / 409). La PR annonçait pourtant des contrats verts : la preuve venait d'une base locale préparée autrement, la CI n'avait pas été relue.
+
+### Cause racine
+- Les CHECK de `workshop_labor_rates`, `import_batches`, `idempotency_keys`, l'UNIQUE `(user_id, key)` et `work_orders_due_mileage_check` n'étaient déclarés que dans `20261101_cdc_ecarts.sql`. La recette des tests et de la CI fait `drizzle-kit push` puis `initializeDatabase()` : les tables existent déjà, `CREATE TABLE IF NOT EXISTS` et `ADD COLUMN IF NOT EXISTS` sont sautés avec leurs contraintes. Drizzle nommait en outre l'unique de date `..._effective_from_unique`, alors que le service attend `..._effective_from_key` pour répondre 409.
+
+### Classification
+- Dérive de schéma entre Drizzle et SQL, plus défaut de preuve (CI non vérifiée avant de l'annoncer).
+
+### Résolution
+- 0ed84c5 : CHECK et UNIQUE déclarés aussi dans `shared/schema.ts` sous le nom que Postgres leur donne. `work_orders` étant déclarée deux fois dans le schéma, `work_orders_due_mileage_check` est réconciliée par un bloc DO idempotent (`pg_constraint`, `NOT VALID`) dans la migration et `init-database.ts`. CI 8/8.
+
+### Prévention (vérifiable)
+- Les jobs CI integration et contract partent d'un `drizzle-kit push` sur base neuve : toute contrainte absente de Drizzle fait échouer `cdc-schema-idempotence.test.ts` (cas refusés 23514 / 23505).
+- `tests/unit/server/cdc-schema-drift.test.ts` garde la migration et `CDC_SCHEMA_STATEMENTS` identiques.
+- Reste ouvert : une base déjà poussée avec un schéma antérieur à 0ed84c5 n'a pas ces contraintes ; réconciliation au démarrage à faire avant d'activer `maintenance-report`, `excel-import` ou `technician-offline` (go/no-go fleet-release, condition C1).
+
+### Règle Projet (obligatoire)
+- Une contrainte écrite en SQL est aussi déclarée dans Drizzle, sous le même nom, ou réconciliée par un bloc DO idempotent. Une PR n'annonce « CI verte » qu'après `gh pr checks` sur sa tête.
 
 ## 2026-11-03 - Second drizzle-kit push en échec (index colonne puis expression)
 

@@ -43,6 +43,8 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 - `E2E_CHANNEL`: navigateur installe a utiliser a la place du Chromium de Playwright (`msedge`, `chrome`). Utile quand `playwright install` n'a pas ete lance sur le poste
 - `E2E_PRODUCTION_DB_MARKERS`: hôtes (ou fragments) supplémentaires traités comme production par le garde-fou
 - `DATABASE_URL`: requise par les specs 07 et 08, qui creent leurs donnees directement en base (d'ou `node --env-file=.env`)
+- `FEATURE_FLAGS`: dans l'environnement du **serveur**. La spec 20 saute l'export KPI sans `kpi-reports=on` (le test l'indique)
+- Base locale : le serveur et le runner peuvent viser le Postgres Docker (`DATABASE_URL=postgres://fleet:fleet@postgres:5432/<base>` + `DATABASE_WS_PROXY=localhost:5433/v1`), une base dédiée par session (`tests/README.md`), schéma poussé par `drizzle-kit push` sur `localhost:54320`
 - `E2E_USERNAME`: login e2e pour les specs 01 a 05 (defaut `admin`)
 - `E2E_PASSWORD`: mot de passe associe (defaut `admin123`)
 - `E2E_MANAGER_USERNAME` / `E2E_MANAGER_PASSWORD`: profil createur de la spec 06 (defaut `terry`, chef d'atelier). Doit avoir le droit de creer un OT (`admin` ou `workshop_manager`)

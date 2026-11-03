@@ -7,6 +7,8 @@ CREATE OR REPLACE FUNCTION check_maintenance_schedule_due() RETURNS TRIGGER AS $
 DECLARE
     days_past INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Maintenance due par date
     IF NEW.is_active = true 
        AND NEW.scheduled_date IS NOT NULL 
@@ -40,6 +42,8 @@ DECLARE
     schedule RECORD;
     excess_km INTEGER;
 BEGIN
+  -- Reprise d'historique (CDC #9) : SET LOCAL fleetos.suppress_side_effects = 'on' coupe cet effet.
+  IF current_setting('fleetos.suppress_side_effects', true) = 'on' THEN RETURN NEW; END IF;
     -- Vérifier toutes les maintenances actives basées sur le kilométrage pour ce véhicule
     FOR schedule IN 
         SELECT id, title, scheduled_mileage, vehicle_id
