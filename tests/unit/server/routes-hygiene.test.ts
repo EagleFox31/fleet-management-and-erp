@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import * as roles from "../../../shared/constants/roles";
 import {
   classifyAuthGuards,
+  extendKinds,
   extractGetRoutes,
+  findUnanalysable,
   judgeGetRoute,
   routerLevelGuards,
   scanOpenGetReads,
@@ -33,16 +35,24 @@ import {
  *    `isWorkflowDocumentWriter`...) doit, AVANT d'envoyer la donnée, contrôler le propriétaire
  *    (`canAccessOwned`, `ownerScopeOf`) ou l'OT (`assertWorkOrderReadable`, obligatoire sur un
  *    chemin d'OT), sinon porter une garde qui exclut le client (AGENTS.md §11). Les gardes sont
- *    classées depuis `server/middleware/auth.ts` (rôles réels), commentaires retirés, en-tête
- *    coupé au premier `async` / `function` / `(req`. Liste gelée des lectures restantes : elle ne
- *    peut que rétrécir (une entrée corrigée doit en sortir). Une nouvelle lecture ouverte échoue.
+ *    classées d'après leur SOURCE (échec fermé, lot A4) : rôles de `server/middleware/auth.ts`,
+ *    `const X = authorize([...])` du fichier, `authorize` en ligne, spreads résolus, gardes posées
+ *    au montage dans `server/api/index.ts` (qui couvrent aussi `routes.ts`, servi après). Tout
+ *    identifiant inconnu (`requireSession`, `guardByX`, `gardeX`, une garde passée par une variable)
+ *    est permissif ; seule une liste blanche par fichier (`RESTRICTIVE_ALLOWLIST`, preuve par contrat)
+ *    y déroge. Un `.get(` sans chemin littéral, un chemin en tableau ou `router.route()` est rapporté
+ *    (`unanalysable`, gelé). Limite assumée : un contrôle de VALEUR (un `ownerScopeOf` calculé puis
+ *    inutilisé) échappe à toute analyse statique, les contrats HTTP font foi. Liste gelée des lectures
+ *    restantes : elle ne peut que rétrécir (une entrée corrigée doit en sortir).
  */
 /**
  * Lectures encore ouvertes à tout compte connecté, à traiter une à une (dette connue, 3 novembre 2026).
- * Certaines sont masquées par un routeur de `server/api/` monté avant `registerRoutes`
- * (`/api/exports/*`, `/api/warehouse/*`, `/api/alerts*`, `/api/fuel-card/*`) ou cloisonnent en ligne
- * par un rôle lu sur l'utilisateur chargé (`/api/vehicles`, `/api/users`, `/api/work-orders/:id`) :
- * le scan statique ne le voit pas, il faut vérifier la route servie avant de la retirer d'ici.
+ * Certaines cloisonnent en ligne par un rôle lu sur l'utilisateur chargé (`/api/vehicles`,
+ * `/api/users`, `/api/work-orders/:id`) ou par `req.session.userId` (`/api/workflows/*`) : le scan
+ * statique ne le voit pas, il faut une preuve par contrat avant de les retirer d'ici. Retirées avec
+ * preuve (client 403) par `client-read-scope-tires.contract.test.ts` : pneus, `/api/fault-catalog`,
+ * `/api/suppliers/*` (montage `SUPPLIER_READ_ROLES`), `/api/warehouse/*`, `/api/fuel-card/*`
+ * et `/api/exports/*` (montage `exportsGuard`).
  */
 const OPEN_GET_READS_FROZEN: string[] = [
   "server/api/document-renewals.routes.ts GET /document-renewals/centers",
@@ -58,49 +68,25 @@ const OPEN_GET_READS_FROZEN: string[] = [
   "server/routes.ts GET /api/alerts/unread",
   "server/routes.ts GET /api/auth/me",
   "server/routes.ts GET /api/dashboard/technician-stats",
-  "server/routes.ts GET /api/exports/complete",
-  "server/routes.ts GET /api/exports/fuel",
-  "server/routes.ts GET /api/exports/inventory",
-  "server/routes.ts GET /api/exports/users",
-  "server/routes.ts GET /api/exports/vehicles",
-  "server/routes.ts GET /api/fault-catalog",
-  "server/routes.ts GET /api/fuel-card/balance",
-  "server/routes.ts GET /api/fuel-card/history",
-  "server/routes.ts GET /api/fuel-card/monthly-stats",
-  "server/routes.ts GET /api/fuel-card/stats-by-client",
   "server/routes.ts GET /api/onboarding/status",
-  "server/routes.ts GET /api/suppliers/:id/invoices/payment",
-  "server/routes.ts GET /api/suppliers/summary",
-  "server/routes.ts GET /api/suppliers/top",
   "server/routes.ts GET /api/technician/my-work-orders",
-  "server/routes.ts GET /api/tire-inspections",
-  "server/routes.ts GET /api/tire-inspections/:id",
-  "server/routes.ts GET /api/tire-inspections/recent",
-  "server/routes.ts GET /api/tire-rotations",
-  "server/routes.ts GET /api/tire-rotations/:id/details",
-  "server/routes.ts GET /api/tires",
-  "server/routes.ts GET /api/tires/:id",
-  "server/routes.ts GET /api/tires/low-stock",
-  "server/routes.ts GET /api/tires/statistics",
-  "server/routes.ts GET /api/tires/statistics-advanced",
   "server/routes.ts GET /api/users",
   "server/routes.ts GET /api/users/:id",
   "server/routes.ts GET /api/users/technicians",
-  "server/routes.ts GET /api/vehicle-tires",
-  "server/routes.ts GET /api/vehicle-tires/:vehicleTireId/last-inspection",
   "server/routes.ts GET /api/vehicles",
   "server/routes.ts GET /api/vehicles/all",
   "server/routes.ts GET /api/vehicles/check/:registrationNumber",
-  "server/routes.ts GET /api/warehouse/inventory-value",
-  "server/routes.ts GET /api/warehouse/most-used-parts",
-  "server/routes.ts GET /api/warehouse/parts-by-supplier",
-  "server/routes.ts GET /api/warehouse/reorder-alerts",
-  "server/routes.ts GET /api/warehouse/statistics",
   "server/routes.ts GET /api/work-orders/:id",
   "server/routes.ts GET /api/workflows/active",
   "server/routes.ts GET /api/workflows/stats",
   "server/routes.ts GET /api/workflows/vehicle-acquisition/:sessionId",
 ];
+/**
+ * Déclarations que le scan ne sait pas lire (chemin non littéral, `router.route()`). Gelée : elle ne peut
+ * que rétrécir. `exports.routes.ts` enregistre ses lectures par l'aide `route(path, ...)` ; toutes sont
+ * couvertes par `exportsGuard` au montage (matrice refusant le client), prouvé par contrat.
+ */
+const UNANALYSABLE_FROZEN: string[] = ["server/api/exports.routes.ts router.get(path"];
 const KNOWN_DUPLICATE_ROUTES: string[] = [];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
@@ -127,8 +113,9 @@ describe("hygiène des routes serveur", () => {
   });
 
   it("aucune lecture GET n'est ouverte à un client sans cloison (liste gelée qui ne peut que rétrécir)", () => {
-    const { offenders, seen } = scanOpenGetReads(serverDir, roleConstants);
+    const { offenders, seen, unanalysable } = scanOpenGetReads(serverDir, roleConstants);
     expect(seen.size).toBeGreaterThan(150);
+    expect(unanalysable).toEqual(UNANALYSABLE_FROZEN);
     // nouvelle lecture ouverte = régression ; entrée gelée devenue saine = à retirer de la liste
     expect(offenders.filter((key) => !OPEN_GET_READS_FROZEN.includes(key))).toEqual([]);
     expect(OPEN_GET_READS_FROZEN.filter((key) => !offenders.includes(key))).toEqual([]);
@@ -202,7 +189,85 @@ describe("garde de cloison des lectures : le scan ne se laisse pas tromper", () 
     const src = 'router.get("/x", authenticate, async (req, res) => { res.json(1); });';
     expect(verdictOf(src, "", ["isStaff"])).toBe(true);
     expect(verdictOf(src, "", ["isAnyUser"])).toBe(false);
-    expect(routerLevelGuards("router.use(isStaff);\nrouter.get('/a', authenticate, h);").get("router")).toEqual(["isStaff"]);
+    expect(routerLevelGuards("router.use(isStaff);\nrouter.get('/a', authenticate, h);", kinds).get("router")).toEqual(["isStaff"]);
+  });
+
+  // échec fermé : un fichier peut déclarer ses gardes locales, le scan les classe d'après leur source
+  const verdictFile = (source: string) => {
+    const fileKinds = extendKinds(kinds, source);
+    const [route] = extractGetRoutes("server/api/test.routes.ts", source);
+    return judgeGetRoute(route, fileKinds, []).ok;
+  };
+  const read = "async (req, res) => { res.json(await read()); }";
+
+  it("requireSession, guardByX, gardeX inconnus : permissifs (aucun nom cru sur parole)", () => {
+    expect(verdictOf(`router.get("/x", requireSession, ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", guardByX, ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", gardeX, ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", guardByDoc, ${read});`)).toBe(false);
+  });
+
+  it("garde locale `const readers = authorize([...ALL_APP_ROLES])` : permissive ; sans client : restrictive", () => {
+    const open = `const readers = authorize([...ALL_APP_ROLES]);\nrouter.get("/x", readers, ${read});`;
+    const closed = `const readers = authorize([...STAFF_ROLES]);\nrouter.get("/x", readers, ${read});`;
+    const literal = `const readers = authorize(['admin', 'secretary']);\nrouter.get("/x", readers, ${read});`;
+    expect(verdictFile(open)).toBe(false);
+    expect(verdictFile(closed)).toBe(true);
+    expect(verdictFile(literal)).toBe(true);
+  });
+
+  it("authorize(ALL_ROLES), authorize en ligne avec spread de tous les rôles : refusés", () => {
+    expect(verdictOf(`router.get("/x", authorize(ALL_ROLES), ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", authorize([...ALL_APP_ROLES]), ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", authorize(STAFF_ROLES), ${read});`)).toBe(true);
+  });
+
+  it("spread non résolu : permissif", () => {
+    expect(verdictOf(`router.get("/x", authorize([...UNKNOWN_ROLES]), ${read});`)).toBe(false);
+    expect(verdictFile(`const g = authorize([...UNKNOWN_ROLES]);\nrouter.get("/x", g, ${read});`)).toBe(false);
+    expect(verdictFile(`const guards = [isAnyUser, authenticate];\nrouter.get("/x", ...guards, ${read});`)).toBe(false);
+    expect(verdictFile(`const guards = [requireFeature("a"), isStaff];\nrouter.get("/x", ...guards, ${read});`)).toBe(true);
+  });
+
+  it("garde passée par une variable ou un alias : permissive tant qu'elle n'est pas classée", () => {
+    expect(verdictFile(`const alias = pickGuard(req);\nrouter.get("/x", alias, ${read});`)).toBe(false);
+    expect(verdictFile(`const alias = isStaff;\nrouter.get("/x", alias, ${read});`)).toBe(false);
+  });
+
+  it("requireFeature seul ne protège rien : la route reste publique, avec ou sans session on le voit", () => {
+    expect(verdictOf(`router.get("/x", requireFeature("f"), authenticate, ${read});`)).toBe(false);
+    expect(verdictOf(`router.get("/x", requireFeature("f"), isStaff, ${read});`)).toBe(true);
+  });
+
+  it("res.status(code).json(...) est un envoi de donnée ; un 4xx littéral non", () => {
+    const send = 'router.get("/work-orders/:id/x", authenticate, async (req, res) => { res.status(code).json(await read()); await assertWorkOrderReadable(req.user, 1); });';
+    const refusal = 'router.get("/work-orders/:id/x", authenticate, async (req, res) => { if (!ok) return res.status(404).json({}); await assertWorkOrderReadable(req.user, 1); res.json(1); });';
+    expect(verdictOf(send)).toBe(false);
+    expect(verdictOf(refusal)).toBe(true);
+  });
+
+  it("déclarations illisibles rapportées : router.route(), chemin en variable, tableau, gabarit", () => {
+    expect(findUnanalysable("f.ts", 'router.route("/x").get(h);')).toHaveLength(1);
+    expect(findUnanalysable("f.ts", "router.get(path, isStaff, h);")).toHaveLength(1);
+    expect(findUnanalysable("f.ts", 'router.get(["/a", "/b"], isStaff, h);')).toHaveLength(1);
+    expect(findUnanalysable("f.ts", "router.get(`/a/${id}`, isStaff, h);")).toHaveLength(1);
+    expect(findUnanalysable("f.ts", 'router.get("/a/:id([0-9]+)", isStaff, h); req.get("x");')).toEqual([]);
+  });
+
+  it("une garde de montage inconnue ne couvre rien ; connue sans client, elle couvre", () => {
+    const src = `router.get("/x", authenticate, ${read});`;
+    expect(verdictOf(src, "", ["unknownGuard"])).toBe(false);
+    expect(verdictOf(src, "", ["authorize([...STAFF_ROLES])"])).toBe(true);
+    expect(verdictOf(src, "", ["authorize([...ALL_APP_ROLES])"])).toBe(false);
+  });
+
+  it("les 8 lectures échappées au scan (billing, kpi, time-tracking, part-scans) sont lues d'après leur garde", () => {
+    const { offenders, seen } = scanOpenGetReads(serverDir, roleConstants);
+    for (const pattern of [/billing\.routes\.ts GET/, /kpi\.routes\.ts GET/, /time-tracking\.routes\.ts GET/, /part-scans\.routes\.ts GET [^ ]*resolve/]) {
+      const keys = [...seen].filter((key) => pattern.test(key));
+      expect(keys.length, String(pattern)).toBeGreaterThan(0);
+      expect(keys.filter((key) => offenders.includes(key) || OPEN_GET_READS_FROZEN.includes(key))).toEqual([]);
+    }
   });
 
   it("stripComments conserve les chaînes qui contiennent //", () => {
