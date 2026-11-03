@@ -219,3 +219,14 @@ Modèle et règles : `docs/journal/README.md`.
 - Comment : même service (`vatBillingService.getSuppliersSummary`), erreurs relayées par `withLogContext`. Accès : garde de montage du routeur (lecture fournisseurs), le client reste en 403.
 - Pourquoi : `useBilling` recevait un 400 « ID invalide », la synthèse n'était jamais servie.
 - Preuve : contrat rouge sans le correctif, vert avec ; `client-read-scope-tires` (client 403 au montage) vert ; tsc 0 ; unitaires 1933.
+
+## 2026-11-03T19:10:23+01:00 — Import de backup : erreur relayée, mineurs de relecture (#222, #223)
+
+- Quoi : le catch de `POST /api/admin/import-backup` (`server/routes.ts`) répondait `500 { error: error.message }` et journalisait par `console.error` avec un emoji. Ses deux `console.log` faisaient de même.
+- Comment : `next(withLogContext(AppError 500, { event: "admin.import_backup.failed" }))`, et les deux logs migrés vers `log.info` avec `requestId`. Seules des lignes du handler changent, aucune route n'est ajoutée. Garde ajoutée dans `error-500-relay-hygiene`. Mineurs :
+  - ligne PRT1 du plan réécrite (anciens défauts corrigés, références des contrats) ;
+  - 201 vérifié sur les POST de mise en place de `parts-catalog-children-patch` ;
+  - commentaire de `server/api/index.ts` sur les routes fournisseurs corrigé ;
+  - leçon « `/:id` avant un littéral frère » dans LESSONS_LEARNED.
+- Pourquoi : AGENTS.md §10, ni message brut ni `console.*`.
+- Preuve : garde rouge sans le correctif, verte avec ; contrat PRT1 6/6 ; tsc 0 erreur ; unitaires 1945/1945.
