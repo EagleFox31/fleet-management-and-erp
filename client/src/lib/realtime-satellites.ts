@@ -15,7 +15,19 @@
  */
 import { KPI_QUERY_KEYS, WAREHOUSE_QUERY_KEYS } from "@shared/contracts/realtime-events";
 
-type SatelliteGroup = { keys: readonly string[]; prefixes?: readonly string[] };
+/**
+ * `byId` : clés d'un seul objet, gabarit à `:vehicleId` ou `:registrationNumber` rempli depuis la
+ * charge de l'événement (`vehicleId`, `vehicle.registrationNumber`). Sans identifiant dans la charge,
+ * repli sur `byIdFallbackPrefixes` : on rafraîchit trop plutôt que pas assez.
+ */
+type SatelliteGroup = {
+  keys: readonly string[];
+  prefixes?: readonly string[];
+  byId?: readonly string[];
+  byIdFallbackPrefixes?: readonly string[];
+};
+
+export type SatellitePayload = { vehicleId?: unknown; vehicle?: { registrationNumber?: unknown } | null } | null | undefined;
 
 const MANAGEMENT_DASHBOARD = "/api/management/dashboard";
 
@@ -80,8 +92,11 @@ export const SATELLITE_GROUPS = {
   },
   /** Kilométrage et position d'atelier : fiche véhicule, plans et échéances de maintenance. */
   vehicleOperations: {
-    keys: ["/api/vehicles", "/api/maintenance/date-alerts"],
-    prefixes: ["/api/vehicles/", "/api/maintenance-schedules"],
+    keys: ["/api/vehicles", "/api/vehicles/all", "/api/vehicles/all-with-status", "/api/maintenance/date-alerts"],
+    prefixes: ["/api/maintenance-schedules"],
+    // fiche du seul véhicule touché, jamais toutes les fiches (`/api/vehicles/` en préfixe)
+    byId: ["/api/vehicles/:vehicleId", "/api/vehicles/:registrationNumber"],
+    byIdFallbackPrefixes: ["/api/vehicles/"],
   },
   /** Carburant : solde et historique de la carte, consommation, statistiques des pleins, fiche véhicule. */
   fuel: {
@@ -182,13 +197,30 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
 };
 
 /** Clés exactes et préfixes à invalider pour un événement (vide s'il n'est pas à la table). */
-export function satelliteTargetsOf(event: string): { keys: string[]; prefixes: string[] } {
+export function satelliteTargetsOf(event: string, payload?: SatellitePayload): { keys: string[]; prefixes: string[] } {
   const keys = new Set<string>();
   const prefixes = new Set<string>();
+  const ids: Record<string, string | null> = {
+    vehicleId: idOf(payload?.vehicleId),
+    registrationNumber: typeof payload?.vehicle?.registrationNumber === "string" && payload.vehicle.registrationNumber.trim() ? payload.vehicle.registrationNumber : null,
+  };
   for (const name of EVENT_SATELLITES[event] ?? []) {
     const group: SatelliteGroup = SATELLITE_GROUPS[name];
     for (const key of group.keys) keys.add(key);
     for (const prefix of group.prefixes ?? []) prefixes.add(prefix);
+    if (!group.byId) continue;
+    const filled = group.byId.flatMap((template) => {
+      const param = template.match(/:(\w+)/)?.[1];
+      const value = param ? ids[param] : null;
+      return value ? [template.replace(`:${param}`, value)] : [];
+    });
+    for (const key of filled) keys.add(key);
+    if (ids.vehicleId === null) for (const prefix of group.byIdFallbackPrefixes ?? []) prefixes.add(prefix);
   }
   return { keys: [...keys], prefixes: [...prefixes] };
+}
+
+function idOf(value: unknown): string | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0 ? String(n) : null;
 }
