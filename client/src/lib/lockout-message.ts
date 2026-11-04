@@ -1,5 +1,5 @@
 import { lockedResponseSchema } from "@shared/contracts/auth-lockout";
-import { ApiError } from "@/lib/api-error";
+import { ApiError, userMessageOf } from "@/lib/api-error";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -27,6 +27,7 @@ export function lockoutMessageOf(error: unknown): string | null {
 
 export type LoginFailure =
   | { kind: "locked"; message: string }
+  | { kind: "unavailable"; message: string }
   | { kind: "other"; message: null };
 
 /**
@@ -37,5 +38,7 @@ export type LoginFailure =
 export function loginFailureOf(error: unknown): LoginFailure {
   const locked = lockoutMessageOf(error);
   if (locked) return { kind: "locked", message: locked };
+  // Panne serveur (#254) : message générique et sa référence, pas « vérifiez vos identifiants ».
+  if (error instanceof ApiError && error.status >= 500) return { kind: "unavailable", message: userMessageOf(error) };
   return { kind: "other", message: null };
 }

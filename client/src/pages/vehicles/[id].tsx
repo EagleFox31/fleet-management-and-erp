@@ -1,4 +1,5 @@
-import { userMessageOf } from "@/lib/api-error";
+import { isApiError, userMessageOf } from "@/lib/api-error";
+import { vehicleUnavailable } from "@/lib/vehicle-load-error";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -27,7 +28,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   Wrench, Fuel, Trash2, Plus, ArrowLeft, Car, Calendar, Gauge,
-  FileText, Clock, Edit, AlertTriangle, CheckCircle, Activity, FolderOpen,
+  FileText, Clock, Edit, AlertTriangle, CheckCircle, Activity, FolderOpen, Lock,
 } from "lucide-react";
 import { MaintenanceScheduleForm } from "@/components/maintenance/maintenance-schedule-form";
 import { DeadlineTile, PremiumTabsNav } from "@/components/design-system";
@@ -80,10 +81,12 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
 
   const idOrRegistration = decodeURIComponent(params.id);
 
-  const { data: vehicle, isLoading: isLoadingVehicle } = useQuery<any>({
+  const { data: vehicle, isLoading: isLoadingVehicle, error: vehicleError } = useQuery<any>({
     queryKey: [`/api/vehicles/${idOrRegistration}`],
     staleTime: 0,
     refetchOnMount: "always",
+    // Un refus ou une absence ne change pas en réessayant.
+    retry: (failureCount, error) => !isApiError(error, 403) && !isApiError(error, 404) && failureCount < 1,
   });
 
   const vehicleId = vehicle?.id;
@@ -234,11 +237,13 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   }
 
   if (!vehicle) {
+    const unavailable = vehicleUnavailable(vehicleError);
+    const UnavailableIcon = unavailable.forbidden ? Lock : AlertTriangle;
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
-        <AlertTriangle className="h-10 w-10 text-red-400 mb-3" />
-        <h2 className="text-lg font-semibold text-gray-800">Véhicule non trouvé</h2>
-        <p className="text-sm text-gray-400 mt-1 mb-4">Le véhicule que vous recherchez n'existe pas ou a été supprimé.</p>
+        <UnavailableIcon className="h-10 w-10 text-red-400 mb-3" />
+        <h2 className="text-lg font-semibold text-gray-800">{unavailable.title}</h2>
+        <p className="text-sm text-gray-400 mt-1 mb-4">{unavailable.message}</p>
         <Button onClick={() => setLocation(returnTo)}>
           {backFromDocuments ? "Retour Documents & Conformité" : "Retour à la liste"}
         </Button>
