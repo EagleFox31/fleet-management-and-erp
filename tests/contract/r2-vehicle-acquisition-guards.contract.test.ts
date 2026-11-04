@@ -139,6 +139,27 @@ describe.each([
   });
 });
 
+describe("R2 : clôture d'une session selon son statut", { timeout: 120000 }, () => {
+  it("complete sur une session abandonnée : 409 lisible, le statut reste abandonné", async () => {
+    const s = sid();
+    await create(s);
+    expect((await session.call("PATCH", `${URL}/${s}/abandon`, { actor: "clientA" })).status).toBe(200);
+    const res = await session.call("PATCH", `${URL}/${s}/complete`, { actor: "clientA" });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expectCleanError(res);
+    expect((await rowOf(s)).status).toBe("abandoned");
+  });
+
+  it("complete rejoué sur une session déjà terminée : 200, statut inchangé", async () => {
+    const s = sid();
+    await create(s);
+    expect((await session.call("PATCH", `${URL}/${s}/complete`, { actor: "clientA" })).status).toBe(200);
+    const again = await session.call("PATCH", `${URL}/${s}/complete`, { actor: "clientA" });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect((await rowOf(s)).status).toBe("completed");
+  });
+});
+
 describe("R2 : documents de session", { timeout: 120000 }, () => {
   const upload = (s: string, actor: Actor, workflowId: number, fields: Record<string, string> = { documentType: "carte_grise" }) => {
     uploadDirs.push(s);
