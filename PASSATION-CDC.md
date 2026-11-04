@@ -12,3 +12,7 @@
 - PR brouillon fix/alert-retry-followup : abandonedSample (5 max) + lot en erreur de connexion sans reprise unitaire ; test rouge puis vert, check 0 erreur.
 - Postgres 54320 inutilisable (plage réservée Windows 54299-54398) : base de test perso, projet compose c7test, ports 55432/55433 (docker compose -p c7test down pour la retirer). c7_idem/c7_side n existent plus (tmpfs) : dropdb sans objet.
 - Reste : pending.catch(() => {}) dans part-requirements-idempotence.
+
+## 2026-11-04 17:55 — c7 : #312 CI rouge corrigée
+- Cause : mock de moduleLogger non fiable en suite complète (module déjà chargé). Remplacé par emitLossContext, fonction pure exportée et testée ; suite intégration complète 328/328, check 0.
+- Leçon : ne pas asserter sur un logger instancié à l import ; extraire le contexte en fonction pure.
