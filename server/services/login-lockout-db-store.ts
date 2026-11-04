@@ -176,11 +176,19 @@ export class DbLockoutStore implements LockoutStore {
    */
   async reserve(username: string, now: Date, cfg: LockoutConfig): Promise<Reservation> {
     let reservation!: Reservation;
-    const { before } = await this.withKeyLock(storedLockoutKey(username), (b) => {
-      reservation = reservedLockState(b ?? EMPTY_LOCK_STATE, now, cfg);
+    const { before, after } = await this.withKeyLock(storedLockoutKey(username), (b) => {
+      const current = b ?? EMPTY_LOCK_STATE;
+      // Verrou actif : refus sans ecriture. Le compteur n'a plus d'effet tant que le verrou dure et une
+      // fenetre expiree repart de zero ; sous attaque, chaque 429 ne coute plus un upsert ni un verrou de ligne.
+      // La transaction et le verrou consultatif restent pris (ils serialisent la lecture) : seule l'ecriture est evitee.
+      if (b && isLocked(b, now)) {
+        reservation = { allowed: false, state: current };
+        return null;
+      }
+      reservation = reservedLockState(current, now, cfg);
       return reservation.state;
     });
-    await this.afterWrite(username, before, reservation.state, now, false);
+    if (after) await this.afterWrite(username, before, after, now, false);
     return reservation;
   }
 

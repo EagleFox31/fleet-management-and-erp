@@ -94,7 +94,9 @@ export class MemoryLockoutStore implements LockoutStore {
     this.m.delete(u);
   }
   async reserve(u: string, now: Date, cfg: LockoutConfig) {
-    const r = reservedLockState(this.m.get(u) ?? EMPTY_LOCK_STATE, now, cfg);
+    const current = this.m.get(u) ?? EMPTY_LOCK_STATE;
+    if (isLocked(current, now)) return { allowed: false, state: current }; // meme regle que le store base : rien a ecrire
+    const r = reservedLockState(current, now, cfg);
     this.m.set(u, r.state);
     return r;
   }
