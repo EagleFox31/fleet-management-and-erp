@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
-import { assignments, drivers } from "@shared/schema";
+import { assignments, drivers, missions } from "@shared/schema";
 import { canReadDriverPersonalData } from "@shared/constants/roles";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isVoidAssignmentStatus } from "@shared/constants/assignments";
 
@@ -32,7 +32,26 @@ export async function driverScopeOf(reader: DriverScopeReader | undefined): Prom
   return rows.map((r) => r.id);
 }
 
-/** Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté. */
+/**
+ * Filtre unique « affectation vivante de l'un de ces chauffeurs » : sur ses fiches, hors annulée ou
+ * refusée (`VOID_ASSIGNMENT_STATUSES`). Toute lecture cloisonnée par chauffeur passe par ici : un
+ * filtre sur `assignments.driverId` seul rend au chauffeur retiré une mission qu'il n'a plus à voir
+ * (#240, garde-fou tests/unit/server/assignment-write-hygiene.test.ts).
+ */
+export function driverLiveAssignmentFilter(driverIds: number[]) {
+  return and(inArray(assignments.driverId, driverIds), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]))!;
+}
+
+/** Missions où l'un de ces chauffeurs a une affectation vivante (listes cloisonnées). */
+export function missionsOfDriversFilter(driverIds: number[]) {
+  return inArray(missions.id, db.select({ id: assignments.missionId }).from(assignments).where(driverLiveAssignmentFilter(driverIds)));
+}
+
+/**
+ * Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté.
+ * Une affectation annulée ou refusée ne compte pas : le chauffeur retiré de la mission n'y a plus accès.
+ * Une affectation terminée garde l'accès (historique de ses missions).
+ */
 export async function canAccessMissionAsDriver(reader: DriverScopeReader | undefined, missionId: number): Promise<boolean> {
   const scope = await driverScopeOf(reader);
   if (scope === undefined) return true;
@@ -40,7 +59,7 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
   const [row] = await db
     .select({ id: assignments.id })
     .from(assignments)
-    .where(and(eq(assignments.missionId, missionId), inArray(assignments.driverId, scope)))
+    .where(and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(scope)))
     .limit(1);
   return Boolean(row);
 }

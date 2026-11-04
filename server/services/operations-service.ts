@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, asc, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
-import { pickMissionAssignment } from "../lib/driver-scope";
+import { driverLiveAssignmentFilter, missionsOfDriversFilter, pickMissionAssignment } from "../lib/driver-scope";
 
 /**
  * Service Opérations & Missions
@@ -23,13 +23,8 @@ import { pickMissionAssignment } from "../lib/driver-scope";
  * - Statistiques par client (MAERSK, CNPCC, AGL, SODECOTON)
  * - Statistiques par destination (NDJAMENA, DLA-NDERE, TOUBORO)
  */
-/** Missions où l'un de ces chauffeurs est affecté (cloison chauffeur, server/lib/driver-scope.ts). */
-function missionsOfDrivers(driverIds: number[]) {
-  return inArray(
-    missions.id,
-    db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverIds)),
-  );
-}
+/** Missions où l'un de ces chauffeurs a une affectation vivante (cloison chauffeur, server/lib/driver-scope.ts). */
+const missionsOfDrivers = missionsOfDriversFilter;
 
 type AssignmentKey = { id: number; driverId: number | null; status: string };
 
@@ -85,7 +80,7 @@ const assignmentKeyColumns = {
  */
 function assignmentsJoin(driverScope?: number[]) {
   const onMission = eq(missions.id, assignments.missionId);
-  return driverScope ? and(onMission, inArray(assignments.driverId, driverScope))! : onMission;
+  return driverScope ? and(onMission, driverLiveAssignmentFilter(driverScope))! : onMission;
 }
 
 export class OperationsService {

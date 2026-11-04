@@ -228,3 +228,51 @@ Règles : `docs/journal/README.md`.
 - **Preuve automatisée** : `tests/unit/server/session-secret.test.ts`, 17 tests dont la garde statique sur `session.ts`.
 - **RAIDER** : couvert durable (dev et test inchangés), failure memory (LESSONS_LEARNED), erreur actionnable sans secret journalisé ; sans objet : migration.
 - **Reste / risques** : la démo Replit (`npm run start`) doit avoir `SESSION_SECRET` dans ses Secrets avant le déploiement. `sameSite: "none"` en production (APK Capacitor) suivi à part.
+
+## 2026-11-03 19:35 — Plusieurs chauffeurs par mission : écriture (suite de #227, empilée sur #233)
+
+- **Quoi** : `POST /api/missions/:id/assignments` (ajout d'un chauffeur et de son véhicule) et `DELETE /api/missions/:id/assignments/:assignmentId` (annulation : statut `cancelled`, ligne conservée) dans `server/api/missions.routes.ts`.
+- **Comment** : rôles `MISSION_MANAGER_ROLES` comme le PATCH ; `assertValidDbId` sur chaque id ; transaction avec `SELECT ... FOR UPDATE` sur la ligne mission (doublon du même chauffeur actif : 409, ajouts concurrents sérialisés, aucun index) ; contrôles du PATCH repris (éligibilité véhicule, chauffeur actif, CPC, tonnage) plus conflit de planning par chauffeur et par véhicule (409) ; `mission_updated` émis après commit par `emitMissionEvent` (personnel hors chauffeur + trame réduite nominative aux chauffeurs de la mission), aucune nouvelle clé de requête. PATCH `{ assignment }` inchangé.
+- **Pourquoi** : le PATCH ne remplace ou supprime qu'une affectation, il n'existait aucun moyen d'ajouter un second chauffeur.
+- **Preuve** : `mission-multi-assignments.contract.test.ts` 26 tests.
+- **Reste** : écran (fleet-fe), voir le corps de PR.
+
+## 2026-11-03 — Plusieurs chauffeurs par mission : NO-GO sécurité levé (#240)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en re-audit
+- **Quoi** : statut, annulation et modification n'écrivent plus que sur les affectations vivantes ; un chauffeur annulé perd l'accès à la mission.
+- **Comment** : `PUT /:id/status` cible les lignes actives du chauffeur (403 sinon) ou toutes pour le personnel, contrôles de lancement par ligne (motifs préfixés par l'immatriculation) ; écritures `where id and status` ; DELETE sous `FOR UPDATE`, no-op sur `cancelled`/`rejected` ; PATCH 409 au-delà d'une affectation vivante, `catch` passé à `next` (il rendait 500) ; `loadOpenRenewalReceipts(vehicleId, tx)` lu dans la transaction de POST /assignments.
+- **Pourquoi** : une affectation annulée était ressuscitée par le lancement (part du CA, saisie carburant), et un chauffeur annulé lançait encore la mission.
+- **Preuve automatisée** : `mission-multi-assignments.contract.test.ts` 34 tests, 7 rouges sur le code d'avant ; garde `assignment-write-hygiene.test.ts`, rouge sur le code d'avant (4 écritures).
+- **3 couches** : pas d'écran pour l'instant ; instantané local et resync ciblé à livrer avec l'écran (fleet-fe). Trames déjà émises par POST/DELETE.
+- **RAIDER** : couvert non-régression (contrats voisins), failure memory (LESSONS « passage 1→N »), garde-fou automatique ; sans objet : migration.
+- **Reste / risques** : le contrôle de conflit de planning au lancement compte encore les affectations nulles des autres missions (faux blocage possible, pas une faille).
+
+## 2026-11-04 00:10 — Plusieurs chauffeurs par mission : listes chauffeur et rattrapage de main (#240)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** : fusion de `main` (base #233 fusionnée). La boucle de lancement par affectation passe sur `isDriverLicenseExpired` / `isPaperExpired` (#224, valable le jour J). `POST /:id/assignments` valide par `validateBody`. Les listes chauffeur (`GET /api/missions`, `/api/operations/missions`, `/upcoming`, `/active`) et la jointure des affectations écartent les affectations annulées ou refusées.
+- **Comment** : un filtre unique `driverLiveAssignmentFilter` / `missionsOfDriversFilter` dans `server/lib/driver-scope.ts`, repris par `canAccessMissionAsDriver`, la liste des missions et `operations-service`. Le garde-fou `assignment-write-hygiene` refuse tout `inArray(assignments.driverId` hors de `driver-scope.ts`.
+- **Pourquoi** : un chauffeur retiré de la mission recevait 403 sur le détail mais la voyait encore dans ses trois listes (preuve rouge sur l'ancien code). Une cloison doit être la même pour le détail et pour la liste.
+- **Reste tracé, non corrigé ici** :
+  - un ajout de chauffeur sur une mission `in_progress` crée une ligne `pending` sans contrôle des papiers ;
+  - au passage à `delivered`, la ligne `in_progress` d'un co-chauffeur reste active ;
+  - le PATCH lit les affectations sans verrou sur la mission.
+
+  Ces trois cas demandent une règle métier (ajout en cours de route, clôture par chauffeur). Ils sont à trancher avant d'être codés.
+- **Preuves** : 0 `error TS` ; 163 fichiers / 2033 tests unitaires ; 14 fichiers / 230 contrats (mission*, operations, fuel-card-write-guards).
+
+## 2026-11-04 00:17 — Plusieurs chauffeurs par mission : fiche chauffeur et trames (#240, re-audit)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** :
+  - `GET /api/drivers/me` et `GET /api/drivers/:id/missions` filtrent par `driverLiveAssignmentFilter` : le tableau de bord d'un chauffeur retiré ne liste plus la mission (client, adresses, consignes).
+  - `assignedDriverUserIds` n'envoie plus de trame au chauffeur retiré.
+  - Les deux contrôles de conflit de planning au lancement ne comptent plus une affectation annulée ou refusée.
+- **Comment** : le garde-fou `assignment-write-hygiene` exige qu'un `eq`/`inArray(assignments.driverId, …)` vive dans un `.where` qui filtre aussi `assignments.status`. Seules exceptions : la jointure `= drivers.id` et le helper lui-même. Il remplace l'interdiction limitée à `inArray`.
+- **Pourquoi** : 96b680b n'avait couvert que les `inArray` ; les `eq` de la fiche chauffeur fuyaient encore. Le contrôle porte maintenant sur la classe de défaut, pas sur une forme d'écriture.
+- **Preuves** :
+  - preuve rouge sur l'ancien code : le garde-fou trouve 2 lectures dans `drivers-management.routes.ts` et 2 dans `missions.routes.ts` ; le contrat voit encore la mission sur `/api/drivers/me` et `/api/drivers/:id/missions` ;
+  - 0 `error TS` ;
+  - unitaires : 163 fichiers, 2034 tests ;
+  - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
