@@ -14,9 +14,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY vendor ./vendor
-# Toutes les dépendances : dist/index.js importe statiquement vite et @vitejs/plugin-react (server/vite.ts),
-# même en production. Les rendre dynamiques permettra de revenir à --omit=dev (lot suivant).
-RUN npm ci --include=dev && npm cache clean --force
+# Dépendances de production seulement : vite n'est chargé qu'en développement, par import dynamique
+# (server/vite.ts). Garde : tests/unit/deploy/runtime-deps.test.ts.
+RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 # init-database rejoue au démarrage server/db/migrations et server/db/triggers (lus depuis le cwd) :
 # sans eux, le démarrage échoue (garde : tests/unit/deploy/dockerfile-runtime.test.ts).
