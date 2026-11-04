@@ -2866,14 +2866,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
-      let fuelRecords: Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>> = [];
+      // Lecture par le service : les pleins supprimés (deleted_at) en sont exclus.
+      let fuelRecords: Awaited<ReturnType<typeof fuelService.getFuelRecordsByVehicleId>> = [];
 
       if (vehicleId && !isNaN(vehicleId)) {
         assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
           return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         }
-        fuelRecords = await storage.getFuelRecordsByVehicleId(vehicleId);
+        fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
       } else {
         // Récupérer tous les enregistrements de carburant
         // Note: Dans une application réelle, il faudrait paginer les résultats
@@ -2883,7 +2884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
-          const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
+          const records = await fuelService.getFuelRecordsByVehicleId(vehicle.id);
           fuelRecords = [...fuelRecords, ...records];
         }
         

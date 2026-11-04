@@ -569,7 +569,8 @@ export class FuelCardService {
       .from(fuelRecords)
       .where(and(
         eq(fuelRecords.vehicleId, vehicleId),
-        sql`${fuelRecords.debitAmount} > 0`
+        sql`${fuelRecords.debitAmount} > 0`,
+        isNull(fuelRecords.deletedAt)
       ));
     
     const totalLiters = parseFloat(stats.totalLiters || "0");
@@ -585,7 +586,8 @@ export class FuelCardService {
       .from(fuelRecords)
       .where(and(
         eq(fuelRecords.vehicleId, vehicleId),
-        sql`${fuelRecords.debitAmount} > 0`
+        sql`${fuelRecords.debitAmount} > 0`,
+        isNull(fuelRecords.deletedAt)
       ))
       .groupBy(fuelRecords.stationName)
       .orderBy(desc(sql<string>`COUNT(*)`))
@@ -622,7 +624,8 @@ export class FuelCardService {
       .from(fuelRecords)
       .where(and(
         eq(fuelRecords.vehicleId, vehicleId),
-        sql`${fuelRecords.debitAmount} > 0`
+        sql`${fuelRecords.debitAmount} > 0`,
+        isNull(fuelRecords.deletedAt)
       ))
       .orderBy(desc(fuelRecords.date));
     
@@ -682,7 +685,7 @@ export class FuelCardService {
         recordsCount: sql<string>`COUNT(*)`
       })
       .from(fuelRecords)
-      .where(sql`${fuelRecords.debitAmount} > 0 AND ${ownerFilter}`)
+      .where(sql`${fuelRecords.debitAmount} > 0 AND ${fuelRecords.deletedAt} IS NULL AND ${ownerFilter}`)
       .groupBy(fuelRecords.stationName)
       .orderBy(desc(sql<string>`COALESCE(SUM(${fuelRecords.debitAmount}), 0)`));
     
@@ -715,7 +718,8 @@ export class FuelCardService {
       .from(fuelRecords)
       .where(and(
         eq(fuelRecords.year, year),
-        eq(fuelRecords.month, month)
+        eq(fuelRecords.month, month),
+        isNull(fuelRecords.deletedAt)
       ));
     
     const result = {

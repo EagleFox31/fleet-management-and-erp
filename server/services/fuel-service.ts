@@ -2,6 +2,12 @@ import { db } from "../db";
 import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
 import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
+import { AppError } from "../lib/app-error";
+import { hasMovedFuelCard } from "../lib/fuel-record-ledger-lock";
+import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+
+// Garde historique de DELETE /api/fuel-records/:id (isWorkshopManager), conservée pour un plein physique.
+const WORKSHOP_MANAGER_ROLES = ["admin", "workshop_manager"] as const;
 
 /** Année et mois (calendaires) d'une date `AAAA-MM-JJ`, pour les colonnes `year` / `month`. */
 function periodOf(date: unknown): { year?: number; month?: number } {
@@ -72,7 +78,7 @@ export class FuelService {
           updatedBy: updatedById,
           updatedAt: new Date(),
         })
-        .where(eq(fuelRecords.id, id))
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)))
         .returning();
       return updatedFuelRecord;
     });
@@ -81,14 +87,34 @@ export class FuelService {
   /**
    * Supprime un enregistrement de carburant - COPIÉ depuis storage-backup.ts
    */
-  async deleteFuelRecord(id: number): Promise<boolean> {
-    // Supprimer un débit ou une recharge change le solde : même verrou que l'écriture.
+  async deleteFuelRecord(id: number, actor: { id: number; role: string }): Promise<boolean> {
+    // Supprimer un débit ou une recharge change le solde : même verrou que l'écriture. La décision
+    // (ligne vivante ? a-t-elle mouvementé la carte ?) est prise sous ce verrou, dans la transaction.
     return db.transaction(async (tx) => {
       await lockFuelCard(tx);
-      const result = await tx
-        .delete(fuelRecords)
-        .where(eq(fuelRecords.id, id))
-        .returning();
+      const [record] = await tx
+        .select()
+        .from(fuelRecords)
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)));
+      if (!record) return false;
+
+      if (hasMovedFuelCard(record)) {
+        // Plein qui a mouvementé la carte : réservé aux gestionnaires de la carte, suppression douce tracée.
+        if (!(FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(actor.role)) {
+          throw new AppError(403, "Seuls l'administrateur, la logistique et le secrétariat peuvent supprimer un plein qui a mouvementé la carte carburant.");
+        }
+        await tx
+          .update(fuelRecords)
+          .set({ deletedAt: new Date(), deletedBy: actor.id })
+          .where(eq(fuelRecords.id, id));
+        return true;
+      }
+
+      // Plein physique sans mouvement de carte : garde historique (isWorkshopManager), suppression définitive.
+      if (!(WORKSHOP_MANAGER_ROLES as readonly string[]).includes(actor.role)) {
+        throw new AppError(403, "Accès non autorisé");
+      }
+      const result = await tx.delete(fuelRecords).where(eq(fuelRecords.id, id)).returning();
       return result.length > 0;
     });
   }

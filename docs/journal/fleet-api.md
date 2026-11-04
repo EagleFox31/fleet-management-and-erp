@@ -288,3 +288,14 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - 0 `error TS` ;
   - unitaires : 163 fichiers, 2034 tests ;
   - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
+
+## 2026-11-04 — Suppression douce des pleins carburant : DELETE gardé (fix/fuel-record-soft-delete, étape 2)
+- **Agent** : fleet-api · **Branche** : `fix/fuel-record-soft-delete`
+- **Quoi** :
+  - `DELETE /api/fuel-records/:id` : garde de route `authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"])`, décision dans `FuelService.deleteFuelRecord(id, actor)` sous `lockFuelCard`. Plein qui a mouvementé la carte : admin, logistics, secretary (403 sinon), suppression douce (`deleted_at`, `deleted_by`). Plein physique : garde historique (admin, chef d'atelier), suppression définitive. Absent ou déjà supprimé : 404. Événement `broadcastFuelRecordChanged` conservé, log `moduleLogger("fuel-records")`.
+  - Lectures filtrées sur `deleted_at` : statistiques par véhicule, par station, par client et bilan mensuel de `fuel-card-service`, triggers `mission-fuel-triggers.sql` et `fuel-alerts-triggers.sql`, `GET /api/fuel-records` (lecture par `FuelService` au lieu de `storage.ts`, gelé), `updateFuelRecord` (WHERE sur ligne vivante).
+  - Rejeu par `request_key` (`findReplayedFuelSubmission`) : une ligne supprimée donne 409 (la clé reste portée par l'index unique), pas un faux rejeu.
+  - `FUEL_CARD_MANAGER_ROLES` ajouté à `shared/constants/roles.ts`, repris par `isFuelCardManager`.
+- **Pourquoi** : décision métier tranchée (suppression d'un plein ayant mouvementé la carte réservée aux gestionnaires, douce et tracée, solde exclu des lignes supprimées).
+- **Preuves** : voir le rapport de PR (check, unitaires, contrats) ; contrat 10 cas, 7 rouges sur `origin/main`.
+- **Écarts / ouvert** : `export-service.ts` (sauvegarde JSON complète) exporte toujours les lignes supprimées avec leur `deleted_at`, voulu pour une sauvegarde ; `server/storage.ts` (interdit) lit encore `fuel_records` sans filtre dans `getFuelRecordsByVehicleId`, plus appelée par `routes.ts`.
