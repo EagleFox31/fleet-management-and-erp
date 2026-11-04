@@ -158,6 +158,16 @@ describe("PO2 rapprochement commande / facture", { timeout: 120000 }, () => {
     const list = await call("secretary", "GET", "/api/supplier-invoices/discrepancies");
     expect(list.status).toBe(200);
     expect(list.body.discrepancies.map((d: { invoiceId: number }) => d.invoiceId)).toContain(row.id);
+    // Champs lus par l'écran des écarts : sans `id`, le lien « Examiner » menait à /procurement/invoices/undefined.
+    expect(list.body.discrepancies.find((d: { invoiceId: number }) => d.invoiceId === row.id)).toMatchObject({
+      id: row.id,
+      supplierId: row.supplierId,
+      invoiceDate: row.invoiceDate,
+      status: "received",
+      totalAmountTTC: Number(row.totalTTC ?? row.totalAmount),
+    });
+    expect(typeof list.body.totalDiscrepancyAmount).toBe("number");
+    expect(typeof list.body.averageVariance).toBe("number");
   });
 
   // Régression : à 5 % pile l'écart est signalé (>= seuil), la recommandation doit suivre.
