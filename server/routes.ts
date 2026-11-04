@@ -928,13 +928,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Un mot de passe changé (après compromission, par exemple) ne doit pas laisser les autres cookies valides.
+      // Le hash est écrit : une erreur 5xx serait réécrite en message générique et ferait croire à un échec.
+      // Succès partiel, dit à l'utilisateur ; l'incident part au journal avec sa référence.
       try {
         await revokeOtherUserSessions(userId, req.sessionID, "password_changed");
       } catch (revokeErr) {
-        return next(new AppError(500, "Le mot de passe est modifié mais les autres sessions n'ont pas pu être fermées. Réessayez.", { cause: revokeErr }));
+        log.error({ err: revokeErr, event: "Revoke other sessions failed", userId, requestId: req.requestId }, "Revoke other sessions failed");
+        return res.status(200).json({
+          message: `Mot de passe modifié, mais la déconnexion de vos autres appareils a échoué. Reconnectez-vous avec le nouveau mot de passe sur ces appareils. Référence : ${req.requestId}`,
+          otherSessionsRevoked: false,
+        });
       }
 
-      return res.status(200).json({ message: "Mot de passe modifié avec succès" });
+      return res.status(200).json({ message: "Mot de passe modifié avec succès", otherSessionsRevoked: true });
     } catch (error) {
       log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });

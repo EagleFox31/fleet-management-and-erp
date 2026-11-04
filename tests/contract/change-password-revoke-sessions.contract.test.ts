@@ -72,6 +72,7 @@ describe("change-password : révocation des autres sessions", { timeout: 120000 
       body: { currentPassword: TEST_USER_PASSWORD, newPassword: "nouveau-mot-de-passe-1" },
     });
     expect(res.status).toBe(200);
+    expect(res.body.otherSessionsRevoked).toBe(true);
 
     expect((await call("GET", "/api/auth/me", { cookie: s.b })).status, "la session courante reste ouverte").toBe(200);
     expect((await call("GET", "/api/auth/me", { cookie: s.a })).status, "l'autre session est révoquée").toBe(401);
