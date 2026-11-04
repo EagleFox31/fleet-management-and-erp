@@ -28,7 +28,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   Wrench, Fuel, Trash2, Plus, ArrowLeft, Car, Calendar, Gauge,
-  FileText, Clock, Edit, AlertTriangle, CheckCircle, Activity, FolderOpen, Lock,
+  FileText, Clock, Edit, AlertTriangle, CheckCircle, Activity, FolderOpen, Lock, RefreshCw,
 } from "lucide-react";
 import { MaintenanceScheduleForm } from "@/components/maintenance/maintenance-schedule-form";
 import { DeadlineTile, PremiumTabsNav } from "@/components/design-system";
@@ -81,7 +81,13 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
 
   const idOrRegistration = decodeURIComponent(params.id);
 
-  const { data: vehicle, isLoading: isLoadingVehicle, error: vehicleError } = useQuery<any>({
+  const {
+    data: vehicle,
+    isLoading: isLoadingVehicle,
+    error: vehicleError,
+    refetch: refetchVehicle,
+    isFetching: isFetchingVehicle,
+  } = useQuery<any>({
     queryKey: [`/api/vehicles/${idOrRegistration}`],
     staleTime: 0,
     refetchOnMount: "always",
@@ -238,15 +244,23 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
 
   if (!vehicle) {
     const unavailable = vehicleUnavailable(vehicleError);
-    const UnavailableIcon = unavailable.forbidden ? Lock : AlertTriangle;
+    const UnavailableIcon = unavailable.kind === "forbidden" ? Lock : AlertTriangle;
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
-        <UnavailableIcon className="h-10 w-10 text-red-400 mb-3" />
-        <h2 className="text-lg font-semibold text-gray-800">{unavailable.title}</h2>
-        <p className="text-sm text-gray-400 mt-1 mb-4">{unavailable.message}</p>
-        <Button onClick={() => setLocation(returnTo)}>
-          {backFromDocuments ? "Retour Documents & Conformité" : "Retour à la liste"}
-        </Button>
+        <UnavailableIcon className="h-10 w-10 text-destructive mb-3" />
+        <h2 className="text-lg font-semibold text-foreground">{unavailable.title}</h2>
+        <p className="text-sm text-muted-foreground mt-1 mb-4">{unavailable.message}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {unavailable.retryable && (
+            <Button variant="outline" onClick={() => refetchVehicle()} disabled={isFetchingVehicle}>
+              <RefreshCw className={`h-4 w-4 mr-2${isFetchingVehicle ? " animate-spin" : ""}`} />
+              Réessayer
+            </Button>
+          )}
+          <Button onClick={() => setLocation(returnTo)}>
+            {backFromDocuments ? "Retour Documents & Conformité" : "Retour à la liste"}
+          </Button>
+        </div>
       </div>
     );
   }
