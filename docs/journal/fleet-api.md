@@ -312,3 +312,12 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - Couche 3 : `fuel_record_changed` invalide aussi le groupe `missions` ; suppressions locales invalident `/api/fuel-card/*` ; `useSingleFlightMutate` sur les 3 boutons supprimer ; `if (!req.user)` mort retiré de la route.
 - **Pourquoi** : réserves de l'audit sécurité et de la relecture sur #263.
 - **Écarts / ouvert** : poser les triggers d'alertes carburant active un comportement dormant (alertes insérées pour `user_id = 1`) ; à valider par `fleet-db` avant la mise en production. Les écrans `fuel/[id].tsx` et `fuel-record-detail-modal.tsx` n'appliquent pas encore `canDeleteFuelRecord` à leur bouton.
+
+## 2026-11-04 — Suppression douce des pleins carburant : triggers d'alertes retirés du démarrage (#263)
+
+- **Quoi** : `applyFuelAlertsTriggers` retiré de `server/init-database.ts`. `fuel-alerts-triggers.sql` garde son filtre `deleted_at`, mais n'est plus posé au démarrage.
+- **Pourquoi** : rejoué sur PG 17 local (relecture), le trigger AFTER INSERT fait échouer le 2e plein d'un véhicule (`AVG(LAG() OVER)` interdit, `format('%.1f')` invalide) et insère avec `user_id = 1` en clé étrangère. Sur toute base où `create_vehicle_alert` existe, création de plein, débit de carte et plein de mission tomberaient en 500. Sa réécriture est confiée à fleet-db (sous-requête, `round()`, destinataire configuré, alerte qui ne casse pas l'écriture, intégration qui pose les triggers).
+- **Comment tester** : `tests/unit/server/fuel-records-soft-delete-schema.test.ts`, qui échoue si `init-database.ts` cite de nouveau ce fichier.
+- **Corrections d'entrées précédentes** :
+  - l'entrée « réserves de l'audit et de la relecture » disait que `fuel/[id].tsx` et `fuel-record-detail-modal.tsx` n'appliquaient pas `canDeleteFuelRecord` : c'est fait depuis ba14938 ;
+  - ef19904 (filtre `deleted_at` de `storage.getFuelRecordsByVehicleId`, lu par `/statistics`, `/consumption-history` et `alert-service`) et ba14938 (bouton supprimer de la fiche et de la modale) n'avaient pas d'entrée : les voici.

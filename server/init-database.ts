@@ -22,29 +22,11 @@ async function applySqlFile(absolutePath: string, logLabel: string) {
   console.log(`✅ Bootstrap SQL appliqué: ${logLabel}`);
 }
 
-/**
- * Triggers d'alertes carburant (CREATE OR REPLACE, rejouables). Ils appellent create_vehicle_alert()
- * (vehicle-alerts-triggers.sql, non bootstrappé) : sans elle, chaque plein déclenchant une alerte
- * échouerait. On ne les pose donc que si la fonction existe, sinon on le signale.
- */
-const FUEL_ALERTS_TRIGGERS_FILE = 'fuel-alerts-triggers.sql';
-
-async function applyFuelAlertsTriggers() {
-  const { rows } = await pool.query(`SELECT to_regproc('create_vehicle_alert') IS NOT NULL AS present`);
-  if (!rows[0]?.present) {
-    initLog.warn({ file: FUEL_ALERTS_TRIGGERS_FILE }, "create_vehicle_alert() absente : triggers d'alertes carburant non posés");
-    return;
-  }
-  const absolutePath = path.resolve(process.cwd(), 'server', 'db', 'triggers', FUEL_ALERTS_TRIGGERS_FILE);
-  await applySqlFile(absolutePath, `server/db/triggers/${FUEL_ALERTS_TRIGGERS_FILE}`);
-}
-
 async function applyBootstrapSqlFiles() {
   for (const relativePath of BOOTSTRAP_SQL_FILES) {
     const absolutePath = path.resolve(process.cwd(), 'server', 'db', 'triggers', relativePath);
     await applySqlFile(absolutePath, `server/db/triggers/${relativePath}`);
   }
-  await applyFuelAlertsTriggers();
 }
 
 /** Migrations idempotentes rejouées à chaque démarrage (pas de table de suivi). */
