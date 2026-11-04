@@ -79,3 +79,11 @@ Entrées ajoutées à la fin, une par lot.
   - Durable : aucun code produit touché.
   - Idempotent : données propres au test, supprimées.
 - **Reste / risques** : une écriture concurrente sur 2002 pendant le test fausserait la différence. Aucune suite ne date d'OT en 2002 à ce jour.
+## 2026-11-04T12:30:55+01:00 — merge=union sur les fichiers en ajout de fin
+- **Statut** : fait, PR brouillon
+- **Quoi** : `.gitattributes` : `merge=union` sur LESSONS_LEARNED, `docs/journal/*.md`, `PASSATION*.md` ; `docs/journal/README.md` reste en fusion normale. Test `tests/unit/gitattributes-union.test.ts`, ligne AGENTS §8, leçon.
+- **Comment** : le test lit les attributs par `git check-attr` (comportement réel, pas le texte) et rejoue dans un dépôt temporaire deux branches qui ajoutent chacune une entrée en fin de LESSONS : merge sans conflit, les deux entrées présentes.
+- **Pourquoi** : erreur répétée, cinq PR passées en CONFLICTING le 4 novembre pour des ajouts de fin indépendants.
+- **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
+- **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
+- **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.
