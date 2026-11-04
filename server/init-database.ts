@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
 import { listMigrationFiles } from './lib/migration-files';
 import { planInitialAdmin } from './lib/initial-admin';
+import { hashPlainUserPins } from './lib/pin-hash-migration';
 
 const initLog = moduleLogger('init-database');
 
@@ -1247,6 +1248,8 @@ export async function initializeDatabase() {
     await applyWorkOrderVehicleStatusTriggers();
     // Capacité des réservoirs (FUEL3) — jumelle de server/db/migrations/20261102_vehicles_tank_capacity.sql.
     await pool.query(VEHICLE_TANK_CAPACITY_SQL);
+    // Reprise : PIN chauffeur en clair vers bcrypt (idempotente, compteur seul journalisé).
+    await hashPlainUserPins(pool);
     await applyPerformanceIndexes();
     await applyMigrationSqlFiles();
     await applyBootstrapSqlFiles();

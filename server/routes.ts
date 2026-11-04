@@ -600,7 +600,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Les écrans renvoient la fiche entière (id, createdAt, loginCount...) :
       // le schéma d'insertion écarte ces champs serveur et contrôle le reste.
       // Avant, createdAt en chaîne faisait échouer l'écriture, avalée en 404.
-      const { password, ...rest } = req.body ?? {};
+      // `pin` sort du schéma d'insertion : il ne s'écrit que haché, après validation.
+      const { password, pin, ...rest } = req.body ?? {};
       const userData = insertUserSchema.partial().parse(rest);
 
       // Le stockage avale l'erreur d'unicité : la vérifier ici pour un 409 lisible.
@@ -616,6 +617,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Si le mot de passe est fourni, le hasher ; vide, il est ignoré
       if (typeof password === "string" && password.trim() !== "") {
         userData.password = await bcrypt.hash(password, 10);
+      }
+
+      // PIN chauffeur : 4 chiffres (même règle que la création de compte chauffeur), haché ; vide, il est ignoré
+      if (pin !== undefined && pin !== null && String(pin).trim() !== "") {
+        if (!/^\d{4}$/.test(String(pin))) {
+          return next(new AppError(400, "Le PIN doit comporter exactement 4 chiffres."));
+        }
+        userData.pin = await bcrypt.hash(String(pin), 10);
       }
 
       if (Object.keys(userData).length === 0) {

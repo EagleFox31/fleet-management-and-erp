@@ -367,3 +367,9 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : un mot de passe changé après compromission laissait valides tous les autres cookies du compte.
 - **Décisions** : échec de révocation = `AppError(500, ..., { cause })` via `next` ; le hash est déjà écrit, le message le dit et l'utilisateur peut relancer (idempotent). Contrairement à `revokeUserAccess`, pas de second essai silencieux. Client inchangé : le 401 « Mot de passe actuel incorrect » n'est lu comme expiration de session nulle part (seule `session-check.ts` sur `/api/auth/me` déconnecte ; `profile.tsx` n'affiche qu'un toast), donc le code reste 401 et les contrats existants aussi.
 - **Preuve** : contrat `change-password-revoke-sessions` rouge avant correctif (autre session encore à 200), vert après ; intégration `revoke-other-user-sessions` (2 suppressions puis 0).
+
+## 2026-11-04 — PATCH utilisateur : PIN haché et reprise des PIN en clair
+- **Quoi** : `PATCH /api/users/:id` retire `pin` du corps avant `insertUserSchema.partial().parse`, le valide (exactement 4 chiffres, 400 lisible sinon, vide ignoré) et l'écrit haché (bcrypt, coût 10). `hashPlainUserPins` (`server/lib/pin-hash-migration.ts`), appelée par `initializeDatabase`, hache tout `users.pin` non NULL sans préfixe `$2`.
+- **Pourquoi** : le PIN était stocké en clair alors que `pin-login` compare à un hash bcrypt.
+- **Décisions** : reprise idempotente, UPDATE gardé par l'ancienne valeur, un PIN en clair non conforme est haché aussi, seul un compteur est journalisé.
+- **Preuve rouge** : intégration (reprise neutralisée) 0 haché au lieu de 2 ; contrat 7 cas rouges sur 7 sur le code d'avant (PIN stocké en clair, PIN invalide accepté en 200, PIN vide stocké `''`).
