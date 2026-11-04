@@ -2349,6 +2349,7 @@ Clé du compteur et identité réelle du compte calculées à deux endroits, de 
 ### Prévention (vérifiable)
 - Contrat `tests/contract/pin-login-hardening.contract.test.ts` : 5 PIN faux sur "id", puis les formes équivalentes sont verrouillées (429) ou refusées (400), et une seule clé `pin:<id>` existe en base.
 - Intégration `tests/integration/driver-password-pin-revocation.test.ts` pour la reprise.
+
 ## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
 
 ### Contexte

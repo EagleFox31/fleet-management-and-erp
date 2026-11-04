@@ -43,20 +43,26 @@ router.post("/auth/pin-login", validateBody(pinLoginRequestSchema), async (req, 
     if (!pinMatch) {
       throw new AppError(401, "Identifiants invalides");
     }
-    // Après la vérification du PIN seulement : sinon la réponse dirait quels
-    // chauffeurs sont désactivés à quiconque devine un identifiant.
+    // Même 401 qu'un PIN faux : un message propre aux fiches désactivées confirmerait que le PIN est bon.
     const [desactive] = await db
       .select({ id: users.id })
       .from(users)
       .where(and(eq(users.id, user.id), ficheChauffeurDesactivee))
       .limit(1);
     if (desactive) {
-      throw new AppError(401, "Ce compte chauffeur est désactivé");
+      throw new AppError(401, "Identifiants invalides");
     }
 
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role as any;
+    // Nouvel identifiant de session à la connexion (fixation de session), comme le login par mot de passe.
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((regenerateError) => {
+        if (regenerateError) return reject(regenerateError);
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        req.session.role = user.role as any;
+        req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
+      });
+    });
 
     await db
       .update(users)

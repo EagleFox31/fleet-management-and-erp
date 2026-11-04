@@ -72,7 +72,15 @@ describe("pin-login : réponse unique à tout échec (D)", { timeout: 60000 }, (
     const driver = await newAccount();
     const noPin = await newAccount({ pin: null });
     const warehouse = await newAccount({ role: "warehouse" });
+    // Fiche chauffeur désactivée, bon PIN : même réponse qu'un PIN faux, sinon le PIN est confirmé.
+    const disabled = await newAccount();
+    const [fiche] = await db
+      .insert(drivers)
+      .values({ firstName: "Fiche", lastName: "Désactivée", userId: disabled.id, isActive: false })
+      .returning({ id: drivers.id });
+    driverIds.push(fiche.id);
     const attempts = [
+      await call("POST", "/api/auth/pin-login", { body: { userId: disabled.id, pin: PIN } }),
       await call("POST", "/api/auth/pin-login", { body: { userId: UNKNOWN_ID, pin: PIN } }),
       await call("POST", "/api/auth/pin-login", { body: { userId: warehouse.id, pin: PIN } }),
       await call("POST", "/api/auth/pin-login", { body: { userId: noPin.id, pin: PIN } }),
@@ -86,6 +94,28 @@ describe("pin-login : réponse unique à tout échec (D)", { timeout: 60000 }, (
     }
     const [first, ...rest] = attempts.map((r) => stable(r.body));
     for (const other of rest) expect(other).toEqual(first);
+  });
+});
+
+describe("pin-login : corps et session", { timeout: 60000 }, () => {
+  it("identifiant numérique hors de la colonne integer (1e21, 2^31) : 400, pas 500", async () => {
+    for (const userId of [1e21, 2147483648]) {
+      expect((await call("POST", "/api/auth/pin-login", { body: { userId, pin: PIN } })).status).toBe(400);
+    }
+  });
+
+  it("connexion réussie : nouvel identifiant de session, le cookie présenté n'est pas repris (fixation)", async () => {
+    const driver = await newAccount();
+    const other = await newAccount({ role: "warehouse" });
+    const before = await call("POST", "/api/auth/login", { body: { username: other.username, password: TEST_USER_PASSWORD } });
+    const planted = before.headers.get("set-cookie")!.split(";")[0];
+    const res = await call("POST", "/api/auth/pin-login", { body: { userId: driver.id, pin: PIN }, cookie: planted });
+    expect(res.status).toBe(200);
+    const issued = res.headers.get("set-cookie")?.split(";")[0];
+    expect(issued).toBeTruthy();
+    expect(issued).not.toBe(planted);
+    const oldSession = await call("GET", "/api/auth/me", { cookie: planted });
+    expect(oldSession.body?.id).not.toBe(driver.id);
   });
 });
 

@@ -363,7 +363,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Preuve rouge** : contrat `r8-auth-misc-write-guards` joué sur le code d'avant : 3 cas rouges sur 19 (corps mal typé de `pin-login` : 401 au lieu de 400 ; `toggle` avec `isActive` mal typé : désactivation effectuée ; auto-désactivation avec `"false"` : 200). L'assertion sur le hash du mot de passe dans la réponse de `toggle` a été ajoutée après ce passage : la réponse du passage rouge contenait ce hash, mais l'assertion n'a pas été rejouée sur l'ancien code.
 
 ## 2026-11-04 — Durcissement de la connexion par PIN
-- **Agent** : fleet-api · **Branche** : `fix/pin-login-hardening` (empilée sur #273)
+- **Agent** : fleet-api · **Branche** : `fix/pin-login-hardening` (base `main`, #273 fusionnée)
 - **Quoi** : tous les échecs de `POST /api/auth/pin-login` répondent le même 401 « Identifiants invalides » (même code, même corps) avec une comparaison bcrypt factice quand il n'y a pas de hash. L'identifiant est validé puis canonisé avant le garde de verrouillage (un seul compteur par compte). À la création d'un compte chauffeur, le mot de passe est aléatoire et n'est plus le PIN haché ; reprise rétroactive idempotente au démarrage (`revokePinDerivedDriverPasswords`).
 - **Comment** : `server/lib/dummy-hash.ts` (comparaison factice, mot de passe aléatoire), montage dans `server/api/index.ts`, reprise dans `server/init-database.ts`. Contrats `driver-pin-login` mis à jour vers le 401 unifié.
 - **Pourquoi** : réduire ce que la connexion par PIN laisse apprendre et fermer la contournement du verrouillage par la forme de l'identifiant.
