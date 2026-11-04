@@ -2815,7 +2815,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedFuelRecord = await fuelService.updateFuelRecord(id, updateData, req.session.userId);
       
       if (!updatedFuelRecord) {
-        return res.status(500).json({ message: "Erreur lors de la mise à jour de l'enregistrement" });
+        // Aucune ligne vivante touchée : supprimée entre la lecture et l'écriture (le service filtre deleted_at).
+        throw new AppError(404, "Enregistrement de carburant non trouvé");
       }
       
       // Mettre à jour le kilométrage du véhicule si nécessaire via le service de kilométrage

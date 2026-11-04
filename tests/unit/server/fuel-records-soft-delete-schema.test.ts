@@ -53,4 +53,14 @@ describe("Suppression douce des pleins : init-database et migration jumelle", ()
     expect(mission.match(/fr\.deleted_at IS NULL/g)).toHaveLength(2);
     expect(norm(readFileSync("server/db/triggers/fuel-alerts-triggers.sql", "utf8")).match(/deleted_at IS NULL/g)).toHaveLength(3);
   });
+
+  it("fuel-alerts-triggers.sql est rejoué au démarrage, sous garde de create_vehicle_alert", () => {
+    const init = readFileSync("server/init-database.ts", "utf8");
+    expect(init).toContain("FUEL_ALERTS_TRIGGERS_FILE = 'fuel-alerts-triggers.sql'");
+    expect(init).toContain("to_regproc('create_vehicle_alert')");
+    expect(init).toMatch(/applyBootstrapSqlFiles[\s\S]*applyFuelAlertsTriggers\(\)/);
+    // Rejouable : aucun CREATE sans OR REPLACE.
+    const sql = readFileSync("server/db/triggers/fuel-alerts-triggers.sql", "utf8");
+    expect(sql.match(/^CREATE (?!OR REPLACE)/gm)).toBeNull();
+  });
 });

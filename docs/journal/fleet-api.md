@@ -299,3 +299,16 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : décision métier tranchée (suppression d'un plein ayant mouvementé la carte réservée aux gestionnaires, douce et tracée, solde exclu des lignes supprimées).
 - **Preuves** : voir le rapport de PR (check, unitaires, contrats) ; contrat 10 cas, 7 rouges sur `origin/main`.
 - **Écarts / ouvert** : `export-service.ts` (sauvegarde JSON complète) exporte toujours les lignes supprimées avec leur `deleted_at`, voulu pour une sauvegarde ; `server/storage.ts` (interdit) lit encore `fuel_records` sans filtre dans `getFuelRecordsByVehicleId`, plus appelée par `routes.ts`.
+
+## 2026-11-04 — Suppression douce des pleins carburant : réserves de l'audit et de la relecture (#263)
+- **Agent** : fleet-api · **Branche** : `fix/fuel-record-soft-delete`
+- **Quoi** :
+  - Correction d'une entrée précédente : `storage.getFuelRecordsByVehicleId` reste appelée (`/statistics`, `/consumption-history`, `alert-service`) ; elle filtre `deleted_at` depuis ef19904. Contrat sur ces deux routes (rouge sans le filtre, vert avec).
+  - Test d'hygiène `fuel-records-deleted-at-hygiene.test.ts` (lecteurs de `fuel_records`, exceptions gelées justifiées).
+  - PATCH : `AppError(404)` quand l'update ne touche aucune ligne vivante (suppression concurrente) au lieu de 500.
+  - `fuel-alerts-triggers.sql` rejoué au démarrage (`CREATE OR REPLACE`), sous garde `to_regproc('create_vehicle_alert')`, sinon avertissement ; cas ajouté au test jumeau.
+  - Log `moduleLogger` de la suppression définitive d'un plein physique (coût, quantité, véhicule).
+  - Règle de suppression partagée : `shared/constants/fuel-record-delete.ts` (`canDeleteFuelRecord`, `hasMovedFuelCard`), utilisée par `FuelService.deleteFuelRecord` et par l'écran (le chef d'atelier ne voit plus la corbeille sur un débit de carte).
+  - Couche 3 : `fuel_record_changed` invalide aussi le groupe `missions` ; suppressions locales invalident `/api/fuel-card/*` ; `useSingleFlightMutate` sur les 3 boutons supprimer ; `if (!req.user)` mort retiré de la route.
+- **Pourquoi** : réserves de l'audit sécurité et de la relecture sur #263.
+- **Écarts / ouvert** : poser les triggers d'alertes carburant active un comportement dormant (alertes insérées pour `user_id = 1`) ; à valider par `fleet-db` avant la mise en production. Les écrans `fuel/[id].tsx` et `fuel-record-detail-modal.tsx` n'appliquent pas encore `canDeleteFuelRecord` à leur bouton.

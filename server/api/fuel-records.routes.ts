@@ -25,10 +25,10 @@ const fuelService = new FuelService();
 router.delete("/fuel-records/:id", authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"]), async (req, res, next) => {
   try {
     const id = idParam(req.params.id, "Identifiant d'enregistrement de carburant");
-    if (!req.user) throw new AppError(401, "Non authentifié");
-    const deleted = await fuelService.deleteFuelRecord(id, { id: req.user.id, role: req.user.role });
+    const user = req.user!; // authorize() a déjà refusé toute requête sans utilisateur
+    const deleted = await fuelService.deleteFuelRecord(id, { id: user.id, role: user.role });
     if (!deleted) throw new AppError(404, "Enregistrement de carburant non trouvé");
-    log.info({ requestId: req.requestId, fuelRecordId: id, userId: req.user.id }, "Plein carburant supprimé");
+    log.info({ requestId: req.requestId, fuelRecordId: id, userId: user.id }, "Plein carburant supprimé");
     broadcastFuelRecordChanged(id, req.requestId);
     return res.status(204).send();
   } catch (err) {

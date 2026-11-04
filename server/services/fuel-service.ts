@@ -3,11 +3,12 @@ import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@
 import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
 import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { hasMovedFuelCard } from "../lib/fuel-record-ledger-lock";
 import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+import { FUEL_PHYSICAL_RECORD_DELETE_ROLES } from "@shared/constants/fuel-record-delete";
 
-// Garde historique de DELETE /api/fuel-records/:id (isWorkshopManager), conservée pour un plein physique.
-const WORKSHOP_MANAGER_ROLES = ["admin", "workshop_manager"] as const;
+const log = moduleLogger("fuel-service");
 
 /** Année et mois (calendaires) d'une date `AAAA-MM-JJ`, pour les colonnes `year` / `month`. */
 function periodOf(date: unknown): { year?: number; month?: number } {
@@ -111,10 +112,16 @@ export class FuelService {
       }
 
       // Plein physique sans mouvement de carte : garde historique (isWorkshopManager), suppression définitive.
-      if (!(WORKSHOP_MANAGER_ROLES as readonly string[]).includes(actor.role)) {
+      if (!(FUEL_PHYSICAL_RECORD_DELETE_ROLES as readonly string[]).includes(actor.role)) {
         throw new AppError(403, "Accès non autorisé");
       }
       const result = await tx.delete(fuelRecords).where(eq(fuelRecords.id, id)).returning();
+      if (result.length > 0) {
+        log.info(
+          { fuelRecordId: id, vehicleId: record.vehicleId, cost: record.cost, quantity: record.quantity, userId: actor.id },
+          "Plein physique supprimé définitivement",
+        );
+      }
       return result.length > 0;
     });
   }

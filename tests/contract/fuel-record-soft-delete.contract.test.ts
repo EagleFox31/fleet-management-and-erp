@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { FuelService } from "../../server/services/fuel-service";
 import { fuelCardService } from "../../server/services/fuel-card-service";
 import { fuelRecords } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -144,5 +145,33 @@ describe("ligne supprimée (suppression douce)", { timeout: 120000 }, () => {
 
     const statsAfter = await fuelCardService.getCurrentBalance();
     expect(statsAfter.totalDebits).toBeCloseTo(statsBefore.totalDebits - 1234, 2);
+  });
+
+  it("absente de /api/fuel-records/statistics et de /consumption-history (lecteurs de storage)", async () => {
+    const vId = await vehicleId();
+    const today = new Date().toISOString().slice(0, 10);
+    const kept = await createTestFuelRecord({ vehicleId: vId, date: today, debitAmount: "1234.00", cost: "1234.00", quantity: 3 });
+    const removed = await createTestFuelRecord({ vehicleId: vId, date: today, debitAmount: "1234.00", cost: "1234.00", quantity: 3 });
+    ids.fuelRecordIds.push(kept.id, removed.id);
+    expect((await del(removed.id, "admin")).status).toBe(204);
+
+    const stats = await session.call("GET", "/api/fuel-records/statistics?period=week", { actor: "admin" });
+    expect(stats.status).toBe(200);
+    const mine = stats.body.vehicleStats.find((v: any) => v.vehicleId === vId);
+    expect(mine).toMatchObject({ recordCount: 1, cost: 1234 });
+
+    const history = await session.call("GET", `/api/fuel-records/consumption-history?period=week&vehicleId=${vId}`, { actor: "admin" });
+    expect(history.status).toBe(200);
+    expect(history.body.reduce((n: number, row: any) => n + row.count, 0)).toBe(1);
+    expect(history.body.reduce((n: number, row: any) => n + row.cost, 0)).toBe(1234);
+  });
+
+  it("updateFuelRecord (appelé par le PATCH après sa lecture) ne touche aucune ligne supprimée", async () => {
+    const record = await movedRecord(await vehicleId());
+    expect((await del(record.id, "admin")).status).toBe(204);
+    // Course : la route a lu la ligne vivante, une suppression est passée avant l'écriture. Le service
+    // renvoie undefined, la route lève alors 404 (et non plus 500).
+    await expect(new FuelService().updateFuelRecord(record.id, { notes: "TEST-course" })).resolves.toBeUndefined();
+    expect((await rowOf(record.id)).notes).not.toBe("TEST-course");
   });
 });
