@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
 import { formatDate, formatPrice, formatDistance } from "@/lib/utils";
 import {
   Dialog,
@@ -275,13 +276,15 @@ export function FuelRecordDetailModal({
                       Modifier
                     </Button>
                     
-                    <Button 
-                      variant="destructive" 
-                      onClick={() => setIsDeleteDialogOpen(true)}
-                    >
-                      <i className="fas fa-trash-alt mr-2"></i>
-                      Supprimer
-                    </Button>
+                    {canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
+                      <Button 
+                        variant="destructive" 
+                        onClick={() => setIsDeleteDialogOpen(true)}
+                      >
+                        <i className="fas fa-trash-alt mr-2"></i>
+                        Supprimer
+                      </Button>
+                    )}
                   </div>
                 )}
                 

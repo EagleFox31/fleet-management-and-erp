@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatPrice, formatDistance } from "@/lib/utils";
 import {
@@ -148,6 +149,7 @@ export default function FuelRecordDetail() {
                   </DialogContent>
                 </Dialog>
 
+                {canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
                 <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="destructive" className="gap-2 h-8 text-xs">
@@ -167,6 +169,7 @@ export default function FuelRecordDetail() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                )}
               </div>
             )}
           </div>
