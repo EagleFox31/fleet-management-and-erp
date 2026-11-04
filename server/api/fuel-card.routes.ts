@@ -6,6 +6,8 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
+import { toFieldErrors } from "@shared/errors";
+import { z } from "zod";
 
 const log = moduleLogger("fuel-card");
 
@@ -118,29 +120,51 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   }
 });
 
+// Corps de POST /consumption : les nombres peuvent arriver en chaîne (formulaires), jamais en NaN.
+// Un message par champ, repris de l'ancien contrôle : il sert de message principal et de `errors`.
+const INCOMPLETE = "Données de consommation incomplètes";
+const QUANTITY_MESSAGE = "La quantité doit être un nombre positif.";
+const VEHICLE_MESSAGE = "Identifiant de véhicule invalide.";
+const requiredText = z.string({ required_error: INCOMPLETE, invalid_type_error: INCOMPLETE }).trim().min(1, INCOMPLETE);
+const consumptionBodySchema = z.object({
+  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE),
+  quantity: z.coerce.number({ invalid_type_error: QUANTITY_MESSAGE }).positive(QUANTITY_MESSAGE).finite(QUANTITY_MESSAGE),
+  // Présent seulement : la lecture du prix (« Prix du litre invalide. ») reste à resolveFuelUnitPrice.
+  unitPrice: z.any().refine((v) => typeof v === "number" || (typeof v === "string" && v.trim() !== ""), INCOMPLETE),
+  date: requiredText,
+  stationName: requiredText,
+  destination: requiredText,
+  clientName: z.string().trim().nullish(),
+  notes: z.string().trim().nullish(),
+});
+
 // Enregistrer une consommation de carburant (débit)
-router.post("/consumption", async (req, res, next) => {
+router.post("/consumption", isFuelCardManager, async (req, res, next) => {
   try {
-    const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = req.body;
-    
-    if (!vehicleId || !quantity || !unitPrice || !date || !stationName || !destination) {
-      return res.status(400).json({ message: "Données de consommation incomplètes" });
+    const parsedBody = consumptionBodySchema.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+      const fieldErrors = toFieldErrors(parsedBody.error.issues);
+      throw new AppError(400, fieldErrors?.[0]?.message ?? "Données de consommation invalides.", {
+        fieldErrors,
+        cause: parsedBody.error,
+      });
     }
+    const { vehicleId, quantity, unitPrice, date, stationName, destination, clientName, notes } = parsedBody.data;
     const fillDate = new Date(date);
     if (Number.isNaN(fillDate.getTime())) throw new AppError(400, "Date de plein invalide.");
     // Prix obligatoire (contrat), retenu pour admin et logistique seulement ; sinon prix du jour imposé.
     const actorRole = String((req as any).user?.role ?? "").trim().toLowerCase();
-    const resolvedUnitPrice = await resolveFuelUnitPrice(actorRole, Number.parseFloat(unitPrice), fillDate);
+    const resolvedUnitPrice = await resolveFuelUnitPrice(actorRole, Number.parseFloat(String(unitPrice)), fillDate);
     
     const result = await fuelCardService.recordConsumption({
-      vehicleId: parseInt(vehicleId),
-      quantity: parseFloat(quantity),
+      vehicleId,
+      quantity,
       unitPrice: resolvedUnitPrice,
       date,
       stationName,
       destination,
-      clientName,
-      notes,
+      clientName: clientName ?? undefined,
+      notes: notes ?? undefined,
       userId: (req as any).session.userId
     });
 
@@ -148,7 +172,7 @@ router.post("/consumption", async (req, res, next) => {
       "fuel_card_consumption_recorded",
       {
         consumption: result,
-        vehicleId: parseInt(vehicleId),
+        vehicleId,
       },
       {
         entityId: typeof result?.consumption?.id === "number" ? result.consumption.id : null,

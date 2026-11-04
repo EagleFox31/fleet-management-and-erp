@@ -139,8 +139,9 @@ describe("T1 carburant : modification d'un plein", { timeout: 60000 }, () => {
     expect(res.status).toBe(403);
   });
 
+  // Plein saisi à la main (POST /api/fuel-records) : il ne mouvemente pas la carte, donc reste modifiable.
   it("non-régression : l'auteur modifie son plein", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics"), debitAmount: "0" });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("logistics"), body: { quantity: 42 } });
     expect(res.status).toBe(200);
@@ -149,10 +150,58 @@ describe("T1 carburant : modification d'un plein", { timeout: 60000 }, () => {
   });
 
   it("non-régression : l'admin modifie le plein d'un autre", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics"), debitAmount: "0" });
     ids.fuelRecordIds.push(record.id);
     const res = await call("PATCH", `/api/fuel-records/${record.id}`, { cookie: cookies.get("admin"), body: { quantity: 43 } });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("plein qui a débité la carte : montants figés", { timeout: 60000 }, () => {
+  // Fabrique : plein débité de 82 800 pour 100 L le 2026-01-15.
+  async function debitedRecord() {
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
+    ids.fuelRecordIds.push(record.id);
+    return record;
+  }
+  const patch = (id: number, body: unknown, role: TestUserRole = "logistics") =>
+    call("PATCH", `/api/fuel-records/${id}`, { cookie: cookies.get(role), body });
+
+  for (const [field, value] of [["quantity", 42], ["cost", 1000], ["date", "2026-02-01"]] as const) {
+    it(`${field} modifié -> 409 lisible, plein inchangé`, async () => {
+      const record = await debitedRecord();
+      const res = await patch(record.id, { [field]: value });
+      expect(res.status).toBe(409);
+      expectErrorContract(res, "CONFLICT");
+      expect(res.body.message).toContain("régularisation");
+      expect(res.body.message).toContain("demandez l'annulation");
+      const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
+      expect(row.quantity).toBe(record.quantity);
+      expect(row.cost).toBe(record.cost);
+      expect(row.date).toBe(record.date);
+    });
+  }
+
+  it("changement de véhicule -> 409, même pour l'admin", async () => {
+    const record = await debitedRecord();
+    const res = await patch(record.id, { vehicleId: await newVehicleId() }, "admin");
+    expect(res.status).toBe(409);
+  });
+
+  it("ré-sauvegarde du formulaire à l'identique (50 vs \"50.00\", date ISO du même jour) -> 200", async () => {
+    const record = await debitedRecord();
+    const res = await patch(record.id, {
+      vehicleId: record.vehicleId,
+      date: "2026-01-15T00:00:00.000Z",
+      quantity: "100.004",
+      cost: "82800.004",
+      mileage: 1500,
+      notes: "corrigé",
+      fullTank: false,
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
+    expect(row).toMatchObject({ notes: "corrigé", mileage: 1500, fullTank: false, quantity: 100, cost: "82800.00" });
   });
 });
 

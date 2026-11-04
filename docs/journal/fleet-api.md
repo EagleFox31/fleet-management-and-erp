@@ -184,3 +184,122 @@ Règles : `docs/journal/README.md`.
 - Quoi : le PATCH véhicule accepte secretary (purchasePrice seul) et logistics (tankCapacityL et purchasePrice) ; tout autre champ en 403. workshop_manager : purchasePrice non nul en 403, vide ou 0 retiré (PATCH, POST, activate-from-workflow). PATCH sans champ restant : 200 sans écriture.
 - Comment : `VEHICLE_RESTRICTED_PATCH_FIELDS` dans roles.ts, `withoutEmptyPurchasePrice` et `vehiclePatchRefusal` dans vehicle-patch-guard.ts, handlers existants de routes.ts uniquement.
 - Reste : côté client, l assistant d acquisition n envoie plus purchasePrice sans droit d écriture ; preuve rouge contre origin/main ; échec préexistant du contrat GET /api/vehicles/:id/tires (10 cas, déjà rouge sur ccc1156) à diagnostiquer ; fusion d origin/main ; corps de PR.
+## 2026-11-03 — Lot B : cloison temps réel des événements d'ordre de travail
+- **Agent** : fleet-api · **Branche** : `fix/lotB-work-order-scope` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : les événements d'OT (créé, modifié, supprimé, statut, pièces, demandes de pièce, pont LISTEN/NOTIFY) ne partent plus en broadcast : personnel (`STAFF_ROLES`) ou, quand la trame porte l'OT ou une demande, personnel hors chauffeur (`WORK_ORDER_COST_READ_ROLES`). Un client n'en reçoit plus aucun.
+- **Comment** : `server/lib/work-order-realtime-scope.ts` (deux portées), appliquées sur place dans 9 fichiers serveur et le pont de `server/index.ts` ; liste gelée de `broadcast-hygiene.test.ts` diminuée.
+- **Pourquoi** : AGENTS.md §11, un client ne voit que ses véhicules ; aucun écran client n'écoute ces événements, donc pas de trame réduite au propriétaire.
+- **Comment tester (QA)** : deux clients propriétaires, un chauffeur, un chef d'atelier ; créer, modifier, supprimer un OT, demander une pièce ; attendu : seul le personnel reçoit la trame.
+- **Preuve automatisée** : `lotB-work-order-scope.contract.test.ts` rouge 5/5 sur main, vert 5/5 après ; unitaires 1854 passed ; `tsc --noEmit` 0 erreur.
+- **RAIDER** : couvert non-régression, moindre privilège ; sans objet : migration.
+- **Reste / risques** : le tableau de bord client perd la mise à jour live du statut véhicule issu d'un OT (`vehicle_status_changed`), il se rafraîchit à la navigation.
+
+## 2026-11-03 — Lot B, réserves de relecture : pont, contrat, garde-fou
+- **Agent** : fleet-api · **Branche** : `fix/lotB-work-order-scope` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le pont LISTEN/NOTIFY passe dans `server/lib/db-event-relay.ts` : `work_order_*` en `workOrderCostScope()`, `vehicle_status_changed` au personnel plus une trame réduite `{ vehicleId, status }` sans acteur au seul propriétaire du véhicule (lu en une requête ; nul ou échec, rien, journalisé par `moduleLogger`). Corrige la phrase fausse de LESSONS_LEARNED (le client lit `/api/vehicles/:id`, donc la perte de mise à jour live signalée plus haut est levée) et ajoute la règle « objet OT, demande ou pièce utilisée = `workOrderCostScope()` ».
+- **Comment** : contrat lotB réécrit avec le vrai `resolveRecipients`, étendu au pont, à incident-service, au préventif, aux lignes de travail, à awaiting-parts et à procurement ; `work-order-scope-hygiene.test.ts` (comptes gelés, trame porteuse d'OT hors portée coûts refusée) ; import de portée remis dans le bloc d'imports des 9 fichiers.
+- **Pourquoi** : réserves du relecteur sur #196.
+- **Reste / risques** : aucun.
+
+## 2026-11-03 — Garde de rôle sur le débit de la carte carburant
+- **Agent** : fleet-api · **Branche** : `fix/fuel-card-consumption-guard`
+- **Statut** : fait
+- **Quoi** : `POST /api/fuel-card/consumption` n'est plus ouvert à tout le personnel : `isFuelCardManager` (admin, logistics, secretary).
+- **Comment** : garde sur la route ; contrat étendu (workshop_manager et technician 403 solde inchangé, logistics et secretary 201) ; entrée retirée de la liste gelée `write-route-guards.frozen.ts`.
+- **Pourquoi** : écriture d'argent sous `isStaff` seul (leçon A5). Aucun écran n'appelle la route ; le chauffeur utilise `/api/missions/:id/fuel-records`.
+- **Comment tester (QA)** : se connecter en technicien, POST /api/fuel-card/consumption ; attendu 403, solde inchangé.
+- **Preuve automatisée** : contrat 44 tests, 2 rouges sur `main` puis verts ; voir PR.
+- **RAIDER** : couvert non-régression et liste gelée réduite ; sans objet : migration.
+- **Reste / risques** : `isFuelRecordWriter` (chef d'atelier) non retenu, aucun écran d'atelier n'appelle la route.
+
+## 2026-11-03 — Carte carburant, lot 2 : garde du plein de mission et corps de /consumption validé
+- **Agent** : fleet-api · **Branche** : `fix/fuel-card-lot2` (empilée sur `fix/fuel-card-consumption-guard`, #207)
+- **Statut** : fait
+- **Quoi** : `POST /api/missions/:id/fuel-records` réservé aux gestionnaires de mission (admin, logistics, secretary) et au chauffeur affecté ; `POST /api/fuel-card/consumption` valide son corps (Zod) : 400 avec `errors` par champ et les messages d'avant (le code d'avant répondait déjà 400 lisible, sans NaN ni 500). Contrôle du chauffeur affecté avant la comparaison des véhicules.
+- **Comment** : `authorize([...MISSION_FUEL_MANAGERS, "driver"])` sur la route, contrôle du chauffeur affecté conservé ; schéma `consumptionBodySchema` + `AppError(400, ..., { fieldErrors })` ; entrée retirée de `write-route-guards.frozen.ts`.
+- **Pourquoi** : le plein de mission débite la carte de l'entreprise et n'avait que `isStaff` au montage (leçon A5, récurrence ajoutée).
+- **Appelants vérifiés** : `client/src/pages/missions/[id].tsx` (bouton visible aux seuls `MISSION_MANAGER_ROLES`), `client/src/pages/driver/dashboard.tsx` (chauffeur), `e2e/21-mission-fuel-double-debit.spec.ts` (chauffeur), contrats existants (logistics) ; aucun écran technicien, magasin ou atelier.
+- **Comment tester (QA)** : en technicien, POST /api/missions/:id/fuel-records, attendu 403 ; POST /api/fuel-card/consumption avec quantity "abc", attendu 400.
+- **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 22 tests, 9 rouges sur la base d'avant (rôles et corps) ; passe de correction : 8 rouges sur la version précédente (dont l'ordre des contrôles), 22 verts. Le contrôle de chauffeur est déjà doublé en amont par `router.param("id")` ; seul le cas d'une seconde affectation distingue l'ordre.
+- **RAIDER** : couvert non-régression, liste gelée réduite, failure memory ; sans objet : migration.
+- **Reste / risques** : `/regularize` et `/declare-no-refuel` gardés dans le handler, pas en garde de route ; DELETE /fuel-records/:id et idempotence de /consumption hors périmètre.
+
+## 2026-11-03 — Déploiement VPS (Docker Compose + Caddy)
+
+- **Agent** : fleet-api · **Branche** : `worktree-agent-a6e486e04d1abd7b9` · **Commit** : voir `git log`
+- **Quoi** : `Dockerfile` multi-étapes (node:20-slim, non root), `deploy/docker-compose.yml` (app-recette, app-prod, Caddy), `deploy/Caddyfile`, `deploy/.env.example`, `docs/deploiement/vps.md`, workflow `deploy-recette.yml` (SSH, no-op sans secrets).
+- **Pourquoi** : cible VPS OVH Europe, base Neon externe. Piste Render abandonnée avant commit.
+- **Constats** : uploads écrits sous `<cwd>/uploads` (volume nommé monté sur `/app/uploads`) ; `SESSION_SECRET` retombe sur une valeur publique si absent ; sauvegarde applicative coupée (`pg_dump` absent de l'image) ; santé = `GET /api/health` existante.
+- **Tester** : `docker compose -f deploy/docker-compose.yml config` avec les `.env*` renseignés ; `docker build .` ; `npm run check`, `npm test` verts.
+
+## 2026-11-03 — Plusieurs chauffeurs par mission : autorisation et saisie carburant (#227)
+
+- **Quoi** : une mission peut avoir plusieurs affectations (un chauffeur chacune). `POST /api/missions/:id/fuel-records` accepte tout chauffeur ayant une affectation active (`ACTIVE_ASSIGNMENT_STATUSES`) et contrôle le véhicule de SA ligne ; une affectation annulée ou refusée ne donne aucun droit. `/regularize` accepte le véhicule de n'importe quelle affectation vivante. `GET /api/missions` et `/:id` gardent `assignment` (celle du chauffeur lecteur, sinon la plus ancienne vivante) et ajoutent `assignments` (un chauffeur ne voit que les siennes). Les listes d'opérations ne dupliquent plus une mission, l'alerte de retard au départ et le CA par véhicule tiennent compte de toutes les affectations.
+- **Comment** : règle factorisée dans `server/lib/driver-scope.ts` (`activeDriverAssignmentsOnMission`, `missionVehicleIdsForStaff`, `pickMissionAssignment`) ; lectures `limit(1)` restantes rendues déterministes (`orderBy assignments.id`) ; les listes d'opérations gardent une ligne par mission choisie par `pickMissionAssignment` (même affectation que le détail) ; statuts exclus partagés (`VOID_ASSIGNMENT_STATUSES`, `shared/constants/assignments.ts`).
+- **Pourquoi** : la table n'a aucune unicité sur `mission_id`, le code supposait une seule ligne (`limit(1)` sans ordre) : un chauffeur sur la seconde affectation recevait 403, et la mission figurait deux fois dans les listes.
+- **Preuve automatisée** : `fuel-card-write-guards.contract.test.ts` 30 tests ; contre l'état d'origine, 6 rouges (second chauffeur refusé, B avec le véhicule de A, personnel sur le 2e véhicule, lecture du détail, doublon des listes d'opérations) ; contre le correctif, 30 verts. 25 fichiers de contrat voisins (missions, opérations, direction, alertes, carburant) : 330 verts.
+- **Décision (3 novembre 2026)** : le CA d'une mission à plusieurs affectations est réparti à parts égales entre ses véhicules distincts (`management-dashboard-service`), au lieu d'être crédité en entier à chacun. Les affectations annulées ou refusées (`VOID_ASSIGNMENT_STATUSES`) ne reçoivent aucune part ; une affectation terminée est comptée.
+- **Nouveaux contrats** : `fuel-card-write-guards.contract.test.ts` (plusieurs chauffeurs par mission : saisie, lecture, listes d'opérations, relais sur le même camion) ; `management-dashboard-kpis.contract.test.ts`, « partage du CA » (relais = une part, terminée comptée, annulée et refusée exclues), rouge quand l'exclusion est retirée. 16 fichiers de contrat voisins : 203 verts ; unitaires : 156 fichiers verts.
+- **RAIDER** : couvert non-régression (contrats voisins verts), réutilisation (`driver-scope.ts`, `ACTIVE_ASSIGNMENT_STATUSES`), failure memory (leçon ajoutée) ; sans objet : migration, aucune colonne.
+- **Reste** : voir le commentaire de suivi sur #227 (édition des affectations, contrôles de départ, documents véhicule, coût de mission, écrans client).
+
+## 2026-11-03 — SESSION_SECRET : refus de démarrer en production sans secret propre (#243)
+- **Agent** : fleet-api · **Branche** : `fix/session-secret-production`
+- **Statut** : fait, en relecture
+- **Quoi** : le serveur refuse de démarrer hors `development`/`test` si `SESSION_SECRET` est absent, fait moins de 32 caractères ou vaut une valeur publique du dépôt.
+- **Comment** : `resolveSessionSecret(env, warn)` dans `server/lib/session-secret.ts`, appelé par `server/middleware/session.ts`. Liste d'autorisation `SESSION_SECRET_FALLBACK_ENVS` ; la signature utilise la valeur brute (le rognage sert seulement à mesurer, pour ne pas invalider les sessions d'un secret actuel entouré d'espaces).
+- **Pourquoi** : le repli `"YaroFleetOSSecretKey"` est public ; un déploiement sans secret permettait de forger un cookie de session.
+- **Comment tester (QA)** : `NODE_ENV=production` sans `SESSION_SECRET` → le serveur s'arrête avec un message qui dit comment générer un secret ; avec 48 octets aléatoires en base64 → démarrage normal.
+- **Preuve automatisée** : `tests/unit/server/session-secret.test.ts`, 17 tests dont la garde statique sur `session.ts`.
+- **RAIDER** : couvert durable (dev et test inchangés), failure memory (LESSONS_LEARNED), erreur actionnable sans secret journalisé ; sans objet : migration.
+- **Reste / risques** : la démo Replit (`npm run start`) doit avoir `SESSION_SECRET` dans ses Secrets avant le déploiement. `sameSite: "none"` en production (APK Capacitor) suivi à part.
+
+## 2026-11-03 19:35 — Plusieurs chauffeurs par mission : écriture (suite de #227, empilée sur #233)
+
+- **Quoi** : `POST /api/missions/:id/assignments` (ajout d'un chauffeur et de son véhicule) et `DELETE /api/missions/:id/assignments/:assignmentId` (annulation : statut `cancelled`, ligne conservée) dans `server/api/missions.routes.ts`.
+- **Comment** : rôles `MISSION_MANAGER_ROLES` comme le PATCH ; `assertValidDbId` sur chaque id ; transaction avec `SELECT ... FOR UPDATE` sur la ligne mission (doublon du même chauffeur actif : 409, ajouts concurrents sérialisés, aucun index) ; contrôles du PATCH repris (éligibilité véhicule, chauffeur actif, CPC, tonnage) plus conflit de planning par chauffeur et par véhicule (409) ; `mission_updated` émis après commit par `emitMissionEvent` (personnel hors chauffeur + trame réduite nominative aux chauffeurs de la mission), aucune nouvelle clé de requête. PATCH `{ assignment }` inchangé.
+- **Pourquoi** : le PATCH ne remplace ou supprime qu'une affectation, il n'existait aucun moyen d'ajouter un second chauffeur.
+- **Preuve** : `mission-multi-assignments.contract.test.ts` 26 tests.
+- **Reste** : écran (fleet-fe), voir le corps de PR.
+
+## 2026-11-03 — Plusieurs chauffeurs par mission : NO-GO sécurité levé (#240)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en re-audit
+- **Quoi** : statut, annulation et modification n'écrivent plus que sur les affectations vivantes ; un chauffeur annulé perd l'accès à la mission.
+- **Comment** : `PUT /:id/status` cible les lignes actives du chauffeur (403 sinon) ou toutes pour le personnel, contrôles de lancement par ligne (motifs préfixés par l'immatriculation) ; écritures `where id and status` ; DELETE sous `FOR UPDATE`, no-op sur `cancelled`/`rejected` ; PATCH 409 au-delà d'une affectation vivante, `catch` passé à `next` (il rendait 500) ; `loadOpenRenewalReceipts(vehicleId, tx)` lu dans la transaction de POST /assignments.
+- **Pourquoi** : une affectation annulée était ressuscitée par le lancement (part du CA, saisie carburant), et un chauffeur annulé lançait encore la mission.
+- **Preuve automatisée** : `mission-multi-assignments.contract.test.ts` 34 tests, 7 rouges sur le code d'avant ; garde `assignment-write-hygiene.test.ts`, rouge sur le code d'avant (4 écritures).
+- **3 couches** : pas d'écran pour l'instant ; instantané local et resync ciblé à livrer avec l'écran (fleet-fe). Trames déjà émises par POST/DELETE.
+- **RAIDER** : couvert non-régression (contrats voisins), failure memory (LESSONS « passage 1→N »), garde-fou automatique ; sans objet : migration.
+- **Reste / risques** : le contrôle de conflit de planning au lancement compte encore les affectations nulles des autres missions (faux blocage possible, pas une faille).
+
+## 2026-11-04 00:10 — Plusieurs chauffeurs par mission : listes chauffeur et rattrapage de main (#240)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** : fusion de `main` (base #233 fusionnée). La boucle de lancement par affectation passe sur `isDriverLicenseExpired` / `isPaperExpired` (#224, valable le jour J). `POST /:id/assignments` valide par `validateBody`. Les listes chauffeur (`GET /api/missions`, `/api/operations/missions`, `/upcoming`, `/active`) et la jointure des affectations écartent les affectations annulées ou refusées.
+- **Comment** : un filtre unique `driverLiveAssignmentFilter` / `missionsOfDriversFilter` dans `server/lib/driver-scope.ts`, repris par `canAccessMissionAsDriver`, la liste des missions et `operations-service`. Le garde-fou `assignment-write-hygiene` refuse tout `inArray(assignments.driverId` hors de `driver-scope.ts`.
+- **Pourquoi** : un chauffeur retiré de la mission recevait 403 sur le détail mais la voyait encore dans ses trois listes (preuve rouge sur l'ancien code). Une cloison doit être la même pour le détail et pour la liste.
+- **Reste tracé, non corrigé ici** :
+  - un ajout de chauffeur sur une mission `in_progress` crée une ligne `pending` sans contrôle des papiers ;
+  - au passage à `delivered`, la ligne `in_progress` d'un co-chauffeur reste active ;
+  - le PATCH lit les affectations sans verrou sur la mission.
+
+  Ces trois cas demandent une règle métier (ajout en cours de route, clôture par chauffeur). Ils sont à trancher avant d'être codés.
+- **Preuves** : 0 `error TS` ; 163 fichiers / 2033 tests unitaires ; 14 fichiers / 230 contrats (mission*, operations, fuel-card-write-guards).
+
+## 2026-11-04 00:17 — Plusieurs chauffeurs par mission : fiche chauffeur et trames (#240, re-audit)
+- **Agent** : fleet-api · **Branche** : `feat/mission-multi-assignments`
+- **Statut** : fait, en relecture
+- **Quoi** :
+  - `GET /api/drivers/me` et `GET /api/drivers/:id/missions` filtrent par `driverLiveAssignmentFilter` : le tableau de bord d'un chauffeur retiré ne liste plus la mission (client, adresses, consignes).
+  - `assignedDriverUserIds` n'envoie plus de trame au chauffeur retiré.
+  - Les deux contrôles de conflit de planning au lancement ne comptent plus une affectation annulée ou refusée.
+- **Comment** : le garde-fou `assignment-write-hygiene` exige qu'un `eq`/`inArray(assignments.driverId, …)` vive dans un `.where` qui filtre aussi `assignments.status`. Seules exceptions : la jointure `= drivers.id` et le helper lui-même. Il remplace l'interdiction limitée à `inArray`.
+- **Pourquoi** : 96b680b n'avait couvert que les `inArray` ; les `eq` de la fiche chauffeur fuyaient encore. Le contrôle porte maintenant sur la classe de défaut, pas sur une forme d'écriture.
+- **Preuves** :
+  - preuve rouge sur l'ancien code : le garde-fou trouve 2 lectures dans `drivers-management.routes.ts` et 2 dans `missions.routes.ts` ; le contrat voit encore la mission sur `/api/drivers/me` et `/api/drivers/:id/missions` ;
+  - 0 `error TS` ;
+  - unitaires : 163 fichiers, 2034 tests ;
+  - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).

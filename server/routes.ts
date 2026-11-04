@@ -1,6 +1,8 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -9,13 +11,12 @@ import { tiresService } from "./services/tires-service-simplified";
 import { FuelService } from "./services/fuel-service";
 import { mileageService } from "./services/mileage-service";
 import { escapeLike } from "./lib/sql-like";
-import { toFuelCardAppError } from "./services/fuel-card-service";
 import { vehicleStatusService } from "./services/vehicle-status-service";
 import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelCardManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -23,7 +24,7 @@ import {
   insertWorkOrderSchema, insertPartSchema, insertFuelRecordSchema,
   insertAlertSchema, insertVehicleDocumentSchema, userOnboarding,
   maintenanceSchedules, workOrders, vehicles, users, parts, fuelRecords, alerts,
-  faultCatalog, vehicleTires, insertFaultCatalogSchema, vehicleAcquisitionWorkflows,
+  vehicleTires, insertFaultCatalogSchema,
   vehicleTankCapacitySchema, VEHICLE_TANK_CAPACITY_MESSAGE
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
@@ -35,6 +36,8 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
+import { withLogContext } from "./lib/error-log-context";
+import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
@@ -49,6 +52,7 @@ import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
+import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 
 const log = moduleLogger("routes");
 
@@ -248,58 +252,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Login error:", error);
       return res.status(401).json({ message: "Erreur d'authentification, veuillez réessayer plus tard" });
-    }
-  });
-
-  // POST /api/auth/pin-login - Connexion chauffeur par PIN
-  app.post("/api/auth/pin-login", async (req, res) => {
-    try {
-      const { userId, pin } = req.body;
-      if (!userId || !pin) {
-        return res.status(400).json({ message: "userId et pin requis" });
-      }
-
-      const [user] = await db.select().from(users).where(eq(users.id, Number(userId))).limit(1);
-      if (!user || user.deletedAt) {
-        return res.status(401).json({ message: "Utilisateur introuvable" });
-      }
-      if (user.role !== "driver") {
-        return res.status(403).json({ message: "Accès réservé aux chauffeurs" });
-      }
-      if (!user.pin) {
-        return res.status(401).json({ message: "Aucun PIN configuré" });
-      }
-
-      const pinMatch = await bcrypt.compare(String(pin), user.pin);
-      if (!pinMatch) {
-        return res.status(401).json({ message: "PIN incorrect" });
-      }
-
-      req.session.userId = user.id;
-      req.session.username = user.username;
-      req.session.role = user.role as any;
-
-      await db.update(users).set({ loginCount: user.loginCount + 1, lastLoginAt: new Date() }).where(eq(users.id, user.id));
-
-      return res.status(200).json({
-        id: user.id, username: user.username, name: user.name, role: user.role, email: user.email,
-      });
-    } catch (error) {
-      console.error("PIN login error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // GET /api/auth/drivers-list - Liste des chauffeurs avec compte actif (public, pour login)
-  app.get("/api/auth/drivers-list", async (req, res) => {
-    try {
-      const driverUsers = await db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(and(eq(users.role, "driver"), isNull(users.deletedAt)));
-      return res.status(200).json(driverUsers);
-    } catch (error) {
-      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
@@ -882,21 +834,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, async (req, res) => {
+  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
         return res.status(401).json({ message: "Non authentifié" });
       }
+      // Présence et longueur vérifiées par `changePasswordRequestSchema`.
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Mot de passe actuel et nouveau mot de passe requis" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 6 caractères" });
-      }
 
       const user = await storage.getUser(userId);
       if (!user) {
@@ -1910,7 +1855,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate("work_order_created", {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId: workOrder.id,
           workOrder,
           source: "manual_work_order",
@@ -2051,7 +1996,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((global as any).broadcastUpdate) {
         const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
         (global as any).broadcastUpdate('work_order_updated', {
-          scope: { type: "broadcast" },
+          scope: workOrderCostScope(),
           workOrderId: id,
           updates: updatedData,
           workOrder: updatedWorkOrder,
@@ -2136,7 +2081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if ((global as any).broadcastUpdate) {
             (global as any).broadcastUpdate('work_order_deleted', {
-              scope: { type: "broadcast" },
+              scope: workOrderStaffScope(),
               workOrderId: wo.id,
               vehicleId: wo.vehicleId,
               source: "bulk_pending_unassigned_delete",
@@ -2229,7 +2174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('work_order_deleted', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           workOrderId: id,
           vehicleId: workOrder.vehicleId,
           source: "manual_work_order_delete",
@@ -2437,7 +2382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('part_used_removed', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           partUsedId: id
         });
       }
@@ -2866,7 +2811,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Convertir les données du formulaire au bon format ; champ absent = inchangé
-      const input = fuelRecordBodySchema.partial().parse(req.body ?? {});
+      // Plein qui a mouvementé la carte : montants, véhicule et date figés (409), valeurs stockées conservées.
+      const input = assertFuelRecordLedgerEditable(fuelRecord, fuelRecordBodySchema.partial().parse(req.body ?? {}));
       const updateData = {
         vehicleId: input.vehicleId ?? fuelRecord.vehicleId,
         date: input.date ?? fuelRecord.date,
@@ -2922,7 +2868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       broadcastFuelRecordChanged(id, req.requestId);
       return res.status(200).json(updatedFuelRecord);
     } catch (error) {
-      if (error instanceof z.ZodError) return next(error);
+      if (error instanceof z.ZodError || isAppError(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update fuel record error");
       return res.status(500).json({ message: "Erreur lors de la mise à jour du plein" });
     }
@@ -3234,200 +3180,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // === FUEL CARD SERVICE ROUTES (Sprint 1 - Phase 2) ===
   
-  // Solde actuel de la carte carburant (14,1M FCFA disponibles)
-  app.get("/api/fuel-card/balance", authenticate, async (_req, res) => {
-    try {
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const balance = await fuelCardService.getCurrentBalance();
-      return res.status(200).json(balance);
-    } catch (error) {
-      console.error("Get fuel card balance error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Recharger la carte carburant (crédit)
-  app.post("/api/fuel-card/recharge", isFuelCardManager, async (req, res, next) => {
-    try {
-      const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
-
-      const amountValue = Number.parseFloat(String(amount));
-      const quantityValue = quantity !== undefined && quantity !== null
-        ? Number.parseFloat(String(quantity))
-        : NaN;
-      const unitPriceValue = unitPrice !== undefined && unitPrice !== null
-        ? Number.parseFloat(String(unitPrice))
-        : NaN;
-      const hasQuantity = Number.isFinite(quantityValue) && quantityValue > 0;
-      const hasUnitPrice = Number.isFinite(unitPriceValue) && unitPriceValue > 0;
-
-      if (!Number.isFinite(amountValue) || amountValue <= 0 || !date || !paymentMode || (!hasQuantity && !hasUnitPrice)) {
-        return res.status(400).json({ message: "Données de recharge incomplètes" });
-      }
-
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-
-      const resolvedQuantity = hasQuantity
-        ? quantityValue
-        : amountValue / unitPriceValue;
-      const resolvedUnitPrice = hasUnitPrice
-        ? unitPriceValue
-        : amountValue / quantityValue;
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const result = await fuelCardService.rechargeCard({
-        amount: amountValue,
-        quantity: resolvedQuantity,
-        unitPrice: resolvedUnitPrice,
-        priceSource:
-          priceSource === "real" || priceSource === "fallback" || priceSource === "manual"
-            ? priceSource
-            : undefined,
-        date,
-        paymentMode,
-        orderNumber,
-        notes,
-        userId
-      });
-
-      if ((global as any).broadcastUpdate) {
-        (global as any).broadcastUpdate("fuel_card_recharged", {
-          version: 1,
-          entity: "fuel_card",
-          entityId: typeof result?.recharge?.id === "number" ? result.recharge.id : null,
-          payload: {
-            recharge: result,
-          },
-          scope: { type: "broadcast" },
-          actor: {
-            userId: req.session.userId ?? null,
-            role: req.session.role ?? null,
-          },
-          emittedAt: new Date().toISOString(),
-        });
-      }
-      
-      return res.status(201).json(result);
-    } catch (error) {
-      log.error({ err: error, requestId: (req as any).requestId }, "recharge de la carte carburant en échec");
-      return next(toFuelCardAppError(error));
-    }
-  });
-  
   // POST /api/fuel-card/consumption : servi par server/api/fuel-card.routes.ts (monté avant).
-  // Historique carburant avec filtres (année, mois, véhicule, type)
-  app.get("/api/fuel-card/history", authenticate, async (req, res) => {
-    try {
-      const { year, month, vehicleId, type } = req.query;
-      
-      const filters: any = {};
-      
-      if (year) filters.year = parseInt(year as string);
-      if (month) filters.month = parseInt(month as string);
-      if (vehicleId) filters.vehicleId = parseInt(vehicleId as string);
-      if (type && ['credit', 'debit', 'all'].includes(type as string)) {
-        filters.type = type as 'credit' | 'debit' | 'all';
-      }
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const history = await fuelCardService.getFuelHistory(filters);
-      
-      return res.status(200).json(history);
-    } catch (error) {
-      console.error("Get fuel history error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Statistiques de consommation par véhicule
-  app.get("/api/fuel-card/vehicle/:vehicleId/stats", isAnyUser, async (req, res, next) => {
-    try {
-      const vehicleId = parseInt(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const stats = await fuelCardService.getConsumptionStatsByVehicle(vehicleId);
-      
-      return res.status(200).json(stats);
-    } catch (error) {
-      log.error({ err: error, requestId: (req as any).requestId }, "statistiques carburant du véhicule en échec");
-      return next(toFuelCardAppError(error));
-    }
-  });
-  
-  // Détection d'anomalies de consommation
-  app.get("/api/fuel-card/vehicle/:vehicleId/anomalies", isAnyUser, async (req, res, next) => {
-    try {
-      const vehicleId = parseInt(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const anomalies = await fuelCardService.detectAnomalies(vehicleId);
-      
-      return res.status(200).json(anomalies);
-    } catch (error) {
-      log.error({ err: error, requestId: (req as any).requestId }, "détection des anomalies carburant en échec");
-      return next(toFuelCardAppError(error));
-    }
-  });
-  
-  // Statistiques par client (MAERSK, CNPCC, etc.)
-  app.get("/api/fuel-card/stats-by-client", authenticate, async (_req, res) => {
-    try {
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const stats = await fuelCardService.getStatsByClient();
-      
-      return res.status(200).json(stats);
-    } catch (error) {
-      console.error("Get fuel stats by client error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Statistiques mensuelles
-  app.get("/api/fuel-card/monthly-stats", authenticate, async (req, res) => {
-    try {
-      const year = parseInt(req.query.year as string) || new Date().getFullYear();
-      const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
-      
-      const { fuelCardService } = await import("./services/fuel-card-service");
-      const stats = await fuelCardService.getMonthlyStats(year, month);
-      
-      return res.status(200).json(stats);
-    } catch (error) {
-      console.error("Get monthly fuel stats error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // === VAT & BILLING SERVICE ROUTES (Sprint 1 - Phase 2) ===
   
-  // Synthèse complète fournisseurs avec factures (96 factures)
-  app.get("/api/suppliers/summary", authenticate, async (_req, res) => {
-    try {
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const summary = await vatBillingService.getSuppliersSummary();
-      return res.status(200).json(summary);
-    } catch (error) {
-      console.error("Get suppliers summary error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/suppliers/summary : servi par server/api/suppliers.routes.ts (déclaré avant /:id).
   
   // Statistiques par famille de produits
   app.get("/api/invoices/by-family", isStaff, async (req, res) => {
@@ -3460,25 +3216,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ 
         message: "Erreur serveur" 
       });
-    }
-  });
-  
-  // Calculer TVA pour un montant HT
-  app.post("/api/invoices/calculate-vat", authenticate, async (req, res) => {
-    try {
-      const { amountHT } = req.body;
-      
-      if (!amountHT || isNaN(parseFloat(amountHT))) {
-        return res.status(400).json({ message: "Montant HT invalide" });
-      }
-      
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const result = vatBillingService.calculateVAT(parseFloat(amountHT));
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error("Calculate VAT error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
   
@@ -3515,21 +3252,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(stats);
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "Get monthly VAT stats error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
-  // Top fournisseurs par montant
-  app.get("/api/suppliers/top", authenticate, async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 10;
-      
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const topSuppliers = await vatBillingService.getTopSuppliers(limit);
-      
-      return res.status(200).json(topSuppliers);
-    } catch (error) {
-      console.error("Get top suppliers error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4061,27 +3783,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/fault-catalog/:id", isWorkshopManager, async (req, res, next) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID invalide" });
-      }
-
-      const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, ...catalogPayload } = req.body ?? {};
-      const { data, errors } = prepareColumnUpdate(faultCatalog, catalogPayload);
-      if (errors.length > 0) {
-        return next(new AppError(400, "Certaines informations de la panne sont invalides.", { fieldErrors: errors }));
-      }
-
-      const catalog = await storage.updateFaultCatalog(id, data);
-      res.json(catalog);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Update fault catalog error");
-      res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   app.delete("/api/fault-catalog/:id", isAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -4098,7 +3799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route spéciale pour importer les données après déploiement
-  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response) => {
+  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const fs = await import("fs");
       const path = await import("path");
@@ -4113,16 +3814,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backupFile = files.find(f => f.startsWith('fleet-backup-') && f.endsWith('.json'));
       
       if (!backupFile) {
-        return res.status(404).json({ 
-          message: "Fichier de backup non trouvé",
-          availableFiles: files
-        });
+        // Le listage du dossier backup/ reste côté serveur (AGENTS.md §10).
+        return res.status(404).json({ message: "Fichier de backup non trouvé" });
       }
 
       const backupFilePath = path.join(backupDir, backupFile);
       const backupData = JSON.parse(fs.readFileSync(backupFilePath, 'utf8'));
 
-      console.log('📥 Import des données de backup en cours...');
+      log.info({ requestId: req.requestId, backupFile }, "import de backup en cours");
 
       // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
       const { db } = await import("../server/db");
@@ -4193,7 +3892,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         importStats.alerts = backupData.alerts.length;
       }
 
-      console.log('✅ Import terminé!', importStats);
+      log.info({ requestId: req.requestId, backupFile, importStats }, "import de backup terminé");
 
       res.json({
         success: true,
@@ -4204,13 +3903,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
     } catch (error) {
-      console.error('❌ Erreur lors de l\'import:', error);
-      const errorMessage = error instanceof Error ? error.message : "Erreur inconnue";
-      res.status(500).json({ 
-        success: false,
-        message: "Erreur lors de l'import des données",
-        error: errorMessage
-      });
+      // Message générique + référence par le gestionnaire central ; le détail reste dans le log (AGENTS.md §10).
+      next(
+        withLogContext(
+          error instanceof AppError ? error : new AppError(500, "Erreur lors de l'import des données.", { cause: error }),
+          { event: "admin.import_backup.failed" },
+        ),
+      );
     }
   });
 
@@ -4975,43 +4674,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour la persistance des workflows d'acquisition de véhicules
-  app.post("/api/workflows/vehicle-acquisition", authenticate, async (req, res) => {
-    try {
-      const { workflowService } = await import('./services/workflow-service');
-      const { VehicleAutoCreation } = await import('./services/vehicle-auto-creation');
-      const userId = req.session.userId;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-
-      const workflow = await workflowService.saveWorkflowState({
-        ...req.body,
-        userId
-      });
-
-      // Si le workflow est terminé (étape 5), activer automatiquement le véhicule
-      if (workflow.currentStep === 5 && workflow.status === 'completed') {
-        try {
-          console.log('🚛 Activation automatique du véhicule depuis le workflow terminé');
-          const vehicleId = await VehicleAutoCreation.createVehicleFromWorkflow(
-            workflow.workflowData as any
-          );
-          
-          console.log('✅ Véhicule activé automatiquement:', vehicleId);
-        } catch (activationError) {
-          console.error('❌ Erreur lors de l\'activation automatique:', activationError);
-          // Ne pas faire échouer la sauvegarde du workflow pour autant
-        }
-      }
-
-      return res.status(200).json(workflow);
-    } catch (error) {
-      console.error("Save workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   app.get("/api/workflows/vehicle-acquisition/:sessionId", authenticate, async (req, res) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
@@ -5026,25 +4688,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(workflow);
     } catch (error) {
       console.error("Get workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  // Route PATCH pour la sauvegarde progressive des workflows
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId", authenticate, async (req, res) => {
-    try {
-      const { workflowService } = await import('./services/workflow-service');
-      const userId = req.session.userId;
-      const sessionId = req.params.sessionId;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-
-      const workflow = await workflowService.updateWorkflowState(userId, sessionId, req.body);
-      return res.status(200).json(workflow);
-    } catch (error) {
-      console.error("Update workflow error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -5115,7 +4758,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -5166,7 +4809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;

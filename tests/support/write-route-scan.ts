@@ -6,8 +6,13 @@ export const API_DIR = path.resolve(process.cwd(), "server/api");
 
 /** Receveur Express : `router`, `xxxRouter` ou `xxxRoutes` (work-order-items.routes.ts). */
 export const WRITE_ROUTE = /\b(router|\w+Router|\w+Routes)\.(post|put|patch|delete)\(/g;
-/** Compte grossier, indépendant du receveur (hors requêtes Drizzle `db.delete(`), pour détecter un scanner devenu aveugle. */
-export const ANY_WRITE_CALL = /(?<!\b(?:db|tx|trx))\.(post|put|patch|delete)\(/g;
+/**
+ * Compte grossier, indépendant du receveur, pour détecter un scanner devenu aveugle.
+ * Les requêtes Drizzle (`db.delete(`, `tx\n  .delete(`) ne sont pas des routes : le receveur
+ * `db` / `tx` / `trx` est exclu, y compris séparé du point par des espaces ou un saut de ligne.
+ * `\b` garde les identifiants qui finissent seulement par ces lettres (`ctx.delete(` compte).
+ */
+export const ANY_WRITE_CALL = /(?<!\b(?:db|tx|trx)\s*)\.(post|put|patch|delete)\(/g;
 const PATH_ARG = /^\s*(["'`])([^"'`]+)\1/;
 /** Premier handler : ce qui suit n'est plus un middleware déclaré sur la route. */
 const HANDLER_START = /async\s*\(|async\s+function\b|\(\s*req\b/;
@@ -91,5 +96,10 @@ export function findUnguardedWriteRoutes(): string[] {
 
 /** Nombre d'appels `.post(` / `.put(` / `.patch(` / `.delete(` dans server/api, quel que soit le receveur. */
 export function countAnyWriteCalls(): number {
-  return apiSources().reduce((n, { source }) => n + (source.match(ANY_WRITE_CALL)?.length ?? 0), 0);
+  return apiSources().reduce((n, { source }) => n + countAnyWriteCallsIn(source), 0);
+}
+
+/** Compte grossier sur un extrait (testable). */
+export function countAnyWriteCallsIn(source: string): number {
+  return source.match(ANY_WRITE_CALL)?.length ?? 0;
 }

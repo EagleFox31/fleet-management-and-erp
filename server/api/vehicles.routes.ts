@@ -12,6 +12,7 @@ import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
 import { canReadVehiclePurchasePrice, VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
+import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 
 const router = Router();
 const log = moduleLogger("vehicles-routes");
@@ -177,9 +178,12 @@ router.get("/check-alerts", isAnyUser, async (req, res, next) => {
         }
       }
       for (const doc of documents.filter((d) => d.vehicleId === vehicle.id && d.expiryDate)) {
-        const days = daysUntil(doc.expiryDate as string);
+        // Règle partagée (expiry-day.ts) : jour UTC, valable le jour J, expiré à J+1.
+        const expiryDateOnly = toExpiryDateOnly(doc.expiryDate);
+        if (expiryDateOnly === null) continue;
+        const days = daysBetweenDateOnly(expiryDateOnly, todayUtcDateOnly(now));
         const label = documentLabels[doc.type] ?? doc.name;
-        if (days <= 0) {
+        if (days < 0) {
           alerts.push({ vehicleId: vehicle.id, registrationNumber: plate, documentId: doc.id, type: "document_expired", priority: "critical",
             message: `Le document "${label}" du véhicule ${plate} est expiré depuis ${Math.abs(days)} jours.` });
         } else if (days <= 30) {

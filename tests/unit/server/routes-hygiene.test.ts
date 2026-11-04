@@ -90,23 +90,9 @@ const KNOWN_DUPLICATE_ROUTES: string[] = [];
  * `routes.ts` ne sert jamais, mais elle dort avec ses gardes et sa logique. Cas réel :
  * `POST /api/fuel-card/consumption` y acceptait un prix unitaire client sous `authenticate` (#201).
  * Liste gelée en égalité stricte (3 novembre 2026) : supprimer la déclaration de `routes.ts`
- * retire la ligne ; toute nouvelle entrée est une régression.
+ * retire la ligne ; toute nouvelle entrée est une régression. Vidée le 3 novembre 2026.
  */
-const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [
-  "GET /api/auth/drivers-list",
-  "GET /api/fuel-card/balance",
-  "GET /api/fuel-card/history",
-  "GET /api/fuel-card/monthly-stats",
-  "GET /api/fuel-card/stats-by-client",
-  "GET /api/fuel-card/vehicle/:p/anomalies",
-  "GET /api/fuel-card/vehicle/:p/stats",
-  "GET /api/suppliers/top",
-  "PATCH /api/fault-catalog/:p",
-  "PATCH /api/workflows/vehicle-acquisition/:p",
-  "POST /api/auth/pin-login",
-  "POST /api/fuel-card/recharge",
-  "POST /api/workflows/vehicle-acquisition",
-];
+const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [];
 
 /**
  * Gardes chaînées : la route de `server/api/` ne fait qu'un contrôle puis passe la main par `next()`

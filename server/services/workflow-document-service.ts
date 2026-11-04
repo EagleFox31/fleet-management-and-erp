@@ -1,11 +1,11 @@
 import { db } from "../db";
 import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
-import { eq, and, inArray, type SQL } from "drizzle-orm";
+import { eq, and, inArray, lt, type SQL } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
+import { isInsideDirectory, isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
 
@@ -141,41 +141,52 @@ export class WorkflowDocumentService {
         fs.mkdirSync(vehicleUploadDir, { recursive: true });
       }
       
+      const transferredIds: number[] = [];
       for (const doc of documents) {
         const originalPath = existingUploadedFile(doc.filePath);
         // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
         const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
 
-        // Copier le fichier
-        if (originalPath) {
-          fs.copyFileSync(originalPath, newPath);
-
-          // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
-          await db.insert(vehicleDocuments).values({
-            vehicleId,
-            name: doc.originalName,
-            type: toVehicleDocumentType(doc.documentType),
-            description: "Document transféré depuis le workflow d'acquisition",
-            filename: newFileName,
-            filesize: doc.fileSize,
-            fileType: doc.mimeType,
-            filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
-            uploadedBy: doc.uploadedBy,
-          });
+        // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
+        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath)) {
+          // Ni copié ni marqué : le document reste dans le workflow, visible comme non transféré.
+          log.warn(
+            { sessionId, vehicleId, docId: doc.id, reason: originalPath ? "destination hors du dossier du véhicule" : "fichier source introuvable" },
+            "document workflow non transféré",
+          );
+          continue;
         }
+
+        fs.copyFileSync(originalPath, newPath);
+
+        // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
+        await db.insert(vehicleDocuments).values({
+          vehicleId,
+          name: doc.originalName,
+          type: toVehicleDocumentType(doc.documentType),
+          description: "Document transféré depuis le workflow d'acquisition",
+          filename: newFileName,
+          filesize: doc.fileSize,
+          fileType: doc.mimeType,
+          filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
+          uploadedBy: doc.uploadedBy,
+        });
+        transferredIds.push(doc.id);
       }
       
-      // Marquer les documents comme transférés
-      await db
-        .update(workflowDocuments)
-        .set({ 
-          vehicleId: vehicleId,
-          isTransferred: true 
-        })
-        .where(eq(workflowDocuments.sessionId, sessionId));
+      // Marquer comme transférés les seuls documents copiés
+      if (transferredIds.length > 0) {
+        await db
+          .update(workflowDocuments)
+          .set({ 
+            vehicleId: vehicleId,
+            isTransferred: true 
+          })
+          .where(and(eq(workflowDocuments.sessionId, sessionId), inArray(workflowDocuments.id, transferredIds)));
+      }
       
-      log.info({ sessionId, vehicleId }, "documents workflow transférés au véhicule");
+      log.info({ sessionId, vehicleId, transferred: transferredIds.length, skipped: documents.length - transferredIds.length }, "documents workflow transférés au véhicule");
 
     } catch (error) {
       log.error({ err: error, sessionId, vehicleId }, "transfert des documents workflow en échec");
@@ -244,12 +255,15 @@ export class WorkflowDocumentService {
   }
   
   /**
-   * Nettoie les documents des workflows abandonnés (plus de 7 jours)
+   * Nettoie les documents des workflows abandonnés depuis plus de `olderThanDays` jours
+   * (7 par défaut). `updatedAt` porte la date de l'abandon (`abandonWorkflow`). Sans cette
+   * borne, un workflow abandonné la veille perdait ses documents.
    */
-  static async cleanupAbandonedWorkflowDocuments(): Promise<void> {
+  static async cleanupAbandonedWorkflowDocuments(
+    { olderThanDays = 7, now = new Date() }: { olderThanDays?: number; now?: Date } = {},
+  ): Promise<void> {
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const cutoff = new Date(now.getTime() - olderThanDays * 24 * 60 * 60 * 1000);
       
       // Récupérer les workflows abandonnés
       const abandonedWorkflows = await db
@@ -258,7 +272,7 @@ export class WorkflowDocumentService {
         .where(
           and(
             eq(vehicleAcquisitionWorkflows.status, 'abandoned'),
-            // Workflows abandonnés depuis plus de 7 jours
+            lt(vehicleAcquisitionWorkflows.updatedAt, cutoff),
           )
         );
       

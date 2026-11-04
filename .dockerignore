@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.github
+.claude
+android
+e2e
+tests
+uploads
+backups
+backup
+.env
+.env.*
+*.log
+docs
+# attached_assets reste dans le contexte : le client en importe des images (écran de connexion)
+# et le serveur y lit le papier à en-tête TAY (PDF, Word).

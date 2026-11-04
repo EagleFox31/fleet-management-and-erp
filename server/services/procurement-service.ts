@@ -22,6 +22,7 @@ import { AppError } from "../lib/app-error";
 import { broadcastAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
 import { moduleLogger } from "../lib/logger";
 import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 /**
  * Service de gestion des commandes d'achat groupées
@@ -1333,7 +1334,7 @@ export class ProcurementService {
       // Diffuser via WebSocket pour mise à jour temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('parts_delivered', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           orderId,
           partIds: deliveredPartIds,
           affectedWorkOrderIds: affectedWorkOrders.map(wo => wo.id),
@@ -1419,7 +1420,7 @@ export class ProcurementService {
       // Diffuser via WebSocket
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('part_received', {
-          scope: { type: "broadcast" },
+          scope: workOrderStaffScope(),
           partId,
           quantityReceived,
           affectedWorkOrderIds: affectedWorkOrders.map(wo => wo.id),

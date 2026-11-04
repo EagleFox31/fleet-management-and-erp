@@ -3,9 +3,11 @@ import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { uploadedFileCandidates } from "../../server/lib/uploaded-file";
 import { WorkflowDocumentService } from "../../server/services/workflow-document-service";
 import { vehicleAcquisitionWorkflows, vehicleDocuments, workflowDocuments } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { cleanupTrackedDir, trackDir, type TrackedDir } from "../support/tracked-dirs";
 import { createTestUser, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
@@ -19,7 +21,8 @@ import { uniqueTestToken } from "../support/ids";
 
 const ids = createIdBag();
 const workflowIds: number[] = [];
-const vehicleDirs: string[] = [];
+// Dossiers suivis : un dossier versionné (uploads/documents/vehicle-1/.gitkeep) ne perd que ce que le test a créé.
+const vehicleDirs: TrackedDir[] = [];
 // Sans le correctif, ces noms finissent hors du dossier prévu : uniques pour être retrouvés.
 const escapeMarker = uniqueTestToken("escape");
 const evilName = `${uniqueTestToken("evil")}.pdf`;
@@ -27,7 +30,7 @@ const workflowsRoot = join(process.cwd(), "uploads", "workflows");
 
 afterAll(async () => {
   // Disque d'abord : un ménage base qui échoue ne doit pas laisser de fichier.
-  for (const dir of vehicleDirs) rmSync(dir, { recursive: true, force: true });
+  for (const dir of vehicleDirs) cleanupTrackedDir(dir);
   rmSync(join(process.cwd(), escapeMarker), { recursive: true, force: true });
   rmSync(join(process.cwd(), "uploads", "documents", evilName), { force: true });
   for (const entry of existsSync(workflowsRoot) ? readdirSync(workflowsRoot) : []) {
@@ -45,7 +48,7 @@ async function workflowWithDocument(originalName: string, documentType: "carte_g
   ids.userIds.push(user.id);
   const vehicle = await createTestVehicle();
   ids.vehicleIds.push(vehicle.id);
-  vehicleDirs.push(join(process.cwd(), "uploads", "documents", `vehicle-${vehicle.id}`));
+  vehicleDirs.push(trackDir(join(process.cwd(), "uploads", "documents", `vehicle-${vehicle.id}`)));
 
   const sessionId = uniqueTestToken("wf");
   const [workflow] = await db
@@ -53,7 +56,7 @@ async function workflowWithDocument(originalName: string, documentType: "carte_g
     .values({ userId: user.id, sessionId, workflowData: {} })
     .returning();
   workflowIds.push(workflow.id);
-  vehicleDirs.push(join(process.cwd(), "uploads", "workflows", sessionId));
+  vehicleDirs.push(trackDir(join(process.cwd(), "uploads", "workflows", sessionId)));
 
   const document = await WorkflowDocumentService.saveWorkflowDocument({
     workflowId: workflow.id,
@@ -93,6 +96,30 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
     expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/carte_grise_${evilName}`);
   });
 
+  it("fichier source disparu : ce document n'est ni copié ni marqué transféré, les autres le sont", async () => {
+    const { sessionId, vehicleId, document: kept } = await workflowWithDocument("present.pdf");
+    const [workflow] = await db.select().from(vehicleAcquisitionWorkflows).where(eq(vehicleAcquisitionWorkflows.sessionId, sessionId));
+    const lost = await WorkflowDocumentService.saveWorkflowDocument({
+      workflowId: workflow.id,
+      sessionId,
+      documentType: "factur_achat",
+      originalName: "disparu.pdf",
+      fileBuffer: Buffer.from("TEST"),
+      mimeType: "application/pdf",
+      uploadedBy: workflow.userId,
+    });
+    for (const candidate of uploadedFileCandidates(lost.filePath)) rmSync(candidate, { force: true });
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["present.pdf"]);
+    const sources = await db.select().from(workflowDocuments).where(eq(workflowDocuments.sessionId, sessionId));
+    const byId = new Map(sources.map((row) => [row.id, row]));
+    expect(byId.get(kept.id)).toMatchObject({ isTransferred: true, vehicleId });
+    expect(byId.get(lost.id)).toMatchObject({ isTransferred: false, vehicleId: null });
+  });
+
   it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {
     const { sessionId, vehicleId } = await workflowWithDocument("facture.pdf", "factur_achat");
 
@@ -105,7 +132,7 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
 
 describe("WorkflowDocumentService.saveWorkflowDocument", { timeout: 60000 }, () => {
   const okSession = uniqueTestToken("wf");
-  vehicleDirs.push(join(workflowsRoot, okSession));
+  vehicleDirs.push(trackDir(join(workflowsRoot, okSession)));
 
   it.each([
     ["sessionId remontant", { sessionId: `../../${escapeMarker}`, documentType: "carte_grise" }],

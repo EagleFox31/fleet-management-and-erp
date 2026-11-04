@@ -18,6 +18,7 @@ import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/co
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("incidents");
 
@@ -222,7 +223,7 @@ export async function createIncident(
       incidentId: row.id,
       triggeredBy: user.id,
       actor: { userId: user.id },
-      scope: { type: "broadcast" },
+      scope: workOrderCostScope(),
     });
   }
 

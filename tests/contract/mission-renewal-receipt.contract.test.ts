@@ -234,10 +234,13 @@ describe("carte grise : préparation alignée sur le lancement", { timeout: 6000
     expect(JSON.stringify(launched.body)).toContain("Carte grise expirée.");
   });
 
-  it("le jour de l'échéance bloque, comme au lancement", async () => {
+  it("le jour de l'échéance est valable, le lendemain bloque, comme au lancement", async () => {
     const { vehicle } = await vehicleWithCarteGrise(inDays(0));
     const missionId = await assignedMission(vehicle.id);
-    expect((await readinessCheck(missionId, "doc_carte_grise")).passed).toBe(false);
+    expect((await readinessCheck(missionId, "doc_carte_grise")).passed).toBe(true);
+    const { vehicle: echue } = await vehicleWithCarteGrise(inDays(-1));
+    const missionEchue = await assignedMission(echue.id);
+    expect((await readinessCheck(missionEchue, "doc_carte_grise")).passed).toBe(false);
   });
 
   it("récépissé valable : item vrai, qui nomme le récépissé", async () => {
@@ -263,4 +266,122 @@ describe("carte grise : préparation alignée sur le lancement", { timeout: 6000
     const missionId = await assignedMission(vehicle.id);
     expect(await readinessCheck(missionId, "doc_carte_grise")).toMatchObject({ passed: false, detail: "Carte grise manquante." });
   });
+});
+
+describe("colonnes miroir de vehicles : préparation alignée sur le lancement", { timeout: 60000 }, () => {
+  /** Papiers valides dans vehicle_documents ; seule la colonne miroir de l'assurance est échue. */
+  async function vehicleWithStaleMirror() {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    const assurance = await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    await db.update(vehicles).set({ insuranceExpiry: inDays(-4) }).where(eq(vehicles.id, vehicle.id));
+    return { vehicle, assurance };
+  }
+
+  it("assurance échue sur la fiche véhicule : item faux, motif de la règle partagée, lancement refusé", async () => {
+    const { vehicle } = await vehicleWithStaleMirror();
+    const missionId = await assignedMission(vehicle.id);
+    const check = await readinessCheck(missionId, "doc_assurance");
+    expect(check.passed).toBe(false);
+    expect(check.blocking).toBe(true);
+    expect(check.detail).toMatch(/^Assurance .*expir/i);
+    const launched = await launch(missionId);
+    expect(launched.status).toBe(400);
+    expect(JSON.stringify(launched.body)).toMatch(/ssurance/);
+  });
+
+  it("récépissé valable : l'item repasse au vert", async () => {
+    const { vehicle, assurance } = await vehicleWithStaleMirror();
+    const missionId = await assignedMission(vehicle.id);
+    await addReceipt(vehicle.id, assurance.id, "assurance", inDays(10));
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+  });
+
+  it("visite et plaque échues sur la fiche : leurs items tombent, l'assurance reste vraie", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(100));
+    await addDoc(vehicle.id, "visite_technique", inDays(100));
+    await db
+      .update(vehicles)
+      .set({ technicalInspectionDate: inDays(-2), licensePlateExpiry: inDays(-2), insuranceExpiry: inDays(50) })
+      .where(eq(vehicles.id, vehicle.id));
+    const missionId = await assignedMission(vehicle.id);
+    expect((await readinessCheck(missionId, "doc_visite_technique")).passed).toBe(false);
+    expect((await readinessCheck(missionId, "doc_carte_grise")).passed).toBe(false);
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+  });
+});
+
+describe("jour de l'échéance : même règle à la préparation et au lancement", { timeout: 60000 }, () => {
+  /** Papiers valides, sauf `type` qui expire dans `days` jours (jour UTC) ; colonnes miroir futures. */
+  async function vehicleExpiringIn(type: "assurance" | "visite_technique", days: number) {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    for (const t of ["carte_grise", "assurance", "visite_technique"] as const) {
+      await addDoc(vehicle.id, t, t === type ? inDays(days) : inDays(100));
+    }
+    await db
+      .update(vehicles)
+      .set({ insuranceExpiry: inDays(100), technicalInspectionDate: inDays(100), licensePlateExpiry: inDays(100) })
+      .where(eq(vehicles.id, vehicle.id));
+    return vehicle;
+  }
+
+  for (const [type, key, motif] of [
+    ["assurance", "doc_assurance", "Assurance manquante ou expirée."],
+    ["visite_technique", "doc_visite_technique", "Visite technique manquante ou expirée."],
+  ] as const) {
+    it(`${type} qui expire aujourd'hui (J) : item vrai, et le lancement ne la cite pas`, async () => {
+      const vehicle = await vehicleExpiringIn(type, 0);
+      const missionId = await assignedMission(vehicle.id);
+      expect((await readinessCheck(missionId, key)).passed).toBe(true);
+      const launched = await launch(missionId);
+      expect(JSON.stringify(launched.body)).not.toContain(motif);
+    });
+
+    it(`${type} échue d'hier (J+1) : item faux, et le lancement la refuse`, async () => {
+      const vehicle = await vehicleExpiringIn(type, -1);
+      const missionId = await assignedMission(vehicle.id);
+      expect((await readinessCheck(missionId, key)).passed).toBe(false);
+      const launched = await launch(missionId);
+      expect(launched.status).toBe(400);
+      expect(JSON.stringify(launched.body)).toContain(motif);
+    });
+  }
+
+  it("échéance demain : item vrai", async () => {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    await addDoc(vehicle.id, "carte_grise", inDays(100));
+    await addDoc(vehicle.id, "assurance", inDays(1));
+    await addDoc(vehicle.id, "visite_technique", inDays(1));
+    const missionId = await assignedMission(vehicle.id);
+    expect((await readinessCheck(missionId, "doc_assurance")).passed).toBe(true);
+    expect((await readinessCheck(missionId, "doc_visite_technique")).passed).toBe(true);
+  });
+});
+
+describe("permis chauffeur : valable le jour J, expiré à J+1 (#224)", { timeout: 60000 }, () => {
+  async function missionWithPermit(days: number) {
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const missionId = await assignedMission(vehicle.id);
+    const [assignment] = await db.select().from(assignments).where(eq(assignments.missionId, missionId));
+    await db.update(drivers).set({ licenseExpiry: inDays(days) } as any).where(eq(drivers.id, assignment.driverId!));
+    return missionId;
+  }
+
+  for (const [days, valid] of [[1, true], [0, true], [-1, false]] as const) {
+    it(`échéance dans ${days} jour(s) : item permis ${valid ? "vrai" : "faux"}, lancement ${valid ? "sans" : "avec"} motif permis`, async () => {
+      const missionId = await missionWithPermit(days);
+      expect((await readinessCheck(missionId, "driver_permit_valid")).passed).toBe(valid);
+      const launched = JSON.stringify((await launch(missionId)).body);
+      if (valid) expect(launched).not.toContain("Permis chauffeur expiré.");
+      else expect(launched).toContain("Permis chauffeur expiré.");
+    });
+  }
 });
