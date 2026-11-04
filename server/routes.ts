@@ -1,7 +1,7 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { PASSWORD_MIN_LENGTH, changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
 import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
 import { toggleUserRequestSchema } from "@shared/contracts/admin-users";
@@ -588,13 +588,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'utilisateur invalide" });
+        return next(new AppError(400, "ID d'utilisateur invalide"));
       }
       
       const user = await storage.getUser(id);
       
       if (!user) {
-        return res.status(404).json({ message: "Utilisateur non trouvé" });
+        return next(new AppError(404, "Utilisateur non trouvé"));
       }
       
       // Les écrans renvoient la fiche entière (id, createdAt, loginCount...) :
@@ -616,6 +616,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Si le mot de passe est fourni, le hasher ; vide, il est ignoré
       if (typeof password === "string" && password.trim() !== "") {
+        // Même longueur minimale que le changement de mot de passe (source : shared/contracts/self-service).
+        if (password.length < PASSWORD_MIN_LENGTH) {
+          return next(new AppError(400, `Le mot de passe doit contenir au moins ${PASSWORD_MIN_LENGTH} caractères.`));
+        }
         userData.password = await bcrypt.hash(password, 10);
       }
 
@@ -658,7 +662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!updatedUser) {
-        return res.status(404).json({ message: "Utilisateur non trouvé" });
+        return next(new AppError(404, "Utilisateur non trouvé"));
       }
       
       return res.status(200).json({
@@ -674,7 +678,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update user error");
-      return res.status(500).json({ message: "Erreur serveur" });
+      return next(new AppError(500, "Erreur serveur", { cause: error }));
     }
   });
 
