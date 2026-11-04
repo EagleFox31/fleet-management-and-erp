@@ -65,8 +65,13 @@ describe("verrou de la carte carburant : écritures génériques", { timeout: 30
   it("deleteFuelRecord attend le verrou", async () => {
     const record = await createTestFuelRecord({ vehicleId: (await newVehicle()).id });
     ids.fuelRecordIds.push(record.id);
-    expect(await expectWaitsForLock(() => fuelService.deleteFuelRecord(record.id))).toBe(true);
-    expect(await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id))).toHaveLength(0);
+    const admin = await createTestUser({ role: "admin" });
+    ids.userIds.push(admin.id);
+    // Le plein de la fabrique a mouvementé la carte (débit) : admin est gestionnaire de la carte, suppression douce.
+    expect(await expectWaitsForLock(() => fuelService.deleteFuelRecord(record.id, { id: admin.id, role: "admin" }))).toBe(true);
+    const [after] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
+    expect(after?.deletedAt).toBeInstanceOf(Date);
+    expect(after?.deletedBy).toBe(admin.id);
   });
 });
 
