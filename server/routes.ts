@@ -4,6 +4,13 @@ import { z } from "zod";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
 import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
+import { toggleUserRequestSchema } from "@shared/contracts/admin-users";
+import {
+  createMaintenanceScheduleRequestSchema,
+  dateMaintenanceTriggerRequestSchema,
+  type CreateMaintenanceScheduleRequest,
+  type DateMaintenanceTriggerRequest,
+} from "@shared/contracts/maintenance-schedules";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -33,6 +40,8 @@ import { checkWorkOrderTransition } from "@shared/constants/work-order-transitio
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
+// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
+import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
@@ -54,8 +63,6 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
-// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
-import { loginUsernameRef } from "./lib/login-identifier";
 
 const log = moduleLogger("routes");
 
@@ -63,7 +70,7 @@ const log = moduleLogger("routes");
  * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
  * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
  */
-const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
@@ -747,7 +754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH /api/admin/users/:id/toggle - Activer/désactiver un utilisateur
-  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, async (req, res) => {
+  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { isActive } = req.body;
@@ -775,12 +782,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await revokeUserAccess(id, "deactivated_by_admin");
       }
 
+      // Ni le hash du mot de passe ni celui du PIN ne quittent le serveur.
+      const { password: _password, pin: _pin, ...safeUser } = updatedUser;
+
       return res.status(200).json({ 
         message: isActive ? "Utilisateur activé" : "Utilisateur désactivé",
-        user: updatedUser
+        user: safeUser
       });
     } catch (error) {
-      console.error("Toggle user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "activation ou désactivation d'un utilisateur en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -861,7 +871,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -883,7 +893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sha256Hash = crypto.createHash("sha256").update(currentPassword).digest("hex");
         if (sha256Hash === user.password) {
           isValidPassword = true;
-          console.log(`🔐 [PASSWORD CHANGE] Legacy SHA-256 hash detected for user ${userId}, will upgrade to bcrypt`);
+          log.info({ event: "Change password legacy hash", userId, requestId: req.requestId }, "Legacy SHA-256 hash, upgraded to bcrypt");
         }
       }
       
@@ -895,11 +905,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       // Update the password (also upgrades legacy SHA-256 to bcrypt)
-      await storage.updateUser(userId, { password: hashedPassword });
+      // updateUser avale l'erreur et renvoie undefined : sans ce contrôle, une panne répondait
+      // « modifié » alors que l'ancien mot de passe restait en place.
+      const updated = await storage.updateUser(userId, { password: hashedPassword });
+      if (!updated) {
+        log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
+        return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {
-      console.error("Change password error:", error);
+      log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1374,48 +1390,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/maintenance-schedules", isWorkshopManager, async (req, res, next) => {
+  app.post("/api/maintenance-schedules", isWorkshopManager, validateBody(createMaintenanceScheduleRequestSchema), async (req, res, next) => {
     try {
-      // Valider les données d'entrée
-      const validationSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        title: z.string().min(1),
-        description: z.string().optional(),
-        frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'mileage']),
-        frequencyValue: z.number().min(1),
-        scheduledDate: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}/, "Date invalide (AAAA-MM-JJ)")
-          .refine((value) => !Number.isNaN(Date.parse(value)), "Date invalide (AAAA-MM-JJ)"),
-        scheduledMileage: z.number().optional(),
-        isActive: z.boolean().default(true)
-      });
-
-      const scheduleData = validationSchema.parse(req.body);
+      const scheduleData = req.body as CreateMaintenanceScheduleRequest;
       if (!(await storage.getVehicle(scheduleData.vehicleId))) {
         return next(new AppError(404, "Véhicule introuvable : la planification n'a pas été créée."));
       }
-      
+
       // Utiliser le service pour créer la planification et générer automatiquement l'OT
       const schedule = await preventiveMaintenanceService.createMaintenanceSchedule(scheduleData);
-      
+
       return res.status(201).json(schedule);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Données de planification invalides",
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message
-          }))
-        });
-      }
-      
-      console.error("Create maintenance schedule error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la création de la planification de maintenance",
-        details: error instanceof Error ? error.message : "Erreur inconnue"
-      });
+      return next(new AppError(500, "Erreur lors de la création de la planification de maintenance", { cause: error }));
     }
   });
 
@@ -2860,7 +2847,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedFuelRecord = await fuelService.updateFuelRecord(id, updateData, req.session.userId);
       
       if (!updatedFuelRecord) {
-        return res.status(500).json({ message: "Erreur lors de la mise à jour de l'enregistrement" });
+        // Aucune ligne vivante touchée : supprimée entre la lecture et l'écriture (le service filtre deleted_at).
+        throw new AppError(404, "Enregistrement de carburant non trouvé");
       }
       
       // Mettre à jour le kilométrage du véhicule si nécessaire via le service de kilométrage
@@ -2911,14 +2899,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
-      let fuelRecords: Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>> = [];
+      // Lecture par le service : les pleins supprimés (deleted_at) en sont exclus.
+      let fuelRecords: Awaited<ReturnType<typeof fuelService.getFuelRecordsByVehicleId>> = [];
 
       if (vehicleId && !isNaN(vehicleId)) {
         assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
           return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         }
-        fuelRecords = await storage.getFuelRecordsByVehicleId(vehicleId);
+        fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
       } else {
         // Récupérer tous les enregistrements de carburant
         // Note: Dans une application réelle, il faudrait paginer les résultats
@@ -2928,7 +2917,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
-          const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
+          const records = await fuelService.getFuelRecordsByVehicleId(vehicle.id);
           fuelRecords = [...fuelRecords, ...records];
         }
         
@@ -4329,22 +4318,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint pour déclencher une action depuis les alertes de maintenance
-  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, async (req, res) => {
+  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, validateBody(dateMaintenanceTriggerRequestSchema), async (req, res) => {
     try {
-      const payloadSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        alertType: z.enum(['maintenance', 'insurance', 'inspection', 'license'])
-      });
-      const parsedPayload = payloadSchema.safeParse(req.body);
-
-      if (!parsedPayload.success) {
-        return res.status(400).json({
-          message: "Payload invalide: vehicleId et alertType sont requis",
-          errors: parsedPayload.error.errors
-        });
-      }
-
-      const { vehicleId, alertType } = parsedPayload.data;
+      const { vehicleId, alertType } = req.body as DateMaintenanceTriggerRequest;
       const createdBy: number | undefined = req.session?.userId ?? undefined;
 
       if (alertType === 'maintenance') {
@@ -4794,7 +4770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, isAnyUser, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4815,12 +4791,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update onboarding step error:", error);
+      log.error({ err: error, event: "Update onboarding step error", requestId: req.requestId }, "Update onboarding step error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, isAnyUser, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4840,12 +4816,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(completedOnboarding);
     } catch (error) {
-      console.error("Complete onboarding error:", error);
+      log.error({ err: error, event: "Complete onboarding error", requestId: req.requestId }, "Complete onboarding error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, isAnyUser, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;
@@ -4865,7 +4841,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update mascot visibility error:", error);
+      log.error({ err: error, event: "Update mascot visibility error", requestId: req.requestId }, "Update mascot visibility error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4877,18 +4853,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fs = await import('fs/promises');
       const path = await import('path');
       
-      // Sécurité: vérifier que le fichier est bien dans la liste autorisée
-      const allowedFiles = ['GUIDE_UTILISATEUR.md', 'CAHIER_TESTS_UTILISATEUR.md'];
-      if (!allowedFiles.includes(filename)) {
+      // Sécurité : seuls ces fichiers sont servis, à leur emplacement sous docs/ (#285)
+      const allowedFiles: Record<string, string> = {
+        'GUIDE_UTILISATEUR.md': 'docs/guides/GUIDE_UTILISATEUR.md',
+        'CAHIER_TESTS_UTILISATEUR.md': 'docs/qa/CAHIER_TESTS_UTILISATEUR.md',
+      };
+      const relativePath = Object.prototype.hasOwnProperty.call(allowedFiles, filename) ? allowedFiles[filename] : undefined;
+      if (!relativePath) {
         return res.status(400).json({ message: "Fichier non autorisé" });
       }
       
-      const filePath = path.join(process.cwd(), filename);
+      const filePath = path.join(process.cwd(), relativePath);
       const content = await fs.readFile(filePath, 'utf-8');
       
       return res.status(200).json({ content, filename });
     } catch (error) {
-      console.error("Error reading documentation file:", error);
+      log.error({ err: error, requestId: req.requestId, filename: req.params.filename }, "lecture du fichier de documentation");
       return res.status(500).json({ message: "Erreur lors de la lecture du fichier" });
     }
   });
