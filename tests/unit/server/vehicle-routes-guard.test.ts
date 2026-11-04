@@ -100,7 +100,7 @@ describe("garde de rôle sur les routes qui lisent un véhicule", () => {
 
   it("la détection voit bien les déclarations des sources", () => {
     const all = SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"), PREFIXES.get(f)?.prefix ?? "", PREFIXES.get(f)?.guarded ?? false));
-    expect(all.length).toBeGreaterThan(3);
+    expect(all.length).toBeGreaterThanOrEqual(KNOWN_AUTHENTICATE_ONLY.length);
   });
 
   it("aucune nouvelle route véhicule n'est gardée par authenticate seul", () => {
