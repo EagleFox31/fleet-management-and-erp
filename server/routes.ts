@@ -2,6 +2,7 @@ import express, { type Express, Request, Response, NextFunction } from "express"
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
@@ -4143,7 +4144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/active/:sessionId/abandon", authenticate, async (req, res) => {
+  app.patch("/api/workflows/active/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res) => {
     try {
       const { workflowReminderService } = await import('./services/workflow-reminder-service');
       const userId = req.session.userId;
@@ -4178,7 +4179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour les documents de workflow d'acquisition
-  app.post("/api/workflows/:sessionId/documents", isWorkflowDocumentWriter, upload.single('document'), async (req, res, next) => {
+  app.post("/api/workflows/:sessionId/documents", isWorkflowDocumentWriter, upload.single('document'), validateBody(workflowDocumentUploadRequestSchema), async (req, res, next) => {
     try {
       const { WorkflowDocumentService, isWorkflowDocumentType } = await import('./services/workflow-document-service');
       const sessionId = req.params.sessionId;
@@ -4406,7 +4407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/workflows/documents/:documentId", isAnyUser, async (req, res, next) => {
+  app.delete("/api/workflows/documents/:documentId", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
       const documentId = parseInt(req.params.documentId);
@@ -4688,38 +4689,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", authenticate, async (req, res) => {
+  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", isWorkflowDocumentWriter, async (req, res) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
       const userId = req.session.userId;
       const sessionId = req.params.sessionId;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Non authentifié" });
       }
 
-      await workflowService.completeWorkflow(userId, sessionId);
+      // Une session est celle de son auteur : hors périmètre (ou inconnue), 404.
+      if (!(await workflowService.completeWorkflow(userId, sessionId))) {
+        return res.status(404).json({ message: "Brouillon d'acquisition introuvable." });
+      }
       return res.status(200).json({ message: "Workflow terminé avec succès" });
     } catch (error) {
-      console.error("Complete workflow error:", error);
+      log.error({ err: error, requestId: req.requestId }, "clôture du workflow en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId/abandon", authenticate, async (req, res) => {
+  app.patch("/api/workflows/vehicle-acquisition/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
       const userId = req.session.userId;
       const sessionId = req.params.sessionId;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Non authentifié" });
       }
 
-      await workflowService.abandonWorkflow(userId, sessionId);
+      if (!(await workflowService.abandonWorkflow(userId, sessionId))) {
+        return res.status(404).json({ message: "Brouillon d'acquisition introuvable." });
+      }
       return res.status(200).json({ message: "Workflow abandonné" });
     } catch (error) {
-      console.error("Abandon workflow error:", error);
+      log.error({ err: error, requestId: req.requestId }, "abandon du workflow en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
