@@ -21,7 +21,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -62,14 +61,6 @@ interface VehicleDocument {
   expiryDate: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-interface RenewalCenter {
-  id: number;
-  name: string;
-  documentType?: VehicleDocument["type"] | null;
-  address?: string | null;
-  contact?: string | null;
 }
 
 // Formatter utilitaires
@@ -150,24 +141,11 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   const queryClient = useQueryClient();
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isRenewDialogOpen, setIsRenewDialogOpen] = useState(false);
-  const [renewalStep, setRenewalStep] = useState<1 | 2>(1);
   const [selectedDocument, setSelectedDocument] = useState<VehicleDocument | null>(null);
-  const [selectedRenewalDocument, setSelectedRenewalDocument] = useState<VehicleDocument | null>(null);
-  const [centerSelection, setCenterSelection] = useState<string>("");
   const canRequestRenewal = ["admin", "workshop_manager", "secretary", "logistics"].includes(user?.role || "");
   // Même garde que DELETE /api/documents/:id (isWorkshopManager).
   const canDeleteDocument = ["admin", "workshop_manager"].includes(user?.role || "");
 
-  const [renewalForm, setRenewalForm] = useState({
-    comment: "",
-    assignedRole: "secretary",
-    newExpiryDate: "",
-    centerName: "",
-    centerAddress: "",
-    centerContact: "",
-  });
-  
   // Formulaire d'upload
   const [uploadForm, setUploadForm] = useState({
     name: '',
@@ -199,25 +177,6 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
     if (usersData && Array.isArray((usersData as any).users)) return (usersData as any).users;
     return [];
   }, [usersData]);
-
-  const { data: renewalCentersData = [] } = useQuery<RenewalCenter[]>({
-    queryKey: ["/api/document-renewals/centers", selectedRenewalDocument?.type],
-    enabled: isRenewDialogOpen && !!selectedRenewalDocument?.type,
-    queryFn: async () => {
-      const query = selectedRenewalDocument?.type
-        ? `?documentType=${encodeURIComponent(selectedRenewalDocument.type)}`
-        : "";
-      const response = await fetch(`/api/document-renewals/centers${query}`, {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("Impossible de charger les centres agréés.");
-      }
-      return response.json();
-    },
-    retry: false,
-  });
-  const renewalCenters = Array.isArray(renewalCentersData) ? renewalCentersData : [];
 
   // Mutation pour télécharger un document
   const uploadMutation = useMutation({
@@ -272,126 +231,6 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
     }
   });
 
-  const quickRenewDocumentMutation = useMutation({
-    mutationFn: async (payload: {
-      vehicleId: number;
-      vehicleDocumentId: number;
-      comment: string;
-      assignedRole: string | null;
-      newExpiryDate: string;
-      centerId: number | null;
-      centerName: string | null;
-      centerAddress: string | null;
-      centerContact: string | null;
-    }) => {
-      const response = await apiRequest("POST", "/api/document-renewals/quick-renew", payload);
-      return response.json();
-    },
-    onSuccess: async (payload: any) => {
-      const updatedDocument = payload?.document && typeof payload.document === "object" ? payload.document as Record<string, any> : null;
-      const updatedDocumentId = Number(updatedDocument?.id ?? 0);
-      const updatedDocumentType = String(updatedDocument?.type || "");
-      const updatedExpiryDate = String(updatedDocument?.expiryDate ?? updatedDocument?.expiry_date ?? "").trim();
-
-      if (updatedDocumentId > 0) {
-        queryClient.setQueryData([`/api/vehicles/${vehicleId}/documents`], (currentData: unknown) => {
-          if (!Array.isArray(currentData)) return currentData;
-          return currentData.map((item: any) =>
-            Number(item?.id) === updatedDocumentId ? { ...item, ...updatedDocument } : item,
-          );
-        });
-
-        if (updatedExpiryDate && ["carte_grise", "assurance", "visite_technique"].includes(updatedDocumentType)) {
-          queryClient.setQueriesData(
-            {
-              predicate: (query) => {
-                const [firstKey] = query.queryKey ?? [];
-                return typeof firstKey === "string" && /^\/api\/vehicles\/[^/]+$/.test(firstKey);
-              },
-            },
-            (currentData: unknown) => {
-              if (!currentData || typeof currentData !== "object" || Array.isArray(currentData)) return currentData;
-              const next = { ...(currentData as Record<string, any>) };
-              if (updatedDocumentType === "carte_grise") next.licensePlateExpiry = updatedExpiryDate;
-              if (updatedDocumentType === "assurance") next.insuranceExpiry = updatedExpiryDate;
-              if (updatedDocumentType === "visite_technique") next.technicalInspectionDate = updatedExpiryDate;
-              return next;
-            },
-          );
-        }
-      }
-
-      toast({
-        title: "Document renouvelé",
-        description:
-          payload?.message || "Le document et les conformités ont été mis à jour.",
-      });
-      setIsRenewDialogOpen(false);
-      setRenewalStep(1);
-      setSelectedRenewalDocument(null);
-      setCenterSelection("");
-      setRenewalForm({
-        comment: "",
-        assignedRole: "secretary",
-        newExpiryDate: "",
-        centerName: "",
-        centerAddress: "",
-        centerContact: "",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts/unread"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts/count"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/alerts/active"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/document-renewals/requests"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles/all"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles/all-with-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles/document-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles/expiring-docs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles/expired-docs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/statistics/fleet"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${vehicleId}/documents`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/vehicles/${vehicleId}`] });
-      queryClient.invalidateQueries({
-        predicate: (query) => {
-          const [firstKey, secondKey, thirdKey] = query.queryKey ?? [];
-
-          if (typeof firstKey === "string" && /^\/api\/vehicles\/[^/]+$/.test(firstKey)) {
-            return true;
-          }
-
-          if (typeof firstKey === "string" && /^\/api\/vehicles\/[^/]+\/documents$/.test(firstKey)) {
-            return true;
-          }
-
-          if (firstKey === "/api/vehicles" && typeof secondKey === "number" && thirdKey === "status-history") {
-            return true;
-          }
-
-          if (firstKey === "/api/document-renewals/requests" && typeof secondKey === "number") {
-            return true;
-          }
-
-          return false;
-        },
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/date-alerts"] });
-      await Promise.allSettled([
-        queryClient.refetchQueries({ queryKey: [`/api/vehicles/${vehicleId}/documents`], type: "all" }),
-        queryClient.refetchQueries({ queryKey: ["/api/vehicles/document-stats"], type: "active" }),
-        queryClient.refetchQueries({ queryKey: ["/api/vehicles/expiring-docs"], type: "active" }),
-        queryClient.refetchQueries({ queryKey: ["/api/vehicles/expired-docs"], type: "active" }),
-        queryClient.refetchQueries({ queryKey: ["/api/document-renewals/requests"], type: "active" }),
-      ]);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Échec de la demande",
-      description: userMessageOf(error, "Impossible de renouveler ce document."),
-        variant: "destructive",
-      });
-    },
-  });
-  
   // Gérer le changement du fichier
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -501,84 +340,6 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
       returnTo,
     });
     setLocation(`/vehicles/documents/renew?${params.toString()}`);
-  };
-
-  const handleRenewalFormChange = (
-    key:
-      | "comment"
-      | "assignedRole"
-      | "newExpiryDate"
-      | "centerName"
-      | "centerAddress"
-      | "centerContact",
-    value: string,
-  ) => {
-    setRenewalForm((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
-  };
-
-  const handleSubmitRenewalRequest = () => {
-    if (!selectedRenewalDocument) {
-      return;
-    }
-
-    const comment = renewalForm.comment.trim();
-    if (comment.length < 3) {
-      toast({
-        title: "Commentaire requis",
-        description: "Ajoutez au moins 3 caractères pour décrire la demande.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!renewalForm.newExpiryDate) {
-      toast({
-        title: "Nouvelle date requise",
-        description: "Renseignez la nouvelle date d'expiration du document.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const isNewCenter = centerSelection === "__new__";
-    const centerName = isNewCenter ? renewalForm.centerName.trim() : "";
-    const centerId =
-      !isNewCenter && centerSelection.length > 0 ? Number.parseInt(centerSelection, 10) : null;
-
-    if (!isNewCenter && !centerSelection) {
-      toast({
-        title: "Centre agréé requis",
-        description: "Sélectionnez un centre agréé.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (isNewCenter && centerName.length < 2) {
-      toast({
-        title: "Centre agréé requis",
-        description: "Saisissez le nom du centre agréé.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const payload = {
-      vehicleId,
-      vehicleDocumentId: selectedRenewalDocument.id,
-      comment,
-      assignedRole: renewalForm.assignedRole || null,
-      newExpiryDate: renewalForm.newExpiryDate,
-      centerId: Number.isFinite(centerId as number) ? centerId : null,
-      centerName: isNewCenter ? centerName : null,
-      centerAddress: isNewCenter ? renewalForm.centerAddress.trim() || null : null,
-      centerContact: isNewCenter ? renewalForm.centerContact.trim() || null : null,
-    };
-
-    quickRenewDocumentMutation.mutate(payload);
   };
 
   const resolveUploadedByLabel = (doc: VehicleDocument) => {
@@ -890,182 +651,6 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
         )}
       </CardContent>
 
-      <Dialog
-        open={isRenewDialogOpen}
-        onOpenChange={(open) => {
-          setIsRenewDialogOpen(open);
-          if (!open) {
-            setSelectedRenewalDocument(null);
-            setRenewalStep(1);
-            setCenterSelection("");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-[680px]">
-          <DialogHeader>
-            <DialogTitle>Renouveler le document</DialogTitle>
-            <DialogDescription>
-              Workflow simple en 2 étapes: informations puis mise à jour du document.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="flex items-center gap-2 text-xs">
-              <span className={`rounded-full px-2 py-1 ${renewalStep === 1 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                1. Contexte
-              </span>
-              <span className={`rounded-full px-2 py-1 ${renewalStep === 2 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                2. Mise à jour
-              </span>
-            </div>
-
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-              <p className="text-sm font-semibold text-orange-900">
-                {selectedRenewalDocument?.name || "Document"}
-              </p>
-              <p className="text-xs text-orange-700">
-                Type: {selectedRenewalDocument ? getDocumentTypeLabel(selectedRenewalDocument.type) : "—"} •
-                Expiration: {selectedRenewalDocument ? formatDate(selectedRenewalDocument.expiryDate) : "N/A"}
-              </p>
-            </div>
-
-            {renewalStep === 1 ? (
-              <div className="space-y-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="renewal-comment">Motif / commentaire *</Label>
-                  <Textarea
-                    id="renewal-comment"
-                    placeholder="Ex: Visite technique renouvelée ce jour."
-                    value={renewalForm.comment}
-                    onChange={(event) => handleRenewalFormChange("comment", event.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Service responsable</Label>
-                  <Select
-                    value={renewalForm.assignedRole || "none"}
-                    onValueChange={(value) => handleRenewalFormChange("assignedRole", value === "none" ? "" : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choisir un service" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Non assigné</SelectItem>
-                      <SelectItem value="secretary">Secrétariat</SelectItem>
-                      <SelectItem value="logistics">Logistique</SelectItem>
-                      <SelectItem value="workshop_manager">Chef d'atelier</SelectItem>
-                      <SelectItem value="admin">Administration</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Centre agréé *</Label>
-                  <Select
-                    value={centerSelection || "none"}
-                    onValueChange={(value) => setCenterSelection(value === "none" ? "" : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionnez un centre agréé" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sélectionner</SelectItem>
-                      {renewalCenters.map((center) => (
-                        <SelectItem key={center.id} value={String(center.id)}>
-                          {center.name}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="__new__">+ Ajouter un nouveau centre</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {centerSelection === "__new__" && (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div className="grid gap-2 md:col-span-2">
-                      <Label htmlFor="new-center-name">Nom du centre *</Label>
-                      <Input
-                        id="new-center-name"
-                        placeholder="Ex: Centre Auto Contrôle Bonabéri"
-                        value={renewalForm.centerName}
-                        onChange={(event) => handleRenewalFormChange("centerName", event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="new-center-address">Adresse</Label>
-                      <Input
-                        id="new-center-address"
-                        placeholder="Bonabéri, Douala"
-                        value={renewalForm.centerAddress}
-                        onChange={(event) => handleRenewalFormChange("centerAddress", event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="new-center-contact">Contact</Label>
-                      <Input
-                        id="new-center-contact"
-                        placeholder="+237 6xx xxx xxx"
-                        value={renewalForm.centerContact}
-                        onChange={(event) => handleRenewalFormChange("centerContact", event.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="renewal-new-expiry">Nouvelle date d'expiration *</Label>
-                  <Input
-                    id="renewal-new-expiry"
-                    type="date"
-                    value={renewalForm.newExpiryDate}
-                    onChange={(event) => handleRenewalFormChange("newExpiryDate", event.target.value)}
-                  />
-                </div>
-                <p className="text-xs text-gray-500">
-                  En validant, la page Documents et les indicateurs de conformité seront mis à jour immédiatement.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setIsRenewDialogOpen(false);
-                setSelectedRenewalDocument(null);
-                setRenewalStep(1);
-                setCenterSelection("");
-              }}
-            >
-              Annuler
-            </Button>
-            {renewalStep === 1 ? (
-              <Button
-                onClick={() => setRenewalStep(2)}
-                disabled={
-                  renewalForm.comment.trim().length < 3 ||
-                  (!centerSelection ||
-                    (centerSelection === "__new__" && renewalForm.centerName.trim().length < 2))
-                }
-              >
-                Suivant
-              </Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setRenewalStep(1)}>
-                  Précédent
-                </Button>
-                <Button onClick={handleSubmitRenewalRequest} disabled={quickRenewDocumentMutation.isPending}>
-                  {quickRenewDocumentMutation.isPending ? "Mise à jour..." : "Renouveler"}
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
       {/* Dialogue de confirmation de suppression */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
