@@ -92,16 +92,15 @@ describe("kpiService.failures : pannes sans double compte", () => {
     expect(res.monthlyAverage).toBe(Math.round((res.total / 3) * 100) / 100);
   }, 30_000);
 
-  it("sur une période vide : une ligne par mois, toutes à zéro", async () => {
+  it("sur une période sans données propres au test : une ligne par mois, totaux cohérents", async () => {
+    // Pas d'hypothèse « 2001 est vide » : work-order-cost y crée un OT correctif, et la base de
+    // test est partagée entre sessions. Les mois sans panne restent présents (zéros compris).
     const res = await kpiService.failures({ from: "2001-01-01", to: "2001-03-31" }, NOW);
-    expect(res.series).toEqual([
-      { month: "2001-01", count: 0 },
-      { month: "2001-02", count: 0 },
-      { month: "2001-03", count: 0 },
-    ]);
-    expect(res.total).toBe(0);
-    expect(res.monthlyAverage).toBe(0);
-    expect(res.byVehicle).toEqual([]);
+    expect(res.series.map((s) => s.month)).toEqual(["2001-01", "2001-02", "2001-03"]);
+    const sum = res.series.reduce((acc, s) => acc + s.count, 0);
+    expect(res.total).toBe(sum);
+    expect(res.monthlyAverage).toBe(Math.round((sum / 3) * 100) / 100);
+    expect(res.byVehicle.reduce((acc, v) => acc + v.count, 0)).toBe(sum);
   }, 30_000);
 });
 
