@@ -100,9 +100,10 @@ export class WorkflowDocumentService {
    * garder que les documents des workflows créés par ce propriétaire. Le filtre
    * porte sur le workflow, pas sur `sessionId`, qui n'est pas unique.
    */
-  static async getWorkflowDocuments(sessionId: string, ownerId: number | null = null): Promise<any[]> {
+  static async getWorkflowDocuments(sessionId: string, ownerId: number | null = null, workflowId?: number): Promise<any[]> {
     try {
       const conditions: SQL[] = [eq(workflowDocuments.sessionId, sessionId)];
+      if (workflowId !== undefined) conditions.push(eq(workflowDocuments.workflowId, workflowId));
       if (ownerId !== null) {
         conditions.push(
           inArray(
@@ -128,12 +129,14 @@ export class WorkflowDocumentService {
   }
   
   /**
-   * Transfère les documents d'un workflow vers un véhicule créé
+   * Transfère les documents d'un workflow vers un véhicule créé. `sessionId` n'est pas unique
+   * entre utilisateurs : le filtre porte aussi sur `workflowId`, sinon le transfert de B
+   * emporterait les documents de A.
    */
-  static async transferDocumentsToVehicle(sessionId: string, vehicleId: number): Promise<void> {
+  static async transferDocumentsToVehicle(sessionId: string, vehicleId: number, workflowId: number): Promise<void> {
     try {
       // Récupérer les documents du workflow
-      const documents = await this.getWorkflowDocuments(sessionId);
+      const documents = await this.getWorkflowDocuments(sessionId, null, workflowId);
       
       // Copier les fichiers vers le dossier du véhicule
       const vehicleUploadDir = path.join(process.cwd(), 'uploads', 'documents', `vehicle-${vehicleId}`);
@@ -183,7 +186,7 @@ export class WorkflowDocumentService {
             vehicleId: vehicleId,
             isTransferred: true 
           })
-          .where(and(eq(workflowDocuments.sessionId, sessionId), inArray(workflowDocuments.id, transferredIds)));
+          .where(and(eq(workflowDocuments.workflowId, workflowId), inArray(workflowDocuments.id, transferredIds)));
       }
       
       log.info({ sessionId, vehicleId, transferred: transferredIds.length, skipped: documents.length - transferredIds.length }, "documents workflow transférés au véhicule");
@@ -277,13 +280,22 @@ export class WorkflowDocumentService {
         );
       
       for (const workflow of abandonedWorkflows) {
-        const documents = await this.getWorkflowDocuments(workflow.sessionId);
+        const documents = await this.getWorkflowDocuments(workflow.sessionId, null, workflow.id);
         
         // Supprimer les documents
         for (const doc of documents) {
           await this.deleteWorkflowDocument(doc.id);
         }
         
+        // Le dossier est celui du sessionId, partagé par les workflows homonymes d'autres comptes :
+        // il ne part que lorsqu'il ne reste plus aucun document sous ce sessionId.
+        const [stillUsed] = await db
+          .select({ id: workflowDocuments.id })
+          .from(workflowDocuments)
+          .where(eq(workflowDocuments.sessionId, workflow.sessionId))
+          .limit(1);
+        if (stillUsed) continue;
+
         // Supprimer le dossier du workflow (suppression récursive : jamais hors de uploads/workflows)
         if (!isSafePathSegment(workflow.sessionId)) continue;
         const workflowDir = path.join(process.cwd(), 'uploads', 'workflows', workflow.sessionId);

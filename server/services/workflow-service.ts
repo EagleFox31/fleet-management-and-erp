@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { vehicleAcquisitionWorkflows, type VehicleAcquisitionWorkflow, type InsertVehicleAcquisitionWorkflow } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
 
 /** Vrai si la session existe au nom de cet utilisateur, quel que soit son statut (rejouer une clôture reste un succès). */
 export async function userOwnsWorkflowSession(userId: number, sessionId: string): Promise<boolean> {
@@ -95,7 +96,17 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
-    return userOwnsWorkflowSession(userId, sessionId);
+    const [session] = await db
+      .select({ status: vehicleAcquisitionWorkflows.status })
+      .from(vehicleAcquisitionWorkflows)
+      .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)))
+      .limit(1);
+    if (!session) return false;
+    // Un brouillon abandonné ne se déclare pas « terminé » : rejouer sur un terminé reste un succès.
+    if (session.status === 'abandoned') {
+      throw new AppError(409, "Ce brouillon d'acquisition a été abandonné : il ne peut plus être terminé.");
+    }
+    return true;
   }
 
   // Mettre à jour seulement les données du workflow (pour sauvegarde progressive)
