@@ -1,0 +1,10 @@
+# Journal fe-e2e-sw
+
+## 2026-11-04T12:50:00+01:00 — e2e 02, 05, 21-parts : /api/auth/me bloqué après un rechargement
+
+- **Agent** : fe-e2e-sw · **Branche** : `worktree-agent-a91de81a6c5dc3623`
+- **Quoi** : le service worker (`client/public/sw.js`) ne revalide plus en arrière-plan que la navigation et la coque statique (`STATIC_ASSETS`), plus chaque ressource servie depuis le cache. Spec 05 : testid `invoice-number` remplacé par `invoice-number-field` (la page détail d'une facture client le porte depuis un renommage, masqué jusque-là par le blocage).
+- **Comment** : cache-first inchangé ; la revalidation passe par `shouldRevalidate(request, url)`. Test `tests/unit/client/offline-sw-cache.test.ts` (2 cas ajoutés).
+- **Pourquoi** : au second chargement complet, le worker servait les centaines de modules Vite depuis le cache et relançait un `fetch` réseau pour chacun. Le navigateur n'ouvre que 6 connexions par hôte : `/api/auth/me`, `/api/alerts`, `/api/feature-flags` attendaient derrière, `/api/auth/me` dépassait les 10 s de `checkSession`, l'utilisateur restait `null` (en-tête « Utilisateur », barre latérale réduite, `<main>` vide). Le serveur n'était pas en cause : même cookie, `fetch` Node sur `/api/auth/me` en 0,7 s pendant le blocage ; sans service worker (`serviceWorkers: 'block'`) la page se charge. En production les bundles sont peu nombreux, l'effet y est atténué, mais revalider des bundles à empreinte était inutile.
+- **Comment tester** : `node node_modules/@playwright/test/cli.js test e2e/02-fleet-vehicles.spec.ts e2e/05-mission-billing-payment.spec.ts e2e/21-parts-catalog.spec.ts` (serveur sans watch, `E2E_BASE_URL`) ; unitaire : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-sw-cache.test.ts` (rouge si `shouldRevalidate` renvoie toujours vrai).
+- **RAIDER** : D (tests SW existants verts, aucune réponse /api/* en cache, cloison inchangée) ; E (cause démontrée par mesure, pas d'allongement de délai) ; I (aucune écriture ni migration).
