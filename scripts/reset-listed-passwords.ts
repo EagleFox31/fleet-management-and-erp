@@ -6,6 +6,7 @@
  */
 import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
+import { guardDatabaseConnection } from "../server/lib/production-db-guard";
 
 const SKIP_USERNAMES = new Set(["admin", "jean.mballa"]);
 
@@ -17,6 +18,8 @@ const PASSWORD_BY_USERNAME: Record<string, string> = {
   fatou: "warehouse123",
 };
 
+// Hors production, refuse la base marquée production (ALLOW_PRODUCTION_DATABASE=1 pour une intervention voulue).
+guardDatabaseConnection("reset-listed-passwords");
 const sql = neon(process.env.DATABASE_URL!);
 
 const activeUsers = await sql`
