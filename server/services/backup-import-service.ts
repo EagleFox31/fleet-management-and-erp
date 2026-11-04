@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import bcrypt from "bcryptjs";
+import { PIN_BCRYPT_COST } from "../lib/pin-hash-migration";
 import { alerts, fuelRecords, maintenanceSchedules, parts, users, vehicles, workOrders } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
@@ -69,7 +71,14 @@ export async function restoreBackup(data: BackupData): Promise<BackupImportStats
       const existing = new Set((await tx.select({ username: users.username }).from(users)).map((u) => u.username));
       const toImport = data.users.filter((u) => !existing.has(u.username));
       if (toImport.length > 0) {
-        await tx.insert(users).values(toImport);
+        // users.pin n'accepte qu'un hash bcrypt (CHECK users_pin_bcrypt_check) : une ancienne sauvegarde au PIN
+        // en clair est reprise hachée plutôt que de faire échouer toute la restauration.
+        const rows = await Promise.all(
+          toImport.map(async (u) =>
+            u.pin && !/^\$2[aby]\$/.test(u.pin) ? { ...u, pin: await bcrypt.hash(u.pin, PIN_BCRYPT_COST) } : u,
+          ),
+        );
+        await tx.insert(users).values(rows);
         stats.users = toImport.length;
       }
     }

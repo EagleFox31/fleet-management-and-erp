@@ -657,7 +657,7 @@ export class DatabaseStorage implements IStorage {
       const [newUser] = await db.insert(users).values(user).returning();
       return newUser;
     } catch (error) {
-      console.error("Error creating user:", error);
+      storageLog.error({ err: error }, "Error creating user");
       throw error;
     }
   }
@@ -700,7 +700,7 @@ export class DatabaseStorage implements IStorage {
         .returning({ id: users.id });
       return Boolean(deletedUser);
     } catch (error) {
-      console.error("Error deleting user:", error);
+      storageLog.error({ err: error, userId: id }, "Error deleting user");
       return false;
     }
   }
