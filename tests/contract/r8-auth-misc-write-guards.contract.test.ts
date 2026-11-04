@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { db, pool } from "../../server/db";
 import { maintenanceSchedules, users, vehicleDocumentTypes } from "../../shared/schema";
 import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
@@ -23,12 +23,18 @@ let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const PIN = "4821";
 const codes: string[] = [];
 const scheduleIds: number[] = [];
+// Identifiant inconnu propre à ce passage, hors de la plage de pin-login-hardening (999999001-999999900) :
+// le compteur `pin:<id>` survit d'un passage à l'autre sur une base partagée et finissait en 429 (#293).
+const UNKNOWN_ID = 999980001 + Math.floor(Math.random() * 9000);
+const lockoutKeys = () => [`pin:${UNKNOWN_ID}`, ...session.ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`])];
+const resetLockout = () => pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [lockoutKeys()]);
 
 beforeAll(async () => {
   session = await startContractSession({ admin: "admin", workshop: "workshop_manager", technician: "technician", secretary: "secretary" });
 }, 120000);
 
 afterAll(async () => {
+  if (session) await resetLockout();
   for (const code of codes) await db.delete(vehicleDocumentTypes).where(eq(vehicleDocumentTypes.code, code));
   for (const id of scheduleIds) await db.delete(maintenanceSchedules).where(eq(maintenanceSchedules.id, id));
   await session?.stop();
@@ -55,6 +61,11 @@ async function newDriver() {
   return created;
 }
 
+// Compteurs remis à zéro avant chaque cas : aucun ne dépend de l'ordre d'exécution.
+beforeEach(async () => {
+  await resetLockout();
+});
+
 const pinLogin = (body: unknown) => session.call("POST", "/api/auth/pin-login", { actor: null, body });
 
 describe("R8 : POST /api/auth/pin-login", { timeout: 60000 }, () => {
@@ -79,7 +90,7 @@ describe("R8 : POST /api/auth/pin-login", { timeout: 60000 }, () => {
     ];
     for (const [i, known] of bodies(driver.id).entries()) {
       const a = await pinLogin(known);
-      const b = await pinLogin(bodies(999999999)[i]);
+      const b = await pinLogin(bodies(UNKNOWN_ID)[i]);
       expectValidation(a);
       expectValidation(b);
       expect(a.status).toBe(b.status);
@@ -89,7 +100,7 @@ describe("R8 : POST /api/auth/pin-login", { timeout: 60000 }, () => {
 
   it("compte inconnu et PIN faux : même statut et même code, sans détail technique, sans session", async () => {
     const driver = await newDriver();
-    const unknown = await pinLogin({ userId: 999999999, pin: PIN });
+    const unknown = await pinLogin({ userId: UNKNOWN_ID, pin: PIN });
     const wrong = await pinLogin({ userId: driver.id, pin: "0000" });
     expect(unknown.status).toBe(401);
     expect(wrong.status).toBe(401);
