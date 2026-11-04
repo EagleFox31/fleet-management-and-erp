@@ -2759,3 +2759,24 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
   coûteux. « Lire, laisser passer, écrire après » n'est jamais atomique, même si chaque requête SQL
   l'est. Le test qui le prouve joue des requêtes simultanées. Des requêtes séquentielles ne verront
   jamais ce défaut.
+
+## 2026-11-04 — `drizzle-kit push --force` tombé sur la base d'une autre session
+
+- **Contexte** : après un redémarrage de Docker Desktop, Windows a réservé la plage de ports TCP 54299-54398,
+  dont 54320 (base de test standard). Une pile de test alternative a été montée sur 55432 sans vérifier que
+  ce port était libre ; il appartenait à la pile `c7test` d'une autre session.
+- **Cause racine** : `DATABASE_URL=…@localhost:<port>` désigne un port, pas une pile. Le compose a échoué sur
+  « port is already allocated » pour mon conteneur, mais la commande suivante, enchaînée, a poussé le schéma
+  sur le conteneur qui tenait déjà le port.
+- **Classification** : near miss, écriture sur une ressource partagée appartenant à un tiers. Schéma poussé
+  identique à celui de `main` ; une divergence de schéma chez `c7test` aurait pu être modifiée en silence
+  (`--force` accepte les pertes de données).
+- **Résolution** : pile `fm-cpw` remontée sur 56432/56433 (fichier de ports hors dépôt), contrôle de ce qui
+  écoute avant tout push, propriétaire de `c7test` prévenu par l'orchestrateur.
+- **Prévention** :
+  - ne jamais enchaîner `compose up` et `drizzle-kit push` sans `&&` ni contrôle : un échec du premier doit
+    arrêter le second ;
+  - avant un `push --force`, vérifier le propriétaire du port (`docker ps --format '{{.Names}} {{.Ports}}'`) ;
+  - cibler la base par son nom propre à la session (`fleet_test_<session>`, `tests/README.md`).
+- **Leçon généralisée** : une commande destructive vise une identité (projet, base), jamais seulement un port ;
+  on vérifie ce qui répond avant de lui écrire.
