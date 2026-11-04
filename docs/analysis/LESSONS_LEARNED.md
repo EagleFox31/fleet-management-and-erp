@@ -2555,3 +2555,16 @@ Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test
 
 ### Leçon généralisée
 Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+
+## 2026-11-04 — Conflit de fusion résolu par `checkout --ours` : les changements de main dans tout le fichier perdus (near miss, #278)
+- **Contexte** : fusion de main dans #278. `server/routes.ts` et `auth-login-unavailable.contract.test.ts` n'avaient qu'un bloc en conflit chacun ; je les ai résolus par `git checkout --ours <fichier>`.
+- **Cause racine** : `--ours` remplace le fichier entier par la version de la branche. Il n'écarte pas seulement le bloc en conflit : toutes les modifications de main y disparaissent, même celles qui fusionnaient sans conflit. Ici, la validation de `PATCH /api/admin/users/:id/toggle` et la garde `isAnyUser` du libre-service ont été perdues.
+- **Classification** : near miss, outillage git, régression silencieuse à la fusion. Elle a été vue avant le push par les cliquets `write-routes-ratchet` et les contrats R1/R8.
+- **Résolution** : les deux fichiers repartent de `origin/main`, et seul le delta propre de la branche y est réappliqué.
+- **Prévention vérifiable** :
+  - après chaque fusion de main, `git diff origin/main --stat` ne doit lister que les fichiers du sujet ;
+  - les suites unitaires et de contrat complètes sont rejouées avant le push (les cliquets de routes l'ont vu ici).
+- **Leçon** :
+  - `checkout --ours` ou `--theirs` ne résout un conflit que sur un fichier où l'on veut vraiment écarter l'autre côté en entier ;
+  - sinon, on édite le bloc en conflit ;
+  - pour un fichier en ajout de fin, `merge-file --union`.
