@@ -22,9 +22,22 @@ import {
 // Reconnaissance des marqueurs : source unique partagée avec le serveur (shared/production-database.ts).
 export { DEFAULT_PRODUCTION_MARKERS, hostOf, matchProductionMarker, productionMarkers };
 
-/** `DATABASE_URL` d'un contenu de fichier `.env` (valeur éventuellement entre guillemets). */
+/**
+ * `DATABASE_URL` d'un contenu de fichier `.env` (valeur éventuellement entre guillemets).
+ * Une clé en double est refusée : `node --env-file` garde la dernière, ce lecteur lisait la
+ * première, et l'ordre des lignes décidait seul de la base visée (near miss du 4 novembre 2026).
+ */
 export function databaseUrlFromDotenv(content: string): string | undefined {
-  const line = content.split(/\r?\n/).find((l) => /^\s*DATABASE_URL\s*=/.test(l));
+  const lines = content.split(/\r?\n/).filter((l) => /^\s*(?:export\s+)?DATABASE_URL\s*=/.test(l));
+  if (lines.length > 1) {
+    throw new Error(
+      [
+        `Le .env définit DATABASE_URL ${lines.length} fois : node --env-file garde la dernière, l'ordre des lignes décide de la base visée.`,
+        "Ne gardez qu'une ligne DATABASE_URL (supprimez les autres), puis relancez.",
+      ].join("\n"),
+    );
+  }
+  const line = lines[0];
   if (!line) return undefined;
   const value = line.slice(line.indexOf("=") + 1).trim().replace(/^(['"])(.*)\1$/, "$2");
   return value || undefined;
