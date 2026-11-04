@@ -88,8 +88,6 @@ const log = moduleLogger("routes");
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
-/** Corps de POST /api/auth/login : schéma partagé avec la validation montée avant le compteur d'essais. */
-const loginBodySchema = loginRequestSchema;
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -186,7 +184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Corps validé avant toute recherche de compte : un `password` non chaîne faisait lever
       // bcrypt.compare pour un compte existant seulement, d'où un oracle d'énumération (#256).
-      const parsed = loginBodySchema.safeParse(req.body);
+      const parsed = loginRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: LOGIN_BODY_INVALID_MESSAGE });
       }
