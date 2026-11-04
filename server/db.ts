@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "@shared/schema";
 import { guardDatabaseConnection } from "./lib/production-db-guard";
+import { resolveListenerConnectionString } from "./lib/listener-connection";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -28,22 +29,8 @@ if (!process.env.DATABASE_URL) {
 // Avant tout pool : hors production, jamais de connexion à la base de production sans dérogation.
 guardDatabaseConnection("db");
 
-const deriveDirectConnectionString = (connectionString: string): string => {
-  try {
-    const url = new URL(connectionString);
-    if (url.hostname.includes("-pooler.")) {
-      url.hostname = url.hostname.replace("-pooler.", ".");
-    }
-    return url.toString();
-  } catch {
-    return connectionString;
-  }
-};
-
-const listenerConnectionString =
-  process.env.DATABASE_URL_LISTENER ||
-  process.env.DATABASE_URL_DIRECT ||
-  deriveDirectConnectionString(process.env.DATABASE_URL);
+// Garde #298 : en test, refuse une variable de connexion directe visant une autre base.
+const listenerConnectionString = resolveListenerConnectionString();
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const listenerPool = new Pool({ connectionString: listenerConnectionString });

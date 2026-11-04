@@ -86,6 +86,18 @@ function anyInt(column: Parameters<typeof eq>[0], values: readonly number[]): SQ
 
 const INSERT_CHUNK = 500;
 
+/** Reprise objet par objet d'un lot en échec : arrêt après ce nombre d'échecs consécutifs. */
+export const MAX_CONSECUTIVE_RETRY_FAILURES = 3;
+
+/** Base injoignable ou connexion coupée : réessayer chaque candidate ne servirait à rien. */
+export function isConnectionError(error: unknown): boolean {
+  for (let current: any = error, depth = 0; current && depth < 3; current = current.cause, depth += 1) {
+    const code = typeof current.code === "string" ? current.code : "";
+    if (["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "57P01", "57P02", "57P03"].includes(code) || /^08/.test(code)) return true;
+  }
+  return false;
+}
+
 function groupBy<T, K>(rows: readonly T[], keyOf: (row: T) => K): Map<K, T[]> {
   const groups = new Map<K, T[]>();
   for (const row of rows) {
@@ -993,17 +1005,34 @@ export class AlertService {
       let created = 0;
       const failed: Array<{ title: string; type: string }> = [];
       let firstError: unknown;
-      for (const candidate of candidates) {
+      let consecutiveFailures = 0;
+      let abandoned = 0;
+      for (const [index, candidate] of candidates.entries()) {
         try {
           created += await this.emitAlertBatch([candidate]);
+          consecutiveFailures = 0;
         } catch (candidateError) {
           firstError ??= candidateError;
           failed.push({ title: candidate.title, type: candidate.type });
+          consecutiveFailures += 1;
+          // Coupe-circuit : base injoignable ou échecs en série, inutile d'insister
+          // candidate par candidate ; le reste est compté comme perdu.
+          if (isConnectionError(candidateError) || consecutiveFailures >= MAX_CONSECUTIVE_RETRY_FAILURES) {
+            abandoned = candidates.length - index - 1;
+            break;
+          }
         }
       }
       if (failed.length > 0) {
         log.error(
-          { err: firstError, failed: failed.length, candidates: candidates.length, sample: failed.slice(0, 5) },
+          {
+            err: firstError,
+            failed: failed.length,
+            abandoned,
+            lost: failed.length + abandoned,
+            candidates: candidates.length,
+            sample: failed.slice(0, 5),
+          },
           "création d'alerte en échec",
         );
       }

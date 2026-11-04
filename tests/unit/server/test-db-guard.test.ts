@@ -65,6 +65,15 @@ describe("garde-fou base de test (intégration, contrat)", () => {
     expect(() => assertSafeTestDatabase(e)).not.toThrow();
   });
 
+  it("(a) accepte _LISTENER et _DIRECT sur l'hôte direct d'une base de test Neon pooler", () => {
+    const pooler = "postgres://u:p@ep-test-pooler.eu.aws.neon.tech/db";
+    const direct = "postgres://u:p@ep-test.eu.aws.neon.tech/db";
+    const e = env({ DATABASE_URL_TEST: pooler, DATABASE_URL: pooler, DATABASE_URL_LISTENER: direct, DATABASE_URL_DIRECT: direct, ALLOW_NEON_TEST_DB: "1" });
+    expect(() => assertSafeTestDatabase(e)).not.toThrow();
+    // Le pooler ne vaut que pour _LISTENER / _DIRECT : DATABASE_URL reste à l'identique.
+    expect(() => assertSafeTestDatabase(env({ DATABASE_URL_TEST: pooler, DATABASE_URL: direct, ALLOW_NEON_TEST_DB: "1" }))).toThrow("DATABASE_URL");
+  });
+
   it("(c) ALLOW_NEON_TEST_DB ne lève pas un hôte de TEST_DB_FORBIDDEN_HOSTS", () => {
     const e = env({
       DATABASE_URL_TEST: "postgres://u:p@ep-prod-abc.neon.tech/db",
