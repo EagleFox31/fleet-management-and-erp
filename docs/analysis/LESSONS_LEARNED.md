@@ -2260,10 +2260,13 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Résolution
 - Reconnaissance des marqueurs extraite dans `shared/production-database.ts` (source unique) ; `e2e/helpers/production-guard.ts` la réexporte sans copie.
 - `server/lib/production-db-guard.ts` : hors `NODE_ENV=production`, refus de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` porte un marqueur (défaut + `E2E_PRODUCTION_DB_MARKERS`). Dérogation explicite `ALLOW_PRODUCTION_DATABASE=1`, journalisée en `warn`. Message sans URL ni mot de passe.
-- Appelé dans `server/db.ts` avant tout `new Pool`, donc pour le serveur comme pour les scripts tsx.
+- Appelé dans `server/db.ts` avant tout `new Pool` : le serveur et tout script qui importe `server/db.ts` en héritent.
+- #264 : `guardDatabaseConnection(source)` appelé aussi en tête des scripts à pool propre (`scripts/audit-dana-password.ts`, `audit-password.ts`, `audit-listed-passwords.ts`, `reset-listed-passwords.ts`) ; `schema-prod` du compose porte `NODE_ENV: production`.
 
 ### Prévention (vérifiable)
 - `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
+- `tests/unit/server/db-pool-hygiene.test.ts` (#264) : hors `server/db.ts` et `tests/`, tout fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) appelle le garde avant, et tout import de valeur de `@neondatabase/serverless`, `pg` ou `postgres` (alias compris) s'accompagne d'un import de `production-db-guard`. Commentaires retirés avant la recherche : un garde commenté ne compte pas. Liste gelée (`test-workflow-reminders.js`) qui ne peut que rétrécir. Chaque cas (pool sans garde, garde après, import aliasé, garde commenté) a sa preuve rouge.
+- `tests/unit/deploy/compose-prod-node-env.test.ts` : `schema-prod` garde `NODE_ENV: production`.
 - Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
 
 ### Règle Projet (obligatoire)

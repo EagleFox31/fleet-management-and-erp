@@ -4,9 +4,10 @@ import { describe, expect, it } from "vitest";
 
 /**
  * #264 : toute connexion SQL hors des tests passe par le garde base de production.
- * Un fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) est soit
- * `server/db.ts`, soit un fichier qui appelle `guardDatabaseConnection(` avant sa première
- * construction. Les tests (tests/) ont leur propre garde (assertSafeTestDatabase).
+ * Un fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) ou importe
+ * un driver SQL (@neondatabase/serverless, pg, postgres) est soit `server/db.ts`, soit un fichier
+ * qui importe production-db-guard et appelle `guardDatabaseConnection(` avant toute construction.
+ * Les tests (tests/) ont leur propre garde (assertSafeTestDatabase).
  *
  * Liste gelée : exceptions existantes, qui ne peuvent que disparaître.
  */
@@ -17,12 +18,27 @@ const FROZEN: Record<string, string> = {
 
 const CONSTRUCTION = /new\s+(?:pg\.)?Pool\s*\(|\bneon\s*\(|new\s+(?:pg\.)?Client\s*\(/;
 const GUARD = "guardDatabaseConnection(";
+/** Import de valeur (pas `import type`) d'un driver SQL, alias compris : `import { Pool as P }`. */
+const DRIVER_IMPORT =
+  /(?:^|\n)\s*import\s+(?!type\b)[^;]*?from\s*["'](?:@neondatabase\/serverless|pg|postgres)["']|require\(\s*["'](?:@neondatabase\/serverless|pg|postgres)["']\s*\)/;
+const GUARD_IMPORT = /from\s*["'][^"']*production-db-guard(?:\.ts|\.js)?["']/;
 
-/** Fichiers qui ouvrent une connexion sans garde préalable. */
+/** Retire commentaires de bloc et de ligne (sans toucher à `://` dans une chaîne d'URL). */
+export function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+}
+
+/**
+ * Fichiers qui ouvrent une connexion sans garde préalable : construction avant (ou sans) appel
+ * du garde, ou import de valeur d'un driver SQL sans import de production-db-guard (alias inclus).
+ * Les commentaires sont retirés avant la recherche : un garde commenté ne compte pas.
+ */
 export function unguardedConnections(files: Record<string, string>): string[] {
   return Object.entries(files)
-    .filter(([file, src]) => {
+    .filter(([file, raw]) => {
       if (file === "server/db.ts") return false;
+      const src = stripComments(raw);
+      if (DRIVER_IMPORT.test(src) && !GUARD_IMPORT.test(src)) return true;
       const construction = src.search(CONSTRUCTION);
       if (construction < 0) return false;
       const guard = src.indexOf(GUARD);
@@ -71,5 +87,28 @@ describe("connexions SQL : garde base de production (#264)", () => {
         "server/db.ts": "const p = new Pool({});",
       }),
     ).toEqual(["a.ts", "b.ts", "d.ts"]);
+  });
+
+  it("un import aliasé du driver sans import du garde est signalé (`import { Pool as P }` puis `new P(`)", () => {
+    const guarded = 'import { guardDatabaseConnection } from "../server/lib/production-db-guard";\n';
+    expect(
+      unguardedConnections({
+        "alias.ts": 'import { Pool as P } from "@neondatabase/serverless";\nconst p = new P({});',
+        "pg.ts": 'import pg from "pg";\nconst C = pg.Client;\nnew C(url);',
+        "req.cjs": 'const { Pool: P } = require("postgres");\nnew P();',
+        "types.ts": 'import type { PoolClient } from "@neondatabase/serverless";',
+        "ok.ts": guarded + 'import { Pool as P } from "@neondatabase/serverless";\nguardDatabaseConnection("ok");\nnew P({});',
+      }),
+    ).toEqual(["alias.ts", "pg.ts", "req.cjs"]);
+  });
+
+  it("un garde en commentaire ne compte pas", () => {
+    expect(
+      unguardedConnections({
+        "line.ts": '// guardDatabaseConnection("x");\nconst sql = neon(url);',
+        "block.ts": '/* guardDatabaseConnection("x"); */\nconst sql = neon(url);',
+        "url.ts": 'guardDatabaseConnection("u");\nconst u = "postgres://h/db";\nconst sql = neon(u);',
+      }),
+    ).toEqual(["block.ts", "line.ts"]);
   });
 });
