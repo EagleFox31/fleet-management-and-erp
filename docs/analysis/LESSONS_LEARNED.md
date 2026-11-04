@@ -2830,6 +2830,7 @@ Correctif additif côté service : les champs lus par la page sont ajoutés (`id
 
 ### Leçon généralisée
 Un écran qui type à la main la réponse d'une route est un contrat implicite. Le test de contrat de la route doit affirmer les champs que l'écran lit, pas seulement le statut HTTP ou la présence de l'id. Une spec e2e ignorée faute de données ne protège rien : la donnée se crée dans la spec.
+
 ## 2026-11-04 — `trust proxy` fixé en dur : la limite par IP dépendait de la topologie
 
 - **Contexte** : la limite d'essais de connexion par adresse IP lit `req.ip`, donc `X-Forwarded-For` jusqu'au

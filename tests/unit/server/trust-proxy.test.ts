@@ -25,7 +25,7 @@ describe("trustProxyFromEnv", () => {
 describe("deploy/docker-compose.yml : TRUST_PROXY par profil", () => {
   const compose = readFileSync(join(__dirname, "../../../deploy/docker-compose.yml"), "utf8");
   const blockOf = (service: string) => {
-    const start = compose.search(new RegExp(`^  ${service}:\s*$`, "m"));
+    const start = compose.search(new RegExp(`^  ${service}:\\s*$`, "m"));
     expect(start, `service ${service} introuvable`).toBeGreaterThanOrEqual(0);
     const rest = compose.slice(start + 1);
     const next = rest.search(/^ {2}[a-z][\w-]*:\s*$/m);
