@@ -2524,6 +2524,37 @@ Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test
 
 ### Leçon généralisée
 Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+## 4 novembre 2026 - un trigger d'effet secondaire casse les reprises d'historique (suivi de #287)
+
+### Contexte
+#287 a posé au démarrage des triggers d'alertes carburant. Trois chemins insèrent des pleins en masse sans couper leurs effets :
+- la restauration de sauvegarde (`POST /api/admin/import-backup`) ;
+- `scripts/import-7-fuel-records.ts` ;
+- le seed.
+
+La restauration vidait `alerts`, réinsérait les pleins (les triggers alertaient sur tout l'historique), puis réinsérait les alertes sauvegardées. Celles-ci heurtaient `uq_alerts_user_dedupe` (23505). Sans transaction, la base restait à moitié restaurée.
+
+Deux défauts du trigger lui-même :
+- `WHEN OTHERS` n'attrape pas `query_canceled` (57014) : un délai dépassé pendant l'alerte annulait le plein ;
+- l'alerte n'avait pas de temps réel.
+
+### Cause racine
+La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun chemin de reprise ne la posait. L'ajout d'un trigger n'a pas déclenché la revue des écritures en masse sur la table.
+
+### Résolution
+- Restauration déplacée dans `server/api/admin-import-backup.routes.ts` et `server/services/backup-import-service.ts` : une transaction, `suppressSideEffects(tx)` avant toute écriture.
+- Même garde pour le script d'import et pour le seed.
+- `query_canceled OR OTHERS` dans les deux blocs d'exception.
+  Conséquence assumée : un `pg_cancel_backend` volontaire pendant le calcul de l'alerte est lui aussi absorbé. Le plein est enregistré, seule l'alerte manque, avec un `RAISE WARNING`. On préfère perdre une alerte, recalculable, plutôt qu'un plein saisi.
+- `pg_notify('fleet_events', alert_created)`, relayé par `db-event-relay` en trames nominatives.
+
+### Prévention (vérifiable)
+- `tests/unit/server/backup-import-service.test.ts` : la garde est posée avant la première écriture, et un échec annule tout.
+- `tests/integration/fuel-alerts-triggers.test.ts` : reprise sans alerte et sans 23505 ; 57014 rattrapé (rouge sur main).
+- `tests/integration/fuel-alerts-realtime.test.ts` (rouge sur main) et `tests/unit/server/db-event-relay-alerts.test.ts`.
+
+### Leçon généralisée
+Un trigger à effet secondaire s'accompagne du recensement des écritures en masse sur sa table (restauration, import, seed). Chacune pose la garde dans sa transaction. En PL/pgSQL, `WHEN OTHERS` ne couvre ni `query_canceled` ni `assert_failure`.
 ## 4 novembre 2026 - cycle d'alertes : requêtes par véhicule et ordres de travail plafonnés à 50 (#281)
 
 ### Contexte

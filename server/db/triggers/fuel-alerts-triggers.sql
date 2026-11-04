@@ -28,19 +28,39 @@ CREATE OR REPLACE FUNCTION emit_configured_alert(
     p_dedupe_key text
 ) RETURNS integer AS $$
 DECLARE
-    inserted integer;
+    inserted_ids integer[];
 BEGIN
-    INSERT INTO alerts (user_id, title, message, type, priority, link, is_read, topic, dedupe_key)
-    SELECT u.id, p_title, p_message, p_type, p_priority, p_link, false, p_type, p_dedupe_key
-    FROM users u
-    JOIN alert_recipient_settings s ON s.alert_type = p_type AND u.role = ANY (s.recipient_roles)
-    WHERE NOT EXISTS (
-        SELECT 1 FROM notification_preferences np
-        WHERE np.user_id = u.id AND np.topic = p_type AND np.in_app = false
+    WITH ins AS (
+        INSERT INTO alerts (user_id, title, message, type, priority, link, is_read, topic, dedupe_key)
+        SELECT u.id, p_title, p_message, p_type, p_priority, p_link, false, p_type, p_dedupe_key
+        FROM users u
+        JOIN alert_recipient_settings s ON s.alert_type = p_type AND u.role = ANY (s.recipient_roles)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM notification_preferences np
+            WHERE np.user_id = u.id AND np.topic = p_type AND np.in_app = false
+        )
+        ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+        RETURNING id
     )
-    ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING;
-    GET DIAGNOSTICS inserted = ROW_COUNT;
-    RETURN inserted;
+    SELECT array_agg(id ORDER BY id) INTO inserted_ids FROM ins;
+
+    -- Temps réel (couche 2) : notification livrée au commit seulement, relayée par
+    -- server/lib/db-event-relay.ts en trames alert_created nominatives. Ids seuls : le relais
+    -- relit les alertes, la charge reste loin de la limite de 8000 octets de pg_notify.
+    IF inserted_ids IS NOT NULL THEN
+        PERFORM pg_notify(
+            'fleet_events',
+            json_build_object(
+                'source', 'database',
+                'version', 1,
+                'entity', 'alert',
+                'eventType', 'alert_created',
+                'payload', json_build_object('alertIds', to_json(inserted_ids)),
+                'emittedAt', to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            )::text
+        );
+    END IF;
+    RETURN COALESCE(array_length(inserted_ids, 1), 0);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -106,7 +126,9 @@ BEGIN
                 'fuel-consumption:' || NEW.id
             );
         END IF;
-    EXCEPTION WHEN OTHERS THEN
+    -- WHEN OTHERS n'attrape pas query_canceled (57014, statement_timeout) : listé à part, sinon
+    -- un délai dépassé pendant l'alerte annulerait l'INSERT du plein.
+    EXCEPTION WHEN query_canceled OR OTHERS THEN
         RAISE WARNING 'check_fuel_consumption : alerte non créée pour le plein % (SQLSTATE %, %)', NEW.id, SQLSTATE, SQLERRM;
     END;
 
@@ -166,7 +188,9 @@ BEGIN
                 'fuel-budget:' || NEW.vehicle_id || ':' || to_char(month_start, 'YYYY-MM') || ':80'
             );
         END IF;
-    EXCEPTION WHEN OTHERS THEN
+    -- WHEN OTHERS n'attrape pas query_canceled (57014, statement_timeout) : listé à part, sinon
+    -- un délai dépassé pendant l'alerte annulerait l'INSERT du plein.
+    EXCEPTION WHEN query_canceled OR OTHERS THEN
         RAISE WARNING 'check_fuel_cost : alerte non créée pour le plein % (SQLSTATE %, %)', NEW.id, SQLSTATE, SQLERRM;
     END;
 

@@ -150,6 +150,41 @@ describe("triggers d'alertes carburant", { timeout: 120_000 }, () => {
     });
   });
 
+  it("reprise d'historique sous suppress_side_effects : aucune alerte, puis les alertes sauvegardées s'insèrent sans 23505", async () => {
+    await inRolledBackTransaction(async (client) => {
+      const logistics = await user(client, "logistics");
+      await client.query(`SELECT set_config('fleetos.suppress_side_effects', 'on', true)`);
+      const v = await vehicle(client);
+
+      const lastId = await anomalousSeries(client, v.id);
+      expect(await alertsOf(client, [logistics])).toEqual([]);
+
+      // Ce que fait la restauration de sauvegarde : réinsérer l'alerte déjà émise à l'origine.
+      await client.query(
+        `INSERT INTO alerts (user_id, title, message, type, priority, link, topic, dedupe_key)
+         VALUES ($1, 'Consommation carburant élevée', 'sauvegarde', 'fuel', 'high', $2, 'fuel', $3)`,
+        [logistics, `/vehicles/${v.id}`, `fuel-consumption:${lastId}`],
+      );
+      expect((await alertsOf(client, [logistics])).map((a) => a.message)).toEqual(["sauvegarde"]);
+    });
+  });
+
+  it("délai dépassé pendant l'alerte (query_canceled, 57014) : le plein est enregistré, l'échec journalisé", async () => {
+    await inRolledBackTransaction(async (client, notices) => {
+      await user(client, "logistics");
+      await client.query(`CREATE FUNCTION c7_cancel_alert() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'délai dépassé' USING ERRCODE = 'query_canceled'; END; $$ LANGUAGE plpgsql`);
+      await client.query(`CREATE TRIGGER c7_cancel_alert BEFORE INSERT ON alerts FOR EACH ROW EXECUTE FUNCTION c7_cancel_alert()`);
+      const v = await vehicle(client);
+
+      await anomalousSeries(client, v.id);
+
+      const { rows } = await client.query(`SELECT count(*)::int AS n FROM fuel_records WHERE vehicle_id = $1`, [v.id]);
+      expect(rows[0].n).toBe(5);
+      expect(notices.some((n) => n.includes("alerte non créée") && n.includes("57014"))).toBe(true);
+    });
+  });
+
   it("réinstallation idempotente : rejouer le fichier n'écrase pas le réglage des destinataires", async () => {
     await inRolledBackTransaction(async (client) => {
       await client.query(`UPDATE alert_recipient_settings SET recipient_roles = ARRAY['technician'] WHERE alert_type = 'fuel'`);
