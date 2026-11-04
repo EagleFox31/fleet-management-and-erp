@@ -1,2 +1,3 @@
 # Scripts de garde lancés par node et importés par Vitest : un shebang suivi de CR casse l'import.
 .claude/hooks/*.mjs text eol=lf
+deploy/*.sh text eol=lf
