@@ -1,7 +1,14 @@
 import { db } from "../db";
 import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
-import { eq, desc, count, sum, avg } from "drizzle-orm";
+import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { hasMovedFuelCard } from "../lib/fuel-record-ledger-lock";
+import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+import { FUEL_PHYSICAL_RECORD_DELETE_ROLES } from "@shared/constants/fuel-record-delete";
+
+const log = moduleLogger("fuel-service");
 
 /** Année et mois (calendaires) d'une date `AAAA-MM-JJ`, pour les colonnes `year` / `month`. */
 function periodOf(date: unknown): { year?: number; month?: number } {
@@ -17,7 +24,7 @@ export class FuelService {
     const [fuelRecord] = await db
       .select()
       .from(fuelRecords)
-      .where(eq(fuelRecords.id, id));
+      .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)));
     return fuelRecord;
   }
 
@@ -28,7 +35,7 @@ export class FuelService {
     const records = await db
       .select()
       .from(fuelRecords)
-      .where(eq(fuelRecords.vehicleId, vehicleId))
+      .where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date));
     
     // Enrichir avec le prix par litre calculé
@@ -72,7 +79,7 @@ export class FuelService {
           updatedBy: updatedById,
           updatedAt: new Date(),
         })
-        .where(eq(fuelRecords.id, id))
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)))
         .returning();
       return updatedFuelRecord;
     });
@@ -81,14 +88,45 @@ export class FuelService {
   /**
    * Supprime un enregistrement de carburant - COPIÉ depuis storage-backup.ts
    */
-  async deleteFuelRecord(id: number): Promise<boolean> {
-    // Supprimer un débit ou une recharge change le solde : même verrou que l'écriture.
+  async deleteFuelRecord(id: number, actor: { id: number; role: string }): Promise<boolean> {
+    // Acteur absent ou malformé : appel interne sans identité. 401 (non identifié) plutôt qu'un TypeError 500.
+    if (!actor || typeof actor.role !== "string" || !Number.isInteger(actor.id)) {
+      log.error({ fuelRecordId: id }, "deleteFuelRecord appelé sans acteur identifié");
+      throw new AppError(401, "Authentification requise pour supprimer un plein.");
+    }
+    // Supprimer un débit ou une recharge change le solde : même verrou que l'écriture. La décision
+    // (ligne vivante ? a-t-elle mouvementé la carte ?) est prise sous ce verrou, dans la transaction.
     return db.transaction(async (tx) => {
       await lockFuelCard(tx);
-      const result = await tx
-        .delete(fuelRecords)
-        .where(eq(fuelRecords.id, id))
-        .returning();
+      const [record] = await tx
+        .select()
+        .from(fuelRecords)
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)));
+      if (!record) return false;
+
+      if (hasMovedFuelCard(record)) {
+        // Plein qui a mouvementé la carte : réservé aux gestionnaires de la carte, suppression douce tracée.
+        if (!(FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(actor.role)) {
+          throw new AppError(403, "Seuls l'administrateur, la logistique et le secrétariat peuvent supprimer un plein qui a mouvementé la carte carburant.");
+        }
+        await tx
+          .update(fuelRecords)
+          .set({ deletedAt: new Date(), deletedBy: actor.id })
+          .where(eq(fuelRecords.id, id));
+        return true;
+      }
+
+      // Plein physique sans mouvement de carte : garde historique (isWorkshopManager), suppression définitive.
+      if (!(FUEL_PHYSICAL_RECORD_DELETE_ROLES as readonly string[]).includes(actor.role)) {
+        throw new AppError(403, "Accès non autorisé");
+      }
+      const result = await tx.delete(fuelRecords).where(eq(fuelRecords.id, id)).returning();
+      if (result.length > 0) {
+        log.info(
+          { fuelRecordId: id, vehicleId: record.vehicleId, cost: record.cost, quantity: record.quantity, userId: actor.id },
+          "Plein physique supprimé définitivement",
+        );
+      }
       return result.length > 0;
     });
   }
@@ -103,7 +141,7 @@ export class FuelService {
         totalQuantity: sum(fuelRecords.quantity),
         recordsCount: count(fuelRecords.id),
         averageCost: avg(fuelRecords.cost)
-      }).from(fuelRecords);
+      }).from(fuelRecords).where(isNull(fuelRecords.deletedAt));
 
       return {
         totalCost: Number(stats.totalCost || 0),

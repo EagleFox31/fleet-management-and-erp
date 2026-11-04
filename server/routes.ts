@@ -2,7 +2,15 @@ import express, { type Express, Request, Response, NextFunction } from "express"
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
+import { toggleUserRequestSchema } from "@shared/contracts/admin-users";
+import {
+  createMaintenanceScheduleRequestSchema,
+  dateMaintenanceTriggerRequestSchema,
+  type CreateMaintenanceScheduleRequest,
+  type DateMaintenanceTriggerRequest,
+} from "@shared/contracts/maintenance-schedules";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -55,6 +63,17 @@ import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 
 const log = moduleLogger("routes");
+
+/**
+ * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
+ * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
+ */
+const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+
+/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
+function loginUsernameRef(username: string): string {
+  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
+}
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({
@@ -164,18 +183,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const { username, password, rememberMe } = parsed.data;
 
-      log.info({ event: "Login attempt", username, requestId: req.requestId }, "Login attempt");
+      log.info({ event: "Login attempt", usernameRef: loginUsernameRef(username), requestId: req.requestId }, "Login attempt");
 
       const user = await storage.getUserByUsername(username);
-      log.info({ event: "Login user lookup", username, found: Boolean(user), requestId: req.requestId }, "Login user lookup");
+      log.info({ event: "Login user lookup", usernameRef: loginUsernameRef(username), found: Boolean(user), requestId: req.requestId }, "Login user lookup");
       
       // Compte supprimé ou désactivé : même réponse qu'un identifiant inconnu.
       if (!user || user.deletedAt) {
+        await bcrypt.compare(password, LOGIN_DUMMY_HASH);
         return res.status(401).json({ message: "Identifiants invalides" });
       }
       
       // Verify password - support both bcrypt and legacy SHA-256 with auto-migration
-      let isPasswordValid = await bcrypt.compare(password, user.password);
+      // Hash non bcrypt (SHA-256 hérité) : bcrypt.compare rendrait false sans calcul, et un compte
+      // non migré répondrait plus vite qu'un nom inconnu. On compare alors au hash factice : un
+      // seul calcul bcrypt de coût 10, quel que soit le compte (#260, M1).
+      const isBcryptHash = user.password.length === 60 && user.password.startsWith("$2");
+      let isPasswordValid = (await bcrypt.compare(password, isBcryptHash ? user.password : LOGIN_DUMMY_HASH)) && isBcryptHash;
       let needsMigration = false;
       
       // If bcrypt fails and the hash looks like SHA-256 (64 hex chars), try legacy verification
@@ -188,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       log.info(
-        { event: "Login password check", username, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
+        { event: "Login password check", userId: user.id, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
         "Login password check",
       );
       
@@ -200,7 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (needsMigration) {
         const bcryptHash = await bcrypt.hash(password, 10);
         await storage.updateUser(user.id, { password: bcryptHash });
-        log.info({ event: "Login password migrated", username, requestId: req.requestId }, "Login password migrated to bcrypt");
+        log.info({ event: "Login password migrated", userId: user.id, requestId: req.requestId }, "Login password migrated to bcrypt");
       }
 
       const currentLoginAt = new Date();
@@ -732,7 +756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH /api/admin/users/:id/toggle - Activer/désactiver un utilisateur
-  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, async (req, res) => {
+  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { isActive } = req.body;
@@ -760,12 +784,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await revokeUserAccess(id, "deactivated_by_admin");
       }
 
+      // Ni le hash du mot de passe ni celui du PIN ne quittent le serveur.
+      const { password: _password, pin: _pin, ...safeUser } = updatedUser;
+
       return res.status(200).json({ 
         message: isActive ? "Utilisateur activé" : "Utilisateur désactivé",
-        user: updatedUser
+        user: safeUser
       });
     } catch (error) {
-      console.error("Toggle user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "activation ou désactivation d'un utilisateur en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -846,7 +873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -868,7 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sha256Hash = crypto.createHash("sha256").update(currentPassword).digest("hex");
         if (sha256Hash === user.password) {
           isValidPassword = true;
-          console.log(`🔐 [PASSWORD CHANGE] Legacy SHA-256 hash detected for user ${userId}, will upgrade to bcrypt`);
+          log.info({ event: "Change password legacy hash", userId, requestId: req.requestId }, "Legacy SHA-256 hash, upgraded to bcrypt");
         }
       }
       
@@ -880,11 +907,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       // Update the password (also upgrades legacy SHA-256 to bcrypt)
-      await storage.updateUser(userId, { password: hashedPassword });
+      // updateUser avale l'erreur et renvoie undefined : sans ce contrôle, une panne répondait
+      // « modifié » alors que l'ancien mot de passe restait en place.
+      const updated = await storage.updateUser(userId, { password: hashedPassword });
+      if (!updated) {
+        log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
+        return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {
-      console.error("Change password error:", error);
+      log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1028,8 +1061,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Marquer le workflow comme terminé
       if (workflowData.sessionId) {
         const { workflowService } = await import('./services/workflow-service');
-        const userId = req.user?.id || 1;
-        await workflowService.completeWorkflow(userId, workflowData.sessionId);
+        const userId = req.user!.id; // isWorkshopManager a déjà refusé toute requête sans utilisateur
+        // Le véhicule est créé : un brouillon déjà abandonné (409) ne doit pas faire échouer la création.
+        await workflowService.completeWorkflow(userId, workflowData.sessionId).catch((err) => {
+          if (!isAppError(err) || err.status !== 409) throw err;
+          log.warn({ err, requestId: req.requestId }, "brouillon d'acquisition non clôturé après création du véhicule");
+        });
       }
       
       // Enregistrer le statut initial dans l'historique
@@ -1355,48 +1392,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/maintenance-schedules", isWorkshopManager, async (req, res, next) => {
+  app.post("/api/maintenance-schedules", isWorkshopManager, validateBody(createMaintenanceScheduleRequestSchema), async (req, res, next) => {
     try {
-      // Valider les données d'entrée
-      const validationSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        title: z.string().min(1),
-        description: z.string().optional(),
-        frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'mileage']),
-        frequencyValue: z.number().min(1),
-        scheduledDate: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}/, "Date invalide (AAAA-MM-JJ)")
-          .refine((value) => !Number.isNaN(Date.parse(value)), "Date invalide (AAAA-MM-JJ)"),
-        scheduledMileage: z.number().optional(),
-        isActive: z.boolean().default(true)
-      });
-
-      const scheduleData = validationSchema.parse(req.body);
+      const scheduleData = req.body as CreateMaintenanceScheduleRequest;
       if (!(await storage.getVehicle(scheduleData.vehicleId))) {
         return next(new AppError(404, "Véhicule introuvable : la planification n'a pas été créée."));
       }
-      
+
       // Utiliser le service pour créer la planification et générer automatiquement l'OT
       const schedule = await preventiveMaintenanceService.createMaintenanceSchedule(scheduleData);
-      
+
       return res.status(201).json(schedule);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Données de planification invalides",
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message
-          }))
-        });
-      }
-      
-      console.error("Create maintenance schedule error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la création de la planification de maintenance",
-        details: error instanceof Error ? error.message : "Erreur inconnue"
-      });
+      return next(new AppError(500, "Erreur lors de la création de la planification de maintenance", { cause: error }));
     }
   });
 
@@ -2841,7 +2849,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedFuelRecord = await fuelService.updateFuelRecord(id, updateData, req.session.userId);
       
       if (!updatedFuelRecord) {
-        return res.status(500).json({ message: "Erreur lors de la mise à jour de l'enregistrement" });
+        // Aucune ligne vivante touchée : supprimée entre la lecture et l'écriture (le service filtre deleted_at).
+        throw new AppError(404, "Enregistrement de carburant non trouvé");
       }
       
       // Mettre à jour le kilométrage du véhicule si nécessaire via le service de kilométrage
@@ -2892,14 +2901,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
     try {
       const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
-      let fuelRecords: Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>> = [];
+      // Lecture par le service : les pleins supprimés (deleted_at) en sont exclus.
+      let fuelRecords: Awaited<ReturnType<typeof fuelService.getFuelRecordsByVehicleId>> = [];
 
       if (vehicleId && !isNaN(vehicleId)) {
         assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
           return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         }
-        fuelRecords = await storage.getFuelRecordsByVehicleId(vehicleId);
+        fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
       } else {
         // Récupérer tous les enregistrements de carburant
         // Note: Dans une application réelle, il faudrait paginer les résultats
@@ -2909,7 +2919,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Pour chaque véhicule, récupérer ses enregistrements de carburant
         for (const vehicle of vehicles.vehicles) {
-          const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
+          const records = await fuelService.getFuelRecordsByVehicleId(vehicle.id);
           fuelRecords = [...fuelRecords, ...records];
         }
         
@@ -4159,7 +4169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/active/:sessionId/abandon", authenticate, async (req, res) => {
+  app.patch("/api/workflows/active/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { workflowReminderService } = await import('./services/workflow-reminder-service');
       const userId = req.session.userId;
@@ -4176,8 +4186,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Workflow non trouvé" });
       }
     } catch (error) {
-      console.error("Abandon workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      log.error({ err: error, requestId: req.requestId }, "abandon du workflow en échec");
+      return next(isAppError(error) ? error : new AppError(500, "Impossible d'abandonner le brouillon pour le moment.", { cause: error }));
     }
   });
 
@@ -4194,7 +4204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Routes pour les documents de workflow d'acquisition
-  app.post("/api/workflows/:sessionId/documents", isWorkflowDocumentWriter, upload.single('document'), async (req, res, next) => {
+  app.post("/api/workflows/:sessionId/documents", isWorkflowDocumentWriter, upload.single('document'), validateBody(workflowDocumentUploadRequestSchema), async (req, res, next) => {
     try {
       const { WorkflowDocumentService, isWorkflowDocumentType } = await import('./services/workflow-document-service');
       const sessionId = req.params.sessionId;
@@ -4310,22 +4320,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint pour déclencher une action depuis les alertes de maintenance
-  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, async (req, res) => {
+  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, validateBody(dateMaintenanceTriggerRequestSchema), async (req, res) => {
     try {
-      const payloadSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        alertType: z.enum(['maintenance', 'insurance', 'inspection', 'license'])
-      });
-      const parsedPayload = payloadSchema.safeParse(req.body);
-
-      if (!parsedPayload.success) {
-        return res.status(400).json({
-          message: "Payload invalide: vehicleId et alertType sont requis",
-          errors: parsedPayload.error.errors
-        });
-      }
-
-      const { vehicleId, alertType } = parsedPayload.data;
+      const { vehicleId, alertType } = req.body as DateMaintenanceTriggerRequest;
       const createdBy: number | undefined = req.session?.userId ?? undefined;
 
       if (alertType === 'maintenance') {
@@ -4422,7 +4419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/workflows/documents/:documentId", isAnyUser, async (req, res, next) => {
+  app.delete("/api/workflows/documents/:documentId", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
       const documentId = parseInt(req.params.documentId);
@@ -4704,38 +4701,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", authenticate, async (req, res) => {
+  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
       const userId = req.session.userId;
       const sessionId = req.params.sessionId;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Non authentifié" });
       }
 
-      await workflowService.completeWorkflow(userId, sessionId);
+      // Une session est celle de son auteur : hors périmètre (ou inconnue), 404.
+      if (!(await workflowService.completeWorkflow(userId, sessionId))) {
+        return res.status(404).json({ message: "Brouillon d'acquisition introuvable." });
+      }
       return res.status(200).json({ message: "Workflow terminé avec succès" });
     } catch (error) {
-      console.error("Complete workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      log.error({ err: error, requestId: req.requestId }, "clôture du workflow en échec");
+      return next(isAppError(error) ? error : new AppError(500, "Impossible de terminer le brouillon pour le moment.", { cause: error }));
     }
   });
 
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId/abandon", authenticate, async (req, res) => {
+  app.patch("/api/workflows/vehicle-acquisition/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
       const userId = req.session.userId;
       const sessionId = req.params.sessionId;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Non authentifié" });
       }
 
-      await workflowService.abandonWorkflow(userId, sessionId);
+      if (!(await workflowService.abandonWorkflow(userId, sessionId))) {
+        return res.status(404).json({ message: "Brouillon d'acquisition introuvable." });
+      }
       return res.status(200).json({ message: "Workflow abandonné" });
     } catch (error) {
-      console.error("Abandon workflow error:", error);
+      log.error({ err: error, requestId: req.requestId }, "abandon du workflow en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4770,7 +4772,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, isAnyUser, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4791,12 +4793,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update onboarding step error:", error);
+      log.error({ err: error, event: "Update onboarding step error", requestId: req.requestId }, "Update onboarding step error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, isAnyUser, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4816,12 +4818,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(completedOnboarding);
     } catch (error) {
-      console.error("Complete onboarding error:", error);
+      log.error({ err: error, event: "Complete onboarding error", requestId: req.requestId }, "Complete onboarding error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, isAnyUser, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;
@@ -4841,7 +4843,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update mascot visibility error:", error);
+      log.error({ err: error, event: "Update mascot visibility error", requestId: req.requestId }, "Update mascot visibility error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

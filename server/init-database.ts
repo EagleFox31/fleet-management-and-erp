@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
 import { listMigrationFiles } from './lib/migration-files';
 import { planInitialAdmin } from './lib/initial-admin';
+import { randomPasswordHash } from './lib/dummy-hash';
 
 const initLog = moduleLogger('init-database');
 
@@ -14,6 +15,8 @@ const BOOTSTRAP_SQL_FILES = [
   'work-orders-realtime-triggers.sql',
   'supplier-invoice-settlements-workflow.sql',
   'mission-fuel-triggers.sql',
+  // Alertes carburant réécrites après #263 (destinataires configurés, échec d'alerte sans casser le plein).
+  'fuel-alerts-triggers.sql',
 ] as const;
 
 async function applySqlFile(absolutePath: string, logLabel: string) {
@@ -601,6 +604,33 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
 }
 
 /**
+ * Durcissement de la connexion par PIN : la création d'un compte chauffeur posait le PIN haché comme
+ * mot de passe (même chaîne que `users.pin`). Le PIN en clair n'est pas recouvrable, mais l'identité
+ * des deux hashs suffit à repérer ces comptes. Chacun reçoit un mot de passe aléatoire que personne
+ * ne connaît ; le PIN n'est jamais touché. Idempotent : après passage, password <> pin, le second
+ * passage ne trouve plus rien. Retourne le nombre de comptes repris.
+ */
+export async function revokePinDerivedDriverPasswords(client: Queryable, log: { info: (obj: object, msg: string) => void } = initLog): Promise<number> {
+  const { rows } = await client.query(
+    `SELECT id FROM users WHERE role = 'driver' AND pin IS NOT NULL AND password = pin ORDER BY id`,
+  );
+  let reprises = 0;
+  for (const row of rows) {
+    const hash = await randomPasswordHash();
+    // Garde password = pin répétée : un mot de passe changé entre-temps n'est pas écrasé.
+    const res = await client.query(
+      `UPDATE users SET password = $1 WHERE id = $2 AND role = 'driver' AND password = pin RETURNING id`,
+      [hash, row.id],
+    );
+    reprises += res.rows.length;
+  }
+  if (reprises > 0) {
+    log.info({ reprises }, `${reprises} compte(s) chauffeur : mot de passe dérivé du PIN remplacé par un secret aléatoire`);
+  }
+  return reprises;
+}
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -1009,9 +1039,14 @@ export async function initializeDatabase() {
     // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
+    // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
+    await revokePinDerivedDriverPasswords(pool);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
+    // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
+    await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
+    await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
     // Le RAISE WARNING n'atteint pas les logs applicatifs : relire pg_indexes.
     const { rows: requestKeyIndex } = await pool.query(
       `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key'`,

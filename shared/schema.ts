@@ -523,6 +523,10 @@ export const fuelRecords = pgTable("fuel_records", {
   // Clé de requête d'un plein de mission, posée par le serveur seul : un nouvel envoi est rejoué
   // au lieu de débiter deux fois (server/db/migrations/20261103_fuel_records_request_key.sql).
   requestKey: text("request_key"),
+  // Suppression douce d'une ligne qui a mouvementé la carte : posée par le serveur seul, la ligne reste
+  // pour l'audit mais n'entre plus dans aucun solde ni somme (server/db/migrations/20261103_fuel_records_soft_delete.sql).
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [uniqueIndex("ux_fuel_records_request_key").on(table.requestKey)]);
@@ -530,6 +534,8 @@ export const fuelRecords = pgTable("fuel_records", {
 export const insertFuelRecordSchema = createInsertSchema(fuelRecords).omit({
   id: true,
   requestKey: true,
+  deletedAt: true,
+  deletedBy: true,
   validatedBy: true,
   validatedAt: true,
   createdAt: true,
@@ -1803,6 +1809,14 @@ export const notificationPreferences = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.topic] })],
 );
+
+// Destinataires des alertes générées en base (triggers), par type d'alerte : des rôles, jamais un
+// user_id en dur. Créée et amorcée par server/db/triggers/fuel-alerts-triggers.sql au démarrage.
+export const alertRecipientSettings = pgTable("alert_recipient_settings", {
+  alertType: text("alert_type").primaryKey(),
+  recipientRoles: text("recipient_roles").array().notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
 
 // Exécutions de sauvegarde (P-19). Un index unique partiel garantit une seule ligne `running`.
 export const backupRuns = pgTable("backup_runs", {

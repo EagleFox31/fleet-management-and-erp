@@ -206,16 +206,17 @@ describe("plein qui a débité la carte : montants figés", { timeout: 60000 }, 
 });
 
 describe("DELETE /api/fuel-records/:id (server/api, sous verrou carte)", { timeout: 60000 }, () => {
-  it("chef d'atelier : 204, plein supprimé", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("admin") });
+  it("chef d'atelier : 204, plein physique supprimé", async () => {
+    // Plein physique (aucun mouvement de carte) : seul cas que le chef d'atelier peut supprimer.
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("admin"), debitAmount: "0" });
     ids.fuelRecordIds.push(record.id);
     const res = await call("DELETE", "/api/fuel-records/" + record.id, { cookie: cookies.get("workshop_manager") });
     expect(res.status).toBe(204);
     expect(await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id))).toHaveLength(0);
   });
 
-  it("logisticien -> 403 au contrat, plein conservé", async () => {
-    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics") });
+  it("logisticien sur un plein physique -> 403 au contrat, plein conservé", async () => {
+    const record = await createTestFuelRecord({ vehicleId: await newVehicleId(), createdBy: sessionUserIds.get("logistics"), debitAmount: "0" });
     ids.fuelRecordIds.push(record.id);
     const res = await call("DELETE", "/api/fuel-records/" + record.id, { cookie: cookies.get("logistics") });
     expect(res.status).toBe(403);

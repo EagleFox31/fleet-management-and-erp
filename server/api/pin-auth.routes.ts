@@ -5,7 +5,10 @@ import { users } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { burnBcryptTime } from "../lib/dummy-hash";
 import { withLogContext } from "../lib/error-log-context";
+import { validateBody } from "../middleware/validate-body";
+import { pinLoginRequestSchema, type PinLoginRequest } from "@shared/contracts/auth-pin-login";
 
 const log = moduleLogger("pin-auth");
 const router = Router();
@@ -23,42 +26,43 @@ const ficheChauffeurDesactivee = sql`exists (
  * Déclarés avant les handlers homonymes de server/routes.ts (/api est servi
  * avant registerRoutes) : Express sert la première déclaration.
  */
-router.post("/auth/pin-login", async (req, res, next) => {
+router.post("/auth/pin-login", validateBody(pinLoginRequestSchema), async (req, res, next) => {
   try {
-    const { userId, pin } = req.body ?? {};
-    if (!userId || !pin) {
-      throw new AppError(400, "userId et pin requis");
-    }
+    // Corps validé en type avant toute recherche de compte : même 400 pour un compte connu ou inconnu.
+    const { userId, pin } = req.body as PinLoginRequest;
 
     const [user] = await db.select().from(users).where(eq(users.id, Number(userId))).limit(1);
-    if (!user || user.deletedAt) {
-      throw new AppError(401, "Utilisateur introuvable");
-    }
-    if (user.role !== "driver") {
-      throw new AppError(403, "Accès réservé aux chauffeurs");
-    }
-    if (!user.pin) {
-      throw new AppError(401, "Aucun PIN configuré");
+    // Tous les échecs d'identification (compte inconnu, non chauffeur, sans PIN, PIN faux) :
+    // même 401, même message, même durée (comparaison factice quand il n'y a rien à comparer).
+    if (!user || user.deletedAt || user.role !== "driver" || !user.pin) {
+      await burnBcryptTime(String(pin));
+      throw new AppError(401, "Identifiants invalides");
     }
 
     const pinMatch = await bcrypt.compare(String(pin), user.pin);
     if (!pinMatch) {
-      throw new AppError(401, "PIN incorrect");
+      throw new AppError(401, "Identifiants invalides");
     }
-    // Après la vérification du PIN seulement : sinon la réponse dirait quels
-    // chauffeurs sont désactivés à quiconque devine un identifiant.
+    // Même 401 qu'un PIN faux : un message propre aux fiches désactivées confirmerait que le PIN est bon.
     const [desactive] = await db
       .select({ id: users.id })
       .from(users)
       .where(and(eq(users.id, user.id), ficheChauffeurDesactivee))
       .limit(1);
     if (desactive) {
-      throw new AppError(401, "Ce compte chauffeur est désactivé");
+      throw new AppError(401, "Identifiants invalides");
     }
 
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role as any;
+    // Nouvel identifiant de session à la connexion (fixation de session), comme le login par mot de passe.
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((regenerateError) => {
+        if (regenerateError) return reject(regenerateError);
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        req.session.role = user.role as any;
+        req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
+      });
+    });
 
     await db
       .update(users)

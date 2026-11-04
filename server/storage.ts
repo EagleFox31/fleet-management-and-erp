@@ -636,8 +636,10 @@ export class DatabaseStorage implements IStorage {
       const [user] = await db.select().from(users).where(eq(users.username, username));
       return user;
     } catch (error) {
-      console.error('Error getting user by username:', error);
-      return undefined;
+      // Relancée, pas avalée : `undefined` se lisait « nom inconnu » (login en 401, contrôle
+      // d'unicité passé à tort) alors que la base était en panne (#260).
+      storageLog.error({ err: error }, "Error getting user by username");
+      throw error;
     }
   }
   
@@ -669,7 +671,7 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updatedUser;
     } catch (error) {
-      console.error("Error updating user:", error);
+      storageLog.error({ err: error, userId: id }, "Error updating user");
       return undefined;
     }
   }
@@ -2121,7 +2123,7 @@ export class DatabaseStorage implements IStorage {
   async getFuelRecordsByVehicleId(vehicleId: number): Promise<FuelRecord[]> {
     try {
       // Récupérer les vrais enregistrements de carburant depuis PostgreSQL
-      const records = await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicleId));
+      const records = await db.select().from(fuelRecords).where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)));
       return records;
     } catch (error) {
       console.error('Error getting fuel records by vehicle ID:', error);

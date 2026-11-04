@@ -1,6 +1,17 @@
 import { db } from "../db";
 import { vehicleAcquisitionWorkflows, type VehicleAcquisitionWorkflow, type InsertVehicleAcquisitionWorkflow } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
+import { AppError } from "../lib/app-error";
+
+/** Vrai si la session existe au nom de cet utilisateur, quel que soit son statut (rejouer une clôture reste un succès). */
+export async function userOwnsWorkflowSession(userId: number, sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: vehicleAcquisitionWorkflows.id })
+    .from(vehicleAcquisitionWorkflows)
+    .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)))
+    .limit(1);
+  return Boolean(row);
+}
 
 export class WorkflowService {
   // Sauvegarder ou mettre à jour l'état du workflow
@@ -69,7 +80,8 @@ export class WorkflowService {
   }
 
   // Marquer un workflow comme terminé
-  async completeWorkflow(userId: number, sessionId: string): Promise<void> {
+  /** Renvoie faux si la session n'est pas celle de cet utilisateur (404 côté route). */
+  async completeWorkflow(userId: number, sessionId: string): Promise<boolean> {
     await db
       .update(vehicleAcquisitionWorkflows)
       .set({
@@ -84,6 +96,19 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
+    // Sans unicité (user_id, session_id), une ancienne ligne abandonnée peut coexister : une ligne
+    // terminée l'emporte, la clôture vient d'être écrite ou l'était déjà.
+    const sessions = await db
+      .select({ status: vehicleAcquisitionWorkflows.status })
+      .from(vehicleAcquisitionWorkflows)
+      .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)));
+    if (sessions.length === 0) return false;
+    if (sessions.some((session) => session.status === 'completed')) return true;
+    // Un brouillon abandonné ne se déclare pas « terminé » : rejouer sur un terminé reste un succès.
+    if (sessions.every((session) => session.status === 'abandoned')) {
+      throw new AppError(409, "Ce brouillon d'acquisition a été abandonné : il ne peut plus être terminé.");
+    }
+    return true;
   }
 
   // Mettre à jour seulement les données du workflow (pour sauvegarde progressive)
@@ -110,7 +135,8 @@ export class WorkflowService {
   }
 
   // Abandonner un workflow
-  async abandonWorkflow(userId: number, sessionId: string): Promise<void> {
+  /** Renvoie faux si la session n'est pas celle de cet utilisateur (404 côté route). */
+  async abandonWorkflow(userId: number, sessionId: string): Promise<boolean> {
     await db
       .update(vehicleAcquisitionWorkflows)
       .set({
@@ -124,6 +150,7 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
+    return userOwnsWorkflowSession(userId, sessionId);
   }
 
   // Nettoyer les anciens workflows abandonnés (plus de 7 jours)
