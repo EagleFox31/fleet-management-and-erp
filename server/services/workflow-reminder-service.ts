@@ -1,6 +1,10 @@
 import { db } from '../db';
 import { vehicleAcquisitionWorkflows } from '@shared/schema';
 import { eq, and, ne, desc, count, gte } from 'drizzle-orm';
+import { moduleLogger } from '../lib/logger';
+import { userOwnsWorkflowSession } from './workflow-service';
+
+const log = moduleLogger('workflow-reminder');
 
 interface ActiveWorkflow {
   id: number;
@@ -50,7 +54,7 @@ class WorkflowReminderService {
 
       return workflows.map(workflow => this.transformWorkflowToActiveWorkflow(workflow));
     } catch (error) {
-      console.error('Error fetching active workflows:', error);
+      log.error({ err: error }, 'lecture des workflows actifs en échec');
       return [];
     }
   }
@@ -119,7 +123,7 @@ class WorkflowReminderService {
         thisMonth: thisMonthResult?.count || 0,
       };
     } catch (error) {
-      console.error('Error fetching workflow stats:', error);
+      log.error({ err: error }, 'lecture des statistiques de workflow en échec');
       return {
         total: 0,
         inProgress: 0,
@@ -132,7 +136,7 @@ class WorkflowReminderService {
 
   async abandonWorkflow(userId: number, sessionId: string): Promise<boolean> {
     try {
-      const result = await db
+      await db
         .update(vehicleAcquisitionWorkflows)
         .set({
           status: 'abandoned',
@@ -147,9 +151,10 @@ class WorkflowReminderService {
           )
         );
 
-      return true;
+      // Faux si la session n'est pas celle de cet utilisateur : la route répond 404.
+      return await userOwnsWorkflowSession(userId, sessionId);
     } catch (error) {
-      console.error('Error abandoning workflow:', error);
+      log.error({ err: error }, "abandon du workflow en échec");
       return false;
     }
   }
