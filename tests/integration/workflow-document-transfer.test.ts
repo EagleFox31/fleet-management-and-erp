@@ -91,9 +91,35 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
 
     await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
 
-    expect(readdirSync(vehicleDir)).toEqual([`carte_grise_${evilName}`]);
+    const files = readdirSync(vehicleDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(new RegExp(`^carte_grise_[0-9a-f]{12}_${evilName.replace(/[.]/g, "\.")}$`));
     const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
-    expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/carte_grise_${evilName}`);
+    expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/${files[0]}`);
+  });
+
+  it("deux documents de même type et de même nom : deux fichiers distincts, chacun avec son contenu", async () => {
+    const { sessionId, vehicleId, workflowId, document: first } = await workflowWithDocument("doublon.pdf");
+    const second = await WorkflowDocumentService.saveWorkflowDocument({
+      workflowId,
+      sessionId,
+      documentType: "carte_grise",
+      originalName: "doublon.pdf",
+      fileBuffer: Buffer.from("SECOND"),
+      mimeType: "application/pdf",
+      uploadedBy: first.uploadedBy,
+    });
+    const vehicleDir = join(process.cwd(), "uploads", "documents", `vehicle-${vehicleId}`);
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.filePath)).size).toBe(2);
+    expect(readdirSync(vehicleDir)).toHaveLength(2);
+    const contents = rows.map((row) => readFileSync(join(vehicleDir, row.filename), "utf8")).sort();
+    expect(contents).toEqual(["SECOND", "TEST"]);
+    expect(second.id).not.toBe(first.id);
   });
 
   it("fichier source disparu : ce document n'est ni copié ni marqué transféré, les autres le sont", async () => {

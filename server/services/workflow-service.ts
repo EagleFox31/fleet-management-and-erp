@@ -96,14 +96,16 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
-    const [session] = await db
+    // Sans unicité (user_id, session_id), une ancienne ligne abandonnée peut coexister : une ligne
+    // terminée l'emporte, la clôture vient d'être écrite ou l'était déjà.
+    const sessions = await db
       .select({ status: vehicleAcquisitionWorkflows.status })
       .from(vehicleAcquisitionWorkflows)
-      .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)))
-      .limit(1);
-    if (!session) return false;
+      .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)));
+    if (sessions.length === 0) return false;
+    if (sessions.some((session) => session.status === 'completed')) return true;
     // Un brouillon abandonné ne se déclare pas « terminé » : rejouer sur un terminé reste un succès.
-    if (session.status === 'abandoned') {
+    if (sessions.every((session) => session.status === 'abandoned')) {
       throw new AppError(409, "Ce brouillon d'acquisition a été abandonné : il ne peut plus être terminé.");
     }
     return true;

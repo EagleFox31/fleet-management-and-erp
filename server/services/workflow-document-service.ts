@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
 import { eq, and, inArray, lt, type SQL } from "drizzle-orm";
+import { randomBytes } from "crypto";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
@@ -149,7 +150,8 @@ export class WorkflowDocumentService {
       for (const doc of documents) {
         const originalPath = existingUploadedFile(doc.filePath);
         // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
-        const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
+        // Aléa dans le nom : deux pièces de même type et de même nom ne s'écrasent pas sur le disque.
+        const newFileName = `${doc.documentType}_${randomBytes(6).toString("hex")}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
 
         // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
@@ -162,7 +164,8 @@ export class WorkflowDocumentService {
           continue;
         }
 
-        fs.copyFileSync(originalPath, newPath);
+        // COPYFILE_EXCL : une collision de nom échoue au lieu d'écraser le contenu d'un autre document.
+        fs.copyFileSync(originalPath, newPath, fs.constants.COPYFILE_EXCL);
 
         // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
         // Ligne véhicule et marque « transféré » dans la même transaction : l'une sans l'autre

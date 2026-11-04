@@ -1039,10 +1039,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Marquer le workflow comme terminé
       if (workflowData.sessionId) {
         const { workflowService } = await import('./services/workflow-service');
-        const userId = req.user?.id || 1;
+        const userId = req.user!.id; // isWorkshopManager a déjà refusé toute requête sans utilisateur
         // Le véhicule est créé : un brouillon déjà abandonné (409) ne doit pas faire échouer la création.
         await workflowService.completeWorkflow(userId, workflowData.sessionId).catch((err) => {
-          if (!isAppError(err)) throw err;
+          if (!isAppError(err) || err.status !== 409) throw err;
           log.warn({ err, requestId: req.requestId }, "brouillon d'acquisition non clôturé après création du véhicule");
         });
       }
