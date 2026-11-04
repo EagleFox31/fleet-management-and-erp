@@ -2346,3 +2346,12 @@ soumission sans doublon.
 - **Comment tester (QA)** : seed puis `E2E_DEMO=1 E2E_RECORD=1 node --env-file=.env node_modules/@playwright/test/cli.js test e2e/demo/<spec> --reporter=list` sur base locale ; attendu : 1 passed, 2 passages consécutifs.
 - **RAIDER** : I (seed rejouable), D (suite par défaut inchangée), E (refus hors base locale) ; ne s'applique pas : code produit.
 - **Reste / risques** : dialogue de renouvellement rapide de `vehicle-documents.tsx` inatteignable (code mort, le bouton mène à la page de renouvellement).
+
+## 2026-11-05T00:33:32+01:00 — Démos e2e : réserves de relecture de #324
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : garde de base durcie (URL analysée : hôte local et chemin exactement `/fleet_test`), appelée dans chaque spec ; seed qui réconcilie rôle, mot de passe et propriétaire ; demandes de renouvellement de la démo purgées ; README sans `--env-file=.env` seul. Correction de l'entrée précédente : le seed est rejouable sans doublon en base, mais le justificatif téléversé reste dans `uploads/`.
+- **Comment tester (QA)** : `DATABASE_URL` vers une autre base : le seed et les specs échouent ; sinon 3 specs vertes.
+- **RAIDER** : I et E (garde stricte, réconciliation) ; ne s'applique pas : code produit.
+- **Reste / risques** : fichier de justificatif dans `uploads/`.

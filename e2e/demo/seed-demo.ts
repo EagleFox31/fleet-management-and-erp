@@ -13,9 +13,9 @@
  * un mot de passe de 12 caractères ; il n'est pas adapté à une base Docker jetable.
  */
 import bcrypt from "bcryptjs";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, pool } from "../../server/db";
-import { partRequirements, parts, partsStockMovements, partsUsed, users, vehicleDocuments, vehicles, workOrders } from "../../shared/schema";
+import { documentRenewalRequests, partRequirements, parts, partsStockMovements, partsUsed, users, vehicleDocuments, vehicles, workOrders } from "../../shared/schema";
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
@@ -37,10 +37,19 @@ export const DEMO_PART = { reference: "DEMO-FILTRE-HUILE", name: "Filtre à huil
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
 export const DEMO_DOCUMENT_NAME = "Assurance DEMO-SEC-001";
 
-function assertLocalDatabase(): void {
-  const url = process.env.DATABASE_URL ?? "";
-  const ok = /fleet_test/.test(url) && /(localhost|127\.0\.0\.1)/.test(`${url} ${process.env.DATABASE_WS_PROXY ?? ""}`);
-  if (!ok) throw new Error("Seed de démo refusé : DATABASE_URL doit viser une base locale fleet_test.");
+/** Hôtes acceptés : base locale ou conteneur Docker du compose de test. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "postgres"]);
+
+/** Refuse toute base autre que `fleet_test` sur un hôte local (le .env racine peut viser la production). */
+export function assertLocalDatabase(rawUrl: string | undefined = process.env.DATABASE_URL): void {
+  let ok = false;
+  try {
+    const url = new URL(rawUrl ?? "");
+    ok = LOCAL_HOSTS.has(url.hostname) && url.pathname === "/fleet_test";
+  } catch {
+    ok = false;
+  }
+  if (!ok) throw new Error("Seed de démo refusé : DATABASE_URL doit viser la base locale fleet_test.");
 }
 
 async function ensureUser(account: { username: string; password: string; name: string; role: string }): Promise<number> {
@@ -54,6 +63,12 @@ async function ensureUser(account: { username: string; password: string; name: s
       password: await bcrypt.hash(account.password, 4),
     })
     .onConflictDoNothing();
+  // Réconciliation : un compte déjà présent retrouve rôle et mot de passe de la démo.
+  const [current] = await db.select().from(users).where(eq(users.username, account.username));
+  const passwordOk = current ? await bcrypt.compare(account.password, current.password) : true;
+  if (current && (current.role !== account.role || !passwordOk)) {
+    await db.update(users).set({ role: account.role as typeof users.$inferInsert.role, password: await bcrypt.hash(account.password, 4) }).where(eq(users.id, current.id));
+  }
   const [row] = await db.select({ id: users.id }).from(users).where(eq(users.username, account.username));
   return row.id;
 }
@@ -63,7 +78,8 @@ async function ensureVehicle(registration: string, model: string, ownerId: numbe
     .insert(vehicles)
     .values({ registrationNumber: registration, brand: "Renault", model, year: 2021, mileage: 120000, lastMileage: 120000, ownerId })
     .onConflictDoNothing();
-  const [row] = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.registrationNumber, registration));
+  const [row] = await db.select({ id: vehicles.id, ownerId: vehicles.ownerId }).from(vehicles).where(eq(vehicles.registrationNumber, registration));
+  if (row.ownerId !== ownerId) await db.update(vehicles).set({ ownerId }).where(eq(vehicles.id, row.id));
   return row.id;
 }
 
@@ -91,7 +107,7 @@ export async function seedDemo(): Promise<void> {
     .insert(parts)
     .values({ reference: DEMO_PART.reference, name: DEMO_PART.name, quantity: 20, minQuantity: 2, unitPrice: "12500", location: "Rayon A1" })
     .onConflictDoNothing();
-  await db.update(parts).set({ quantity: 20 }).where(eq(parts.reference, DEMO_PART.reference));
+  await db.update(parts).set({ quantity: 20 }).where(and(eq(parts.reference, DEMO_PART.reference), ne(parts.quantity, 20)));
 
   // Intervention du technicien : ramenée à « en cours », sans demande de pièce.
   const existing = await db
@@ -118,6 +134,10 @@ export async function seedDemo(): Promise<void> {
     .select({ id: vehicleDocuments.id })
     .from(vehicleDocuments)
     .where(and(eq(vehicleDocuments.vehicleId, secretaryVehicleId), eq(vehicleDocuments.name, DEMO_DOCUMENT_NAME)));
+  if (documents.length > 0) {
+    // Demandes de renouvellement créées par la démo précédente (périmètre : ce document seul).
+    await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleDocumentId, documents.map((d) => d.id)));
+  }
   if (documents.length === 0) {
     await db.insert(vehicleDocuments).values({
       vehicleId: secretaryVehicleId,
