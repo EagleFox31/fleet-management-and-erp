@@ -24,11 +24,19 @@ export async function setupVite(app: Express, server: Server) {
 
   // vite et vite.config.ts sont des dépendances de développement : chargés ici seulement, jamais
   // par dist/index.js en production (image runtime en --omit=dev, garde :
-  // tests/unit/deploy/runtime-deps.test.ts). vite lit lui-même son fichier de configuration.
-  const { createServer: createViteServer, createLogger } = await import("vite");
+  // tests/unit/deploy/runtime-deps.test.ts).
+  const { createServer: createViteServer, createLogger, loadConfigFromFile } = await import("vite");
+  const loaded = await loadConfigFromFile(
+    { command: "serve", mode: "development" },
+    path.resolve(import.meta.dirname, "..", "vite.config.ts"),
+  );
+  if (!loaded) throw new Error("vite.config.ts introuvable");
   const viteLogger = createLogger();
+  // Étalé puis configFile: false, comme avant : le bloc `server` de vite.config.ts (polling, host)
+  // est remplacé par serverOptions, pas fusionné.
   const vite = await createViteServer({
-    configFile: path.resolve(import.meta.dirname, "..", "vite.config.ts"),
+    ...loaded.config,
+    configFile: false,
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
