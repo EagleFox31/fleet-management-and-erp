@@ -4,15 +4,16 @@ import { readRepoFile, repoFiles, REPO_SCAN_TIMEOUT_MS } from "../../support/rep
 /**
  * DOC1 : un centre désactivé n'est pas proposé dans le sélecteur de centre du renouvellement.
  *
- * Aucun filtre n'existe côté écran : les deux sélecteurs affichent tel quel ce que
+ * Aucun filtre n'existe côté écran : le sélecteur affiche tel quel ce que
  * `GET /api/document-renewals/centers` renvoie, et c'est l'API qui retire les centres
  * inactifs (contrat : `tests/contract/document-renewal-centers.contract.test.ts`).
  * Ce test garde donc la seule chose qui puisse faire réapparaître un centre inactif
  * dans le choix : un sélecteur qui demanderait `includeInactive` à l'API.
  */
+// Seul sélecteur : le dialogue de renouvellement rapide de vehicle-documents.tsx, jamais ouvert, a été retiré
+// (le bouton mène au parcours /vehicles/documents/renew).
 const SELECTORS = [
   "client/src/pages/vehicles/document-renew.tsx",
-  "client/src/components/vehicles/vehicle-documents.tsx",
 ];
 const CENTERS_URL = "/api/document-renewals/centers";
 
