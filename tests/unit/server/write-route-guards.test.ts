@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   API_DIR,
   countAnyWriteCalls,
+  countAnyWriteCallsIn,
   findUnguardedWriteRoutes,
   findWriteRoutes,
   findWriteRoutesIn,
@@ -68,5 +69,25 @@ describe("scanner des routes d'écriture : faux verts connus", () => {
     expect(scan(multi)).toEqual([{ id: "x.routes.ts PUT /d", guarded: true }]);
     const late = `router.put(\n  "/e",\n  async (req, res) => { isStaff; },\n);`;
     expect(scan(late)[0].guarded).toBe(false);
+  });
+
+  it("le compte grossier ignore les requêtes db/tx/trx, même chaînées sur une autre ligne", () => {
+    // Faux positifs : écritures Drizzle, receveur collé ou séparé du point.
+    const drizzle = `await db.delete(t);
+await tx
+  .delete(t)
+  .where(x);
+await trx .delete(t);
+this.db.delete(t);`;
+    expect(countAnyWriteCallsIn(drizzle)).toBe(0);
+    // Vrais positifs : routes, y compris chaînées, et identifiants qui finissent par tx.
+    const routes = `router.post("/a", h);
+router
+  .delete("/b", h);
+ctx.patch("/c", h);
+adminRouter.put("/d", h);`;
+    expect(countAnyWriteCallsIn(routes)).toBe(4);
+    // Receveur chaîné ou non reconnu : WRITE_ROUTE ne le voit pas, l'écart avec le compte grossier le signale.
+    expect(scan(routes).length).toBe(2);
   });
 });
