@@ -128,6 +128,7 @@ export class DbLockoutStore implements LockoutStore {
     apply: (before: LockState | null) => LockState | null,
   ): Promise<{ before: LockState | null; after: LockState | null }> {
     const client = await pool.connect();
+    let broken: Error | undefined;
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + key]);
@@ -149,10 +150,13 @@ export class DbLockoutStore implements LockoutStore {
       await client.query("COMMIT");
       return { before, after };
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      // Connexion dont le ROLLBACK echoue : detruite plutot que rendue au pool.
+      await client.query("ROLLBACK").catch((rollbackErr: Error) => {
+        broken = rollbackErr;
+      });
       throw err;
     } finally {
-      client.release();
+      client.release(broken);
     }
   }
 

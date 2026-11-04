@@ -47,8 +47,10 @@ export function loginLockoutGuard(opts: LockoutGuardOptions): RequestHandler {
     try {
       reservation = await opts.store.reserve(username, now(), cfg);
     } catch (err) {
+      // Fermee sur panne : sans compteur, chaque essai verifierait un secret sans limite. Le 503 n'est
+      // pas compte comme un echec (une panne n'est pas un echec de connexion).
       log.error({ err, requestId }, "reservation de la tentative impossible");
-      return next();
+      return next(new AppError(503, "Connexion momentanément impossible, réessayez dans un instant.", { cause: err }));
     }
     if (!reservation.allowed) {
       const lockedUntil = reservation.state.lockedUntil ?? new Date(now().getTime() + cfg.lockMinutes * 60_000);

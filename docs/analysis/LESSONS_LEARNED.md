@@ -2740,6 +2740,7 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
     - 400 ou 5xx → `release` : la réponse ne dit rien du secret, et une panne n'est pas un échec de connexion
       (`auth-login-unavailable.contract.test.ts`). Seuls les 401 consomment le seuil, la borne tient ;
     - tout autre statut, ou une connexion coupée sans réponse, reste compté (le verrou expire seul) ;
+  - compteur indisponible : la garde refuse en 503 sans appeler le handler (fermée sur panne), le refus n'est pas compté ;
   - lecture et écriture du compteur dans une transaction, sous `pg_advisory_xact_lock` pris sur la clé. Une
     première version en CTE `FOR UPDATE` ne verrouillait rien tant que la ligne n'existait pas : 20 réservations
     parallèles donnaient 20 audits `lock`. Le test d'intégration l'a vu ;
@@ -2753,7 +2754,7 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
   - `tests/integration/login-lockout-db-store.test.ts` : 20 réservations parallèles, exactement MAX
     admises, un seul audit ;
   - `tests/unit/server/auth-ip-limit.test.ts` : rafale sur la garde, statuts rendus ou comptés, Map bornée,
-    Retry-After.
+    Retry-After, 503 sans vérification si le compteur est en panne.
 - **Leçon** : un contrôle anti-force brute décide et compte dans la même écriture, avant le travail
   coûteux. « Lire, laisser passer, écrire après » n'est jamais atomique, même si chaque requête SQL
   l'est. Le test qui le prouve joue des requêtes simultanées. Des requêtes séquentielles ne verront

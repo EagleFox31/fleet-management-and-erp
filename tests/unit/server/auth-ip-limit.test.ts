@@ -158,6 +158,25 @@ describe("loginLockoutGuard : réservation avant le handler", () => {
     });
   });
 
+  it("compteur en panne : 503 sans appeler le handler, aucun secret vérifié", async () => {
+    const store = new MemoryLockoutStore();
+    store.reserve = () => Promise.reject(new Error("base indisponible"));
+    let checked = 0;
+    await withApp(
+      (app) =>
+        app.post("/login", loginLockoutGuard({ store }), (_req, res) => {
+          checked += 1;
+          res.status(401).json({});
+        }),
+      async (port) => {
+        const results = await Promise.all(Array.from({ length: 5 }, () => post(port, { username: "u", password: "x" })));
+        expect(results.map((r) => r.status)).toEqual([503, 503, 503, 503, 503]);
+        expect(JSON.stringify(results[0].body)).not.toContain("base indisponible");
+        expect(checked).toBe(0);
+      },
+    );
+  });
+
   it("reservedLockState : verrou posé au premier dépassement, verrou expiré repart de zéro", () => {
     const cfg = { maxAttempts: 2, lockMinutes: 15 };
     const t0 = new Date("2026-11-04T08:00:00Z");
