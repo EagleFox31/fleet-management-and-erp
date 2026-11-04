@@ -64,7 +64,7 @@ describe("Suppression douce des pleins : init-database et migration jumelle", ()
     expect(sql).not.toContain("%.1f");
     expect(sql).not.toMatch(/VALUES\s*\(\s*1\s*,/);
     expect(sql).not.toContain("create_vehicle_alert");
-    expect(sql.match(/EXCEPTION WHEN OTHERS THEN\n\s*RAISE WARNING/g)).toHaveLength(2);
+    expect(sql.match(/EXCEPTION WHEN query_canceled OR OTHERS THEN\n\s*RAISE WARNING/g)).toHaveLength(2);
     expect(sql.match(/^CREATE (?!OR REPLACE|TABLE IF NOT EXISTS)/gm)).toBeNull();
   });
 });
