@@ -303,3 +303,9 @@ Règles : `docs/journal/README.md`.
   - 0 `error TS` ;
   - unitaires : 163 fichiers, 2034 tests ;
   - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
+
+## 2026-11-04 — Prix d'achat du véhicule, clôture du « Reste » (#214)
+- **Quoi** : le « Reste » de l'entrée du 3 novembre est soldé. L'assistant d'acquisition n'envoie plus `purchasePrice` pour un rôle sans droit d'écriture (8bbfc6a). Le contrat pneus était rouge parce qu'il lisait `r.id`, `row.tire` et `row.vehicle`. La route renvoie des lignes de jointure `{ vehicle_tires, tires, vehicles }`, forme que lit déjà `pages/vehicles/[id].tsx` : le test a été corrigé, l'API n'a pas changé (192d934). La branche est fusionnée avec `origin/main`.
+- **Preuve rouge** : le contrat `vehicle-purchase-price-scope` a été rejoué sur le code de `origin/main` (9461373). Seule différence : la constante `VEHICLE_PURCHASE_PRICE_READ_ROLES`, absente de main, est remplacée par sa valeur littérale. Résultat : 52 cas rouges sur 89. Ils échouent pour les rôles hors lecture : liste 7, détail 7, `/all` 7, pneus 7, coûts de mission 5, missions 5, export 2, trame kilométrage 1, écriture PATCH 11. Sur la branche, les 89 cas passent.
+- **Preuves** : 0 `error TS`, 2150 tests unitaires et 1810 contrats verts.
+- **Reste** : l'écart sur `acquisitionHT` (direction, `management-dashboard-service.ts:529` et `:713`) attend la décision de l'utilisatrice, que 0a lui pose. Rien n'est modifié en attendant.
