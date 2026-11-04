@@ -2340,3 +2340,25 @@ Outillage de garde-fou (exception non modélisée) + erreur avalée, l'utilisate
 ### Règle Projet (obligatoire)
 - Une exception à un cliquet de sécurité se déclare par clé, avec sa preuve comportementale (un contrat). Elle ne passe jamais par l'analyse du code qu'elle exempte.
 - Après un appel de storage qui renvoie `undefined` en cas d'erreur, tester le retour avant de répondre « fait ».
+
+## 2026-11-04 — Near miss : exception de cliquet prouvée par la présence d'une chaîne (R1, audit)
+
+### Contexte
+L'audit de sécurité de #274 a relevé que la preuve exigée pour une route libre-service était la présence, dans le contrat, du texte de l'appel (`calls`). Le test « sans session : 401 sur chaque route » suffisait à la fournir.
+
+### Cause racine
+Le garde-fou contrôlait un indice (l'appel apparaît dans le fichier), pas la propriété visée (un compte A ne touche pas aux données de B).
+
+### Classification
+Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il porte. Aucune route n'était fautive.
+
+### Résolution
+- L'appel doit figurer dans un test dont le titre contient « autre compte ». Les quatre contrats concernés ont été renommés en ce sens.
+- Le texte du handler ne doit lire aucun identifiant de compte de la requête (`req.params|query|body` vers `userId`, `user_id`, `ownerId`, `accountId`, accès direct ou déstructuration). C'est un motif de refus, jamais un critère d'acceptation : la preuve positive reste le contrat.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : `selfServiceProblems` refuse les quatre formes de lecture et un contrat dont seul un test 401 appelle la route (tests synthétiques).
+- Mutations jouées : une ligne `req.body.userId` dans change-password fait échouer le cliquet ; « autre compte » retiré du titre du contrat des préférences aussi.
+
+### Règle Projet (obligatoire)
+- Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.

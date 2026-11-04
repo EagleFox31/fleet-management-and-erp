@@ -81,7 +81,7 @@ describe("R1 : routes libre-service, compte de session seulement", { timeout: 12
     }
   });
 
-  it("accueil : A (client) avance, termine et masque la mascotte ; la ligne de B ne bouge pas", async () => {
+  it("accueil : A (client) avance, termine et masque la mascotte ; autre compte (B) : sa ligne ne bouge pas", async () => {
     // GET /status crée la ligne de chacun.
     for (const who of ["a", "b"] as const) {
       expect((await call("GET", "/api/onboarding/status", { cookie: accounts[who].cookie })).status).toBe(200);
@@ -104,7 +104,7 @@ describe("R1 : routes libre-service, compte de session seulement", { timeout: 12
     expect(b, "la ligne de B est inchangée").toEqual(before);
   });
 
-  it("mot de passe : A change le sien, userId de B dans le corps ignoré, B se connecte comme avant", async () => {
+  it("mot de passe : A change le sien ; autre compte (B) : son userId dans le corps est ignoré, B se connecte comme avant", async () => {
     const newPassword = `nouveau-${Date.now().toString(36)}`;
     const res = await call("POST", "/api/users/change-password", {
       cookie: accounts.a.cookie,
