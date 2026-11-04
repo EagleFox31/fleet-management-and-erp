@@ -7,11 +7,14 @@
  * - `vehicle_status_changed` part au personnel en entier, puis au propriétaire du véhicule en trame
  *   réduite `{ vehicleId, status }`, sans acteur : la fiche véhicule du client s'actualise.
  *   Propriétaire nul ou lecture en échec : rien n'est envoyé au client.
+ * - `alert_created` (triggers d'alertes carburant, #287) ne porte que des ids : les alertes sont
+ *   relues et chacune part à son seul destinataire par `broadcastAlertCreated`.
  */
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
-import { vehicles } from "@shared/schema";
+import { eq, inArray } from "drizzle-orm";
+import { alerts, vehicles } from "@shared/schema";
 import { db } from "../db";
+import { broadcastAlertCreated, type BroadcastableAlert } from "./alert-broadcast";
 import { moduleLogger } from "./logger";
 import { workOrderCostScope, workOrderStaffScope } from "./work-order-realtime-scope";
 
@@ -34,6 +37,44 @@ export interface RelayDeps {
   inferEntity: (event: string) => string;
   /** Propriétaire d'un véhicule ; lève en cas d'échec. Par défaut : une requête sur `vehicles`. */
   readOwnerId?: (vehicleId: number) => Promise<number | null>;
+  /** Alertes par id ; lève en cas d'échec. Par défaut : une requête sur `alerts`. */
+  readAlerts?: (alertIds: number[]) => Promise<BroadcastableAlert[]>;
+  /** Trame nominative d'une alerte. Par défaut : `broadcastAlertCreated`. */
+  broadcastAlert?: (alert: BroadcastableAlert) => void;
+}
+
+/** Plafond défensif : une notification de trigger ne vise qu'une poignée de destinataires. */
+const MAX_RELAYED_ALERTS = 500;
+
+async function defaultReadAlerts(alertIds: number[]): Promise<BroadcastableAlert[]> {
+  return db
+    .select({
+      id: alerts.id,
+      userId: alerts.userId,
+      title: alerts.title,
+      message: alerts.message,
+      type: alerts.type,
+      priority: alerts.priority,
+      link: alerts.link,
+    })
+    .from(alerts)
+    .where(inArray(alerts.id, alertIds));
+}
+
+async function relayCreatedAlerts(payload: Record<string, unknown>, deps: RelayDeps): Promise<void> {
+  const ids = Array.isArray(payload.alertIds)
+    ? [...new Set(payload.alertIds.map(positiveInteger).filter((id): id is number => id !== null))].slice(0, MAX_RELAYED_ALERTS)
+    : [];
+  if (ids.length === 0) return;
+  let rows: BroadcastableAlert[];
+  try {
+    rows = await (deps.readAlerts ?? defaultReadAlerts)(ids);
+  } catch (err) {
+    log.error({ err, alertIds: ids.length }, "alertes du trigger non relues : trames alert_created non envoyées");
+    return;
+  }
+  // Sans destinataire, rien ne part (AGENTS.md §11) : broadcastAlertCreated sans repli de rôles.
+  for (const alert of rows) (deps.broadcastAlert ?? broadcastAlertCreated)(alert);
 }
 
 const positiveInteger = (value: unknown): number | null =>
@@ -53,6 +94,10 @@ export async function relayDatabaseEvent(parsed: DatabaseRealtimeMessage, deps: 
       : {};
   const entityId = parsed.entityId ?? positiveInteger(payload.workOrderId) ?? positiveInteger(payload.vehicleId) ?? null;
   const emittedAt = typeof parsed.emittedAt === "string" ? parsed.emittedAt : new Date().toISOString();
+  if (eventType === "alert_created") {
+    await relayCreatedAlerts(payload, deps);
+    return;
+  }
   // Fermé par défaut : seuls les événements connus des triggers ont une portée.
   if (!eventType.startsWith("work_order") && eventType !== "vehicle_status_changed") {
     log.warn({ eventType }, "événement de base inconnu : non relayé");

@@ -114,3 +114,19 @@ Entrées ajoutées à la fin, une par lot.
 - **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
 - **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
 - **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.
+## 2026-11-04T13:58:26+01:00 — suivi #287 : reprises sans effets secondaires, 57014, temps réel
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Restauration de sauvegarde sortie de `routes.ts` vers un routeur `server/api/` et un service, en une transaction avec `suppressSideEffects`.
+  - Même garde dans `scripts/import-7-fuel-records.ts` et le seed.
+  - Trigger : `query_canceled` rattrapé, notification `alert_created` relayée par `db-event-relay`.
+- **Comment** :
+  - Helper `server/lib/suppress-side-effects.ts`, sur le modèle de `preventive-due.ts`.
+  - Le relais relit les alertes par id et diffuse par `broadcastAlertCreated`, sans repli de rôles.
+- **Pourquoi** : réserves 1, 2 et 5 de la relecture de #287.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/fuel-alerts-triggers.test.ts tests/integration/fuel-alerts-realtime.test.ts` ;
+  - `npx vitest run tests/unit/server/backup-import-service.test.ts tests/unit/server/db-event-relay-alerts.test.ts`.
+- **Reste / risques** :
+  - La ligne de dette AGENTS §9 ajoutée par #297 devient caduque : à retirer après la fusion de #297.
+  - Le budget de 500 000 F CFA reste une constante.
