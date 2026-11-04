@@ -2879,3 +2879,9 @@ Un secret ne se dérive jamais d'un autre secret, même pour remplir une colonne
 - **Résolution** : PIN validé (4 chiffres) puis haché dans les deux routes de création (`server/lib/user-pin.ts`), 400 lisible au lieu de 500 ; `err.detail` et `err.where` masqués dans `server/lib/logger.ts`.
 - **Prévention vérifiable** : `tests/contract/user-create-pin-hashed.contract.test.ts` (clair jamais écrit, 400 sur PIN invalide) ; `tests/unit/server/logger-redact.test.ts` (aucune valeur d'une ligne refusée ne sort dans le journal).
 - **Leçon généralisée** : avant de poser une contrainte sur une colonne secrète, lister et tester chaque chemin d'écriture (routes, import de sauvegarde, scripts) ; un message d'erreur de base de données contient la donnée refusée, donc le redact doit couvrir `detail` et `where`.
+
+### Complément (2026-11-04) — le masquage pino ne couvre pas `console.*`
+Les `console.error("Error creating user:", error)` de `storage.createUser` et des routes de comptes affichaient l'erreur SQL brute, `detail` compris, hors de portée du `redact` pino. Migrés vers `moduleLogger` avec `{ err, requestId }` ; `tests/unit/server/accounts-no-console.test.ts` interdit tout `console.*` dans ces handlers et méthodes de stockage (liste gelée vide). Un log ne se supprime pas : il se migre.
+
+### Complément (2026-11-04) — l'import valide le PIN comme les routes
+L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `restoreBackup` passe par `pinForRestore` (`server/lib/user-pin.ts`) : vide → NULL, nombre → haché, non conforme (hors 4 chiffres et hors `$2a/b/y`) → NULL + `warn` avec le seul nom d'utilisateur, hash repris tel quel. Hachage fait avant `db.transaction` (pas de N bcrypt sous verrous après les DELETE), un PIN exotique n'annule plus toute la restauration. Prévention : `tests/unit/server/user-pin.test.ts` et `backup-import-service.test.ts`.

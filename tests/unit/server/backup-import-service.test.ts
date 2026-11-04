@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * sauvegardées échouent en 23505 et la base reste à moitié restaurée).
  */
 const calls: string[] = [];
+let inserted: Record<string, any> = {};
 let failOn: string | null = null;
 
 function sqlText(query: any): string {
@@ -26,8 +27,9 @@ const tx = {
   },
   select: () => ({ from: async () => [{ username: "admin" }] }),
   insert: (table: unknown) => ({
-    values: async () => {
+    values: async (v: unknown) => {
       const name = tableName(table);
+      inserted[name] = v;
       calls.push(`insert ${name}`);
       if (failOn === name) throw Object.assign(new Error("duplicate key"), { code: "23505" });
     },
@@ -55,6 +57,7 @@ import { restoreBackup } from "../../../server/services/backup-import-service";
 beforeEach(() => {
   calls.length = 0;
   failOn = null;
+  inserted = {};
 });
 
 const backup = {
@@ -79,5 +82,24 @@ describe("restoreBackup", () => {
     await expect(restoreBackup(backup)).rejects.toThrow("duplicate key");
     expect(calls.at(-1)).toBe("ROLLBACK");
     expect(calls).not.toContain("COMMIT");
+  });
+
+  it("valide le PIN comme les routes : vide, numerique, non conforme, hash conserve", async () => {
+    const hash = "$2b$10$abcdefghijklmnopqrstuuabcdefghijklmnopqrstuvwxyz01234";
+    const res = await restoreBackup({
+      users: [
+        { username: "u1", pin: "" },
+        { username: "u2", pin: 1234 },
+        { username: "u3", pin: "12345" },
+        { username: "u4", pin: hash },
+      ],
+    } as any);
+    const [u1, u2, u3, u4] = inserted.users;
+    expect(u1.pin).toBeNull();
+    expect(u2.pin).toMatch(/^\$2[aby]\$/);
+    expect(u3.pin).toBeNull();
+    expect(u4.pin).toBe(hash);
+    expect(res.users).toBe(4);
+    expect(calls.at(-1)).toBe("COMMIT");
   });
 });

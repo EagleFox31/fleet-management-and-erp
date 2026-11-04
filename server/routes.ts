@@ -340,7 +340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.error("Registration error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Registration error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -705,7 +705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Delete user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
