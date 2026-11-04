@@ -6,19 +6,13 @@
 
 /** T1 : routes d'écriture sans garde de rôle ni de permission (ni au montage). Elles ne sont ouvertes qu'à un compte connecté, ou le contrôle est fait dans le handler. */
 export const T1_WITHOUT_ROLE_GUARD: readonly string[] = [
-  "delete /api/workflows/documents/:documentId",
   "delete /api<relative(alertPath(\":id\"))>",
   "patch /api${relative(alertPath(\":id\"))}/read",
   "patch /api/notifications/settings",
   "patch /api/onboarding/complete",
   "patch /api/onboarding/mascot",
   "patch /api/onboarding/step",
-  "patch /api/workflows/active/:sessionId/abandon",
-  "patch /api/workflows/vehicle-acquisition/:sessionId",
-  "patch /api/workflows/vehicle-acquisition/:sessionId/abandon",
-  "patch /api/workflows/vehicle-acquisition/:sessionId/complete",
   "post /api/users/change-password",
-  "post /api/workflows/vehicle-acquisition",
   "post /api<relative(ALERT_READ_ALL_PATH)>",
 ];
 
@@ -40,7 +34,6 @@ export const T3_WITHOUT_BODY_VALIDATION: readonly string[] = [
   "post /api/work-orders/:workOrderId/items",
   "post /api/work-orders/:workOrderId/part-requirements/:requirementId/issue",
   "post /api/work-orders/:workOrderId/parts",
-  "post /api/workflows/:sessionId/documents",
   "put /api/missions/:id/status",
   "put /api/vehicles/:id/maintenance-position",
   "put /api/vehicles/:id/mileage",

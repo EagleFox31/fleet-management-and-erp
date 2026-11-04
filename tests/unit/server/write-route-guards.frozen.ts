@@ -44,7 +44,5 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "work-order-items.routes.ts PATCH /:id (laborCatalogWriteRoutes)",
   "work-order-items.routes.ts PATCH /:id (workOrderItemDetailRoutes)",
   "work-order-items.routes.ts POST / (laborCatalogWriteRoutes)",
-  "workflows.routes.ts PATCH /workflows/vehicle-acquisition/:sessionId",
-  "workflows.routes.ts POST /workflows/vehicle-acquisition",
   "workshop-labor-rates.routes.ts POST /",
 ];

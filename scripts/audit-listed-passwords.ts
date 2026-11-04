@@ -5,6 +5,7 @@
 import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { guardDatabaseConnection } from "../server/lib/production-db-guard";
 
 /** Tous les mots de passe affichés sur la landing + doc */
 const LISTED_PASSWORDS: Array<{ password: string; source: string }> = [
@@ -28,6 +29,8 @@ function verify(hash: string, plain: string): boolean {
   return false;
 }
 
+// Hors production, refuse la base marquée production (ALLOW_PRODUCTION_DATABASE=1 pour une intervention voulue).
+guardDatabaseConnection("audit-listed-passwords");
 const sql = neon(process.env.DATABASE_URL!);
 const allUsers = await sql`SELECT username, role, password FROM users WHERE deleted_at IS NULL ORDER BY username`;
 

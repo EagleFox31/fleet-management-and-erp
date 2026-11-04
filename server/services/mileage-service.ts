@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { vehicles, fuelRecords, type Vehicle } from "@shared/schema";
-import { eq, desc, max } from "drizzle-orm";
+import { and, eq, desc, max, isNull } from "drizzle-orm";
 
 interface MileageHistoryEntry {
   mileage: number;
@@ -131,7 +131,7 @@ export class MileageService {
         id: fuelRecords.id
       })
       .from(fuelRecords)
-      .where(eq(fuelRecords.vehicleId, vehicleId))
+      .where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)))
       .orderBy(desc(fuelRecords.date));
 
     // Historique fiable basé sur les enregistrements carburant
@@ -171,7 +171,7 @@ export class MileageService {
     const [maxFuelMileage] = await db
       .select({ maxMileage: max(fuelRecords.mileage) })
       .from(fuelRecords)
-      .where(eq(fuelRecords.vehicleId, vehicleId));
+      .where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)));
 
     const highestMileage = maxFuelMileage?.maxMileage || 0;
 

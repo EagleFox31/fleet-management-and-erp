@@ -160,7 +160,7 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   // Argent
   fuel_card_recharged: ["fuel"],
   fuel_card_consumption_recorded: ["fuel"],
-  fuel_record_changed: ["fuel"],
+  fuel_record_changed: ["fuel", "missions"],
   fuel_record_validated: ["fuel"],
   client_invoice_created: ["clientMoney"],
   client_invoice_payment_recorded: ["clientMoney"],

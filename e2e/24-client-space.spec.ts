@@ -116,6 +116,41 @@ test.describe("Profil client : cloison et lecture seule", () => {
     await expect(page.getByText(own.registrationNumber).first()).toBeVisible();
   });
 
+  test("fiche véhicule : une panne serveur ou réseau ne dit pas « n'existe pas », Réessayer recharge (#261)", async ({ page }) => {
+    await loginWithSession(page, clientA);
+    const own = vehiclesA[0];
+    let mode: "5xx" | "network" | "pass" = "5xx";
+    await page.route(new RegExp(`/api/vehicles/${own.id}$`), async (route) => {
+      if (mode === "5xx") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          headers: { "x-request-id": "e2e-261" },
+          body: JSON.stringify({ message: "Erreur interne", code: "INTERNAL", requestId: "e2e-261" }),
+        });
+      } else if (mode === "network") {
+        await route.abort("connectionrefused");
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto(`/vehicles/${own.id}`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Chargement impossible" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Référence : e2e-261/)).toBeVisible();
+    await expect(page.getByText(/n'existe pas ou a été supprimé/)).toHaveCount(0);
+
+    mode = "network";
+    await page.getByRole("button", { name: "Réessayer" }).click();
+    await expect(page.getByText(/Connexion au serveur impossible/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/n'existe pas ou a été supprimé/)).toHaveCount(0);
+
+    mode = "pass";
+    await page.getByRole("button", { name: "Réessayer" }).click();
+    await expect(page.getByText(own.registrationNumber).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Chargement impossible" })).toHaveCount(0);
+  });
+
   test("aucune saisie d'exploitation, même sur son véhicule", async ({ page }) => {
     await loginWithSession(page, clientA);
     const own = vehiclesA[0];

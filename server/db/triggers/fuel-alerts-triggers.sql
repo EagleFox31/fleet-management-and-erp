@@ -14,6 +14,7 @@ BEGIN
     SELECT mileage, quantity INTO previous_record
     FROM fuel_records 
     WHERE vehicle_id = NEW.vehicle_id 
+    AND deleted_at IS NULL
     AND date < NEW.date 
     ORDER BY date DESC 
     LIMIT 1;
@@ -28,6 +29,7 @@ BEGIN
         ) INTO avg_consumption
         FROM fuel_records fr
         WHERE fr.vehicle_id = NEW.vehicle_id
+        AND fr.deleted_at IS NULL
         AND fr.date >= CURRENT_DATE - INTERVAL '90 days'
         AND fr.date < NEW.date;
         
@@ -66,6 +68,7 @@ BEGIN
     SELECT COALESCE(SUM(cost), 0) INTO current_month_total
     FROM fuel_records
     WHERE vehicle_id = NEW.vehicle_id
+    AND deleted_at IS NULL
     AND date >= date_trunc('month', CURRENT_DATE)
     AND date <= CURRENT_DATE;
     
