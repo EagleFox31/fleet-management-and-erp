@@ -25,6 +25,12 @@ function isApiRequest(url) {
   return /^\/api(\/|$)/.test(url.pathname.replace(/\/{2,}/g, '/').toLowerCase());
 }
 
+// Seules la navigation et la coque statique (STATIC_ASSETS) sont revalidées en
+// arrière-plan : une poignée de requêtes, quel que soit le nombre de modules chargés.
+function shouldRevalidate(request, url) {
+  return request.mode === 'navigate' || STATIC_ASSETS.includes(url.pathname);
+}
+
 // 1. Installation du Service Worker et mise en cache des assets statiques
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -80,12 +86,18 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // En arrière-plan, rafraîchir le cache
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-          }
-        }).catch(() => {});
+        // En arrière-plan, rafraîchir le cache, mais seulement la coque (navigation,
+        // manifeste, icônes). Un module ou un bundle ne se revalide pas : ses
+        // requêtes (des centaines avec le serveur de développement Vite) occuperaient
+        // les 6 connexions du navigateur vers l'hôte, et les appels /api/* de la page
+        // restaient en file d'attente derrière (/api/auth/me > 10 s, écran vide).
+        if (shouldRevalidate(event.request, url)) {
+          fetch(event.request).then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+            }
+          }).catch(() => {});
+        }
         return cachedResponse;
       }
 

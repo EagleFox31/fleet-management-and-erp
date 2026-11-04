@@ -136,34 +136,45 @@ export async function apiRequest(
   return res;
 }
 
+/**
+ * URL d'une clé de query pour la queryFn par défaut (#285).
+ *
+ * `[url, ...segments, params?]` : les chaînes et les nombres qui suivent l'URL deviennent des
+ * segments de chemin (encodés), et le premier objet devient la chaîne de requête. Ce qui le suit
+ * est ignoré. `null`, `undefined`, booléens et chaînes vides sont sautés, comme avant.
+ * Avant #285, seul `queryKey[1]` était lu, comme objet : `['/api/vehicles', 5]` appelait la liste.
+ */
+export function buildQueryUrl(queryKey: readonly unknown[]): string {
+  let path = String(queryKey[0]);
+  let params: Record<string, unknown> | undefined;
+  for (const segment of queryKey.slice(1)) {
+    if (typeof segment === "string" || typeof segment === "number") {
+      if (segment !== "") path += `/${encodeURIComponent(String(segment))}`;
+      continue;
+    }
+    if (segment !== null && typeof segment === "object") {
+      params = segment as Record<string, unknown>;
+      break;
+    }
+  }
+  if (!params) return path;
+
+  // Ajoute uniquement les paramètres qui ne sont pas undefined
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) searchParams.append(key, String(value));
+  });
+  const searchString = searchParams.toString();
+  return searchString ? `${path}?${searchString}` : path;
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Récupère l'URL de base et les paramètres
-    const baseUrl = queryKey[0] as string;
-    const params = queryKey[1] as Record<string, any> | undefined;
-
-    // Construit l'URL avec les paramètres
-    let url = baseUrl;
-    if (params) {
-      const searchParams = new URLSearchParams();
-
-      // Ajoute uniquement les paramètres qui ne sont pas undefined
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, String(value));
-        }
-      });
-
-      // Ajoute les paramètres à l'URL si au moins un paramètre existe
-      const searchString = searchParams.toString();
-      if (searchString) {
-        url = `${baseUrl}?${searchString}`;
-      }
-    }
+    const url = buildQueryUrl(queryKey);
 
     const resolvedUrl = resolveApiUrl(url);
 
