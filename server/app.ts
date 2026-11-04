@@ -8,6 +8,7 @@ import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
 import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
+import { trustProxyFromEnv } from "./lib/trust-proxy";
 import { accessLog, apiNotFound, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
 
 export type CreateAppOptions = {
@@ -53,7 +54,8 @@ export async function createApp(
     next();
   });
 
-  app.set("trust proxy", 1);
+  // Sauts de proxy de confiance par profil de déploiement (TRUST_PROXY, défaut 1) : voir server/lib/trust-proxy.ts.
+  app.set("trust proxy", trustProxyFromEnv(process.env.TRUST_PROXY));
 
   // Configuration CORS dynamique & sécurisée compatible cookies de session (Credentials: true)
   app.use((req, res, next) => {
