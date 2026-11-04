@@ -146,7 +146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   
   // Authentication Routes
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", async (req, res, next) => {
     try {
       const { username, password, rememberMe } = req.body;
       
@@ -249,8 +249,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: currentLoginAt
       });
     } catch (error) {
-      console.error("Login error:", error);
-      return res.status(401).json({ message: "Erreur d'authentification, veuillez réessayer plus tard" });
+      // Panne (base, session) : 5xx normalisée avec sa référence, jamais 401. Un 401 se lirait
+      // « identifiants invalides » et le garde de verrouillage le compterait comme un échec (#254).
+      return next(
+        withLogContext(new AppError(503, "Connexion momentanément impossible, réessayez dans un instant.", { cause: error }), {
+          event: "Login error",
+        }),
+      );
     }
   });
 
