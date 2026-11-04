@@ -17,7 +17,7 @@ import { AppError } from "../lib/app-error";
  * - Une 5xx reste comptee ici, a l'inverse de la garde par compte qui la rend (une panne n'y est pas un
  *   echec de connexion) : ce plafond est le filet anti-abus, une rafale qui provoque des pannes ne doit
  *   pas en sortir. Tests : `auth-ip-limit.test.ts` (« une 5xx reste comptee » et « 400 et 5xx rendues »).
- * - Adresse : `req.ip` sous `trust proxy 1` (server/app.ts). Seul le saut ajoute par le proxy compte ;
+ * - Adresse : `req.ip` sous `trust proxy` (TRUST_PROXY, server/lib/trust-proxy.ts ; 1 saut par défaut). Seul le saut ajoute par le proxy compte ;
  *   les entrees X-Forwarded-For forgees en amont sont ignorees.
  * - IPv6 : un compteur par /64 (un abonne dispose d'un /64 entier, une adresse par essai contournerait
  *   le plafond et evincerait les compteurs des autres). IPv4 mappee (`::ffff:a.b.c.d`) = l'IPv4.

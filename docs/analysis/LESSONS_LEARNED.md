@@ -2831,6 +2831,27 @@ Correctif additif côté service : les champs lus par la page sont ajoutés (`id
 ### Leçon généralisée
 Un écran qui type à la main la réponse d'une route est un contrat implicite. Le test de contrat de la route doit affirmer les champs que l'écran lit, pas seulement le statut HTTP ou la présence de l'id. Une spec e2e ignorée faute de données ne protège rien : la donnée se crée dans la spec.
 
+## 2026-11-04 — `trust proxy` fixé en dur : la limite par IP dépendait de la topologie
+
+- **Contexte** : la limite d'essais de connexion par adresse IP lit `req.ip`, donc `X-Forwarded-For` jusqu'au
+  nombre de sauts de confiance. Ce nombre était fixé à 1 dans `server/app.ts`.
+- **Cause racine** : le réglage décrivait le seul déploiement derrière Caddy. Le profil `site` du compose
+  publie l'application directement sur le réseau local : un client y choisit lui-même l'adresse comptée en
+  forgeant l'en-tête, et le plafond par IP ne joue plus. Détecté par l'audit de sécurité du lot, avant tout
+  usage de la limite sur ce profil.
+- **Classification** : sécurité, configuration dépendante de l'environnement (hypothèse de topologie en dur).
+  Near miss : aucune exploitation, la garde par compte restait active.
+- **Résolution** : `TRUST_PROXY` lu par `trustProxyFromEnv` (défaut 1, `0` = aucun proxy de confiance) ;
+  `app-site` fixe `TRUST_PROXY: "0"`.
+- **Prévention (vérifiable)** :
+  - `tests/contract/trust-proxy.contract.test.ts` : à `TRUST_PROXY=0`, un `X-Forwarded-For` changé à chaque essai
+    ne contourne pas le plafond (rouge sans le correctif) ;
+  - `tests/unit/server/trust-proxy.test.ts` : le profil `site` du compose fixe `TRUST_PROXY: "0"`, `vps` et
+    `recette` ne le désactivent pas.
+- **Leçon généralisée** : une valeur qui dépend de la topologie (sauts de proxy, hôtes de confiance, ports
+  publiés) se déclare par profil de déploiement, avec un défaut sûr et un test qui lit la configuration de
+  chaque profil. Elle ne se fixe pas en dur pour le cas de production.
+
 ## 2026-11-04 — Compte chauffeur : le mot de passe était dérivé du PIN
 
 ### Contexte
