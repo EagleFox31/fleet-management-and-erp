@@ -20,6 +20,13 @@ describe("vehicleUnavailable", () => {
     expect(state.retryable).toBe(false);
   });
 
+  it("401 : session expirée, jamais « n'existe pas » ni « accès refusé »", () => {
+    const state = vehicleUnavailable(apiError(401, '{"message":"Non authentifié"}'));
+    expect(state.kind).toBe("failed");
+    expect(state.title).toBe("Chargement impossible");
+    expect(state.message).not.toMatch(/n'existe pas/);
+  });
+
   it("sans erreur (réponse vide) : véhicule non trouvé", () => {
     expect(vehicleUnavailable(undefined).kind).toBe("notFound");
   });
