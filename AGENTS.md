@@ -284,6 +284,8 @@ npm run test:e2e           # Playwright (voir e2e/README.md)
 
 Arborescence et règles : `tests/README.md`. Ne pas colocaliser de `*.test.ts` dans `client/`, `server/` ou `shared/`.
 
+Relecture : tout changement de signature d'un service impose la suite d'intégration complète, rejouée par le relecteur (pas seulement les tests du domaine touché).
+
 ### Base de test : Postgres local par défaut
 
 Les suites **intégration** et **contrat** tournent sur le Postgres local Docker,
