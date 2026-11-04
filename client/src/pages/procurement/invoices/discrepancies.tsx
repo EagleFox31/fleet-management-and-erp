@@ -5,30 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPrice } from "@/lib/utils";
-
-interface DiscrepancyInvoice {
-  id: number;
-  invoiceNumber: string;
-  supplierId: number | null;
-  supplierName: string;
-  invoiceDate: string;
-  totalAmountTTC: string;
-  variancePercentage: string;
-  varianceAmount: string;
-  status: string;
-  purchaseOrderNumber?: string;
-}
-
-interface DiscrepancyResult {
-  discrepancies: DiscrepancyInvoice[];
-  totalDiscrepancyAmount: number;
-  averageVariance: number;
-}
+import { SUPPLIER_INVOICE_DISCREPANCIES_PATH, type DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
 
 export default function InvoiceDiscrepanciesPage() {
   // Charger les factures avec écarts
   const { data, isLoading } = useQuery<DiscrepancyResult>({
-    queryKey: ["/api/supplier-invoices/discrepancies"],
+    queryKey: [SUPPLIER_INVOICE_DISCREPANCIES_PATH],
   });
 
   const formatCurrency = (amount: string | number) => {
