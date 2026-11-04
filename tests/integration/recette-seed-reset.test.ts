@@ -28,9 +28,11 @@ async function counts(): Promise<Record<string, number>> {
   return out;
 }
 
+// alerts : 3 stocks bas + « Budget carburant dépassé » pour l'admin et le logisticien de recette
+// (le « plein anormal » à 675 000 F CFA dépasse le budget mensuel, triggers fuel-alerts).
 const EXPECTED = {
   users: 11, vehicles: 12, parts: 5, tires: 3, suppliers: 2, clients: 2, work_orders: 6,
-  part_requirements: 6, fuel_records: 3, invoices: 2, documents: 9, time_tracking: 21, alerts: 3,
+  part_requirements: 6, fuel_records: 3, invoices: 2, documents: 9, time_tracking: 21, alerts: 5,
 };
 
 describe("seed et reset de recette", { timeout: 180_000 }, () => {

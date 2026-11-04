@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { workflowDocuments, vehicleAcquisitionWorkflows, vehicleDocuments } from "../../shared/schema";
 import { eq, and, inArray, lt, type SQL } from "drizzle-orm";
+import { randomBytes } from "crypto";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
@@ -100,9 +101,10 @@ export class WorkflowDocumentService {
    * garder que les documents des workflows créés par ce propriétaire. Le filtre
    * porte sur le workflow, pas sur `sessionId`, qui n'est pas unique.
    */
-  static async getWorkflowDocuments(sessionId: string, ownerId: number | null = null): Promise<any[]> {
+  static async getWorkflowDocuments(sessionId: string, ownerId: number | null = null, workflowId?: number): Promise<any[]> {
     try {
       const conditions: SQL[] = [eq(workflowDocuments.sessionId, sessionId)];
+      if (workflowId !== undefined) conditions.push(eq(workflowDocuments.workflowId, workflowId));
       if (ownerId !== null) {
         conditions.push(
           inArray(
@@ -128,13 +130,16 @@ export class WorkflowDocumentService {
   }
   
   /**
-   * Transfère les documents d'un workflow vers un véhicule créé
+   * Transfère les documents d'un workflow vers un véhicule créé. `sessionId` n'est pas unique
+   * entre utilisateurs : le filtre porte aussi sur `workflowId`, sinon le transfert de B
+   * emporterait les documents de A.
    */
-  static async transferDocumentsToVehicle(sessionId: string, vehicleId: number): Promise<void> {
+  static async transferDocumentsToVehicle(sessionId: string, vehicleId: number, workflowId: number): Promise<void> {
     try {
       // Récupérer les documents du workflow
-      const documents = await this.getWorkflowDocuments(sessionId);
-      
+      // Seuls les documents pas encore transférés : un rejeu ne duplique rien dans vehicle_documents.
+      const documents = (await this.getWorkflowDocuments(sessionId, null, workflowId)).filter((doc) => !doc.isTransferred);
+
       // Copier les fichiers vers le dossier du véhicule
       const vehicleUploadDir = path.join(process.cwd(), 'uploads', 'documents', `vehicle-${vehicleId}`);
       if (!fs.existsSync(vehicleUploadDir)) {
@@ -145,7 +150,8 @@ export class WorkflowDocumentService {
       for (const doc of documents) {
         const originalPath = existingUploadedFile(doc.filePath);
         // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
-        const newFileName = `${doc.documentType}_${path.basename(doc.originalName)}`;
+        // Aléa dans le nom : deux pièces de même type et de même nom ne s'écrasent pas sur le disque.
+        const newFileName = `${doc.documentType}_${randomBytes(6).toString("hex")}_${path.basename(doc.originalName)}`;
         const newPath = path.join(vehicleUploadDir, newFileName);
 
         // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
@@ -158,32 +164,33 @@ export class WorkflowDocumentService {
           continue;
         }
 
-        fs.copyFileSync(originalPath, newPath);
+        // COPYFILE_EXCL : une collision de nom échoue au lieu d'écraser le contenu d'un autre document.
+        fs.copyFileSync(originalPath, newPath, fs.constants.COPYFILE_EXCL);
 
         // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
-        await db.insert(vehicleDocuments).values({
-          vehicleId,
-          name: doc.originalName,
-          type: toVehicleDocumentType(doc.documentType),
-          description: "Document transféré depuis le workflow d'acquisition",
-          filename: newFileName,
-          filesize: doc.fileSize,
-          fileType: doc.mimeType,
-          filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
-          uploadedBy: doc.uploadedBy,
+        // Ligne véhicule et marque « transféré » dans la même transaction : l'une sans l'autre
+        // dupliquerait le document au rejeu. Le garde isTransferred = false écarte un rejeu concurrent.
+        const inserted = await db.transaction(async (tx) => {
+          const [claimed] = await tx
+            .update(workflowDocuments)
+            .set({ vehicleId, isTransferred: true })
+            .where(and(eq(workflowDocuments.id, doc.id), eq(workflowDocuments.workflowId, workflowId), eq(workflowDocuments.isTransferred, false)))
+            .returning({ id: workflowDocuments.id });
+          if (!claimed) return false;
+          await tx.insert(vehicleDocuments).values({
+            vehicleId,
+            name: doc.originalName,
+            type: toVehicleDocumentType(doc.documentType),
+            description: "Document transféré depuis le workflow d'acquisition",
+            filename: newFileName,
+            filesize: doc.fileSize,
+            fileType: doc.mimeType,
+            filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
+            uploadedBy: doc.uploadedBy,
+          });
+          return true;
         });
-        transferredIds.push(doc.id);
-      }
-      
-      // Marquer comme transférés les seuls documents copiés
-      if (transferredIds.length > 0) {
-        await db
-          .update(workflowDocuments)
-          .set({ 
-            vehicleId: vehicleId,
-            isTransferred: true 
-          })
-          .where(and(eq(workflowDocuments.sessionId, sessionId), inArray(workflowDocuments.id, transferredIds)));
+        if (inserted) transferredIds.push(doc.id);
       }
       
       log.info({ sessionId, vehicleId, transferred: transferredIds.length, skipped: documents.length - transferredIds.length }, "documents workflow transférés au véhicule");
@@ -277,13 +284,22 @@ export class WorkflowDocumentService {
         );
       
       for (const workflow of abandonedWorkflows) {
-        const documents = await this.getWorkflowDocuments(workflow.sessionId);
+        const documents = await this.getWorkflowDocuments(workflow.sessionId, null, workflow.id);
         
         // Supprimer les documents
         for (const doc of documents) {
           await this.deleteWorkflowDocument(doc.id);
         }
         
+        // Le dossier est celui du sessionId, partagé par les workflows homonymes d'autres comptes :
+        // il ne part que lorsqu'il ne reste plus aucun document sous ce sessionId.
+        const [stillUsed] = await db
+          .select({ id: workflowDocuments.id })
+          .from(workflowDocuments)
+          .where(eq(workflowDocuments.sessionId, workflow.sessionId))
+          .limit(1);
+        if (stillUsed) continue;
+
         // Supprimer le dossier du workflow (suppression récursive : jamais hors de uploads/workflows)
         if (!isSafePathSegment(workflow.sessionId)) continue;
         const workflowDir = path.join(process.cwd(), 'uploads', 'workflows', workflow.sessionId);

@@ -7,6 +7,7 @@ import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { randomPasswordHash } from "../lib/dummy-hash";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
 import { driverLiveAssignmentFilter, driverScopeOf, OUT_OF_DRIVER_PROFILE_MESSAGE, redactDriverPersonalData, stripDriverPersonalData } from "../lib/driver-scope";
@@ -450,7 +451,8 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
     const newUser = await db.transaction(async (tx) => {
       const [created] = await tx.insert(users).values({
         username,
-        password: hashedPin,
+        // Mot de passe aléatoire, jamais communiqué : le chauffeur se connecte par PIN seulement.
+        password: await randomPasswordHash(),
         pin: hashedPin,
         email,
         name: `${driver.firstName} ${driver.lastName}`,

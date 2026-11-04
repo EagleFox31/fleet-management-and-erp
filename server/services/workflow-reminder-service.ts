@@ -3,6 +3,7 @@ import { vehicleAcquisitionWorkflows } from '@shared/schema';
 import { eq, and, ne, desc, count, gte } from 'drizzle-orm';
 import { moduleLogger } from '../lib/logger';
 import { userOwnsWorkflowSession } from './workflow-service';
+import { AppError } from '../lib/app-error';
 
 const log = moduleLogger('workflow-reminder');
 
@@ -154,8 +155,9 @@ class WorkflowReminderService {
       // Faux si la session n'est pas celle de cet utilisateur : la route répond 404.
       return await userOwnsWorkflowSession(userId, sessionId);
     } catch (error) {
+      // Une panne n'est pas une absence : 500, le 404 reste réservé à la session inconnue.
       log.error({ err: error }, "abandon du workflow en échec");
-      return false;
+      throw new AppError(500, "Impossible d'abandonner le brouillon pour le moment.", { cause: error });
     }
   }
 
