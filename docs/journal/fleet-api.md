@@ -165,6 +165,25 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : retours de fleet-securite et du relecteur sur #184 ; les 6 chemins retirés sont servis plus tôt par le routeur monté avant `registerRoutes`.
 - **Reste** : transaction et plancher `Math.max` du mouvement de stock au lot suivant.
 
+## 2026-11-03 — Prix d'achat du véhicule réservé à admin, logistique et secrétariat
+- **Agent** : fleet-api · **Branche** : `fix/vehicle-purchase-price-scope`
+- **Quoi** : `vehicles.purchasePrice` n'est plus servi qu'à admin, logistics, secretary (`VEHICLE_PURCHASE_PRICE_READ_ROLES`) ; tout autre rôle le reçoit à `null` (clé conservée) en réponse comme en trame WebSocket. Colonne « Prix d'achat » retirée de l'export XLSX pour les autres rôles ; champ du formulaire véhicule masqué.
+- **Comment** : `shared/constants/roles.ts` (constante + `canReadVehiclePurchasePrice`), `server/lib/vehicle-price-scope.ts` (`redactVehiclePrice`, `redactVehiclePriceDeep`, remplace le masquage chauffeur de `operations-service`), application explicite sur `vehicles.routes.ts` (liste, all, expiring/expired, stats, all-with-status, PUT kilométrage et position, trame temps réel scindée par rôle), `operations.routes.ts` (4 lectures de missions), `routes.ts` en place (GET/POST/PATCH véhicule, activate-from-workflow, export en `isAnyUser`), `vehicle-form.tsx`. Contrat `vehicle-purchase-price-scope` (50 cas), unitaire du helper, entrée retirée de `vehicle-routes-guard` (export désormais gardé).
+- **Pourquoi** : décision métier du 3 novembre 2026. Pas de middleware global sur `res.json` : `authenticate` ne charge pas `req.user` et les fiches pneu portent aussi un `purchasePrice`.
+- **Reste / risques** : KPI direction `acquisitionHT` (contrat partagé figé) non expurgé, décision à prendre ; toute nouvelle sortie qui joint `vehicles` doit passer par le helper.
+
+## 2026-11-03 — Prix d'achat du véhicule, passe de correction (relecture et sécurité)
+- **Quoi** : l'inventaire précédent n'était pas complet. Fuites fermées : `GET /api/vehicles/:vehicleId/tires` (véhicule joint), `GET /api/operations/missions/:id/costs` (`vehicleCost` = prix / 1000, désormais `null`, `totalCost` sans ce terme), `POST /api/vehicles/:id/mileage/sync`, `GET /api/vehicles/:id` (rôle normalisé). Écriture : `VEHICLE_PURCHASE_PRICE_WRITE_ROLES` = admin, logistics, secretary ; tout autre rôle qui envoie `purchasePrice` (PATCH, POST, activation) reçoit un 403 lisible. La direction reste en lecture seule et garde `acquisitionHT` (voulu).
+- **Comment** : `vehicle-price-scope.ts`, `vehicle-patch-guard.ts` (`vehiclePriceWriteRefusal`), `operations-service.ts`, `routes.ts` (en place), formulaire véhicule, test d'hygiène `vehicle-select-hygiene.test.ts` (liste gelée de 31 lectures justifiées), cas de contrat pneus, coûts, `acquisitionHT`, écriture.
+- **Pourquoi** : retours du relecteur et de fleet-securite sur la première livraison.
+- **Reste** : contrats et preuve RED sur 3fbf86e à rejouer ; fusion de origin/main et corps de la PR #214 à mettre à jour ; secretary n'atteint ni le PATCH ni le POST véhicule, donc « secretary 200 » non testable par route ; l'assistant d'acquisition (`vehicle-acquisition.tsx:411`) peut envoyer un prix depuis un rôle sans droit.
+
+
+## 2026-11-03 - PR 214 : PATCH véhicule ouvert à secretary et logistics sur le prix (partiel)
+
+- Quoi : le PATCH véhicule accepte secretary (purchasePrice seul) et logistics (tankCapacityL et purchasePrice) ; tout autre champ en 403. workshop_manager : purchasePrice non nul en 403, vide ou 0 retiré (PATCH, POST, activate-from-workflow). PATCH sans champ restant : 200 sans écriture.
+- Comment : `VEHICLE_RESTRICTED_PATCH_FIELDS` dans roles.ts, `withoutEmptyPurchasePrice` et `vehiclePatchRefusal` dans vehicle-patch-guard.ts, handlers existants de routes.ts uniquement.
+- Reste : côté client, l assistant d acquisition n envoie plus purchasePrice sans droit d écriture ; preuve rouge contre origin/main ; échec préexistant du contrat GET /api/vehicles/:id/tires (10 cas, déjà rouge sur ccc1156) à diagnostiquer ; fusion d origin/main ; corps de PR.
 ## 2026-11-03 — Lot B : cloison temps réel des événements d'ordre de travail
 - **Agent** : fleet-api · **Branche** : `fix/lotB-work-order-scope` · **Commit** : voir `git log`
 - **Statut** : fait
@@ -284,3 +303,18 @@ Règles : `docs/journal/README.md`.
   - 0 `error TS` ;
   - unitaires : 163 fichiers, 2034 tests ;
   - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
+
+## 2026-11-04 11:10 — R2 : gardes déclaratives du parcours d'acquisition
+- **Agent** : fleet-api · **Branche** : `fix/r2-vehicle-acquisition-guards`
+- **Statut** : fait, en relecture
+- **Quoi** : les 7 écritures gelées du parcours d'acquisition (POST et PATCH de la session, complete, abandon, abandon actif, téléversement et suppression de document) portent `isWorkflowDocumentWriter` (admin, secrétariat, logistique, chef d'atelier, client). Les corps passent par `validateBody` (schémas dans `shared/contracts/vehicle-acquisition.ts`, `purchasePrice` accepté dans `workflowData`). Les sept entrées quittent les listes gelées du cliquet, plus quatre de `KNOWN_AUTHENTICATE_ONLY`.
+- **Comment** : la cloison était déjà dans le service (`user_id` + `session_id`) ; `complete` et `abandon` répondaient 200 sur la session d'un autre. `completeWorkflow` et `abandonWorkflow` renvoient maintenant si la session est celle de l'utilisateur (quel que soit son statut : rejouer reste 200), la route répond 404 sinon. Les documents gardent le 403 du handler (`canAccessOwned`).
+- **Pourquoi** : une écriture sans garde de rôle laissait un technicien ou un magasinier créer des brouillons ; une clôture silencieuse sur la session d'un autre masquait l'accès hors périmètre.
+- **Écarts de droits** : technicien, magasinier, chauffeur, direction et comptable ne créent plus de session ni ne suppriment de document (403). Aucun écran ne leur ouvre ce parcours (route `/workflows/vehicle-acquisition` : admin et chef d'atelier).
+- **Preuves** : preuve rouge avant correctif, 10 cas sur 15 en échec (complete, abandon et abandon actif : 200 au lieu de 404 pour le client B ; 200 au lieu de 403 pour le technicien ; 400 sans `errors[]` sur le téléversement) ; ensuite 15/15. 0 `error TS` ; unitaires 2107 verts, seul `backup-db.test.ts` instable (non corrigé) ; contrats 145 fichiers, 1742 tests verts.
+
+## 2026-11-04 — Prix d'achat du véhicule, clôture du « Reste » (#214)
+- **Quoi** : le « Reste » de l'entrée du 3 novembre est soldé. L'assistant d'acquisition n'envoie plus `purchasePrice` pour un rôle sans droit d'écriture (8bbfc6a). Le contrat pneus était rouge parce qu'il lisait `r.id`, `row.tire` et `row.vehicle`. La route renvoie des lignes de jointure `{ vehicle_tires, tires, vehicles }`, forme que lit déjà `pages/vehicles/[id].tsx` : le test a été corrigé, l'API n'a pas changé (192d934). La branche est fusionnée avec `origin/main`.
+- **Preuve rouge** : le contrat `vehicle-purchase-price-scope` a été rejoué sur le code de `origin/main` (9461373). Seule différence : la constante `VEHICLE_PURCHASE_PRICE_READ_ROLES`, absente de main, est remplacée par sa valeur littérale. Résultat : 52 cas rouges sur 89. Ils échouent pour les rôles hors lecture : liste 7, détail 7, `/all` 7, pneus 7, coûts de mission 5, missions 5, export 2, trame kilométrage 1, écriture PATCH 11. Sur la branche, les 89 cas passent.
+- **Preuves** : 0 `error TS`, 2150 tests unitaires et 1810 contrats verts.
+- **Reste** : l'écart sur `acquisitionHT` (direction, `management-dashboard-service.ts:529` et `:713`) attend la décision de l'utilisatrice, que 0a lui pose. Rien n'est modifié en attendant.

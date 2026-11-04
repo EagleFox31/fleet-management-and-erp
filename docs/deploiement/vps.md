@@ -122,6 +122,7 @@ Tester une restauration au moins une fois. Activer aussi les sauvegardes automat
 
 ## Points d'attention
 
+- Garde base de production (`server/lib/production-db-guard.ts`) : hors `NODE_ENV=production`, tout importeur de `server/db.ts` (et tout script qui appelle `guardDatabaseConnection`) refuse une base dont l'hôte porte un marqueur de `E2E_PRODUCTION_DB_MARKERS`. `schema-prod` tourne sur la cible `build`, sans `NODE_ENV` dans l'image : il le fixe dans `deploy/docker-compose.yml` (garde : `tests/unit/deploy/compose-prod-node-env.test.ts`). Tout nouvel outil de production sur `x-tools` doit faire de même.
 - Instance unique par environnement : pas de mise à l'échelle horizontale (WebSocket et uploads locaux).
 - L'APK Android et la PWA pointent sur l'URL de prod : ne pas changer ce domaine sans republier l'APK.
 - Déploiement par SSH vers la recette : `.github/workflows/deploy-recette.yml` (actif seulement si les secrets `RECETTE_SSH_HOST`, `RECETTE_SSH_USER`, `RECETTE_SSH_KEY` existent). `RECETTE_SSH_KNOWN_HOSTS` est alors obligatoire (sortie de `ssh-keyscan <hôte>` vérifiée à la main) : le workflow échoue sans lui, il ne fait jamais confiance à la première clé vue.

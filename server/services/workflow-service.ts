@@ -2,6 +2,16 @@ import { db } from "../db";
 import { vehicleAcquisitionWorkflows, type VehicleAcquisitionWorkflow, type InsertVehicleAcquisitionWorkflow } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
+/** Vrai si la session existe au nom de cet utilisateur, quel que soit son statut (rejouer une clôture reste un succès). */
+export async function userOwnsWorkflowSession(userId: number, sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: vehicleAcquisitionWorkflows.id })
+    .from(vehicleAcquisitionWorkflows)
+    .where(and(eq(vehicleAcquisitionWorkflows.userId, userId), eq(vehicleAcquisitionWorkflows.sessionId, sessionId)))
+    .limit(1);
+  return Boolean(row);
+}
+
 export class WorkflowService {
   // Sauvegarder ou mettre à jour l'état du workflow
   async saveWorkflowState(data: InsertVehicleAcquisitionWorkflow): Promise<VehicleAcquisitionWorkflow> {
@@ -69,7 +79,8 @@ export class WorkflowService {
   }
 
   // Marquer un workflow comme terminé
-  async completeWorkflow(userId: number, sessionId: string): Promise<void> {
+  /** Renvoie faux si la session n'est pas celle de cet utilisateur (404 côté route). */
+  async completeWorkflow(userId: number, sessionId: string): Promise<boolean> {
     await db
       .update(vehicleAcquisitionWorkflows)
       .set({
@@ -84,6 +95,7 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
+    return userOwnsWorkflowSession(userId, sessionId);
   }
 
   // Mettre à jour seulement les données du workflow (pour sauvegarde progressive)
@@ -110,7 +122,8 @@ export class WorkflowService {
   }
 
   // Abandonner un workflow
-  async abandonWorkflow(userId: number, sessionId: string): Promise<void> {
+  /** Renvoie faux si la session n'est pas celle de cet utilisateur (404 côté route). */
+  async abandonWorkflow(userId: number, sessionId: string): Promise<boolean> {
     await db
       .update(vehicleAcquisitionWorkflows)
       .set({
@@ -124,6 +137,7 @@ export class WorkflowService {
           eq(vehicleAcquisitionWorkflows.status, 'in_progress')
         )
       );
+    return userOwnsWorkflowSession(userId, sessionId);
   }
 
   // Nettoyer les anciens workflows abandonnés (plus de 7 jours)
