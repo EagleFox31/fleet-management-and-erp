@@ -54,6 +54,7 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 > de la base Neon courante. Les comptes de `scripts/seed-production-data.ts`
 > (`workshop_manager`, `warehouse`, `technician`...) n'existent **pas** sur cet
 > environnement: les utiliser fait skipper les specs sans que rien ne le signale.
+- `VITE_ENABLE_SW=1`: le service worker PWA n'est enregistre qu'en production (en developpement il est retire et ses caches `fleetos-*` supprimes, sinon un module source modifie resterait invisible). La spec 13 le requiert et echoue si `navigator.serviceWorker.controller` est absent. `playwright.config.ts` positionne la variable pour le serveur qu'il lance ; avec `E2E_BASE_URL`, demarrer ce serveur avec `VITE_ENABLE_SW=1` (ou un build de production).
 - `RECETTE_PASSWORD` (ou `RECETTE_PASSWORD_<ROLE>`): mot de passe des comptes `recette_*` (`scripts/recette-seed.ts`), requis par les specs 24 (client) et 25 (direction), qui sautent sinon avec la raison. `E2E_CLIENT_A_USERNAME`, `E2E_CLIENT_B_USERNAME`, `E2E_DIRECTION_USERNAME` changent les comptes (defaut `recette_client_1`, `recette_client_2`, `recette_direction`)
 - `E2E_WORKERS`: nombre de workers Playwright (defaut `1` pour stabilite locale)
 - `CI`: si defini, active 2 retries par test
