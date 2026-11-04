@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * Toute réponse 500 locale ou tout `console.*` réintroduit ici est une régression.
  */
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
-const ROUTERS = ["clients", "document-renewals", "operations", "suppliers", "vehicles"];
+const ROUTERS = ["clients", "document-renewals", "operations", "supplier-invoices", "suppliers", "vehicles"];
 
 const sourceOf = (name: string) =>
   readFileSync(join(ROOT, "server", "api", `${name}.routes.ts`), "utf-8");
@@ -44,5 +44,23 @@ describe.each(ROUTERS)("server/api/%s.routes.ts relaie ses 500", (name) => {
       return guard && new RegExp(`${guard[1]} instanceof AppError \\?`).test(l) ? [`${i + 1}: ${l.trim()}`] : [];
     });
     expect(hits).toEqual([]);
+  });
+});
+
+describe("server/routes.ts POST /api/admin/import-backup", () => {
+  it("ne renvoie pas le listage du dossier backup/ dans sa 404", () => {
+    const source = readFileSync(join(ROOT, "server", "routes.ts"), "utf-8");
+    expect(source).not.toMatch(/availableFiles/);
+  });
+
+  it("relaie son erreur au gestionnaire central, sans message brut ni console.*", () => {
+    const source = readFileSync(join(ROOT, "server", "routes.ts"), "utf-8");
+    const start = source.indexOf('app.post("/api/admin/import-backup"');
+    expect(start).toBeGreaterThan(-1);
+    const handler = source.slice(start, source.indexOf("\n  });", start));
+    expect(handler).not.toMatch(/\bconsole\.\w+\(/);
+    expect(handler).not.toMatch(/\.status\s*\(\s*500\s*\)/);
+    expect(handler).not.toMatch(/errorMessage|error\.message/);
+    expect(handler).toMatch(/next\(\s*withLogContext\(/);
   });
 });

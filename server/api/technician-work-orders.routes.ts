@@ -6,7 +6,7 @@ import {
 } from "@shared/constants/technician-work-order-transitions";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { authenticate } from "../middleware/auth";
+import { authenticate, authorize } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
 import { storage } from "../storage";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
@@ -137,6 +137,7 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
 };
 
 const router = Router();
-router.patch("/technician/work-orders/:id/status", authenticate, patchTechnicianWorkOrderStatus);
+// `isTechnician` admet aussi admin et chef d'atelier : la route est réservée au rôle technicien.
+router.patch("/technician/work-orders/:id/status", authenticate, authorize(["technician"]), patchTechnicianWorkOrderStatus);
 
 export default router;

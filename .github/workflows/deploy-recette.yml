@@ -1,0 +1,57 @@
+name: Déploiement recette (SSH)
+
+# No-op tant que les secrets RECETTE_SSH_* n'existent pas.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "client/**"
+      - "shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+      - "deploy/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-recette
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.RECETTE_SSH_HOST }}
+      SSH_USER: ${{ secrets.RECETTE_SSH_USER }}
+      SSH_KEY: ${{ secrets.RECETTE_SSH_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.RECETTE_SSH_KNOWN_HOSTS }}
+      DEPLOY_DIR: ${{ vars.RECETTE_DEPLOY_DIR }}
+    steps:
+      - name: Secrets présents ?
+        id: gate
+        run: |
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KEY" ]; then
+            # Empreinte de l'hôte obligatoire : pas de ssh-keyscan (confiance au premier contact).
+            if [ -z "$SSH_KNOWN_HOSTS" ]; then
+              echo "::error::Secret RECETTE_SSH_KNOWN_HOSTS absent : y mettre la ligne known_hosts de l'hôte, vérifiée hors bande."
+              exit 1
+            fi
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Secrets RECETTE_SSH_* absents : déploiement ignoré."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mise à jour du VPS
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          DIR="${DEPLOY_DIR:-fleet-management-and-erp}"
+          ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_deploy "$SSH_USER@$SSH_HOST" \
+            "cd '$DIR' && git pull --ff-only && cd deploy && docker compose --profile recette build app-recette && docker compose --profile recette up -d app-recette"

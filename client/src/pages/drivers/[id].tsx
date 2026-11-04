@@ -9,6 +9,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageDrivers } from "@shared/constants/roles";
+import { driverLicenseDaysLabel, getDriverLicenseStatus } from "@/lib/driver-license-status";
 import {
   ArrowLeft, Users, CheckCircle, AlertTriangle, XCircle, CreditCard,
   GraduationCap, Calendar, IdCard, Truck, MapPin, Clock, Pencil,
@@ -61,11 +62,11 @@ const cpcBadge = (status: string) => {
 };
 
 const licenseBadge = (expiry: string | null) => {
-  if (!expiry) return <span className="text-[10px] text-gray-400 font-medium">Non renseigné</span>;
-  const days = Math.floor((new Date(expiry).getTime() - Date.now()) / 86400000);
-  if (days < 0) return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />Expiré</span>;
-  if (days <= 30) return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{days}j restants</span>;
-  if (days <= 90) return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 inline-flex items-center gap-1"><Clock className="w-3 h-3" />{days}j restants</span>;
+  const { state, days } = getDriverLicenseStatus(expiry);
+  if (state === "none") return <span className="text-[10px] text-gray-400 font-medium">Non renseigné</span>;
+  if (state === "expired") return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />Expiré</span>;
+  if (state === "soon") return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{driverLicenseDaysLabel(days!, " restants")}</span>;
+  if (state === "warning") return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 inline-flex items-center gap-1"><Clock className="w-3 h-3" />{driverLicenseDaysLabel(days!, " restants")}</span>;
   return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />Valide</span>;
 };
 

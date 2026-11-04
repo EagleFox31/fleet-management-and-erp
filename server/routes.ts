@@ -1,6 +1,8 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -34,6 +36,7 @@ import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
 import { AppError, isAppError } from "./lib/app-error";
+import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
@@ -830,21 +833,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, async (req, res) => {
+  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
         return res.status(401).json({ message: "Non authentifié" });
       }
+      // Présence et longueur vérifiées par `changePasswordRequestSchema`.
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Mot de passe actuel et nouveau mot de passe requis" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 6 caractères" });
-      }
 
       const user = await storage.getUser(userId);
       if (!user) {
@@ -3173,17 +3169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/fuel-card/consumption : servi par server/api/fuel-card.routes.ts (monté avant).
   // === VAT & BILLING SERVICE ROUTES (Sprint 1 - Phase 2) ===
   
-  // Synthèse complète fournisseurs avec factures (96 factures)
-  app.get("/api/suppliers/summary", authenticate, async (_req, res) => {
-    try {
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const summary = await vatBillingService.getSuppliersSummary();
-      return res.status(200).json(summary);
-    } catch (error) {
-      console.error("Get suppliers summary error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/suppliers/summary : servi par server/api/suppliers.routes.ts (déclaré avant /:id).
   
   // Statistiques par famille de produits
   app.get("/api/invoices/by-family", isStaff, async (req, res) => {
@@ -3216,25 +3202,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ 
         message: "Erreur serveur" 
       });
-    }
-  });
-  
-  // Calculer TVA pour un montant HT
-  app.post("/api/invoices/calculate-vat", authenticate, async (req, res) => {
-    try {
-      const { amountHT } = req.body;
-      
-      if (!amountHT || isNaN(parseFloat(amountHT))) {
-        return res.status(400).json({ message: "Montant HT invalide" });
-      }
-      
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const result = vatBillingService.calculateVAT(parseFloat(amountHT));
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error("Calculate VAT error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
     }
   });
   
@@ -3818,7 +3785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route spéciale pour importer les données après déploiement
-  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response) => {
+  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const fs = await import("fs");
       const path = await import("path");
@@ -3833,16 +3800,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backupFile = files.find(f => f.startsWith('fleet-backup-') && f.endsWith('.json'));
       
       if (!backupFile) {
-        return res.status(404).json({ 
-          message: "Fichier de backup non trouvé",
-          availableFiles: files
-        });
+        // Le listage du dossier backup/ reste côté serveur (AGENTS.md §10).
+        return res.status(404).json({ message: "Fichier de backup non trouvé" });
       }
 
       const backupFilePath = path.join(backupDir, backupFile);
       const backupData = JSON.parse(fs.readFileSync(backupFilePath, 'utf8'));
 
-      console.log('📥 Import des données de backup en cours...');
+      log.info({ requestId: req.requestId, backupFile }, "import de backup en cours");
 
       // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
       const { db } = await import("../server/db");
@@ -3913,7 +3878,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         importStats.alerts = backupData.alerts.length;
       }
 
-      console.log('✅ Import terminé!', importStats);
+      log.info({ requestId: req.requestId, backupFile, importStats }, "import de backup terminé");
 
       res.json({
         success: true,
@@ -3924,13 +3889,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
     } catch (error) {
-      console.error('❌ Erreur lors de l\'import:', error);
-      const errorMessage = error instanceof Error ? error.message : "Erreur inconnue";
-      res.status(500).json({ 
-        success: false,
-        message: "Erreur lors de l'import des données",
-        error: errorMessage
-      });
+      // Message générique + référence par le gestionnaire central ; le détail reste dans le log (AGENTS.md §10).
+      next(
+        withLogContext(
+          error instanceof AppError ? error : new AppError(500, "Erreur lors de l'import des données.", { cause: error }),
+          { event: "admin.import_backup.failed" },
+        ),
+      );
     }
   });
 
@@ -4777,7 +4742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4828,7 +4793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;

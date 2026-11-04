@@ -4,15 +4,20 @@ import { documentRenewalRequests } from "@shared/schema";
 import { OPEN_DOCUMENT_RENEWAL_STATUSES } from "@shared/constants/document-renewal-statuses";
 import { RENEWAL_DOCUMENT_BLOCKER_CODE, type VehicleEligibilityInput } from "@shared/constants/vehicle-eligibility";
 import { AppError } from "./app-error";
+import type { DbExecutor } from "./fuel-card-lock";
 
 /**
  * Récépissés valables d'un véhicule, prêts pour `getMissionEligibility` (`receipts`).
  * Ne retient que les demandes ouvertes (une demande terminée a posé la nouvelle échéance) et,
  * par papier, la date la plus lointaine. Le calcul « encore valable aujourd'hui » reste dans
  * `getMissionEligibility`, seule règle d'éligibilité.
+ * Dans une transaction, passer `tx` : la lecture voit alors le même instantané que le reste du contrôle.
  */
-export async function loadOpenRenewalReceipts(vehicleId: number): Promise<NonNullable<VehicleEligibilityInput["receipts"]>> {
-  const rows = await db
+export async function loadOpenRenewalReceipts(
+  vehicleId: number,
+  executor: DbExecutor = db,
+): Promise<NonNullable<VehicleEligibilityInput["receipts"]>> {
+  const rows = await executor
     .select({
       documentType: documentRenewalRequests.documentType,
       validUntil: sql<string>`max(${documentRenewalRequests.receiptValidUntil})::text`,

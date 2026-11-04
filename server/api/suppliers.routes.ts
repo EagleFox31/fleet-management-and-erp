@@ -14,6 +14,7 @@ import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
 import type { AppRole } from "@shared/constants/roles";
 import { withLogContext } from "../lib/error-log-context";
+import { vatBillingService } from "../services/vat-billing-service";
 
 const supplierLog = moduleLogger("suppliers");
 const router = Router();
@@ -203,6 +204,16 @@ router.get("/top", async (req: Request, res: Response, next: NextFunction) => {
     res.json(topSuppliers);
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération du top fournisseurs", { cause: error }), { event: "Erreur lors de la récupération du top fournisseurs" }));
+  }
+});
+
+// GET /api/suppliers/summary - Synthèse fournisseurs avec factures (useBilling).
+// Déclarée avant /:id, qui la captait (« ID invalide ») : l'ancienne déclaration de routes.ts n'était jamais servie.
+router.get("/summary", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await vatBillingService.getSuppliersSummary());
+  } catch (error) {
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération de la synthèse fournisseurs.", { cause: error }), { event: "Get suppliers summary error" }));
   }
 });
 

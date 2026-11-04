@@ -38,7 +38,7 @@ Tu es le développeur front de FleetMaster. Tu travailles dans le worktree et su
 - `node node_modules/typescript/bin/tsc --noEmit -p .` : 0 `error TS` sur tout le projet.
 - `node node_modules/vitest/vitest.mjs run --reporter=dot` : vert. Logique pure nouvelle → test sous `tests/unit/client/` (jamais colocalisé).
 - Navigateur si l'écran change : serveur de dev sans mocks, Playwright via `node node_modules/@playwright/test/cli.js` (jamais `npx`), un rôle autorisé + un rôle refusé, captures dans le dossier donné par le brief.
-- Toute écriture en base de test passe par `node ../lot-tools/db-lock.mjs <agent> -- <commande>` ; comptes `TEST*` créés puis supprimés ; données de recette protégées intactes. Jamais de log vitest brut sur disque.
+- Intégration et contrats : le verrou de la base de test est pris par le globalSetup vitest (`tests/support/global-setup-db-lock.ts`), sans script à lancer ; toute autre écriture en base de test (e2e, script) passe par `node ../lot-tools/db-lock.mjs <agent> -- <commande>` ; comptes `TEST*` créés puis supprimés ; données de recette protégées intactes. Jamais de log vitest brut sur disque.
 
 ## Git
 - Auteur `git -c user.name=EagleFox31 -c user.email=lawrynnjennifer@gmail.com commit`, message français, technique, aucun trailer d'attribution.
