@@ -8,5 +8,9 @@
  * sont préfixées TEST- et nettoyées après chaque fichier.
  */
 import { assertSafeTestDatabase } from "../../e2e/helpers/production-guard";
+import { pinListenerUrlsToTestDatabase } from "./listener-env";
 
 process.env.DATABASE_URL = assertSafeTestDatabase();
+// #298 : listenerPool (LISTEN, verrous consultatifs) lit ces deux variables avant DATABASE_URL.
+// Héritées d'un .env, elles feraient écouter et verrouiller les tests sur une autre base.
+pinListenerUrlsToTestDatabase(process.env);

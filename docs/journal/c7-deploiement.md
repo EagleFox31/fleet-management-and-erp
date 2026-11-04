@@ -123,3 +123,17 @@ Entrées ajoutées à la fin, une par lot.
 - **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
 - **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 3/4 rouges.
 - **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+## 2026-11-04T14:40:01+01:00 — #298 : verrou de sauvegarde, test isolé et garde listenerPool
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Clé injectable pour `createAdvisoryBackupLock`, clé unique dans le test.
+  - Connexions rendues en `finally`, plus de `listenerPool.end()` dans le test.
+  - Garde `listenerPool` en test : `setup-db` épingle les deux variables, et `resolveListenerConnectionString` refuse une autre base.
+- **Comment** :
+  - Le test tient lui-même la clé de production pendant son passage.
+  - La logique de chaîne de connexion est sortie de `server/db.ts` vers `server/lib/listener-connection.ts`, qui se teste sans base.
+- **Pourquoi** : #298. Cause : clé de production partagée sur une base de test commune aux sessions.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/backup-production.test.ts` ;
+  - preuve rouge : avec `SELECT pg_advisory_lock(hashtext('backup')), pg_sleep(90)` lancé sur la base de test, la version de main échoue.
+- **Reste / risques** : aucun changement de comportement hors `NODE_ENV=test`.
