@@ -68,6 +68,7 @@ import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
 import { validateBody } from "../middleware/validate-body";
 import { pinLoginRequestSchema } from "@shared/contracts/auth-pin-login";
+import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contracts/auth-login";
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
@@ -96,6 +97,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   const lockoutStore = new DbLockoutStore();
   apiRouter.post(
     "/auth/login",
+    // Corps validé AVANT le garde, comme pour le PIN : un corps invalide ne crée aucune ligne de
+    // compteur et ne compte pas. Même 400 que le handler (server/routes.ts), qui revalide.
+    (req, res, next) =>
+      loginRequestSchema.safeParse(req.body).success ? next() : res.status(400).json({ message: LOGIN_BODY_INVALID_MESSAGE }),
     loginLockoutGuard({ store: lockoutStore, keyPrefix: PASSWORD_KEY_PREFIX }),
   );
   apiRouter.post(

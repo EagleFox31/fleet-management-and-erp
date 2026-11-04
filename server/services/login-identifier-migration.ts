@@ -15,6 +15,9 @@ const PLAIN_KEY_FILTER = notLike("username_normalized");
  * - nom non numerique : dans `entity_ref` ;
  * - nom numerique (« 1234 », souvent un PIN ou un mot de passe tape dans le champ identifiant) : le puits
  *   d'audit l'a range dans `entity_id`. Un compte connu a toujours `user_id` ; un nom inconnu, jamais (M-3).
+ * A surveiller : le filtre porte sur `action`, que `idx_activity_logs_entity` (entity_type, entity_id,
+ * created_at) ne couvre pas. La lecture au demarrage parcourt donc `activity_logs` ; un index partiel
+ * sur `action = 'lock'` sera a envisager si la table grossit.
  */
 const PLAIN_LOCK_AUDIT_FILTER = `action = 'lock' AND entity_type = 'user' AND (
   (entity_ref IS NOT NULL AND ${notLike("entity_ref")})

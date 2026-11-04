@@ -40,10 +40,43 @@ export function nextLockState(s: LockState, now: Date, cfg: LockoutConfig): Lock
  * Stockage du compteur. L'implementation base (un seul UPDATE ... RETURNING
  * atomique sur la table de db-1) vient apres le schema.
  */
+/** Issue d'une reservation de tentative : `allowed` = la requete peut verifier le secret. */
+export interface Reservation {
+  allowed: boolean;
+  state: LockState;
+}
+
 export interface LockoutStore {
   get(username: string): Promise<LockState>;
   registerFailure(username: string, now: Date, cfg: LockoutConfig): Promise<LockState>;
   reset(username: string): Promise<void>;
+  /**
+   * Reserve la tentative AVANT le travail couteux (bcrypt), en une ecriture atomique : +1 au compteur.
+   * Refusee si un verrou est actif, ou si elle depasse le seuil (le verrou est alors pose).
+   * Sans cela, N requetes simultanees lisent toutes « non verrouille » et verifient toutes le secret.
+   */
+  reserve(username: string, now: Date, cfg: LockoutConfig): Promise<Reservation>;
+  /** Echec confirme (401) d'une tentative reservee : pose le verrou au seuil. */
+  confirmFailure(username: string, now: Date, cfg: LockoutConfig): Promise<LockState>;
+  /** Rend une tentative reservee qui n'a verifie aucun secret (corps invalide, 400). */
+  release(username: string, now: Date): Promise<void>;
+}
+
+/** Echec confirme (401) d'une tentative reservee : verrou pose au seuil. Fonction pure. */
+export function confirmedLockState(s: LockState, now: Date, cfg: LockoutConfig): LockState {
+  const lockedUntil =
+    !s.lockedUntil && s.failedCount >= cfg.maxAttempts ? new Date(now.getTime() + cfg.lockMinutes * 60_000) : s.lockedUntil;
+  return { failedCount: s.failedCount, lockedUntil, lastFailedAt: now };
+}
+
+/** Etat apres reservation. Un verrou expire repart de zero. Fonction pure. */
+export function reservedLockState(s: LockState, now: Date, cfg: LockoutConfig): Reservation {
+  const base = s.lockedUntil && !isLocked(s, now) ? EMPTY_LOCK_STATE : s;
+  const failedCount = base.failedCount + 1;
+  const lockedUntil =
+    !base.lockedUntil && failedCount > cfg.maxAttempts ? new Date(now.getTime() + cfg.lockMinutes * 60_000) : base.lockedUntil;
+  const state = { failedCount, lockedUntil, lastFailedAt: base.lastFailedAt };
+  return { allowed: !isLocked(state, now) && failedCount <= cfg.maxAttempts, state };
 }
 
 /** Magasin memoire : tests et repli sans table. */
@@ -59,5 +92,21 @@ export class MemoryLockoutStore implements LockoutStore {
   }
   async reset(u: string) {
     this.m.delete(u);
+  }
+  async reserve(u: string, now: Date, cfg: LockoutConfig) {
+    const r = reservedLockState(this.m.get(u) ?? EMPTY_LOCK_STATE, now, cfg);
+    this.m.set(u, r.state);
+    return r;
+  }
+  async confirmFailure(u: string, now: Date, cfg: LockoutConfig) {
+    const s = this.m.get(u);
+    if (!s) return EMPTY_LOCK_STATE;
+    const next = confirmedLockState(s, now, cfg);
+    this.m.set(u, next);
+    return next;
+  }
+  async release(u: string) {
+    const s = this.m.get(u);
+    if (s) this.m.set(u, { ...s, failedCount: Math.max(s.failedCount - 1, 0) });
   }
 }
