@@ -61,3 +61,17 @@ Règles : `docs/journal/README.md`.
   - Preuve automatisée : `tests/unit/scripts/tay-import.test.ts` (28 tests).
 - **RAIDER** : Idempotent (second `--apply` sans écriture) ; Retroactive (fiche préexistante gardée, kilométrage seulement relevé, aucune suppression) ; Durable (aucun schéma modifié).
 - **Reste / risques** : colonnes d'audit incomplètes sur `vehicles`, `drivers`, `suppliers` (non ajoutées) ; six véhicules identifiés par numéro de châssis ; exécution sur la base cible à décider.
+
+## 2026-11-04T18:04:13+01:00 — CHECK users_pin_bcrypt_check (PIN en clair refusé en base)
+
+- **Agent** : fleet-db · **Branche** : `fix/users-pin-bcrypt-check` (locale, sur `origin/main` après #304) · **Commit** : voir `git log`
+- **Statut** : fait en local, sans push ni PR (attente du signal de l'orchestrateur)
+- **Quoi** : `users.pin` n'accepte plus qu'un hash bcrypt (`$2a$`, `$2b$`, `$2y$`) ou NULL, quel que soit l'appelant. Migration `server/db/migrations/20261104_users_pin_bcrypt_check.sql`, jumelle `USERS_PIN_BCRYPT_CHECK_SQL` dans `server/init-database.ts`, relevé d'écart `reportUsersPinBcryptGaps`, CHECK déclarée dans `shared/schema.ts`.
+- **Comment** : patron de `20261103_document_renewal_receipt.sql` : verrou consultatif, `lock_timeout` 5 s, CHECK posée NOT VALID si absente puis VALIDATE dans un sous-bloc qui piège `check_violation` (contrainte laissée NOT VALID, démarrage jamais bloqué). Préfixe écrit `[$]` : texte identique dans le `.sql` et le gabarit TypeScript (`\$` y deviendrait `$`). Au démarrage : reprise `hashPlainUserPins` (#304) avant `applyMigrationSqlFiles` et avant la pose explicite, garde-fou d'ordre dans le test unitaire. La reprise sélectionne désormais exactement ce que la CHECK refuse (`pin !~ '^[$]2[aby][$]'` au lieu de `NOT LIKE '$2%'`) et accepte un client de transaction.
+- **Pourquoi** : invariant de sécurité (aucun PIN en clair) à tenir en base, pas seulement dans les routes.
+- **Comment tester (QA)** :
+  - Prérequis : Postgres local de test (`DATABASE_URL_TEST`), jamais Neon.
+  - Étapes : `npm test -- tests/unit/server/users-pin-bcrypt-check-schema.test.ts` ; `npm run test:contract -- tests/contract/users-pin-bcrypt-check.contract.test.ts`.
+  - Attendu : PIN « 1234 » refusé (23514, `users_pin_bcrypt_check`), hash et NULL acceptés, rejeu sans changement (même oid), clair présent : NOT VALID + avertissement sans valeur, puis validée après reprise.
+- **RAIDER** : Idempotent (rejeu = même contrainte) ; Retroactive (aucune donnée modifiée par la migration, clair existant laissé à la reprise) ; Durable (`tests/integration/pin-hash-migration.test.ts` adapté : le clair n'est plus écrit qu'en transaction annulée sans la contrainte).
+- **Reste / risques** : `POST /api/users` et `POST /api/auth/register` (`server/routes.ts`, gelé) acceptent encore `pin` via `insertUserSchema` sans le hacher : avec la contrainte, un PIN fourni y donne une erreur 500 au lieu d'un stockage en clair ; correction côté fleet-api.

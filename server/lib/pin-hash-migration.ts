@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import type { PoolClient } from "@neondatabase/serverless";
 import { pool as defaultPool } from "../db";
 import { moduleLogger } from "./logger";
 
@@ -18,14 +19,16 @@ export interface PinHashMigrationResult {
 /**
  * Reprise au démarrage : tout `users.pin` non NULL qui n'est pas déjà un hash bcrypt est haché.
  *
- * - Idempotente : ne lit que les lignes sans préfixe `$2`. Rien à reprendre = aucune écriture.
+ * - Idempotente : ne lit que les lignes hors préfixe bcrypt `$2a$`, `$2b$`, `$2y$` (même expression que la CHECK
+ *   users_pin_bcrypt_check, server/db/migrations/20261104_users_pin_bcrypt_check.sql). Rien à reprendre = aucune écriture.
+ * - Jouée au démarrage avant la pose de cette CHECK : son VALIDATE trouve alors une table sans clair.
  * - Un PIN en clair non conforme (autre chose que 4 chiffres) est haché aussi : aucun clair ne reste en base.
  * - Chaque réécriture est gardée par la valeur lue (`pin = <ancienne valeur>`) : un PIN changé entre-temps n'est pas écrasé.
  * - Ne journalise qu'un compteur, jamais une valeur.
  */
-export async function hashPlainUserPins(pool: typeof defaultPool = defaultPool): Promise<PinHashMigrationResult> {
+export async function hashPlainUserPins(pool: Pick<PoolClient, "query"> = defaultPool): Promise<PinHashMigrationResult> {
   const { rows } = await pool.query<{ id: number; pin: string }>(
-    `SELECT id, pin FROM users WHERE pin IS NOT NULL AND pin NOT LIKE '$2%'`,
+    `SELECT id, pin FROM users WHERE pin IS NOT NULL AND pin !~ '^[$]2[aby][$]'`,
   );
   let hashed = 0;
   for (const row of rows) {

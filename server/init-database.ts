@@ -541,6 +541,68 @@ export async function reportDocumentRenewalReceiptGaps(client: Queryable, log: W
 }
 
 /**
+ * users.pin : hash bcrypt ou NULL (CHECK users_pin_bcrypt_check), PIN en clair refusé en base. Posée NOT VALID
+ * puis validée dans un sous-bloc : un PIN en clair encore présent laisse la contrainte NOT VALID, le démarrage
+ * continue, l'écart est relu par reportUsersPinBcryptGaps. Doit rester identique à
+ * server/db/migrations/20261104_users_pin_bcrypt_check.sql : tests/unit/server/users-pin-bcrypt-check-schema.test.ts
+ * compare les deux. Préfixe écrit [$] : ce gabarit n'interpole rien et vaut le texte du fichier.
+ */
+export const USERS_PIN_BCRYPT_CHECK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'users'::regclass
+      AND conname = 'users_pin_bcrypt_check'
+  ) THEN
+    ALTER TABLE users ADD CONSTRAINT users_pin_bcrypt_check
+      CHECK (pin IS NULL OR pin ~ '^[$]2[aby][$]') NOT VALID;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'users'::regclass
+      AND conname = 'users_pin_bcrypt_check' AND NOT convalidated
+  ) THEN
+    BEGIN
+      ALTER TABLE users VALIDATE CONSTRAINT users_pin_bcrypt_check;
+    EXCEPTION WHEN check_violation THEN
+      RAISE WARNING 'users_pin_bcrypt_check laissée NOT VALID : PIN en clair dans users';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available OR undefined_column THEN
+  RAISE WARNING 'users_pin_bcrypt_check non posée : verrou indisponible ou colonne pin absente';
+END $$;`;
+
+export const USERS_PIN_BCRYPT_CHECK = 'users_pin_bcrypt_check';
+
+/**
+ * Le RAISE WARNING n'atteint pas les logs applicatifs : relit pg_constraint après USERS_PIN_BCRYPT_CHECK_SQL et
+ * journalise une contrainte absente ou non validée, avec le seul nombre de PIN en clair (jamais une valeur ni un id).
+ */
+export async function reportUsersPinBcryptGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows } = await client.query(
+    `SELECT convalidated FROM pg_constraint WHERE conrelid = 'users'::regclass AND conname = $1`,
+    [USERS_PIN_BCRYPT_CHECK],
+  );
+  const missing = rows.length === 0;
+  const notValidated = rows.length > 0 && rows[0].convalidated === false;
+  if (!missing && !notValidated) return { missing, notValidated, plainPins: 0 };
+  const { rows: counted } = await client.query(
+    `SELECT count(*)::int AS n FROM users WHERE pin IS NOT NULL AND pin !~ '^[$]2[aby][$]'`,
+  );
+  const plainPins = Number(counted[0].n);
+  log.warn(
+    { constraint: USERS_PIN_BCRYPT_CHECK, missing, notValidated, plainPins },
+    missing
+      ? `Contrainte ${USERS_PIN_BCRYPT_CHECK} non posée (verrou de table indisponible) : PIN en clair non refusés en base`
+      : `Contrainte ${USERS_PIN_BCRYPT_CHECK} laissée NOT VALID : ${plainPins} PIN en clair dans users, à reprendre en hash bcrypt`,
+  );
+  return { missing, notValidated, plainPins };
+}
+
+/**
  * #113 : une fiche chauffeur par compte (index unique partiel uq_drivers_user_id). Doit rester identique à
  * server/db/migrations/20261103_drivers_user_id_unique.sql : tests/unit/server/drivers-user-id-unique-schema.test.ts
  * compare les deux. Doublons existants : index non posé, rien supprimé, écart relu par reportDriverUserIdUniqueGaps.
@@ -1306,6 +1368,10 @@ export async function initializeDatabase() {
     await applyBootstrapSqlFiles();
     // Enfants du catalogue de pièces et pièces de panne (PRT1/CAT2) — jumelle de server/db/migrations/20261102_parts_catalog_children.sql.
     await pool.query(PARTS_CATALOG_CHILDREN_SQL);
+    // PIN en clair refusé en base — jumelle de server/db/migrations/20261104_users_pin_bcrypt_check.sql.
+    // Après toute reprise des PIN en clair : la validation ne réussit que si aucun clair ne reste.
+    await pool.query(USERS_PIN_BCRYPT_CHECK_SQL);
+    await reportUsersPinBcryptGaps(pool);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);
