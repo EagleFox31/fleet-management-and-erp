@@ -15,7 +15,12 @@ import pino from "pino";
 
 const defaultLevel = process.env.VITEST ? "silent" : "info";
 
-export const logger = pino({
+/**
+ * Options pino partagées (exportées pour être testées sur un flux capturé).
+ * `err.detail` / `err.where` : Postgres y recopie la ligne refusée (« Failing row contains (…) »,
+ * « Key (col)=(valeur) »), donc un PIN, un hash ou un e-mail ; jamais journalisés.
+ */
+export const loggerOptions: pino.LoggerOptions = {
   level: process.env.LOG_LEVEL || defaultLevel,
   base: { service: "fleetmaster" },
   timestamp: pino.stdTimeFunctions.isoTime,
@@ -32,11 +37,17 @@ export const logger = pino({
       "req.headers.authorization",
       "headers.cookie",
       "headers.authorization",
+      "err.detail",
+      "*.err.detail",
+      "err.where",
+      "*.err.where",
     ],
     censor: "[masqué]",
   },
   serializers: { err: pino.stdSerializers.err },
-});
+};
+
+export const logger = pino(loggerOptions);
 
 export type Logger = typeof logger;
 
