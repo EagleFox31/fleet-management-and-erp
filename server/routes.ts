@@ -54,6 +54,8 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
+// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
+import { loginUsernameRef } from "./lib/login-identifier";
 
 const log = moduleLogger("routes");
 
@@ -63,10 +65,6 @@ const log = moduleLogger("routes");
  */
 const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
 
-/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
-function loginUsernameRef(username: string): string {
-  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
-}
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({

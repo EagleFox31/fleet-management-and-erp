@@ -5,6 +5,8 @@ import type { Server } from "http";
 import { registerRoutes } from "./routes";
 import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
+import { moduleLogger } from "./lib/logger";
+import { migrateLoginIdentifiers } from "./services/login-identifier-migration";
 import { accessLog, apiNotFound, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
 
 export type CreateAppOptions = {
@@ -103,6 +105,11 @@ export async function createApp(
 
   if (initializeDb) {
     await initializeDatabase();
+    // Reprise M3 : clés de verrouillage et audit de blocage en clair vers leur empreinte. Un échec ne
+    // bloque pas le démarrage, la reprise se rejoue au suivant.
+    await migrateLoginIdentifiers().catch((err) =>
+      moduleLogger("login-identifier-migration").error({ err }, "reprise des identifiants de connexion impossible"),
+    );
   }
 
   app.use("/api", apiRouter);

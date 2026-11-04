@@ -1,6 +1,7 @@
 import type { LockoutConfig } from "@shared/contracts/auth-lockout";
 import { pool } from "../db";
 import { recordAudit } from "../lib/audit";
+import { loginIdentifierDigest, PASSWORD_DIGEST_KEY_PREFIX } from "../lib/login-identifier";
 import { EMPTY_LOCK_STATE, type LockState, type LockoutStore } from "./login-lockout-service";
 
 const toState = (r: { failed_count: number; locked_until: Date | null; last_failed_at: Date | null }): LockState => ({
@@ -23,6 +24,21 @@ export type LockedUserRow = {
 export const PASSWORD_KEY_PREFIX = "pwd:";
 export const PIN_KEY_PREFIX = "pin:";
 
+/**
+ * Clé stockée pour une clé du garde (M3) : `pin:<id>` telle quelle (un id n'est pas une saisie libre),
+ * sinon `pwdh1:` + empreinte du nom (`pwd:<nom>` ou clé brute). Le nom saisi ne quitte pas la mémoire :
+ * il ne sert qu'au miroir `users`, comme paramètre de requête, jamais écrit.
+ */
+export function storedLockoutKey(key: string): string {
+  if (key.startsWith(PIN_KEY_PREFIX) || key.startsWith(PASSWORD_DIGEST_KEY_PREFIX)) return key;
+  return PASSWORD_DIGEST_KEY_PREFIX + loginIdentifierDigest(legacyName(key));
+}
+
+/** Nom porté par une clé en clair (`pwd:<nom>` ou clé brute, format antérieur à M3). */
+export function legacyName(key: string): string {
+  return key.startsWith(PASSWORD_KEY_PREFIX) ? key.slice(PASSWORD_KEY_PREFIX.length) : key;
+}
+
 /** Cible du miroir `users` pour une cle : par id (pin:), sinon par nom d'utilisateur (pwd: ou cle brute). */
 function mirrorTarget(key: string): { where: string; param: string | number } {
   if (key.startsWith(PIN_KEY_PREFIX)) {
@@ -41,7 +57,7 @@ export class DbLockoutStore implements LockoutStore {
   async get(username: string): Promise<LockState> {
     const { rows } = await pool.query(
       "SELECT failed_count, locked_until, last_failed_at FROM login_attempts_by_username WHERE username_normalized = $1",
-      [username],
+      [storedLockoutKey(username)],
     );
     return rows[0] ? toState(rows[0]) : EMPTY_LOCK_STATE;
   }
@@ -60,7 +76,7 @@ export class DbLockoutStore implements LockoutStore {
          last_failed_at = $2::timestamp,
          updated_at = $2::timestamp
        RETURNING failed_count, locked_until, last_failed_at`,
-      [username, now, until, cfg.maxAttempts],
+      [storedLockoutKey(username), now, until, cfg.maxAttempts],
     );
     const state = toState(rows[0]);
     const target = mirrorTarget(username);
@@ -76,7 +92,8 @@ export class DbLockoutStore implements LockoutStore {
         userId: id ?? null,
         action: "lock",
         entityType: "user",
-        entityId: id !== undefined ? String(id) : username,
+        // Compte inconnu : l'empreinte, jamais le nom saisi.
+        entityId: id !== undefined ? String(id) : storedLockoutKey(username),
         method: null,
         path: null,
         details: { lockedUntil: state.lockedUntil.toISOString(), failedCount: state.failedCount },
@@ -86,7 +103,7 @@ export class DbLockoutStore implements LockoutStore {
   }
 
   async reset(username: string): Promise<void> {
-    await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [username]);
+    await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [storedLockoutKey(username)]);
     const target = mirrorTarget(username);
     await pool.query(
       `UPDATE users SET failed_login_count = 0, locked_until = NULL
@@ -127,7 +144,8 @@ export class DbLockoutStore implements LockoutStore {
     );
     if (!rows[0]) return false;
     await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [
-      [rows[0].u, PASSWORD_KEY_PREFIX + rows[0].u, PIN_KEY_PREFIX + userId],
+      // Clé par empreinte, plus les formats en clair antérieurs à M3 si la reprise ne les a pas encore vus.
+      [storedLockoutKey(rows[0].u), rows[0].u, PASSWORD_KEY_PREFIX + rows[0].u, PIN_KEY_PREFIX + userId],
     ]);
     await recordAudit({
       userId: adminId,

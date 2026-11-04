@@ -2363,3 +2363,35 @@ Sécurité (énumération de comptes, fuite de secret dans les journaux) + test 
 
 ### Règle Projet (obligatoire)
 - « N'existe pas » se déduit d'un 404 seulement, jamais d'une erreur quelconque. Un écran de détail classe son erreur par une fonction pure testée par catégorie, pas par `if (error)`.
+
+## 2026-11-04 — Identifiants de connexion : empreinte salée pour les logs, les compteurs et l'audit (M2, M3)
+
+### Contexte
+L'audit de sécurité de #272 a relevé deux points. La référence de log du nom saisi était un SHA-256 non salé, qu'on inverse par dictionnaire. Les compteurs d'échecs (`login_attempts_by_username.username_normalized`) et l'audit de blocage d'un nom inconnu stockaient le nom saisi en clair, alors qu'un nom inconnu est souvent un mot de passe tapé dans le mauvais champ.
+
+### Cause racine
+La clé du compteur était le nom normalisé lui-même. Elle servait à la fois de clé de stockage et de critère pour le miroir sur `users`, si bien que personne ne s'est demandé ce qu'elle exposait au repos.
+
+### Classification
+Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans exploitation connue.
+
+### Résolution
+- `server/lib/login-identifier.ts` : HMAC-SHA256 sous une sous-clé dérivée du secret de session et du domaine `fleet:login-identifier:v1`. Le secret brut ne sert qu'à signer les cookies. `loginUsernameRef` (logs) en prend les 12 premiers caractères.
+- `DbLockoutStore` stocke `pwdh1:<empreinte>`. Le nom saisi reste en mémoire, comme simple paramètre du miroir `users`. L'audit `lock` d'un nom inconnu porte l'empreinte.
+- Reprise au démarrage (`migrateLoginIdentifiers`, dans `app.ts`), en une transaction :
+  - les clés en clair (`pwd:<nom>`, clé brute) fusionnent vers l'empreinte, au maximum de chaque champ ;
+  - seules les lignes d'audit `lock` à nom inconnu sont réécrites. C'est une modification d'historique assumée, et les autres lignes ne bougent pas ;
+  - les logs ne portent que des compteurs.
+- `server/services/user-service.ts` supprimé : aucun importeur. Son `getUserByUsername` avalait l'erreur, et son `authenticateUser` ne comparait pas de hash factice.
+- Une rotation de `SESSION_SECRET` ou un changement de domaine remet les compteurs à zéro : c'est accepté, un verrou dure 15 minutes.
+
+### Prévention (vérifiable)
+- `tests/integration/login-lockout-db-store.test.ts` : ni la ligne du compteur ni l'audit d'un nom inconnu ne contiennent le nom saisi, et la normalisation est identique à celle du garde.
+- `tests/integration/login-identifier-migration.test.ts` :
+  - fusion de deux clés d'un même nom ;
+  - réécriture du seul audit `lock` ;
+  - un second démarrage ne fait qu'une lecture, sans transaction ni écriture.
+
+### Règle Projet (obligatoire)
+- Une saisie libre non authentifiée (nom, e-mail, téléphone) ne se stocke ni ne se journalise en clair. On passe par `loginIdentifierDigest` / `loginUsernameRef`.
+- Une clé HMAC dérivée d'un secret existant porte un domaine versionné. On ne réutilise jamais le secret brut pour un second usage.

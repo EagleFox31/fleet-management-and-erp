@@ -7,6 +7,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * #113 : une fiche chauffeur par compte. Seconde fiche ou modification vers un compte déjà lié → 409,
@@ -74,7 +75,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (driverIds.length) await db.delete(drivers).where(inArray(drivers.id, driverIds));
   const keys = ids.userIds.map((id) => `pwd:${id}`);
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys.map(storedLockoutKey)]);
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
