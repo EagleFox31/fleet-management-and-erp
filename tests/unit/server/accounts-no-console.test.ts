@@ -32,10 +32,9 @@ describe("écriture de comptes : journal structuré seulement", () => {
     expect(slice(routes, marker, /\n {2}app\./)).not.toMatch(/console\./);
   });
   it.each(STORAGE)("storage.%s", (name) => {
-    expect(slice(storage, `  async ${name}(`, /\n {2}(?:async |\n)/)).not.toMatch(/console\./);
+    expect(slice(storage, `  async ${name}(`, /\n {2}async |\n[ \t]*\n/)).not.toMatch(/console\./);
   });
-  it("import de sauvegarde : PIN clair haché avant insertion, aucun console", () => {
+  it("import de sauvegarde : aucun console (le comportement est testé dans backup-import-service)", () => {
     expect(backup).not.toMatch(/console\./);
-    expect(backup).toContain("PIN_BCRYPT_COST");
   });
 });

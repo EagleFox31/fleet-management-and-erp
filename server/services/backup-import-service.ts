@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import bcrypt from "bcryptjs";
-import { PIN_BCRYPT_COST } from "../lib/pin-hash-migration";
+import { pinForRestore } from "../lib/user-pin";
+import { moduleLogger } from "../lib/logger";
 import { alerts, fuelRecords, maintenanceSchedules, parts, users, vehicles, workOrders } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
@@ -44,7 +44,23 @@ export function readBackupFile(backupDir = join(process.cwd(), "backup")): { bac
   return { backupFile, data: JSON.parse(readFileSync(join(backupDir, backupFile), "utf8")) as BackupData };
 }
 
+const log = moduleLogger("backup-import");
+
+/**
+ * users.pin n'accepte qu'un hash bcrypt (CHECK users_pin_bcrypt_check). L'import valide le PIN comme les
+ * routes : haché hors transaction (N bcrypt sous verrous apres les DELETE), non conforme -> NULL + warn.
+ */
+async function usersWithSafePins(list: NonNullable<BackupData["users"]>) {
+  return Promise.all(
+    list.map(async (u) => ({
+      ...u,
+      pin: await pinForRestore(u.pin, () => log.warn({ username: u.username }, "PIN de sauvegarde non conforme : ignore")),
+    })),
+  );
+}
+
 export async function restoreBackup(data: BackupData): Promise<BackupImportStats> {
+  const importedUsers = data.users?.length ? await usersWithSafePins(data.users) : [];
   return db.transaction(async (tx) => {
     await suppressSideEffects(tx);
 
@@ -69,16 +85,9 @@ export async function restoreBackup(data: BackupData): Promise<BackupImportStats
     // Utilisateurs : seulement ceux dont le nom d'utilisateur n'existe pas encore.
     if (data.users?.length) {
       const existing = new Set((await tx.select({ username: users.username }).from(users)).map((u) => u.username));
-      const toImport = data.users.filter((u) => !existing.has(u.username));
+      const toImport = importedUsers.filter((u) => !existing.has(u.username));
       if (toImport.length > 0) {
-        // users.pin n'accepte qu'un hash bcrypt (CHECK users_pin_bcrypt_check) : une ancienne sauvegarde au PIN
-        // en clair est reprise hachée plutôt que de faire échouer toute la restauration.
-        const rows = await Promise.all(
-          toImport.map(async (u) =>
-            u.pin && !/^\$2[aby]\$/.test(u.pin) ? { ...u, pin: await bcrypt.hash(u.pin, PIN_BCRYPT_COST) } : u,
-          ),
-        );
-        await tx.insert(users).values(rows);
+        await tx.insert(users).values(toImport);
         stats.users = toImport.length;
       }
     }
