@@ -6,14 +6,6 @@
 
 /** T1 : routes d'écriture sans garde de rôle ni de permission (ni au montage). Elles ne sont ouvertes qu'à un compte connecté, ou le contrôle est fait dans le handler. */
 export const T1_WITHOUT_ROLE_GUARD: readonly string[] = [
-  "delete /api<relative(alertPath(\":id\"))>",
-  "patch /api${relative(alertPath(\":id\"))}/read",
-  "patch /api/notifications/settings",
-  "patch /api/onboarding/complete",
-  "patch /api/onboarding/mascot",
-  "patch /api/onboarding/step",
-  "post /api/users/change-password",
-  "post /api<relative(ALERT_READ_ALL_PATH)>",
 ];
 
 /** T3 : routes qui lisent `req.body` sans schéma Zod ni `prepareColumnUpdate` / `columnTypeErrors` : un corps invalide peut finir en 500. */
