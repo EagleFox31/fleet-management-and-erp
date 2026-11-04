@@ -15,7 +15,7 @@ describe("garde base de production au démarrage du serveur (#259)", () => {
     } catch (e) {
       message = (e as Error).message;
     }
-    expect(message).toMatch(/Démarrage refusé : DATABASE_URL vise la base de production/);
+    expect(message).toMatch(/Connexion refusée : DATABASE_URL vise la base de production/);
     expect(message).toMatch(/ALLOW_PRODUCTION_DATABASE=1/);
     expect(message).not.toContain("p%40ss");
     expect(message).not.toContain(PROD);
@@ -58,8 +58,30 @@ describe("garde base de production au démarrage du serveur (#259)", () => {
   });
 
   it("guardDatabaseConnection lève sur la base marquée et laisse passer la dérogation", () => {
-    expect(() => guardDatabaseConnection("t", env({ DATABASE_URL: PROD }))).toThrow(/Démarrage refusé/);
+    expect(() => guardDatabaseConnection("t", env({ DATABASE_URL: PROD }))).toThrow(/Connexion refusée/);
     expect(guardDatabaseConnection("t", env({ DATABASE_URL: PROD, ALLOW_PRODUCTION_DATABASE: "1" })).status).toBe("overridden");
     expect(guardDatabaseConnection("t", env({ DATABASE_URL: LOCAL })).status).toBe("clear");
+  });
+});
+
+describe("garde base de production : prod VPS, drizzle-kit, message (#268)", () => {
+  const VPS = "postgres://fleet:secret@db-prod:5432/fleet";
+
+  it("reconnaît par défaut la base de la prod VPS (service compose db-prod), sans divulguer l'URL", () => {
+    let message = "";
+    try {
+      assertServerNotProductionDatabase(env({ DATABASE_URL: VPS }));
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/Connexion refusée : DATABASE_URL vise la base de production \(hôte contenant « db-prod »\)/);
+    expect(message).not.toContain("secret");
+    expect(assertServerNotProductionDatabase(env({ NODE_ENV: "production", DATABASE_URL: VPS }))).toEqual({ status: "skipped" });
+    expect(assertServerNotProductionDatabase(env({ DATABASE_URL: "postgres://fleet:x@db-recette:5432/fleet" }))).toEqual({ status: "clear" });
+  });
+
+  it("le message vaut pour un script ou drizzle-kit et met en garde contre NODE_ENV=production en local", () => {
+    expect(() => assertServerNotProductionDatabase(env({ DATABASE_URL: PROD }))).toThrow(/script ou drizzle-kit/);
+    expect(() => assertServerNotProductionDatabase(env({ DATABASE_URL: PROD }))).toThrow(/Ne préfixez pas NODE_ENV=production en local/);
   });
 });

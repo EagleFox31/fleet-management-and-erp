@@ -21,10 +21,10 @@ import {
   workshopLaborRateSchema,
   workshopLaborRatesResponseSchema,
 } from "../../shared/contracts/workshop-labor-rates";
-import { workshopLaborRates } from "../../shared/schema";
+import { workOrders, workshopLaborRates } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
-import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 
 /**
  * Niveau C, CDC #7 : indicateurs du cahier (rôles, formes), taux horaires, rapports exportables.
@@ -130,7 +130,7 @@ describe("/api/kpi/* : rôles", { timeout: 120000 }, () => {
 describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
   const q = "?from=2001-01-01&to=2001-12-31";
 
-  it("pannes : tous les mois de la période, zéros compris", async () => {
+  it("pannes : tous les mois de la période, total et moyenne cohérents avec la série", async () => {
     const res = await call("GET", KPI_FAILURES_PATH + q, "workshop_manager");
     expect(failuresResponseSchema.safeParse(res.body).success).toBe(true);
     // Invariants, pas « 2001 est vide » : d'autres suites créent des OT correctifs datés de 2001
@@ -140,6 +140,34 @@ describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
     const sum = res.body.series.reduce((acc: number, m: { count: number }) => acc + m.count, 0);
     expect(res.body.total).toBe(sum);
     expect(res.body.monthlyAverage).toBe(Math.round((sum / 12) * 100) / 100);
+  });
+
+  it("pannes : une panne sur un véhicule du test : seul son mois augmente de 1, les 11 autres ne bougent pas", async () => {
+    // Année propre au test : la base est partagée, on compare donc à une lecture de référence.
+    const period = "?from=2002-01-01&to=2002-12-31";
+    const read = async () => (await call("GET", KPI_FAILURES_PATH + period, "workshop_manager")).body;
+    const before = await read();
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const [wo] = await db
+      .insert(workOrders)
+      .values({ vehicleId: vehicle.id, title: "TEST panne KPI", status: "pending", startDate: new Date("2002-06-15T12:00:00Z") })
+      .returning();
+    try {
+      const after = await read();
+      expect(failuresResponseSchema.safeParse(after).success).toBe(true);
+      expect(after.series).toHaveLength(12);
+      const delta = after.series.map((p: { month: string; count: number }, i: number) => [p.month, p.count - before.series[i].count]);
+      expect(delta).toEqual(
+        Array.from({ length: 12 }, (_, i) => [`2002-${String(i + 1).padStart(2, "0")}`, i === 5 ? 1 : 0]),
+      );
+      expect(after.total).toBe(before.total + 1);
+      expect(after.byVehicle.filter((v: { vehicleId: number }) => v.vehicleId === vehicle.id)).toEqual([
+        { vehicleId: vehicle.id, registrationNumber: vehicle.registrationNumber, count: 1 },
+      ]);
+    } finally {
+      await db.delete(workOrders).where(eq(workOrders.id, wo.id));
+    }
   });
 
   it("préventif : formes du contrat et fenêtre arrêtée à la veille", async () => {

@@ -7,6 +7,7 @@ import {
   T3_WITHOUT_BODY_VALIDATION,
   T4_WITHOUT_SERVER_FIELD_PROTECTION,
 } from "./support/write-routes-frozen";
+import { SELF_SERVICE_ROUTES, selfServiceProblems } from "./support/write-routes-self-service";
 import {
   AUTH_ROLE_GUARDS,
   LOCAL_ROLE_GUARDS,
@@ -339,7 +340,7 @@ describe("cliquets sur les routes d'écriture", () => {
   it("T1 : toute route d'écriture a une garde de rôle", () => {
     check(
       "T1",
-      routes.filter((r) => !hasRoleGuard(r) && !PUBLIC_BY_DESIGN.has(r.key)),
+      routes.filter((r) => !hasRoleGuard(r) && !PUBLIC_BY_DESIGN.has(r.key) && !(r.key in SELF_SERVICE_ROUTES)),
       T1_WITHOUT_ROLE_GUARD,
       "T1_WITHOUT_ROLE_GUARD",
       "Ajoute une garde de rôle (`isStaff`, `isWorkshopManager`, `authorize([...])`...) sur la déclaration, ou monte le routeur derrière une garde dans server/api/index.ts.",
@@ -364,6 +365,60 @@ describe("cliquets sur les routes d'écriture", () => {
       "T4_WITHOUT_SERVER_FIELD_PROTECTION",
       "Valide avec un schéma d'insertion qui omet `createdBy`/`updatedBy`/montants (shared/schema.ts, `.omit`), ou écrase ces champs depuis `req.user` / le serveur, ou ne retiens que les champs nommés.",
     );
+  });
+
+  it("libre-service (exception T1) : isAnyUser déclaré et contrat de périmètre présent", () => {
+    const byKey = new Map(routes.map((r) => [r.key, r]));
+    const root = join(serverDir, "..");
+    for (const [key, entry] of Object.entries(SELF_SERVICE_ROUTES)) {
+      const route = byKey.get(key);
+      expect(route, `${key} : route libre-service introuvable, retire-la de write-routes-self-service.ts`).toBeDefined();
+      expect(route!.middlewares, `${key} : une route libre-service déclare isAnyUser (compte de session chargé)`).toContain("isAnyUser");
+      expect(hasRoleGuard(route!), `${key} : a une garde de rôle, ce n'est plus une exception, retire-la`).toBe(false);
+      expect(T1_WITHOUT_ROLE_GUARD, `${key} : à la fois gelée T1 et libre-service`).not.toContain(key);
+      expect(PUBLIC_BY_DESIGN.has(key), `${key} : publique et libre-service`).toBe(false);
+      let contract = "";
+      try {
+        contract = readFileSync(join(root, entry.contract), "utf8");
+      } catch {
+        // contrat absent : l'assertion suivante le dit
+      }
+      expect(selfServiceProblems(key, entry, route!.body, contract)).toEqual([]);
+    }
+  });
+
+  it("libre-service : un handler qui lit un identifiant de compte de la requête est refusé", () => {
+    const entry = { contract: "c.ts", calls: '"PATCH", "/api/x/y"', scope: "test" };
+    const contract = `describe("x", () => {
+  it("autre compte (B) : rien ne change", async () => {
+    await call("PATCH", "/api/x/y");
+  });
+});`;
+    for (const code of [
+      `router.patch("/y/:userId", isAnyUser, async (req, res) => { await save(Number(req.params.userId)); });`,
+      `router.patch("/y", isAnyUser, async (req, res) => { await save(req.body.ownerId); });`,
+      `router.patch("/y", isAnyUser, async (req, res) => { await save(req.query["accountId"]); });`,
+      `router.patch("/y", isAnyUser, async (req, res) => { const { step, userId } = req.body; await save(userId, step); });`,
+    ]) {
+      const [route] = writeRoutesOf(code, () => ({ prefix: "/api/x", guarded: false }));
+      expect(selfServiceProblems(route.key, entry, route.body, contract), code).toHaveLength(1);
+    }
+    const [own] = writeRoutesOf(`router.patch("/y", isAnyUser, async (req, res) => { await save(req.session.userId, req.body.step); });`, () => ({ prefix: "/api/x", guarded: false }));
+    expect(selfServiceProblems(own.key, entry, own.body, contract)).toEqual([]);
+  });
+
+  it("libre-service : la seule présence de l'appel dans le contrat ne suffit pas", () => {
+    const entry = { contract: "c.ts", calls: '"PATCH", "/api/x/y"', scope: "test" };
+    const onlyUnauthenticated = `describe("x", () => {
+  it("sans session : 401", async () => {
+    await call("PATCH", "/api/x/y");
+  });
+  it("autre compte (B) : rien ne change", async () => {
+    await call("GET", "/api/x/y");
+  });
+});`;
+    expect(selfServiceProblems("patch /api/x/y", entry, "", onlyUnauthenticated)).toHaveLength(1);
+    expect(selfServiceProblems("patch /api/x/y", entry, "", "")).toHaveLength(1);
   });
 
   it("les listes gelées n'ont pas de doublon", () => {
