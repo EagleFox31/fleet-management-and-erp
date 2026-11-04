@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, sql, gte, lte, or, lt, ne, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import type { DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
 
 /**
  * Service de contrôle 3 voies pour les factures fournisseurs
@@ -413,28 +414,7 @@ export class ThreeWayMatchingService {
    * MÉTHODE 4: Escalade des écarts >5%
    * Remonte les factures avec écarts significatifs vers admin/workshop_manager
    */
-  async escalateDiscrepancies(): Promise<{
-    escalatedCount: number;
-    // Totaux affichés par l'écran /procurement/invoices/discrepancies.
-    totalDiscrepancyAmount: number;
-    averageVariance: number;
-    discrepancies: Array<{
-      invoiceId: number;
-      invoiceNumber: string;
-      supplierName: string;
-      varianceAmount: number;
-      variancePercentage: number;
-      orderNumber?: string;
-      // Champs lus par l'écran des écarts (lien « Examiner », montant, date, statut).
-      // Ajoutés sans retirer les précédents : `invoiceId` et `orderNumber` restent consommés.
-      id: number;
-      supplierId: number | null;
-      invoiceDate: string;
-      totalAmountTTC: number;
-      status: string;
-      purchaseOrderNumber?: string;
-    }>;
-  }> {
+  async escalateDiscrepancies(): Promise<DiscrepancyResult> {
     // Récupérer les factures avec écarts >5%
     const discrepantInvoices = await db
       .select({
