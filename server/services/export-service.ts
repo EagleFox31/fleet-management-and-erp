@@ -2,6 +2,7 @@ import { db } from "../db";
 import { vehicles, workOrders, parts, partsStockMovements, fuelRecords, users } from "@shared/schema";
 import { eq, desc, asc, isNull } from "drizzle-orm";
 import { ROLE_LABELS } from "@shared/constants/roles";
+import { canReadPurchasePrice, type PriceReader } from "../lib/vehicle-price-scope";
 import { WORK_ORDER_PRIORITY_LABELS, WORK_ORDER_STATUS_LABELS } from "@shared/constants/work-orders";
 import * as XLSX from 'xlsx';
 import archiver from 'archiver';
@@ -10,7 +11,9 @@ import { Readable } from 'stream';
 export class ExportService {
   
   // Export des véhicules en XLSX
-  async exportVehiclesXLSX(): Promise<Buffer> {
+  async exportVehiclesXLSX(reader?: PriceReader): Promise<Buffer> {
+    // Prix d'achat : colonne réservée à admin, logistique et secrétariat (décision du 3 novembre 2026).
+    const withPrice = canReadPurchasePrice(reader);
     try {
       console.log('Exporting vehicles to XLSX...');
       
@@ -50,7 +53,7 @@ export class ExportService {
         'Nombre d\'essieux': vehicle.axleCount || '',
         'Numéro VIN': vehicle.vin || '',
         'Date d\'achat': vehicle.purchaseDate ? new Date(vehicle.purchaseDate).toLocaleDateString('fr-FR') : '',
-        'Prix d\'achat (XAF)': vehicle.purchasePrice || '',
+        ...(withPrice ? { 'Prix d\'achat (XAF)': vehicle.purchasePrice || '' } : {}),
         'Expiration assurance': vehicle.insuranceExpiry ? new Date(vehicle.insuranceExpiry).toLocaleDateString('fr-FR') : '',
         'Contrôle technique': vehicle.technicalInspectionDate ? new Date(vehicle.technicalInspectionDate).toLocaleDateString('fr-FR') : '',
         'Date de création': new Date(vehicle.createdAt).toLocaleDateString('fr-FR')

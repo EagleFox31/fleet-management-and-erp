@@ -10,7 +10,7 @@ import {
 import { VEHICLE_TANK_CAPACITY_MESSAGE, fuelAnomalyResolutions, fuelRecords, vehicles } from "../../shared/schema";
 import { REALTIME_EVENTS } from "../../shared/contracts/realtime-events";
 import { db } from "../../server/db";
-import { VEHICLE_TANK_CAPACITY_ONLY_MESSAGE } from "../../server/lib/vehicle-patch-guard";
+import { vehicleRestrictedPatchMessage } from "../../server/lib/vehicle-patch-guard";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -184,7 +184,7 @@ describe("PATCH /api/vehicles/:id : capacité des réservoirs", { timeout: 12000
       const before = await stored();
       const res = await refusalOf({ tankCapacityL: 55, notes: "TEST logistique" });
       expect(res.status).toBe(403);
-      expect(res.body.message).toBe(VEHICLE_TANK_CAPACITY_ONLY_MESSAGE);
+      expect(res.body.message).toBe(vehicleRestrictedPatchMessage("logistics"));
       expect(leakText(res.body)).not.toMatch(/constraint|SQL|stack/i);
       expect(await stored()).toEqual(before);
     });

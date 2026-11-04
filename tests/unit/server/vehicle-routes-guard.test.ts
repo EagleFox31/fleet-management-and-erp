@@ -21,14 +21,8 @@ const KNOWN_AUTHENTICATE_ONLY = [
   "get /api/vehicles/:id",
   // Contrôle de rôle fait dans le handler (lecture de l'utilisateur).
   "get /api/maintenance-schedules/vehicle/:vehicleId",
-  // Export tabulaire : écran du personnel, couvert au montage (exportsGuard) ; pneus montés retirés (lot A4).
-  "get /api/exports/vehicles",
-  // Sessions d'acquisition : cloison par propriétaire de la session (workflow-vehicle-acquisition).
-  "post /api/workflows/vehicle-acquisition",
+  // Lecture de la session d'acquisition : cloison par propriétaire de la session (workflow-vehicle-acquisition). Les écritures portent isWorkflowDocumentWriter (R2).
   "get /api/workflows/vehicle-acquisition/:sessionId",
-  "patch /api/workflows/vehicle-acquisition/:sessionId",
-  "patch /api/workflows/vehicle-acquisition/:sessionId/complete",
-  "patch /api/workflows/vehicle-acquisition/:sessionId/abandon",
 ];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
@@ -106,7 +100,7 @@ describe("garde de rôle sur les routes qui lisent un véhicule", () => {
 
   it("la détection voit bien les déclarations des sources", () => {
     const all = SOURCES.flatMap((f) => authenticateOnlyRoutes(readFileSync(join(serverDir, f), "utf8"), PREFIXES.get(f)?.prefix ?? "", PREFIXES.get(f)?.guarded ?? false));
-    expect(all.length).toBeGreaterThan(5);
+    expect(all.length).toBeGreaterThanOrEqual(KNOWN_AUTHENTICATE_ONLY.length);
   });
 
   it("aucune nouvelle route véhicule n'est gardée par authenticate seul", () => {

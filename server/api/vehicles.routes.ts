@@ -10,7 +10,8 @@ import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from 
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
+import { canReadVehiclePurchasePrice, VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
+import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 
 const router = Router();
@@ -46,7 +47,11 @@ const broadcastVehicleUpdate = (
     },
     emittedAt: new Date().toISOString(),
   };
-  broadcastUpdate(eventType, { ...envelope, payload, scope: { type: "roles", roles: [...VEHICLE_DOCUMENT_EVENT_ROLES] } });
+  // Prix d'achat : la fiche complète ne part qu'aux rôles autorisés (décision du 3 novembre 2026).
+  const priceRoles = VEHICLE_DOCUMENT_EVENT_ROLES.filter((role) => canReadVehiclePurchasePrice(role));
+  const otherStaffRoles = VEHICLE_DOCUMENT_EVENT_ROLES.filter((role) => !canReadVehiclePurchasePrice(role));
+  broadcastUpdate(eventType, { ...envelope, payload, scope: { type: "roles", roles: [...priceRoles] } });
+  broadcastUpdate(eventType, { ...envelope, payload: redactVehiclePriceDeep(null, payload), scope: { type: "roles", roles: [...otherStaffRoles] } });
   broadcastUpdate(eventType, { ...envelope, payload: reducedPayload, scope: { type: "roles", roles: ["driver"] } });
   if (typeof ownerId === "number" && Number.isInteger(ownerId) && ownerId > 0) {
     broadcastUpdate(eventType, { ...envelope, actor: null, payload: reducedPayload, scope: { type: "user", userIds: [ownerId] } });
@@ -78,7 +83,7 @@ router.get("/", isAnyUser, async (req, res, next) => {
       sortOrder: req.query.sort_order === "asc" ? "asc" : "desc",
       ownerId: ownerScopeOf(req.user),
     });
-    return res.status(200).json(result);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, result));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de la liste des véhicules en échec" }));
@@ -89,7 +94,7 @@ router.get("/", isAnyUser, async (req, res, next) => {
 router.get("/all", isAnyUser, async (req, res, next) => {
   try {
     const result = await listVehicles({ limit: VEHICLE_LIST_MAX_LIMIT, ownerId: ownerScopeOf(req.user) });
-    return res.status(200).json(result.vehicles);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, result.vehicles));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture de tous les véhicules en échec" }));
@@ -104,7 +109,7 @@ router.get("/expiring-docs", isAnyUser, async (req, res, next) => {
   try {
     const days = parseInt(req.query.days as string) || 30;
     const docs = await vehicleDocumentationService.getExpiringDocuments(days, ownerScopeOf(req.user));
-    return res.status(200).json(docs);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, docs));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirant bientôt en échec" }));
@@ -118,7 +123,7 @@ router.get("/expiring-docs", isAnyUser, async (req, res, next) => {
 router.get("/expired-docs", isAnyUser, async (req, res, next) => {
   try {
     const docs = await vehicleDocumentationService.getExpiredDocuments(ownerScopeOf(req.user));
-    return res.status(200).json(docs);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, docs));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des documents expirés en échec" }));
@@ -312,7 +317,7 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
       },
     );
     
-    return res.status(200).json(vehicle);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, vehicle));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour du kilométrage en échec" }));
@@ -355,7 +360,7 @@ router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
       },
     );
     
-    return res.status(200).json(vehicle);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, vehicle));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "mise à jour de la position maintenance en échec" }));
@@ -369,7 +374,7 @@ router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
 router.get("/document-stats", isAnyUser, async (req, res, next) => {
   try {
     const stats = await vehicleDocumentationService.getDocumentStats(ownerScopeOf(req.user));
-    return res.status(200).json(stats);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, stats));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "statistiques documents en échec" }));
@@ -383,7 +388,7 @@ router.get("/document-stats", isAnyUser, async (req, res, next) => {
 router.get("/all-with-status", isAnyUser, async (req, res, next) => {
   try {
     const vehicles = await vehicleDocumentationService.getAllVehiclesWithDocStatus(ownerScopeOf(req.user));
-    return res.status(200).json(vehicles);
+    return res.status(200).json(redactVehiclePriceDeep(req.user, vehicles));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des véhicules avec statut documents en échec" }));

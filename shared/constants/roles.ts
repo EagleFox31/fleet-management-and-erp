@@ -184,7 +184,18 @@ export const DOCUMENT_RENEWAL_VIEWER_ROLES = [...DOCUMENT_RENEWAL_WRITER_ROLES, 
  */
 export const VEHICLE_EDIT_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 export const VEHICLE_TANK_CAPACITY_ONLY_ROLES = ["logistics"] as const satisfies readonly AppRole[];
-export const VEHICLE_PATCH_ROLES = [...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as const satisfies readonly AppRole[];
+/** Secrétariat : atteint le PATCH véhicule pour le seul prix d'achat (décision du 3 novembre 2026). */
+export const VEHICLE_PRICE_ONLY_PATCH_ROLES = ["secretary"] as const satisfies readonly AppRole[];
+export const VEHICLE_PATCH_ROLES = [...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES, ...VEHICLE_PRICE_ONLY_PATCH_ROLES] as const satisfies readonly AppRole[];
+
+/**
+ * Champs que les rôles hors `VEHICLE_EDIT_ROLES` peuvent envoyer au PATCH véhicule. Tout autre champ,
+ * ou un corps vide, est refusé en 403.
+ */
+export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  logistics: ["tankCapacityL", "purchasePrice"],
+  secretary: ["purchasePrice"],
+};
 
 /**
  * Gestionnaires de la carte carburant (`isFuelCardManager`). Seuls eux suppriment un plein qui a
@@ -194,7 +205,37 @@ export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as co
 
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
 export function canEditTankCapacity(role: string | null | undefined): boolean {
-  return (VEHICLE_PATCH_ROLES as readonly string[]).includes(String(role ?? ""));
+  return ([...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Lecture du prix d'achat d'un véhicule (`vehicles.purchasePrice`), décision du 3 novembre 2026 :
+ * administrateur, logistique et secrétariat seulement. Tout autre rôle (chauffeur, client, chef
+ * d'atelier, technicien, magasinier, direction…) ne le reçoit ni dans les réponses des routes
+ * véhicule, mission, pneus, coûts de mission et exports, ni dans les trames temps réel.
+ * Le serveur le retire par `redactVehiclePrice[Deep]` (server/lib/vehicle-price-scope.ts) ; l'interface
+ * masque le bloc avec `canReadVehiclePurchasePrice`. Un test d'hygiène
+ * (tests/unit/server/vehicle-select-hygiene.test.ts) gèle les lectures entières de `vehicles`.
+ *
+ * Le tableau de bord de direction (rôle management) sert la valeur d'acquisition par véhicule
+ * (`acquisitionHT`) : c'est voulu, la direction la voit.
+ */
+export const VEHICLE_PURCHASE_PRICE_READ_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+
+export function canReadVehiclePurchasePrice(role: string | null | undefined): boolean {
+  return (VEHICLE_PURCHASE_PRICE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Écriture du prix d'achat (décision du 3 novembre 2026) : administrateur, logistique et secrétariat.
+ * La direction reste en lecture seule, le chef d'atelier n'y a pas droit. Cette liste ne change pas
+ * qui peut appeler `PATCH` ou `POST /api/vehicles` : elle refuse seulement la clé `purchasePrice`
+ * aux autres rôles.
+ */
+export const VEHICLE_PURCHASE_PRICE_WRITE_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+
+export function canWriteVehiclePurchasePrice(role: string | null | undefined): boolean {
+  return (VEHICLE_PURCHASE_PRICE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */

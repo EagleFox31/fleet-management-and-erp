@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "@/lib/api-error";
-import { formatLockTime, lockoutMessageOf } from "@/lib/lockout-message";
+import { ApiError, toApiError } from "@/lib/api-error";
+import { formatLockTime, lockoutMessageOf, loginFailureOf } from "@/lib/lockout-message";
 
 const locked = (lockedUntil: string) =>
   new ApiError(429, "Trop de tentatives", { message: "Trop de tentatives", code: "RATE_LIMITED", lockedUntil });
@@ -24,5 +24,25 @@ describe("message de compte verrouillé", () => {
     expect(lockoutMessageOf(new ApiError(429, "x", { message: "x", code: "RATE_LIMITED" }))).toBeNull();
     expect(lockoutMessageOf(new ApiError(401, "x", {}))).toBeNull();
     expect(lockoutMessageOf(new Error("boom"))).toBeNull();
+  });
+});
+
+describe("échec de connexion par panne serveur (#254)", () => {
+  it("une 5xx donne le message générique et sa référence, pas « vérifiez vos identifiants »", async () => {
+    const response = new Response(JSON.stringify({ message: "Erreur interne", code: "INTERNAL", requestId: "req-254" }), {
+      status: 503,
+      headers: { "x-request-id": "req-254" },
+    });
+    const failure = loginFailureOf(await toApiError(response));
+    expect(failure.kind).toBe("unavailable");
+    expect(failure.message).toContain("req-254");
+    expect(failure.message).not.toMatch(/identifiants/i);
+  });
+
+  it("un 401 reste un échec ordinaire, avec le message habituel de l'écran", () => {
+    expect(loginFailureOf(new ApiError(401, "Identifiants invalides", { message: "Identifiants invalides" }))).toEqual({
+      kind: "other",
+      message: null,
+    });
   });
 });

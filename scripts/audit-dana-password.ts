@@ -1,9 +1,12 @@
 import { Pool } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { guardDatabaseConnection } from "../server/lib/production-db-guard";
 
 const targetUsername = process.argv[2] ?? "dana";
 
+// Hors production, refuse la base marquée production (ALLOW_PRODUCTION_DATABASE=1 pour une intervention voulue).
+guardDatabaseConnection("audit-dana-password");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const { rows } = await pool.query(
   `SELECT username, role, password FROM users WHERE username = $1 AND deleted_at IS NULL LIMIT 1`,
