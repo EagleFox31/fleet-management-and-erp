@@ -81,3 +81,12 @@ Entrées ajoutées à la fin, une par lot.
 - **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
 - **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
 - **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.
+## 2026-11-04T13:22:03+01:00 — #281 cycle d'alertes à requêtes bornées
+- **Statut** : fait, PR brouillon empilée sur #287
+- **Quoi** :
+  - `alert-service.ts` : candidates en lot émises en fin de passage, chargements groupés, ordres de travail ouverts sans plafond de 50, `fuelRecipientRoles()` lu dans `alert_recipient_settings`.
+  - Réserves 3 et 4 de #287 : la clé et le lien de l'alerte de consommation sont alignés sur le trigger, et le lien `/vehicles/<id>/fuel`, qui ne correspondait à aucune route, est corrigé. Index `fuel_records (vehicle_id, date, id)`.
+- **Comment** : `AsyncLocalStorage` limité au passage planifié, donc les alertes nées d'une requête HTTP restent immédiates. Les listes passent en un seul paramètre jsonb. Une tranche d'insertion en échec est rejouée ligne à ligne.
+- **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 3/4 rouges.
+- **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
