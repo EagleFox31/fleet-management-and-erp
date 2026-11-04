@@ -7,6 +7,7 @@ import { users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * ADM5 : connexion chauffeur par PIN (`POST /api/auth/pin-login`).
@@ -56,7 +57,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const keys = ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`]);
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys.map(storedLockoutKey)]);
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });

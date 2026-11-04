@@ -1,4 +1,5 @@
 import { LOCKOUT_DEFAULTS, type LockoutConfig } from "@shared/contracts/auth-lockout";
+import { normalizeLoginIdentifier } from "../lib/login-identifier";
 
 export interface LockState {
   failedCount: number;
@@ -21,7 +22,8 @@ export function lockoutConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Lock
 }
 
 /** Nom normalise : le compteur ne depend ni de la casse ni des espaces. */
-export const normalizeUsername = (u: unknown): string => String(u ?? "").trim().toLowerCase();
+/** Source unique : `server/lib/login-identifier.ts` (même normalisation pour la clé et l'empreinte). */
+export const normalizeUsername = normalizeLoginIdentifier;
 
 export const isLocked = (s: LockState, now: Date): boolean => !!s.lockedUntil && s.lockedUntil.getTime() > now.getTime();
 

@@ -10,8 +10,15 @@ export interface LockoutGuardOptions {
   now?: () => Date;
   /** Champ du corps portant l'identifiant (defaut "username"). */
   usernameField?: string;
-  /** Prefixe de la cle du compteur : separe les espaces (mot de passe, PIN). */
+  /** Prefixe de la cle du compteur : separe les espaces (mot de passe, PIN, changement de mot de passe). */
   keyPrefix?: string;
+  /** Message du 429 (defaut : tentatives de connexion). */
+  lockedMessage?: string;
+  /**
+   * Identifiant compte, a la place du champ du corps : pour une route sous session
+   * (changement de mot de passe), la cle est le compte de session, jamais une saisie.
+   */
+  keyOf?: (req: Parameters<RequestHandler>[0]) => string | number | null | undefined;
 }
 
 /**
@@ -23,7 +30,7 @@ export function loginLockoutGuard(opts: LockoutGuardOptions): RequestHandler {
   const now = opts.now ?? (() => new Date());
   const field = opts.usernameField ?? "username";
   return async (req, res, next) => {
-    const raw = normalizeUsername(req.body?.[field]);
+    const raw = normalizeUsername(opts.keyOf ? opts.keyOf(req) : req.body?.[field]);
     const username = raw ? (opts.keyPrefix ?? "") + raw : raw;
     if (!username) return next();
     const requestId = (req as { requestId?: string }).requestId;
@@ -31,7 +38,7 @@ export function loginLockoutGuard(opts: LockoutGuardOptions): RequestHandler {
       const state = await opts.store.get(username);
       if (isLocked(state, now())) {
         return next(
-          new AppError(429, "Trop de tentatives de connexion. Réessayez plus tard.", {
+          new AppError(429, opts.lockedMessage ?? "Trop de tentatives de connexion. Réessayez plus tard.", {
             code: "RATE_LIMITED",
             details: { lockedUntil: state.lockedUntil!.toISOString() },
           }),
