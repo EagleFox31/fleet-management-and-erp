@@ -26,6 +26,8 @@ import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated } from "../lib/alert-broadcast";
 
 const log = moduleLogger("alert-service");
+/** Taille des échantillons de candidates dans le journal récapitulatif d'emitAlerts. */
+const SAMPLE_SIZE = 5;
 
 /** Clé de rappel quotidien (ALR1) : même objet, même jour UTC = même alerte. */
 export function dailyReminderDedupeKey(type: string, title: string, link: string, now: Date = new Date()): string {
@@ -999,11 +1001,28 @@ export class AlertService {
         log.error({ err: error, title: candidates[0].title, type: candidates[0].type }, "création d'alerte en échec");
         return 0;
       }
+      const describe = (c: AlertCandidate) => ({ title: c.title, type: c.type });
+      // Base injoignable : la reprise unitaire échouerait pareil, tout le lot est perdu.
+      if (isConnectionError(error)) {
+        log.error(
+          {
+            err: error,
+            failed: 0,
+            abandoned: candidates.length,
+            lost: candidates.length,
+            candidates: candidates.length,
+            abandonedSample: candidates.slice(0, SAMPLE_SIZE).map(describe),
+          },
+          "création d'alerte en échec",
+        );
+        return 0;
+      }
       // Un lot en échec ne doit pas emporter tout le passage : reprise objet par objet,
       // un seul journal récapitulatif (pas une ligne par candidate si la base est tombée).
       log.warn({ err: error, candidates: candidates.length }, "lot d'alertes en échec, reprise objet par objet");
       let created = 0;
       const failed: Array<{ title: string; type: string }> = [];
+      let abandonedSample: Array<{ title: string; type: string }> = [];
       let firstError: unknown;
       let consecutiveFailures = 0;
       let abandoned = 0;
@@ -1019,6 +1038,7 @@ export class AlertService {
           // candidate par candidate ; le reste est compté comme perdu.
           if (isConnectionError(candidateError) || consecutiveFailures >= MAX_CONSECUTIVE_RETRY_FAILURES) {
             abandoned = candidates.length - index - 1;
+            abandonedSample = candidates.slice(index + 1, index + 1 + SAMPLE_SIZE).map(describe);
             break;
           }
         }
@@ -1031,7 +1051,8 @@ export class AlertService {
             abandoned,
             lost: failed.length + abandoned,
             candidates: candidates.length,
-            sample: failed.slice(0, 5),
+            sample: failed.slice(0, SAMPLE_SIZE),
+            abandonedSample,
           },
           "création d'alerte en échec",
         );

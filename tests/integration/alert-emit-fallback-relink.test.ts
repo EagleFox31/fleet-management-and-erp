@@ -8,6 +8,12 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
+const alertLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
+vi.mock("../../server/lib/logger", async (importActual) => {
+  const actual = await importActual<typeof import("../../server/lib/logger")>();
+  return { ...actual, moduleLogger: (name: string) => (name === "alert-service" ? alertLog : actual.moduleLogger(name)) };
+});
+
 /** Relecture de #297 : repli par objet d'emitAlerts, et reprise des liens /vehicles/<id>/fuel. */
 const ids = createIdBag();
 let userId = 0;
@@ -78,9 +84,33 @@ describe("emitAlerts : coupe-circuit sur la reprise", () => {
     expect(result).toEqual({ created: 0, calls: 1 + MAX_CONSECUTIVE_RETRY_FAILURES });
   });
 
-  it("erreur de connexion : arrêt dès la première reprise", async () => {
+  it("lot entier en échec sur une erreur de connexion : aucune reprise unitaire, tout est perdu", async () => {
+    alertLog.error.mockClear();
     const result = await attempts(Object.assign(new Error("connexion refusée"), { code: "ECONNREFUSED" }));
-    expect(result).toEqual({ created: 0, calls: 2 });
+    expect(result).toEqual({ created: 0, calls: 1 });
+    const [context] = alertLog.error.mock.calls.at(-1)!;
+    expect(context).toMatchObject({ failed: 0, abandoned: 10, lost: 10, candidates: 10 });
+    expect(context.abandonedSample).toHaveLength(5);
+  });
+
+  it("erreur de connexion en cours de reprise : arrêt, les abandonnées sont échantillonnées (5 au plus)", async () => {
+    alertLog.error.mockClear();
+    const service = alertService as any;
+    const spy = vi
+      .spyOn(service, "emitAlertBatch")
+      .mockRejectedValueOnce(new Error("lot en échec"))
+      .mockRejectedValue(Object.assign(new Error("connexion perdue"), { code: "ECONNRESET" }));
+    try {
+      const created = await service.emitAlerts(candidates);
+      expect(created).toBe(0);
+      expect(spy.mock.calls.length).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+    const [context] = alertLog.error.mock.calls.at(-1)!;
+    expect(context).toMatchObject({ failed: 1, abandoned: 9, lost: 10 });
+    expect(context.sample).toHaveLength(1);
+    expect(context.abandonedSample).toEqual(candidates.slice(1, 6).map((c) => ({ title: c.title, type: c.type })));
   });
 
   it("reconnaît les erreurs de connexion, y compris enveloppées", () => {
