@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,11 +17,18 @@ case "$*" in
 esac
 `;
 
+/** AAAAMMJJ local à `days` jours d'aujourd'hui, comme `date -d '<days> days' +%Y%m%d` dans le script. */
 function dayOffset(days: number): string {
-  return execFileSync("bash", ["-c", `date -d '${days} days' +%Y%m%d`], { encoding: "utf-8" }).trim();
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
 
-describe.skipIf(!hasBash)("deploy/backup-db.sh", () => {
+// Chaque test lance le script, qui enchaîne une dizaine de sous-processus. Sous Git Bash (Windows),
+// fork est émulé et coûte cher : sous la charge de la suite complète, un test dépassait les 5 s par
+// défaut alors qu'il en prend 1 isolé. Le délai suit le coût réel d'un script shell, pas celui d'un
+// test en mémoire.
+describe.skipIf(!hasBash)("deploy/backup-db.sh", { timeout: 30_000 }, () => {
   let dir: string;
   let backups: string;
   let stub: string;

@@ -130,18 +130,19 @@ describe("/api/kpi/* : rôles", { timeout: 120000 }, () => {
 describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
   const q = "?from=2001-01-01&to=2001-12-31";
 
-  it("pannes : tous les mois de la période, zéros compris", async () => {
+  it("pannes : tous les mois de la période, total et moyenne cohérents avec la série", async () => {
     const res = await call("GET", KPI_FAILURES_PATH + q, "workshop_manager");
     expect(failuresResponseSchema.safeParse(res.body).success).toBe(true);
-    expect(res.body.series.map((p: { month: string }) => p.month)).toEqual(
-      Array.from({ length: 12 }, (_, i) => `2001-${String(i + 1).padStart(2, "0")}`),
-    );
-    expect(res.body.series.every((p: { count: number }) => p.count === 0)).toBe(true);
-    expect(res.body.total).toBe(0);
-    expect(res.body.monthlyAverage).toBe(0);
+    // Invariants, pas « 2001 est vide » : d'autres suites créent des OT correctifs datés de 2001
+    // (work-order-labor-rate, work-order-cost), et la base Docker de test est partagée entre sessions.
+    const months = Array.from({ length: 12 }, (_, i) => `2001-${String(i + 1).padStart(2, "0")}`);
+    expect(res.body.series.map((m: { month: string }) => m.month)).toEqual(months);
+    const sum = res.body.series.reduce((acc: number, m: { count: number }) => acc + m.count, 0);
+    expect(res.body.total).toBe(sum);
+    expect(res.body.monthlyAverage).toBe(Math.round((sum / 12) * 100) / 100);
   });
 
-  it("pannes : une panne sur un véhicule du test ne remplit que son mois, les autres restent à zéro", async () => {
+  it("pannes : une panne sur un véhicule du test : seul son mois augmente de 1, les 11 autres ne bougent pas", async () => {
     // Année propre au test : la base est partagée, on compare donc à une lecture de référence.
     const period = "?from=2002-01-01&to=2002-12-31";
     const read = async () => (await call("GET", KPI_FAILURES_PATH + period, "workshop_manager")).body;
