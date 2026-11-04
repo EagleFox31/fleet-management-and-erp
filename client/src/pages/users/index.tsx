@@ -28,16 +28,9 @@ interface User {
 export default function UsersPage() {
   const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-
-  // Fonction pour forcer la mise à jour de la liste
-  const refreshUsersList = () => {
-    setRefreshTrigger(prev => prev + 1);
-  };
-
   // Requête pour obtenir la liste des utilisateurs
   const { data: users, isLoading, refetch } = useQuery<any>({
-    queryKey: ["/api/users", refreshTrigger],
+    queryKey: ["/api/users"],
     refetchInterval: false,
     retry: 1,
     staleTime: 5000
@@ -94,7 +87,6 @@ export default function UsersPage() {
               onSuccess={() => {
                 setIsAddDialogOpen(false);
                 refetch(); // Force le rafraîchissement de la liste
-                refreshUsersList(); // Déclenche la mise à jour via le refreshTrigger
                 toast({
                   title: "Utilisateur créé",
                   description: "Le nouvel utilisateur a été créé avec succès",

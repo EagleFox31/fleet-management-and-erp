@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
-import { extractRoutes, matchingClose, parseMounts, sourceFiles, stripComments } from "./route-guard-scan";
+import { extractRoutes, matchingClose, parseMounts, sourceFiles, splitTopLevel, stripComments } from "./route-guard-scan";
 
 /**
  * Croise les URL des `queryKey` du client avec les routes GET servies par le serveur (#280).
@@ -83,7 +83,24 @@ function enclosingObjectStart(source: string, at: number): number {
   return -1;
 }
 
-/** `queryKey: ["/api/..."` littérales du client (premier élément du tableau). */
+/**
+ * Segments ajoutés au chemin par la queryFn par défaut (`buildQueryUrl`, #285) : chaque élément
+ * scalaire après l'URL, jusqu'au premier objet. Chaîne littérale = segment littéral ; autre
+ * expression = paramètre. `null`, `undefined`, booléens et chaîne vide sont sautés, comme à l'exécution.
+ * Une variable qui contient un objet passe ici pour un paramètre : écart signalé à tort, jamais un faux vert.
+ */
+function keySegments(elements: string[]): string[] {
+  const segments: string[] = [];
+  for (const element of elements) {
+    if (element.startsWith("{")) break;
+    if (/^(null|undefined|true|false|""|''|``)$/.test(element)) continue;
+    const literal = element.match(/^(["'`])([^"'`]*)\1$/);
+    segments.push(literal && !literal[2].includes("${") ? literal[2] : "${}");
+  }
+  return segments;
+}
+
+/** `queryKey: ["/api/...", ...]` littérales du client : l'URL, et en `fetch` les segments scalaires qui la suivent. */
 export function extractQueryKeyUrls(file: string, rawSource: string): QueryKeyUse[] {
   const source = stripComments(rawSource);
   const out: QueryKeyUse[] = [];
@@ -93,7 +110,17 @@ export function extractQueryKeyUrls(file: string, rawSource: string): QueryKeyUs
     const object = open === -1 || close === -1 ? "" : source.slice(open, close + 1);
     const mode = open !== -1 && CACHE_CALL.test(source.slice(Math.max(0, open - 80), open)) ? "prefix" : "fetch";
     if (mode === "fetch" && /\bqueryFn\s*[:,(]/.test(object)) continue;
-    out.push({ file, url: m[2].split("?")[0], mode });
+    let url = m[2].split("?")[0];
+    if (mode === "fetch") {
+      // une invalidation reste un préfixe : seul le fetch ajoute les segments au chemin
+      const arrayOpen = m.index! + m[0].indexOf("[");
+      const arrayClose = matchingClose(source, arrayOpen);
+      if (arrayClose !== -1) {
+        const extra = keySegments(splitTopLevel(source.slice(arrayOpen + 1, arrayClose)).slice(1));
+        if (extra.length > 0) url = `${url.replace(/\/+$/, "")}/${extra.join("/")}`;
+      }
+    }
+    out.push({ file, url, mode });
   }
   return out;
 }

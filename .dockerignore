@@ -13,5 +13,8 @@ backup
 .env.*
 *.log
 docs
+# sauf les deux documents servis par GET /api/documentation/:filename (#285)
+!docs/guides/GUIDE_UTILISATEUR.md
+!docs/qa/CAHIER_TESTS_UTILISATEUR.md
 # attached_assets reste dans le contexte : le client en importe des images (écran de connexion)
 # et le serveur y lit le papier à en-tête TAY (PDF, Word).
