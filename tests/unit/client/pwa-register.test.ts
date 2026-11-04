@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clientLogger } from "../../../client/src/lib/logger";
 import { registerPwaServiceWorker } from "../../../client/src/lib/pwa-register";
 
 describe("enregistrement du service worker PWA", () => {
@@ -28,7 +29,23 @@ describe("enregistrement du service worker PWA", () => {
     });
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("échec d'enregistrement : journalisé par clientLogger, pas par console (AGENTS §10)", async () => {
+    const warn = vi.spyOn(clientLogger, "warn").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failure = new Error("refus");
+    register.mockRejectedValueOnce(failure);
+    registerPwaServiceWorker({ isProd: true });
+    loadHandler?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warn).toHaveBeenCalledWith("[PWA] Service Worker registration failed", { error: failure });
+    expect(consoleWarn).not.toHaveBeenCalled();
+  });
 
   it("en développement : n'enregistre rien et retire les workers déjà installés", async () => {
     registerPwaServiceWorker({ isProd: false });

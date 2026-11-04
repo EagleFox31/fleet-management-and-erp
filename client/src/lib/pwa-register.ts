@@ -1,3 +1,5 @@
+import { clientLogger } from "@/lib/logger";
+
 // Enregistrement du Service Worker PWA
 //
 // Le worker sert les modules depuis le cache sans les revalider. C'est sans risque en
@@ -61,7 +63,7 @@ export function registerPwaServiceWorker(
         };
       })
       .catch((error) => {
-        console.warn('[PWA] Service Worker registration failed:', error);
+        clientLogger.warn('[PWA] Service Worker registration failed', { error });
       });
   });
 }
