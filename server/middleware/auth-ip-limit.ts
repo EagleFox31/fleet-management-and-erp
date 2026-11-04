@@ -13,6 +13,9 @@ import { AppError } from "../lib/app-error";
  * - Jetons : chaque requete en reserve un AVANT le handler (une rafale simultanee est comptee).
  *   Un succes (2xx) ou un corps invalide (400) rend SON jeton, jamais plus, et ne reinitialise pas la
  *   fenetre : intercaler ses propres succes ne libere aucun echec.
+ * - Une 5xx reste comptee ici, a l'inverse de la garde par compte qui la rend (une panne n'y est pas un
+ *   echec de connexion) : ce plafond est le filet anti-abus, une rafale qui provoque des pannes ne doit
+ *   pas en sortir. Tests : `auth-ip-limit.test.ts` (« une 5xx reste comptee » et « 400 et 5xx rendues »).
  * - Adresse : `req.ip` sous `trust proxy 1` (server/app.ts). Seul le saut ajoute par le proxy compte ;
  *   les entrees X-Forwarded-For forgees en amont sont ignorees.
  * - Memoire bornee : `maxEntries` adresses au plus. Les fenetres expirees sont purgees d'abord, puis

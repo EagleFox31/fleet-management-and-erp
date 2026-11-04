@@ -30,7 +30,7 @@ export interface LockoutGuardOptions {
  * - 2xx -> remise a zero ;
  * - 400 ou 5xx -> tentative rendue : corps invalide ou panne, la reponse ne dit rien du secret
  *   (contrat : une panne n'est pas un echec de connexion). Seuls les 401 consomment le seuil, la borne
- *   « au plus maxAttempts reponses 401 » tient donc ;
+ *   « au plus maxAttempts reponses 401 » tient donc. La limite par IP (auth-ip-limit), elle, compte la 5xx ;
  * - tout autre statut, ou connexion coupee sans reponse -> la tentative reste comptee (le verrou expire seul).
  * Le 429 est une AppError : lockedUntil part dans le corps via AppError.details (T-08).
  */
