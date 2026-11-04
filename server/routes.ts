@@ -4855,18 +4855,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fs = await import('fs/promises');
       const path = await import('path');
       
-      // Sécurité: vérifier que le fichier est bien dans la liste autorisée
-      const allowedFiles = ['GUIDE_UTILISATEUR.md', 'CAHIER_TESTS_UTILISATEUR.md'];
-      if (!allowedFiles.includes(filename)) {
+      // Sécurité : seuls ces fichiers sont servis, à leur emplacement sous docs/ (#285)
+      const allowedFiles: Record<string, string> = {
+        'GUIDE_UTILISATEUR.md': 'docs/guides/GUIDE_UTILISATEUR.md',
+        'CAHIER_TESTS_UTILISATEUR.md': 'docs/qa/CAHIER_TESTS_UTILISATEUR.md',
+      };
+      const relativePath = Object.prototype.hasOwnProperty.call(allowedFiles, filename) ? allowedFiles[filename] : undefined;
+      if (!relativePath) {
         return res.status(400).json({ message: "Fichier non autorisé" });
       }
       
-      const filePath = path.join(process.cwd(), filename);
+      const filePath = path.join(process.cwd(), relativePath);
       const content = await fs.readFile(filePath, 'utf-8');
       
       return res.status(200).json({ content, filename });
     } catch (error) {
-      console.error("Error reading documentation file:", error);
+      log.error({ err: error, requestId: req.requestId, filename: req.params.filename }, "lecture du fichier de documentation");
       return res.status(500).json({ message: "Erreur lors de la lecture du fichier" });
     }
   });

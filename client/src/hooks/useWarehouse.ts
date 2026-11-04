@@ -273,13 +273,6 @@ export function useMostUsedParts(limit?: number) {
   });
 }
 
-export function usePartRealStock(partId: number | null) {
-  return useQuery<any>({
-    queryKey: ['/api/warehouse/parts', partId, 'real-stock'],
-    enabled: !!partId && partId > 0,
-  });
-}
-
 export function useWarehouseRefresh() {
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/warehouse'] });
