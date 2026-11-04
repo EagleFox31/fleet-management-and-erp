@@ -68,7 +68,7 @@ const log = moduleLogger("routes");
  * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
  * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
  */
-const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 /** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
 function loginUsernameRef(username: string): string {
