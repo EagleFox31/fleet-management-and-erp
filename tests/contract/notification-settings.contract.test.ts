@@ -58,7 +58,7 @@ describe("/api/notifications/settings", () => {
     expect(rows.every((r) => r.inApp && !r.email)).toBe(true);
   });
 
-  it("A désactive documents, B garde la sienne ; userId du corps ignoré ; idempotent", async () => {
+  it("A désactive documents ; autre compte (B) : garde la sienne ; userId du corps ignoré ; idempotent", async () => {
     const patch = { body: [{ topic: "documents", inApp: false, userId: (cookies as any).bId }], cookie: cookies.a };
     const first = await call("PATCH", "/api/notifications/settings", patch);
     expect(first.status).toBe(200);

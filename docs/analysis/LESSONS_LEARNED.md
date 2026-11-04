@@ -2356,6 +2356,52 @@ Sécurité (énumération de comptes, fuite de secret dans les journaux) + test 
 - Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
 - Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
 
+## 2026-11-04 — Routes libre-service : exception T1 déclarée, et un « mot de passe modifié » qui ne l'était pas (R1)
+
+### Contexte
+Huit routes d'écriture (mot de passe, accueil, préférences, boîte d'alertes) restaient gelées en T1 : sans garde de rôle, par nature, puisqu'elles servent tout compte connecté. La garde `selfScoped` de #235 jugeait le périmètre en analysant le handler, et chaque relecture la contournait.
+
+### Cause racine
+- Le cliquet T1 n'avait que deux issues, « garde de rôle » ou « gelée ». Aucune place pour une route légitimement ouverte à tous les rôles.
+- En écrivant le contrat, on a vu que `POST /api/users/change-password` répondait 200 quand `storage.updateUser` échouait : la méthode avale l'erreur et renvoie `undefined`, et le handler ne regardait pas le retour.
+
+### Classification
+Outillage de garde-fou (exception non modélisée) + erreur avalée, l'utilisateur croyant son mot de passe changé.
+
+### Résolution
+- `tests/unit/server/support/write-routes-self-service.ts` : table déclarée, route par route, avec son contrat de périmètre et la donnée touchée.
+- Les 4 routes de `routes.ts` déclarent `isAnyUser`, comme les routes d'alertes et de préférences.
+- change-password répond 503 quand l'enregistrement n'a pas eu lieu.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : pour chaque entrée libre-service, la route existe, déclare `isAnyUser`, n'est ni gelée ni publique, et son contrat existe et contient l'appel déclaré. Mutation : `isAnyUser` retiré d'une route, le test échoue.
+- `tests/contract/self-service-scope.contract.test.ts` : un client A agit avec l'`userId` de B dans le corps, et la ligne d'accueil comme le mot de passe de B restent inchangés. L'enregistrement non fait répond 503.
+
+### Règle Projet (obligatoire)
+- Une exception à un cliquet de sécurité se déclare par clé, avec sa preuve comportementale (un contrat). Elle ne passe jamais par l'analyse du code qu'elle exempte.
+- Après un appel de storage qui renvoie `undefined` en cas d'erreur, tester le retour avant de répondre « fait ».
+
+## 2026-11-04 — Near miss : exception de cliquet prouvée par la présence d'une chaîne (R1, audit)
+
+### Contexte
+L'audit de sécurité de #274 a relevé que la preuve exigée pour une route libre-service était la présence, dans le contrat, du texte de l'appel (`calls`). Le test « sans session : 401 sur chaque route » suffisait à la fournir.
+
+### Cause racine
+Le garde-fou contrôlait un indice (l'appel apparaît dans le fichier), pas la propriété visée (un compte A ne touche pas aux données de B).
+
+### Classification
+Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il porte. Aucune route n'était fautive.
+
+### Résolution
+- L'appel doit figurer dans un test dont le titre contient « autre compte ». Les quatre contrats concernés ont été renommés en ce sens.
+- Le texte du handler ne doit lire aucun identifiant de compte de la requête (`req.params|query|body` vers `userId`, `user_id`, `ownerId`, `accountId`, accès direct ou déstructuration). C'est un motif de refus, jamais un critère d'acceptation : la preuve positive reste le contrat.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : `selfServiceProblems` refuse les quatre formes de lecture et un contrat dont seul un test 401 appelle la route (tests synthétiques).
+- Mutations jouées : une ligne `req.body.userId` dans change-password fait échouer le cliquet ; « autre compte » retiré du titre du contrat des préférences aussi.
+
+### Règle Projet (obligatoire)
+- Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.
 ## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
 
 ### Contexte
