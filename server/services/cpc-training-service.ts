@@ -71,6 +71,8 @@ export class CPCTrainingService {
         hireDate: driver.hireDate,
         geoTrainingDate: driver.geoTrainingDate,
         cpcStatus: this.calculateCPCStatus(driver.cpcTrainingDate),
+        // Statut enregistré en base : c'est lui que la garde d'affectation d'une mission lit.
+        cpcStatusRecorded: driver.cpcStatus ?? null,
         cpcTrainingDate: driver.cpcTrainingDate,
         cpcStatusUpdatedAt: driver.cpcStatusUpdatedAt,
         expiryDate: expiryDate ? expiryDate.toISOString() : null,

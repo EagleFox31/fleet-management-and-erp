@@ -12,10 +12,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save } from "lucide-react";
+import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save, AlertTriangle } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
+import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
+import { driverCpcStatusOf, getStepBlockReason } from "@/lib/mission-wizard-rules";
 
 const WORKFLOW_STEPS = [
   { number: 1, title: "Client & Mission", description: "Informations de base" },
@@ -102,24 +104,13 @@ export default function NewMission() {
   };
 
   const handleNext = () => {
-    if (currentStep === 3) {
-      if (formData.vehicleId && !isWeightCompatible) {
-        toast({
-          title: "Véhicule incompatible",
-          description: `Le poids cargo (${formData.weight}T) dépasse le tonnage du véhicule (${selectedVehicle?.tonnage ?? "N/A"}T).`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      if (formData.driverId && !isDriverCpcCompatible) {
-        toast({
-          title: "Chauffeur non éligible",
-          description: "Le chauffeur sélectionné n'a pas un statut CPC valide (FORMÉ).",
-          variant: "destructive",
-        });
-        return;
-      }
+    if (stepBlockReason) {
+      toast({
+        title: "Étape incomplète",
+        description: stepBlockReason,
+        variant: "destructive",
+      });
+      return;
     }
 
     if (currentStep < 4) {
@@ -146,7 +137,7 @@ export default function NewMission() {
     if (formData.driverId && !isDriverCpcCompatible) {
       toast({
         title: "Chauffeur non éligible",
-        description: "Le chauffeur sélectionné n'a pas un statut CPC valide (FORMÉ).",
+        description: driverCpc.reason,
         variant: "destructive",
       });
       return;
@@ -198,7 +189,23 @@ export default function NewMission() {
     || vehicleTonnage === null
     || Number.isNaN(vehicleTonnage)
     || cargoWeight <= vehicleTonnage;
-  const isDriverCpcCompatible = !formData.driverId || selectedDriver?.cpcStatus === "FORMÉ";
+  // Même règle que la garde d'affectation du serveur, sur le statut enregistré.
+  const driverCpcStatus = driverCpcStatusOf(selectedDriver);
+  const driverCpc = getDriverCpcEligibility({ cpcStatus: driverCpcStatus });
+  const isDriverCpcCompatible = !formData.driverId || driverCpc.eligible;
+  const stepBlockReason = getStepBlockReason({
+    step: currentStep,
+    clientId: formData.clientId,
+    orderNumber: formData.orderNumber,
+    pickupAddress: formData.pickupAddress,
+    deliveryAddress: formData.deliveryAddress,
+    vehicleId: formData.vehicleId,
+    driverId: formData.driverId,
+    weightCompatible: isWeightCompatible,
+    cargoWeight: formData.weight,
+    vehicleTonnage: selectedVehicle?.tonnage,
+    selectedDriver,
+  });
 
   const isInitialLoading = clientsLoading || vehiclesLoading || driversLoading;
 
@@ -529,11 +536,11 @@ export default function NewMission() {
                         <div>
                           <span className="text-gray-600 dark:text-gray-400">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
-                            selectedDriver.cpcStatus === 'FORMÉ' ? 'bg-green-100 text-green-800' :
-                            selectedDriver.cpcStatus === 'À FORMER' ? 'bg-orange-100 text-orange-800' :
+                            driverCpc.eligible ? 'bg-green-100 text-green-800' :
+                            driverCpcStatus === 'À FORMER' ? 'bg-orange-100 text-orange-800' :
                             'bg-red-100 text-red-800'
                           }`}>
-                            {selectedDriver.cpcStatus}
+                            {driverCpcStatus ?? "Non défini"}
                           </p>
                         </div>
                         {selectedDriver.licenseNumber ? (
@@ -550,7 +557,7 @@ export default function NewMission() {
 
               <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
                 <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  💡 <strong>Astuce:</strong> Vérifiez que le tonnage du véhicule correspond au poids du cargo et que le chauffeur a une formation CPC valide pour ce type de mission.
+                  <strong>Astuce :</strong> Vérifiez que le tonnage du véhicule correspond au poids du cargo et que le chauffeur a une formation CPC valide pour ce type de mission.
                 </p>
               </div>
 
@@ -583,7 +590,7 @@ export default function NewMission() {
                     <p className="text-sm">Sélectionnez un chauffeur pour lancer le contrôle automatique.</p>
                   ) : (
                     <p className="text-sm">
-                      Statut CPC: {selectedDriver?.cpcStatus ?? "Non défini"}
+                      Statut CPC: {driverCpcStatus ?? "Non défini"}
                       {isDriverCpcCompatible ? " - Valide" : " - Non valide (FORMÉ requis)"}
                     </p>
                   )}
@@ -693,7 +700,7 @@ export default function NewMission() {
                         <div className="bg-white dark:bg-gray-700 p-3 rounded">
                           <p className="font-medium">{selectedDriver.firstName} {selectedDriver.lastName}</p>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {selectedDriver.employeeNumber} - {selectedDriver.cpcStatus}
+                            {selectedDriver.employeeNumber} - {driverCpcStatus ?? "Non défini"}
                           </p>
                         </div>
                       ) : (
@@ -710,6 +717,17 @@ export default function NewMission() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {stepBlockReason && (
+            <div
+              role="alert"
+              data-testid="step-block-reason"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p>{stepBlockReason}</p>
             </div>
           )}
 
