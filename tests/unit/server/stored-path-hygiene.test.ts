@@ -25,7 +25,7 @@ const UNBOUNDED_FROZEN: Record<string, string> = {
   "server/init-database.ts:applySqlFile:readFile": "fichiers de migration SQL livrés avec le code",
   "server/lib/tay-header-asset.ts:readTayHeaderImage:readFile": "image d'en-tête livrée avec le code",
   "server/routes.ts:GET /api/documentation/:filename:readFile": "liste blanche de noms de fichiers de documentation",
-  "server/routes.ts:POST /api/admin/import-backup:readFileSync": "fichier choisi parmi le listage du dossier backup/",
+  "server/services/backup-import-service.ts:readBackupFile:readFileSync": "fichier choisi parmi le listage du dossier backup/",
   "server/lib/backup/encrypt.ts:encryptFile:createReadStream": "fichier temporaire de sauvegarde produit par le job",
   "server/lib/backup/encrypt.ts:decryptFile:createReadStream": "fichier de sauvegarde du dossier de sauvegarde configuré",
   "server/lib/backup/encrypt.ts:decryptFile:open": "même fichier de sauvegarde, ouvert pour lire l'en-tête et l'étiquette",

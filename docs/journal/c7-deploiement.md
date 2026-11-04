@@ -114,6 +114,22 @@ Entrées ajoutées à la fin, une par lot.
 - **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
 - **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
 - **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.
+## 2026-11-04T13:58:26+01:00 — suivi #287 : reprises sans effets secondaires, 57014, temps réel
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Restauration de sauvegarde sortie de `routes.ts` vers un routeur `server/api/` et un service, en une transaction avec `suppressSideEffects`.
+  - Même garde dans `scripts/import-7-fuel-records.ts` et le seed.
+  - Trigger : `query_canceled` rattrapé, notification `alert_created` relayée par `db-event-relay`.
+- **Comment** :
+  - Helper `server/lib/suppress-side-effects.ts`, sur le modèle de `preventive-due.ts`.
+  - Le relais relit les alertes par id et diffuse par `broadcastAlertCreated`, sans repli de rôles.
+- **Pourquoi** : réserves 1, 2 et 5 de la relecture de #287.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/fuel-alerts-triggers.test.ts tests/integration/fuel-alerts-realtime.test.ts` ;
+  - `npx vitest run tests/unit/server/backup-import-service.test.ts tests/unit/server/db-event-relay-alerts.test.ts`.
+- **Reste / risques** :
+  - La ligne de dette AGENTS §9 ajoutée par #297 devient caduque : à retirer après la fusion de #297.
+  - Le budget de 500 000 F CFA reste une constante.
 ## 2026-11-04T13:22:03+01:00 — #281 cycle d'alertes à requêtes bornées
 - **Statut** : fait, PR brouillon empilée sur #287
 - **Quoi** :
@@ -121,5 +137,25 @@ Entrées ajoutées à la fin, une par lot.
   - Réserves 3 et 4 de #287 : la clé et le lien de l'alerte de consommation sont alignés sur le trigger, et le lien `/vehicles/<id>/fuel`, qui ne correspondait à aucune route, est corrigé. Index `fuel_records (vehicle_id, date, id)`.
 - **Comment** : `AsyncLocalStorage` limité au passage planifié, donc les alertes nées d'une requête HTTP restent immédiates. Les listes passent en un seul paramètre jsonb. Une tranche d'insertion en échec est rejouée ligne à ligne.
 - **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
-- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 3/4 rouges.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 2/4 rouges.
 - **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+## 2026-11-04T14:18:11+01:00 — suivi #297 : plafond de 50 testé, repli d'emitAlerts, liens carburant repris
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Test du plafond de 50 OT.
+  - `emitAlerts` : repli objet par objet quand le lot échoue.
+  - Reprise au démarrage des liens `/vehicles/<id>/fuel`.
+  - Précision sur la sortie de `remindDaily` pour l'alerte de consommation.
+- **Comment** :
+  - `emitAlerts` enveloppe `emitAlertBatch` : si le lot échoue, chaque candidate est retentée seule, avec un journal récapitulatif (nombre, échantillon, première erreur) plutôt qu'une ligne par candidate.
+  - `relinkLegacyFuelAlerts` (`server/init-database.ts`), appelée au démarrage : `UPDATE ... WHERE link ~ '^/vehicles/[0-9]+/fuel$'`.
+- **Pourquoi** : relecture de #297 par 0a.
+- **Alerte de consommation carburant, sortie de `remindDaily` (#297)** :
+  - Elle porte la clé du trigger, `fuel-consumption:<id du plein>`, à la place de la clé quotidienne `remindDaily`.
+  - Il y a donc une alerte par plein anormal, lue ou non, et plus de rappel quotidien tant que la consommation reste haute.
+  - Le plein anormal suivant produit une nouvelle alerte.
+  - Choix assumé : le trigger et le cycle ne doivent pas se doubler, et un rappel quotidien sur un fait passé (un plein) n'apporte rien.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/alert-work-orders-beyond-50.test.ts tests/integration/alert-emit-fallback-relink.test.ts` ;
+  - preuves rouges : le test des 50 échoue avec l'alert-service d'avant #297, le repli échoue avec celui de #297 (0 au lieu de 2).
+- **Reste / risques** : la reprise des liens ne touche que le motif exact `/vehicles/<n>/fuel` ; `/vehicles/<n>/fuel-cards` et les autres liens restent intacts.
