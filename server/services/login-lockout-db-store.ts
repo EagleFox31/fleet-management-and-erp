@@ -23,6 +23,11 @@ export type LockedUserRow = {
 /** Espaces de cles : un identifiant « 5 » (mot de passe) n'est pas l'utilisateur d'id 5 (PIN). */
 export const PASSWORD_KEY_PREFIX = "pwd:";
 export const PIN_KEY_PREFIX = "pin:";
+/**
+ * Changement de mot de passe (`cpw:<userId>`) : essais sur le mot de passe actuel, compte de session.
+ * Espace a part, sans miroir sur `users` : trop d'echecs ici bloquent le changement, pas la connexion.
+ */
+export const CHANGE_PASSWORD_KEY_PREFIX = "cpw:";
 
 /**
  * Clé stockée pour une clé du garde (M3) : `pin:<id>` telle quelle (un id n'est pas une saisie libre),
@@ -30,7 +35,7 @@ export const PIN_KEY_PREFIX = "pin:";
  * il ne sert qu'au miroir `users`, comme paramètre de requête, jamais écrit.
  */
 export function storedLockoutKey(key: string): string {
-  if (key.startsWith(PIN_KEY_PREFIX) || key.startsWith(PASSWORD_DIGEST_KEY_PREFIX)) return key;
+  if ([PIN_KEY_PREFIX, CHANGE_PASSWORD_KEY_PREFIX, PASSWORD_DIGEST_KEY_PREFIX].some((p) => key.startsWith(p))) return key;
   return PASSWORD_DIGEST_KEY_PREFIX + loginIdentifierDigest(legacyName(key));
 }
 
@@ -41,6 +46,8 @@ export function legacyName(key: string): string {
 
 /** Cible du miroir `users` pour une cle : par id (pin:), sinon par nom d'utilisateur (pwd: ou cle brute). */
 function mirrorTarget(key: string): { where: string; param: string | number } {
+  // Aucun compte ne porte l'id -1 : pas de miroir pour le changement de mot de passe.
+  if (key.startsWith(CHANGE_PASSWORD_KEY_PREFIX)) return { where: "id = $1", param: -1 };
   if (key.startsWith(PIN_KEY_PREFIX)) {
     const id = Number(key.slice(PIN_KEY_PREFIX.length));
     return { where: "id = $1", param: Number.isInteger(id) ? id : -1 };
@@ -144,8 +151,8 @@ export class DbLockoutStore implements LockoutStore {
     );
     if (!rows[0]) return false;
     await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [
-      // Clé par empreinte, plus les formats en clair antérieurs à M3 si la reprise ne les a pas encore vus.
-      [storedLockoutKey(rows[0].u), rows[0].u, PASSWORD_KEY_PREFIX + rows[0].u, PIN_KEY_PREFIX + userId],
+      // Clé par empreinte (connexion), PIN et essais de change-password, plus les formats en clair antérieurs à M3 si la reprise ne les a pas encore vus.
+      [storedLockoutKey(rows[0].u), rows[0].u, PASSWORD_KEY_PREFIX + rows[0].u, PIN_KEY_PREFIX + userId, CHANGE_PASSWORD_KEY_PREFIX + userId],
     ]);
     await recordAudit({
       userId: adminId,

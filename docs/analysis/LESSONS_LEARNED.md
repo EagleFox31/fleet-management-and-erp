@@ -2495,6 +2495,31 @@ Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans
 - Un changement du chargement de vite ou du démarrage serveur se vérifie aussi en `npm run dev` **dans la durée** (au moins 2 minutes, 0 « Restarting »), pas seulement en build de prod.
 - Un fichier temporaire écrit dans le dépôt par un outil est exclu du watch et du `.gitignore`.
 
+## 2026-11-04 — Changement de mot de passe : essais du mot de passe actuel sans limite
+
+- **Contexte** : `POST /api/users/change-password` vérifie le mot de passe actuel, mais aucun compteur ne
+  s'y appliquait, alors que la connexion est limitée depuis P-03.
+- **Cause racine** : le garde de verrouillage ne savait lire sa clé que dans le corps (`username`). Une
+  route authentifiée, dont la clé est le compte de session, ne pouvait pas l'utiliser.
+- **Classification** : sécurité, contrôle absent sur un second point d'entrée du même secret.
+- **Résolution** : `loginLockoutGuard` accepte `keyOf(req)`. Sur change-password, la clé vaut
+  `cpw:<id de session>`, avec le même seuil et la même durée que la connexion. Ce compteur est à part de
+  celui de la connexion : bloquer le changement ne bloque pas la connexion, et l'inverse non plus. Il
+  n'a pas de miroir dans `users`, n'est jamais converti en empreinte par la reprise M3, et le
+  déverrouillage admin le lève.
+- **Prévention vérifiable** : `tests/contract/change-password-attempts.contract.test.ts` couvre
+  plusieurs cas :
+  - N échecs puis 429, même avec le bon mot de passe ;
+  - les autres comptes et la connexion ne sont pas touchés ;
+  - un succès remet le compteur à zéro ;
+  - un corps invalide n'est pas compté ;
+  - le déverrouillage admin lève ce verrou.
+
+  `tests/integration/login-identifier-migration.test.ts` vérifie que la clé `cpw:` reste telle quelle.
+- **Leçon** : tout point d'entrée qui vérifie un secret (mot de passe, PIN, code) passe par le même
+  compteur. Un garde dont la clé est codée en dur sur le corps de la requête ne protège que la route
+  pour laquelle il a été écrit.
+
 ## 2026-11-04 — Fichiers en ajout de fin : chaque fusion mettait les autres PR en conflit
 - Erreur répétée (cinq allers-retours le 4 novembre) : LESSONS, `docs/journal/*.md` et `PASSATION*.md` ne reçoivent que des entrées de fin, mais deux PR qui ajoutaient chacune la sienne entraient en conflit à chaque fusion. Prévention : `merge=union` dans `.gitattributes`, vérifiée par `tests/unit/gitattributes-union.test.ts` (attributs + merge réel de deux branches). Limite : GitHub n'applique pas union côté serveur, le `git merge origin/main` local reste nécessaire mais ne conflicte plus. Règle : n'y écrire qu'en ajout de fin, jamais en réécriture (union dupliquerait la ligne modifiée des deux côtés).
 ## 2026-11-04 — Comptes e2e absents de la base de test : la passe ressemble à une série de défauts produit (#245)

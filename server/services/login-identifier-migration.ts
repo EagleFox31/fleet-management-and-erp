@@ -1,12 +1,15 @@
 import { pool as defaultPool } from "../db";
 import { moduleLogger } from "../lib/logger";
 import { PASSWORD_DIGEST_KEY_PREFIX } from "../lib/login-identifier";
-import { PIN_KEY_PREFIX, storedLockoutKey } from "./login-lockout-db-store";
+import { CHANGE_PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX, storedLockoutKey } from "./login-lockout-db-store";
 
 const log = moduleLogger("login-identifier-migration");
 
-/** Clé en clair : ni PIN (`pin:<id>`), ni empreinte (`pwdh1:`). Préfixes constants, sans `_` ni `%`. */
-const PLAIN_KEY_FILTER = `username_normalized NOT LIKE '${PIN_KEY_PREFIX}%' AND username_normalized NOT LIKE '${PASSWORD_DIGEST_KEY_PREFIX}%'`;
+/** Préfixes qui ne portent pas de nom saisi : PIN et changement de mot de passe (id), empreinte. Sans `_` ni `%`. */
+const NOT_PLAIN_PREFIXES = [PIN_KEY_PREFIX, CHANGE_PASSWORD_KEY_PREFIX, PASSWORD_DIGEST_KEY_PREFIX];
+const notLike = (column: string) => NOT_PLAIN_PREFIXES.map((p) => `${column} NOT LIKE '${p}%'`).join(" AND ");
+/** Clé en clair : ni identifiant numérique préfixé, ni empreinte. */
+const PLAIN_KEY_FILTER = notLike("username_normalized");
 /**
  * Ligne d'audit de blocage d'un nom inconnu, encore en clair :
  * - nom non numerique : dans `entity_ref` ;
@@ -14,7 +17,7 @@ const PLAIN_KEY_FILTER = `username_normalized NOT LIKE '${PIN_KEY_PREFIX}%' AND 
  *   d'audit l'a range dans `entity_id`. Un compte connu a toujours `user_id` ; un nom inconnu, jamais (M-3).
  */
 const PLAIN_LOCK_AUDIT_FILTER = `action = 'lock' AND entity_type = 'user' AND (
-  (entity_ref IS NOT NULL AND entity_ref NOT LIKE '${PIN_KEY_PREFIX}%' AND entity_ref NOT LIKE '${PASSWORD_DIGEST_KEY_PREFIX}%')
+  (entity_ref IS NOT NULL AND ${notLike("entity_ref")})
   OR (entity_ref IS NULL AND user_id IS NULL AND entity_id IS NOT NULL))`;
 
 export interface LoginIdentifierMigrationResult {

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pool } from "../../server/db";
 import { initializeDatabase } from "../../server/init-database";
-import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
+import { CHANGE_PASSWORD_KEY_PREFIX, storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "../../server/services/login-identifier-migration";
 
 // Noms réservés à ce fichier : seules ces lignes sont créées puis nettoyées.
@@ -9,7 +9,8 @@ const A = "lot-m3-migration-probe-a";
 const B = "lot-m3-migration-probe-b";
 const C = "lot-m3-migration-probe-c";
 const D = "lot-m3-migration-probe-d";
-const KEYS = [A, `pwd:${A}`, storedLockoutKey(A), C, storedLockoutKey(C), `pwd:${D}`, storedLockoutKey(D)];
+const CPW = `${CHANGE_PASSWORD_KEY_PREFIX}999999901`;
+const KEYS = [A, `pwd:${A}`, storedLockoutKey(A), CPW, C, storedLockoutKey(C), `pwd:${D}`, storedLockoutKey(D)];
 // Nom inconnu numerique (M-3) : un id qui n'existe pas dans users, range dans entity_id.
 const NUMERIC_NAME = 987_654_321;
 const auditIds: number[] = [];
@@ -34,8 +35,8 @@ describe("reprise M3 : identifiants de connexion en clair vers leur empreinte", 
     const t0 = new Date(Date.now() - 60_000);
     await pool.query(
       `INSERT INTO login_attempts_by_username (username_normalized, failed_count, locked_until, last_failed_at, updated_at)
-       VALUES ($1, 2, NULL, $3, $3), ($2, 5, $4, $3, $3)`,
-      [A, `pwd:${A}`, t0, later],
+       VALUES ($1, 2, NULL, $3, $3), ($2, 5, $4, $3, $3), ($5, 1, NULL, $3, $3)`,
+      [A, `pwd:${A}`, t0, later, CPW],
     );
     const audit = await pool.query(
       `INSERT INTO activity_logs (user_id, action, entity_type, entity_ref, details)
@@ -52,10 +53,12 @@ describe("reprise M3 : identifiants de connexion en clair vers leur empreinte", 
       "SELECT username_normalized, failed_count, locked_until FROM login_attempts_by_username WHERE username_normalized = ANY($1)",
       [KEYS],
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].username_normalized).toBe(storedLockoutKey(A));
-    expect(rows[0].failed_count).toBe(5);
-    expect(new Date(rows[0].locked_until).getTime()).toBe(later.getTime());
+    const byKey = new Map(rows.map((r) => [r.username_normalized, r]));
+    expect([...byKey.keys()].sort()).toEqual([storedLockoutKey(A), CPW].sort());
+    expect(byKey.get(storedLockoutKey(A)).failed_count).toBe(5);
+    expect(new Date(byKey.get(storedLockoutKey(A)).locked_until).getTime()).toBe(later.getTime());
+    // Clé d'essais de change-password (par id, aucun nom saisi) : jamais convertie en empreinte.
+    expect(byKey.get(CPW).failed_count).toBe(1);
 
     const refs = await pool.query("SELECT action, entity_ref FROM activity_logs WHERE id = ANY($1) ORDER BY action", [auditIds]);
     expect(refs.rows).toEqual([

@@ -63,6 +63,20 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
+import { loginLockoutGuard } from "./middleware/login-lockout-guard";
+import { CHANGE_PASSWORD_KEY_PREFIX, DbLockoutStore } from "./services/login-lockout-db-store";
+
+/**
+ * Essais sur le mot de passe actuel (POST /api/users/change-password) : même compteur et même seuil
+ * que la connexion, clé = compte de session. Sans lui, une session volée devine le mot de passe actuel
+ * sans limite, puis le remplace.
+ */
+const changePasswordAttemptsGuard = loginLockoutGuard({
+  store: new DbLockoutStore(),
+  keyPrefix: CHANGE_PASSWORD_KEY_PREFIX,
+  keyOf: (req) => req.session?.userId,
+  lockedMessage: "Trop d'essais du mot de passe actuel. Réessayez plus tard.",
+});
 
 const log = moduleLogger("routes");
 
@@ -871,7 +885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, changePasswordAttemptsGuard, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
