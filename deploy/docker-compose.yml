@@ -1,0 +1,226 @@
+# Une image, une définition de base, deux usages, choisis par profil (depuis le dossier deploy/) :
+#
+#   docker compose --profile site up        serveur de site (PC sur le LAN), guide : docs/deploiement/site-local.md
+#   docker compose --profile vps up -d      VPS : prod, publiée sur 127.0.0.1 seulement, guide : docs/deploiement/vps.md
+#   ... --profile vps --profile recette ...  ajoute la recette (pas les deux par défaut, la RAM est comptée)
+#   ... --profile vps --profile edge ...     ajoute Caddy en conteneur (80/443), seulement si l'hôte n'a pas
+#                                            déjà son reverse proxy
+#
+# Limites mémoire calibrées pour un VPS de 2 Go (prod seule) ; à relever si la RAM le permet.
+#
+# Base : Postgres en conteneur (volume nommé persistant), joint par le driver Neon via wsproxy
+# (DATABASE_WS_PROXY), comme la base de test locale. Seul le .env change d'un usage à l'autre.
+
+x-postgres: &postgres
+  image: postgres:16-alpine
+  restart: unless-stopped
+  mem_limit: 384m
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+x-app: &app
+  image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${APP_TAG:-latest}
+  build:
+    context: ..
+  restart: unless-stopped
+  mem_limit: 768m
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 60s
+
+# Outils (drizzle-kit, tsx) : étape « build » de la même image, jamais exposée.
+x-tools: &tools
+  image: fleet-tools:${APP_TAG:-latest}
+  build:
+    context: ..
+    target: build
+  restart: "no"
+  mem_limit: 768m
+
+services:
+  # Proxy WebSocket -> Postgres pour le driver Neon. Image épinglée par digest (dépôt sans tag versionné).
+  # Non publié sur l'hôte : seul le réseau Compose le joint.
+  wsproxy:
+    image: ghcr.io/neondatabase/wsproxy:latest@sha256:7f2e2149aa6a57ba382a140102fba44f5053f3e44389ccc18adcecf896054efb
+    profiles: [site, vps, recette]
+    mem_limit: 64m
+    environment:
+      ALLOW_ADDR_REGEX: "^db-(site|recette|prod):5432$$"
+      LOG_TRAFFIC: "false"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- profil site
+  db-site:
+    <<: *postgres
+    profiles: [site]
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: ${SITE_DB_PASSWORD:-}  # vide : Postgres refuse de démarrer
+      POSTGRES_DB: fleet
+    volumes:
+      - pgdata-site:/var/lib/postgresql/data
+
+  # Secret de session tiré au premier démarrage, conservé dans un volume (idempotent).
+  site-secret:
+    <<: *tools
+    profiles: [site]
+    # 0600, propriétaire node (uid 1000, celui de l'image runtime) ; droits réappliqués à chaque démarrage.
+    command: ["node", "-e", "const fs=require('fs'),f='/run/site/session_secret';if(!fs.existsSync(f)){fs.writeFileSync(f,require('crypto').randomBytes(32).toString('hex'),{mode:0o600});console.info('Secret de session créé.')}else console.info('Secret de session déjà présent.');fs.chownSync(f,1000,1000);fs.chmodSync(f,0o600)"]
+    volumes:
+      - site-secret:/run/site
+
+  site-schema:
+    <<: *tools
+    profiles: [site]
+    command: ["npx", "tsx", "scripts/db-bootstrap.ts"]
+    environment: &site-db-env
+      DATABASE_URL: postgres://fleet:${SITE_DB_PASSWORD:-}@db-site:5432/fleet
+      DATABASE_WS_PROXY: wsproxy:80/v1
+    depends_on:
+      db-site: { condition: service_healthy }
+      wsproxy: { condition: service_started }
+
+  app-site:
+    <<: *app
+    profiles: [site]
+    # Le secret est lu dans le volume, jamais écrit dans un fichier du dépôt.
+    entrypoint: ["sh", "-c", "SESSION_SECRET=$$(cat /run/site/session_secret) exec node dist/index.js"]
+    environment:
+      <<: *site-db-env
+      PORT: "5000"
+      # http:// : cookie de session non « secure », sinon refusé par le navigateur sur le LAN.
+      APP_URL: ${SITE_APP_URL:-http://localhost:5000}
+      BACKUP_ENABLED: "0"
+      # Optionnel : compte « admin » en plus de recette_admin (12+ caractères, lu dans deploy/.env).
+      # Pas sur app-prod / app-recette : leur env_file le transmet déjà, et une entrée ici l'écraserait.
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+    ports:
+      - "${SITE_PORT:-5000}:5000"
+    volumes:
+      - uploads-site:/app/uploads
+      - site-secret:/run/site:ro
+    depends_on:
+      site-secret: { condition: service_completed_successfully }
+      site-schema: { condition: service_completed_successfully }
+
+  # Données de démonstration fictives (comptes recette_*, véhicules RCT-*), idempotent.
+  site-seed:
+    <<: *tools
+    profiles: [site]
+    command: ["npx", "tsx", "scripts/recette-seed.ts"]
+    environment:
+      <<: *site-db-env
+      APP_ENV: recette
+      RECETTE_DB_HOST_ALLOW: db-site
+      RECETTE_PASSWORD: ${SITE_DEMO_PASSWORD:-}  # vide ou < 12 caractères : le seed refuse
+    depends_on:
+      app-site: { condition: service_healthy }
+
+  # ----------------------------------------------------------------- profil vps
+  db-recette:
+    <<: *postgres
+    profiles: [recette]
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: ${RECETTE_DB_PASSWORD:-}  # vide : Postgres refuse de démarrer
+      POSTGRES_DB: fleet
+    volumes:
+      - pgdata-recette:/var/lib/postgresql/data
+
+  db-prod:
+    <<: *postgres
+    profiles: [vps]
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: ${PROD_DB_PASSWORD:-}  # vide : Postgres refuse de démarrer
+      POSTGRES_DB: fleet
+    volumes:
+      - pgdata-prod:/var/lib/postgresql/data
+
+  schema-recette:
+    <<: *tools
+    profiles: [recette]
+    command: ["npx", "tsx", "scripts/db-bootstrap.ts"]
+    env_file: .env.recette
+    depends_on:
+      db-recette: { condition: service_healthy }
+      wsproxy: { condition: service_started }
+
+  schema-prod:
+    <<: *tools
+    profiles: [vps]
+    command: ["npx", "tsx", "scripts/db-bootstrap.ts"]
+    env_file: .env.prod
+    depends_on:
+      db-prod: { condition: service_healthy }
+      wsproxy: { condition: service_started }
+
+  app-recette:
+    <<: *app
+    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${RECETTE_TAG:-latest}
+    profiles: [recette]
+    env_file: .env.recette
+    environment:
+      PORT: "5000"
+    # Boucle locale seulement : le reverse proxy (Caddy de l'hôte ou profil edge) sert l'extérieur.
+    ports:
+      - "127.0.0.1:${RECETTE_PORT:-5001}:5000"
+    volumes:
+      - uploads-recette:/app/uploads
+    depends_on:
+      schema-recette: { condition: service_completed_successfully }
+
+  app-prod:
+    <<: *app
+    image: ${APP_IMAGE:-ghcr.io/eaglefox31/fleet-management-and-erp}:${PROD_TAG:-definir-PROD_TAG-date}
+    # Image déjà construite, tag daté obligatoire (jamais latest, retour arrière par PROD_TAG) : jamais reconstruite ici.
+    # Sans PROD_TAG, le pull échoue sur le tag « definir-PROD_TAG-date », qui dit quoi faire.
+    build: !reset null
+    profiles: [vps]
+    env_file: .env.prod
+    environment:
+      PORT: "5000"
+    # Boucle locale seulement : le reverse proxy (Caddy de l'hôte ou profil edge) sert l'extérieur.
+    ports:
+      - "127.0.0.1:${PROD_PORT:-5000}:5000"
+    volumes:
+      - uploads-prod:/app/uploads
+    depends_on:
+      schema-prod: { condition: service_completed_successfully }
+
+  # Facultatif : un hôte qui a déjà un reverse proxy sur 80/443 ne l'active pas (conflit de ports).
+  caddy:
+    image: caddy:2
+    profiles: [edge]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RECETTE_DOMAIN: ${RECETTE_DOMAIN:-}
+      PROD_DOMAIN: ${PROD_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 128m
+    # Pas de dépendance à app-recette : la recette est facultative (502 sur son domaine si arrêtée).
+    depends_on:
+      - app-prod
+    restart: unless-stopped
+
+volumes:
+  pgdata-site:
+  pgdata-recette:
+  pgdata-prod:
+  site-secret:
+  uploads-site:
+  uploads-recette:
+  uploads-prod:
+  caddy-data:
+  caddy-config:

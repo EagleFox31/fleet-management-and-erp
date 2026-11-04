@@ -207,6 +207,14 @@ Règles : `docs/journal/README.md`.
 - **RAIDER** : couvert non-régression, liste gelée réduite, failure memory ; sans objet : migration.
 - **Reste / risques** : `/regularize` et `/declare-no-refuel` gardés dans le handler, pas en garde de route ; DELETE /fuel-records/:id et idempotence de /consumption hors périmètre.
 
+## 2026-11-03 — Déploiement VPS (Docker Compose + Caddy)
+
+- **Agent** : fleet-api · **Branche** : `worktree-agent-a6e486e04d1abd7b9` · **Commit** : voir `git log`
+- **Quoi** : `Dockerfile` multi-étapes (node:20-slim, non root), `deploy/docker-compose.yml` (app-recette, app-prod, Caddy), `deploy/Caddyfile`, `deploy/.env.example`, `docs/deploiement/vps.md`, workflow `deploy-recette.yml` (SSH, no-op sans secrets).
+- **Pourquoi** : cible VPS OVH Europe, base Neon externe. Piste Render abandonnée avant commit.
+- **Constats** : uploads écrits sous `<cwd>/uploads` (volume nommé monté sur `/app/uploads`) ; `SESSION_SECRET` retombe sur une valeur publique si absent ; sauvegarde applicative coupée (`pg_dump` absent de l'image) ; santé = `GET /api/health` existante.
+- **Tester** : `docker compose -f deploy/docker-compose.yml config` avec les `.env*` renseignés ; `docker build .` ; `npm run check`, `npm test` verts.
+
 ## 2026-11-03 — Plusieurs chauffeurs par mission : autorisation et saisie carburant (#227)
 
 - **Quoi** : une mission peut avoir plusieurs affectations (un chauffeur chacune). `POST /api/missions/:id/fuel-records` accepte tout chauffeur ayant une affectation active (`ACTIVE_ASSIGNMENT_STATUSES`) et contrôle le véhicule de SA ligne ; une affectation annulée ou refusée ne donne aucun droit. `/regularize` accepte le véhicule de n'importe quelle affectation vivante. `GET /api/missions` et `/:id` gardent `assignment` (celle du chauffeur lecteur, sinon la plus ancienne vivante) et ajoutent `assignments` (un chauffeur ne voit que les siennes). Les listes d'opérations ne dupliquent plus une mission, l'alerte de retard au départ et le CA par véhicule tiennent compte de toutes les affectations.

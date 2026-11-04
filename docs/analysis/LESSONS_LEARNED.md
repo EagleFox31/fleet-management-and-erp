@@ -2074,6 +2074,34 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.
 
+## 2026-11-04 — Image Docker jamais construite, et migrations sautées sans erreur (near miss, #242 → #247)
+
+### Contexte
+- Le kit de déploiement de #242 n'avait jamais été construit pour de vrai. Au premier `docker compose build` (kit serveur de site, #247), quatre défauts sont apparus d'un coup :
+  - `.dockerignore` excluait `attached_assets`, que l'écran de connexion importe : le build vite échouait ;
+  - l'étape runtime ne copiait ni `server/db/migrations` ni `server/db/triggers` ;
+  - `npm start` passait par `cross-env`, une dépendance de développement ;
+  - avec `--omit=dev`, `dist/index.js` ne trouvait plus `vite`, qu'il importe statiquement.
+
+### Cause racine
+- Classification : livraison non prouvée, plus un échec silencieux. Le kit avait été relu, mais jamais exécuté.
+- `applyMigrationSqlFiles` d'`init-database` faisait un `return` quand le dossier des migrations manquait. Une image incomplète aurait donc démarré, healthcheck vert, sur une base à laquelle il manquait colonnes et triggers. Personne ne l'aurait vu avant un écran en erreur.
+
+### Résolution
+- `init-database` lève une erreur si le dossier des migrations est absent, et le démarrage s'arrête. Les triggers échouaient déjà, par `readFile`.
+- Le Dockerfile copie les migrations, les triggers et l'en-tête TAY, et lance `node dist/index.js`. `attached_assets` reste dans le contexte de build.
+- Preuve réelle :
+  - build, `docker compose --profile site up` et connexion par l'IP du LAN ;
+  - un second `up` sans écriture ;
+  - une sauvegarde et restauration `pg_dump` qui annule une modification.
+
+### Prévention (vérifiable)
+- `tests/unit/deploy/dockerfile-runtime.test.ts` vérifie que l'étape runtime copie migrations, triggers et en-tête, que `.dockerignore` n'exclut aucun dossier lu au build ou au démarrage, et que le conteneur démarre sans `cross-env`.
+
+### Règle Projet (obligatoire)
+- Un kit de déploiement n'est pas livré tant qu'il n'a pas été **construit et démarré pour de vrai** (build, `up`, connexion). Une relecture ne suffit pas.
+- Une étape de démarrage qui ne trouve pas ce qu'elle doit appliquer **échoue**. Elle ne saute pas l'étape. Un saut volontaire se journalise en erreur, jamais en silence.
+
 ## 2026-11-03 — Une table sans contrainte d'unicité, un code qui suppose « une seule ligne » (#227)
 
 ### Contexte

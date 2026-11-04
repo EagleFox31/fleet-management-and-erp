@@ -2,12 +2,19 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "../db";
 import { moduleLogger } from "../lib/logger";
+import { sessionCookieFlags } from "../lib/session-cookie";
 import { resolveSessionSecret } from "../lib/session-secret";
 
 const PgSession = connectPgSimple(session);
 
-const isProduction = process.env.NODE_ENV === "production";
-const useCrossSiteCookies = process.env.ALLOW_CROSS_SITE_COOKIES === "true" || isProduction;
+const cookieFlags = sessionCookieFlags();
+if (process.env.NODE_ENV === "production" && !cookieFlags.secure) {
+  // Voulu pour le serveur de site sur un LAN en http:// ; anormal derrière un domaine public.
+  moduleLogger("session").warn(
+    { appUrl: process.env.APP_URL },
+    "Cookie de session non secure en production (APP_URL en http://) : réservé à un réseau local de confiance.",
+  );
+}
 
 /**
  * Shared session middleware instance with PostgreSQL storage
@@ -20,10 +27,10 @@ export const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    // Si sameSite vaut 'none', le cookie DOIT obligatoirement avoir secure: true
-    secure: useCrossSiteCookies,
+    // sameSite 'none' exige secure ; en HTTP sur le LAN (APP_URL http://), lax et non secure.
+    secure: cookieFlags.secure,
     httpOnly: true,
-    sameSite: useCrossSiteCookies ? "none" : "lax",
+    sameSite: cookieFlags.sameSite,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
   },
   store: new PgSession({
