@@ -197,6 +197,12 @@ export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly s
   secretary: ["purchasePrice"],
 };
 
+/**
+ * Gestionnaires de la carte carburant (`isFuelCardManager`). Seuls eux suppriment un plein qui a
+ * mouvementé la carte : le service de suppression relit cette liste sous verrou.
+ */
+export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
 export function canEditTankCapacity(role: string | null | undefined): boolean {
   return ([...VEHICLE_EDIT_ROLES, ...VEHICLE_TANK_CAPACITY_ONLY_ROLES] as readonly string[]).includes(String(role ?? ""));

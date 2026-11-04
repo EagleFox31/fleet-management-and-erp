@@ -1,4 +1,5 @@
 import { AppError } from "./app-error";
+import { hasMovedFuelCard } from "@shared/constants/fuel-record-delete";
 
 /**
  * Verrou comptable d'un plein qui a mouvementé la carte carburant.
@@ -44,9 +45,8 @@ function day(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
 }
 
-export function hasMovedFuelCard(record: Pick<LedgerRecord, "debitAmount" | "creditAmount">): boolean {
-  return (amount(record.debitAmount) ?? 0) !== 0 || (amount(record.creditAmount) ?? 0) !== 0;
-}
+// Définition partagée avec l'écran (shared/constants/fuel-record-delete.ts).
+export { hasMovedFuelCard };
 
 function sameValue(field: LedgerLockedField, before: unknown, after: unknown): boolean {
   if (field === "date") return day(before) === day(after);

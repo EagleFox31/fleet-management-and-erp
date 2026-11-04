@@ -6,6 +6,8 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
+import { validateBody } from "../middleware/validate-body";
+import { pinLoginRequestSchema, type PinLoginRequest } from "@shared/contracts/auth-pin-login";
 
 const log = moduleLogger("pin-auth");
 const router = Router();
@@ -23,12 +25,10 @@ const ficheChauffeurDesactivee = sql`exists (
  * Déclarés avant les handlers homonymes de server/routes.ts (/api est servi
  * avant registerRoutes) : Express sert la première déclaration.
  */
-router.post("/auth/pin-login", async (req, res, next) => {
+router.post("/auth/pin-login", validateBody(pinLoginRequestSchema), async (req, res, next) => {
   try {
-    const { userId, pin } = req.body ?? {};
-    if (!userId || !pin) {
-      throw new AppError(400, "userId et pin requis");
-    }
+    // Corps validé en type avant toute recherche de compte : même 400 pour un compte connu ou inconnu.
+    const { userId, pin } = req.body as PinLoginRequest;
 
     const [user] = await db.select().from(users).where(eq(users.id, Number(userId))).limit(1);
     if (!user || user.deletedAt) {

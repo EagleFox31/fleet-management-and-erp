@@ -1670,6 +1670,9 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Ordre des contrôles : sur le plein de mission, le contrôle du chauffeur affecté passe avant la comparaison des véhicules, sinon un chauffeur non affecté distingue 400 de 403 et devine le véhicule d'une mission hors de son périmètre.
 - Prévention : `tests/contract/fuel-card-write-guards.contract.test.ts` (technician, workshop_manager et warehouse en 403 solde inchangé, chauffeur non affecté en 403, chauffeur affecté et gestionnaires en 201, six corps invalides en 400) ; entrée retirée de `write-route-guards.frozen.ts`.
 - Règle : quand on garde une écriture d'argent, lister par grep toutes les routes qui écrivent la même table (`fuelRecords`, `fuel_records`) avant de conclure ; une garde dans le corps du handler ne vaut pas une garde de route.
+- Suite (4 novembre 2026, lot A5) : `DELETE /api/fuel-records/:id` est désormais gardé. La route déclare `authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"])` ; le service relit la ligne sous `lockFuelCard` puis tranche : plein qui a mouvementé la carte (`hasMovedFuelCard`) réservé à admin, logistics, secretary (403 au chef d'atelier, rien d'écrit), suppression douce `deleted_at` / `deleted_by` ; plein physique : garde historique (admin, chef d'atelier), suppression définitive ; ligne supprimée : 404, PATCH compris.
+- Même lot : une suppression douce n'est complète que si toutes les lectures filtrent `deleted_at`. Le grep de revue a trouvé des lectures arrivées avec `main` sans filtre (statistiques par véhicule, par station, bilan mensuel de `fuel-card-service`, triggers `mission-fuel` et `fuel-alerts`, liste `GET /api/fuel-records` qui passait par `storage.ts`), et le rejeu par `request_key` (`missions.routes.ts`) qui aurait renvoyé une ligne supprimée comme « déjà enregistrée » : il répond maintenant 409.
+- Prévention : `tests/contract/fuel-record-soft-delete.contract.test.ts` (10 cas, 7 rouges sur `origin/main`) ; `tests/unit/server/fuel-records-soft-delete-schema.test.ts` (colonnes jumelles migration / init-database, triggers filtrés).
 
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
@@ -2230,6 +2233,14 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
 
+### Suppression douce d'une table : inventorier tous les lecteurs (4 novembre 2026, pleins carburant, #263)
+- Contexte : `fuel_records` passe à la suppression douce (`deleted_at`). Le premier inventaire a filtré les services et les triggers de mission, mais a conclu à tort que `storage.getFuelRecordsByVehicleId` n'était plus appelée : elle l'est par `/api/fuel-records/statistics`, `/consumption-history` et `alert-service`. Les triggers d'alertes carburant ne sont par ailleurs pas rejoués au démarrage tant que leur fichier n'est pas dans `init-database.ts`.
+- Cause racine : l'inventaire des lecteurs s'est fait de mémoire et par service, sans balayer `storage.ts` ni les fichiers SQL, et une affirmation « plus appelée » n'a pas été vérifiée par un grep des appels.
+- Classification : lecteur oublié lors d'un changement de modèle (récurrence du « recenser toutes les écritures » de la relation 1 vers N, appliquée ici aux lectures).
+- Résolution : filtre `deletedAt` dans `storage.getFuelRecordsByVehicleId` ; filtre `deleted_at` dans `fuel-alerts-triggers.sql`, qui reste NON posé au démarrage : rejoué sur PG 17, il échoue au 2e plein (agrégat sur fonction fenêtre, `format('%.1f')` invalide) et vise `user_id = 1` en clé étrangère ; sa réécriture est confiée à fleet-db ; PATCH concurrent d'une ligne supprimée = 404 et non 500.
+- Prévention (vérifiable) : `tests/unit/server/fuel-records-deleted-at-hygiene.test.ts` échoue sur tout `.from(fuelRecords)`, `innerJoin(fuelRecords` ou `FROM|JOIN fuel_records` sous `server/` sans `deletedAt` / `deleted_at` dans l'instruction (appels multi-lignes vus, `storage.ts` et les SQL de triggers compris), avec une liste gelée d'exceptions justifiées une par une ; vu rouge en retirant le filtre de `storage.ts`. Contrat : `fuel-record-soft-delete.contract.test.ts` (statistiques et historique de consommation).
+- Règle Projet : passer une table à la suppression douce commence par un grep de tous ses lecteurs (`storage.ts`, services, SQL brut, triggers), et toute affirmation « n'est plus appelée » se prouve par un grep des appelants.
+
 ## 2026-11-04 — Prix d'achat du véhicule : inventaire des sorties incomplet, fuites trouvées en relecture (#214)
 
 ### Contexte
@@ -2283,10 +2294,13 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Résolution
 - Reconnaissance des marqueurs extraite dans `shared/production-database.ts` (source unique) ; `e2e/helpers/production-guard.ts` la réexporte sans copie.
 - `server/lib/production-db-guard.ts` : hors `NODE_ENV=production`, refus de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` porte un marqueur (défaut + `E2E_PRODUCTION_DB_MARKERS`). Dérogation explicite `ALLOW_PRODUCTION_DATABASE=1`, journalisée en `warn`. Message sans URL ni mot de passe.
-- Appelé dans `server/db.ts` avant tout `new Pool`, donc pour le serveur comme pour les scripts tsx.
+- Appelé dans `server/db.ts` avant tout `new Pool` : le serveur et tout script qui importe `server/db.ts` en héritent.
+- #264 : `guardDatabaseConnection(source)` appelé aussi en tête des scripts à pool propre (`scripts/audit-dana-password.ts`, `audit-password.ts`, `audit-listed-passwords.ts`, `reset-listed-passwords.ts`) ; `schema-prod` du compose porte `NODE_ENV: production`.
 
 ### Prévention (vérifiable)
 - `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
+- `tests/unit/server/db-pool-hygiene.test.ts` (#264) : hors `server/db.ts` et `tests/`, tout fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) appelle le garde avant, et tout import de valeur de `@neondatabase/serverless`, `pg` ou `postgres` (alias compris) s'accompagne d'un import de `production-db-guard`. Commentaires retirés avant la recherche : un garde commenté ne compte pas. Liste gelée (`test-workflow-reminders.js`) qui ne peut que rétrécir. Chaque cas (pool sans garde, garde après, import aliasé, garde commenté) a sa preuve rouge.
+- `tests/unit/deploy/compose-prod-node-env.test.ts` : `schema-prod` garde `NODE_ENV: production`.
 - Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
 
 ### Règle Projet (obligatoire)
@@ -2362,3 +2376,42 @@ Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il po
 
 ### Règle Projet (obligatoire)
 - Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.
+## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
+
+### Contexte
+- #255 : un client ouvrant le véhicule d'un autre client (403) lisait « Le véhicule n'existe pas ou a été supprimé ».
+- #261 : même message sur une panne réseau ou une 5xx. L'utilisateur conclut à une suppression et ne réessaie pas, et la référence (requestId) n'est pas montrée.
+
+### Cause racine
+- Classification : deuxième défaut du même genre sur le même écran. La page branchait « non trouvé » sur `error || !vehicle`, sans regarder la nature de l'erreur. Corriger le seul 403 (#255) a laissé les autres catégories dans la branche « n'existe pas ».
+
+### Résolution
+- Fonction pure `vehicleUnavailable` (`client/src/lib/vehicle-load-error.ts`) : 403 → « Accès refusé » ; 404 ou réponse vide → « Véhicule non trouvé » ; tout le reste (401, 5xx, réseau, exception) → « Chargement impossible », message `userMessageOf` avec la référence, bouton « Réessayer ».
+
+### Prévention (vérifiable)
+- `tests/unit/client/vehicle-load-error.test.ts` : un cas par catégorie (401, 403, 404, réponse vide, 5xx avec corps, 5xx sans corps, réseau, exception technique). Seuls 404 et la réponse vide produisent « n'existe pas ».
+- `e2e/24-client-space.spec.ts` : 403 réel dans le navigateur, puis 5xx et panne réseau simulées, puis relance réussie.
+
+### Règle Projet (obligatoire)
+- « N'existe pas » se déduit d'un 404 seulement, jamais d'une erreur quelconque. Un écran de détail classe son erreur par une fonction pure testée par catégorie, pas par `if (error)`.
+
+## 2026-11-04 — `npm run dev` redémarrait en boucle depuis #252, sans qu'aucune CI ne le voie
+
+### Contexte
+- #252 (image de prod `--omit=dev`) a remplacé l'import statique de `vite.config.ts` par `loadConfigFromFile` dans `server/vite.ts`.
+- Vite 5 écrit alors `vite.config.ts.timestamp-<n>-<hash>.mjs` à la racine, l'importe puis le supprime. tsx watch suit tout fichier importé : la suppression relançait le serveur environ toutes les 10 s (mesuré : 10 « Restarting » en 100 s).
+- Symptômes signalés par b7 : `npm run dev` instable, et le serveur e2e de Playwright (`webServer: npm run dev`) jamais prêt.
+
+### Cause racine
+- Classification : régression d'un mode d'exécution non couvert par la CI. La CI construit l'image et joue `node dist/index.js` ; aucun job ne lance `tsx watch`. La preuve « mode dev vérifié » de #252 était un appel ponctuel (`/` 200), pas une observation dans la durée : la boucle commence après le premier chargement.
+
+### Résolution
+- Script `dev` : `tsx watch --exclude "*.timestamp-*.mjs"`. `loadConfigFromFile` est conservé : c'est lui qui tient vite hors du bundle de prod (`tests/unit/deploy/runtime-deps.test.ts`). Vite 5.4 n'a pas d'option de chargement sans fichier temporaire (`configLoader: "runner"` arrive en 6.1).
+
+### Prévention (vérifiable)
+- `tests/unit/server/dev-watch-vite-config.test.ts` : tant que `server/vite.ts` utilise `loadConfigFromFile`, tout script `tsx watch` de `package.json` doit avoir un `--exclude` qui couvre `vite.config.ts.timestamp-*.mjs`. Rouge sur le `package.json` de main avant correctif.
+- Preuve manuelle : `npm run dev` pendant 145 s sur Postgres local, 0 « Restarting », `/api/health` et `/` à 200.
+
+### Règle Projet (obligatoire)
+- Un changement du chargement de vite ou du démarrage serveur se vérifie aussi en `npm run dev` **dans la durée** (au moins 2 minutes, 0 « Restarting »), pas seulement en build de prod.
+- Un fichier temporaire écrit dans le dépôt par un outil est exclu du watch et du `.gitignore`.

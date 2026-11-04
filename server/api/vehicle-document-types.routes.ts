@@ -6,16 +6,17 @@ import {
   createVehicleDocumentTypeRequestSchema,
   updateVehicleDocumentTypeRequestSchema,
   vehicleDocumentTypeCodeSchema,
+  type CreateVehicleDocumentTypeRequest,
+  type UpdateVehicleDocumentTypeRequest,
 } from "@shared/contracts/vehicle-document-types";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authorize, isStaff } from "../middleware/auth";
+import { validateBody } from "../middleware/validate-body";
 
 const log = moduleLogger("vehicle-document-types");
 const router = Router();
-const adminOnly = authorize(["admin"]);
-
 /** Couche 2 : prévient les clients connectés ; le client ré-interroge `/api/vehicle-document-types`. */
 function broadcastTypeChanged(code: string): void {
   const broadcastUpdate = (global as any).broadcastUpdate;
@@ -51,9 +52,9 @@ router.get("/vehicle-document-types", isStaff, async (req, res, next) => {
   }
 });
 
-router.post("/vehicle-document-types", adminOnly, async (req, res, next) => {
+router.post("/vehicle-document-types", authorize(["admin"]), validateBody(createVehicleDocumentTypeRequestSchema), async (req, res, next) => {
   try {
-    const body = createVehicleDocumentTypeRequestSchema.parse(req.body);
+    const body = req.body as CreateVehicleDocumentTypeRequest;
     const [created] = await db.insert(vehicleDocumentTypes).values(body).onConflictDoNothing().returning();
     if (!created) throw new AppError(409, "Ce code de type de document existe déjà.");
     log.info({ code: created.code, requestId: req.requestId }, "type de document créé");
@@ -64,11 +65,11 @@ router.post("/vehicle-document-types", adminOnly, async (req, res, next) => {
   }
 });
 
-router.patch("/vehicle-document-types/:code", adminOnly, async (req, res, next) => {
+router.patch("/vehicle-document-types/:code", authorize(["admin"]), validateBody(updateVehicleDocumentTypeRequestSchema), async (req, res, next) => {
   try {
     const parsedCode = vehicleDocumentTypeCodeSchema.safeParse(req.params.code);
     if (!parsedCode.success) throw new AppError(404, "Type de document introuvable.");
-    const body = updateVehicleDocumentTypeRequestSchema.parse(req.body);
+    const body = req.body as UpdateVehicleDocumentTypeRequest;
     const [updated] = await db
       .update(vehicleDocumentTypes)
       .set(body)
