@@ -159,3 +159,11 @@ Entrées ajoutées à la fin, une par lot.
   - `npm run test:integration -- tests/integration/alert-work-orders-beyond-50.test.ts tests/integration/alert-emit-fallback-relink.test.ts` ;
   - preuves rouges : le test des 50 échoue avec l'alert-service d'avant #297, le repli échoue avec celui de #297 (0 au lieu de 2).
 - **Reste / risques** : la reprise des liens ne touche que le motif exact `/vehicles/<n>/fuel` ; `/vehicles/<n>/fuel-cards` et les autres liens restent intacts.
+
+## 2026-11-04T15:28:00+01:00 — part-requirements-idempotence : course forcée par verrou de ligne
+- **Statut** : fait, PR brouillon
+- **Quoi** : le test « deux réceptions simultanées » retient les deux `UPDATE` sur un `FOR UPDATE` jusqu'à ce que les deux requêtes aient lu `ordered`.
+- **Comment** : `waitForBlockedUpdates(2)` interroge `pg_stat_activity` (`wait_event_type = 'Lock'`), puis le verrou est relâché.
+- **Pourquoi** : rouge 5 fois sur 5 sur main nu, alors que le stock était juste (5 → 7, un mouvement) ; la seconde requête lisait après le commit de la première et devenait un no-op réussi.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/part-requirements-idempotence.test.ts` ; rouge si l'on retire `eq(partRequirements.status, current.status)` du service.
+- **Reste / risques** : aucun ; le code produit n'est pas modifié.
