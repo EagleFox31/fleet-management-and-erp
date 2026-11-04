@@ -1,4 +1,6 @@
-import { chromium, type FullConfig } from "@playwright/test";
+import { chromium, request, type FullConfig } from "@playwright/test";
+import { DEFAULT_CREDENTIALS, MANAGER_CREDENTIALS, VIEWER_CREDENTIALS } from "./helpers/auth";
+import { rejectedAccounts, rejectedAccountsMessage } from "./helpers/account-preflight";
 
 /**
  * Préchauffage du serveur de développement.
@@ -46,6 +48,31 @@ async function globalSetup(config: FullConfig): Promise<void> {
     );
   } finally {
     await browser.close();
+  }
+
+  // Comptes absents de la base visée : arrêter la suite ici plutôt que de laisser chaque spec
+  // échouer à la connexion (voir e2e/helpers/account-preflight.ts).
+  if (process.env.E2E_SKIP_ACCOUNT_CHECK !== "1") {
+    const api = await request.newContext({ baseURL });
+    try {
+      const rejected = await rejectedAccounts(
+        [DEFAULT_CREDENTIALS, MANAGER_CREDENTIALS, VIEWER_CREDENTIALS],
+        async (account) => {
+          try {
+            const response = await api.post("/api/auth/login", {
+              data: { username: account.username, password: account.password },
+              timeout: 60_000,
+            });
+            return response.status();
+          } catch {
+            return null;
+          }
+        },
+      );
+      if (rejected.length > 0) throw new Error(rejectedAccountsMessage(rejected));
+    } finally {
+      await api.dispose();
+    }
   }
 }
 

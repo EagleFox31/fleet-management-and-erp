@@ -46,3 +46,28 @@ Entrées ajoutées à la fin, une par lot.
   - Agnostic : drivers listés, pas de chemin de script en dur.
   - Idempotent et Retroactive : sans objet (test et code de démarrage).
 - **Reste / risques** : drizzle-kit push, marqueur de la prod VPS et message du garde suivis dans l'issue #268.
+
+## 2026-11-04T12:03:08+01:00 — npm run dev stable : fichier temporaire de vite.config exclu du watch (régression #252)
+
+- **Statut** : fait, PR brouillon
+- **Quoi** : script `dev` en `tsx watch --exclude "*.timestamp-*.mjs"`, motif ajouté au `.gitignore`, garde `tests/unit/server/dev-watch-vite-config.test.ts`, leçon dans LESSONS_LEARNED.
+- **Comment** : `loadConfigFromFile` est gardé, car il tient vite hors du bundle de prod. Vite 5.4 écrit et supprime toujours un `.mjs` temporaire à la racine ; on l'exclut du watch au lieu de changer le chargement.
+- **Pourquoi** : signalé par b7, `npm run dev` redémarrait toutes les ~10 s et le serveur e2e de Playwright n'était jamais prêt.
+- **Comment tester (QA)** :
+  - `npm run dev` (avec DATABASE_URL local) pendant 2 min : 0 « Restarting ».
+  - Avant le correctif : 10 relances en 100 s, chacune sur « unlink in ./vite.config.ts.timestamp-… ».
+  - Le garde est rouge sur le package.json de main.
+- **RAIDER** :
+  - Durable : build de prod et runtime-deps inchangés.
+  - Agnostic : motif générique, couvre tout script `tsx watch`.
+  - Idempotent et Retroactive : sans objet.
+- **Reste / risques** : à la montée en vite 6.1+, `configLoader: "runner"` supprimerait le fichier temporaire.
+
+## 2026-11-04T12:30:55+01:00 — merge=union sur les fichiers en ajout de fin
+- **Statut** : fait, PR brouillon
+- **Quoi** : `.gitattributes` : `merge=union` sur LESSONS_LEARNED, `docs/journal/*.md`, `PASSATION*.md` ; `docs/journal/README.md` reste en fusion normale. Test `tests/unit/gitattributes-union.test.ts`, ligne AGENTS §8, leçon.
+- **Comment** : le test lit les attributs par `git check-attr` (comportement réel, pas le texte) et rejoue dans un dépôt temporaire deux branches qui ajoutent chacune une entrée en fin de LESSONS : merge sans conflit, les deux entrées présentes.
+- **Pourquoi** : erreur répétée, cinq PR passées en CONFLICTING le 4 novembre pour des ajouts de fin indépendants.
+- **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
+- **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
+- **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.

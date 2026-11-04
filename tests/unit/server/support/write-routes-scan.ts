@@ -281,7 +281,6 @@ export const LOCAL_ROLE_GUARDS: Readonly<Record<string, readonly string[]>> = {
   "api/supplier-invoices.routes.ts": ["checkCreatePermission", "checkPaymentPermission", "checkAutoApprovePermission"],
   "api/suppliers.routes.ts": ["checkWritePermission", "checkEvaluationPermission", "checkSupplierCreatePermission"],
   "api/time-tracking.routes.ts": ["writers"],
-  "api/vehicle-document-types.routes.ts": ["adminOnly"],
 };
 
 /** Gardes de montage locales à `server/api/index.ts` (`apiRouter.use("/x", garde, xRoutes)`). */
