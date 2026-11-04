@@ -2252,3 +2252,44 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Pour restreindre la lecture d'une colonne, recenser par grep les lectures de la table, pas les routes. Une jointure ou un `select()` vide expose toutes les colonnes.
 - Une valeur calculée à partir d'une donnée restreinte suit la même restriction, si le calcul est réversible.
+
+## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
+
+### Contexte
+- #256 a fait passer le `catch` de `POST /api/auth/login` de 401 à 503, pour qu'une panne de base ne se lise plus comme « identifiants invalides » et ne soit plus comptée par le verrouillage (#254).
+- Relecture sécurité (NO-GO) : le corps n'était pas validé en type. Avec `{"username":"admin","password":1}`, `bcrypt.compare` (bcryptjs 3) lève. Cette branche n'est atteinte que si le compte existe et est actif : un compte existant répondait 503, un nom inconnu 401. Les 503 n'étant pas comptés par le verrouillage, l'énumération était illimitée.
+
+### Cause racine
+- Classification : canal auxiliaire introduit par un changement de code d'erreur. Avant #256, le `catch` aplatissait tout en 401 et masquait la différence. Il cachait l'oracle au lieu de l'empêcher. Rendre l'erreur honnête a rendu l'oracle visible.
+
+### Résolution
+- Corps validé par Zod en tête du handler (`username` et `password` en chaînes non vides, longueur bornée). 400 avant `getUserByUsername`, même réponse pour tout compte.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : avec `password: 1` puis `password: {}`, sur un compte existant et sur un nom inconnu, la réponse est le même 400 et aucune recherche de compte n'a lieu. Sur le code d'avant, les deux cas échouent (503 contre 400). Le même fichier couvre aussi la panne de base et l'échec de `session.regenerate` (503, non comptés), plus le témoin 401 compté.
+
+### Règle Projet (obligatoire)
+- Sur une route d'authentification, valider le type du corps **avant** la recherche du compte.
+- Avant de changer le code HTTP d'un `catch` d'authentification, recenser les branches qui ne lèvent que pour un compte existant (comparaison de hash, migration, session) : chacune devient un oracle dès que son code diffère de celui d'un compte inconnu.
+
+## 2026-11-04 — Serveur dev démarré sur la base de production : aucun garde hors des tests (#259)
+
+### Contexte
+- Pour une preuve e2e, un serveur dev a été lancé avec `--env-file=.env`. Le `.env` racine pointe l'ancien Neon marqué production (`ep-bitter-term…`). Le serveur y a tourné environ 2 minutes : il a rejoué les migrations d'amorçage (`init-database.ts`) et l'`alert-service` a créé des alertes. Arrêt manuel, incident signalé.
+
+### Cause racine
+- Classification : garde-fou partiel. Playwright (`assertNotProductionDatabase`) et vitest (`assertSafeTestDatabase`, `assertUnitDatabaseNotProduction`) refusaient la base de production ; le serveur lui-même, et tout script qui importe `server/db.ts`, n'avait aucune vérification. Le garde protégeait l'outil de test, pas la connexion.
+
+### Résolution
+- Reconnaissance des marqueurs extraite dans `shared/production-database.ts` (source unique) ; `e2e/helpers/production-guard.ts` la réexporte sans copie.
+- `server/lib/production-db-guard.ts` : hors `NODE_ENV=production`, refus de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` porte un marqueur (défaut + `E2E_PRODUCTION_DB_MARKERS`). Dérogation explicite `ALLOW_PRODUCTION_DATABASE=1`, journalisée en `warn`. Message sans URL ni mot de passe.
+- Appelé dans `server/db.ts` avant tout `new Pool`, donc pour le serveur comme pour les scripts tsx.
+
+### Prévention (vérifiable)
+- `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
+- Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
+
+### Règle Projet (obligatoire)
+- Un garde-fou de base se place à la **connexion** (`server/db.ts`), pas seulement dans les runners de test : tout point d'entrée qui construit un pool en hérite.
+- Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
+- Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
