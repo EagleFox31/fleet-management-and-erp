@@ -2850,3 +2850,22 @@ Un écran qui type à la main la réponse d'une route est un contrat implicite. 
 - **Leçon généralisée** : une valeur qui dépend de la topologie (sauts de proxy, hôtes de confiance, ports
   publiés) se déclare par profil de déploiement, avec un défaut sûr et un test qui lit la configuration de
   chaque profil. Elle ne se fixe pas en dur pour le cas de production.
+
+## 2026-11-04 — Compte chauffeur : le mot de passe était dérivé du PIN
+
+### Contexte
+La création d'un compte chauffeur (`POST /api/drivers/:id/create-user`) posait le PIN haché comme mot de passe. Un PIN de quatre chiffres, qui sert à `pin-login` (limité par compte), ouvrait donc aussi `/api/auth/login`.
+
+### Cause racine
+Un second secret (le mot de passe) a été rempli avec la valeur d'un premier (le PIN) « pour que la colonne ne soit pas vide ». Le secret le plus faible fixait la force de l'autre, et changer le PIN pouvait remettre le même lien en place.
+
+### Résolution
+Mot de passe aléatoire à la création (`randomPasswordHash`), reprise idempotente des comptes existants au démarrage (`revokePinDerivedDriverPasswords`, garde `password = pin`, zéro écriture au second passage), PATCH administrateur sans recopie du PIN.
+
+### Prévention (vérifiable)
+- `tests/contract/pin-login-hardening.contract.test.ts` (E2) : le mot de passe créé diffère du PIN et refuse PIN et identifiant.
+- `tests/contract/driver-account-secret.contract.test.ts` : après un changement de PIN par l'admin, ni l'ancien ni le nouveau PIN n'ouvrent `/api/auth/login`, seul le nouveau ouvre `pin-login`. Vu rouge quand le PATCH recopie le PIN dans le mot de passe.
+- `tests/integration/driver-password-pin-revocation.test.ts` : reprise idempotente.
+
+### Leçon généralisée
+Un secret ne se dérive jamais d'un autre secret, même pour remplir une colonne obligatoire : donner à chaque secret sa propre valeur aléatoire, et tester que changer l'un n'ouvre pas l'autre.
