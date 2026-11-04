@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
-import { storage } from "../../server/storage";
+import * as userSessions from "../../server/lib/user-sessions";
 import { loginAttemptsByUsername, userOnboarding } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -118,14 +118,14 @@ describe("R1 : routes libre-service, compte de session seulement", { timeout: 12
     expect((await login(accounts.a.username, TEST_USER_PASSWORD)).status, "l'ancien mot de passe de A ne vaut plus").toBe(401);
   });
 
-  it("mot de passe : enregistrement non fait, 503 et pas « modifié »", async () => {
-    // updateUser avale l'erreur de base et renvoie undefined : c'est ce que le spy reproduit.
-    vi.spyOn(storage, "updateUser").mockResolvedValueOnce(undefined);
+  it("mot de passe : écriture annulée (transaction en échec), erreur et pas « modifié »", async () => {
+    // Le DELETE des sessions échoue dans la transaction : le hash écrit avant est annulé avec elle.
+    vi.spyOn(userSessions, "deleteOtherUserSessions").mockRejectedValueOnce(new Error("panne simulée"));
     const res = await call("POST", "/api/users/change-password", {
       cookie: accounts.b.cookie,
       body: { currentPassword: TEST_USER_PASSWORD, newPassword: "jamais-enregistre" },
     });
-    expect(res.status).toBe(503);
+    expect(res.status).toBeGreaterThanOrEqual(500);
     expect(res.body.message).not.toMatch(/succès/i);
     expect((await login(accounts.b.username, TEST_USER_PASSWORD)).status, "l'ancien mot de passe reste valable").toBe(200);
   });

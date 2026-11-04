@@ -12,6 +12,7 @@ import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * Niveau C, #254 : une panne pendant la connexion est une 5xx, jamais un 401.
