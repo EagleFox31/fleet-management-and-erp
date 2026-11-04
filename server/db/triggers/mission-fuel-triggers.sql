@@ -11,12 +11,14 @@ BEGIN
       SELECT COALESCE(SUM(fr.quantity), 0)
       FROM fuel_records fr
       WHERE fr.mission_id = p_mission_id
+        AND fr.deleted_at IS NULL
         AND COALESCE(fr.debit_amount, '0')::numeric > 0
     ),
     actual_fuel_cost = (
       SELECT COALESCE(SUM(COALESCE(fr.debit_amount, '0')::numeric), 0)
       FROM fuel_records fr
       WHERE fr.mission_id = p_mission_id
+        AND fr.deleted_at IS NULL
         AND COALESCE(fr.debit_amount, '0')::numeric > 0
     ),
     updated_at = NOW()

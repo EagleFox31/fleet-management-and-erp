@@ -40,8 +40,6 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "suppliers.routes.ts POST /:id/calculate-ratings",
   "telemetry.routes.ts POST /positions",
   "time-tracking.routes.ts PUT /time-tracking",
-  "vehicle-document-types.routes.ts PATCH /vehicle-document-types/:code",
-  "vehicle-document-types.routes.ts POST /vehicle-document-types",
   "work-order-items.routes.ts DELETE /:id (workOrderItemDetailRoutes)",
   "work-order-items.routes.ts PATCH /:id (laborCatalogWriteRoutes)",
   "work-order-items.routes.ts PATCH /:id (workOrderItemDetailRoutes)",

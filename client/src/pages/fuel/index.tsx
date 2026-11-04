@@ -12,6 +12,8 @@ import { MascotHelper } from "@/components/onboarding/mascot-helper";
 import { Input } from "@/components/ui/input";
 import { PageLayout } from "@/components/layout/page-layout";
 import { useAuth } from "@/hooks/useAuth";
+import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -85,7 +87,6 @@ export default function FuelPage() {
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
   const fuelPricesEnabled = useFeature("fuel-prices");
   const canEditFuelPrice = !isFuelPriceImposed(user?.role, fuelPricesEnabled);
-  const canDeleteFuelRecord = user?.role === "admin" || user?.role === "workshop_manager";
 
   const scrollToHistoryTable = () => {
     tableSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -236,6 +237,9 @@ export default function FuelPage() {
       setDeletingRecord(null);
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-records/statistics"] });
+      // Un débit supprimé rétablit le solde de la carte.
+      queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/balance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/history"] });
     },
     onError: (error: any) => {
       toast({
@@ -245,6 +249,7 @@ export default function FuelPage() {
       });
     },
   });
+  const deleteFuelRecord = useSingleFlightMutate(deleteFuelRecordMutation.mutate);
 
   const filteredFuelRecords = React.useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -456,7 +461,8 @@ export default function FuelPage() {
       widthClassName: "w-[92px] whitespace-nowrap",
       cell: (row) => {
         const showEdit = canEditFuelRecord(row);
-        const showDelete = canDeleteFuelRecord;
+        // Même règle que le serveur : débit de carte = gestionnaires de la carte, plein physique = atelier.
+        const showDelete = canDeleteFuelRecord(user?.role, row);
         if (!showEdit && !showDelete) {
           return <span className="text-xs text-gray-300">—</span>;
         }
@@ -1022,7 +1028,7 @@ export default function FuelPage() {
             <Button
               variant="destructive"
               disabled={deleteFuelRecordMutation.isPending || !deletingRecord}
-              onClick={() => deletingRecord && deleteFuelRecordMutation.mutate(deletingRecord.id)}
+              onClick={() => deletingRecord && deleteFuelRecord(deletingRecord.id)}
             >
               {deleteFuelRecordMutation.isPending ? "Suppression..." : "Supprimer"}
             </Button>

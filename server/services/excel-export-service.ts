@@ -9,7 +9,7 @@ import {
   clientInvoices,
   clients,
 } from "@shared/schema";
-import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte, isNull } from "drizzle-orm";
 import * as XLSX from 'xlsx';
 
 /**
@@ -125,6 +125,7 @@ export class ExcelExportService {
     // `year` / `month` ne sont renseignés que par l'import Excel : un plein saisi à l'écran ne les
     // porte pas toujours. Repli sur la date du plein pour ne pas l'exclure de l'export de son mois.
     const conditions = [
+      isNull(fuelRecords.deletedAt),
       sql`COALESCE(${fuelRecords.year}, EXTRACT(YEAR FROM ${fuelRecords.date})::int) = ${year}`,
     ];
 
@@ -311,7 +312,8 @@ export class ExcelExportService {
       .where(
         and(
           eq(fuelRecords.year, year),
-          eq(fuelRecords.month, month)
+          eq(fuelRecords.month, month),
+          isNull(fuelRecords.deletedAt)
         )
       );
 
@@ -384,7 +386,8 @@ export class ExcelExportService {
       .where(
         and(
           eq(fuelRecords.year, year),
-          eq(fuelRecords.month, month)
+          eq(fuelRecords.month, month),
+          isNull(fuelRecords.deletedAt)
         )
       );
 
