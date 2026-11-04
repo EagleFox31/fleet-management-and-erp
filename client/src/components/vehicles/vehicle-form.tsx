@@ -25,6 +25,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { useWorkflowPersistence } from "@/hooks/use-workflow-persistence";
+import { useAuth } from "@/hooks/useAuth";
+import { canWriteVehiclePurchasePrice } from "@shared/constants/roles";
 import { CardShell, SectionLabel } from "@/components/design-system";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
@@ -80,6 +82,12 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
     isSaving 
   } = workflowHook || { data: {}, updateData: () => {}, sessionId: null, saveCurrentState: () => {}, isSaving: false };
   
+  // Prix d'achat : lisible par admin, logistique et secrétariat seulement (décision du 3 novembre 2026).
+  // Les autres rôles ne voient pas le champ, et la valeur n'est pas renvoyée au PATCH.
+  const { user: currentUser } = useAuth();
+  // Le champ n'est offert qu'aux rôles qui peuvent écrire le prix : le serveur refuse la clé aux autres.
+  const canSeePurchasePrice = canWriteVehiclePurchasePrice(currentUser?.role);
+
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
     defaultValues: {
@@ -189,7 +197,8 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
           axleCount: values.axleCount || 2,
           engineSpec: values.engineSpec || '',
           purchaseDate: values.purchaseDate || '',
-          purchasePrice: values.purchasePrice || 0,
+          // Un rôle qui ne lit pas le prix ne l'envoie pas : sans la clé, il n'écrase rien et n'écrit pas 0.
+          ...(canSeePurchasePrice ? { purchasePrice: values.purchasePrice || 0 } : {}),
           fuelType: values.fuelType,
           status: values.status,
           mileage: values.mileage,
@@ -759,41 +768,43 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
                 )}
               />
               
-              <FormField
-                control={form.control}
-                name="purchasePrice"
-                render={({ field }) => (
-                  <FormItem>
-                    <div className="flex items-center">
-                      <FormLabel>Prix d'achat (F CFA)</FormLabel>
-                      <div className="ml-2 relative group">
-                        <div className="cursor-help w-4 h-4 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs shadow-sm">
-                          ?
-                        </div>
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 w-64 bg-popover text-popover-foreground text-xs rounded-md p-3 shadow-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 z-50 border">
-                          <p className="mb-1">Montant payé pour l'acquisition du véhicule en Francs CFA.</p>
-                          <ul className="space-y-1">
-                            <li><span className="font-semibold">Format</span> - Nombre entier sans décimale</li>
-                            <li><span className="font-semibold">Importance</span> - Calcul de l'amortissement, évaluation de la flotte</li>
-                            <li><span className="font-semibold">Accessibilité</span> - Visible uniquement par les administrateurs</li>
-                            <li><span className="font-semibold">À inclure</span> - Prix du véhicule + taxes et frais d'immatriculation</li>
-                          </ul>
-                          <div className="absolute w-2 h-2 bg-popover rotate-45 left-1/2 bottom-0 transform translate-y-1/2 -translate-x-1/2 border-r border-b"></div>
+              {canSeePurchasePrice && (
+                <FormField
+                  control={form.control}
+                  name="purchasePrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center">
+                        <FormLabel>Prix d'achat (F CFA)</FormLabel>
+                        <div className="ml-2 relative group">
+                          <div className="cursor-help w-4 h-4 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs shadow-sm">
+                            ?
+                          </div>
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 w-64 bg-popover text-popover-foreground text-xs rounded-md p-3 shadow-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 z-50 border">
+                            <p className="mb-1">Montant payé pour l'acquisition du véhicule en Francs CFA.</p>
+                            <ul className="space-y-1">
+                              <li><span className="font-semibold">Format</span> - Nombre entier sans décimale</li>
+                              <li><span className="font-semibold">Importance</span> - Calcul de l'amortissement, évaluation de la flotte</li>
+                              <li><span className="font-semibold">Accessibilité</span> - Visible uniquement par l'administrateur, la logistique et le secrétariat</li>
+                              <li><span className="font-semibold">À inclure</span> - Prix du véhicule + taxes et frais d'immatriculation</li>
+                            </ul>
+                            <div className="absolute w-2 h-2 bg-popover rotate-45 left-1/2 bottom-0 transform translate-y-1/2 -translate-x-1/2 border-r border-b"></div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        {...field} 
-                        value={field.value !== undefined ? Number(field.value).toString() : ''} 
-                        onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} 
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          {...field} 
+                          value={field.value !== undefined ? Number(field.value).toString() : ''} 
+                          onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} 
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
               
               <FormField
                 control={form.control}

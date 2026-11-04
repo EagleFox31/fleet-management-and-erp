@@ -2230,6 +2230,29 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
 
+## 2026-11-04 — Prix d'achat du véhicule : inventaire des sorties incomplet, fuites trouvées en relecture (#214)
+
+### Contexte
+- #214 réserve `vehicles.purchasePrice` à admin, logistique et secrétariat. La première passe masquait les routes véhicule recensées à la main : liste, détail, missions, export.
+- La relecture a trouvé deux autres fuites :
+  - `GET /api/vehicles/:vehicleId/tires` joignait le véhicule entier (`select()` vide sur `vehicle_tires` ⋈ `vehicles`), ce qui servait le prix à tout rôle ;
+  - `GET /api/operations/missions/:id/costs` renvoyait `vehicleCost` = prix / 1000. Le prix restait donc récupérable, même sans apparaître en clair.
+
+### Cause racine
+- Classification : inventaire des sorties fait par les routes, pas par la donnée. Toute lecture de `vehicles` sans projection explicite (`select()` vide, `{ vehicle: vehicles }`, `getTableColumns(vehicles)`, `row_to_json(v.*)`) ramène la colonne. Le masquage ne couvrait que les routes connues.
+- Une valeur dérivée par une opération réversible (division par une constante) reste une fuite. Contrôler l'absence du champ ne suffit pas.
+
+### Résolution
+- Pneus : la sortie passe par `redactVehiclePriceDeep`. Coûts de mission : `vehicleCost` et `breakdown.vehicle` valent `null` hors rôles autorisés, et `totalCost` n'inclut plus ce terme.
+
+### Prévention (vérifiable)
+- `tests/unit/server/vehicle-select-hygiene.test.ts` : gèle chaque lecture de `vehicles` sans projection explicite, avec sa justification (masquée en aval ou jamais servie). Une occurrence nouvelle ou disparue fait échouer le test.
+- `tests/contract/vehicle-purchase-price-scope.contract.test.ts` : parcourt `ALL_APP_ROLES` sur chaque sortie, contrôle que les chiffres du prix sont absents du corps et que le prix / 1000 n'apparaît pas. 52 cas sur 89 rouges sur le code de main.
+
+### Règle Projet (obligatoire)
+- Pour restreindre la lecture d'une colonne, recenser par grep les lectures de la table, pas les routes. Une jointure ou un `select()` vide expose toutes les colonnes.
+- Une valeur calculée à partir d'une donnée restreinte suit la même restriction, si le calcul est réversible.
+
 ## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
 
 ### Contexte
