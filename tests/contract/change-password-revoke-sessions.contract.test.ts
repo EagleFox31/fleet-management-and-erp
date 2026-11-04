@@ -1,9 +1,11 @@
 import { createServer, type Server } from "http";
-import { inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import bcrypt from "bcryptjs";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
+import * as userSessions from "../../server/lib/user-sessions";
 import { CHANGE_PASSWORD_KEY_PREFIX, storedLockoutKey } from "../../server/services/login-lockout-db-store";
-import { loginAttemptsByUsername } from "../../shared/schema";
+import { loginAttemptsByUsername, users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
@@ -17,7 +19,7 @@ let server: Server;
 let baseUrl = "";
 const ids = createIdBag();
 type Account = { id: number; username: string };
-const users: Account[] = [];
+const created: Account[] = [];
 
 async function call(method: string, path: string, options: { cookie?: string; body?: unknown } = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -34,7 +36,7 @@ async function call(method: string, path: string, options: { cookie?: string; bo
 async function newUser() {
   const user = await createTestUser({ role: "technician" });
   ids.userIds.push(user.id);
-  users.push({ id: user.id, username: user.username });
+  created.push({ id: user.id, username: user.username });
   return user;
 }
 
@@ -55,7 +57,7 @@ beforeAll(async () => {
 }, 180000);
 
 afterAll(async () => {
-  const keys = users.flatMap((u) => [u.username, `${CHANGE_PASSWORD_KEY_PREFIX}${u.id}`]).map(storedLockoutKey);
+  const keys = created.flatMap((u) => [u.username, `${CHANGE_PASSWORD_KEY_PREFIX}${u.id}`]).map(storedLockoutKey);
   if (keys.length) await db.delete(loginAttemptsByUsername).where(inArray(loginAttemptsByUsername.usernameNormalized, keys));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
@@ -72,7 +74,6 @@ describe("change-password : révocation des autres sessions", { timeout: 120000 
       body: { currentPassword: TEST_USER_PASSWORD, newPassword: "nouveau-mot-de-passe-1" },
     });
     expect(res.status).toBe(200);
-    expect(res.body.otherSessionsRevoked).toBe(true);
 
     expect((await call("GET", "/api/auth/me", { cookie: s.b })).status, "la session courante reste ouverte").toBe(200);
     expect((await call("GET", "/api/auth/me", { cookie: s.a })).status, "l'autre session est révoquée").toBe(401);
@@ -106,5 +107,74 @@ describe("change-password : révocation des autres sessions", { timeout: 120000 
     ).toBe(200);
 
     expect((await call("GET", "/api/auth/me", { cookie: o.cookie })).status).toBe(200);
+  });
+
+  // Moyen choisi pour faire échouer le DELETE : vi.spyOn sur l'export `deleteOtherUserSessions` du module
+  // user-sessions (la route l'appelle par l'import ESM, donc l'espion est vu). Il rejette une fois, dans la
+  // transaction : le hash écrit juste avant doit être annulé avec elle.
+  it("DELETE des autres sessions en échec : erreur, hash inchangé, ancien mot de passe valide, autre session valide", async () => {
+    const user = await newUser();
+    const s = await twoSessions(user.username);
+    const hashOf = async () => (await db.select({ p: users.password }).from(users).where(eq(users.id, user.id)))[0].p;
+    const before = await hashOf();
+
+    const spy = vi.spyOn(userSessions, "deleteOtherUserSessions").mockRejectedValueOnce(new Error("panne simulée"));
+    const res = await call("POST", "/api/users/change-password", {
+      cookie: s.b,
+      body: { currentPassword: TEST_USER_PASSWORD, newPassword: "nouveau-mot-de-passe-4" },
+    });
+    spy.mockRestore();
+
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(JSON.stringify(res.body)).not.toContain("panne simulée");
+    expect(await hashOf(), "hash inchangé").toBe(before);
+    expect((await call("POST", "/api/auth/login", { body: { username: user.username, password: TEST_USER_PASSWORD } })).status, "ancien mot de passe valide").toBe(200);
+    expect((await call("GET", "/api/auth/me", { cookie: s.a })).status, "l'autre session est toujours valide").toBe(200);
+  });
+
+  it("fermeture des sockets qui jette après le commit : 200 et nouveau hash en base", async () => {
+    const user = await newUser();
+    const s = await twoSessions(user.username);
+    const hashOf = async () => (await db.select({ p: users.password }).from(users).where(eq(users.id, user.id)))[0].p;
+    const before = await hashOf();
+
+    const spy = vi.spyOn(userSessions, "closeOtherUserConnections").mockImplementationOnce(() => {
+      throw new Error("socket en panne");
+    });
+    const res = await call("POST", "/api/users/change-password", {
+      cookie: s.b,
+      body: { currentPassword: TEST_USER_PASSWORD, newPassword: "nouveau-mot-de-passe-5" },
+    });
+    spy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(await hashOf()).not.toBe(before);
+    expect((await call("GET", "/api/auth/me", { cookie: s.a })).status).toBe(401);
+  });
+
+  it("deux changements concurrents du même compte : un seul 200, l'autre 409, le hash final est celui du gagnant", async () => {
+    const user = await newUser();
+    const s = await twoSessions(user.username);
+    const change = (cookie: string, newPassword: string) =>
+      call("POST", "/api/users/change-password", { cookie, body: { currentPassword: TEST_USER_PASSWORD, newPassword } });
+
+    // Barrière sur bcrypt.hash : les deux requêtes ont lu l'ancien hash avant que l'une n'écrive.
+    const realHash = bcrypt.hash.bind(bcrypt) as (...args: any[]) => Promise<string>;
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const spy = vi.spyOn(bcrypt, "hash").mockImplementation((async (...args: any[]) => {
+      if (++arrived === 2) release();
+      await gate;
+      return realHash(...args);
+    }) as any);
+    const [ra, rb] = await Promise.all([change(s.a, "mot-de-passe-gagnant-A1"), change(s.b, "mot-de-passe-gagnant-B1")]);
+    spy.mockRestore();
+    expect([ra.status, rb.status].sort()).toEqual([200, 409]);
+    expect(JSON.stringify([ra.body, rb.body])).toMatch(/modifié entre-temps/);
+
+    const winner = ra.status === 200 ? "mot-de-passe-gagnant-A1" : "mot-de-passe-gagnant-B1";
+    const [row] = await db.select({ p: users.password }).from(users).where(eq(users.id, user.id));
+    expect(await bcrypt.compare(winner, row.p)).toBe(true);
   });
 });

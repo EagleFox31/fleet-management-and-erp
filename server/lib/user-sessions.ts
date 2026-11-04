@@ -41,23 +41,30 @@ export async function revokeUserAccess(userId: number, reason: string): Promise<
   return revoked;
 }
 
-/**
- * Changement de mot de passe : efface les AUTRES sessions du compte (table `session`) et ferme
- * leurs sockets temps réel ; la session `keepSessionId` reste ouverte. Requête paramétrée.
- *
- * Contrairement à `revokeUserAccess`, un échec est remonté : l'appelant décide de la réponse.
- * Idempotent : un second appel supprime 0 ligne.
- */
-export async function revokeOtherUserSessions(userId: number, keepSessionId: string, reason: string): Promise<number> {
-  const result = await db.execute(
-    sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
-  );
-  const revoked = result.rowCount ?? 0;
+type SqlExecutor = Pick<typeof db, "execute">;
 
+/**
+ * Changement de mot de passe, partie base : efface les AUTRES sessions du compte (table `session`),
+ * celle de `keepSessionId` reste. À appeler avec le `tx` qui écrit le nouveau hash : tout ou rien.
+ * Requête paramétrée. Idempotent : un second appel supprime 0 ligne.
+ */
+export async function deleteOtherUserSessions(executor: SqlExecutor, userId: number, keepSessionId: string | null = null): Promise<number> {
+  // Sans session à garder (admin qui change le secret d'un autre compte) : toutes les sessions du compte partent.
+  const result = await executor.execute(
+    keepSessionId === null
+      ? sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)}`
+      : sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Partie temps réel : ferme les sockets du compte hors `keepSessionId`. À appeler APRÈS le commit,
+ * sinon une transaction annulée aurait déjà déconnecté les autres appareils.
+ */
+export function closeOtherUserConnections(userId: number, keepSessionId: string | null, reason: string): void {
   const closeUserConnections = (global as { closeUserConnections?: unknown }).closeUserConnections;
   if (typeof closeUserConnections === "function") {
-    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId);
+    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId ?? undefined);
   }
-  log.info({ userId, reason, revoked }, "Autres sessions du compte révoquées");
-  return revoked;
 }

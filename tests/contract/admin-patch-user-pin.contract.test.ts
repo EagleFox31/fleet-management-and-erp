@@ -1,7 +1,8 @@
 import { createServer, type Server } from "http";
 import bcrypt from "bcryptjs";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as userSessions from "../../server/lib/user-sessions";
 import { db } from "../../server/db";
 import { CHANGE_PASSWORD_KEY_PREFIX, storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { loginAttemptsByUsername, users } from "../../shared/schema";
@@ -97,5 +98,97 @@ describe("PATCH /api/users/:id : PIN", { timeout: 120000 }, () => {
     const res = await call("PATCH", `/api/users/${driver.id}`, { cookie, body: { pin: "", name: "TEST renommé" } });
     expect(res.status).toBe(200);
     expect(await storedPin(driver.id)).toBeNull();
+  });
+});
+
+describe("PATCH /api/users/:id : révocation des sessions du compte visé", { timeout: 120000 }, () => {
+  async function twoSessions(username: string) {
+    const a = await login(username);
+    const b = await login(username);
+    expect(a).not.toBe(b);
+    return { a, b };
+  }
+  const status = async (cookie: string) => (await call("GET", "/api/auth/me", { cookie })).status;
+  const passwordOf = async (id: number) => (await db.select({ password: users.password }).from(users).where(eq(users.id, id)))[0].password;
+
+  it("PIN d'un autre compte : ses deux sessions sont révoquées, la session admin reste", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const adminCookie = await login(admin.username);
+    const s = await twoSessions(driver.username);
+
+    expect((await call("PATCH", `/api/users/${driver.id}`, { cookie: adminCookie, body: { pin: "1357" } })).status).toBe(200);
+
+    expect(await status(s.a)).toBe(401);
+    expect(await status(s.b)).toBe(401);
+    expect(await status(adminCookie)).toBe(200);
+  });
+
+  it("mot de passe d'un autre compte : ses sessions sont révoquées", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const adminCookie = await login(admin.username);
+    const s = await twoSessions(driver.username);
+
+    expect((await call("PATCH", `/api/users/${driver.id}`, { cookie: adminCookie, body: { password: "nouveau-mdp-admin-1" } })).status).toBe(200);
+    expect(await status(s.a)).toBe(401);
+    expect(await status(s.b)).toBe(401);
+  });
+
+  it("admin sur son propre compte : la session courante reste, l'autre est révoquée", async () => {
+    const admin = await newUser("admin");
+    const s = await twoSessions(admin.username);
+
+    expect((await call("PATCH", `/api/users/${admin.id}`, { cookie: s.b, body: { password: "nouveau-mdp-admin-2" } })).status).toBe(200);
+    expect(await status(s.b)).toBe(200);
+    expect(await status(s.a)).toBe(401);
+  });
+
+  it("PATCH sans secret (nom seul) : aucune session révoquée", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const adminCookie = await login(admin.username);
+    const s = await twoSessions(driver.username);
+
+    expect((await call("PATCH", `/api/users/${driver.id}`, { cookie: adminCookie, body: { name: "TEST nom seul" } })).status).toBe(200);
+    expect(await status(s.a)).toBe(200);
+    expect(await status(s.b)).toBe(200);
+  });
+
+  it("DELETE des sessions en échec : secret inchangé en base, sessions intactes", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const adminCookie = await login(admin.username);
+    const s = await twoSessions(driver.username);
+    const before = await passwordOf(driver.id);
+
+    const spy = vi.spyOn(userSessions, "deleteOtherUserSessions").mockRejectedValueOnce(new Error("panne simulée"));
+    const res = await call("PATCH", `/api/users/${driver.id}`, { cookie: adminCookie, body: { pin: "2468", password: "nouveau-mdp-admin-3" } });
+    spy.mockRestore();
+
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain("panne simulée");
+    expect(await storedPin(driver.id)).toBeNull();
+    expect(await passwordOf(driver.id)).toBe(before);
+    expect(await status(s.a)).toBe(200);
+    expect(await status(s.b)).toBe(200);
+  });
+
+  it("fermeture des sockets qui jette après le commit : 200, nouveau secret en base, sessions révoquées", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const adminCookie = await login(admin.username);
+    const s = await twoSessions(driver.username);
+    const before = await passwordOf(driver.id);
+
+    const spy = vi.spyOn(userSessions, "closeOtherUserConnections").mockImplementationOnce(() => {
+      throw new Error("socket en panne");
+    });
+    const res = await call("PATCH", `/api/users/${driver.id}`, { cookie: adminCookie, body: { password: "nouveau-mdp-admin-4" } });
+    spy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(await passwordOf(driver.id)).not.toBe(before);
+    expect(await status(s.a)).toBe(401);
   });
 });

@@ -218,7 +218,7 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
           ws.close(1000, reason);
         }
       } catch (error) {
-        console.error(`[WS] Erreur fermeture socket utilisateur ${userId}:`, error);
+        moduleLogger("websocket").error({ err: error, userId }, "Erreur fermeture socket utilisateur");
       }
     });
   };
