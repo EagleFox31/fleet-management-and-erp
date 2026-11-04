@@ -57,6 +57,8 @@ Suite de tests bout-en-bout sur les parcours critiques de Yaro FleetOS.
 - `RECETTE_PASSWORD` (ou `RECETTE_PASSWORD_<ROLE>`): mot de passe des comptes `recette_*` (`scripts/recette-seed.ts`), requis par les specs 24 (client) et 25 (direction), qui sautent sinon avec la raison. `E2E_CLIENT_A_USERNAME`, `E2E_CLIENT_B_USERNAME`, `E2E_DIRECTION_USERNAME` changent les comptes (defaut `recette_client_1`, `recette_client_2`, `recette_direction`)
 - `E2E_WORKERS`: nombre de workers Playwright (defaut `1` pour stabilite locale)
 - `CI`: si defini, active 2 retries par test
+- `E2E_RECORD=1`: mode enregistrement (montage video par fonctionnalite). Video et capture de **chaque** test, succes compris, en 1280x720 (taille du viewport), sans trace. Sortie : `test-results/recordings/<spec>-<titre du test>-chromium/` (`video.webm`, `test-finished-1.png`). Playwright vide ce dossier au debut de chaque run : copier les videos avant de relancer. Sans la variable, le defaut reste « en cas d'echec seulement »
+- `PORT`: port du serveur lance par Playwright (defaut `5000`), pour tourner a cote d'un serveur deja lance
 
 ## Configuration (`playwright.config.ts`)
 

@@ -1012,6 +1012,9 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
+    // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
+    await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
+    await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
     // Le RAISE WARNING n'atteint pas les logs applicatifs : relire pg_indexes.
     const { rows: requestKeyIndex } = await pool.query(
       `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key'`,

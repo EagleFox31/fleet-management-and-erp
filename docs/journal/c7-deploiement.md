@@ -47,6 +47,22 @@ Entrées ajoutées à la fin, une par lot.
   - Idempotent et Retroactive : sans objet (test et code de démarrage).
 - **Reste / risques** : drizzle-kit push, marqueur de la prod VPS et message du garde suivis dans l'issue #268.
 
+## 2026-11-04T12:03:08+01:00 — npm run dev stable : fichier temporaire de vite.config exclu du watch (régression #252)
+
+- **Statut** : fait, PR brouillon
+- **Quoi** : script `dev` en `tsx watch --exclude "*.timestamp-*.mjs"`, motif ajouté au `.gitignore`, garde `tests/unit/server/dev-watch-vite-config.test.ts`, leçon dans LESSONS_LEARNED.
+- **Comment** : `loadConfigFromFile` est gardé, car il tient vite hors du bundle de prod. Vite 5.4 écrit et supprime toujours un `.mjs` temporaire à la racine ; on l'exclut du watch au lieu de changer le chargement.
+- **Pourquoi** : signalé par b7, `npm run dev` redémarrait toutes les ~10 s et le serveur e2e de Playwright n'était jamais prêt.
+- **Comment tester (QA)** :
+  - `npm run dev` (avec DATABASE_URL local) pendant 2 min : 0 « Restarting ».
+  - Avant le correctif : 10 relances en 100 s, chacune sur « unlink in ./vite.config.ts.timestamp-… ».
+  - Le garde est rouge sur le package.json de main.
+- **RAIDER** :
+  - Durable : build de prod et runtime-deps inchangés.
+  - Agnostic : motif générique, couvre tout script `tsx watch`.
+  - Idempotent et Retroactive : sans objet.
+- **Reste / risques** : à la montée en vite 6.1+, `configLoader: "runner"` supprimerait le fichier temporaire.
+
 ## 2026-11-04T11:17:27+01:00 — Garde base de production : drizzle-kit push et prod VPS (#268)
 
 - **Statut** : fait, PR brouillon empilée sur #267
