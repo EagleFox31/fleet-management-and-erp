@@ -3,13 +3,15 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { partRequirements, workOrders } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { DEMO_ACCOUNTS, DEMO_PART, DEMO_WORK_ORDER_TITLE } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_PART, DEMO_WORK_ORDER_TITLE } from "./seed-demo";
 
 /**
  * Démo « technicien » (E2E_DEMO=1, état de départ : node --env-file=.env --import tsx e2e/demo/seed-demo.ts).
  * Parcours : connexion, ouverture de son intervention, demande d'une pièce (le technicien ne
  * sort pas de stock : le magasinier sort), clôture de l'OT. Un seul navigateur.
  */
+test.beforeAll(() => assertLocalDatabase());
+
 test("démo technicien : demander une pièce puis clôturer son intervention", async ({ page }) => {
   test.setTimeout(180_000);
   await loginThroughForm(page, DEMO_ACCOUNTS.technician.username, DEMO_ACCOUNTS.technician.password);

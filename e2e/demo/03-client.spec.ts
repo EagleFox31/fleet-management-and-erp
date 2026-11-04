@@ -3,12 +3,14 @@ import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { vehicles } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { DEMO_ACCOUNTS, DEMO_VEHICLES } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_VEHICLES } from "./seed-demo";
 
 /**
  * Démo « client » (donneur d'ordre) : tableau de bord, ses véhicules en consultation,
  * et la preuve de cloison : le véhicule d'un autre client est refusé (403, AGENTS.md §11).
  */
+test.beforeAll(() => assertLocalDatabase());
+
 test("démo client : ses véhicules en consultation, jamais ceux d'un autre client", async ({ page }) => {
   test.setTimeout(180_000);
   const [foreign] = await db.select().from(vehicles).where(eq(vehicles.registrationNumber, DEMO_VEHICLES.clientB1));
