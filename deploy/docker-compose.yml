@@ -96,6 +96,8 @@ services:
       PORT: "5000"
       # http:// : cookie de session non « secure », sinon refusé par le navigateur sur le LAN.
       APP_URL: ${SITE_APP_URL:-http://localhost:5000}
+      # Publié sans reverse proxy : aucun X-Forwarded-For n'est de confiance (limite d'essais par IP).
+      TRUST_PROXY: "0"
       BACKUP_ENABLED: "0"
       # Optionnel : compte « admin » en plus de recette_admin (12+ caractères, lu dans deploy/.env).
       # Pas sur app-prod / app-recette : leur env_file le transmet déjà, et une entrée ici l'écraserait.
