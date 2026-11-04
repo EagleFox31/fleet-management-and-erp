@@ -63,7 +63,7 @@ export const fuelAnomalyResolutionService = {
       throw new AppError(400, "Clé d'anomalie invalide.");
     }
     const fuelRecordId = Number(anomalyKey.split(":")[1]);
-    const exists = rowsOf(await db.execute(sql`SELECT 1 FROM fuel_records WHERE id = ${fuelRecordId}`));
+    const exists = rowsOf(await db.execute(sql`SELECT 1 FROM fuel_records WHERE id = ${fuelRecordId} AND deleted_at IS NULL`));
     if (exists.length === 0) throw new AppError(404, "Plein introuvable pour cette anomalie.");
 
     const res = await db.execute(sql`
@@ -103,7 +103,7 @@ export const fuelAnomalyResolutionService = {
         SELECT fr.id, fr.vehicle_id, fr.date, fr.quantity,
                AVG(fr.quantity) OVER w AS avg_q, STDDEV_POP(fr.quantity) OVER w AS sd_q, COUNT(*) OVER w AS n
           FROM fuel_records fr
-         WHERE fr.vehicle_id IS NOT NULL AND fr.debit_amount > 0
+         WHERE fr.vehicle_id IS NOT NULL AND fr.debit_amount > 0 AND fr.deleted_at IS NULL
         WINDOW w AS (PARTITION BY fr.vehicle_id)
       ),
       gap AS (
@@ -124,6 +124,7 @@ export const fuelAnomalyResolutionService = {
           FROM fuel_records fr
           JOIN vehicles v ON v.id = fr.vehicle_id
          WHERE fr.vehicle_id IS NOT NULL
+           AND fr.deleted_at IS NULL
            AND fr.fuel_type IS DISTINCT FROM 'electric'
            AND v.tank_capacity_l IS NOT NULL
            AND fr.quantity::numeric * 100 > v.tank_capacity_l::numeric * (100 + ${TOLERANCE_SQL})
@@ -137,6 +138,7 @@ export const fuelAnomalyResolutionService = {
                LAG(fr.quantity) OVER o AS previous_quantity
           FROM fuel_records fr
          WHERE fr.vehicle_id IS NOT NULL
+           AND fr.deleted_at IS NULL
            AND fr.date IS NOT NULL
            AND fr.fuel_type IS DISTINCT FROM 'electric'
            AND fr.mileage > 0

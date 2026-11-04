@@ -106,7 +106,7 @@ describe("ALR2 boîte d'alertes", { timeout: 120000 }, () => {
     expect(data.scope).toEqual({ type: "user", userIds: [ownerId] });
   });
 
-  it("tout marquer lu : seul le compte appelant, second appel = 0, pas d'événement vide", async () => {
+  it("tout marquer lu : seul le compte appelant, autre compte intact, second appel = 0, pas d'événement vide", async () => {
     await seed(ownerId, 3);
     await seed(otherId, 2);
 

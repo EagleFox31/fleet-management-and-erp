@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatPrice, formatDistance } from "@/lib/utils";
 import {
@@ -54,6 +56,8 @@ export default function FuelRecordDetail() {
     onSuccess: () => {
       toast({ title: "Plein supprimé", description: "L'enregistrement de carburant a été supprimé avec succès." });
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-records"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/balance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/history"] });
       if (fuelRecord?.vehicleId) {
         queryClient.invalidateQueries({ queryKey: [`/api/fuel-records/vehicle/${fuelRecord.vehicleId}`] });
       }
@@ -64,8 +68,10 @@ export default function FuelRecordDetail() {
     },
   });
 
+  const submitDelete = useSingleFlightMutate(deleteFuelRecord.mutate);
+
   const handleDelete = () => {
-    deleteFuelRecord.mutate();
+    submitDelete();
     setIsDeleteDialogOpen(false);
   };
 
@@ -143,6 +149,7 @@ export default function FuelRecordDetail() {
                   </DialogContent>
                 </Dialog>
 
+                {canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
                 <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="destructive" className="gap-2 h-8 text-xs">
@@ -162,6 +169,7 @@ export default function FuelRecordDetail() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                )}
               </div>
             )}
           </div>
