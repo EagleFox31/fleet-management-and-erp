@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import { isIP } from "node:net";
 import { AppError } from "../lib/app-error";
 
 /**
@@ -18,10 +19,32 @@ import { AppError } from "../lib/app-error";
  *   pas en sortir. Tests : `auth-ip-limit.test.ts` (« une 5xx reste comptee » et « 400 et 5xx rendues »).
  * - Adresse : `req.ip` sous `trust proxy 1` (server/app.ts). Seul le saut ajoute par le proxy compte ;
  *   les entrees X-Forwarded-For forgees en amont sont ignorees.
+ * - IPv6 : un compteur par /64 (un abonne dispose d'un /64 entier, une adresse par essai contournerait
+ *   le plafond et evincerait les compteurs des autres). IPv4 mappee (`::ffff:a.b.c.d`) = l'IPv4.
  * - Memoire bornee : `maxEntries` adresses au plus. Les fenetres expirees sont purgees d'abord, puis
  *   les plus anciennes.
  * - Le 429 ne dit rien du compte vise ; Retry-After donne l'attente en secondes.
  */
+
+/**
+ * Cle du compteur pour une adresse : IPv4 telle quelle, IPv4 mappee ramenee a l'IPv4, IPv6 agregee
+ * par /64 sous forme developpee (deux ecritures d'une meme adresse donnent la meme cle). Fonction pure.
+ */
+export function ipBucketKey(ip: string | undefined): string {
+  if (!ip) return "unknown";
+  const bare = ip.split("%")[0];
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(bare);
+  if (mapped) return mapped[1];
+  if (isIP(bare) !== 6) return bare;
+  const [head, tail] = bare.includes("::") ? bare.split("::") : [bare, undefined];
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  // Fin en notation IPv4 (`64:ff9b::1.2.3.4`) : deux groupes, hors du prefixe /64 de toute facon.
+  const groupsOf = (parts: string[]) => parts.reduce((n, p) => n + (p.includes(".") ? 2 : 1), 0);
+  const fill = tail === undefined ? [] : Array(8 - groupsOf(left) - groupsOf(right)).fill("0");
+  const groups = [...left, ...fill, ...right];
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+}
 
 const positive = (raw: string | undefined, fallback: number) => {
   const n = Number(raw);
@@ -70,7 +93,7 @@ export function createIpFailureLimiter(opts: IpFailureLimiterOptions = {}): IpFa
 
   const middleware: RequestHandler = (req, res, next) => {
     const t = now();
-    const bucket = bucketFor(req.ip ?? "unknown", t);
+    const bucket = bucketFor(ipBucketKey(req.ip), t);
     if (bucket.used >= maxFailures()) {
       res.setHeader("Retry-After", String(Math.max(1, Math.ceil((bucket.resetAt - t) / 1000))));
       return next(new AppError(429, "Trop de tentatives depuis cette connexion. Réessayez plus tard.", { code: "RATE_LIMITED" }));

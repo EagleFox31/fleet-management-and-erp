@@ -1,7 +1,7 @@
 import express from "express";
 import http from "node:http";
 import { describe, expect, it } from "vitest";
-import { createIpFailureLimiter } from "../../../server/middleware/auth-ip-limit";
+import { createIpFailureLimiter, ipBucketKey } from "../../../server/middleware/auth-ip-limit";
 import { errorHandler, errorResponseGuard } from "../../../server/middleware/error-handler";
 import { loginLockoutGuard } from "../../../server/middleware/login-lockout-guard";
 import { EMPTY_LOCK_STATE, MemoryLockoutStore, reservedLockState } from "../../../server/services/login-lockout-service";
@@ -120,6 +120,57 @@ describe("createIpFailureLimiter", () => {
       for (let i = 0; i < 50; i++) await post(port, { username: "a", password: "x" }, `10.9.9.${i}`);
       expect(limiter.size()).toBeLessThanOrEqual(50);
     });
+  });
+});
+
+describe("ipBucketKey", () => {
+  it("IPv6 agrégée par /64, quelle que soit l'écriture ; IPv4 et IPv4 mappée identiques", () => {
+    const k = ipBucketKey("2001:db8:1:2::5");
+    expect(k).toBe("2001:db8:1:2::/64");
+    expect(ipBucketKey("2001:0db8:0001:0002:ffff:eeee:dddd:cccc")).toBe(k);
+    expect(ipBucketKey("2001:DB8:1:2:0:0:0:1")).toBe(k);
+    expect(ipBucketKey("2001:db8:1:3::5")).not.toBe(k);
+    expect(ipBucketKey("::1")).toBe("0:0:0:0::/64");
+    expect(ipBucketKey("fe80::1%eth0")).toBe("fe80:0:0:0::/64");
+    expect(ipBucketKey("::ffff:203.0.113.5")).toBe("203.0.113.5");
+    expect(ipBucketKey("203.0.113.5")).toBe("203.0.113.5");
+    expect(ipBucketKey(undefined)).toBe("unknown");
+  });
+
+  it("plafond partagé par tout un /64 : changer d'adresse dans le préfixe ne remet pas à zéro", async () => {
+    await withApp(
+      (app) => app.post("/login", createIpFailureLimiter({ maxFailures: () => 3 }), handler),
+      async (port) => {
+        for (let i = 1; i <= 3; i++) expect((await post(port, { username: "a", password: "x" }, `2001:db8:7:7::${i}`)).status).toBe(401);
+        expect((await post(port, { username: "a", password: "x" }, "2001:db8:7:7::99")).status).toBe(429);
+        expect((await post(port, { username: "a", password: "x" }, "2001:db8:7:8::1")).status, "autre /64").toBe(401);
+      },
+    );
+  });
+});
+
+describe("AUTH_IP_FAILURE_MAX", () => {
+  it("valeur invalide ou absente : 20 par défaut ; valeur valide appliquée", async () => {
+    const saved = process.env.AUTH_IP_FAILURE_MAX;
+    const allowedWith = async (raw: string | undefined) => {
+      if (raw === undefined) delete process.env.AUTH_IP_FAILURE_MAX;
+      else process.env.AUTH_IP_FAILURE_MAX = raw;
+      let n = 0;
+      await withApp(
+        (app) => app.post("/login", createIpFailureLimiter(), handler),
+        async (port) => {
+          while (n < 30 && (await post(port, { username: "a", password: "x" }, "198.51.100.9")).status === 401) n += 1;
+        },
+      );
+      return n;
+    };
+    try {
+      for (const raw of [undefined, "", "abc", "0", "-3", "2.5"]) expect(await allowedWith(raw), String(raw)).toBe(20);
+      expect(await allowedWith("4")).toBe(4);
+    } finally {
+      if (saved === undefined) delete process.env.AUTH_IP_FAILURE_MAX;
+      else process.env.AUTH_IP_FAILURE_MAX = saved;
+    }
   });
 });
 
