@@ -74,7 +74,10 @@ describe("change-password : limite d'essais du mot de passe actuel", { timeout: 
     expect(locked.body.message).toMatch(/mot de passe actuel/i);
     expect(JSON.stringify(locked.body)).not.toContain(accounts.a.username);
 
-    expect((await login(accounts.a.username, TEST_USER_PASSWORD)).status, "le mot de passe n'a pas changé, la connexion reste ouverte").toBe(200);
+    const relogin = await login(accounts.a.username, TEST_USER_PASSWORD);
+    expect(relogin.status, "le mot de passe n'a pas changé, la connexion reste ouverte").toBe(200);
+    // Clé = id du compte, pas la session : se reconnecter ne remet pas le compteur à zéro.
+    expect((await changePassword({ ...accounts.a, cookie: relogin.cookie! }, TEST_USER_PASSWORD)).status, "nouvelle session").toBe(429);
     expect((await changePassword(accounts.b, "faux")).status, "B a son propre compteur").toBe(401);
   });
 
