@@ -116,7 +116,11 @@ export async function createApp(
   }
 
   // Plafond d'echecs par IP, avant les routes de connexion (complement du verrou par compte).
-  app.post(["/api/auth/login", "/api/auth/pin-login"], createIpFailureLimiter());
+  // Une seule instance : un meme budget pour les deux routes. Deux declarations plutot qu'un tableau de
+  // chemins, que le controle des routes publiques (api-auth-guard) lirait comme un chemin inconnu.
+  const ipFailureLimit = createIpFailureLimiter();
+  app.post("/api/auth/login", ipFailureLimit);
+  app.post("/api/auth/pin-login", ipFailureLimit);
   app.use("/api", apiRouter);
   const server = await registerRoutes(app);
 
