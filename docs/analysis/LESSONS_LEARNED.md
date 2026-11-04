@@ -2716,3 +2716,45 @@ Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le 
 
 ### Leçon généralisée
 Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
+## 2026-11-04 — Compteur anti-force brute lu puis écrit en deux temps
+
+- **Contexte** : `loginLockoutGuard` protège la connexion par mot de passe (`pwd:`), par PIN (`pin:`) et
+  le changement de mot de passe (`cpw:`). Un audit de sécurité a montré qu'une rafale de requêtes
+  simultanées contournait le verrou. Sur la base de test, 20 PIN faux en parallèle donnaient 11 réponses
+  401 (11 PIN vérifiés), et 20 mots de passe faux donnaient 20 réponses 401, pour un seuil de 5.
+- **Cause racine** : la garde lisait l'état (`get`), laissait passer, et n'écrivait l'échec qu'à
+  `res.on("finish")`, après le bcrypt. Toutes les requêtes parties avant la fin du premier bcrypt
+  lisaient « non verrouillé ». L'écriture était atomique, mais la décision ne l'était pas.
+- **Classification** : sécurité, condition de concurrence (TOCTOU) sur un contrôle anti-force brute.
+  Elle était aggravée par :
+  - un PIN de 4 chiffres ;
+  - une liste des chauffeurs publique ;
+  - aucune limite par IP.
+- **Résolution** :
+  - `LockoutStore.reserve` compte la tentative avant le handler, en une seule écriture atomique
+    (`INSERT … ON CONFLICT DO UPDATE … RETURNING`) ;
+  - au-delà du seuil, le verrou est posé et la requête refusée en 429 ;
+  - en fin de requête :
+    - 401 → `confirmFailure` (verrou au seuil) ;
+    - 2xx → `reset` ;
+    - 400 ou 5xx → `release` : la réponse ne dit rien du secret, et une panne n'est pas un échec de connexion
+      (`auth-login-unavailable.contract.test.ts`). Seuls les 401 consomment le seuil, la borne tient ;
+    - tout autre statut, ou une connexion coupée sans réponse, reste compté (le verrou expire seul) ;
+  - lecture et écriture du compteur dans une transaction, sous `pg_advisory_xact_lock` pris sur la clé. Une
+    première version en CTE `FOR UPDATE` ne verrouillait rien tant que la ligne n'existait pas : 20 réservations
+    parallèles donnaient 20 audits `lock`. Le test d'intégration l'a vu ;
+  - l'audit `lock` n'est écrit qu'au passage « non verrouillé → verrouillé » ;
+  - en complément, un plafond d'échecs par IP est monté devant `/api/auth/login` et `/api/auth/pin-login`
+    (`server/middleware/auth-ip-limit.ts`). Un succès n'y rend que son propre jeton et ne réinitialise pas
+    la fenêtre. Seul le dernier saut est retenu (`trust proxy 1`). La mémoire est bornée.
+- **Prévention vérifiable** :
+  - `tests/contract/login-lockout-concurrency.contract.test.ts` (rouge sur l'ancien code) : 20 requêtes en
+    `Promise.all`, au plus MAX réponses 401 ; limite par IP avec succès intercalés et X-Forwarded-For forgé ;
+  - `tests/integration/login-lockout-db-store.test.ts` : 20 réservations parallèles, exactement MAX
+    admises, un seul audit ;
+  - `tests/unit/server/auth-ip-limit.test.ts` : rafale sur la garde, statuts rendus ou comptés, Map bornée,
+    Retry-After.
+- **Leçon** : un contrôle anti-force brute décide et compte dans la même écriture, avant le travail
+  coûteux. « Lire, laisser passer, écrire après » n'est jamais atomique, même si chaque requête SQL
+  l'est. Le test qui le prouve joue des requêtes simultanées. Des requêtes séquentielles ne verront
+  jamais ce défaut.

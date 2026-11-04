@@ -7,6 +7,7 @@ import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
+import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
 import { accessLog, apiNotFound, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
 
 export type CreateAppOptions = {
@@ -114,6 +115,8 @@ export async function createApp(
     });
   }
 
+  // Plafond d'echecs par IP, avant les routes de connexion (complement du verrou par compte).
+  app.post(["/api/auth/login", "/api/auth/pin-login"], createIpFailureLimiter());
   app.use("/api", apiRouter);
   const server = await registerRoutes(app);
 

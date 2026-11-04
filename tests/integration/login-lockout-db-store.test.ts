@@ -51,4 +51,37 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
     await store.reset(U);
     expect((await store.get(U)).failedCount).toBe(0);
   });
+
+  it("réservation : 20 en parallèle, exactement maxAttempts admises, un seul blocage audité", async () => {
+    await store.reset(U);
+    audits.length = 0;
+    const now = new Date();
+    const reservations = await Promise.all(Array.from({ length: 20 }, () => store.reserve(U, now, cfg)));
+    expect(reservations.filter((r) => r.allowed)).toHaveLength(cfg.maxAttempts);
+    // Les admises échouent en même temps : le verrou, déjà posé au premier dépassement, n'est pas réaudité.
+    await Promise.all(Array.from({ length: cfg.maxAttempts }, () => store.confirmFailure(U, now, cfg)));
+    const s = await store.get(U);
+    expect(s.lockedUntil!.getTime()).toBeGreaterThan(now.getTime());
+    expect(audits.filter((a) => a.action === "lock")).toHaveLength(1);
+    expect((await store.reserve(U, now, cfg)).allowed).toBe(false);
+  });
+
+  it("réservation séquentielle : verrou au maxAttempts-ième échec confirmé, release rend la tentative", async () => {
+    await store.reset(U);
+    audits.length = 0;
+    const now = new Date();
+    expect((await store.reserve(U, now, cfg)).allowed).toBe(true);
+    await store.release(U, now);
+    expect((await store.get(U)).failedCount).toBe(0);
+    for (let i = 0; i < cfg.maxAttempts; i++) {
+      expect((await store.reserve(U, now, cfg)).allowed).toBe(true);
+      await store.confirmFailure(U, now, cfg);
+    }
+    expect((await store.get(U)).lockedUntil).not.toBeNull();
+    expect(audits.filter((a) => a.action === "lock")).toHaveLength(1);
+    // Verrou expiré : la réservation repart de un.
+    const later = new Date(now.getTime() + (cfg.lockMinutes + 1) * 60_000);
+    expect(await store.reserve(U, later, cfg)).toMatchObject({ allowed: true, state: { failedCount: 1, lockedUntil: null } });
+    await store.reset(U);
+  });
 });
