@@ -18,6 +18,13 @@ export interface E2EIdentity {
 const defaultUsername = process.env.E2E_USERNAME || "admin";
 const defaultPassword = process.env.E2E_PASSWORD || "admin123";
 
+/** Compte principal (admin) des specs, tel que résolu depuis l'environnement. */
+export const DEFAULT_CREDENTIALS: E2ECredentials = {
+  username: defaultUsername,
+  password: defaultPassword,
+  label: "admin",
+};
+
 /**
  * Comptes multi-profils pour les scenarios inter-roles.
  *

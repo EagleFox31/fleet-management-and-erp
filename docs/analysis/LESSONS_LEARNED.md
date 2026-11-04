@@ -2301,6 +2301,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
 - `tests/unit/server/db-pool-hygiene.test.ts` (#264) : hors `server/db.ts` et `tests/`, tout fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) appelle le garde avant, et tout import de valeur de `@neondatabase/serverless`, `pg` ou `postgres` (alias compris) s'accompagne d'un import de `production-db-guard`. Commentaires retirés avant la recherche : un garde commenté ne compte pas. Liste gelée (`test-workflow-reminders.js`) qui ne peut que rétrécir. Chaque cas (pool sans garde, garde après, import aliasé, garde commenté) a sa preuve rouge.
 - `tests/unit/deploy/compose-prod-node-env.test.ts` : `schema-prod` garde `NODE_ENV: production`.
+- #268 : `drizzle.config.ts` appelle le garde (`drizzle-kit push` refusé sur une base marquée, `tests/unit/server/drizzle-config-guard.test.ts`) ; `db-prod`, service Postgres de la prod VPS, est un marqueur par défaut.
 - Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
 
 ### Règle Projet (obligatoire)
@@ -2356,6 +2357,26 @@ Sécurité (énumération de comptes, fuite de secret dans les journaux) + test 
 - Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
 - Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
 
+## 2026-11-04 — Compteur anti-force brute indexé sur la chaîne reçue (pin-login)
+
+### Contexte
+Le garde de verrouillage de `POST /api/auth/pin-login` passait avant la validation et indexait son compteur sur la chaîne brute de `userId`, alors que le handler appliquait `Number(userId)`. Les formes "12", "012" et "0012" ouvraient chacune un compteur distinct pour le même compte. Les échecs d'identification répondaient en outre par des statuts et des messages différents (401, 403) et sans comparaison bcrypt quand il n'y avait pas de hash.
+
+### Cause racine
+Clé du compteur et identité réelle du compte calculées à deux endroits, de deux façons. Le garde ne connaissait que la chaîne reçue.
+
+### Résolution
+- L'identifiant est validé (`^[1-9]\d{0,8}$`) puis ramené à sa forme canonique avant le garde, au montage de la route.
+- Tous les échecs d'identification répondent le même 401 « Identifiants invalides », avec comparaison bcrypt factice.
+- Le mot de passe d'un compte chauffeur n'est plus le PIN haché ; reprise idempotente des comptes existants au démarrage.
+
+### Règle Projet (obligatoire)
+- La clé d'un compteur anti-force brute est la forme canonique de l'identifiant, jamais la chaîne reçue.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/pin-login-hardening.contract.test.ts` : 5 PIN faux sur "id", puis les formes équivalentes sont verrouillées (429) ou refusées (400), et une seule clé `pin:<id>` existe en base.
+- Intégration `tests/integration/driver-password-pin-revocation.test.ts` pour la reprise.
+
 ## 2026-11-04 — Routes libre-service : exception T1 déclarée, et un « mot de passe modifié » qui ne l'était pas (R1)
 
 ### Contexte
@@ -2402,6 +2423,7 @@ Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il po
 
 ### Règle Projet (obligatoire)
 - Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.
+
 ## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
 
 ### Contexte
@@ -2497,6 +2519,203 @@ Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans
 - **Leçon** : tout point d'entrée qui vérifie un secret (mot de passe, PIN, code) passe par le même
   compteur. Un garde dont la clé est codée en dur sur le corps de la requête ne protège que la route
   pour laquelle il a été écrit.
+
+## 2026-11-04 — Fichiers en ajout de fin : chaque fusion mettait les autres PR en conflit
+- Erreur répétée (cinq allers-retours le 4 novembre) : LESSONS, `docs/journal/*.md` et `PASSATION*.md` ne reçoivent que des entrées de fin, mais deux PR qui ajoutaient chacune la sienne entraient en conflit à chaque fusion. Prévention : `merge=union` dans `.gitattributes`, vérifiée par `tests/unit/gitattributes-union.test.ts` (attributs + merge réel de deux branches). Limite : GitHub n'applique pas union côté serveur, le `git merge origin/main` local reste nécessaire mais ne conflicte plus. Règle : n'y écrire qu'en ajout de fin, jamais en réécriture (union dupliquerait la ligne modifiée des deux côtés).
+## 2026-11-04 — Comptes e2e absents de la base de test : la passe ressemble à une série de défauts produit (#245)
+
+### Contexte
+- Passe e2e complète sur la base de test (`ep-plain-lake`). Les comptes par défaut des specs (`admin`/`admin123`, `terry`, `fatou`) n'y existent pas. Chaque spec a échoué à la connexion, une par une, avant que la cause commune soit identifiée. Les specs 24/25, qui lisent `RECETTE_PASSWORD`, se sont de plus skippées sans bruit tant que la variable n'était pas exportée.
+
+### Cause racine
+- Classification : hypothèse d'environnement implicite. Les valeurs par défaut de `e2e/helpers/auth.ts` ne valent que pour la base décrite par `docs/qa/COMPTES_ENVIRONNEMENT.md`. Rien ne vérifiait, avant la suite, que la base visée connaissait ces comptes : un refus de connexion apparaissait comme un échec de spec.
+
+### Résolution
+- `e2e/helpers/account-preflight.ts` : sonde `POST /api/auth/login` pour chaque compte (admin, chef d'atelier, magasinier), dédoublonné. Seul un 401/403 est imputé au compte ; un serveur muet ou en 5xx ne l'est pas (les specs le diront).
+- Branché dans `e2e/global-setup.ts` : la suite s'arrête d'emblée avec un message qui nomme les comptes refusés, sans mot de passe, et rappelle les variables à renseigner. Dérogation explicite `E2E_SKIP_ACCOUNT_CHECK=1`.
+
+### Prévention (vérifiable)
+- `tests/unit/e2e/account-preflight.test.ts` : 401/403 retenus, `null`/500/503 non imputés, dédoublonnage, message sans mot de passe, et présence de l'appel bloquant dans `e2e/global-setup.ts`.
+
+### Règle Projet (obligatoire)
+- Avant une passe e2e sur une autre base que celle de `COMPTES_ENVIRONNEMENT.md`, renseigner `E2E_USERNAME` / `E2E_MANAGER_USERNAME` / `E2E_VIEWER_USERNAME` (et `*_PASSWORD`) avec les comptes de cette base, et exporter `RECETTE_PASSWORD` pour les specs de recette.
+- Un skip silencieux n'est pas un vert : compter les skips dans le rapport de passe et en donner la cause.
+
+## 2026-11-04 — Triggers d'alertes carburant : jamais exécutés, ils cassaient la saisie du 2e plein (retirés de #263, réécrits)
+
+### Contexte
+- `server/db/triggers/fuel-alerts-triggers.sql` n'était posé par aucun bootstrap. Installé à la main, il faisait échouer tout INSERT de plein à partir du 2e : `AVG(... LAG() OVER ...)` lève « aggregate function calls cannot contain window function calls ». Il formatait aussi par `%.1f` (non supporté par `format()`) et envoyait l'alerte à `user_id = 1` en dur.
+
+### Cause racine
+- Classification : code SQL jamais exécuté par un test. Un trigger n'est éprouvé qu'à l'INSERT ; aucune suite n'installait le fichier, et l'alerte n'était pas isolée de l'écriture métier.
+
+### Résolution
+- Fichier réécrit et ajouté à `BOOTSTRAP_SQL_FILES` (`server/init-database.ts`) :
+  - moyenne sur une sous-requête de `lag()` (90 jours), `round()` au lieu de `%.1f` ;
+  - destinataires par rôles dans `alert_recipient_settings` (réglage conservé au rejeu), préférence `in_app` respectée ;
+  - déduplication `uq_alerts_user_dedupe` ;
+  - bloc `EXCEPTION WHEN OTHERS THEN RAISE WARNING` : une alerte en échec n'annule jamais le plein.
+
+### Prévention (vérifiable)
+- `tests/integration/fuel-alerts-triggers.test.ts` installe le fichier et insère des pleins. Rouge sur l'original (4/5, erreur fenêtre/agrégat), vert sur la réécriture. `FUEL_ALERTS_SQL` permet de rejouer la preuve sur une autre version.
+- `tests/unit/server/fuel-records-soft-delete-schema.test.ts` : fichier présent au bootstrap, ni `AVG(LAG`, ni `%.1f`, ni `VALUES (1,`, deux rattrapages d'exception, toutes les créations rejouables.
+
+### Règle Projet (obligatoire)
+- Un trigger posé au démarrage s'accompagne d'un test d'intégration qui l'installe et déclenche l'écriture qui l'appelle. Un effet secondaire (alerte, notification) attrape ses erreurs : il ne casse jamais l'écriture métier.
+- Un fichier posé au démarrage modifie toutes les suites d'intégration : lancer la suite complète, pas seulement les tests du domaine (ici `recette-seed-reset` comptait 3 alertes, il en compte 5).
+## 4 novembre 2026 - main rouge : signature de service changée, appelant de test oublié (#263)
+
+### Contexte
+#263 (suppression douce des pleins carburant) a ajouté un paramètre `actor` obligatoire à `FuelService.deleteFuelRecord`. Seul l'appelant de production (`fuel-records.routes.ts`) a été mis à jour ; `tests/integration/fuel-card-lock-coverage.test.ts` appelait encore `deleteFuelRecord(id)` : `TypeError: Cannot read properties of undefined (reading 'role')`, suite d'intégration rouge sur main.
+
+### Cause racine
+Le relecteur de #263 n'a rejoué que les tests carburant, pas la suite d'intégration complète. Un test d'intégration qui appelait le service n'a donc pas été exécuté.
+
+### Résolution
+Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test corrigé avec un acteur admin (le plein de la fabrique a mouvementé la carte : suppression douce, l'assertion d'origine « ligne absente » ne tenait plus), autres appelants recensés par grep (aucun autre).
+
+### Prévention vérifiable
+- La CI d'intégration est déjà un gate bloquant.
+- Règle de relecture ajoutée à `AGENTS.md` §8 : tout changement de signature d'un service impose la suite d'intégration complète, rejouée par le relecteur.
+
+### Leçon généralisée
+Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+
+## 2026-11-04 — Conflit de fusion résolu par `checkout --ours` : les changements de main dans tout le fichier perdus (near miss, #278)
+- **Contexte** : fusion de main dans #278. `server/routes.ts` et `auth-login-unavailable.contract.test.ts` n'avaient qu'un bloc en conflit chacun ; je les ai résolus par `git checkout --ours <fichier>`.
+- **Cause racine** : `--ours` remplace le fichier entier par la version de la branche. Il n'écarte pas seulement le bloc en conflit : toutes les modifications de main y disparaissent, même celles qui fusionnaient sans conflit. Ici, la validation de `PATCH /api/admin/users/:id/toggle` et la garde `isAnyUser` du libre-service ont été perdues.
+- **Classification** : near miss, outillage git, régression silencieuse à la fusion. Elle a été vue avant le push par les cliquets `write-routes-ratchet` et les contrats R1/R8.
+- **Résolution** : les deux fichiers repartent de `origin/main`, et seul le delta propre de la branche y est réappliqué.
+- **Prévention vérifiable** :
+  - après chaque fusion de main, `git diff origin/main --stat` ne doit lister que les fichiers du sujet ;
+  - les suites unitaires et de contrat complètes sont rejouées avant le push (les cliquets de routes l'ont vu ici).
+- **Leçon** :
+  - `checkout --ours` ou `--theirs` ne résout un conflit que sur un fichier où l'on veut vraiment écarter l'autre côté en entier ;
+  - sinon, on édite le bloc en conflit ;
+  - pour un fichier en ajout de fin, `merge-file --union`.
+## 4 novembre 2026 - un trigger d'effet secondaire casse les reprises d'historique (suivi de #287)
+
+### Contexte
+#287 a posé au démarrage des triggers d'alertes carburant. Trois chemins insèrent des pleins en masse sans couper leurs effets :
+- la restauration de sauvegarde (`POST /api/admin/import-backup`) ;
+- `scripts/import-7-fuel-records.ts` ;
+- le seed.
+
+La restauration vidait `alerts`, réinsérait les pleins (les triggers alertaient sur tout l'historique), puis réinsérait les alertes sauvegardées. Celles-ci heurtaient `uq_alerts_user_dedupe` (23505). Sans transaction, la base restait à moitié restaurée.
+
+Deux défauts du trigger lui-même :
+- `WHEN OTHERS` n'attrape pas `query_canceled` (57014) : un délai dépassé pendant l'alerte annulait le plein ;
+- l'alerte n'avait pas de temps réel.
+
+### Cause racine
+La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun chemin de reprise ne la posait. L'ajout d'un trigger n'a pas déclenché la revue des écritures en masse sur la table.
+
+### Résolution
+- Restauration déplacée dans `server/api/admin-import-backup.routes.ts` et `server/services/backup-import-service.ts` : une transaction, `suppressSideEffects(tx)` avant toute écriture.
+- Même garde pour le script d'import et pour le seed.
+- `query_canceled OR OTHERS` dans les deux blocs d'exception.
+  Conséquence assumée : un `pg_cancel_backend` volontaire pendant le calcul de l'alerte est lui aussi absorbé. Le plein est enregistré, seule l'alerte manque, avec un `RAISE WARNING`. On préfère perdre une alerte, recalculable, plutôt qu'un plein saisi.
+- `pg_notify('fleet_events', alert_created)`, relayé par `db-event-relay` en trames nominatives.
+
+### Prévention (vérifiable)
+- `tests/unit/server/backup-import-service.test.ts` : la garde est posée avant la première écriture, et un échec annule tout.
+- `tests/integration/fuel-alerts-triggers.test.ts` : reprise sans alerte et sans 23505 ; 57014 rattrapé (rouge sur main).
+- `tests/integration/fuel-alerts-realtime.test.ts` (rouge sur main) et `tests/unit/server/db-event-relay-alerts.test.ts`.
+
+### Leçon généralisée
+Un trigger à effet secondaire s'accompagne du recensement des écritures en masse sur sa table (restauration, import, seed). Chacune pose la garde dans sa transaction. En PL/pgSQL, `WHEN OTHERS` ne couvre ni `query_canceled` ni `assert_failure`.
+## 4 novembre 2026 - cycle d'alertes : requêtes par véhicule et ordres de travail plafonnés à 50 (#281)
+
+### Contexte
+Le cycle d'alertes (`AlertService.runAllAlertChecks`) faisait plusieurs requêtes par véhicule (plannings, historique carburant, liens de renouvellement), puis rechargeait toutes les alertes de chaque destinataire pour chaque alerte candidate. Mesure : 99 requêtes pour 2 véhicules neufs, 531 pour 12. En lisant le code, un second défaut est apparu : les ordres de travail passaient par `storage.getWorkOrders()`, plafonné par défaut à 50 lignes. Au-delà, les ordres de travail en retard n'étaient jamais alertés.
+
+### Cause racine
+- Le dédoublonnage était écrit candidate par candidate, en lecture complète (`getAlertsByUserId`), au lieu de s'appuyer sur la contrainte `uq_alerts_user_dedupe`.
+- Le cycle réutilisait une méthode de liste paginée prévue pour l'UI, dont la limite par défaut est implicite.
+
+### Résolution
+- Les candidates sont mises en lot (`AsyncLocalStorage`) pendant le passage et émises à la fin, en un nombre fixe de requêtes, avec `ON CONFLICT DO NOTHING`.
+- Les chargements sont groupés par véhicule.
+- Les ordres de travail ouverts sont lus par une requête directe.
+- L'alerte de consommation porte désormais la clé du trigger (`fuel-consumption:<plein>`) : une seule alerte par plein anormal.
+
+### Prévention (vérifiable)
+- `tests/integration/alert-cycle-query-count.test.ts` vérifie que 2 et 12 véhicules coûtent le même nombre de requêtes, avec une borne fixe. Il est rouge sur l'original (99 contre 531) et vérifie aussi le dédoublonnage rejoué et après lecture.
+
+### Leçon généralisée
+Un traitement planifié ne réutilise pas une méthode de liste UI sans vérifier sa limite par défaut. Un nombre de requêtes se fige par un test qui compte les requêtes sur deux tailles de données.
+
+## 2026-11-04 — Near miss : serveur d'agent lancé avec `--env-file=.env` d'un worktree pointant la production (récidive de #259)
+
+### Contexte
+Pour la spec PWA de #279, un agent a démarré le serveur de son worktree (`.claude/worktrees/agent-a91de81a6c5dc3623`) par `NODE_ENV=development node --env-file=.env … server/index.ts`. Le `.env` de ce worktree portait une ligne `DATABASE_URL` vers l'ancien Neon de production. C'est le deuxième démarrage de serveur avec `--env-file=.env` de la journée. Le premier est le near miss de #259.
+
+### Ce qui s'est passé
+- Le `.env` définissait `DATABASE_URL` deux fois. La ligne 2 visait la production, une ligne plus bas visait la base de test. `node --env-file` garde la dernière valeur : le serveur a donc visé la base de test, par le seul hasard de l'ordre des lignes.
+- Le log du serveur le confirme : connexion à la base de test seulement, l'URL wss des erreurs vise `ep-plain-lake`, aucune occurrence de `ep-bitter-term`. L'agent a été arrêté, et les lignes de production (la clé et un commentaire psql) ont été retirées du `.env` du worktree.
+- La garde de #259 (`server/lib/production-db-guard.ts`, appelée par `server/db.ts`) était présente dans la branche, et active : `NODE_ENV=development`.
+- Reproduction sur main, avec un `.env` factice dont l'hôte porte le marqueur (domaine `.invalid`, aucun contact réseau) : `node --env-file=<factice> … server/index.ts` s'arrête avant tout pool sur « Connexion refusée : DATABASE_URL vise la base de production ». La garde serveur lit la valeur effective : le chemin `--env-file` n'est pas un trou.
+- Trou trouvé dans la garde e2e : `databaseUrlFromDotenv` (`e2e/helpers/production-guard.ts`) lisait la **première** ligne `DATABASE_URL`, alors que Node garde la **dernière**. Avec la base de test en premier et la production en dernier, la garde Playwright laissait passer un serveur qui aurait visé la production.
+
+### Cause racine
+La copie d'un `.env` racine dans un worktree emporte l'URL de production. Le brief de l'agent ne lui interdisait pas `--env-file=.env`. La garde de #259 protège l'exécution, mais pas la présence de l'URL dans les fichiers.
+
+### Prévention (vérifiable)
+- Garde au démarrage : `tests/unit/server/production-db-guard.test.ts`, plus la reproduction ci-dessus, rejouable en une commande. Aucun trou côté serveur (marqueur, `NODE_ENV`, chemin de démarrage).
+- Clé en double : `databaseUrlFromDotenv` refuse un `.env` qui définit `DATABASE_URL` plus d'une fois (forme `export` comprise, lignes commentées et `DATABASE_URL_TEST` exclues). Le message ne contient pas l'URL. Test : `tests/unit/e2e/production-guard.test.ts`, rouge sur l'ancienne version, vert ensuite.
+- Règle de brief, tenue par l'orchestrateur : un agent qui démarre un serveur force `DATABASE_URL` depuis `DATABASE_URL_TEST`, avec une garde d'hôte, et n'utilise jamais `--env-file=.env`. Les `.env` de worktree ne portent que `DATABASE_URL_TEST`.
+
+### Leçon généralisée
+Avant de coder un deuxième contrôle après une récidive, rejouer le scénario contre le premier : ici, la garde serveur tenait. La récidive vient du geste (`--env-file` sur un `.env` qui porte la prod) : c'est le brief et le contenu des `.env` qu'il faut corriger. Une clé en double dans un `.env` est un piège : l'ordre des lignes décide de la base visée, et tout lecteur maison doit soit reproduire la règle du chargeur réel, soit refuser l'ambiguïté.
+## 4 novembre 2026 - verrou consultatif de sauvegarde instable en suite complète (#298)
+
+### Contexte
+`tests/integration/backup-production.test.ts` (verrou consultatif) échouait pendant la suite complète, fichier compris, et passait lancé seul.
+
+### Cause racine
+Le test prenait la clé de production (`hashtext('backup')`), commune à toute la base. La base de test locale est partagée entre sessions, et un serveur local dont le planificateur sauvegarde sur cette base tient cette clé : `tryAcquire()` renvoie `false` sans défaut du code.
+
+Deux facteurs aggravants :
+- le test ne rendait pas ses connexions en cas d'échec ;
+- l'`afterAll` fermait `listenerPool`, partagé par toute la suite (`isolate: false`). Un `end()` bloqué sur une connexion non rendue fait échouer le fichier entier.
+
+Reproduit : avec un détenteur externe de la clé sur la base de test, la version de main échoue (`expected false to be true`). La branche reste verte.
+
+Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base. `assertSafeTestDatabase` (`e2e/helpers/production-guard.ts`) refuse déjà des variables `_LISTENER` et `_DIRECT` qui divergent de la base de test. La garde de `server/db.ts` (`resolveListenerConnectionString`) est une seconde couche, au point où la connexion s'ouvre.
+
+### Résolution
+- Clé du verrou injectable : `createAdvisoryBackupLock(lockKey)`. Le test utilise une clé unique par passage, rend ses connexions en `finally` et ne ferme plus le pool partagé.
+- `setup-db.ts` force les deux variables à la base de test, sur l'hôte direct (`deriveDirectConnectionString`, sans `-pooler.`).
+  `assertSafeTestDatabase` accepte donc pour ces deux variables la forme directe de la base de test, et pour elles seules. Ce garde est rejoué avant chaque fichier sous `isolate:false`, où l'environnement est partagé : sans cette tolérance, le second fichier serait refusé sur une base de test Neon pooler.
+- `resolveListenerConnectionString` refuse en `NODE_ENV=test` une variable dédiée qui vise une autre base.
+
+### Prévention (vérifiable)
+- `backup-production.test.ts` tient lui-même la clé de production pendant le test : il reste vert.
+- `tests/unit/server/listener-connection.test.ts` (refus, message sans URL, épinglage par setup-db).
+
+### Leçon généralisée
+Un test d'intégration n'emprunte jamais une ressource globale de production (verrou consultatif, canal, nom fixe) sur une base partagée. Il prend une clé à lui, rend tout en `finally`, et ne ferme pas un pool partagé par la suite.
+
+## 2026-11-04 — Fausse alerte « double entrée en stock » : test de concurrence qui ne forçait pas la course
+
+### Contexte
+`tests/integration/part-requirements-idempotence.test.ts` (« deux réceptions simultanées n'entrent le stock qu'une fois ») échouait 5 fois sur 5, seul et sous verrou, sur une base dédiée. L'échec se reproduisait sur `main` nu et même sur un commit qui était vert une heure plus tôt. Il annonçait 2 succès au lieu d'1, ce qui faisait craindre une double entrée en stock.
+
+### Ce qui s'est passé
+Le stock était juste : 5 → 7, un seul mouvement. Les deux appels partaient par `Promise.all`, mais la seconde requête lisait le statut **après** le commit de la première. Elle voyait alors `received → received`, prenait la branche sans changement de statut et rendait `success: true`. C'est le no-op voulu, que le test voisin « réception rejouée après coup » exige.
+
+### Cause racine
+Le test supposait que deux appels lancés ensemble lisent ensemble. L'entrelacement dépendait de la latence du pool et du proxy WebSocket : il a changé sans aucun commit et a fait basculer le résultat. Classification : test non déterministe, pas de régression du code.
+
+### Résolution
+Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le test attend que `pg_stat_activity` montre les deux `UPDATE` bloqués sur ce verrou, donc que les deux requêtes ont lu `ordered`, puis relâche le verrou. Le compare-and-set (`WHERE status = <lu>`) refuse alors exactement la seconde.
+
+### Prévention (vérifiable)
+- 5 passages verts sur base dédiée sous `lot-tools/db-lock.mjs`.
+- Rouge prouvé : sans le compare-and-set du service, le test échoue (2 succès).
+
+### Leçon généralisée
+Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
 
 ## 4 novembre 2026 : changer le mot de passe ne coupait pas les autres sessions
 

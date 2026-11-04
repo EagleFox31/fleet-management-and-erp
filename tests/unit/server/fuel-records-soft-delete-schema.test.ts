@@ -54,7 +54,17 @@ describe("Suppression douce des pleins : init-database et migration jumelle", ()
     expect(norm(readFileSync("server/db/triggers/fuel-alerts-triggers.sql", "utf8")).match(/deleted_at IS NULL/g)).toHaveLength(3);
   });
 
-  it("fuel-alerts-triggers.sql n'est pas posé au démarrage tant qu'il n'est pas réécrit (échec au 2e plein sur PG 17)", () => {
-    expect(readFileSync("server/init-database.ts", "utf8")).not.toContain("fuel-alerts-triggers.sql");
+  it("fuel-alerts-triggers.sql est posé au démarrage, réécrit (sans AVG(LAG), ni %.1f, ni user_id en dur, alerte en échec rattrapée)", () => {
+    expect(readFileSync("server/init-database.ts", "utf8")).toMatch(/BOOTSTRAP_SQL_FILES = \[[^\]]*'fuel-alerts-triggers\.sql'/);
+    const sql = norm(readFileSync("server/db/triggers/fuel-alerts-triggers.sql", "utf8"))
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n");
+    expect(sql).not.toMatch(/AVG\s*\([^)]*LAG/i);
+    expect(sql).not.toContain("%.1f");
+    expect(sql).not.toMatch(/VALUES\s*\(\s*1\s*,/);
+    expect(sql).not.toContain("create_vehicle_alert");
+    expect(sql.match(/EXCEPTION WHEN query_canceled OR OTHERS THEN\n\s*RAISE WARNING/g)).toHaveLength(2);
+    expect(sql.match(/^CREATE (?!OR REPLACE|TABLE IF NOT EXISTS)/gm)).toBeNull();
   });
 });

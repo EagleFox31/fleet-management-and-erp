@@ -64,14 +64,18 @@ export function createDrizzleBackupRepository(): BackupRunRepository {
   };
 }
 
-/** Verrou consultatif sur une connexion directe dédiée. */
-export function createAdvisoryBackupLock(): BackupLock {
+/**
+ * Verrou consultatif sur une connexion directe dédiée. La clé est injectable pour les tests :
+ * celle de production est commune à toute la base, un serveur local qui sauvegarde sur la
+ * même base de test la tiendrait (#298).
+ */
+export function createAdvisoryBackupLock(lockKey: string = BACKUP_LOCK_KEY): BackupLock {
   let client: { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: () => void } | null = null;
   return {
     async tryAcquire() {
       const c = (await (listenerPool as any).connect()) as NonNullable<typeof client>;
       try {
-        const res = await c.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [BACKUP_LOCK_KEY]);
+        const res = await c.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [lockKey]);
         if (res.rows[0]?.ok === true) {
           client = c;
           return true;
@@ -88,7 +92,7 @@ export function createAdvisoryBackupLock(): BackupLock {
       const c = client;
       client = null;
       try {
-        await c.query("SELECT pg_advisory_unlock(hashtext($1))", [BACKUP_LOCK_KEY]);
+        await c.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]);
       } finally {
         c.release();
       }

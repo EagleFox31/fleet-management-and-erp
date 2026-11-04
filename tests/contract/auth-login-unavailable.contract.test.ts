@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { loginAttemptsByUsername, users } from "../../shared/schema";
 import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
