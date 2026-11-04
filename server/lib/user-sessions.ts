@@ -40,3 +40,31 @@ export async function revokeUserAccess(userId: number, reason: string): Promise<
   log.info({ userId, reason, revoked }, "Accès du compte révoqué");
   return revoked;
 }
+
+type SqlExecutor = Pick<typeof db, "execute">;
+
+/**
+ * Changement de mot de passe, partie base : efface les AUTRES sessions du compte (table `session`),
+ * celle de `keepSessionId` reste. À appeler avec le `tx` qui écrit le nouveau hash : tout ou rien.
+ * Requête paramétrée. Idempotent : un second appel supprime 0 ligne.
+ */
+export async function deleteOtherUserSessions(executor: SqlExecutor, userId: number, keepSessionId: string | null = null): Promise<number> {
+  // Sans session à garder (admin qui change le secret d'un autre compte) : toutes les sessions du compte partent.
+  const result = await executor.execute(
+    keepSessionId === null
+      ? sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)}`
+      : sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Partie temps réel : ferme les sockets du compte hors `keepSessionId`. À appeler APRÈS le commit,
+ * sinon une transaction annulée aurait déjà déconnecté les autres appareils.
+ */
+export function closeOtherUserConnections(userId: number, keepSessionId: string | null, reason: string): void {
+  const closeUserConnections = (global as { closeUserConnections?: unknown }).closeUserConnections;
+  if (typeof closeUserConnections === "function") {
+    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId ?? undefined);
+  }
+}

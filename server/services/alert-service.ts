@@ -26,6 +26,31 @@ import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated } from "../lib/alert-broadcast";
 
 const log = moduleLogger("alert-service");
+/** Taille des échantillons de candidates dans le journal récapitulatif d'emitAlerts. */
+const SAMPLE_SIZE = 5;
+
+/**
+ * Contexte du journal récapitulatif d'emitAlerts : `failed` = candidates en échec,
+ * `abandonedFrom` = indice de la première candidate non tentée (== candidates.length : aucune).
+ */
+export function emitLossContext(
+  err: unknown,
+  candidates: readonly AlertCandidate[],
+  failed: readonly AlertCandidate[],
+  abandonedFrom: number,
+) {
+  const describe = (c: AlertCandidate) => ({ title: c.title, type: c.type });
+  const abandoned = candidates.length - abandonedFrom;
+  return {
+    err,
+    failed: failed.length,
+    abandoned,
+    lost: failed.length + abandoned,
+    candidates: candidates.length,
+    sample: failed.slice(0, SAMPLE_SIZE).map(describe),
+    abandonedSample: candidates.slice(abandonedFrom, abandonedFrom + SAMPLE_SIZE).map(describe),
+  };
+}
 
 /** Clé de rappel quotidien (ALR1) : même objet, même jour UTC = même alerte. */
 export function dailyReminderDedupeKey(type: string, title: string, link: string, now: Date = new Date()): string {
@@ -999,42 +1024,37 @@ export class AlertService {
         log.error({ err: error, title: candidates[0].title, type: candidates[0].type }, "création d'alerte en échec");
         return 0;
       }
+      // Base injoignable : la reprise unitaire échouerait pareil, tout le lot est perdu.
+      if (isConnectionError(error)) {
+        log.error(emitLossContext(error, candidates, [], 0), "création d'alerte en échec");
+        return 0;
+      }
       // Un lot en échec ne doit pas emporter tout le passage : reprise objet par objet,
       // un seul journal récapitulatif (pas une ligne par candidate si la base est tombée).
       log.warn({ err: error, candidates: candidates.length }, "lot d'alertes en échec, reprise objet par objet");
       let created = 0;
-      const failed: Array<{ title: string; type: string }> = [];
+      const failed: AlertCandidate[] = [];
       let firstError: unknown;
       let consecutiveFailures = 0;
-      let abandoned = 0;
+      let abandonedFrom = candidates.length;
       for (const [index, candidate] of candidates.entries()) {
         try {
           created += await this.emitAlertBatch([candidate]);
           consecutiveFailures = 0;
         } catch (candidateError) {
           firstError ??= candidateError;
-          failed.push({ title: candidate.title, type: candidate.type });
+          failed.push(candidate);
           consecutiveFailures += 1;
           // Coupe-circuit : base injoignable ou échecs en série, inutile d'insister
           // candidate par candidate ; le reste est compté comme perdu.
           if (isConnectionError(candidateError) || consecutiveFailures >= MAX_CONSECUTIVE_RETRY_FAILURES) {
-            abandoned = candidates.length - index - 1;
+            abandonedFrom = index + 1;
             break;
           }
         }
       }
       if (failed.length > 0) {
-        log.error(
-          {
-            err: firstError,
-            failed: failed.length,
-            abandoned,
-            lost: failed.length + abandoned,
-            candidates: candidates.length,
-            sample: failed.slice(0, 5),
-          },
-          "création d'alerte en échec",
-        );
+        log.error(emitLossContext(firstError, candidates, failed, abandonedFrom), "création d'alerte en échec");
       }
       return created;
     }

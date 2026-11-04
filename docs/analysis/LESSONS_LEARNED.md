@@ -2717,6 +2717,37 @@ Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le 
 ### Leçon généralisée
 Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
 
+## 4 novembre 2026 : changer le mot de passe ne coupait pas les autres sessions
+
+- **Contexte** : `POST /api/users/change-password` écrivait le nouveau hash sans toucher à la table `session`.
+- **Cause racine** : les sessions sont indépendantes du secret qui les a ouvertes ; seule la suppression du compte
+  (`revokeUserAccess`) les révoquait.
+- **Prévention vérifiable** : `tests/contract/change-password-revoke-sessions.contract.test.ts` (deux sessions du
+  même compte : celle qui change reste à 200, l'autre passe à 401 ; mot de passe actuel faux : rien n'est révoqué ;
+  autre compte intact) et `tests/integration/revoke-other-user-sessions.test.ts` (second appel = 0 suppression).
+- **Leçon** : toute modification d'un secret d'authentification (mot de passe, PIN) révoque les autres sessions du
+  compte et ferme leurs sockets ; la session courante est exclue par son identifiant, jamais par un filtre sur l'utilisateur seul.
+
+## 4 novembre 2026 : le PATCH admin d'un utilisateur écrivait le PIN sans le hacher
+
+- **Contexte** : `PATCH /api/users/:id` hachait `password` mais laissait passer `pin` tel quel vers la base, alors que `POST /api/auth/pin-login` compare le PIN reçu à un hash bcrypt.
+- **Cause racine** : `insertUserSchema` est dérivé de la table (`createInsertSchema`) : il accepte toute colonne, y compris les colonnes secrètes. Seul le champ nommé explicitement dans le handler (`password`) était traité ; `pin` suivait le chemin générique.
+- **Prévention vérifiable** : `tests/contract/admin-patch-user-pin.contract.test.ts` (PIN valide stocké en bcrypt, jamais renvoyé, `pin-login` fonctionne ; PIN invalide : 400 ; PIN vide ignoré). Reprise rétroactive `hashPlainUserPins` (`server/lib/pin-hash-migration.ts`, appelée par `initializeDatabase`) testée par `tests/integration/pin-hash-migration.test.ts` (clair haché, hash existant intact, second passage à 0 écriture).
+- **Leçon** : un schéma d'insertion dérivé de la table accepte toute colonne secrète. Un secret écrit par une route générique passe par un hachage explicite, retiré du corps avant le `parse`, et une reprise idempotente traite les valeurs déjà stockées en clair.
+
+## 4 novembre 2026 : un état partiel ne passe pas par une erreur 5xx
+
+- **Contexte** : changement de mot de passe, première version : hash écrit, puis révocation des autres sessions qui
+  pouvait échouer. Une AppError 5xx aurait fait croire à un échec du changement.
+- **Cause racine** : `error-handler.ts:97` remplace toujours le message d'une 5xx par le message générique ;
+  l'état partiel ne peut donc pas être annoncé par ce canal. Et deux écritures séparées laissent un état partiel.
+- **Prévention vérifiable** : le hash et le DELETE des sessions sont dans une seule transaction ; le contrat
+  `change-password-revoke-sessions` fait échouer le DELETE par un espion et vérifie : réponse >= 500, hash
+  inchangé, ancien mot de passe valable, autre session valide. L'UPDATE conditionné à l'ancien hash est couvert
+  par le contrat de deux changements concurrents (200 + 409).
+- **Leçon** : un état partiel à annoncer à l'utilisateur ne passe jamais par une AppError 5xx. Il passe par une
+  transaction (tout ou rien) ou par une réponse 2xx/4xx explicite. Les effets non transactionnels (sockets) se
+  déclenchent après le commit.
 ## 2026-11-04 — Écarts de rapprochement : « Examiner » ouvrait `/procurement/invoices/undefined`
 
 ### Contexte
