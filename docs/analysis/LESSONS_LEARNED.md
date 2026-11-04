@@ -2229,3 +2229,25 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Quand une relation passe de 1 à N, recenser **toutes** les écritures sur la table enfant, pas seulement les lectures : chaque `limit(1)` suivi d'une écriture vise désormais une ligne arbitraire.
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
+
+## 2026-11-04 — Tests instables : une « période vide » partagée et un délai calibré sur un test en mémoire (kpi-cdc, backup-db)
+
+### Contexte
+- `tests/contract/kpi-cdc.contract.test.ts` échouait par intermittence (« expected 1 to be +0 » sur les pannes de 2001).
+- `tests/unit/deploy/backup-db.test.ts` échouait sous la charge de la suite complète (« Test timed out in 5000ms ») et passait lancé seul.
+
+### Cause racine
+- kpi-cdc : hypothèse d'état global. Le test supposait l'année 2001 vide, alors que `work-order-labor-rate` (contrat) et `work-order-cost` (intégration) y créent des OT correctifs, comptés comme pannes par `loadFailures`. Le nettoyage en `afterAll` ne protège pas : la base Docker de test est partagée entre sessions et suites, et un run interrompu laisse ses lignes. `kpi-service-cdc` (intégration) faisait la même hypothèse.
+- backup-db : délai. Chaque test lance le script shell, qui enchaîne une dizaine de sous-processus. Sous Git Bash (Windows), `fork` est émulé : 1,1 s isolé, plus de 5 s en parallèle avec 168 fichiers.
+
+### Résolution
+- kpi-cdc et kpi-service-cdc : invariants plutôt que zéros absolus (une entrée par mois, total égal à la somme des mois, moyenne égale à total/mois, ventilation par véhicule égale au total).
+- backup-db : dates calculées en JS (deux bash de moins par test) et `timeout: 30_000` sur le `describe`, à la mesure d'un script shell.
+
+### Prévention (vérifiable)
+- Reproduction : avec un OT correctif daté de 2001 posé en base, l'ancien kpi-cdc échoue et le nouveau passe, de même que kpi-service-cdc.
+- 20 répétitions de chaque fichier, 3 passes complètes de `npm test`.
+
+### Règle Projet (obligatoire)
+- Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
+- Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
