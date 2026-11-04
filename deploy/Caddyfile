@@ -1,0 +1,10 @@
+# HTTPS (Let's Encrypt) automatique ; les WebSocket passent par reverse_proxy sans réglage.
+{$RECETTE_DOMAIN} {
+	encode gzip
+	reverse_proxy app-recette:5000
+}
+
+{$PROD_DOMAIN} {
+	encode gzip
+	reverse_proxy app-prod:5000
+}

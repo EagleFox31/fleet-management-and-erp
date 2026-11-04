@@ -1,6 +1,8 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { validateBody } from "./middleware/validate-body";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -52,6 +54,13 @@ import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 
 const log = moduleLogger("routes");
+
+/** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
+const loginBodySchema = z.object({
+  username: z.string().min(1).max(255),
+  password: z.string().min(1).max(1024),
+  rememberMe: z.unknown().optional(),
+});
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -144,18 +153,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   
   // Authentication Routes
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", async (req, res, next) => {
     try {
-      const { username, password, rememberMe } = req.body;
-      
-      console.log("Login attempt:", { username, password: password ? "[PROVIDED]" : "[MISSING]" });
-      
-      if (!username || !password) {
+      // Corps validé avant toute recherche de compte : un `password` non chaîne faisait lever
+      // bcrypt.compare pour un compte existant seulement, d'où un oracle d'énumération (#256).
+      const parsed = loginBodySchema.safeParse(req.body);
+      if (!parsed.success) {
         return res.status(400).json({ message: "Nom d'utilisateur et mot de passe requis" });
       }
-      
+      const { username, password, rememberMe } = parsed.data;
+
+      log.info({ event: "Login attempt", username, requestId: req.requestId }, "Login attempt");
+
       const user = await storage.getUserByUsername(username);
-      console.log("User found:", user ? `Yes (${user.username})` : "No");
+      log.info({ event: "Login user lookup", username, found: Boolean(user), requestId: req.requestId }, "Login user lookup");
       
       // Compte supprimé ou désactivé : même réponse qu'un identifiant inconnu.
       if (!user || user.deletedAt) {
@@ -175,12 +186,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      console.log(`🔐 [AUTH] Tentative de connexion pour l'utilisateur: ${username}`);
-      console.log(`🔐 [AUTH] Utilisateur trouvé: ${user.name} (${user.role})`);
-      console.log(`🔐 [AUTH] Vérification du mot de passe: ${isPasswordValid ? '✅ Succès' : '❌ Échec'}`);
-      if (needsMigration) {
-        console.log(`🔐 [AUTH] Migration SHA-256 → bcrypt détectée pour l'utilisateur ${username}`);
-      }
+      log.info(
+        { event: "Login password check", username, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
+        "Login password check",
+      );
       
       if (!isPasswordValid) {
         return res.status(401).json({ message: "Identifiants invalides" });
@@ -190,7 +199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (needsMigration) {
         const bcryptHash = await bcrypt.hash(password, 10);
         await storage.updateUser(user.id, { password: bcryptHash });
-        console.log(`🔐 [AUTH] Mot de passe migré vers bcrypt pour l'utilisateur ${username}`);
+        log.info({ event: "Login password migrated", username, requestId: req.requestId }, "Login password migrated to bcrypt");
       }
 
       const currentLoginAt = new Date();
@@ -207,7 +216,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .where(eq(users.id, user.id))
         .catch((lastLoginError) => {
-          console.error("Update last login error:", lastLoginError);
+          log.error({ err: lastLoginError, event: "Update last login error", userId: user.id }, "Update last login error");
         });
       
       // Set user session and persist it BEFORE returning response.
@@ -247,8 +256,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: currentLoginAt
       });
     } catch (error) {
-      console.error("Login error:", error);
-      return res.status(401).json({ message: "Erreur d'authentification, veuillez réessayer plus tard" });
+      // Panne (base, session) : 5xx normalisée avec sa référence, jamais 401. Un 401 se lirait
+      // « identifiants invalides » et le garde de verrouillage le compterait comme un échec (#254).
+      return next(
+        withLogContext(new AppError(503, "Connexion momentanément impossible, réessayez dans un instant.", { cause: error }), {
+          event: "Login error",
+        }),
+      );
     }
   });
 
@@ -831,21 +845,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, async (req, res) => {
+  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
         return res.status(401).json({ message: "Non authentifié" });
       }
+      // Présence et longueur vérifiées par `changePasswordRequestSchema`.
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Mot de passe actuel et nouveau mot de passe requis" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 6 caractères" });
-      }
 
       const user = await storage.getUser(userId);
       if (!user) {
@@ -3210,25 +3217,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Calculer TVA pour un montant HT
-  app.post("/api/invoices/calculate-vat", authenticate, async (req, res) => {
-    try {
-      const { amountHT } = req.body;
-      
-      if (!amountHT || isNaN(parseFloat(amountHT))) {
-        return res.status(400).json({ message: "Montant HT invalide" });
-      }
-      
-      const { vatBillingService } = await import("./services/vat-billing-service");
-      const result = vatBillingService.calculateVAT(parseFloat(amountHT));
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error("Calculate VAT error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-  
   // Pièces extraites d'une facture
   app.get("/api/invoices/:id/parts", isStaff, async (req, res) => {
     try {
@@ -4766,7 +4754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4817,7 +4805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;

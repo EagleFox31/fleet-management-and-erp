@@ -2073,3 +2073,200 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - Dans un routeur, déclarer les chemins littéraux (`/summary`, `/stats`, `/export`) **avant** le chemin paramétré du même niveau (`/:id`). Pour un littéral déplacé hors de `routes.ts`, vérifier qu'aucun routeur monté plus tôt n'a de `/:param` qui le capture.
+
+## 2026-11-04 — Image Docker jamais construite, et migrations sautées sans erreur (near miss, #242 → #247)
+
+### Contexte
+- Le kit de déploiement de #242 n'avait jamais été construit pour de vrai. Au premier `docker compose build` (kit serveur de site, #247), quatre défauts sont apparus d'un coup :
+  - `.dockerignore` excluait `attached_assets`, que l'écran de connexion importe : le build vite échouait ;
+  - l'étape runtime ne copiait ni `server/db/migrations` ni `server/db/triggers` ;
+  - `npm start` passait par `cross-env`, une dépendance de développement ;
+  - avec `--omit=dev`, `dist/index.js` ne trouvait plus `vite`, qu'il importe statiquement.
+
+### Cause racine
+- Classification : livraison non prouvée, plus un échec silencieux. Le kit avait été relu, mais jamais exécuté.
+- `applyMigrationSqlFiles` d'`init-database` faisait un `return` quand le dossier des migrations manquait. Une image incomplète aurait donc démarré, healthcheck vert, sur une base à laquelle il manquait colonnes et triggers. Personne ne l'aurait vu avant un écran en erreur.
+
+### Résolution
+- `init-database` lève une erreur si le dossier des migrations est absent, et le démarrage s'arrête. Les triggers échouaient déjà, par `readFile`.
+- Le Dockerfile copie les migrations, les triggers et l'en-tête TAY, et lance `node dist/index.js`. `attached_assets` reste dans le contexte de build.
+- Preuve réelle :
+  - build, `docker compose --profile site up` et connexion par l'IP du LAN ;
+  - un second `up` sans écriture ;
+  - une sauvegarde et restauration `pg_dump` qui annule une modification.
+
+### Prévention (vérifiable)
+- `tests/unit/deploy/dockerfile-runtime.test.ts` vérifie que l'étape runtime copie migrations, triggers et en-tête, que `.dockerignore` n'exclut aucun dossier lu au build ou au démarrage, et que le conteneur démarre sans `cross-env`.
+
+### Règle Projet (obligatoire)
+- Un kit de déploiement n'est pas livré tant qu'il n'a pas été **construit et démarré pour de vrai** (build, `up`, connexion). Une relecture ne suffit pas.
+- Une étape de démarrage qui ne trouve pas ce qu'elle doit appliquer **échoue**. Elle ne saute pas l'étape. Un saut volontaire se journalise en erreur, jamais en silence.
+
+## 2026-11-03 — Une table sans contrainte d'unicité, un code qui suppose « une seule ligne » (#227)
+
+### Contexte
+- `assignments` n'a aucune unicité sur `mission_id` : la base accepte plusieurs chauffeurs par mission. Le code, lui, lisait « l'» affectation par `limit(1)` sans ordre, par `leftJoin` ou par `one(assignments)`.
+
+### Cause racine
+- Hypothèse d'unicité écrite seulement dans le code, jamais dans le schéma ni dans un test : tant qu'aucune mission n'avait deux lignes, tout passait.
+- Conséquences observées dès qu'une seconde ligne existe : un chauffeur autorisé recevait 403 (le contrôle ne portait que sur la première ligne lue), une mission apparaissait deux fois dans les listes, le contrôle du véhicule dépendait de l'ordre de lecture.
+
+### Résolution
+- Règle d'autorisation lue sur l'ensemble des lignes, factorisée dans `server/lib/driver-scope.ts` ; lectures qui restent à valeur unique rendues déterministes (`orderBy`) ; jointures dédupliquées.
+
+### Prévention (vérifiable)
+- Contrat à deux chauffeurs sur une même mission (`fuel-card-write-guards.contract.test.ts`) : deux saisies acceptées, véhicule d'un autre chauffeur refusé, chauffeur hors mission et affectation annulée en 403, aucune mission dupliquée dans les listes d'opérations.
+
+### Règle Projet (obligatoire)
+- Toute lecture « une ligne par X » sur une relation que le schéma n'a pas bornée à un (`limit(1)`, `[0]`, `leftJoin` puis `.map`) est soit ordonnée et justifiée en commentaire, soit remplacée par une lecture sur l'ensemble. Décider si la relation est bien 1-1 ; si oui, le dire dans le schéma (contrainte), sinon le code doit supporter N.
+
+## 2026-11-03 — Cliquet T1 : exclusion par nom contournée par alias, et liste négative (NO-GO n°2 et n°3, #235)
+
+### Contexte
+- Le cliquet T1 (`tests/unit/server/write-routes-ratchet.test.ts`) vérifie que chaque route d'écriture porte une garde de rôle. Deux relectures successives de #235 ont refusé la fusion.
+  - NO-GO n°2 : le scanner refusait une liste de noms connus pour ne pas être des gardes (`authenticate`, `isAnyUser`...). Tout middleware absent de cette liste comptait comme garde : un alias `anyone`, un tableau `[isAnyUser]` ou un spread passaient.
+  - NO-GO n°3 : la liste était devenue positive, mais `authorize([...])` sur place restait admis sauf s'il contenait le NOM `ALL_ROLES`. `authorize([...ALL_APP_ROLES])`, ou un alias local de tous les rôles, comptait comme garde alors qu'il vaut `isAnyUser`.
+
+### Cause racine
+- Classification : règle de sécurité appuyée sur un nom plutôt que sur une valeur.
+  - Une liste négative ne contient que ce qu'on a pensé à refuser.
+  - Une exclusion sur le nom d'une constante se contourne par une autre constante de même valeur, ou par un alias.
+- Aggravant : selfScoped, une garde « tous rôles, compte de session seul », vérifiée par analyse du handler, a ouvert une surface d'analyse que chaque relecture trouvait contournable. Aucune route n'en avait encore besoin.
+
+### Résolution
+- Le scanner résout l'ensemble de rôles par valeur (`resolveRoles`). Il suit les littéraux, les spreads, les constantes locales et les alias, puis les exports de `shared/constants/roles`.
+- `authorize(...)` n'est une garde que si cet ensemble exclut au moins un rôle de `ALL_APP_ROLES`. Un ensemble non résolu ne compte pas comme garde.
+- La règle vaut pour :
+  - `authorize` écrit sur place ;
+  - les exports `is*` de `auth.ts` (`isAnyUser` est écarté par sa valeur) ;
+  - les gardes locales et les gardes de montage, jugées sur leur définition dans leur fichier.
+- selfScoped est retiré de la PR (YAGNI). Il fera l'objet d'une PR dédiée.
+
+### Prévention (vérifiable)
+- Cas rouges dans `write-routes-ratchet.test.ts` :
+  - `authorize([...ALL_APP_ROLES])`, `authorize(ALL_APP_ROLES)` ;
+  - alias local de tous les rôles, `[...STAFF_ROLES, "client"]`, ensemble non résolu ;
+  - garde locale définie par `authorize([...ALL_APP_ROLES])` ou par `isAnyUser` ;
+  - garde de montage sur tous les rôles ;
+  - nom listé mais non défini dans son fichier.
+
+### Règle Projet (obligatoire)
+- Un contrôle d'accès se juge sur la valeur résolue, jamais sur le nom d'une constante.
+- Une liste de gardes est positive : ce qui n'est pas reconnu ne protège pas.
+- Une garde dont la validité dépend d'une analyse du handler n'entre qu'avec une route qui en a besoin, dans une PR dédiée.
+- Un scanner de gardes se fonde sur l'origine du symbole (import résolu, définition unique et non mutée) et sur le source débarrassé de ses commentaires, jamais sur un nom. Écarts restants de ce scanner : issue #244.
+
+## 2026-11-03 — Secret de session public par défaut : le serveur démarrait avec une clé connue de tous (#243)
+
+### Contexte
+- `server/middleware/session.ts` signait les cookies avec `process.env.SESSION_SECRET || "YaroFleetOSSecretKey"`. La valeur de repli figure dans le dépôt : un déploiement sans `SESSION_SECRET` démarrait sans alerte, et quiconque lit le code pouvait forger un cookie de session valide, donc se connecter sous n'importe quel compte.
+
+### Cause racine
+- Classification : configuration de sécurité par défaut non sûre (fail-open). Un repli pratique en développement s'appliquait aussi en production, et rien ne distinguait « secret absent » de « secret fourni ».
+- Aggravant : Express sert le build de production dès que `NODE_ENV` n'est pas `development` ; un test sur `NODE_ENV === "production"` aurait laissé passer `Production`, `staging` ou une variable absente.
+- Near miss lors de la correction : rogner le secret avant de signer aurait changé la clé d'un secret actuel entouré d'espaces et invalidé toutes les sessions ouvertes.
+
+### Résolution
+- `resolveSessionSecret` (`server/lib/session-secret.ts`) : repli seulement pour `NODE_ENV` dans une liste d'autorisation (`development`, `test`) ; ailleurs, démarrage refusé si le secret est absent, de moins de 32 caractères ou égal à une valeur publique du dépôt. Le message dit comment corriger et ne contient jamais la valeur. Le rognage sert à mesurer, la signature utilise la valeur brute.
+
+### Prévention (vérifiable)
+- `tests/unit/server/session-secret.test.ts` : refus en production (absent, vide, court, public), `NODE_ENV` hors liste traité comme la production, valeur brute conservée.
+- Garde statique dans le même fichier : `session.ts` doit passer par `resolveSessionSecret(process.env` et ne contenir ni `SESSION_SECRET ||`/`??` ni le repli littéral.
+
+### Règle Projet (obligatoire)
+- Un secret n'a jamais de valeur par défaut hors d'une liste d'autorisation d'environnements de développement. En production, secret absent ou public = refus de démarrer, avec un message actionnable.
+- Un environnement se teste par liste d'autorisation, jamais par `=== "production"`.
+- Ne jamais normaliser (trim, casse) une clé de signature existante : on ne normalise que pour valider.
+
+### Assurance et visite : la check-list jugeait l'échéance un jour plus tard que le lancement (2026-11-03)
+
+- **Contexte** : une assurance ou une visite technique qui expire aujourd'hui était « conforme » dans `GET /api/missions/:id/launch-readiness`, puis refusée au lancement (`PUT /status` → `in_progress`). Même écart autour de minuit UTC.
+- **Cause racine** : la check-list passait par `isDateExpired`, qui compare en jour local avec un `<` strict. C'est la règle du permis chauffeur. Le lancement passe par `isExpiredOnOrBeforeToday` (jour UTC, le jour de l'échéance bloque, `shared/constants/expiry-day.ts`). C'est la deuxième divergence entre ces deux chemins, après la carte grise.
+- **Classification** : règle métier dupliquée, divergence de calcul de date.
+- **Résolution** :
+  - la check-list juge tous les papiers véhicule par `isExpiredOnOrBeforeToday` ;
+  - un papier sans date reste invalide, sauf la carte grise ;
+  - l'ancienne fonction est renommée `isDriverLicenseExpired`, réservée au permis.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-renewal-receipt.contract.test.ts`, bloc « jour de l'échéance » : 2 cas passent au rouge sur l'ancienne règle ;
+  - `tests/unit/server/mission-expiry-day-hygiene.test.ts` échoue si `isDocumentTypeValid` compare des dates elle-même, ou si la règle du permis sert à autre chose qu'au permis.
+- **Leçon** : une règle de date se nomme d'après le papier qu'elle juge. Une fonction générique `isDateExpired` invite à la réutiliser pour un papier dont la règle est différente.
+
+### Jour de l'échéance : une règle partagée renversée sans divergence (2026-11-03, #224)
+
+- **Contexte** : décision produit (#224) : un papier est valable le jour de son échéance et expiré le lendemain, comme le permis. Jusque-là, P3-2 (D1, D2) rendait le jour J expiré pour les papiers, et le permis suivait sa propre règle au jour local.
+- **Cause racine** : la règle du jour J existait en trois écritures : la source partagée (`isExpiredOn`, `<= 0`), deux calculs locaux qui la recopiaient (`alert-service.checkVehicleDocumentAlerts`, `GET /api/vehicles/alerts`, au jour local avec `setHours` et `Math.ceil`) et le permis (`isDriverLicenseExpired`, jour local, `<` strict). Basculer seulement la source aurait laissé les alertes dire « expiré » un jour où le lancement passe.
+- **Classification** : règle métier dupliquée, changement de décision produit.
+- **Résolution** :
+  - `shared/constants/expiry-day.ts` : `isExpiredOn` à `days < 0`, nouveau `isDriverLicenseExpiredOn` ;
+  - alertes (`alert-service`, `vehicles.routes`) rebranchées sur `toExpiryDateOnly` + `daysBetweenDateOnly`, jour UTC ;
+  - `isExpiredOnOrBeforeToday` renommée `isPaperExpired` : son nom contredisait la nouvelle règle ;
+  - le jour J reste signalé : alerte « expire bientôt », priorité haute, « dernier jour de validité ».
+- **Prévention vérifiable** :
+  - `tests/unit/server/document-expiry-day-j.test.ts` : J-1, J, J+1 sur les cinq verdicts papiers (éligibilité, statut, statistiques, liste, règle typée) et sur le permis, plus la bascule à minuit UTC sous Africa/Douala et UTC ;
+  - contrats `mission-document-expiry` et `mission-renewal-receipt` : alertes, check-list et lancement à J et J+1, permis à J-1, J, J+1.
+  - relecture : une troisième recopie (`getExpiredDocuments`, liste `expiredDocuments`, `new Date(échéance) < now`) avait échappé à la bascule. `tests/unit/server/expiry-day-local-math-hygiene.test.ts` échoue désormais sur toute comparaison locale d'une échéance dans `server/`, `client/src` et `shared/` (liste gelée de 6 fichiers client/CPC, qui ne peut que rétrécir).
+- **Leçon** : un changement de règle partagée se fait sur la source ET sur chaque recopie. Avant de basculer, chercher les calculs qui reproduisent la règle sans l'importer (`setHours(0`, `<= 0` sur un nombre de jours) ; une fonction dont le nom décrit l'ancienne règle se renomme dans le même changement.
+
+## 2026-11-03 — Passage 1→N : tout `limit(1)` sur la table enfant devient une écriture sur la mauvaise ligne (#240)
+
+### Contexte
+- #240 ouvre l'ajout et l'annulation d'affectations sur une mission (N chauffeurs). Les routes existantes lisaient « l'affectation » de la mission par `limit(1)` puis écrivaient sur son id.
+- Effets relevés à la relecture sécurité (NO-GO) : `PUT /:id/status` réécrivait une affectation **annulée** en `in_progress` (elle reprenait sa part du CA et ses droits de saisie) ; un chauffeur annulé gardait l'accès à la mission et pouvait la lancer ; les contrôles de lancement ne portaient que sur le premier camion ; `PATCH /:id { assignment }` remplaçait « la première » ligne d'une mission à deux chauffeurs ; `DELETE` d'une affectation refusée la réécrivait en `cancelled`.
+- Near miss pendant la correction : le `catch` du PATCH convertissait toute `AppError` en 500, le 409 prévu n'arrivait jamais. Seul le contrat l'a montré.
+
+### Cause racine
+- Classification : invariant de cardinalité implicite (suite de la leçon #227). Le code lecteur avait été revu pour N lignes, pas le code écrivain. Une écriture filtrée sur l'id seul ne revérifie pas l'état qui justifiait l'écriture.
+
+### Résolution
+- Statut : chauffeur → ses lignes actives (403 s'il n'en a aucune) ; personnel → toutes les lignes actives ; contrôles de lancement par ligne. Écritures conditionnées au statut lu. `canAccessMissionAsDriver` ignore les lignes `cancelled`/`rejected`. DELETE sous `FOR UPDATE`, no-op sur une ligne déjà nulle. PATCH : 409 au-delà d'une ligne vivante, erreurs passées au gestionnaire central.
+
+### Prévention (vérifiable)
+- `tests/contract/mission-multi-assignments.contract.test.ts` : 8 cas (7 rouges sur le code d'avant), dont le CA de la mission menée à terme sans la ligne annulée.
+- `tests/unit/server/assignment-write-hygiene.test.ts` : échoue sur tout `update(assignments)` / `delete(assignments)` sans filtre `assignments.status` ou `assignments.driverId` (même coupé sur plusieurs lignes), et sur toute SQL brute ; 4 écritures relevées sur le code d'avant.
+
+### Règle Projet (obligatoire)
+- Quand une relation passe de 1 à N, recenser **toutes** les écritures sur la table enfant, pas seulement les lectures : chaque `limit(1)` suivi d'une écriture vise désormais une ligne arbitraire.
+- Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
+- Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
+
+## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
+
+### Contexte
+- #256 a fait passer le `catch` de `POST /api/auth/login` de 401 à 503, pour qu'une panne de base ne se lise plus comme « identifiants invalides » et ne soit plus comptée par le verrouillage (#254).
+- Relecture sécurité (NO-GO) : le corps n'était pas validé en type. Avec `{"username":"admin","password":1}`, `bcrypt.compare` (bcryptjs 3) lève. Cette branche n'est atteinte que si le compte existe et est actif : un compte existant répondait 503, un nom inconnu 401. Les 503 n'étant pas comptés par le verrouillage, l'énumération était illimitée.
+
+### Cause racine
+- Classification : canal auxiliaire introduit par un changement de code d'erreur. Avant #256, le `catch` aplatissait tout en 401 et masquait la différence. Il cachait l'oracle au lieu de l'empêcher. Rendre l'erreur honnête a rendu l'oracle visible.
+
+### Résolution
+- Corps validé par Zod en tête du handler (`username` et `password` en chaînes non vides, longueur bornée). 400 avant `getUserByUsername`, même réponse pour tout compte.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : avec `password: 1` puis `password: {}`, sur un compte existant et sur un nom inconnu, la réponse est le même 400 et aucune recherche de compte n'a lieu. Sur le code d'avant, les deux cas échouent (503 contre 400). Le même fichier couvre aussi la panne de base et l'échec de `session.regenerate` (503, non comptés), plus le témoin 401 compté.
+
+### Règle Projet (obligatoire)
+- Sur une route d'authentification, valider le type du corps **avant** la recherche du compte.
+- Avant de changer le code HTTP d'un `catch` d'authentification, recenser les branches qui ne lèvent que pour un compte existant (comparaison de hash, migration, session) : chacune devient un oracle dès que son code diffère de celui d'un compte inconnu.
+
+## 2026-11-04 — Serveur dev démarré sur la base de production : aucun garde hors des tests (#259)
+
+### Contexte
+- Pour une preuve e2e, un serveur dev a été lancé avec `--env-file=.env`. Le `.env` racine pointe l'ancien Neon marqué production (`ep-bitter-term…`). Le serveur y a tourné environ 2 minutes : il a rejoué les migrations d'amorçage (`init-database.ts`) et l'`alert-service` a créé des alertes. Arrêt manuel, incident signalé.
+
+### Cause racine
+- Classification : garde-fou partiel. Playwright (`assertNotProductionDatabase`) et vitest (`assertSafeTestDatabase`, `assertUnitDatabaseNotProduction`) refusaient la base de production ; le serveur lui-même, et tout script qui importe `server/db.ts`, n'avait aucune vérification. Le garde protégeait l'outil de test, pas la connexion.
+
+### Résolution
+- Reconnaissance des marqueurs extraite dans `shared/production-database.ts` (source unique) ; `e2e/helpers/production-guard.ts` la réexporte sans copie.
+- `server/lib/production-db-guard.ts` : hors `NODE_ENV=production`, refus de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` porte un marqueur (défaut + `E2E_PRODUCTION_DB_MARKERS`). Dérogation explicite `ALLOW_PRODUCTION_DATABASE=1`, journalisée en `warn`. Message sans URL ni mot de passe.
+- Appelé dans `server/db.ts` avant tout `new Pool`, donc pour le serveur comme pour les scripts tsx.
+
+### Prévention (vérifiable)
+- `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
+- Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
+
+### Règle Projet (obligatoire)
+- Un garde-fou de base se place à la **connexion** (`server/db.ts`), pas seulement dans les runners de test : tout point d'entrée qui construit un pool en hérite.
+- Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
+- Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.

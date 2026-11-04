@@ -1,8 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
-import { assignments, drivers } from "@shared/schema";
+import { assignments, drivers, missions } from "@shared/schema";
 import { canReadDriverPersonalData } from "@shared/constants/roles";
-import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isVoidAssignmentStatus } from "@shared/constants/assignments";
 
 /**
  * Cloison des chauffeurs (AGENTS §11, pendant de `client-scope.ts`).
@@ -32,7 +32,26 @@ export async function driverScopeOf(reader: DriverScopeReader | undefined): Prom
   return rows.map((r) => r.id);
 }
 
-/** Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté. */
+/**
+ * Filtre unique « affectation vivante de l'un de ces chauffeurs » : sur ses fiches, hors annulée ou
+ * refusée (`VOID_ASSIGNMENT_STATUSES`). Toute lecture cloisonnée par chauffeur passe par ici : un
+ * filtre sur `assignments.driverId` seul rend au chauffeur retiré une mission qu'il n'a plus à voir
+ * (#240, garde-fou tests/unit/server/assignment-write-hygiene.test.ts).
+ */
+export function driverLiveAssignmentFilter(driverIds: number[]) {
+  return and(inArray(assignments.driverId, driverIds), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]))!;
+}
+
+/** Missions où l'un de ces chauffeurs a une affectation vivante (listes cloisonnées). */
+export function missionsOfDriversFilter(driverIds: number[]) {
+  return inArray(missions.id, db.select({ id: assignments.missionId }).from(assignments).where(driverLiveAssignmentFilter(driverIds)));
+}
+
+/**
+ * Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté.
+ * Une affectation annulée ou refusée ne compte pas : le chauffeur retiré de la mission n'y a plus accès.
+ * Une affectation terminée garde l'accès (historique de ses missions).
+ */
 export async function canAccessMissionAsDriver(reader: DriverScopeReader | undefined, missionId: number): Promise<boolean> {
   const scope = await driverScopeOf(reader);
   if (scope === undefined) return true;
@@ -40,9 +59,69 @@ export async function canAccessMissionAsDriver(reader: DriverScopeReader | undef
   const [row] = await db
     .select({ id: assignments.id })
     .from(assignments)
-    .where(and(eq(assignments.missionId, missionId), inArray(assignments.driverId, scope)))
+    .where(and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(scope)))
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * Une mission peut avoir plusieurs chauffeurs (une ligne `assignments` par chauffeur, aucune unicité
+ * sur `mission_id`). Un droit d'agir sur la mission se lit donc sur l'ensemble des lignes, jamais sur
+ * « la » première.
+ *
+ * Affectations du compte sur la mission, encore actives (`ACTIVE_ASSIGNMENT_STATUSES`) : une
+ * affectation annulée, refusée ou terminée ne donne aucun droit de saisie. Ordre stable (id).
+ * Vide pour un compte sans fiche chauffeur ou hors mission.
+ */
+export async function activeDriverAssignmentsOnMission(
+  reader: DriverScopeReader,
+  missionId: number,
+): Promise<{ id: number; vehicleId: number | null; driverId: number }[]> {
+  const scope = (await driverScopeOf(reader)) ?? [];
+  if (scope.length === 0) return [];
+  const rows = await db
+    .select({ id: assignments.id, vehicleId: assignments.vehicleId, driverId: assignments.driverId })
+    .from(assignments)
+    .where(
+      and(
+        eq(assignments.missionId, missionId),
+        inArray(assignments.driverId, scope),
+        inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+      ),
+    )
+    .orderBy(asc(assignments.id));
+  return rows.filter((r): r is { id: number; vehicleId: number | null; driverId: number } => r.driverId !== null);
+}
+
+/**
+ * Véhicules d'une mission pour le personnel (saisie carburant, régularisation) : ceux de toutes ses
+ * affectations, hors annulée ou refusée. Ordre stable (id), sans doublon.
+ */
+export async function missionVehicleIdsForStaff(missionId: number): Promise<number[]> {
+  const rows = await db
+    .select({ vehicleId: assignments.vehicleId })
+    .from(assignments)
+    .where(and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])))
+    .orderBy(asc(assignments.id));
+  return Array.from(new Set(rows.map((r) => r.vehicleId).filter((v): v is number => v !== null)));
+}
+
+/**
+ * Affectation à présenter comme « l'affectation » d'une mission dans une réponse à valeur unique
+ * (`assignment`). Chauffeur (`driverScope` défini) : uniquement les siennes, jamais celle d'un autre
+ * chauffeur. Pour le chauffeur comme pour le personnel : la plus ancienne active d'abord, puis la plus
+ * ancienne non annulée ni refusée, à défaut la plus ancienne. Ordre stable, indépendant de l'ordre de lecture.
+ */
+export function pickMissionAssignment<T extends { id: number; driverId: number | null; status: string }>(
+  rows: T[],
+  driverScope?: number[],
+): T | null {
+  const visible = (driverScope === undefined ? rows : rows.filter((r) => r.driverId !== null && driverScope.includes(r.driverId)))
+    .slice()
+    .sort((a, b) => a.id - b.id);
+  const live = visible.filter((r) => !isVoidAssignmentStatus(r.status));
+  const active = live.filter((r) => (ACTIVE_ASSIGNMENT_STATUSES as readonly string[]).includes(r.status));
+  return active[0] ?? live[0] ?? visible[0] ?? null;
 }
 
 /**

@@ -3,7 +3,7 @@ import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
-import { eq, and, desc, inArray, ne, or, ilike, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -18,11 +18,22 @@ import {
   extractMissionActualRoadExpensesHT,
   mergeMissionActualFdrCost,
 } from "@shared/constants/management-mission-profitability";
-import { isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
+import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
+import { assertValidDbId } from "../lib/work-order-scope";
+import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { toFieldErrors } from "@shared/errors";
-import { canAccessMissionAsDriver, driverScopeOf, OUT_OF_DRIVER_SCOPE_MESSAGE } from "../lib/driver-scope";
+import {
+  activeDriverAssignmentsOnMission,
+  canAccessMissionAsDriver,
+  driverScopeOf,
+  missionsOfDriversFilter,
+  missionVehicleIdsForStaff,
+  OUT_OF_DRIVER_SCOPE_MESSAGE,
+  pickMissionAssignment,
+} from "../lib/driver-scope";
 import { authorize } from "../middleware/auth";
+import { validateBody } from "../middleware/validate-body";
 import { moduleLogger } from "../lib/logger";
 import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
@@ -133,13 +144,17 @@ type MissionRealtimeEvent =
 
 type VehicleDocumentRequirementType = "carte_grise" | "assurance" | "visite_technique";
 
-/** Comptes utilisateur des chauffeurs affectés à la mission (destinataires de la trame réduite). */
+/**
+ * Comptes utilisateur des chauffeurs affectés à la mission (destinataires de la trame réduite).
+ * Affectation annulée ou refusée exclue : le chauffeur retiré ne reçoit plus les trames de la mission
+ * (son écran se resynchronise par polling sur des routes qui l'excluent déjà).
+ */
 async function assignedDriverUserIds(missionId: number): Promise<number[]> {
   const rows = await db
     .select({ userId: drivers.userId })
     .from(assignments)
     .innerJoin(drivers, eq(assignments.driverId, drivers.id))
-    .where(eq(assignments.missionId, missionId));
+    .where(and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])));
   return Array.from(new Set(rows.map((row) => row.userId).filter((id): id is number => typeof id === "number" && id > 0)));
 }
 
@@ -329,21 +344,20 @@ function normalizeCpcStatus(value: string | null | undefined): string {
     .toUpperCase();
 }
 
-function isDateExpired(dateValue: Date | string | null | undefined): boolean {
-  if (!dateValue) return true;
-  const candidate = new Date(dateValue);
-  if (Number.isNaN(candidate.getTime())) return true;
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  candidate.setHours(0, 0, 0, 0);
-  return candidate < now;
+/**
+ * Permis chauffeur : même règle que les papiers véhicule (jour UTC, valable le jour J,
+ * expiré à J+1, #224), source `isDriverLicenseExpiredOn`. Absent ou illisible : expiré.
+ */
+function isDriverLicenseExpired(dateValue: Date | string | null | undefined): boolean {
+  return isDriverLicenseExpiredOn(dateValue, todayUtcDateOnly());
 }
 
 /**
  * Même règle que `getMissionEligibility` (source unique `shared/constants/expiry-day.ts`) :
- * le jour de l'échéance bloque, la date du jour est la date UTC. Date illisible : bloque.
+ * le jour de l'échéance est valable, expiré à J+1, la date du jour est la date UTC.
+ * Date illisible : bloque.
  */
-function isExpiredOnOrBeforeToday(dateValue: Date | string): boolean {
+function isPaperExpired(dateValue: Date | string): boolean {
   if (toExpiryDateOnly(dateValue) === null) return true;
   return isExpiredOn(dateValue, todayUtcDateOnly());
 }
@@ -722,16 +736,19 @@ function isDocumentTypeValid(
 
   if (documentType === "carte_grise") {
     // Même règle que le lancement (transition in_progress) : une carte grise sans date ne bloque
-    // pas ; datée, la plus récente échéance compte, le jour de l'échéance bloque (UTC). Le
+    // pas ; datée, la plus récente échéance compte, valable le jour J, expirée à J+1 (UTC). Le
     // récépissé « plaque » lève l'échéance dépassée.
     if (receiptCovers) return true;
     const expiries = docs.flatMap((doc) => (doc.expiryDate ? [doc.expiryDate] : []));
     if (expiries.length === 0) return true;
-    return expiries.some((expiry) => !isExpiredOnOrBeforeToday(expiry));
+    return expiries.some((expiry) => !isPaperExpired(expiry));
   }
 
-  // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier.
-  return receiptCovers || docs.some((doc) => !isDateExpired(doc.expiryDate));
+  // Un récépissé valable lève l'échéance dépassée, pas l'absence du papier. Même jour
+  // d'échéance que le lancement : jour UTC, valable le jour J, papier sans date
+  // invalide (isPaperExpired, jamais la règle du permis).
+  if (receiptCovers) return true;
+  return docs.some((doc) => doc.expiryDate !== null && !isPaperExpired(doc.expiryDate));
 }
 
 /** Exporté pour le contrat de portée. */
@@ -819,17 +836,14 @@ router.get("/", async (req, res) => {
       .where(
         driverScope === undefined
           ? undefined
-          : inArray(
-              missions.id,
-              db.select({ id: assignments.missionId }).from(assignments).where(inArray(assignments.driverId, driverScope)),
-            ),
+          : missionsOfDriversFilter(driverScope),
       )
       .orderBy(desc(missions.createdAt));
 
     // Get assignments for each mission
     const missionsWithAssignments = await Promise.all(
       allMissions.map(async (mission) => {
-        const [assignment] = await db
+        const assignmentRows = await db
           .select({
             id: assignments.id,
             missionId: assignments.missionId,
@@ -858,7 +872,11 @@ router.get("/", async (req, res) => {
           .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
-          .limit(1);
+          .orderBy(asc(assignments.id));
+        // Plusieurs chauffeurs possibles : `assignment` reste la valeur unique historique (celle du chauffeur
+        // lecteur, sinon la plus ancienne active), `assignments` liste toutes celles qu'il a le droit de voir.
+        const visibleAssignments = driverScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && driverScope.includes(a.driverId));
+        const assignment = pickMissionAssignment(assignmentRows, driverScope);
 
         const executionDates = extractMissionExecutionDates({
           workflowData: mission.workflowData,
@@ -873,6 +891,7 @@ router.get("/", async (req, res) => {
           ...mission,
           ...executionDates,
           assignment: assignment || null,
+          assignments: visibleAssignments,
         };
       })
     );
@@ -939,7 +958,7 @@ router.get("/:id", async (req, res) => {
     }
 
     // Get assignment
-    const [assignment] = await db
+    const assignmentRows = await db
       .select({
         id: assignments.id,
         missionId: assignments.missionId,
@@ -972,7 +991,11 @@ router.get("/:id", async (req, res) => {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
-      .limit(1);
+      .orderBy(asc(assignments.id));
+    // Plusieurs chauffeurs possibles (voir la liste) : un chauffeur ne lit que ses propres affectations.
+    const detailScope = await driverScopeOf(req.user);
+    const visibleAssignments = detailScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && detailScope.includes(a.driverId));
+    const assignment = pickMissionAssignment(assignmentRows, detailScope);
 
     const executionDates = extractMissionExecutionDates({
       workflowData: mission.workflowData,
@@ -987,6 +1010,7 @@ router.get("/:id", async (req, res) => {
       ...mission,
       ...executionDates,
       assignment: assignment || null,
+      assignments: visibleAssignments,
     });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get mission error");
@@ -1094,15 +1118,9 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
         status: missions.status,
         deliveryAddress: missions.deliveryAddress,
         clientName: clients.name,
-        assignmentId: assignments.id,
-        assignmentVehicleId: assignments.vehicleId,
-        assignmentDriverId: assignments.driverId,
-        assignmentDriverUserId: drivers.userId,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
-      .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(missions.id, missionId))
       .limit(1);
 
@@ -1110,24 +1128,28 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
-    // Périmètre d'abord : un chauffeur non affecté reçoit 403 quel que soit le véhicule envoyé, sans
-    // pouvoir distinguer 400 et 403 pour deviner le véhicule d'une mission hors de son périmètre.
+    // Plusieurs chauffeurs possibles par mission : le droit et le véhicule contrôlé se lisent sur
+    // l'ensemble des affectations, pas sur « la » première (#227).
+    // Périmètre d'abord : un chauffeur sans affectation active sur la mission reçoit 403 quel que soit le
+    // véhicule envoyé, sans pouvoir distinguer 400 et 403 pour deviner le véhicule d'une mission hors de
+    // son périmètre. Son véhicule est celui de SA affectation, jamais celui d'un autre chauffeur.
+    let allowedVehicleIds: number[];
     if (actorRole === "driver") {
-      if (!mission.assignmentDriverId || !mission.assignmentDriverUserId) {
-        throw new AppError(403, "Aucun chauffeur valide affecté à cette mission.");
+      const own = await activeDriverAssignmentsOnMission({ id: actorUserId, role: actorRole }, missionId);
+      if (own.length === 0) {
+        throw new AppError(403, "Accès refusé: seul un chauffeur affecté à cette mission peut enregistrer ce plein.");
       }
-
-      if (mission.assignmentDriverUserId !== actorUserId) {
-        throw new AppError(403, "Accès refusé: seul le chauffeur affecté peut enregistrer ce plein.");
-      }
+      allowedVehicleIds = own.map((a) => a.vehicleId).filter((v): v is number => v !== null);
+    } else {
+      allowedVehicleIds = await missionVehicleIdsForStaff(missionId);
     }
 
     // Statut : contrôlé sous le verrou de ligne, après le rejeu (assertMissionAcceptsFuel), pas ici.
-    if (!mission.assignmentId || !mission.assignmentVehicleId) {
+    if (allowedVehicleIds.length === 0) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
     }
 
-    if (payload.vehicleId !== mission.assignmentVehicleId) {
+    if (!allowedVehicleIds.includes(payload.vehicleId)) {
       return res.status(400).json({
         message: "Le véhicule renseigné ne correspond pas au véhicule affecté à la mission.",
       });
@@ -1268,12 +1290,9 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
         workflowData: missions.workflowData,
         deliveryAddress: missions.deliveryAddress,
         clientName: clients.name,
-        assignmentId: assignments.id,
-        assignmentVehicleId: assignments.vehicleId,
       })
       .from(missions)
       .leftJoin(clients, eq(missions.clientId, clients.id))
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .where(eq(missions.id, missionId))
       .limit(1);
 
@@ -1291,11 +1310,13 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
       });
     }
 
-    if (!mission.assignmentId || !mission.assignmentVehicleId) {
+    // Plusieurs chauffeurs, donc plusieurs véhicules possibles : on accepte celui de n'importe quelle affectation (#227).
+    const regularizableVehicleIds = await missionVehicleIdsForStaff(missionId);
+    if (regularizableVehicleIds.length === 0) {
       return res.status(400).json({ message: "Aucun véhicule affecté à cette mission." });
     }
 
-    if (payload.vehicleId !== mission.assignmentVehicleId) {
+    if (!regularizableVehicleIds.includes(payload.vehicleId)) {
       return res.status(400).json({
         message: "Le véhicule renseigné ne correspond pas au véhicule affecté à la mission.",
       });
@@ -1608,6 +1629,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     const hasVehicle = Boolean(missionAssignment?.vehicleId);
@@ -1675,7 +1697,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
     const assuranceParRecepisse = assuranceValid && !isDocumentTypeValid("assurance", assuranceDocs);
     const carteGriseParRecepisse = carteGriseValid && !isDocumentTypeValid("carte_grise", carteGriseDocs);
     const visiteParRecepisse = visiteTechniqueValid && !isDocumentTypeValid("visite_technique", visiteDocs);
-    const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDateExpired(missionAssignment?.driverLicenseExpiry);
+    const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDriverLicenseExpired(missionAssignment?.driverLicenseExpiry);
     const cpcValid = hasDriver && normalizeCpcStatus(missionAssignment?.driverCpcStatus) === "FORME";
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
     const vehicleOperational = hasVehicle && missionAssignment?.vehicleStatus === "operational";
@@ -1773,6 +1795,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
           and(
             ne(assignments.missionId, mission.id),
             inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+            inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
             or(
               eq(assignments.vehicleId, missionAssignment.vehicleId),
               eq(assignments.driverId, missionAssignment.driverId),
@@ -2210,7 +2233,7 @@ const updateMissionSchema = z.object({
 // PATCH /api/missions/:id - Mettre à jour les infos de mission
 // Réservé aux gestionnaires de missions (R3) : le montage n'exige que isStaff, ce qui laissait
 // chauffeur, technicien et magasinier modifier coût carburant, dates, chauffeur et véhicule.
-router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
+router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id);
     if (!Number.isInteger(missionId)) {
@@ -2405,20 +2428,32 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
         : null;
     }
 
-    const [existingAssignment] = await db
-      .select({
-        id: assignments.id,
-        status: assignments.status,
-      })
-      .from(assignments)
-      .where(eq(assignments.missionId, missionId))
-      .limit(1);
+    // `assignment` du PATCH reste le format « un chauffeur par mission ». Avec plusieurs affectations
+    // vivantes, il ne sait pas laquelle viser : refus explicite plutôt qu'écrire sur « la première ».
+    // Une affectation annulée ou refusée n'est jamais réécrite (elle reprendrait sa part du CA).
+    const liveAssignments = (
+      await db
+        .select({
+          id: assignments.id,
+          status: assignments.status,
+        })
+        .from(assignments)
+        .where(eq(assignments.missionId, missionId))
+        .orderBy(asc(assignments.id))
+    ).filter((row) => !isVoidAssignmentStatus(row.status));
+    const existingAssignment = liveAssignments[0];
 
     const assignmentProvided = Object.prototype.hasOwnProperty.call(payload, "assignment");
+    if (assignmentProvided && liveAssignments.length > 1) {
+      throw new AppError(
+        409,
+        "Cette mission a plusieurs chauffeurs : modifiez ses affectations une par une (ajout ou annulation d'une affectation).",
+      );
+    }
     if (assignmentProvided) {
       if (payload.assignment == null) {
         if (existingAssignment?.id) {
-          await db.delete(assignments).where(eq(assignments.id, existingAssignment.id));
+          await db.delete(assignments).where(and(eq(assignments.id, existingAssignment.id), eq(assignments.status, existingAssignment.status)));
         }
         if (existingMission.status === "assigned") {
           missionUpdates.status = "planned";
@@ -2515,7 +2550,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
               status: existingAssignment.status === "in_progress" ? "in_progress" : "pending",
               updatedAt: new Date(),
             })
-            .where(eq(assignments.id, existingAssignment.id));
+            .where(and(eq(assignments.id, existingAssignment.id), eq(assignments.status, existingAssignment.status)));
         } else {
           await db.insert(assignments).values({
             missionId,
@@ -2550,8 +2585,193 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => 
 
     return res.json(updatedMission);
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Update mission error");
-    return res.status(500).json({ message: "Erreur lors de la mise à jour de la mission" });
+    // Une AppError (409 plusieurs chauffeurs, 403…) garde son statut ; le reste devient une 5xx normalisée.
+    if (!(error instanceof AppError)) log.error({ err: error, requestId: req.requestId }, "Update mission error");
+    next(error);
+  }
+});
+
+const addAssignmentSchema = z.object({
+  vehicleId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+  driverId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+});
+
+const editionBlockedMessage = (status: string) => `Mission ${status === "completed" ? "terminée" : "annulée"} : édition bloquée.`;
+
+// POST /api/missions/:id/assignments - Ajouter un chauffeur (et son véhicule) à la mission.
+// Une mission peut avoir plusieurs chauffeurs (#227) ; le PATCH ne sait remplacer qu'une affectation.
+// Mêmes rôles que l'affectation par PATCH (MISSION_MANAGER_ROLES). La ligne mission est verrouillée
+// (FOR UPDATE) : deux ajouts concurrents du même chauffeur se serrent, le second voit le premier et reçoit 409.
+router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateBody(addAssignmentSchema), async (req, res, next) => {
+  try {
+    const missionId = Number(req.params.id);
+    assertValidDbId(missionId, "ID mission invalide.");
+    const { vehicleId, driverId } = req.body as z.infer<typeof addAssignmentSchema>;
+    assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
+    assertValidDbId(driverId, "Affectation invalide (véhicule/chauffeur).");
+
+    const result = await db.transaction(async (tx) => {
+      const [mission] = await tx
+        .select({
+          id: missions.id,
+          status: missions.status,
+          weight: missions.weight,
+          pickupDate: missions.pickupDate,
+          deliveryDate: missions.deliveryDate,
+        })
+        .from(missions)
+        .where(eq(missions.id, missionId))
+        .for("update");
+      if (!mission) throw new AppError(404, "Mission non trouvée.");
+      if (mission.status === "completed" || mission.status === "cancelled") {
+        throw new AppError(400, editionBlockedMessage(mission.status));
+      }
+
+      const [vehicle] = await tx
+        .select({
+          id: vehicles.id,
+          registrationNumber: vehicles.registrationNumber,
+          tonnage: vehicles.tonnage,
+          status: vehicles.status,
+          insuranceExpiry: vehicles.insuranceExpiry,
+          technicalInspectionDate: vehicles.technicalInspectionDate,
+          licensePlateExpiry: vehicles.licensePlateExpiry,
+        })
+        .from(vehicles)
+        .where(and(eq(vehicles.id, vehicleId), isNull(vehicles.deletedAt)))
+        .limit(1);
+      if (!vehicle) throw new AppError(400, "Véhicule introuvable pour l'affectation.");
+
+      const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id, tx) });
+      if (!eligibilite.eligible) {
+        throw new AppError(400, formatEligibilityRefusal(vehicle.registrationNumber, eligibilite.blockers));
+      }
+
+      const [driver] = await tx
+        .select({ id: drivers.id, firstName: drivers.firstName, lastName: drivers.lastName, cpcStatus: drivers.cpcStatus, isActive: drivers.isActive })
+        .from(drivers)
+        .where(eq(drivers.id, driverId))
+        .limit(1);
+      if (!driver) throw new AppError(400, "Chauffeur introuvable pour l'affectation.");
+      if (driver.isActive === false) throw new AppError(400, "Ce chauffeur est désactivé, il ne peut pas être affecté.");
+      if (normalizeCpcStatus(driver.cpcStatus) !== "FORME") {
+        throw new AppError(400, `CPC invalide pour ${driver.firstName} ${driver.lastName} : statut ${driver.cpcStatus || "non défini"}.`);
+      }
+
+      const missionWeight = mission.weight !== null && mission.weight !== undefined ? Number(mission.weight) : null;
+      const vehicleTonnage = vehicle.tonnage !== null && vehicle.tonnage !== undefined ? Number(vehicle.tonnage) : null;
+      if (missionWeight !== null && vehicleTonnage !== null && !Number.isNaN(missionWeight) && !Number.isNaN(vehicleTonnage) && missionWeight > vehicleTonnage) {
+        throw new AppError(400, `Charge incompatible : ${missionWeight}T > tonnage véhicule ${vehicle.registrationNumber} (${vehicleTonnage}T).`);
+      }
+
+      const [already] = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(and(eq(assignments.missionId, missionId), eq(assignments.driverId, driverId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+        .limit(1);
+      if (already) throw new AppError(409, "Ce chauffeur est déjà affecté à cette mission.");
+
+      // Conflit de planning (même règle que le lancement) : chaque chauffeur et chaque véhicule ajouté.
+      if (mission.pickupDate && mission.deliveryDate) {
+        const candidates = await tx
+          .select({
+            orderNumber: missions.orderNumber,
+            pickupDate: missions.pickupDate,
+            deliveryDate: missions.deliveryDate,
+            vehicleId: assignments.vehicleId,
+            driverId: assignments.driverId,
+          })
+          .from(assignments)
+          .innerJoin(missions, eq(assignments.missionId, missions.id))
+          .where(
+            and(
+              ne(assignments.missionId, missionId),
+              inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+              inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+              or(eq(assignments.vehicleId, vehicleId), eq(assignments.driverId, driverId)),
+            ),
+          );
+        const clash = candidates.find((c) => overlaps(mission.pickupDate, mission.deliveryDate, c.pickupDate, c.deliveryDate));
+        if (clash) {
+          const what = clash.driverId === driverId ? "Ce chauffeur" : "Ce véhicule";
+          throw new AppError(409, `Conflit de planning : ${what} est déjà affecté à la mission ${clash.orderNumber} sur ce créneau.`);
+        }
+      }
+
+      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" }).returning();
+      const [updatedMission] =
+        mission.status === "planned"
+          ? await tx.update(missions).set({ status: "assigned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
+          : await tx.select().from(missions).where(eq(missions.id, missionId));
+      return { assignment, mission: updatedMission };
+    });
+
+    // Après le commit : trame complète au personnel, trame réduite aux chauffeurs affectés (portée nominative).
+    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id }, req.requestId);
+    return res.status(201).json(result.assignment);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/missions/:id/assignments/:assignmentId - Annuler l'affectation d'un chauffeur.
+// Pas de suppression physique : la ligne passe à `cancelled` (l'historique carburant et les trames en dépendent).
+// Le chauffeur perd aussitôt le droit de saisie (activeDriverAssignmentsOnMission ne compte que les actives).
+router.delete("/:id/assignments/:assignmentId", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
+  try {
+    const missionId = Number(req.params.id);
+    const assignmentId = Number(req.params.assignmentId);
+    assertValidDbId(missionId, "ID mission invalide.");
+    assertValidDbId(assignmentId, "ID affectation invalide.");
+
+    const result = await db.transaction(async (tx) => {
+      const [mission] = await tx
+        .select({ id: missions.id, status: missions.status })
+        .from(missions)
+        .where(eq(missions.id, missionId))
+        .for("update");
+      if (!mission) throw new AppError(404, "Mission non trouvée.");
+      if (mission.status === "completed" || mission.status === "cancelled") {
+        throw new AppError(400, editionBlockedMessage(mission.status));
+      }
+      const [assignment] = await tx
+        .select()
+        .from(assignments)
+        .where(and(eq(assignments.id, assignmentId), eq(assignments.missionId, missionId)))
+        // Verrou de ligne : un démarrage concurrent (pending -> in_progress) attend la fin de l'annulation.
+        .for("update");
+      if (!assignment) throw new AppError(404, "Affectation non trouvée sur cette mission.");
+      // Déjà annulée ou refusée : rien à faire. Un refus reste un refus, il n'est pas réécrit en annulation.
+      if (isVoidAssignmentStatus(assignment.status)) return { assignment, mission: undefined, changed: false };
+      if (assignment.status === "in_progress" || assignment.status === "completed") {
+        throw new AppError(409, "Cette affectation est déjà démarrée ou terminée : elle ne peut plus être annulée.");
+      }
+
+      const [cancelled] = await tx
+        .update(assignments)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(and(eq(assignments.id, assignmentId), eq(assignments.status, assignment.status)))
+        .returning();
+      const stillActive = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(and(eq(assignments.missionId, missionId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+        .limit(1);
+      const [updatedMission] =
+        stillActive.length === 0 && mission.status === "assigned"
+          ? await tx.update(missions).set({ status: "planned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
+          : await tx.select().from(missions).where(eq(missions.id, missionId));
+      return { assignment: cancelled, mission: updatedMission, changed: true };
+    });
+
+    // L'annulation est rejouable : une seconde demande ne rediffuse rien. Le chauffeur annulé reçoit la trame
+    // (son affectation reste une ligne de la mission) et resynchronise son écran, qui ne l'affiche plus actif.
+    if (result.changed && result.mission) {
+      await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_cancelled", assignmentId }, req.requestId);
+    }
+    return res.json(result.assignment);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -2604,7 +2824,10 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
     }
 
-    const [missionAssignment] = await db
+    // Une mission peut porter plusieurs affectations (un chauffeur chacune). Le statut ne s'écrit que sur
+    // les lignes actives : celles du chauffeur qui agit, ou toutes pour le personnel. Une affectation annulée
+    // ou refusée n'est jamais ressuscitée (elle reprendrait sa part du CA et ses droits de saisie).
+    const missionAssignmentRows = await db
       .select({
         id: assignments.id,
         vehicleId: assignments.vehicleId,
@@ -2628,10 +2851,25 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
-      .limit(1);
+      .orderBy(asc(assignments.id));
+
+    const statusDriverScope = await driverScopeOf(req.user);
+    const ownRows = statusDriverScope === undefined
+      ? missionAssignmentRows
+      : missionAssignmentRows.filter((r) => r.driverId !== null && statusDriverScope.includes(r.driverId));
+    if (statusDriverScope !== undefined && !ownRows.some((r) => isActiveAssignmentStatus(r.status))) {
+      throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
+    }
+    // Livraison et clôture confirment aussi une affectation déjà terminée ; les autres statuts ne touchent
+    // que les affectations actives.
+    const closesAssignments = targetStatus === "delivered" || targetStatus === "completed";
+    const targetAssignments = ownRows.filter(
+      (r) => isActiveAssignmentStatus(r.status) || (closesAssignments && r.status === "completed"),
+    );
+    const missionAssignment = targetAssignments[0] ?? null;
 
     if (targetStatus === "assigned") {
-      if (!missionAssignment?.vehicleId || !missionAssignment?.driverId) {
+      if (!targetAssignments.some((r) => r.vehicleId && r.driverId)) {
         return res.status(400).json({
           message: "Affectation requise: assignez d'abord un véhicule et un chauffeur.",
         });
@@ -2641,138 +2879,152 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     if (targetStatus === "in_progress") {
       const launchErrors: string[] = [];
 
-      if (!missionAssignment?.vehicleId || !missionAssignment?.driverId) {
+      // Contrôles de lancement sur chaque affectation lancée : un second camion non conforme ou un second
+      // chauffeur sans CPC ne part pas sous couvert du premier. Avec plusieurs affectations, chaque motif
+      // porte l'immatriculation concernée.
+      if (targetAssignments.length === 0) {
         launchErrors.push("Affectation incomplète (véhicule + chauffeur requis).");
-      } else {
-        if (missionAssignment.vehicleStatus !== "operational") {
-          launchErrors.push(
-            `Véhicule ${missionAssignment.vehicleRegistration || ""} non opérationnel (${missionAssignment.vehicleStatus}).`,
-          );
+      }
+      for (const row of targetAssignments) {
+        if (!row.vehicleId || !row.driverId) {
+          launchErrors.push("Affectation incomplète (véhicule + chauffeur requis).");
+          continue;
         }
-
-        if (!missionAssignment.driverIsActive) {
-          launchErrors.push("Chauffeur inactif.");
-        }
-
-        if (normalizeCpcStatus(missionAssignment.driverCpcStatus) !== "FORME") {
-          launchErrors.push(
-            `CPC chauffeur non valide (${missionAssignment.driverCpcStatus || "non défini"}).`,
-          );
-        }
-
-        if (missionAssignment.driverLicenseExpiry && isDateExpired(missionAssignment.driverLicenseExpiry)) {
-          launchErrors.push("Permis chauffeur expiré.");
-        }
-
-        const docs = await db
-          .select({
-            type: vehicleDocuments.type,
-            expiryDate: vehicleDocuments.expiryDate,
-          })
-          .from(vehicleDocuments)
-          .where(eq(vehicleDocuments.vehicleId, missionAssignment.vehicleId));
-
-        // Par type, la date d'expiration la plus lointaine : un ancien document
-        // échu ne masque pas le renouvellement (même règle que vehicle-documentation-service).
-        const docsByType = new Map<string, { expiryDate: Date | string | null }>();
-        docs.forEach((doc) => {
-          const known = docsByType.get(doc.type);
-          const candidate = doc.expiryDate ? new Date(doc.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
-          const current = known?.expiryDate ? new Date(known.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
-          if (!known || candidate > current) {
-            docsByType.set(doc.type, { expiryDate: doc.expiryDate });
+        const rowErrors: string[] = [];
+          if (row.vehicleStatus !== "operational") {
+            rowErrors.push(
+              `Véhicule ${row.vehicleRegistration || ""} non opérationnel (${row.vehicleStatus}).`,
+            );
           }
-        });
 
-        const carteGrise = docsByType.get("carte_grise");
-        const assurance = docsByType.get("assurance");
-        const visiteTechnique = docsByType.get("visite_technique");
+          if (!row.driverIsActive) {
+            rowErrors.push("Chauffeur inactif.");
+          }
 
-        // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
-        // comme dans getMissionEligibility). Le jour de l'échéance bloque ; le jour
-        // courant est la date UTC (expiry-day.ts).
-        // Récépissé provisoire valable : il lève l'échéance dépassée d'un papier présent,
-        // jamais un papier manquant (même règle que getMissionEligibility).
-        const receipts = await loadOpenRenewalReceipts(missionAssignment.vehicleId);
-        const expiredWithoutReceipt = (
-          expiryDate: Date | string,
-          code: "insurance" | "technical_inspection" | "license_plate",
-        ) => isExpiredOnOrBeforeToday(expiryDate) && !isRenewalReceiptValid(receipts, code);
+          if (normalizeCpcStatus(row.driverCpcStatus) !== "FORME") {
+            rowErrors.push(
+              `CPC chauffeur non valide (${row.driverCpcStatus || "non défini"}).`,
+            );
+          }
 
-        let carteGriseErreur = false;
-        if (!carteGrise) {
-          launchErrors.push("Carte grise manquante.");
-        } else if (carteGrise.expiryDate && expiredWithoutReceipt(carteGrise.expiryDate, "license_plate")) {
-          launchErrors.push("Carte grise expirée.");
-          carteGriseErreur = true;
-        }
+          if (row.driverLicenseExpiry && isDriverLicenseExpired(row.driverLicenseExpiry)) {
+            rowErrors.push("Permis chauffeur expiré.");
+          }
 
-        const assuranceErreur = !assurance || !assurance.expiryDate || expiredWithoutReceipt(assurance.expiryDate, "insurance");
-        if (assuranceErreur) {
-          launchErrors.push("Assurance manquante ou expirée.");
-        }
-
-        const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || expiredWithoutReceipt(visiteTechnique.expiryDate, "technical_inspection");
-        if (visiteErreur) {
-          launchErrors.push("Visite technique manquante ou expirée.");
-        }
-
-        // Règle unique d'éligibilité, la même qu'à l'affectation : couvre les
-        // colonnes miroir de `vehicles` (assurance, visite, plaque). L'état
-        // mécanique est déjà refusé plus haut ; on n'ajoute que les motifs de
-        // conformité qui ne sont pas déjà énoncés.
-        const eligibilite = getMissionEligibility({
-          status: missionAssignment.vehicleStatus,
-          insuranceExpiry: missionAssignment.vehicleInsuranceExpiry,
-          technicalInspectionDate: missionAssignment.vehicleTechnicalInspectionDate,
-          licensePlateExpiry: missionAssignment.vehicleLicensePlateExpiry,
-          receipts,
-        });
-        for (const blocker of eligibilite.blockers) {
-          if (blocker.kind !== "compliance") continue;
-          if (blocker.code === "insurance" && assuranceErreur) continue;
-          if (blocker.code === "technical_inspection" && visiteErreur) continue;
-          if (blocker.code === "license_plate" && carteGriseErreur) continue;
-          launchErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
-        }
-
-        if (mission.pickupDate && mission.deliveryDate) {
-          const planningConflicts = await db
+          const docs = await db
             .select({
-              missionId: assignments.missionId,
-              orderNumber: missions.orderNumber,
-              pickupDate: missions.pickupDate,
-              deliveryDate: missions.deliveryDate,
-              vehicleId: assignments.vehicleId,
-              driverId: assignments.driverId,
+              type: vehicleDocuments.type,
+              expiryDate: vehicleDocuments.expiryDate,
             })
-            .from(assignments)
-            .innerJoin(missions, eq(assignments.missionId, missions.id))
-            .where(
-              and(
-                ne(assignments.missionId, mission.id),
-                inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
-                or(
-                  eq(assignments.vehicleId, missionAssignment.vehicleId),
-                  eq(assignments.driverId, missionAssignment.driverId),
+            .from(vehicleDocuments)
+            .where(eq(vehicleDocuments.vehicleId, row.vehicleId));
+
+          // Par type, la date d'expiration la plus lointaine : un ancien document
+          // échu ne masque pas le renouvellement (même règle que vehicle-documentation-service).
+          const docsByType = new Map<string, { expiryDate: Date | string | null }>();
+          docs.forEach((doc) => {
+            const known = docsByType.get(doc.type);
+            const candidate = doc.expiryDate ? new Date(doc.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+            const current = known?.expiryDate ? new Date(known.expiryDate).getTime() : Number.NEGATIVE_INFINITY;
+            if (!known || candidate > current) {
+              docsByType.set(doc.type, { expiryDate: doc.expiryDate });
+            }
+          });
+
+          const carteGrise = docsByType.get("carte_grise");
+          const assurance = docsByType.get("assurance");
+          const visiteTechnique = docsByType.get("visite_technique");
+
+          // Carte grise : sa présence ET son échéance (une date absente ne bloque pas,
+          // comme dans getMissionEligibility). Valable le jour J, expirée à J+1 ; le jour
+          // courant est la date UTC (expiry-day.ts).
+          // Récépissé provisoire valable : il lève l'échéance dépassée d'un papier présent,
+          // jamais un papier manquant (même règle que getMissionEligibility).
+          const receipts = await loadOpenRenewalReceipts(row.vehicleId);
+          const expiredWithoutReceipt = (
+            expiryDate: Date | string,
+            code: "insurance" | "technical_inspection" | "license_plate",
+          ) => isPaperExpired(expiryDate) && !isRenewalReceiptValid(receipts, code);
+
+          let carteGriseErreur = false;
+          if (!carteGrise) {
+            rowErrors.push("Carte grise manquante.");
+          } else if (carteGrise.expiryDate && expiredWithoutReceipt(carteGrise.expiryDate, "license_plate")) {
+            rowErrors.push("Carte grise expirée.");
+            carteGriseErreur = true;
+          }
+
+          const assuranceErreur = !assurance || !assurance.expiryDate || expiredWithoutReceipt(assurance.expiryDate, "insurance");
+          if (assuranceErreur) {
+            rowErrors.push("Assurance manquante ou expirée.");
+          }
+
+          const visiteErreur = !visiteTechnique || !visiteTechnique.expiryDate || expiredWithoutReceipt(visiteTechnique.expiryDate, "technical_inspection");
+          if (visiteErreur) {
+            rowErrors.push("Visite technique manquante ou expirée.");
+          }
+
+          // Règle unique d'éligibilité, la même qu'à l'affectation : couvre les
+          // colonnes miroir de `vehicles` (assurance, visite, plaque). L'état
+          // mécanique est déjà refusé plus haut ; on n'ajoute que les motifs de
+          // conformité qui ne sont pas déjà énoncés.
+          const eligibilite = getMissionEligibility({
+            status: row.vehicleStatus,
+            insuranceExpiry: row.vehicleInsuranceExpiry,
+            technicalInspectionDate: row.vehicleTechnicalInspectionDate,
+            licensePlateExpiry: row.vehicleLicensePlateExpiry,
+            receipts,
+          });
+          for (const blocker of eligibilite.blockers) {
+            if (blocker.kind !== "compliance") continue;
+            if (blocker.code === "insurance" && assuranceErreur) continue;
+            if (blocker.code === "technical_inspection" && visiteErreur) continue;
+            if (blocker.code === "license_plate" && carteGriseErreur) continue;
+            rowErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
+          }
+
+          if (mission.pickupDate && mission.deliveryDate) {
+            const planningConflicts = await db
+              .select({
+                missionId: assignments.missionId,
+                orderNumber: missions.orderNumber,
+                pickupDate: missions.pickupDate,
+                deliveryDate: missions.deliveryDate,
+                vehicleId: assignments.vehicleId,
+                driverId: assignments.driverId,
+              })
+              .from(assignments)
+              .innerJoin(missions, eq(assignments.missionId, missions.id))
+              .where(
+                and(
+                  ne(assignments.missionId, mission.id),
+                  inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
+                  inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+                  or(
+                    eq(assignments.vehicleId, row.vehicleId),
+                    eq(assignments.driverId, row.driverId),
+                  ),
                 ),
+              );
+
+            const hasOverlap = planningConflicts.some((candidate) =>
+              overlaps(
+                mission.pickupDate,
+                mission.deliveryDate,
+                candidate.pickupDate,
+                candidate.deliveryDate,
               ),
             );
 
-          const hasOverlap = planningConflicts.some((candidate) =>
-            overlaps(
-              mission.pickupDate,
-              mission.deliveryDate,
-              candidate.pickupDate,
-              candidate.deliveryDate,
-            ),
-          );
-
-          if (hasOverlap) {
-            launchErrors.push("Conflit planning détecté sur ce véhicule ou ce chauffeur.");
+            if (hasOverlap) {
+              rowErrors.push("Conflit planning détecté sur ce véhicule ou ce chauffeur.");
+            }
           }
-        }
+        const prefix = targetAssignments.length > 1 ? `Véhicule ${row.vehicleRegistration || row.vehicleId} : ` : "";
+        launchErrors.push(...rowErrors.map((motif) => `${prefix}${motif}`));
+      }
 
+      if (targetAssignments.length > 0) {
         const missionBudgetPlan = extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost);
         const fuelBudget = missionBudgetPlan.fuelBudget;
         const roadExpensesBudget = missionBudgetPlan.roadExpensesBudget;
@@ -2877,48 +3129,42 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         })
         .where(eq(missions.id, missionId))
         .returning();
+      // Une écriture par affectation visée, conditionnée au statut lu : une ligne annulée entre-temps
+      // (DELETE concurrent) n'est pas ressuscitée.
+      for (const target of targetAssignments) {
+        const assignmentUpdate: Record<string, unknown> = { updatedAt: now };
+        if (targetStatus === "assigned") {
+          assignmentUpdate.status = "accepted";
+          assignmentUpdate.acceptedAt = target.acceptedAt || now;
+        }
+        if (targetStatus === "in_progress") {
+          assignmentUpdate.status = "in_progress";
+          assignmentUpdate.acceptedAt = target.acceptedAt || now;
+          assignmentUpdate.startedAt = target.startedAt || now;
+        }
+        if (targetStatus === "delivered") {
+          assignmentUpdate.status = "completed";
+          assignmentUpdate.acceptedAt = target.acceptedAt || now;
+          assignmentUpdate.startedAt = target.startedAt || now;
+          assignmentUpdate.completedAt = target.completedAt || now;
+        }
+        if (targetStatus === "completed") {
+          assignmentUpdate.status = "completed";
+          assignmentUpdate.completedAt = target.completedAt || now;
+        }
+        if (targetStatus === "cancelled") {
+          assignmentUpdate.status = "cancelled";
+        }
+        if (Object.keys(assignmentUpdate).length > 1) {
+          await tx
+            .update(assignments)
+            .set(assignmentUpdate)
+            .where(and(eq(assignments.id, target.id), eq(assignments.status, target.status)));
+        }
+      }
+
       return row;
     });
-
-    if (missionAssignment?.id) {
-      const assignmentUpdate: Record<string, any> = {
-        updatedAt: now,
-      };
-
-      if (targetStatus === "assigned") {
-        assignmentUpdate.status = "accepted";
-        assignmentUpdate.acceptedAt = missionAssignment.acceptedAt || new Date();
-      }
-
-      if (targetStatus === "in_progress") {
-        assignmentUpdate.status = "in_progress";
-        assignmentUpdate.acceptedAt = missionAssignment.acceptedAt || now;
-        assignmentUpdate.startedAt = missionAssignment.startedAt || now;
-      }
-
-      if (targetStatus === "delivered") {
-        assignmentUpdate.status = "completed";
-        assignmentUpdate.acceptedAt = missionAssignment.acceptedAt || now;
-        assignmentUpdate.startedAt = missionAssignment.startedAt || now;
-        assignmentUpdate.completedAt = missionAssignment.completedAt || now;
-      }
-
-      if (targetStatus === "completed") {
-        assignmentUpdate.status = "completed";
-        assignmentUpdate.completedAt = missionAssignment.completedAt || now;
-      }
-
-      if (targetStatus === "cancelled") {
-        assignmentUpdate.status = "cancelled";
-      }
-
-      if (Object.keys(assignmentUpdate).length > 1) {
-        await db
-          .update(assignments)
-          .set(assignmentUpdate)
-          .where(eq(assignments.id, missionAssignment.id));
-      }
-    }
 
     await broadcastMissionUpdate(
       targetStatus === "completed" ? "mission_completed" : "mission_status_changed",
@@ -3000,6 +3246,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
       .from(missions)
       .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .where(eq(missions.id, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     if (!mission) {
@@ -3163,6 +3410,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       .leftJoin(assignments, eq(assignments.missionId, missions.id))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(eq(missions.id, missionId))
+      .orderBy(asc(assignments.id))
       .limit(1);
 
     if (!mission) {

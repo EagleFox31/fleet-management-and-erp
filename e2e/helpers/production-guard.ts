@@ -12,35 +12,15 @@ import { resolve } from "node:path";
  *
  * Le message d'erreur ne reproduit jamais l'URL (mot de passe) : seulement le marqueur.
  */
-export const DEFAULT_PRODUCTION_MARKERS: readonly string[] = ["ep-bitter-term-ai6i3ey4"];
+import {
+  DEFAULT_PRODUCTION_MARKERS,
+  hostOf,
+  matchProductionMarker,
+  productionMarkers,
+} from "../../shared/production-database";
 
-export function productionMarkers(env: NodeJS.ProcessEnv = process.env): string[] {
-  const extra = (env.E2E_PRODUCTION_DB_MARKERS ?? "")
-    .split(",")
-    .map((m) => m.trim().toLowerCase())
-    .filter(Boolean);
-  return Array.from(new Set([...DEFAULT_PRODUCTION_MARKERS.map((m) => m.toLowerCase()), ...extra]));
-}
-
-/** Hôte d'une URL de connexion, sans `new URL` (mot de passe avec caractères spéciaux). */
-export function hostOf(databaseUrl: string): string {
-  const authority = databaseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0] ?? "";
-  const at = authority.lastIndexOf("@");
-  // Sans `user@`, l'autorité est déjà l'hôte (éventuellement suivi d'un port) : ne jamais
-  // renvoyer "", sinon une URL sans identifiants passerait pour une base inconnue.
-  return (at < 0 ? authority : authority.slice(at + 1)).toLowerCase();
-}
-
-/** Marqueur de production trouvé dans l'hôte de l'URL, ou `null`. */
-export function matchProductionMarker(
-  databaseUrl: string | undefined,
-  markers: readonly string[],
-): string | null {
-  if (!databaseUrl) return null;
-  const host = hostOf(databaseUrl);
-  if (!host) return null;
-  return markers.find((m) => host.includes(m.toLowerCase())) ?? null;
-}
+// Reconnaissance des marqueurs : source unique partagée avec le serveur (shared/production-database.ts).
+export { DEFAULT_PRODUCTION_MARKERS, hostOf, matchProductionMarker, productionMarkers };
 
 /** `DATABASE_URL` d'un contenu de fichier `.env` (valeur éventuellement entre guillemets). */
 export function databaseUrlFromDotenv(content: string): string | undefined {
