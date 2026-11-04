@@ -46,3 +46,18 @@ Règles : `docs/journal/README.md`.
   - Preuve automatisée : `tests/integration/document-renewal-receipt.test.ts` (4 échecs avec le SQL de 77b4700, 7/7 avec le correctif).
 - **RAIDER** : Idempotent (second démarrage sans changement, double `drizzle-kit push` sans ordre receipt, OID stables) ; Durable (insertion sans récépissé inchangée) ; failure memory (le patron #124 est repris, pas réinventé).
 - **Reste / risques** : avec `lock_timeout` atteint, colonnes ou contraintes peuvent manquer jusqu'au démarrage suivant ; le journal le signale.
+
+## 2026-11-04T04:32:02+01:00 — Import des données TAY
+
+- **Agent** : fleet-db · **Branche** : `feat/import-tay` · **Commit** : voir `git log`
+- **Statut** : fait (aperçu et preuve sur base locale jetable ; aucune exécution sur la base de dev partagée)
+- **Quoi** : `scripts/import-tay.ts` (CLI) et `scripts/lib/tay-import.ts` (logique pure) chargent véhicules, kilométrage, chauffeurs et fournisseurs depuis les quatre classeurs de `attached_assets/` ; véhicule fictif `TEST-0001` (désactivable par `--no-test-vehicle`).
+- **Comment** : aperçu par défaut, `--apply` en une transaction sous verrou consultatif ; upserts sur clés naturelles (plaque normalisée comme `vehicles_registration_key_idx`, `TAY-NNN`, nom fournisseur) avec `WHERE … IS DISTINCT FROM` ; lot `import_batches` par empreinte composite. Détail : `docs/data-import/IMPORT_TAY.md`.
+- **Pourquoi** : reprise des données client ; décisions utilisateur : dates telles quelles, trois échéances sur `vehicles` sans `vehicle_documents`, un véhicule de test.
+- **Comment tester (QA)** :
+  - Prérequis : base jetable (conteneur `fleetmaster20-main-postgres-1`), schéma poussé puis `initializeDatabase`, utilisateur `admin`.
+  - Étapes : aperçu, `--apply`, `--apply`.
+  - Attendu : 1er passage 99 écritures (59 + 1 véhicules, 27 chauffeurs, 11 + 1 fournisseurs), 2e passage « Écritures : 0 », empreinte `xmin` identique.
+  - Preuve automatisée : `tests/unit/scripts/tay-import.test.ts` (28 tests).
+- **RAIDER** : Idempotent (second `--apply` sans écriture) ; Retroactive (fiche préexistante gardée, kilométrage seulement relevé, aucune suppression) ; Durable (aucun schéma modifié).
+- **Reste / risques** : colonnes d'audit incomplètes sur `vehicles`, `drivers`, `suppliers` (non ajoutées) ; six véhicules identifiés par numéro de châssis ; exécution sur la base cible à décider.
