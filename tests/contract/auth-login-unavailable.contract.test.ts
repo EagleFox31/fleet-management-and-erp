@@ -1,4 +1,5 @@
 import { createServer, type Server } from "http";
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import session from "express-session";
 import { eq, like } from "drizzle-orm";
@@ -168,6 +169,28 @@ describe("POST /api/auth/login, même travail pour un nom inconnu", { timeout: 6
     expect(JSON.parse(unknown.text).message).toBe(JSON.parse(known.text).message);
     expect(knownCalls, "compte existant").toBe(1);
     expect(compare.mock.calls.length, "nom inconnu").toBe(1);
+  });
+
+  it("compte au hash SHA-256 hérité : une seule comparaison bcrypt, contre un hash de 60 caractères", async () => {
+    const legacyPassword = "ancien-mot-de-passe";
+    const legacy = await createTestUser({ role: "technician" });
+    ids.userIds.push(legacy.id);
+    await db
+      .update(users)
+      .set({ password: crypto.createHash("sha256").update(legacyPassword).digest("hex") })
+      .where(eq(users.id, legacy.id));
+    const compare = vi.spyOn(bcrypt, "compare");
+
+    const wrong = await login("mauvais-mot-de-passe", legacy.username);
+    expect(wrong.status).toBe(401);
+    expect(compare).toHaveBeenCalledTimes(1);
+    expect(String(compare.mock.calls[0][1]), "jamais contre le hash SHA-256").toHaveLength(60);
+
+    compare.mockClear();
+    const right = await login(legacyPassword, legacy.username);
+    expect(right.status, "le mot de passe hérité reste accepté").toBe(200);
+    expect(compare).toHaveBeenCalledTimes(1);
+    await db.delete(loginAttemptsByUsername).where(like(loginAttemptsByUsername.usernameNormalized, `%${legacy.username.trim().toLowerCase()}`));
   });
 
   it("la recherche du compte en panne n'est jamais lue comme un nom inconnu", async () => {

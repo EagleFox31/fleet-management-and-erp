@@ -187,7 +187,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Verify password - support both bcrypt and legacy SHA-256 with auto-migration
-      let isPasswordValid = await bcrypt.compare(password, user.password);
+      // Hash non bcrypt (SHA-256 hérité) : bcrypt.compare rendrait false sans calcul, et un compte
+      // non migré répondrait plus vite qu'un nom inconnu. On compare alors au hash factice : un
+      // seul calcul bcrypt de coût 10, quel que soit le compte (#260, M1).
+      const isBcryptHash = user.password.length === 60 && user.password.startsWith("$2");
+      let isPasswordValid = (await bcrypt.compare(password, isBcryptHash ? user.password : LOGIN_DUMMY_HASH)) && isBcryptHash;
       let needsMigration = false;
       
       // If bcrypt fails and the hash looks like SHA-256 (64 hex chars), try legacy verification
