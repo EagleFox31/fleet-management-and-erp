@@ -2731,8 +2731,9 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
   - une liste des chauffeurs publique ;
   - aucune limite par IP.
 - **Résolution** :
-  - `LockoutStore.reserve` compte la tentative avant le handler, en une seule écriture atomique
-    (`INSERT … ON CONFLICT DO UPDATE … RETURNING`) ;
+  - `LockoutStore.reserve` compte la tentative avant le handler, de façon atomique :
+    lecture et écriture dans une transaction, sous verrou consultatif pris sur la clé (`pg_advisory_xact_lock`),
+    `SELECT` de l'état puis upsert ;
   - au-delà du seuil, le verrou est posé et la requête refusée en 429 ;
   - en fin de requête :
     - 401 → `confirmFailure` (verrou au seuil) ;
@@ -2801,3 +2802,44 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
 - **Leçon généralisée** : une valeur qui dépend de la topologie (sauts de proxy, hôtes de confiance, ports
   publiés) se déclare par profil de déploiement, avec un défaut sûr et un test qui lit la configuration de
   chaque profil. Elle ne se fixe pas en dur pour le cas de production.
+## 4 novembre 2026 : changer le mot de passe ne coupait pas les autres sessions
+
+- **Contexte** : `POST /api/users/change-password` écrivait le nouveau hash sans toucher à la table `session`.
+- **Cause racine** : les sessions sont indépendantes du secret qui les a ouvertes ; seule la suppression du compte
+  (`revokeUserAccess`) les révoquait.
+- **Prévention vérifiable** : `tests/contract/change-password-revoke-sessions.contract.test.ts` (deux sessions du
+  même compte : celle qui change reste à 200, l'autre passe à 401 ; mot de passe actuel faux : rien n'est révoqué ;
+  autre compte intact) et `tests/integration/revoke-other-user-sessions.test.ts` (second appel = 0 suppression).
+- **Leçon** : toute modification d'un secret d'authentification (mot de passe, PIN) révoque les autres sessions du
+  compte et ferme leurs sockets ; la session courante est exclue par son identifiant, jamais par un filtre sur l'utilisateur seul.
+
+## 4 novembre 2026 : un état partiel ne passe pas par une erreur 5xx
+
+- **Contexte** : changement de mot de passe, première version : hash écrit, puis révocation des autres sessions qui
+  pouvait échouer. Une AppError 5xx aurait fait croire à un échec du changement.
+- **Cause racine** : `error-handler.ts:97` remplace toujours le message d'une 5xx par le message générique ;
+  l'état partiel ne peut donc pas être annoncé par ce canal. Et deux écritures séparées laissent un état partiel.
+- **Prévention vérifiable** : le hash et le DELETE des sessions sont dans une seule transaction ; le contrat
+  `change-password-revoke-sessions` fait échouer le DELETE par un espion et vérifie : réponse >= 500, hash
+  inchangé, ancien mot de passe valable, autre session valide. L'UPDATE conditionné à l'ancien hash est couvert
+  par le contrat de deux changements concurrents (200 + 409).
+- **Leçon** : un état partiel à annoncer à l'utilisateur ne passe jamais par une AppError 5xx. Il passe par une
+  transaction (tout ou rien) ou par une réponse 2xx/4xx explicite. Les effets non transactionnels (sockets) se
+  déclenchent après le commit.
+## 2026-11-04 — Écarts de rapprochement : « Examiner » ouvrait `/procurement/invoices/undefined`
+
+### Contexte
+En écrivant la donnée de la spec e2e 04 (facture fournisseur en écart), le bouton « Examiner » de `/procurement/invoices/discrepancies` menait à `/procurement/invoices/undefined`. La spec était ignorée depuis longtemps faute de données : rien ne l'avait signalé.
+
+### Cause racine
+La page et l'API étaient désalignées sur les noms de champs. `client/src/pages/procurement/invoices/discrepancies.tsx` lit `id`, `totalAmountTTC`, `invoiceDate`, `status`, `purchaseOrderNumber`, ainsi que `totalDiscrepancyAmount` et `averageVariance` au niveau racine. `escalateDiscrepancies` (`server/services/three-way-matching-service.ts`) renvoyait `invoiceId`, `orderNumber`, etc. Chaque côté avait son propre type écrit à la main, et aucun test ne vérifiait la forme consommée par l'écran. Classification : contrat implicite non testé.
+
+### Résolution
+Correctif additif côté service : les champs lus par la page sont ajoutés (`id`, `supplierId`, `invoiceDate`, `totalAmountTTC`, `status`, `purchaseOrderNumber`, ainsi que les totaux racine), et les anciens sont conservés pour tout autre consommateur.
+
+### Prévention (vérifiable)
+- `tests/contract/purchase-order-three-way.contract.test.ts` exige ces champs sur l'élément de la facture créée, avec des totaux numériques. Rouge sur l'ancien service.
+- La spec e2e 04 crée sa propre facture en écart et clique « Examiner » jusqu'au détail : elle n'est plus ignorée.
+
+### Leçon généralisée
+Un écran qui type à la main la réponse d'une route est un contrat implicite. Le test de contrat de la route doit affirmer les champs que l'écran lit, pas seulement le statut HTTP ou la présence de l'id. Une spec e2e ignorée faute de données ne protège rien : la donnée se crée dans la spec.
