@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { assertServerNotProductionDatabase } from "../../../server/lib/production-db-guard";
+import { assertServerNotProductionDatabase, guardDatabaseConnection } from "../../../server/lib/production-db-guard";
 import * as e2eGuard from "../../../e2e/helpers/production-guard";
 import * as shared from "../../../shared/production-database";
 
@@ -58,10 +57,9 @@ describe("garde base de production au démarrage du serveur (#259)", () => {
     expect(e2eGuard.DEFAULT_PRODUCTION_MARKERS).toBe(shared.DEFAULT_PRODUCTION_MARKERS);
   });
 
-  it("server/db.ts appelle le garde avant de construire un pool", () => {
-    const src = readFileSync("server/db.ts", "utf8");
-    const guard = src.indexOf("assertServerNotProductionDatabase()");
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(src.indexOf("new Pool("));
+  it("guardDatabaseConnection lève sur la base marquée et laisse passer la dérogation", () => {
+    expect(() => guardDatabaseConnection("t", env({ DATABASE_URL: PROD }))).toThrow(/Démarrage refusé/);
+    expect(guardDatabaseConnection("t", env({ DATABASE_URL: PROD, ALLOW_PRODUCTION_DATABASE: "1" })).status).toBe("overridden");
+    expect(guardDatabaseConnection("t", env({ DATABASE_URL: LOCAL })).status).toBe("clear");
   });
 });

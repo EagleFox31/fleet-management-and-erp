@@ -1,4 +1,5 @@
 import { matchProductionMarker, productionMarkers } from "@shared/production-database";
+import { moduleLogger } from "./logger";
 
 /**
  * Garde-fou du serveur hors production (dev, scripts tsx, recette locale) : refuse de construire
@@ -40,4 +41,23 @@ export function assertServerNotProductionDatabase(
     );
   }
   return { status: "clear" };
+}
+
+/**
+ * Point d'appel unique avant toute construction de pool ou de client SQL : `server/db.ts` et les
+ * scripts qui ouvrent leur propre connexion (garde d'hygiène : tests/unit/server/db-pool-hygiene.test.ts).
+ * Lève hors production sur une base marquée ; journalise la dérogation quand elle est utilisée.
+ */
+export function guardDatabaseConnection(
+  source: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ProductionDbGuardResult {
+  const result = assertServerNotProductionDatabase(env);
+  if (result.status === "overridden") {
+    moduleLogger(source).warn(
+      { variable: result.variable, marker: result.marker },
+      `Connexion à la base de production hors NODE_ENV=production (${PRODUCTION_DB_OVERRIDE}=1)`,
+    );
+  }
+  return result;
 }

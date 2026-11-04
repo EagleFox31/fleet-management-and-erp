@@ -26,6 +26,27 @@ Entrées ajoutées à la fin, une par lot.
   - Idempotent et Retroactive : sans objet (build).
 - **Reste / risques** : redéploiement de la prod à décider.
 
+## 2026-11-04T11:11:07+01:00 — Garde base de production étendue aux scripts et vérifiée par hygiène (#264, PR #267)
+
+- **Statut** : fait (réserves de relecture levées ; fusion par l'orchestrateur)
+- **Quoi** :
+  - `guardDatabaseConnection(source)` (`server/lib/production-db-guard.ts`) appelé par `server/db.ts` et par les 4 scripts à pool propre (audit-dana-password, audit-password, audit-listed-passwords, reset-listed-passwords) ;
+  - `schema-prod` du compose : `NODE_ENV: production` (la cible `build` ne le fixe pas) ;
+  - test d'hygiène `tests/unit/server/db-pool-hygiene.test.ts`, `tests/unit/deploy/compose-prod-node-env.test.ts`.
+- **Comment** :
+  - Hygiène : sur les fichiers suivis hors `tests/` et `server/db.ts`, une construction de pool ou client doit suivre un appel du garde ; un import de valeur d'un driver SQL (`@neondatabase/serverless`, `pg`, `postgres`, alias et `require` compris, `import type` exclu) exige l'import de `production-db-guard`.
+  - Commentaires retirés avant la recherche (`//` précédé de `:` conservé pour les URL).
+  - Liste gelée : `test-workflow-reminders.js`, qui ne peut que disparaître.
+- **Pourquoi** : relecture de #267, deux faux négatifs prouvés : `import { Pool as P }` puis `new P(` passait sans garde, et un `// guardDatabaseConnection(` commenté comptait comme garde.
+- **Comment tester (QA)** :
+  - `npx vitest run tests/unit/server/db-pool-hygiene.test.ts` : 6/6.
+  - Mutation vérifiée : sans le retrait des commentaires, le cas « garde en commentaire » échoue ; sans le contrôle d'import, le cas « import aliasé » échoue.
+- **RAIDER** :
+  - Durable : comportement du garde inchangé ; seul le test se durcit.
+  - Agnostic : drivers listés, pas de chemin de script en dur.
+  - Idempotent et Retroactive : sans objet (test et code de démarrage).
+- **Reste / risques** : drizzle-kit push, marqueur de la prod VPS et message du garde suivis dans l'issue #268.
+
 ## 2026-11-04T12:03:08+01:00 — npm run dev stable : fichier temporaire de vite.config exclu du watch (régression #252)
 
 - **Statut** : fait, PR brouillon

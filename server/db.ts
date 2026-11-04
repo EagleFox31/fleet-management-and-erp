@@ -2,8 +2,7 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "@shared/schema";
-import { assertServerNotProductionDatabase } from "./lib/production-db-guard";
-import { moduleLogger } from "./lib/logger";
+import { guardDatabaseConnection } from "./lib/production-db-guard";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -27,13 +26,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 // Avant tout pool : hors production, jamais de connexion à la base de production sans dérogation.
-const productionDbGuard = assertServerNotProductionDatabase();
-if (productionDbGuard.status === "overridden") {
-  moduleLogger("db").warn(
-    { variable: productionDbGuard.variable, marker: productionDbGuard.marker },
-    "Connexion à la base de production hors NODE_ENV=production (ALLOW_PRODUCTION_DATABASE=1)",
-  );
-}
+guardDatabaseConnection("db");
 
 const deriveDirectConnectionString = (connectionString: string): string => {
   try {
