@@ -57,7 +57,7 @@ import { moduleLogger } from "./lib/logger";
 import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
 import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
-import { revokeUserAccess } from "./lib/user-sessions";
+import { revokeOtherUserSessions, revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
@@ -885,7 +885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, isAnyUser, changePasswordAttemptsGuard, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, changePasswordAttemptsGuard, validateBody(changePasswordRequestSchema), async (req, res, next) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -925,6 +925,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updated) {
         log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
         return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      }
+
+      // Un mot de passe changé (après compromission, par exemple) ne doit pas laisser les autres cookies valides.
+      try {
+        await revokeOtherUserSessions(userId, req.sessionID, "password_changed");
+      } catch (revokeErr) {
+        return next(new AppError(500, "Le mot de passe est modifié mais les autres sessions n'ont pas pu être fermées. Réessayez.", { cause: revokeErr }));
       }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });

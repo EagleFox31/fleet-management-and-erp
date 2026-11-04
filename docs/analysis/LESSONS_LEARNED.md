@@ -2497,3 +2497,14 @@ Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans
 - **Leçon** : tout point d'entrée qui vérifie un secret (mot de passe, PIN, code) passe par le même
   compteur. Un garde dont la clé est codée en dur sur le corps de la requête ne protège que la route
   pour laquelle il a été écrit.
+
+## 4 novembre 2026 : changer le mot de passe ne coupait pas les autres sessions
+
+- **Contexte** : `POST /api/users/change-password` écrivait le nouveau hash sans toucher à la table `session`.
+- **Cause racine** : les sessions sont indépendantes du secret qui les a ouvertes ; seule la suppression du compte
+  (`revokeUserAccess`) les révoquait.
+- **Prévention vérifiable** : `tests/contract/change-password-revoke-sessions.contract.test.ts` (deux sessions du
+  même compte : celle qui change reste à 200, l'autre passe à 401 ; mot de passe actuel faux : rien n'est révoqué ;
+  autre compte intact) et `tests/integration/revoke-other-user-sessions.test.ts` (second appel = 0 suppression).
+- **Leçon** : toute modification d'un secret d'authentification (mot de passe, PIN) révoque les autres sessions du
+  compte et ferme leurs sockets ; la session courante est exclue par son identifiant, jamais par un filtre sur l'utilisateur seul.

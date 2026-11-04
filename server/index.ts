@@ -28,9 +28,12 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
   interface WsConnectionMeta {
     userId: number;
     role: string | null;
+    /** Session HTTP qui a ouvert la socket (pour garder ouverte celle qui reste valide). */
+    sessionId?: string;
   }
 
   interface WsSessionRequest extends IncomingMessage {
+    sessionID?: string;
     session?: {
       userId?: number;
     };
@@ -97,6 +100,7 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
           sessionRequest.wsMeta = {
             userId: sessionUserId,
             role: typeof user.role === "string" ? user.role : null,
+            sessionId: typeof sessionRequest.sessionID === "string" ? sessionRequest.sessionID : undefined,
           };
 
           wss.handleUpgrade(request, socket, head, (ws) => {
@@ -200,13 +204,15 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
     return onlineUserIds;
   };
 
-  const closeUserConnections = (userId: number, reason: string = "logout"): void => {
+  // `keepSessionId` : les sockets de cette session HTTP restent ouvertes (changement de mot de passe).
+  const closeUserConnections = (userId: number, reason: string = "logout", keepSessionId?: string): void => {
     const userSockets = activeConnections.get(userId);
     if (!userSockets || userSockets.size === 0) {
       return;
     }
 
     Array.from(userSockets).forEach((ws) => {
+      if (keepSessionId && connectionMeta.get(ws)?.sessionId === keepSessionId) return;
       try {
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
           ws.close(1000, reason);

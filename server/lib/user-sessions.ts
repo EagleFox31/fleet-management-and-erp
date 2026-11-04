@@ -40,3 +40,24 @@ export async function revokeUserAccess(userId: number, reason: string): Promise<
   log.info({ userId, reason, revoked }, "Accès du compte révoqué");
   return revoked;
 }
+
+/**
+ * Changement de mot de passe : efface les AUTRES sessions du compte (table `session`) et ferme
+ * leurs sockets temps réel ; la session `keepSessionId` reste ouverte. Requête paramétrée.
+ *
+ * Contrairement à `revokeUserAccess`, un échec est remonté : l'appelant décide de la réponse.
+ * Idempotent : un second appel supprime 0 ligne.
+ */
+export async function revokeOtherUserSessions(userId: number, keepSessionId: string, reason: string): Promise<number> {
+  const result = await db.execute(
+    sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
+  );
+  const revoked = result.rowCount ?? 0;
+
+  const closeUserConnections = (global as { closeUserConnections?: unknown }).closeUserConnections;
+  if (typeof closeUserConnections === "function") {
+    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId);
+  }
+  log.info({ userId, reason, revoked }, "Autres sessions du compte révoquées");
+  return revoked;
+}
