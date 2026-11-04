@@ -264,3 +264,32 @@ Modèle et règles : `docs/journal/README.md`.
 - Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.
 - Comment : elle nomme maintenant la garde (`route-order-hygiene.test.ts`, PR séparée) et ce qu'elle vérifie.
 - Pourquoi : une prévention doit être vérifiable, pas renvoyée à une personne.
+
+## 2026-11-04T13:01:58+01:00 — #280 : query morte retirée, garde-fou queryKey contre routes servies (#282)
+
+- Quoi : `useWarehouse` interrogeait `/api/parts/by-supplier`, une route qui n'existe pas (la vraie est `/api/warehouse/parts-by-supplier`). La donnée n'était lue par aucun écran : chaque montage produisait un 404, réessayé.
+- Comment :
+  - la query et son bloc `partsBySupplier` sont retirés ;
+  - `tests/support/query-route-scan.ts` croise les URL des `queryKey` littérales qui utilisent la queryFn par défaut avec les GET servis (routeurs montés de `server/api/`, `app.get` de `routes.ts`, squelettes `createStubRouter`) ;
+  - `tests/unit/client/query-keys-routes.test.ts` gèle les 15 écarts existants, en égalité stricte ;
+  - limites documentées en tête du scanner, dont le masquage de §9, laissé à `route-order-scan.ts`.
+- Pourquoi : une clé qui ne vise aucune route échoue en silence (404 réessayé, écran vide), et rien ne la signalait.
+- Preuve : rouge sur l'origine (by-supplier), vert après ; 3/3 ; tsc 0 erreur ; unitaires 2212/2212.
+
+## 2026-11-04T13:36:18+01:00 — #285 : segments scalaires de la queryKey, aperçu documentation
+
+- Quoi : la queryFn par défaut ne lisait que `queryKey[1]`, et comme un objet de paramètres. `['/api/vehicles', 5]` appelait donc la liste, et `['/api/documentation', 'GUIDE.md']` appelait `?0=G&1=U…`. L'aperçu documentation restait vide, et les plannings de maintenance manquaient dans le formulaire d'OT. Une fois la bonne URL atteinte, la route de documentation répondait 500 : elle lisait la racine du dépôt, alors que les fichiers sont sous `docs/guides` et `docs/qa`. Enfin, l'image prod excluait `docs/`.
+- Comment :
+  - `buildQueryUrl` : les scalaires deviennent des segments encodés, le premier objet devient la chaîne de requête ;
+  - les 2 cache-busters `/api/users` sont réécrits ;
+  - 5 hooks sans consommateur sont supprimés. Ceux dont la clé est référencée par le temps réel sont conservés ;
+  - le scanner compte les segments scalaires : 5 entrées sortent de la liste gelée ;
+  - la route lit une liste blanche nom → chemin sous `docs/` ;
+  - le Dockerfile copie les 2 fichiers, et `.dockerignore` les excepte.
+- Pourquoi : la forme de la clé décidait en silence de l'URL appelée, sans aucun test ; la route s'était cassée lors du déplacement des fichiers, sans que rien ne le voie.
+- Preuve :
+  - `query-fn-url.test.ts` : 7 cas rouges sur l'ancienne queryFn ;
+  - contrat `documentation-preview` : rouge 2/4 sur l'ancienne route, vert 4/4 (200 sur les 2 fichiers, 400 sur `..%2Fetc.md`, 403 pour un non-admin) ;
+  - garde Docker ;
+  - e2e 03 et 22 : 3/3 ;
+  - tsc 0 erreur.

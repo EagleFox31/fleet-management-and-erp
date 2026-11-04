@@ -24,6 +24,9 @@ COPY server/db/migrations ./server/db/migrations
 COPY server/db/triggers ./server/db/triggers
 # Papier à en-tête TAY des PDF et documents Word (repli sans en-tête s'il manque).
 COPY attached_assets/TAY-header-final.png attached_assets/TAY-header.png ./attached_assets/
+# Documents servis par GET /api/documentation/:filename (aperçu admin, #285).
+COPY docs/guides/GUIDE_UTILISATEUR.md ./docs/guides/
+COPY docs/qa/CAHIER_TESTS_UTILISATEUR.md ./docs/qa/
 # Les fichiers téléversés sont écrits sous <cwd>/uploads : dossier monté en volume nommé.
 RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
 USER node

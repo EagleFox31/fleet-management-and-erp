@@ -40,6 +40,8 @@ import { checkWorkOrderTransition } from "@shared/constants/work-order-transitio
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
+// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
+import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
@@ -61,8 +63,6 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
-// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
-import { loginUsernameRef } from "./lib/login-identifier";
 import { loginLockoutGuard } from "./middleware/login-lockout-guard";
 import { CHANGE_PASSWORD_KEY_PREFIX, DbLockoutStore } from "./services/login-lockout-db-store";
 
@@ -84,7 +84,7 @@ const log = moduleLogger("routes");
  * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
  * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
  */
-const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
@@ -1073,8 +1073,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Marquer le workflow comme terminé
       if (workflowData.sessionId) {
         const { workflowService } = await import('./services/workflow-service');
-        const userId = req.user?.id || 1;
-        await workflowService.completeWorkflow(userId, workflowData.sessionId);
+        const userId = req.user!.id; // isWorkshopManager a déjà refusé toute requête sans utilisateur
+        // Le véhicule est créé : un brouillon déjà abandonné (409) ne doit pas faire échouer la création.
+        await workflowService.completeWorkflow(userId, workflowData.sessionId).catch((err) => {
+          if (!isAppError(err) || err.status !== 409) throw err;
+          log.warn({ err, requestId: req.requestId }, "brouillon d'acquisition non clôturé après création du véhicule");
+        });
       }
       
       // Enregistrer le statut initial dans l'historique
@@ -4177,7 +4181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/active/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res) => {
+  app.patch("/api/workflows/active/:sessionId/abandon", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { workflowReminderService } = await import('./services/workflow-reminder-service');
       const userId = req.session.userId;
@@ -4194,8 +4198,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Workflow non trouvé" });
       }
     } catch (error) {
-      console.error("Abandon workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      log.error({ err: error, requestId: req.requestId }, "abandon du workflow en échec");
+      return next(isAppError(error) ? error : new AppError(500, "Impossible d'abandonner le brouillon pour le moment.", { cause: error }));
     }
   });
 
@@ -4709,7 +4713,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", isWorkflowDocumentWriter, async (req, res) => {
+  app.patch("/api/workflows/vehicle-acquisition/:sessionId/complete", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { workflowService } = await import('./services/workflow-service');
       const userId = req.session.userId;
@@ -4726,7 +4730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json({ message: "Workflow terminé avec succès" });
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "clôture du workflow en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
+      return next(isAppError(error) ? error : new AppError(500, "Impossible de terminer le brouillon pour le moment.", { cause: error }));
     }
   });
 
@@ -4863,18 +4867,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fs = await import('fs/promises');
       const path = await import('path');
       
-      // Sécurité: vérifier que le fichier est bien dans la liste autorisée
-      const allowedFiles = ['GUIDE_UTILISATEUR.md', 'CAHIER_TESTS_UTILISATEUR.md'];
-      if (!allowedFiles.includes(filename)) {
+      // Sécurité : seuls ces fichiers sont servis, à leur emplacement sous docs/ (#285)
+      const allowedFiles: Record<string, string> = {
+        'GUIDE_UTILISATEUR.md': 'docs/guides/GUIDE_UTILISATEUR.md',
+        'CAHIER_TESTS_UTILISATEUR.md': 'docs/qa/CAHIER_TESTS_UTILISATEUR.md',
+      };
+      const relativePath = Object.prototype.hasOwnProperty.call(allowedFiles, filename) ? allowedFiles[filename] : undefined;
+      if (!relativePath) {
         return res.status(400).json({ message: "Fichier non autorisé" });
       }
       
-      const filePath = path.join(process.cwd(), filename);
+      const filePath = path.join(process.cwd(), relativePath);
       const content = await fs.readFile(filePath, 'utf-8');
       
       return res.status(200).json({ content, filename });
     } catch (error) {
-      console.error("Error reading documentation file:", error);
+      log.error({ err: error, requestId: req.requestId, filename: req.params.filename }, "lecture du fichier de documentation");
       return res.status(500).json({ message: "Erreur lors de la lecture du fichier" });
     }
   });

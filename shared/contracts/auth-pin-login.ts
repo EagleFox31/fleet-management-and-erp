@@ -8,8 +8,8 @@ import { z } from "zod";
  */
 export const pinLoginRequestSchema = z.object({
   userId: z.union([
-    z.number().int().positive(),
-    z.string().trim().regex(/^\d{1,9}$/, "Identifiant du chauffeur invalide."),
+    z.number().int().positive().max(2147483647), // borne de la colonne integer : au-delà, 400 et non 500
+    z.string().trim().regex(/^[1-9]\d{0,8}$/, "Identifiant du chauffeur invalide."),
   ]),
   pin: z.union([z.string().min(1, "PIN requis.").max(64), z.number().int().nonnegative()]),
 });

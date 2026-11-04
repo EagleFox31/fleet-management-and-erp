@@ -52,13 +52,6 @@ export function useMaintenance() {
   };
 }
 
-export function useWorkOrder(id: number | null) {
-  return useQuery<any>({
-    queryKey: ['/api/work-orders', id],
-    enabled: !!id && id > 0,
-  });
-}
-
 export function useCreateWorkOrder() {
   return useMutation({
     mutationFn: async (workOrderData: any) => {

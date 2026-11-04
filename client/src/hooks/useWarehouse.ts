@@ -63,11 +63,6 @@ export function useWarehouse() {
     }),
   });
 
-  const partsBySupplierQuery = useQuery<any>({
-    queryKey: ['/api/parts/by-supplier'],
-    enabled: true,
-  });
-
   const derivedReorderAlerts = Array.isArray(lowStockPartsQuery.data)
     ? (() => {
         const toDemandStatus = (statusRaw: unknown) => String(statusRaw || "").toLowerCase();
@@ -267,12 +262,6 @@ export function useWarehouse() {
       error: statisticsQuery.error,
       refetch: statisticsQuery.refetch,
     },
-    partsBySupplier: {
-      data: partsBySupplierQuery.data,
-      isLoading: partsBySupplierQuery.isLoading,
-      error: partsBySupplierQuery.error,
-      refetch: partsBySupplierQuery.refetch,
-    },
     service: warehouseService,
   };
 }
@@ -281,13 +270,6 @@ export function useMostUsedParts(limit?: number) {
   return useQuery<any>({
     queryKey: ['/api/warehouse/most-used-parts', { limit }],
     enabled: true,
-  });
-}
-
-export function usePartRealStock(partId: number | null) {
-  return useQuery<any>({
-    queryKey: ['/api/warehouse/parts', partId, 'real-stock'],
-    enabled: !!partId && partId > 0,
   });
 }
 

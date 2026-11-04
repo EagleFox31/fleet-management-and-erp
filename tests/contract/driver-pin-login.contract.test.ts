@@ -102,10 +102,10 @@ describe("ADM5 : connexion chauffeur par PIN", { timeout: 30000 }, () => {
     expect(Object.keys(entry!).sort()).toEqual(["id", "name"]);
   });
 
-  it("compte non chauffeur : refusé même avec le bon PIN", async () => {
+  it("compte non chauffeur : refusé même avec le bon PIN (401 unifié, plus de 403)", async () => {
     const warehouse = await newDriver({ role: "warehouse" });
     const res = await call("POST", "/api/auth/pin-login", { body: { userId: warehouse.id, pin: PIN } });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
@@ -113,6 +113,7 @@ describe("ADM5 : connexion chauffeur par PIN", { timeout: 30000 }, () => {
     const driver = await newDriver({ pin: null });
     const res = await call("POST", "/api/auth/pin-login", { body: { userId: driver.id, pin: PIN } });
     expect(res.status).toBe(401);
+    expect(res.body.message).toBe("Identifiants invalides");
   });
 
   it("corps incomplet : 400", async () => {

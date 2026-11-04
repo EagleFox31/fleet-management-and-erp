@@ -1,3 +1,12 @@
 # Scripts de garde lancés par node et importés par Vitest : un shebang suivi de CR casse l'import.
 .claude/hooks/*.mjs text eol=lf
 deploy/*.sh text eol=lf
+
+# Fichiers tenus en ajout de fin seulement : deux PR qui ajoutent chacune une entrée ne se bloquent
+# plus au merge local (git garde les deux côtés). GitHub n'applique pas union côté serveur : la PR
+# reste CONFLICTING jusqu'au merge local de main, qui devient trivial. Test : gitattributes-union.
+docs/analysis/LESSONS_LEARNED.md merge=union
+docs/journal/*.md merge=union
+PASSATION*.md merge=union
+# Le README du journal se réécrit : fusion normale, conflit visible.
+docs/journal/README.md merge=text

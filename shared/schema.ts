@@ -1810,6 +1810,14 @@ export const notificationPreferences = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.topic] })],
 );
 
+// Destinataires des alertes générées en base (triggers), par type d'alerte : des rôles, jamais un
+// user_id en dur. Créée et amorcée par server/db/triggers/fuel-alerts-triggers.sql au démarrage.
+export const alertRecipientSettings = pgTable("alert_recipient_settings", {
+  alertType: text("alert_type").primaryKey(),
+  recipientRoles: text("recipient_roles").array().notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Exécutions de sauvegarde (P-19). Un index unique partiel garantit une seule ligne `running`.
 export const backupRuns = pgTable("backup_runs", {
   id: serial("id").primaryKey(),

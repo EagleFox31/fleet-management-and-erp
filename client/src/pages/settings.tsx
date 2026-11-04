@@ -165,7 +165,7 @@ export default function Settings() {
 
   // Fetch users
   const usersQuery = useQuery<any[]>({
-    queryKey: ["/api/users", "with-created-at"], // Changed key to force fresh request
+    queryKey: ["/api/users"],
     enabled: user?.role === "admin",
     staleTime: 0, // Force fresh data
     gcTime: 0, // Don't cache
