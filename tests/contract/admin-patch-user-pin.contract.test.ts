@@ -91,6 +91,22 @@ describe("PATCH /api/users/:id : PIN", { timeout: 120000 }, () => {
     expect(await storedPin(driver.id)).toBeNull();
   });
 
+  it("mot de passe trop court (sous la longueur de change-password) : 400 lisible, base inchangée ; utilisateur inconnu : 404", async () => {
+    const admin = await newUser("admin");
+    const driver = await newUser("driver");
+    const cookie = await login(admin.username);
+    const before = (await db.select({ password: users.password }).from(users).where(eq(users.id, driver.id)))[0].password;
+
+    const res = await call("PATCH", `/api/users/${driver.id}`, { cookie, body: { password: "abc" } });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/au moins 6 caractères/);
+    expect((await db.select({ password: users.password }).from(users).where(eq(users.id, driver.id)))[0].password).toBe(before);
+
+    const missing = await call("PATCH", `/api/users/2147483000`, { cookie, body: { name: "TEST absent" } });
+    expect(missing.status).toBe(404);
+    expect(missing.body.message).toBe("Utilisateur non trouvé");
+  });
+
   it("PIN vide : ignoré (nom modifié, PIN inchangé)", async () => {
     const admin = await newUser("admin");
     const driver = await newUser("driver");
