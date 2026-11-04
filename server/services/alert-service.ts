@@ -23,6 +23,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lt, max, or, sql, type SQL } 
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
+import { broadcastAlertCreated } from "../lib/alert-broadcast";
 
 const log = moduleLogger("alert-service");
 
@@ -653,11 +654,16 @@ export class AlertService {
    */
   private async checkVehicleDocumentAlerts(
     vehicle: Vehicle,
-    context: {
+    preloaded?: {
       latestDocumentIds: Map<string, number>;
       inProgressMissions: Map<number, { id: number; orderNumber: string | null }>;
     },
   ): Promise<void> {
+    // Appel isolé (hors passage) : charger le contexte, au prix de deux requêtes.
+    const context = preloaded ?? {
+      latestDocumentIds: await this.latestDocumentIds(),
+      inProgressMissions: await this.inProgressMissionsByVehicle(),
+    };
     const todayDateOnly = todayUtcDateOnly();
 
     const documents: Array<{
@@ -1083,26 +1089,6 @@ export class AlertService {
       for (const alert of created) {
         const objectKey = `${alert.type}|${alert.title}|${alert.link ?? ""}`;
         createdPerObject.set(objectKey, (createdPerObject.get(objectKey) ?? 0) + 1);
-        // Couche 2 de la règle des 3 couches: sans cet événement, l'alerte
-        // n'apparaissait qu'au prochain rafraîchissement, sans rien signaler.
-        // Scope `user`: une alerte est nominative, elle ne concerne pas tout le monde.
-        const broadcastUpdate = (global as any).broadcastUpdate;
-        if (typeof broadcastUpdate === "function" && alert.id) {
-          broadcastUpdate("alert_created", {
-            entity: "alert",
-            entityId: alert.id,
-            payload: {
-              alertId: alert.id,
-              userId: alert.userId,
-              title: alert.title,
-              message: alert.message,
-              type: alert.type,
-              priority: alert.priority,
-              link: alert.link || null,
-            },
-            scope: { type: "user", userIds: [alert.userId] },
-          });
-        }
       }
 
       for (const [objectKey, createdCount] of createdPerObject) {
@@ -1142,6 +1128,9 @@ export class AlertService {
         }
       }
     }
+    // Couche 2 de la règle des 3 couches : sans cette trame, l'alerte n'apparaissait qu'au
+    // prochain rafraîchissement. Portée nominative : une alerte concerne son destinataire.
+    for (const alert of created) broadcastAlertCreated(alert);
     return created;
   }
 
