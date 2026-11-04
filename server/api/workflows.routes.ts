@@ -1,33 +1,26 @@
 import { Router } from "express";
-import { z } from "zod";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { authenticate } from "../middleware/auth";
+import { isWorkflowDocumentWriter } from "../middleware/auth";
+import { validateBody } from "../middleware/validate-body";
 import { workflowService } from "../services/workflow-service";
 import { withLogContext } from "../lib/error-log-context";
+import { workflowCreateRequestSchema, workflowPatchRequestSchema } from "@shared/contracts/vehicle-acquisition";
 
 const log = moduleLogger("workflows");
 const router = Router();
 
 /**
- * Sauvegarde du brouillon d'acquisition de véhicule. Liste blanche des champs :
- * le statut, le propriétaire et les dates ne viennent jamais du corps (un
- * `status: "completed"` à l'étape 5 déclenchait l'activation automatique du
- * véhicule). Montées avant les handlers homonymes de server/routes.ts (gelé).
+ * Sauvegarde du brouillon d'acquisition de véhicule. Montées avant les handlers homonymes de
+ * server/routes.ts (gelé). Garde : `isWorkflowDocumentWriter` (personnel d'acquisition et client,
+ * qui alimente sa propre session). Cloison : la session est celle de `req.session.userId`, un
+ * autre compte ne la lit ni ne la modifie (404). Schémas : shared/contracts/vehicle-acquisition.ts.
  */
-const workflowFields = {
-  currentStep: z.number().int().min(1).max(5),
-  workflowData: z.record(z.unknown()),
-  uploadedFiles: z.unknown().optional(),
-};
-const createSchema = z.object({ sessionId: z.string().trim().min(1).max(200), ...workflowFields });
-const patchSchema = z.object(workflowFields).partial();
-
-router.post("/workflows/vehicle-acquisition", authenticate, async (req, res, next) => {
+router.post("/workflows/vehicle-acquisition", isWorkflowDocumentWriter, validateBody(workflowCreateRequestSchema), async (req, res, next) => {
   try {
     const userId = req.session.userId;
     if (!userId) throw new AppError(401, "Non authentifié");
-    const data = createSchema.parse(req.body);
+    const data = req.body as ReturnType<typeof workflowCreateRequestSchema.parse>;
     const workflow = await workflowService.saveWorkflowState({
       userId,
       sessionId: data.sessionId,
@@ -38,21 +31,21 @@ router.post("/workflows/vehicle-acquisition", authenticate, async (req, res, nex
     });
     return res.status(200).json(workflow);
   } catch (err) {
-    if (err instanceof AppError || err instanceof z.ZodError) return next(err);
+    if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la sauvegarde du workflow" }));
   }
 });
 
-router.patch("/workflows/vehicle-acquisition/:sessionId", authenticate, async (req, res, next) => {
+router.patch("/workflows/vehicle-acquisition/:sessionId", isWorkflowDocumentWriter, validateBody(workflowPatchRequestSchema), async (req, res, next) => {
   try {
     const userId = req.session.userId;
     if (!userId) throw new AppError(401, "Non authentifié");
-    const data = patchSchema.parse(req.body);
+    const data = req.body as ReturnType<typeof workflowPatchRequestSchema.parse>;
     const workflow = await workflowService.updateWorkflowState(userId, req.params.sessionId, data);
     if (!workflow) throw new AppError(404, "Brouillon d'acquisition introuvable.");
     return res.status(200).json(workflow);
   } catch (err) {
-    if (err instanceof AppError || err instanceof z.ZodError) return next(err);
+    if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la mise à jour du workflow" }));
   }
 });
