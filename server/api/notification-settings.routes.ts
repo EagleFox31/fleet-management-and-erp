@@ -11,6 +11,7 @@ import { notificationPreferences } from "@shared/schema";
 import { db } from "../db";
 import { isFeatureEnabled } from "../lib/feature-flags";
 import { authenticate, isAnyUser } from "../middleware/auth";
+import { validateBody } from "../middleware/validate-body";
 
 /**
  * Réglages de notification de l'utilisateur connecté (P-12). L'utilisateur vient de la session,
@@ -60,6 +61,6 @@ const patchSettings: RequestHandler = async (req, res, next) => {
 
 const router = Router();
 router.get("/notifications/settings", authenticate, isAnyUser, getSettings);
-router.patch("/notifications/settings", authenticate, isAnyUser, patchSettings);
+router.patch("/notifications/settings", authenticate, isAnyUser, validateBody(updateNotificationSettingsRequestSchema), patchSettings);
 
 export default router;

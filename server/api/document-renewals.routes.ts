@@ -489,12 +489,9 @@ const quickRenewPayloadSchema = z.object({
     }),
 });
 
-router.post("/requests", async (req, res, next) => {
+router.post("/requests", isDocumentRenewalWriter, async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
-    if (!hasRole(role, CREATE_ROLES)) {
-      return res.status(403).json({ message: "Accès non autorisé" });
-    }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
     if (!actorUserId) {
@@ -701,12 +698,9 @@ router.post("/requests", async (req, res, next) => {
  * PATCH /api/document-renewals/requests/:id/status
  * Mettre à jour le statut d'une demande (ex: marquer comme traité)
  */
-router.patch("/requests/:id/status", async (req, res, next) => {
+router.patch("/requests/:id/status", isDocumentRenewalWriter, async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
-    if (!hasRole(role, CREATE_ROLES)) {
-      return res.status(403).json({ message: "Accès non autorisé" });
-    }
 
     const id = Number.parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id <= 0) {
