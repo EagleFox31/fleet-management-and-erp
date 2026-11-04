@@ -5,6 +5,7 @@ import { SERVER_FIELDS } from "../../../../shared/constants/server-fields";
 import * as roles from "../../../../shared/constants/roles";
 import { ALL_APP_ROLES } from "../../../../shared/constants/roles";
 import * as schema from "../../../../shared/schema";
+import * as loginContract from "../../../../shared/contracts/auth-login";
 
 /**
  * Analyse statique des routes d'écriture (POST/PUT/PATCH/DELETE) de `server/routes.ts` et de
@@ -381,7 +382,8 @@ export { SERVER_FIELDS };
 const SERVER_FIELD_ALT = SERVER_FIELDS.join("|");
 
 function exportedSchemaIsClean(name: string): boolean | undefined {
-  const value = (schema as Record<string, unknown>)[name] as { shape?: Record<string, unknown> } | undefined;
+  // Schémas de contrat lus par un handler sans validateBody (corps validé deux fois, voir auth-login).
+  const value = ({ ...schema, ...loginContract } as Record<string, unknown>)[name] as { shape?: Record<string, unknown> } | undefined;
   if (!value || typeof value !== "object" || !value.shape) return undefined;
   return !SERVER_FIELDS.some((f) => f in value.shape!);
 }
