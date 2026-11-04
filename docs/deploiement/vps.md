@@ -87,19 +87,24 @@ Remettre `PROD_TAG` sur le tag précédent et `docker compose --profile vps up -
 
 ## 6. Sauvegarde de la base
 
-Chaque nuit, par cron sur l'hôte, puis copie hors du VPS (restic ou rclone vers OVH Object Storage) :
+Chaque nuit, par cron sur l'hôte, `deploy/backup-db.sh` écrit `~/backups/fleet-AAAAMMJJ.dump` (format custom) :
+
+- idempotent : relancé le même jour, il remplace le dump du jour ; un dump vide ou illisible par `pg_restore --list` échoue sans toucher au précédent ;
+- rotation : les dumps `fleet-AAAAMMJJ.dump` de plus de 14 jours sont supprimés ; tout autre fichier du dossier (ex. `fleet-pre-import-20261104.dump`) est conservé ;
+- réglages par variables : `BACKUP_DIR`, `RETENTION_DAYS`, `PREFIX`, `DB_SERVICE`, `COMPOSE_CMD`.
 
 ```bash
-# crontab : 30 2 * * * cd /chemin/vers/fleet-management-and-erp/deploy && <commande ci-dessous>
-# (docker compose lit docker-compose.yml et .env du dossier courant ; % s'échappe en \% dans une crontab)
-docker compose --profile vps exec -T db-prod pg_dump -U fleet -Fc fleet > prod-$(date +%F).dump   # bash : redirection binaire sûre
+# crontab -e (le script se place lui-même dans deploy/ pour docker compose)
+30 2 * * * $HOME/fleet/deploy/backup-db.sh >> $HOME/backups/backup-db.log 2>&1
 ```
+
+Reste à faire : copie hors du VPS (restic ou rclone vers OVH Object Storage). Tant qu'elle manque, une perte du VPS emporte aussi les dumps.
 
 Restauration (application arrêtée) :
 
 ```bash
 docker compose --profile vps stop app-prod
-docker compose --profile vps exec -T db-prod pg_restore -U fleet -d fleet --clean --if-exists < prod-AAAA-MM-JJ.dump
+docker compose --profile vps exec -T db-prod pg_restore -U fleet -d fleet --clean --if-exists < ~/backups/fleet-AAAAMMJJ.dump
 docker compose --profile vps start app-prod
 ```
 
