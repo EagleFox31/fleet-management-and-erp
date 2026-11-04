@@ -63,7 +63,6 @@ export function useWarehouse() {
     }),
   });
 
-
   const derivedReorderAlerts = Array.isArray(lowStockPartsQuery.data)
     ? (() => {
         const toDemandStatus = (statusRaw: unknown) => String(statusRaw || "").toLowerCase();

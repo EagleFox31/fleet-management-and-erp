@@ -14,6 +14,9 @@ import { extractRoutes, matchingClose, parseMounts, sourceFiles, stripComments }
  * vues. Un segment `${...}` vaut n'importe quel segment. Côté serveur, seuls les routeurs montés dans
  * `server/api/index.ts` et les `app.get` de `server/routes.ts` sont connus : une route servie
  * autrement apparaît comme manquante, et se règle par la liste gelée, avec sa justification.
+ * L'union des routes ne modélise pas l'ordre de service ni le masquage (AGENTS.md §9) : un futur
+ * `/:id` de `server/api/`, monté avant `routes.ts`, qui capturerait un littéral de `routes.ts` serait
+ * compté comme servi et donnerait un faux vert ici. Ce masquage relève de `route-order-scan.ts`.
  */
 
 const PARAM = ":p";
