@@ -14,6 +14,8 @@ const BOOTSTRAP_SQL_FILES = [
   'work-orders-realtime-triggers.sql',
   'supplier-invoice-settlements-workflow.sql',
   'mission-fuel-triggers.sql',
+  // Alertes carburant réécrites après #263 (destinataires configurés, échec d'alerte sans casser le plein).
+  'fuel-alerts-triggers.sql',
 ] as const;
 
 async function applySqlFile(absolutePath: string, logLabel: string) {
