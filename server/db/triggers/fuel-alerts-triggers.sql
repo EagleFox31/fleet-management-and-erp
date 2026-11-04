@@ -102,7 +102,7 @@ BEGIN
                     round(current_consumption, 1)
                 ),
                 CASE WHEN excess_percent > 50 THEN 'high' ELSE 'medium' END,
-                '/vehicles/' || NEW.vehicle_id || '/fuel',
+                '/vehicles/' || NEW.vehicle_id,
                 'fuel-consumption:' || NEW.id
             );
         END IF;
@@ -151,7 +151,7 @@ BEGIN
                     (SELECT v.registration_number FROM vehicles v WHERE v.id = NEW.vehicle_id),
                     round(month_total), round(monthly_budget)),
                 'high',
-                '/vehicles/' || NEW.vehicle_id || '/fuel',
+                '/vehicles/' || NEW.vehicle_id,
                 'fuel-budget:' || NEW.vehicle_id || ':' || to_char(month_start, 'YYYY-MM') || ':exceeded'
             );
         ELSIF month_total > monthly_budget * 0.8 THEN
@@ -162,7 +162,7 @@ BEGIN
                     (SELECT v.registration_number FROM vehicles v WHERE v.id = NEW.vehicle_id),
                     round(month_total), round(monthly_budget)),
                 'medium',
-                '/vehicles/' || NEW.vehicle_id || '/fuel',
+                '/vehicles/' || NEW.vehicle_id,
                 'fuel-budget:' || NEW.vehicle_id || ':' || to_char(month_start, 'YYYY-MM') || ':80'
             );
         END IF;

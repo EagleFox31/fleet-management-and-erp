@@ -2524,6 +2524,26 @@ Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test
 
 ### Leçon généralisée
 Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+## 4 novembre 2026 - cycle d'alertes : requêtes par véhicule et ordres de travail plafonnés à 50 (#281)
+
+### Contexte
+Le cycle d'alertes (`AlertService.runAllAlertChecks`) faisait plusieurs requêtes par véhicule (plannings, historique carburant, liens de renouvellement), puis rechargeait toutes les alertes de chaque destinataire pour chaque alerte candidate. Mesure : 99 requêtes pour 2 véhicules neufs, 531 pour 12. En lisant le code, un second défaut est apparu : les ordres de travail passaient par `storage.getWorkOrders()`, plafonné par défaut à 50 lignes. Au-delà, les ordres de travail en retard n'étaient jamais alertés.
+
+### Cause racine
+- Le dédoublonnage était écrit candidate par candidate, en lecture complète (`getAlertsByUserId`), au lieu de s'appuyer sur la contrainte `uq_alerts_user_dedupe`.
+- Le cycle réutilisait une méthode de liste paginée prévue pour l'UI, dont la limite par défaut est implicite.
+
+### Résolution
+- Les candidates sont mises en lot (`AsyncLocalStorage`) pendant le passage et émises à la fin, en un nombre fixe de requêtes, avec `ON CONFLICT DO NOTHING`.
+- Les chargements sont groupés par véhicule.
+- Les ordres de travail ouverts sont lus par une requête directe.
+- L'alerte de consommation porte désormais la clé du trigger (`fuel-consumption:<plein>`) : une seule alerte par plein anormal.
+
+### Prévention (vérifiable)
+- `tests/integration/alert-cycle-query-count.test.ts` vérifie que 2 et 12 véhicules coûtent le même nombre de requêtes, avec une borne fixe. Il est rouge sur l'original (99 contre 531) et vérifie aussi le dédoublonnage rejoué et après lecture.
+
+### Leçon généralisée
+Un traitement planifié ne réutilise pas une méthode de liste UI sans vérifier sa limite par défaut. Un nombre de requêtes se fige par un test qui compte les requêtes sur deux tailles de données.
 
 ## 2026-11-04 — Near miss : serveur d'agent lancé avec `--env-file=.env` d'un worktree pointant la production (récidive de #259)
 
