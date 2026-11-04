@@ -2229,3 +2229,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Quand une relation passe de 1 à N, recenser **toutes** les écritures sur la table enfant, pas seulement les lectures : chaque `limit(1)` suivi d'une écriture vise désormais une ligne arbitraire.
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
+
+## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
+
+### Contexte
+- #256 a fait passer le `catch` de `POST /api/auth/login` de 401 à 503, pour qu'une panne de base ne se lise plus comme « identifiants invalides » et ne soit plus comptée par le verrouillage (#254).
+- Relecture sécurité (NO-GO) : le corps n'était pas validé en type. Avec `{"username":"admin","password":1}`, `bcrypt.compare` (bcryptjs 3) lève. Cette branche n'est atteinte que si le compte existe et est actif : un compte existant répondait 503, un nom inconnu 401. Les 503 n'étant pas comptés par le verrouillage, l'énumération était illimitée.
+
+### Cause racine
+- Classification : canal auxiliaire introduit par un changement de code d'erreur. Avant #256, le `catch` aplatissait tout en 401 et masquait la différence. Il cachait l'oracle au lieu de l'empêcher. Rendre l'erreur honnête a rendu l'oracle visible.
+
+### Résolution
+- Corps validé par Zod en tête du handler (`username` et `password` en chaînes non vides, longueur bornée). 400 avant `getUserByUsername`, même réponse pour tout compte.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : avec `password: 1` puis `password: {}`, sur un compte existant et sur un nom inconnu, la réponse est le même 400 et aucune recherche de compte n'a lieu. Sur le code d'avant, les deux cas échouent (503 contre 400). Le même fichier couvre aussi la panne de base et l'échec de `session.regenerate` (503, non comptés), plus le témoin 401 compté.
+
+### Règle Projet (obligatoire)
+- Sur une route d'authentification, valider le type du corps **avant** la recherche du compte.
+- Avant de changer le code HTTP d'un `catch` d'authentification, recenser les branches qui ne lèvent que pour un compte existant (comparaison de hash, migration, session) : chacune devient un oracle dès que son code diffère de celui d'un compte inconnu.

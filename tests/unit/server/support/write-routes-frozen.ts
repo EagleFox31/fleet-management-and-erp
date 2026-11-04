@@ -31,7 +31,6 @@ export const T3_WITHOUT_BODY_VALIDATION: readonly string[] = [
   "patch /api/supplier-invoices/:id/settlements/:settlementId/reconcile",
   "patch /api/supplier-invoices/:id/settlements/:settlementId/reject",
   "patch /api/work-order-items/:id",
-  "post /api/auth/login",
   "post /api/auth/pin-login",
   "post /api/drivers/:id/create-user",
   "post /api/drivers/:id/update-cpc",

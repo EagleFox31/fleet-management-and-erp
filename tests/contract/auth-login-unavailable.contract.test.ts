@@ -1,4 +1,5 @@
 import { createServer, type Server } from "http";
+import session from "express-session";
 import { eq, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
@@ -24,11 +25,11 @@ const ids = createIdBag();
 let username = "";
 let userId = 0;
 
-async function login(password: string) {
+async function login(password: unknown, as: string = username) {
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username: as, password }),
   });
   return { status: res.status, text: await res.text(), requestId: res.headers.get("x-request-id") };
 }
@@ -91,4 +92,41 @@ describe("POST /api/auth/login, base indisponible", { timeout: 60000 }, () => {
     expect(res.status).toBe(401);
     expect(await settledFailedCount()).toBe(before + 1);
   });
+
+  it("session.regenerate en échec : 503, et l'échec n'est pas compté", async () => {
+    const before = await failedCount();
+    vi.spyOn(session.Session.prototype, "regenerate").mockImplementationOnce(function (this: unknown, callback) {
+      callback(new Error("session store down"));
+      return this as session.Session;
+    });
+
+    const res = await login(TEST_USER_PASSWORD);
+
+    expect(apiErrorProblems(res.status, res.text, 503, "INTERNAL", res.requestId)).toEqual([]);
+    expect(res.text).not.toContain("session store down");
+    expect(await settledFailedCount()).toBe(before);
+  });
+});
+
+/**
+ * Oracle d'énumération (#256, audit de sécurité) : avec un `password` non chaîne, bcrypt.compare levait,
+ * et seulement pour un compte existant et actif. Le compte existant répondait 503, l'inconnu 401.
+ * Le corps est désormais validé avant la recherche du compte : même 400 dans les deux cas.
+ */
+describe("POST /api/auth/login, corps mal typé", { timeout: 60000 }, () => {
+  for (const [label, password] of [
+    ["nombre", 1],
+    ["objet", {}],
+  ] as const) {
+    it(`password ${label} : 400 identique pour un compte existant et un nom inconnu`, async () => {
+      const lookup = vi.spyOn(storage, "getUserByUsername");
+      const known = await login(password);
+      const unknown = await login(password, `inconnu-${Date.now().toString(36)}`);
+
+      expect(known.status).toBe(400);
+      expect(unknown.status).toBe(known.status);
+      expect(JSON.parse(unknown.text).message).toBe(JSON.parse(known.text).message);
+      expect(lookup, "aucune recherche de compte avant validation").not.toHaveBeenCalled();
+    });
+  }
 });
