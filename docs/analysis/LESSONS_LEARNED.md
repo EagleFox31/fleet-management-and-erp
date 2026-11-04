@@ -2612,11 +2612,12 @@ Deux facteurs aggravants :
 
 Reproduit : avec un détenteur externe de la clé sur la base de test, la version de main échoue (`expected false to be true`). La branche reste verte.
 
-Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base.
+Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base. `assertSafeTestDatabase` (`e2e/helpers/production-guard.ts`) refuse déjà des variables `_LISTENER` et `_DIRECT` qui divergent de la base de test. La garde de `server/db.ts` (`resolveListenerConnectionString`) est une seconde couche, au point où la connexion s'ouvre.
 
 ### Résolution
 - Clé du verrou injectable : `createAdvisoryBackupLock(lockKey)`. Le test utilise une clé unique par passage, rend ses connexions en `finally` et ne ferme plus le pool partagé.
-- `setup-db.ts` force les deux variables à la base de test.
+- `setup-db.ts` force les deux variables à la base de test, sur l'hôte direct (`deriveDirectConnectionString`, sans `-pooler.`).
+  `assertSafeTestDatabase` accepte donc pour ces deux variables la forme directe de la base de test, et pour elles seules. Ce garde est rejoué avant chaque fichier sous `isolate:false`, où l'environnement est partagé : sans cette tolérance, le second fichier serait refusé sur une base de test Neon pooler.
 - `resolveListenerConnectionString` refuse en `NODE_ENV=test` une variable dédiée qui vise une autre base.
 
 ### Prévention (vérifiable)

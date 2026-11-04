@@ -181,3 +181,14 @@ Entrées ajoutées à la fin, une par lot.
 - **Pourquoi** : rouge 5 fois sur 5 sur main nu, alors que le stock était juste (5 → 7, un mouvement) ; la seconde requête lisait après le commit de la première et devenait un no-op réussi.
 - **Comment tester (QA)** : `npm run test:integration -- tests/integration/part-requirements-idempotence.test.ts` ; rouge si l'on retire `eq(partRequirements.status, current.status)` du service.
 - **Reste / risques** : aucun ; le code produit n'est pas modifié.
+
+## 2026-11-04T15:46:52+01:00 — relecture #305 : variables du listener sur l'hôte direct
+- **Statut** : fait, PR #305
+- **Quoi** :
+  - `tests/support/listener-env.ts` pose `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` à `deriveDirectConnectionString(DATABASE_URL)` (sans `-pooler.`).
+  - `assertSafeTestDatabase` accepte cette forme directe pour ces deux variables seulement.
+  - LESSONS : la garde de `server/db.ts` est une seconde couche derrière `assertSafeTestDatabase`.
+- **Comment** : la dérivation existante est réutilisée côté setup et côté garde.
+- **Pourquoi** : sur une base de test Neon pooler, LISTEN et verrous de session passaient par le pooler. Une fois corrigé, le garde rejoué avant chaque fichier aurait refusé le second fichier.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/listener-connection.test.ts tests/unit/server/test-db-guard.test.ts` ; rouge mesuré sur le garde sans la tolérance.
+- **Reste / risques** : aucun.

@@ -50,6 +50,14 @@ describe("pinListenerUrlsToTestDatabase (setup-db)", () => {
     expect(resolveListenerConnectionString({ ...env, NODE_ENV: "test" })).toBe(TEST);
   });
 
+  it("base de test Neon pooler : variables posées sur l'hôte direct", () => {
+    const env: NodeJS.ProcessEnv = { DATABASE_URL: NEON_POOLER };
+    pinListenerUrlsToTestDatabase(env);
+    expect(env.DATABASE_URL_LISTENER).toBe(NEON_DIRECT);
+    expect(env.DATABASE_URL_DIRECT).toBe(NEON_DIRECT);
+    expect(resolveListenerConnectionString({ ...env, NODE_ENV: "test" })).toBe(NEON_DIRECT);
+  });
+
   it("sans DATABASE_URL : erreur explicite", () => {
     expect(() => pinListenerUrlsToTestDatabase({})).toThrow("DATABASE_URL");
   });
