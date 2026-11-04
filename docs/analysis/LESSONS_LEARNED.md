@@ -2315,3 +2315,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
 - Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
+
+## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
+
+### Contexte
+- #255 : un client ouvrant le véhicule d'un autre client (403) lisait « Le véhicule n'existe pas ou a été supprimé ».
+- #261 : même message sur une panne réseau ou une 5xx. L'utilisateur conclut à une suppression et ne réessaie pas, et la référence (requestId) n'est pas montrée.
+
+### Cause racine
+- Classification : deuxième défaut du même genre sur le même écran. La page branchait « non trouvé » sur `error || !vehicle`, sans regarder la nature de l'erreur. Corriger le seul 403 (#255) a laissé les autres catégories dans la branche « n'existe pas ».
+
+### Résolution
+- Fonction pure `vehicleUnavailable` (`client/src/lib/vehicle-load-error.ts`) : 403 → « Accès refusé » ; 404 ou réponse vide → « Véhicule non trouvé » ; tout le reste (401, 5xx, réseau, exception) → « Chargement impossible », message `userMessageOf` avec la référence, bouton « Réessayer ».
+
+### Prévention (vérifiable)
+- `tests/unit/client/vehicle-load-error.test.ts` : un cas par catégorie (401, 403, 404, réponse vide, 5xx avec corps, 5xx sans corps, réseau, exception technique). Seuls 404 et la réponse vide produisent « n'existe pas ».
+- `e2e/24-client-space.spec.ts` : 403 réel dans le navigateur, puis 5xx et panne réseau simulées, puis relance réussie.
+
+### Règle Projet (obligatoire)
+- « N'existe pas » se déduit d'un 404 seulement, jamais d'une erreur quelconque. Un écran de détail classe son erreur par une fonction pure testée par catégorie, pas par `if (error)`.
