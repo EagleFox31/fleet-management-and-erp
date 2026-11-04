@@ -8,23 +8,18 @@ import { extractQueryKeyUrls, matchesServed, scanUnservedQueryKeys } from "../..
  * `useWarehouse` interrogeait `/api/parts/by-supplier` (la route est `/api/warehouse/parts-by-supplier`)
  * depuis les tableaux de bord, sans qu'aucun écran ne lise la donnée.
  *
- * Liste gelée des écarts existants au 4 novembre 2026, à traiter un par un (brancher la bonne route
+ * Liste gelée des écarts existants au 4 novembre 2026 (5 sorties avec #285), à traiter un par un (brancher la bonne route
  * ou retirer la query). Elle ne peut que rétrécir : une entrée corrigée doit en sortir, toute
  * nouvelle entrée est une régression.
  */
 const UNSERVED_QUERY_KEYS_FROZEN: string[] = [
   "client/src/components/charts/fuel-consumption-chart.tsx /api/fuel-card/consumption-history",
-  "client/src/components/maintenance/work-order-form.tsx /api/maintenance-schedules/vehicle",
-  "client/src/hooks/useAlerts.ts /api/alerts/type",
   "client/src/hooks/useBilling.ts /api/invoices/unpaid",
-  "client/src/hooks/useFuelCard.ts /api/fuel-card/vehicle",
   "client/src/hooks/useMaintenance.ts /api/maintenance/faults",
   "client/src/hooks/useMaintenance.ts /api/maintenance/preventive",
   "client/src/hooks/useMaintenance.ts /api/maintenance/stats",
-  "client/src/hooks/useVehicles.ts /api/vehicles/registration",
   "client/src/hooks/useVehicles.ts /api/vehicles/stats",
   "client/src/hooks/useVehicles.ts /api/vehicles/status-summary",
-  "client/src/hooks/useWarehouse.ts /api/warehouse/parts",
   "client/src/pages/inventory/parts-database.tsx /api/parts/categories",
   "client/src/pages/procurement/orders/group.tsx /api/purchase-orders/optimize-timing/${selectedGroup}",
   "client/src/pages/workflows/documents.tsx /api/workflows/all-with-documents",
@@ -57,5 +52,26 @@ describe("queryKey du client : chaque URL a une route GET (#280)", () => {
       { file: "f.ts", url: "/api/a", mode: "fetch" },
       { file: "f.ts", url: "/api/c", mode: "prefix" },
     ]);
+  });
+
+  it("compte les segments scalaires de la clé comme la queryFn par défaut (#285)", () => {
+    const source = `
+      useQuery({ queryKey: ['/api/maintenance-schedules/vehicle', vehicleId] });
+      useQuery({ queryKey: ['/api/suppliers', id, 'invoices', { status }] });
+      useQuery({ queryKey: ['/api/parts', { limit: 5 }, 'ignored'] });
+      useQuery({ queryKey: ['/api/users', null, true] });
+      queryClient.invalidateQueries({ queryKey: ['/api/vehicles', id] });
+    `;
+    expect(extractQueryKeyUrls("f.ts", source).map((u) => u.url)).toEqual([
+      "/api/maintenance-schedules/vehicle/${}",
+      "/api/suppliers/${}/invoices",
+      "/api/parts",
+      "/api/users",
+      "/api/vehicles",
+    ]);
+    // sans les segments, la clé visait `/api/maintenance-schedules/vehicle`, qui n'est pas servie
+    const served = [["api", "maintenance-schedules", "vehicle", ":p"]];
+    expect(matchesServed({ url: "/api/maintenance-schedules/vehicle/${}", mode: "fetch" }, served)).toBe(true);
+    expect(matchesServed({ url: "/api/maintenance-schedules/vehicle", mode: "fetch" }, served)).toBe(false);
   });
 });
