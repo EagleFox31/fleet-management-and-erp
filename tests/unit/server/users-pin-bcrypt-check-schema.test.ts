@@ -87,8 +87,9 @@ describe("users.pin : CHECK bcrypt, init-database et migration jumelle", () => {
     expect(migrations).toBeLessThan(posed);
   });
 
-  it("la reprise des PIN en clair sélectionne exactement ce que la CHECK refuse", () => {
+  it("la reprise ne touche que le clair : un préfixe $2 non conforme est compté, jamais réécrit", () => {
     const src = norm(readFileSync("server/lib/pin-hash-migration.ts", "utf8"));
-    expect(src).toContain(`pin IS NOT NULL AND pin !~ '${PREFIX}'`);
+    expect(src).toContain("pin IS NOT NULL AND pin !~ '^[$]2'");
+    expect(src).toContain(`pin ~ '^[$]2' AND pin !~ '${PREFIX}'`);
   });
 });

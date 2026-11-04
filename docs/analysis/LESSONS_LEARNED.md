@@ -2849,3 +2849,12 @@ Mot de passe aléatoire à la création (`randomPasswordHash`), reprise idempote
 
 ### Leçon généralisée
 Un secret ne se dérive jamais d'un autre secret, même pour remplir une colonne obligatoire : donner à chaque secret sa propre valeur aléatoire, et tester que changer l'un n'ouvre pas l'autre.
+
+## 2026-11-04 — Une CHECK de sécurité rend visible la valeur refusée dans les logs
+
+- **Contexte** : CHECK `users_pin_bcrypt_check` (PIN en base = hash bcrypt ou NULL), relue par la sécurité avant fusion (#320).
+- **Cause racine** : `POST /api/users` et `POST /api/auth/register` passaient `pin` brut à `storage.createUser` (`insertUserSchema` ne l'omet pas). Une écriture refusée renvoie 23514 avec `detail: "Failing row contains (…1234…)"`, journalisé tel quel : la contrainte qui protège le secret l'aurait écrit dans les logs. Le redact pino ne couvrait pas `err.detail`.
+- **Classification** : near miss (détecté en relecture, jamais déployé) ; défaut de conception : contrainte posée sans avoir passé en revue chaque chemin d'écriture de la colonne.
+- **Résolution** : PIN validé (4 chiffres) puis haché dans les deux routes de création (`server/lib/user-pin.ts`), 400 lisible au lieu de 500 ; `err.detail` et `err.where` masqués dans `server/lib/logger.ts`.
+- **Prévention vérifiable** : `tests/contract/user-create-pin-hashed.contract.test.ts` (clair jamais écrit, 400 sur PIN invalide) ; `tests/unit/server/logger-redact.test.ts` (aucune valeur d'une ligne refusée ne sort dans le journal).
+- **Leçon généralisée** : avant de poser une contrainte sur une colonne secrète, lister et tester chaque chemin d'écriture (routes, import de sauvegarde, scripts) ; un message d'erreur de base de données contient la donnée refusée, donc le redact doit couvrir `detail` et `where`.

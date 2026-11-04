@@ -85,6 +85,7 @@ const log = moduleLogger("routes");
  * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
  * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
  */
+import { hashNewUserPin } from "./lib/user-pin";
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
@@ -320,7 +321,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const user = await storage.createUser({
         ...parsedUser,
-        password: hashedPassword
+        password: hashedPassword,
+        pin: await hashNewUserPin(parsedUser.pin),
       });
       
       return res.status(201).json({
@@ -541,13 +543,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Hasher le mot de passe
       const hashedPassword = await bcrypt.hash(parsedUser.password, 10);
+      const hashedPin = await hashNewUserPin(parsedUser.pin); // hors du try d'écriture : un PIN invalide donne 400
 
       log.info({ requestId: req.requestId }, "Tentative de création utilisateur dans la base de données");
 
       try {
         const user = await storage.createUser({
           ...parsedUser,
-          password: hashedPassword
+          password: hashedPassword,
+          pin: hashedPin,
         });
 
         log.info({ requestId: req.requestId, userId: user.id }, "Utilisateur créé avec succès");

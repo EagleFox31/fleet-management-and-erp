@@ -20,7 +20,7 @@ const pinOf = async (client: PoolClient, id: number) =>
 
 describe("reprise des PIN en clair", { timeout: 60_000 }, () => {
   beforeAll(async () => {
-    for (let i = 0; i < 4; i++) ids.userIds.push((await createTestUser({ role: "driver" })).id);
+    for (let i = 0; i < 5; i++) ids.userIds.push((await createTestUser({ role: "driver" })).id);
     accounts = [...ids.userIds];
   });
   afterAll(async () => {
@@ -29,7 +29,8 @@ describe("reprise des PIN en clair", { timeout: 60_000 }, () => {
 
   it("hache un PIN en clair (conforme ou non), laisse un hash et NULL intacts, second passage à 0 écriture", async () => {
     const existing = await bcrypt.hash("9999", 4);
-    const [plain, odd, kept, none] = accounts;
+    const [plain, odd, kept, none, extra] = accounts;
+    const malformed = "$2x$10$abcdefghijklmnopqrstuv"; // ressemble à un hash, préfixe hors a/b/y
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -40,6 +41,7 @@ describe("reprise des PIN en clair", { timeout: 60_000 }, () => {
       await setPin(odd, "12");
       await setPin(kept, existing);
       await setPin(none, null);
+      await setPin(extra, malformed);
 
       const first = await hashPlainUserPins(client);
       expect(first.hashed).toBe(2);
@@ -50,6 +52,7 @@ describe("reprise des PIN en clair", { timeout: 60_000 }, () => {
       expect(await bcrypt.compare("12", (await pinOf(client, odd))!)).toBe(true);
       expect(await pinOf(client, kept)).toBe(existing);
       expect(await pinOf(client, none)).toBeNull();
+      expect(await pinOf(client, extra)).toBe(malformed); // jamais réécrit
 
       const second = await hashPlainUserPins(client);
       expect(second.hashed).toBe(0);

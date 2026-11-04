@@ -75,3 +75,5 @@ Règles : `docs/journal/README.md`.
   - Attendu : PIN « 1234 » refusé (23514, `users_pin_bcrypt_check`), hash et NULL acceptés, rejeu sans changement (même oid), clair présent : NOT VALID + avertissement sans valeur, puis validée après reprise.
 - **RAIDER** : Idempotent (rejeu = même contrainte) ; Retroactive (aucune donnée modifiée par la migration, clair existant laissé à la reprise) ; Durable (`tests/integration/pin-hash-migration.test.ts` adapté : le clair n'est plus écrit qu'en transaction annulée sans la contrainte).
 - **Reste / risques** : `POST /api/users` et `POST /api/auth/register` (`server/routes.ts`, gelé) acceptent encore `pin` via `insertUserSchema` sans le hacher : avec la contrainte, un PIN fourni y donne une erreur 500 au lieu d'un stockage en clair ; correction côté fleet-api.
+
+- 2026-11-04 18:40 : branche poussée, PR #320 ouverte (la mention « sans push ni PR » ci-dessus est périmée). Correctifs de relecture : PIN haché dans les deux routes de création, err.detail masqué dans le logger, préfixe $2 non conforme exclu de la reprise et compté.
