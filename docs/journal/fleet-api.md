@@ -214,6 +214,10 @@ Règles : `docs/journal/README.md`.
 - **RAIDER** : couvert non-régression et liste gelée réduite ; sans objet : migration.
 - **Reste / risques** : `isFuelRecordWriter` (chef d'atelier) non retenu, aucun écran d'atelier n'appelle la route.
 
+## 2026-11-03 - fix/fuel-record-soft-delete (etape 1, en pause)
+Quoi : colonnes fuel_records.deleted_at / deleted_by (schema, init-database, migration 20261103_fuel_records_soft_delete.sql) et exclusion des lignes supprimees dans solde, listes et sommes des services (carte, fuel-service, dashboard direction, exports, anomalies, bons, kilometrage, rentabilite vehicule).
+Pourquoi : la suppression d un plein qui a mouvemente la carte sera douce et reservee aux gestionnaires de la carte ; le solde ne doit plus compter ces lignes.
+Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), PATCH 404, filtre GET /api/fuel-records dans routes.ts, trigger mission-fuel, contrat, listes gelees, LESSONS A5.
 ## 2026-11-03 — Carte carburant, lot 2 : garde du plein de mission et corps de /consumption validé
 - **Agent** : fleet-api · **Branche** : `fix/fuel-card-lot2` (empilée sur `fix/fuel-card-consumption-guard`, #207)
 - **Statut** : fait
@@ -303,6 +307,39 @@ Règles : `docs/journal/README.md`.
   - 0 `error TS` ;
   - unitaires : 163 fichiers, 2034 tests ;
   - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
+
+## 2026-11-04 — Suppression douce des pleins carburant : DELETE gardé (fix/fuel-record-soft-delete, étape 2)
+- **Agent** : fleet-api · **Branche** : `fix/fuel-record-soft-delete`
+- **Quoi** :
+  - `DELETE /api/fuel-records/:id` : garde de route `authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"])`, décision dans `FuelService.deleteFuelRecord(id, actor)` sous `lockFuelCard`. Plein qui a mouvementé la carte : admin, logistics, secretary (403 sinon), suppression douce (`deleted_at`, `deleted_by`). Plein physique : garde historique (admin, chef d'atelier), suppression définitive. Absent ou déjà supprimé : 404. Événement `broadcastFuelRecordChanged` conservé, log `moduleLogger("fuel-records")`.
+  - Lectures filtrées sur `deleted_at` : statistiques par véhicule, par station, par client et bilan mensuel de `fuel-card-service`, triggers `mission-fuel-triggers.sql` et `fuel-alerts-triggers.sql`, `GET /api/fuel-records` (lecture par `FuelService` au lieu de `storage.ts`, gelé), `updateFuelRecord` (WHERE sur ligne vivante).
+  - Rejeu par `request_key` (`findReplayedFuelSubmission`) : une ligne supprimée donne 409 (la clé reste portée par l'index unique), pas un faux rejeu.
+  - `FUEL_CARD_MANAGER_ROLES` ajouté à `shared/constants/roles.ts`, repris par `isFuelCardManager`.
+- **Pourquoi** : décision métier tranchée (suppression d'un plein ayant mouvementé la carte réservée aux gestionnaires, douce et tracée, solde exclu des lignes supprimées).
+- **Preuves** : voir le rapport de PR (check, unitaires, contrats) ; contrat 10 cas, 7 rouges sur `origin/main`.
+- **Écarts / ouvert** : `export-service.ts` (sauvegarde JSON complète) exporte toujours les lignes supprimées avec leur `deleted_at`, voulu pour une sauvegarde ; `server/storage.ts` (interdit) lit encore `fuel_records` sans filtre dans `getFuelRecordsByVehicleId`, plus appelée par `routes.ts`.
+
+## 2026-11-04 — Suppression douce des pleins carburant : réserves de l'audit et de la relecture (#263)
+- **Agent** : fleet-api · **Branche** : `fix/fuel-record-soft-delete`
+- **Quoi** :
+  - Correction d'une entrée précédente : `storage.getFuelRecordsByVehicleId` reste appelée (`/statistics`, `/consumption-history`, `alert-service`) ; elle filtre `deleted_at` depuis ef19904. Contrat sur ces deux routes (rouge sans le filtre, vert avec).
+  - Test d'hygiène `fuel-records-deleted-at-hygiene.test.ts` (lecteurs de `fuel_records`, exceptions gelées justifiées).
+  - PATCH : `AppError(404)` quand l'update ne touche aucune ligne vivante (suppression concurrente) au lieu de 500.
+  - `fuel-alerts-triggers.sql` rejoué au démarrage (`CREATE OR REPLACE`), sous garde `to_regproc('create_vehicle_alert')`, sinon avertissement ; cas ajouté au test jumeau.
+  - Log `moduleLogger` de la suppression définitive d'un plein physique (coût, quantité, véhicule).
+  - Règle de suppression partagée : `shared/constants/fuel-record-delete.ts` (`canDeleteFuelRecord`, `hasMovedFuelCard`), utilisée par `FuelService.deleteFuelRecord` et par l'écran (le chef d'atelier ne voit plus la corbeille sur un débit de carte).
+  - Couche 3 : `fuel_record_changed` invalide aussi le groupe `missions` ; suppressions locales invalident `/api/fuel-card/*` ; `useSingleFlightMutate` sur les 3 boutons supprimer ; `if (!req.user)` mort retiré de la route.
+- **Pourquoi** : réserves de l'audit sécurité et de la relecture sur #263.
+- **Écarts / ouvert** : poser les triggers d'alertes carburant active un comportement dormant (alertes insérées pour `user_id = 1`) ; à valider par `fleet-db` avant la mise en production. Les écrans `fuel/[id].tsx` et `fuel-record-detail-modal.tsx` n'appliquent pas encore `canDeleteFuelRecord` à leur bouton.
+
+## 2026-11-04 — Suppression douce des pleins carburant : triggers d'alertes retirés du démarrage (#263)
+
+- **Quoi** : `applyFuelAlertsTriggers` retiré de `server/init-database.ts`. `fuel-alerts-triggers.sql` garde son filtre `deleted_at`, mais n'est plus posé au démarrage.
+- **Pourquoi** : rejoué sur PG 17 local (relecture), le trigger AFTER INSERT fait échouer le 2e plein d'un véhicule (`AVG(LAG() OVER)` interdit, `format('%.1f')` invalide) et insère avec `user_id = 1` en clé étrangère. Sur toute base où `create_vehicle_alert` existe, création de plein, débit de carte et plein de mission tomberaient en 500. Sa réécriture est confiée à fleet-db (sous-requête, `round()`, destinataire configuré, alerte qui ne casse pas l'écriture, intégration qui pose les triggers).
+- **Comment tester** : `tests/unit/server/fuel-records-soft-delete-schema.test.ts`, qui échoue si `init-database.ts` cite de nouveau ce fichier.
+- **Corrections d'entrées précédentes** :
+  - l'entrée « réserves de l'audit et de la relecture » disait que `fuel/[id].tsx` et `fuel-record-detail-modal.tsx` n'appliquaient pas `canDeleteFuelRecord` : c'est fait depuis ba14938 ;
+  - ef19904 (filtre `deleted_at` de `storage.getFuelRecordsByVehicleId`, lu par `/statistics`, `/consumption-history` et `alert-service`) et ba14938 (bouton supprimer de la fiche et de la modale) n'avaient pas d'entrée : les voici.
 
 ## 2026-11-04 11:10 — R2 : gardes déclaratives du parcours d'acquisition
 - **Agent** : fleet-api · **Branche** : `fix/r2-vehicle-acquisition-guards`

@@ -1670,6 +1670,9 @@ Mise à jour de cette entrée : la même classe de défaut est revenue sur une r
 - Ordre des contrôles : sur le plein de mission, le contrôle du chauffeur affecté passe avant la comparaison des véhicules, sinon un chauffeur non affecté distingue 400 de 403 et devine le véhicule d'une mission hors de son périmètre.
 - Prévention : `tests/contract/fuel-card-write-guards.contract.test.ts` (technician, workshop_manager et warehouse en 403 solde inchangé, chauffeur non affecté en 403, chauffeur affecté et gestionnaires en 201, six corps invalides en 400) ; entrée retirée de `write-route-guards.frozen.ts`.
 - Règle : quand on garde une écriture d'argent, lister par grep toutes les routes qui écrivent la même table (`fuelRecords`, `fuel_records`) avant de conclure ; une garde dans le corps du handler ne vaut pas une garde de route.
+- Suite (4 novembre 2026, lot A5) : `DELETE /api/fuel-records/:id` est désormais gardé. La route déclare `authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"])` ; le service relit la ligne sous `lockFuelCard` puis tranche : plein qui a mouvementé la carte (`hasMovedFuelCard`) réservé à admin, logistics, secretary (403 au chef d'atelier, rien d'écrit), suppression douce `deleted_at` / `deleted_by` ; plein physique : garde historique (admin, chef d'atelier), suppression définitive ; ligne supprimée : 404, PATCH compris.
+- Même lot : une suppression douce n'est complète que si toutes les lectures filtrent `deleted_at`. Le grep de revue a trouvé des lectures arrivées avec `main` sans filtre (statistiques par véhicule, par station, bilan mensuel de `fuel-card-service`, triggers `mission-fuel` et `fuel-alerts`, liste `GET /api/fuel-records` qui passait par `storage.ts`), et le rejeu par `request_key` (`missions.routes.ts`) qui aurait renvoyé une ligne supprimée comme « déjà enregistrée » : il répond maintenant 409.
+- Prévention : `tests/contract/fuel-record-soft-delete.contract.test.ts` (10 cas, 7 rouges sur `origin/main`) ; `tests/unit/server/fuel-records-soft-delete-schema.test.ts` (colonnes jumelles migration / init-database, triggers filtrés).
 
 ## 2026-11-03 — Deux tests rouges au hasard : un requestId aléatoire, un compteur global
 
@@ -2229,6 +2232,14 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Quand une relation passe de 1 à N, recenser **toutes** les écritures sur la table enfant, pas seulement les lectures : chaque `limit(1)` suivi d'une écriture vise désormais une ligne arbitraire.
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
+
+### Suppression douce d'une table : inventorier tous les lecteurs (4 novembre 2026, pleins carburant, #263)
+- Contexte : `fuel_records` passe à la suppression douce (`deleted_at`). Le premier inventaire a filtré les services et les triggers de mission, mais a conclu à tort que `storage.getFuelRecordsByVehicleId` n'était plus appelée : elle l'est par `/api/fuel-records/statistics`, `/consumption-history` et `alert-service`. Les triggers d'alertes carburant ne sont par ailleurs pas rejoués au démarrage tant que leur fichier n'est pas dans `init-database.ts`.
+- Cause racine : l'inventaire des lecteurs s'est fait de mémoire et par service, sans balayer `storage.ts` ni les fichiers SQL, et une affirmation « plus appelée » n'a pas été vérifiée par un grep des appels.
+- Classification : lecteur oublié lors d'un changement de modèle (récurrence du « recenser toutes les écritures » de la relation 1 vers N, appliquée ici aux lectures).
+- Résolution : filtre `deletedAt` dans `storage.getFuelRecordsByVehicleId` ; filtre `deleted_at` dans `fuel-alerts-triggers.sql`, qui reste NON posé au démarrage : rejoué sur PG 17, il échoue au 2e plein (agrégat sur fonction fenêtre, `format('%.1f')` invalide) et vise `user_id = 1` en clé étrangère ; sa réécriture est confiée à fleet-db ; PATCH concurrent d'une ligne supprimée = 404 et non 500.
+- Prévention (vérifiable) : `tests/unit/server/fuel-records-deleted-at-hygiene.test.ts` échoue sur tout `.from(fuelRecords)`, `innerJoin(fuelRecords` ou `FROM|JOIN fuel_records` sous `server/` sans `deletedAt` / `deleted_at` dans l'instruction (appels multi-lignes vus, `storage.ts` et les SQL de triggers compris), avec une liste gelée d'exceptions justifiées une par une ; vu rouge en retirant le filtre de `storage.ts`. Contrat : `fuel-record-soft-delete.contract.test.ts` (statistiques et historique de consommation).
+- Règle Projet : passer une table à la suppression douce commence par un grep de tous ses lecteurs (`storage.ts`, services, SQL brut, triggers), et toute affirmation « n'est plus appelée » se prouve par un grep des appelants.
 
 ## 2026-11-04 — Prix d'achat du véhicule : inventaire des sorties incomplet, fuites trouvées en relecture (#214)
 
