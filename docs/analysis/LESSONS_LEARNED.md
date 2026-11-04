@@ -2524,6 +2524,37 @@ Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test
 
 ### Leçon généralisée
 Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+## 4 novembre 2026 - un trigger d'effet secondaire casse les reprises d'historique (suivi de #287)
+
+### Contexte
+#287 a posé au démarrage des triggers d'alertes carburant. Trois chemins insèrent des pleins en masse sans couper leurs effets :
+- la restauration de sauvegarde (`POST /api/admin/import-backup`) ;
+- `scripts/import-7-fuel-records.ts` ;
+- le seed.
+
+La restauration vidait `alerts`, réinsérait les pleins (les triggers alertaient sur tout l'historique), puis réinsérait les alertes sauvegardées. Celles-ci heurtaient `uq_alerts_user_dedupe` (23505). Sans transaction, la base restait à moitié restaurée.
+
+Deux défauts du trigger lui-même :
+- `WHEN OTHERS` n'attrape pas `query_canceled` (57014) : un délai dépassé pendant l'alerte annulait le plein ;
+- l'alerte n'avait pas de temps réel.
+
+### Cause racine
+La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun chemin de reprise ne la posait. L'ajout d'un trigger n'a pas déclenché la revue des écritures en masse sur la table.
+
+### Résolution
+- Restauration déplacée dans `server/api/admin-import-backup.routes.ts` et `server/services/backup-import-service.ts` : une transaction, `suppressSideEffects(tx)` avant toute écriture.
+- Même garde pour le script d'import et pour le seed.
+- `query_canceled OR OTHERS` dans les deux blocs d'exception.
+  Conséquence assumée : un `pg_cancel_backend` volontaire pendant le calcul de l'alerte est lui aussi absorbé. Le plein est enregistré, seule l'alerte manque, avec un `RAISE WARNING`. On préfère perdre une alerte, recalculable, plutôt qu'un plein saisi.
+- `pg_notify('fleet_events', alert_created)`, relayé par `db-event-relay` en trames nominatives.
+
+### Prévention (vérifiable)
+- `tests/unit/server/backup-import-service.test.ts` : la garde est posée avant la première écriture, et un échec annule tout.
+- `tests/integration/fuel-alerts-triggers.test.ts` : reprise sans alerte et sans 23505 ; 57014 rattrapé (rouge sur main).
+- `tests/integration/fuel-alerts-realtime.test.ts` (rouge sur main) et `tests/unit/server/db-event-relay-alerts.test.ts`.
+
+### Leçon généralisée
+Un trigger à effet secondaire s'accompagne du recensement des écritures en masse sur sa table (restauration, import, seed). Chacune pose la garde dans sa transaction. En PL/pgSQL, `WHEN OTHERS` ne couvre ni `query_canceled` ni `assert_failure`.
 ## 4 novembre 2026 - cycle d'alertes : requêtes par véhicule et ordres de travail plafonnés à 50 (#281)
 
 ### Contexte
@@ -2567,3 +2598,52 @@ La copie d'un `.env` racine dans un worktree emporte l'URL de production. Le bri
 
 ### Leçon généralisée
 Avant de coder un deuxième contrôle après une récidive, rejouer le scénario contre le premier : ici, la garde serveur tenait. La récidive vient du geste (`--env-file` sur un `.env` qui porte la prod) : c'est le brief et le contenu des `.env` qu'il faut corriger. Une clé en double dans un `.env` est un piège : l'ordre des lignes décide de la base visée, et tout lecteur maison doit soit reproduire la règle du chargeur réel, soit refuser l'ambiguïté.
+## 4 novembre 2026 - verrou consultatif de sauvegarde instable en suite complète (#298)
+
+### Contexte
+`tests/integration/backup-production.test.ts` (verrou consultatif) échouait pendant la suite complète, fichier compris, et passait lancé seul.
+
+### Cause racine
+Le test prenait la clé de production (`hashtext('backup')`), commune à toute la base. La base de test locale est partagée entre sessions, et un serveur local dont le planificateur sauvegarde sur cette base tient cette clé : `tryAcquire()` renvoie `false` sans défaut du code.
+
+Deux facteurs aggravants :
+- le test ne rendait pas ses connexions en cas d'échec ;
+- l'`afterAll` fermait `listenerPool`, partagé par toute la suite (`isolate: false`). Un `end()` bloqué sur une connexion non rendue fait échouer le fichier entier.
+
+Reproduit : avec un détenteur externe de la clé sur la base de test, la version de main échoue (`expected false to be true`). La branche reste verte.
+
+Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base. `assertSafeTestDatabase` (`e2e/helpers/production-guard.ts`) refuse déjà des variables `_LISTENER` et `_DIRECT` qui divergent de la base de test. La garde de `server/db.ts` (`resolveListenerConnectionString`) est une seconde couche, au point où la connexion s'ouvre.
+
+### Résolution
+- Clé du verrou injectable : `createAdvisoryBackupLock(lockKey)`. Le test utilise une clé unique par passage, rend ses connexions en `finally` et ne ferme plus le pool partagé.
+- `setup-db.ts` force les deux variables à la base de test, sur l'hôte direct (`deriveDirectConnectionString`, sans `-pooler.`).
+  `assertSafeTestDatabase` accepte donc pour ces deux variables la forme directe de la base de test, et pour elles seules. Ce garde est rejoué avant chaque fichier sous `isolate:false`, où l'environnement est partagé : sans cette tolérance, le second fichier serait refusé sur une base de test Neon pooler.
+- `resolveListenerConnectionString` refuse en `NODE_ENV=test` une variable dédiée qui vise une autre base.
+
+### Prévention (vérifiable)
+- `backup-production.test.ts` tient lui-même la clé de production pendant le test : il reste vert.
+- `tests/unit/server/listener-connection.test.ts` (refus, message sans URL, épinglage par setup-db).
+
+### Leçon généralisée
+Un test d'intégration n'emprunte jamais une ressource globale de production (verrou consultatif, canal, nom fixe) sur une base partagée. Il prend une clé à lui, rend tout en `finally`, et ne ferme pas un pool partagé par la suite.
+
+## 2026-11-04 — Fausse alerte « double entrée en stock » : test de concurrence qui ne forçait pas la course
+
+### Contexte
+`tests/integration/part-requirements-idempotence.test.ts` (« deux réceptions simultanées n'entrent le stock qu'une fois ») échouait 5 fois sur 5, seul et sous verrou, sur une base dédiée. L'échec se reproduisait sur `main` nu et même sur un commit qui était vert une heure plus tôt. Il annonçait 2 succès au lieu d'1, ce qui faisait craindre une double entrée en stock.
+
+### Ce qui s'est passé
+Le stock était juste : 5 → 7, un seul mouvement. Les deux appels partaient par `Promise.all`, mais la seconde requête lisait le statut **après** le commit de la première. Elle voyait alors `received → received`, prenait la branche sans changement de statut et rendait `success: true`. C'est le no-op voulu, que le test voisin « réception rejouée après coup » exige.
+
+### Cause racine
+Le test supposait que deux appels lancés ensemble lisent ensemble. L'entrelacement dépendait de la latence du pool et du proxy WebSocket : il a changé sans aucun commit et a fait basculer le résultat. Classification : test non déterministe, pas de régression du code.
+
+### Résolution
+Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le test attend que `pg_stat_activity` montre les deux `UPDATE` bloqués sur ce verrou, donc que les deux requêtes ont lu `ordered`, puis relâche le verrou. Le compare-and-set (`WHERE status = <lu>`) refuse alors exactement la seconde.
+
+### Prévention (vérifiable)
+- 5 passages verts sur base dédiée sous `lot-tools/db-lock.mjs`.
+- Rouge prouvé : sans le compare-and-set du service, le test échoue (2 succès).
+
+### Leçon généralisée
+Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
