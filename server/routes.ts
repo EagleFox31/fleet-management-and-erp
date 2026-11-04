@@ -1380,7 +1380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/maintenance-schedules/vehicle/:vehicleId", authenticate, async (req, res) => {
+  app.get("/api/maintenance-schedules/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
@@ -1388,23 +1388,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       
-      // Vérifier les permissions d'accès au véhicule
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
-        return res.status(401).json({ message: "Utilisateur non trouvé" });
-      }
-      
-      // Les clients ne peuvent voir que les planifications de leurs véhicules
-      if (user.role === 'client') {
-        const vehicle = await storage.getVehicle(vehicleId);
-        if (!vehicle || vehicle.ownerId !== user.id) {
-          return res.status(403).json({ message: "Accès refusé - Ce n'est pas votre véhicule" });
-        }
+      // Un client ne voit que les planifications de ses véhicules (AGENTS.md §11)
+      if (!(await canAccessOwned(req.user, async () => (await storage.getVehicle(vehicleId))?.ownerId))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       const schedules = await preventiveMaintenanceService.getVehicleMaintenanceSchedules(vehicleId);
@@ -3350,7 +3336,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/alerts/type/:type", authenticate, async (req: Request, res) => {
+  app.get("/api/alerts/type/:type", isAnyUser, async (req: Request, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
