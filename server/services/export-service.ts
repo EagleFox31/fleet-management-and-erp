@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { vehicles, workOrders, parts, partsStockMovements, fuelRecords, users } from "@shared/schema";
-import { eq, desc, asc } from "drizzle-orm";
+import { eq, desc, asc, isNull } from "drizzle-orm";
 import { ROLE_LABELS } from "@shared/constants/roles";
 import { canReadPurchasePrice, type PriceReader } from "../lib/vehicle-price-scope";
 import { WORK_ORDER_PRIORITY_LABELS, WORK_ORDER_STATUS_LABELS } from "@shared/constants/work-orders";
@@ -175,6 +175,7 @@ export class ExportService {
           createdAt: fuelRecords.createdAt
         })
         .from(fuelRecords)
+        .where(isNull(fuelRecords.deletedAt))
         .orderBy(desc(fuelRecords.date));
 
       const worksheetData = fuelList.map(record => {

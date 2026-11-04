@@ -523,6 +523,10 @@ export const fuelRecords = pgTable("fuel_records", {
   // Clé de requête d'un plein de mission, posée par le serveur seul : un nouvel envoi est rejoué
   // au lieu de débiter deux fois (server/db/migrations/20261103_fuel_records_request_key.sql).
   requestKey: text("request_key"),
+  // Suppression douce d'une ligne qui a mouvementé la carte : posée par le serveur seul, la ligne reste
+  // pour l'audit mais n'entre plus dans aucun solde ni somme (server/db/migrations/20261103_fuel_records_soft_delete.sql).
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [uniqueIndex("ux_fuel_records_request_key").on(table.requestKey)]);
@@ -530,6 +534,8 @@ export const fuelRecords = pgTable("fuel_records", {
 export const insertFuelRecordSchema = createInsertSchema(fuelRecords).omit({
   id: true,
   requestKey: true,
+  deletedAt: true,
+  deletedBy: true,
   validatedBy: true,
   validatedAt: true,
   createdAt: true,

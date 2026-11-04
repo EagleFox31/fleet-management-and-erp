@@ -208,6 +208,7 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(has("warehouse_stock_movement_recorded", "stock")).toBe(true);
     expect(has("fuel_card_recharged", "fuel")).toBe(true);
     expect(has("fuel_record_changed", "fuel")).toBe(true);
+    expect(has("fuel_record_changed", "missions")).toBe(true);
     expect(has("client_invoice_created", "clientMoney")).toBe(true);
     expect(has("supplier_invoice_created", "supplierMoney")).toBe(true);
     expect(has("parts_delivered", "stock")).toBe(true);

@@ -116,6 +116,11 @@ async function findReplayedFuelSubmission(
     }
   }
   if (!record) return null;
+  // La clé reste portée par la ligne supprimée (index unique) : rejouer sans débiter ferait croire
+  // à un plein enregistré qui ne compte plus, et un nouvel insert violerait l'index.
+  if (record.deletedAt) {
+    throw new AppError(409, "Ce plein a déjà été enregistré, puis supprimé. Rechargez la page.");
+  }
   if (!isSameFuelSubmission(record, submission)) throw new AppError(409, DIFFERENT_FUEL_SUBMISSION_MESSAGE);
   return record;
 }

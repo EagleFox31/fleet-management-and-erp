@@ -2121,7 +2121,7 @@ export class DatabaseStorage implements IStorage {
   async getFuelRecordsByVehicleId(vehicleId: number): Promise<FuelRecord[]> {
     try {
       // Récupérer les vrais enregistrements de carburant depuis PostgreSQL
-      const records = await db.select().from(fuelRecords).where(eq(fuelRecords.vehicleId, vehicleId));
+      const records = await db.select().from(fuelRecords).where(and(eq(fuelRecords.vehicleId, vehicleId), isNull(fuelRecords.deletedAt)));
       return records;
     } catch (error) {
       console.error('Error getting fuel records by vehicle ID:', error);
