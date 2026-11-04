@@ -2308,6 +2308,32 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
 - Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
 
+## 2026-11-04 — Connexion : oracle de temps et mock qui rejette là où le code avale (#260)
+
+### Contexte
+Audit de sécurité de #256 (oracle du code HTTP sur `POST /api/auth/login`, déjà fermé).
+
+### Cause racine
+- Oracle de temps : pour un nom inconnu ou supprimé, le handler répondait 401 sans aucun calcul bcrypt (~70 ms de moins qu'un compte existant). La latence suffisait à énumérer les comptes.
+- Garantie fictive : le contrat de #254 simulait la panne par `vi.spyOn(storage, "getUserByUsername").mockRejectedValueOnce(...)`. Or la vraie méthode avalait l'erreur et renvoyait `undefined` : une vraie coupure donnait 401 (« identifiants », échec compté par le garde) et le test restait vert. Même défaut pour les contrôles d'unicité du nom (création, modification) : une panne y valait « nom libre ».
+- Les journaux de connexion portaient le nom saisi en clair ; un mot de passe tapé dans le champ identifiant y finissait.
+
+### Classification
+Sécurité (énumération de comptes, fuite de secret dans les journaux) + test à garantie fictive.
+
+### Résolution
+- Comparaison à un hash factice de coût 10 (`LOGIN_DUMMY_HASH`) quand le compte est inconnu ou supprimé.
+- `storage.getUserByUsername` journalise par `storageLog` et relance l'erreur.
+- Journaux de connexion : `usernameRef` (empreinte SHA-256 tronquée) ou `userId`, jamais le nom saisi.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : espion sur `bcrypt.compare`, exactement 1 appel pour un compte existant comme pour un nom inconnu, même réponse ; panne simulée **sous** storage (`db.select().from(users)`), et `getUserByUsername` doit rejeter.
+- Mutation rejouée : sans le hash factice ni la relance, 4 tests échouent.
+
+### Règle Projet (obligatoire)
+- Fermer l'oracle du code HTTP ne ferme pas celui du temps : chaque branche d'échec d'authentification fait le même travail coûteux.
+- Un mock se place sous la couche qui gère l'erreur, jamais à sa place : simuler l'échec de la dépendance, pas le résultat que l'on espère du code testé.
+- Une méthode de lecture qui sert à décider (existence, unicité, droit) ne transforme pas une panne en « absent ».
 ## 2026-11-04 — Tests instables : une « période vide » partagée et un délai calibré sur un test en mémoire (kpi-cdc, backup-db)
 
 ### Contexte
@@ -2413,3 +2439,20 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Un trigger posé au démarrage s'accompagne d'un test d'intégration qui l'installe et déclenche l'écriture qui l'appelle. Un effet secondaire (alerte, notification) attrape ses erreurs : il ne casse jamais l'écriture métier.
 - Un fichier posé au démarrage modifie toutes les suites d'intégration : lancer la suite complète, pas seulement les tests du domaine (ici `recette-seed-reset` comptait 3 alertes, il en compte 5).
+## 4 novembre 2026 - main rouge : signature de service changée, appelant de test oublié (#263)
+
+### Contexte
+#263 (suppression douce des pleins carburant) a ajouté un paramètre `actor` obligatoire à `FuelService.deleteFuelRecord`. Seul l'appelant de production (`fuel-records.routes.ts`) a été mis à jour ; `tests/integration/fuel-card-lock-coverage.test.ts` appelait encore `deleteFuelRecord(id)` : `TypeError: Cannot read properties of undefined (reading 'role')`, suite d'intégration rouge sur main.
+
+### Cause racine
+Le relecteur de #263 n'a rejoué que les tests carburant, pas la suite d'intégration complète. Un test d'intégration qui appelait le service n'a donc pas été exécuté.
+
+### Résolution
+Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test corrigé avec un acteur admin (le plein de la fabrique a mouvementé la carte : suppression douce, l'assertion d'origine « ligne absente » ne tenait plus), autres appelants recensés par grep (aucun autre).
+
+### Prévention vérifiable
+- La CI d'intégration est déjà un gate bloquant.
+- Règle de relecture ajoutée à `AGENTS.md` §8 : tout changement de signature d'un service impose la suite d'intégration complète, rejouée par le relecteur.
+
+### Leçon généralisée
+Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
