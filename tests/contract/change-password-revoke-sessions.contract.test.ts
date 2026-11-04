@@ -132,6 +132,26 @@ describe("change-password : révocation des autres sessions", { timeout: 120000 
     expect((await call("GET", "/api/auth/me", { cookie: s.a })).status, "l'autre session est toujours valide").toBe(200);
   });
 
+  it("fermeture des sockets qui jette après le commit : 200 et nouveau hash en base", async () => {
+    const user = await newUser();
+    const s = await twoSessions(user.username);
+    const hashOf = async () => (await db.select({ p: users.password }).from(users).where(eq(users.id, user.id)))[0].p;
+    const before = await hashOf();
+
+    const spy = vi.spyOn(userSessions, "closeOtherUserConnections").mockImplementationOnce(() => {
+      throw new Error("socket en panne");
+    });
+    const res = await call("POST", "/api/users/change-password", {
+      cookie: s.b,
+      body: { currentPassword: TEST_USER_PASSWORD, newPassword: "nouveau-mot-de-passe-5" },
+    });
+    spy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(await hashOf()).not.toBe(before);
+    expect((await call("GET", "/api/auth/me", { cookie: s.a })).status).toBe(401);
+  });
+
   it("deux changements concurrents du même compte : un seul 200, l'autre 409, le hash final est celui du gagnant", async () => {
     const user = await newUser();
     const s = await twoSessions(user.username);
