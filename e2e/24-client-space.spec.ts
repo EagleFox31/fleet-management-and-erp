@@ -103,7 +103,10 @@ test.describe("Profil client : cloison et lecture seule", () => {
 
     await page.goto(`/vehicles/${foreign.id}`, { waitUntil: "domcontentloaded" });
     // Première ouverture de la fiche : Vite la compile à froid en dev, d'où le délai large.
-    await expect(page.getByRole("heading", { name: "Véhicule non trouvé" })).toBeVisible({ timeout: 30_000 });
+    // #255 : un 403 dit « accès refusé », pas « n'existe pas ».
+    await expect(page.getByRole("heading", { name: "Accès refusé" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Accès non autorisé à ce véhicule")).toBeVisible();
+    await expect(page.getByText(/n'existe pas ou a été supprimé/)).toHaveCount(0);
     await expect(page.getByText(foreign.registrationNumber)).toHaveCount(0);
 
     // Son propre véhicule s'ouvre normalement.
