@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { loginAs, MANAGER_CREDENTIALS, VIEWER_CREDENTIALS } from "./helpers/auth";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * La liste des OT est rafraichie par polling toutes les 7s
@@ -16,8 +17,8 @@ test.describe("Critical Journey 6 - Temps Réel OT (inter-profils)", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const viewerContext = await browser.newContext();
-    const creatorContext = await browser.newContext();
+    const viewerContext = await newE2EContext(browser, "viewer");
+    const creatorContext = await newE2EContext(browser, "creator");
 
     try {
       const viewerPage = await viewerContext.newPage();

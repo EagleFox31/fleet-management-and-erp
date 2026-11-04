@@ -14,6 +14,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestPart, createTestSupplier } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * P6 niveau navigateur : stock bas -> réapprovisionnement.
@@ -163,9 +164,9 @@ test.describe("P6 - stock bas -> réapprovisionnement (navigateur)", () => {
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(240_000);
-    const adminCtx = await browser.newContext();
-    const warehouseCtx = await browser.newContext();
-    const observerCtx = await browser.newContext();
+    const adminCtx = await newE2EContext(browser, "admin");
+    const warehouseCtx = await newE2EContext(browser, "warehouse");
+    const observerCtx = await newE2EContext(browser, "observer");
     contexts.push(adminCtx, warehouseCtx, observerCtx);
     const adminPage = await openSession(adminCtx, admin);
     const warehousePage = await openSession(warehouseCtx, warehouse);
@@ -295,8 +296,8 @@ test.describe("P6 - stock bas -> réapprovisionnement (navigateur)", () => {
 
   test("le technicien ne peut pas réceptionner : bouton absent, 403, stock inchangé", async ({ browser }) => {
     test.setTimeout(180_000);
-    const adminCtx = await browser.newContext();
-    const techCtx = await browser.newContext();
+    const adminCtx = await newE2EContext(browser, "admin");
+    const techCtx = await newE2EContext(browser, "tech");
     try {
       const adminPage = await openSession(adminCtx, admin);
       const { part, requirementId } = await draftOrderForLowPart(4);

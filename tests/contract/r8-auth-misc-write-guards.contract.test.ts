@@ -26,7 +26,7 @@ const scheduleIds: number[] = [];
 // Identifiant inconnu propre à ce passage, hors de la plage de pin-login-hardening (999999001-999999900) :
 // le compteur `pin:<id>` survit d'un passage à l'autre sur une base partagée et finissait en 429 (#293).
 const UNKNOWN_ID = 999980001 + Math.floor(Math.random() * 9000);
-const lockoutKeys = () => [`pin:${UNKNOWN_ID}`, ...session.ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`])];
+const lockoutKeys = () => [`pin:${UNKNOWN_ID}`, ...session.ids.userIds.map((id) => `pin:${id}`)];
 const resetLockout = () => pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [lockoutKeys()]);
 
 beforeAll(async () => {

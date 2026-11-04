@@ -7,6 +7,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { uniqueTestToken } from "../tests/support/ids";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * TIR5 — brouillon du wizard pneu : enregistré pendant la saisie, restauré au
@@ -108,7 +109,7 @@ test("tableau pneus : stock bas surligné, corbeille réservée à l'admin", asy
     [warehouse, false],
     [admin, true],
   ] as const) {
-    const context = await browser.newContext();
+    const context = await newE2EContext(browser, "profil");
     try {
       const page = await context.newPage();
       await loginWithSession(page, user);

@@ -1,5 +1,28 @@
 import { test, expect } from "@playwright/test";
+import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
+import { createTestClient, createTestClientInvoice } from "../tests/support/factories";
+import { uniqueTestToken } from "../tests/support/ids";
 import { loginAndOpen } from "./helpers/auth";
+
+/**
+ * Données propres à la spec : un client et une facture client en attente, créés sur la base
+ * visée par le serveur (garde-fou production de playwright.config.ts) et supprimés en fin de
+ * spec (paiements en cascade). Rejouable : identifiants uniques, nettoyage par id.
+ */
+const ids = createIdBag();
+let invoiceId = 0;
+
+test.beforeAll(async () => {
+  const client = await createTestClient({ name: uniqueTestToken("E2E-05-CLIENT") });
+  ids.clientIds.push(client.id);
+  const invoice = await createTestClientInvoice({ clientId: client.id, invoiceNumber: uniqueTestToken("E2E-05-FACT"), status: "pending" });
+  ids.clientInvoiceIds.push(invoice.id);
+  invoiceId = invoice.id;
+});
+
+test.afterAll(async () => {
+  await cleanupCreated(ids);
+});
 
 test.describe("Critical Journey 5 - Mission vers Facture vers Paiement", () => {
   test("operations + factures clients + enregistrement paiement", async ({ page }) => {
@@ -17,28 +40,15 @@ test.describe("Critical Journey 5 - Mission vers Facture vers Paiement", () => {
 
     const invoicesResponse = await page.request.get("/api/billing/invoices");
     expect(invoicesResponse.ok()).toBeTruthy();
-
     const invoicesPayload = await invoicesResponse.json();
     expect(Array.isArray(invoicesPayload.invoices)).toBeTruthy();
 
-    if (invoicesPayload.invoices.length === 0) {
-      await expect(page.getByText("Aucune facture trouvée")).toBeVisible();
-      test.skip(true, "Aucune facture client en base: detail et paiement non exerces.");
-    }
-
-    const invoiceId = invoicesPayload.invoices[0].id;
     await page.goto(`/operations/invoices/${invoiceId}`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByTestId("invoice-number-field")).toBeVisible();
     await expect(page.getByTestId("amount-ttc")).toBeVisible();
 
-    const paymentButton = page.getByTestId("button-record-payment");
-    if ((await paymentButton.count()) === 0 || !(await paymentButton.isVisible())) {
-      await expect(page.getByTestId("invoice-status")).toBeVisible();
-      test.skip(true, "Facture non payable (deja soldee ou annulee): enregistrement de paiement non exerce.");
-    }
-
-    await paymentButton.click();
+    await page.getByTestId("button-record-payment").click();
     await page.getByTestId("input-payment-amount").fill("1");
     await page.getByTestId("button-confirm-payment").click();
 

@@ -4,6 +4,7 @@ import { db } from "../server/db";
 import { vehicleAcquisitionWorkflows } from "../shared/schema";
 import { loginAs, loginWithSession } from "./helpers/auth";
 import { recetteAccount, requireRecettePassword, vehiclesOwnedBy, type RecetteAccount } from "./helpers/recette-accounts";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * Profil client, niveau E (AGENTS.md §11, cloison entre clients).
@@ -179,8 +180,8 @@ test.describe("Profil client : cloison et lecture seule", () => {
 
   test("sessions d'acquisition : le client B ne lit ni ne modifie celle du client A", async ({ browser }) => {
     const sessionId = `${PREFIX}${Date.now().toString(36)}`;
-    const contextA = await browser.newContext();
-    const contextB = await browser.newContext();
+    const contextA = await newE2EContext(browser, "contextA");
+    const contextB = await newE2EContext(browser, "contextB");
     try {
       const pageA = await contextA.newPage();
       const pageB = await contextB.newPage();

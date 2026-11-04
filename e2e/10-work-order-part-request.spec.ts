@@ -7,6 +7,7 @@ import { createTestPart, createTestVehicle } from "../tests/support/factories";
 import { uniqueTestToken } from "../tests/support/ids";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * « Demander la pièce » depuis l'OT, niveau UI, deux rôles :
@@ -57,8 +58,8 @@ test("technicien : le rayon attend le magasinier, le manquant part en demande, l
   browser,
 }) => {
   test.setTimeout(120_000);
-  const warehouseContext = await browser.newContext();
-  const technicianContext = await browser.newContext();
+  const warehouseContext = await newE2EContext(browser, "warehouse");
+  const technicianContext = await newE2EContext(browser, "technician");
 
   try {
     const warehousePage = await warehouseContext.newPage();

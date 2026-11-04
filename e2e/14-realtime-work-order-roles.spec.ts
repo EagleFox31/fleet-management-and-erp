@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestVehicle } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * WO1, WO7 et T6, niveau E, deux comptes de rôles différents créés par la spec
@@ -72,9 +73,9 @@ test.describe("Temps réel OT entre chef d'atelier et technicien", () => {
     test.setTimeout(240_000);
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
-    const techContext = await browser.newContext();
-    const managerContext = await browser.newContext();
-    const otherContext = await browser.newContext();
+    const techContext = await newE2EContext(browser, "tech");
+    const managerContext = await newE2EContext(browser, "manager");
+    const otherContext = await newE2EContext(browser, "other");
     const title = `E2E-RT-ROLES-${Date.now()}`;
 
     try {

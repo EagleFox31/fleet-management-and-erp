@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestVehicle } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * T6, WO1 et WO7, niveau E : deux comptes de rôles différents créés par la spec
@@ -143,8 +144,8 @@ test.describe("T6, WO1 : transitions d'OT et écrans satellites du chef d'atelie
     expect(REFETCH_BUDGET_MS).toBeLessThan(POLLING_MS);
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
-    const bossContext = await browser.newContext();
-    const techContext = await browser.newContext();
+    const bossContext = await newE2EContext(browser, "boss");
+    const techContext = await newE2EContext(browser, "tech");
     const title = `E2E-RT-SAT-${Date.now()}`;
 
     try {
@@ -234,8 +235,8 @@ test.describe.serial("WO7 : alerte d'avancement vers le chef d'atelier", () => {
     test.setTimeout(180_000);
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
-    bossContext = await browser.newContext();
-    const techContext = await browser.newContext();
+    bossContext = await newE2EContext(browser, "boss");
+    const techContext = await newE2EContext(browser, "tech");
     try {
       const boss = await observe(bossContext, manager);
       bossPage = boss.page;
