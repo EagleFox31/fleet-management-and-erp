@@ -52,6 +52,8 @@ export default defineConfig({
         command: "npm run dev",
         env: {
           ...process.env,
+          // Le service worker n'est enregistré qu'en production ; la spec 13 (PWA) le requiert.
+          VITE_ENABLE_SW: "1",
           TMPDIR: process.env.TMPDIR || "/tmp",
         },
         url: baseURL,
