@@ -2230,6 +2230,29 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Une écriture sur une ligne lue plus tôt se conditionne à l'état lu (`where id = ? and status = ?`).
 - Un `catch` de route ne réécrit jamais une `AppError` en 500 : `next(error)`.
 
+## 2026-11-04 — Prix d'achat du véhicule : inventaire des sorties incomplet, fuites trouvées en relecture (#214)
+
+### Contexte
+- #214 réserve `vehicles.purchasePrice` à admin, logistique et secrétariat. La première passe masquait les routes véhicule recensées à la main : liste, détail, missions, export.
+- La relecture a trouvé deux autres fuites :
+  - `GET /api/vehicles/:vehicleId/tires` joignait le véhicule entier (`select()` vide sur `vehicle_tires` ⋈ `vehicles`), ce qui servait le prix à tout rôle ;
+  - `GET /api/operations/missions/:id/costs` renvoyait `vehicleCost` = prix / 1000. Le prix restait donc récupérable, même sans apparaître en clair.
+
+### Cause racine
+- Classification : inventaire des sorties fait par les routes, pas par la donnée. Toute lecture de `vehicles` sans projection explicite (`select()` vide, `{ vehicle: vehicles }`, `getTableColumns(vehicles)`, `row_to_json(v.*)`) ramène la colonne. Le masquage ne couvrait que les routes connues.
+- Une valeur dérivée par une opération réversible (division par une constante) reste une fuite. Contrôler l'absence du champ ne suffit pas.
+
+### Résolution
+- Pneus : la sortie passe par `redactVehiclePriceDeep`. Coûts de mission : `vehicleCost` et `breakdown.vehicle` valent `null` hors rôles autorisés, et `totalCost` n'inclut plus ce terme.
+
+### Prévention (vérifiable)
+- `tests/unit/server/vehicle-select-hygiene.test.ts` : gèle chaque lecture de `vehicles` sans projection explicite, avec sa justification (masquée en aval ou jamais servie). Une occurrence nouvelle ou disparue fait échouer le test.
+- `tests/contract/vehicle-purchase-price-scope.contract.test.ts` : parcourt `ALL_APP_ROLES` sur chaque sortie, contrôle que les chiffres du prix sont absents du corps et que le prix / 1000 n'apparaît pas. 52 cas sur 89 rouges sur le code de main.
+
+### Règle Projet (obligatoire)
+- Pour restreindre la lecture d'une colonne, recenser par grep les lectures de la table, pas les routes. Une jointure ou un `select()` vide expose toutes les colonnes.
+- Une valeur calculée à partir d'une donnée restreinte suit la même restriction, si le calcul est réversible.
+
 ## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
 
 ### Contexte
@@ -2248,3 +2271,47 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Sur une route d'authentification, valider le type du corps **avant** la recherche du compte.
 - Avant de changer le code HTTP d'un `catch` d'authentification, recenser les branches qui ne lèvent que pour un compte existant (comparaison de hash, migration, session) : chacune devient un oracle dès que son code diffère de celui d'un compte inconnu.
+
+## 2026-11-04 — Serveur dev démarré sur la base de production : aucun garde hors des tests (#259)
+
+### Contexte
+- Pour une preuve e2e, un serveur dev a été lancé avec `--env-file=.env`. Le `.env` racine pointe l'ancien Neon marqué production (`ep-bitter-term…`). Le serveur y a tourné environ 2 minutes : il a rejoué les migrations d'amorçage (`init-database.ts`) et l'`alert-service` a créé des alertes. Arrêt manuel, incident signalé.
+
+### Cause racine
+- Classification : garde-fou partiel. Playwright (`assertNotProductionDatabase`) et vitest (`assertSafeTestDatabase`, `assertUnitDatabaseNotProduction`) refusaient la base de production ; le serveur lui-même, et tout script qui importe `server/db.ts`, n'avait aucune vérification. Le garde protégeait l'outil de test, pas la connexion.
+
+### Résolution
+- Reconnaissance des marqueurs extraite dans `shared/production-database.ts` (source unique) ; `e2e/helpers/production-guard.ts` la réexporte sans copie.
+- `server/lib/production-db-guard.ts` : hors `NODE_ENV=production`, refus de démarrer si `DATABASE_URL`, `DATABASE_URL_LISTENER` ou `DATABASE_URL_DIRECT` porte un marqueur (défaut + `E2E_PRODUCTION_DB_MARKERS`). Dérogation explicite `ALLOW_PRODUCTION_DATABASE=1`, journalisée en `warn`. Message sans URL ni mot de passe.
+- Appelé dans `server/db.ts` avant tout `new Pool`, donc pour le serveur comme pour les scripts tsx.
+
+### Prévention (vérifiable)
+- `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
+- Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
+
+### Règle Projet (obligatoire)
+- Un garde-fou de base se place à la **connexion** (`server/db.ts`), pas seulement dans les runners de test : tout point d'entrée qui construit un pool en hérite.
+- Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
+- Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
+
+## 2026-11-04 — Tests instables : une « période vide » partagée et un délai calibré sur un test en mémoire (kpi-cdc, backup-db)
+
+### Contexte
+- `tests/contract/kpi-cdc.contract.test.ts` échouait par intermittence (« expected 1 to be +0 » sur les pannes de 2001).
+- `tests/unit/deploy/backup-db.test.ts` échouait sous la charge de la suite complète (« Test timed out in 5000ms ») et passait lancé seul.
+
+### Cause racine
+- kpi-cdc : hypothèse d'état global. Le test supposait l'année 2001 vide, alors que `work-order-labor-rate` (contrat) et `work-order-cost` (intégration) y créent des OT correctifs, comptés comme pannes par `loadFailures`. Le nettoyage en `afterAll` ne protège pas : la base Docker de test est partagée entre sessions et suites, et un run interrompu laisse ses lignes. `kpi-service-cdc` (intégration) faisait la même hypothèse.
+- backup-db : délai. Chaque test lance le script shell, qui enchaîne une dizaine de sous-processus. Sous Git Bash (Windows), `fork` est émulé : 1,1 s isolé, plus de 5 s en parallèle avec 168 fichiers.
+
+### Résolution
+- kpi-cdc et kpi-service-cdc : invariants plutôt que zéros absolus (une entrée par mois, total égal à la somme des mois, moyenne égale à total/mois, ventilation par véhicule égale au total).
+- backup-db : dates calculées en JS (deux bash de moins par test) et `timeout: 30_000` sur le `describe`, à la mesure d'un script shell.
+
+### Prévention (vérifiable)
+- Reproduction : avec un OT correctif daté de 2001 posé en base, l'ancien kpi-cdc échoue et le nouveau passe, de même que kpi-service-cdc.
+- 20 répétitions de chaque fichier, 3 passes complètes de `npm test`.
+
+### Règle Projet (obligatoire)
+- Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
+- Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.

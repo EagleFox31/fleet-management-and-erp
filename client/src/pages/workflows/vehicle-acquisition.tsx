@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useWorkflowPersistence } from '@/hooks/use-workflow-persistence';
+import { useAuth } from '@/hooks/useAuth';
+import { canWriteVehiclePurchasePrice } from '@shared/constants/roles';
 import { apiRequest } from '@/lib/queryClient';
 import { invalidateVehicleDocumentQueries } from '@/lib/vehicle-document-cache';
 import { uploadFile } from '@/lib/api';
@@ -83,6 +85,7 @@ export function VehicleAcquisitionWorkflow() {
   const [uploadingDoc, setUploadingDoc] = useState<DocumentKey | null>(null);
   const [docUploadStatus, setDocUploadStatus] = useState<Partial<Record<DocumentKey, DocumentUploadStatus>>>({});
   const [, setLocation] = useLocation();
+  const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   
   // Récupérer les paramètres depuis l'URL
@@ -408,7 +411,8 @@ export function VehicleAcquisitionWorkflow() {
         axleCount: data.axleCount,
         engineSpec: data.engineSpec,
         purchaseDate: data.purchaseDate,
-        purchasePrice: data.purchasePrice,
+        // Prix d'achat : envoyé seulement par un rôle autorisé à l'écrire (le serveur ignore 0 sinon).
+        ...(canWriteVehiclePurchasePrice(currentUser?.role) ? { purchasePrice: data.purchasePrice } : {}),
         fuelType: data.fuelType,
         status: data.status || 'operational',
         mileage: data.mileage || 0,

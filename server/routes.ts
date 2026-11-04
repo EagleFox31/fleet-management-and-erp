@@ -40,8 +40,9 @@ import { AppError, isAppError } from "./lib/app-error";
 import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
-import { vehiclePatchRefusal } from "./lib/vehicle-patch-guard";
+import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
@@ -953,14 +954,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
       }
       
-      return res.status(200).json(vehicle);
+      return res.status(200).json(redactVehiclePrice({ role: normalizeRole(user.role) }, vehicle));
     } catch (error) {
       console.error("Get vehicle error:", error);
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.post("/api/vehicles", isWorkshopManager, async (req, res) => {
+  app.post("/api/vehicles", isWorkshopManager, async (req, res, next) => {
+    // Valeur vide ou à 0 d'un rôle sans droit sur le prix : ignorée ; non nulle : 403.
+    req.body = withoutEmptyPurchasePrice(req.user?.role, req.body);
+    const priceRefusal = vehiclePriceWriteRefusal(req.user?.role, req.body);
+    if (priceRefusal) return next(priceRefusal);
     try {
       const parsedVehicle = insertVehicleSchema.parse(req.body);
       
@@ -973,7 +978,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // `createVehicle` consigne déjà le statut initial dans l'historique : ne pas le doubler ici.
       const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
       
-      return res.status(201).json(vehicle);
+      return res.status(201).json(redactVehiclePrice(req.user, vehicle));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ 
@@ -988,7 +993,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route pour activer un véhicule depuis un workflow complet
-  app.post("/api/vehicles/activate-from-workflow", isWorkshopManager, async (req, res) => {
+  app.post("/api/vehicles/activate-from-workflow", isWorkshopManager, async (req, res, next) => {
+    if (req.body?.vehicleData) req.body.vehicleData = withoutEmptyPurchasePrice(req.user?.role, req.body.vehicleData);
+    const priceRefusal = vehiclePriceWriteRefusal(req.user?.role, req.body?.vehicleData);
+    if (priceRefusal) return next(priceRefusal);
     try {
       const { vehicleData, workflowData } = req.body;
       
@@ -1034,7 +1042,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `Véhicule créé via workflow d'acquisition`
       );
       
-      return res.status(201).json(vehicle);
+      return res.status(201).json(redactVehiclePrice(req.user, vehicle));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ 
@@ -1048,7 +1056,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/vehicles/:id", isVehiclePatcher, async (req, res, next) => {
-    const refusal = vehiclePatchRefusal(req.user?.role, req.body);
+    req.body = withoutEmptyPurchasePrice(req.user?.role, req.body);
+    const refusal = vehiclePatchRefusal(req.user?.role, req.body) ?? vehiclePriceWriteRefusal(req.user?.role, req.body);
     if (refusal) return next(refusal);
     try {
       const id = parseInt(req.params.id);
@@ -1089,6 +1098,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Rien à modifier (par exemple un prix vide retiré pour un rôle sans droit) : fiche inchangée.
+      if (Object.keys(data).length === 0) {
+        return res.status(200).json(redactVehiclePrice(req.user, vehicle));
+      }
+
       const updatedVehicle = await storage.updateVehicle(id, data, userId);
       // Le stockage rend undefined quand l'écriture échoue : ne pas répondre 200.
       if (!updatedVehicle) {
@@ -1101,7 +1115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         broadcastVehicleTankCapacityChanged(id, req.requestId);
       }
 
-      return res.status(200).json(updatedVehicle);
+      return res.status(200).json(redactVehiclePrice(req.user, updatedVehicle));
     } catch (error) {
       // Filet : la contrainte de capacité refusée par la base (storage.updateVehicle remonte les CHECK).
       if (isCheckViolation(error) && pgConstraintOf(error) === "vehicles_tank_capacity_l_positive") {
@@ -2488,11 +2502,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ====== ENDPOINTS D'EXPORT DE DONNÉES ======
 
   // Export des véhicules en XLSX
-  app.get("/api/exports/vehicles", authenticate, async (req, res) => {
+  app.get("/api/exports/vehicles", isAnyUser, async (req, res) => {
     try {
       console.log('Exporting vehicles data to XLSX...');
       const { exportService } = await import("./services/export-service");
-      const xlsxBuffer = await exportService.exportVehiclesXLSX();
+      const xlsxBuffer = await exportService.exportVehiclesXLSX(req.user);
       
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=vehicules_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -2979,7 +2993,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.json({
         message: "Kilométrage synchronisé avec succès",
-        vehicle: updatedVehicle
+        vehicle: redactVehiclePrice(req.user, updatedVehicle)
       });
     } catch (error) {
       console.error("Sync vehicle mileage error:", error);
@@ -4063,7 +4077,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const vehicleTires = await tiresService.getVehicleTires(vehicleId);
-      return res.status(200).json(vehicleTires);
+      // La jointure renvoie le véhicule entier : le prix d'achat en est retiré
+      // pour les rôles non autorisés.
+      return res.status(200).json(redactVehiclePriceDeep(req.user, vehicleTires));
     } catch (error) {
       if (isAppError(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "lecture des pneus du véhicule en échec");

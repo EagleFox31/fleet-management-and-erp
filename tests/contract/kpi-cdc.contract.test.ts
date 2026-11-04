@@ -133,9 +133,13 @@ describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
   it("pannes : tous les mois de la période, zéros compris", async () => {
     const res = await call("GET", KPI_FAILURES_PATH + q, "workshop_manager");
     expect(failuresResponseSchema.safeParse(res.body).success).toBe(true);
-    expect(res.body.series).toHaveLength(12);
-    expect(res.body.total).toBe(0);
-    expect(res.body.monthlyAverage).toBe(0);
+    // Invariants, pas « 2001 est vide » : d'autres suites créent des OT correctifs datés de 2001
+    // (work-order-labor-rate, work-order-cost), et la base Docker de test est partagée entre sessions.
+    const months = Array.from({ length: 12 }, (_, i) => `2001-${String(i + 1).padStart(2, "0")}`);
+    expect(res.body.series.map((m: { month: string }) => m.month)).toEqual(months);
+    const sum = res.body.series.reduce((acc: number, m: { count: number }) => acc + m.count, 0);
+    expect(res.body.total).toBe(sum);
+    expect(res.body.monthlyAverage).toBe(Math.round((sum / 12) * 100) / 100);
   });
 
   it("préventif : formes du contrat et fenêtre arrêtée à la veille", async () => {
