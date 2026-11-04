@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../server/db", () => ({ db: {} }));
 
+const warn = vi.hoisted(() => vi.fn());
+vi.mock("../../../server/lib/logger", () => ({
+  moduleLogger: () => ({ warn, error: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+}));
+
 import { relayDatabaseEvent } from "../../../server/lib/db-event-relay";
 import type { BroadcastableAlert } from "../../../server/lib/alert-broadcast";
 
@@ -47,5 +52,19 @@ describe("db-event-relay : alert_created", () => {
     const d = deps(new Error("base indisponible"));
     await expect(relayDatabaseEvent({ eventType: "alert_created", payload: { alertIds: [1] } }, d)).resolves.toBeUndefined();
     expect(d.broadcastAlert).not.toHaveBeenCalled();
+  });
+
+  it("plus de 500 ids : 500 relus, la troncature est journalisée", async () => {
+    warn.mockClear();
+    const d = deps([]);
+    await relayDatabaseEvent({ eventType: "alert_created", payload: { alertIds: Array.from({ length: 501 }, (_, i) => i + 1) } }, d);
+    expect(d.readAlerts.mock.calls[0][0]).toHaveLength(500);
+    expect(warn).toHaveBeenCalledWith({ received: 501, relayed: 500 }, expect.stringContaining("tronqué"));
+  });
+
+  it("500 ids ou moins : pas d'avertissement", async () => {
+    warn.mockClear();
+    await relayDatabaseEvent({ eventType: "alert_created", payload: { alertIds: Array.from({ length: 500 }, (_, i) => i + 1) } }, deps([]));
+    expect(warn).not.toHaveBeenCalled();
   });
 });

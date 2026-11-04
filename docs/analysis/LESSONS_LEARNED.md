@@ -2545,6 +2545,7 @@ La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun ch
 - Restauration déplacée dans `server/api/admin-import-backup.routes.ts` et `server/services/backup-import-service.ts` : une transaction, `suppressSideEffects(tx)` avant toute écriture.
 - Même garde pour le script d'import et pour le seed.
 - `query_canceled OR OTHERS` dans les deux blocs d'exception.
+  Conséquence assumée : un `pg_cancel_backend` volontaire pendant le calcul de l'alerte est lui aussi absorbé. Le plein est enregistré, seule l'alerte manque, avec un `RAISE WARNING`. On préfère perdre une alerte, recalculable, plutôt qu'un plein saisi.
 - `pg_notify('fleet_events', alert_created)`, relayé par `db-event-relay` en trames nominatives.
 
 ### Prévention (vérifiable)

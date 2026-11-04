@@ -62,9 +62,16 @@ async function defaultReadAlerts(alertIds: number[]): Promise<BroadcastableAlert
 }
 
 async function relayCreatedAlerts(payload: Record<string, unknown>, deps: RelayDeps): Promise<void> {
-  const ids = Array.isArray(payload.alertIds)
-    ? [...new Set(payload.alertIds.map(positiveInteger).filter((id): id is number => id !== null))].slice(0, MAX_RELAYED_ALERTS)
+  const unique = Array.isArray(payload.alertIds)
+    ? [...new Set(payload.alertIds.map(positiveInteger).filter((id): id is number => id !== null))]
     : [];
+  if (unique.length > MAX_RELAYED_ALERTS) {
+    log.warn(
+      { received: unique.length, relayed: MAX_RELAYED_ALERTS },
+      "alert_created tronqué : alertes au-delà du plafond non diffusées en temps réel",
+    );
+  }
+  const ids = unique.slice(0, MAX_RELAYED_ALERTS);
   if (ids.length === 0) return;
   let rows: BroadcastableAlert[];
   try {
