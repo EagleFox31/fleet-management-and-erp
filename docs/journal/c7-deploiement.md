@@ -121,5 +121,25 @@ Entrées ajoutées à la fin, une par lot.
   - Réserves 3 et 4 de #287 : la clé et le lien de l'alerte de consommation sont alignés sur le trigger, et le lien `/vehicles/<id>/fuel`, qui ne correspondait à aucune route, est corrigé. Index `fuel_records (vehicle_id, date, id)`.
 - **Comment** : `AsyncLocalStorage` limité au passage planifié, donc les alertes nées d'une requête HTTP restent immédiates. Les listes passent en un seul paramètre jsonb. Une tranche d'insertion en échec est rejouée ligne à ligne.
 - **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
-- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 3/4 rouges.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 2/4 rouges.
 - **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+## 2026-11-04T14:18:11+01:00 — suivi #297 : plafond de 50 testé, repli d'emitAlerts, liens carburant repris
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Test du plafond de 50 OT.
+  - `emitAlerts` : repli objet par objet quand le lot échoue.
+  - Reprise au démarrage des liens `/vehicles/<id>/fuel`.
+  - Précision sur la sortie de `remindDaily` pour l'alerte de consommation.
+- **Comment** :
+  - `emitAlerts` enveloppe `emitAlertBatch` : si le lot échoue, chaque candidate est retentée seule, avec un journal récapitulatif (nombre, échantillon, première erreur) plutôt qu'une ligne par candidate.
+  - `relinkLegacyFuelAlerts` (`server/init-database.ts`), appelée au démarrage : `UPDATE ... WHERE link ~ '^/vehicles/[0-9]+/fuel$'`.
+- **Pourquoi** : relecture de #297 par 0a.
+- **Alerte de consommation carburant, sortie de `remindDaily` (#297)** :
+  - Elle porte la clé du trigger, `fuel-consumption:<id du plein>`, à la place de la clé quotidienne `remindDaily`.
+  - Il y a donc une alerte par plein anormal, lue ou non, et plus de rappel quotidien tant que la consommation reste haute.
+  - Le plein anormal suivant produit une nouvelle alerte.
+  - Choix assumé : le trigger et le cycle ne doivent pas se doubler, et un rappel quotidien sur un fait passé (un plein) n'apporte rien.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/alert-work-orders-beyond-50.test.ts tests/integration/alert-emit-fallback-relink.test.ts` ;
+  - preuves rouges : le test des 50 échoue avec l'alert-service d'avant #297, le repli échoue avec celui de #297 (0 au lieu de 2).
+- **Reste / risques** : la reprise des liens ne touche que le motif exact `/vehicles/<n>/fuel` ; `/vehicles/<n>/fuel-cards` et les autres liens restent intacts.

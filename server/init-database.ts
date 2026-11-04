@@ -633,6 +633,21 @@ export async function revokePinDerivedDriverPasswords(client: Queryable, log: { 
 }
 
 /**
+ * Alertes carburant d'avant #297 : lien `/vehicles/<id>/fuel`, route absente côté client
+ * (clic vers une page introuvable). Réécrites en `/vehicles/<id>`, le lien posé depuis par
+ * les triggers et le cycle d'alertes. Idempotent : le second passage ne trouve plus rien.
+ * Retourne le nombre d'alertes reprises.
+ */
+export async function relinkLegacyFuelAlerts(client: Queryable, log: { info: (obj: object, msg: string) => void } = initLog): Promise<number> {
+  const res = await client.query(
+    `UPDATE alerts SET link = regexp_replace(link, '/fuel$', '') WHERE link ~ '^/vehicles/[0-9]+/fuel$' RETURNING id`,
+  );
+  const reprises = res.rows.length;
+  if (reprises > 0) log.info({ reprises }, `${reprises} alerte(s) carburant : lien /vehicles/<id>/fuel réécrit en /vehicles/<id>`);
+  return reprises;
+}
+
+/**
  * VEH4 : libère le véhicule quand son dernier OT ouvert est clôturé ou annulé (trigger
  * AFTER UPDATE OF status sur work_orders). Doit rester identique à
  * server/db/migrations/20261102_work_orders_release_vehicle.sql (AGENTS.md §5) : le test
@@ -1043,6 +1058,8 @@ export async function initializeDatabase() {
     await reportDriverUserIdUniqueGaps(pool);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
+    // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
+    await relinkLegacyFuelAlerts(pool);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
