@@ -2731,8 +2731,9 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
   - une liste des chauffeurs publique ;
   - aucune limite par IP.
 - **Résolution** :
-  - `LockoutStore.reserve` compte la tentative avant le handler, en une seule écriture atomique
-    (`INSERT … ON CONFLICT DO UPDATE … RETURNING`) ;
+  - `LockoutStore.reserve` compte la tentative avant le handler, de façon atomique :
+    lecture et écriture dans une transaction, sous verrou consultatif pris sur la clé (`pg_advisory_xact_lock`),
+    `SELECT` de l'état puis upsert ;
   - au-delà du seuil, le verrou est posé et la requête refusée en 429 ;
   - en fin de requête :
     - 401 → `confirmFailure` (verrou au seuil) ;
