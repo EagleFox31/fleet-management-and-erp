@@ -26,6 +26,7 @@ const ALLOWED: Record<string, string> = {
   "server/init-database.ts": "création idempotente des colonnes (DDL)",
   "server/services/login-lockout-db-store.ts": "le store pg : seul lecteur et écrivain",
   "server/services/login-lockout-service.ts": "LockState calculé à partir du store",
+  "server/services/login-identifier-migration.ts": "reprise M3 : recopie locked_until de login_attempts_by_username par le même pilote pg, sans lire users",
   "server/middleware/login-lockout-guard.ts": "LockState lu par le store",
   "server/api/auth-lockout.routes.ts": "lignes de DbLockoutStore.listLocked",
   "server/lib/app-error.ts": "commentaire (corps du 429)",

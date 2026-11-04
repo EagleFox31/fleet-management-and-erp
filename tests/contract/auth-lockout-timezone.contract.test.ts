@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCKED_USERS_PATH, LOCKOUT_DEFAULTS } from "../../shared/contracts/auth-lockout";
 import { db } from "../../server/db";
 import { sql } from "drizzle-orm";
-import { DbLockoutStore } from "../../server/services/login-lockout-db-store";
+import { DbLockoutStore, storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
@@ -47,7 +47,7 @@ beforeAll(async () => {
 }, 180000);
 
 afterAll(async () => {
-  await db.execute(sql`DELETE FROM login_attempts_by_username WHERE username_normalized = ${target.username}`);
+  await db.execute(sql`DELETE FROM login_attempts_by_username WHERE username_normalized = ${storedLockoutKey(target.username)}`);
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
   if (previousTz === undefined) delete process.env.TZ;

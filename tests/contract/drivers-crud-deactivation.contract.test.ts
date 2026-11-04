@@ -8,6 +8,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * DRV1 : fiche chauffeur (`/api/drivers`) créée et modifiée par un gestionnaire
@@ -80,7 +81,7 @@ afterAll(async () => {
   if (missionIds.length) await db.delete(missions).where(inArray(missions.id, missionIds));
   if (driverIds.length) await db.delete(drivers).where(inArray(drivers.id, driverIds));
   const keys = ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`]);
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys.map(storedLockoutKey)]);
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });

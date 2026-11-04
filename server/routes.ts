@@ -40,6 +40,8 @@ import { checkWorkOrderTransition } from "@shared/constants/work-order-transitio
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
+// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
+import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
@@ -61,6 +63,20 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
+import { loginLockoutGuard } from "./middleware/login-lockout-guard";
+import { CHANGE_PASSWORD_KEY_PREFIX, DbLockoutStore } from "./services/login-lockout-db-store";
+
+/**
+ * Essais sur le mot de passe actuel (POST /api/users/change-password) : même compteur et même seuil
+ * que la connexion, clé = compte de session. Sans lui, une session volée devine le mot de passe actuel
+ * sans limite, puis le remplace.
+ */
+const changePasswordAttemptsGuard = loginLockoutGuard({
+  store: new DbLockoutStore(),
+  keyPrefix: CHANGE_PASSWORD_KEY_PREFIX,
+  keyOf: (req) => req.session?.userId,
+  lockedMessage: "Trop d'essais du mot de passe actuel. Réessayez plus tard.",
+});
 
 const log = moduleLogger("routes");
 
@@ -70,10 +86,6 @@ const log = moduleLogger("routes");
  */
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
-/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
-function loginUsernameRef(username: string): string {
-  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
-}
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({
@@ -873,7 +885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, changePasswordAttemptsGuard, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -1356,7 +1368,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/maintenance-schedules/vehicle/:vehicleId", authenticate, async (req, res) => {
+  app.get("/api/maintenance-schedules/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
       const vehicleId = parseInt(req.params.vehicleId);
       
@@ -1364,23 +1376,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       
-      // Vérifier les permissions d'accès au véhicule
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
-        return res.status(401).json({ message: "Utilisateur non trouvé" });
-      }
-      
-      // Les clients ne peuvent voir que les planifications de leurs véhicules
-      if (user.role === 'client') {
-        const vehicle = await storage.getVehicle(vehicleId);
-        if (!vehicle || vehicle.ownerId !== user.id) {
-          return res.status(403).json({ message: "Accès refusé - Ce n'est pas votre véhicule" });
-        }
+      // Un client ne voit que les planifications de ses véhicules (AGENTS.md §11)
+      if (!(await canAccessOwned(req.user, async () => (await storage.getVehicle(vehicleId))?.ownerId))) {
+        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
       
       const schedules = await preventiveMaintenanceService.getVehicleMaintenanceSchedules(vehicleId);
@@ -3326,7 +3324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/alerts/type/:type", authenticate, async (req: Request, res) => {
+  app.get("/api/alerts/type/:type", isAnyUser, async (req: Request, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { db, pool } from "../../server/db";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { drivers, users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -62,7 +63,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (driverIds.length) await db.delete(drivers).where(inArray(drivers.id, driverIds));
   const keys = [`pin:${UNKNOWN_ID}`, ...ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`])];
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys.map(storedLockoutKey)]);
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
