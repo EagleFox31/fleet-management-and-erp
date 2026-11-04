@@ -321,6 +321,9 @@ Notes :
   `node node_modules/@playwright/test/cli.js test`.
 - Les e2e écrivent sur la base réelle pointée par `DATABASE_URL`. Ne pas les
   lancer contre la production.
+- LESSONS, `docs/journal/*.md` et `PASSATION*.md` fusionnent en `merge=union` (`.gitattributes`) :
+  GitHub ne l'applique pas côté serveur, la PR reste CONFLICTING jusqu'au `git merge origin/main`
+  local, qui garde alors les deux entrées sans conflit. N'y écrire qu'en ajout de fin.
 
 ---
 
