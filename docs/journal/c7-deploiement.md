@@ -62,3 +62,143 @@ Entrées ajoutées à la fin, une par lot.
   - Agnostic : motif générique, couvre tout script `tsx watch`.
   - Idempotent et Retroactive : sans objet.
 - **Reste / risques** : à la montée en vite 6.1+, `configLoader: "runner"` supprimerait le fichier temporaire.
+
+## 2026-11-04T13:06:19+01:00 — Triggers d'alertes carburant réécrits et posés au démarrage
+
+- **Statut** : fait, PR brouillon
+- **Quoi** : réécriture de `fuel-alerts-triggers.sql`, table `alert_recipient_settings`, ajout à `BOOTSTRAP_SQL_FILES`, test d'intégration (5 cas), garde unitaire, attendu de `recette-seed-reset` passé de 3 à 5 alertes.
+- **Comment** : moyenne par sous-requête, `round()`, destinataires par rôles configurés, exception rattrapée puis WARNING, toutes les créations rejouables.
+- **Pourquoi** : demandé par 0a. Retirés de #263 : installés, ils cassaient l'INSERT du 2e plein.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/fuel-alerts-triggers.test.ts` (vert) ; avec `FUEL_ALERTS_SQL` pointé sur l'original : 4/5 rouges.
+- **Reste / risques** :
+  - `AlertService.fuelRecipients` reste en dur côté TypeScript (à brancher sur `alert_recipient_settings`).
+  - Le budget de 500 000 F CFA est encore une constante.
+## 2026-11-04T11:17:27+01:00 — Garde base de production : drizzle-kit push et prod VPS (#268)
+
+- **Statut** : fait, PR brouillon empilée sur #267
+- **Quoi** :
+  - `drizzle.config.ts` appelle `guardDatabaseConnection("drizzle-kit")` ;
+  - marqueur par défaut `db-prod` (service Postgres de la prod VPS) ;
+  - message « Connexion refusée », valable pour le serveur, un script ou drizzle-kit, avec une mise en garde contre `NODE_ENV=production` en local ;
+  - `docs/deploiement/vps.md` : garde, NODE_ENV et alias d'hôte pour un tunnel SSH.
+- **Comment** : drizzle-kit charge sa configuration avec résolution des alias de tsconfig, donc l'import du garde serveur fonctionne tel quel (vérifié : `drizzle-kit push` sur un hôte marqué `.invalid` sort en 1 avant toute connexion ; sur le Postgres local, « Changes applied »).
+- **Pourquoi** : relecture de #267. `npm run db:push` avec une URL de prod écrivait le schéma sans refus, et la prod VPS n'était pas reconnue.
+- **Comment tester (QA)** :
+  - `npx vitest run tests/unit/server/drizzle-config-guard.test.ts tests/unit/server/production-db-guard.test.ts`.
+  - Mutations vérifiées, une rouge par chemin : garde retiré de drizzle.config, marqueur db-prod retiré, ligne NODE_ENV retirée du message.
+- **RAIDER** :
+  - Durable : la prod n'est pas affectée (NODE_ENV=production dans l'image runtime et dans schema-prod) ; `test:db:schema` local inchangé.
+  - Agnostic : marqueurs supplémentaires par `E2E_PRODUCTION_DB_MARKERS`, sans code.
+- **Reste / risques** : un tunnel vers `localhost` sans alias reste indétectable, documenté.
+## 2026-11-04T12:06:10+01:00 — Contrat KPI pannes : mois sans panne vérifiés par différence avant/après (mineur de #266, PR #269)
+
+- **Statut** : fait, PR brouillon
+- **Quoi** : `tests/contract/kpi-cdc.contract.test.ts`.
+  - Le cas 2001 garde les invariants de #266 (12 mois, total = somme, moyenne). Son titre devient « total et moyenne cohérents avec la série » : il ne prouvait pas de zéros.
+  - Nouveau cas sur 2002, par différence avant/après, et non par une base vide.
+- **Comment** :
+  - Lecture de référence de 2002, puis un OT correctif au 15 juin sur un véhicule créé par le test, puis seconde lecture.
+  - Attendu : juin +1, les 11 autres mois +0, total +1, byVehicle à 1 pour ce véhicule.
+  - L'OT est supprimé en `finally`, le véhicule par `cleanupCreated`.
+- **Pourquoi** : la base de test est partagée entre suites et sessions. Une valeur absolue « 0 » n'y est pas fiable (leçon « période vide partagée » de #266). Le test prouve que seul le mois de la panne bouge, pas que les autres mois valent 0 dans l'absolu.
+- **Comment tester (QA)** : `npm run test:contract -- kpi-cdc` sur Postgres local, 21/21. Mutation : OT déplacé au 15 juillet, le nouveau cas échoue.
+- **RAIDER** :
+  - Durable : aucun code produit touché.
+  - Idempotent : données propres au test, supprimées.
+- **Reste / risques** : une écriture concurrente sur 2002 pendant le test fausserait la différence. Aucune suite ne date d'OT en 2002 à ce jour.
+## 2026-11-04T12:30:55+01:00 — merge=union sur les fichiers en ajout de fin
+- **Statut** : fait, PR brouillon
+- **Quoi** : `.gitattributes` : `merge=union` sur LESSONS_LEARNED, `docs/journal/*.md`, `PASSATION*.md` ; `docs/journal/README.md` reste en fusion normale. Test `tests/unit/gitattributes-union.test.ts`, ligne AGENTS §8, leçon.
+- **Comment** : le test lit les attributs par `git check-attr` (comportement réel, pas le texte) et rejoue dans un dépôt temporaire deux branches qui ajoutent chacune une entrée en fin de LESSONS : merge sans conflit, les deux entrées présentes.
+- **Pourquoi** : erreur répétée, cinq PR passées en CONFLICTING le 4 novembre pour des ajouts de fin indépendants.
+- **Comment tester (QA)** : `npx vitest run tests/unit/gitattributes-union.test.ts` ; preuve rouge : sans les lignes `merge=union`, 6 tests sur 7 échouent.
+- **RAIDER** : Durable — eol=lf existant conservé ; Retroactive — aucun fichier réécrit ; Engineering-grade — limite GitHub documentée.
+- **Reste / risques** : GitHub reste CONFLICTING tant que l'auteur n'a pas mergé main en local ; union dupliquerait une ligne modifiée des deux côtés, d'où la règle ajout de fin.
+## 2026-11-04T13:58:26+01:00 — suivi #287 : reprises sans effets secondaires, 57014, temps réel
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Restauration de sauvegarde sortie de `routes.ts` vers un routeur `server/api/` et un service, en une transaction avec `suppressSideEffects`.
+  - Même garde dans `scripts/import-7-fuel-records.ts` et le seed.
+  - Trigger : `query_canceled` rattrapé, notification `alert_created` relayée par `db-event-relay`.
+- **Comment** :
+  - Helper `server/lib/suppress-side-effects.ts`, sur le modèle de `preventive-due.ts`.
+  - Le relais relit les alertes par id et diffuse par `broadcastAlertCreated`, sans repli de rôles.
+- **Pourquoi** : réserves 1, 2 et 5 de la relecture de #287.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/fuel-alerts-triggers.test.ts tests/integration/fuel-alerts-realtime.test.ts` ;
+  - `npx vitest run tests/unit/server/backup-import-service.test.ts tests/unit/server/db-event-relay-alerts.test.ts`.
+- **Reste / risques** :
+  - La ligne de dette AGENTS §9 ajoutée par #297 devient caduque : à retirer après la fusion de #297.
+  - Le budget de 500 000 F CFA reste une constante.
+## 2026-11-04T13:22:03+01:00 — #281 cycle d'alertes à requêtes bornées
+- **Statut** : fait, PR brouillon empilée sur #287
+- **Quoi** :
+  - `alert-service.ts` : candidates en lot émises en fin de passage, chargements groupés, ordres de travail ouverts sans plafond de 50, `fuelRecipientRoles()` lu dans `alert_recipient_settings`.
+  - Réserves 3 et 4 de #287 : la clé et le lien de l'alerte de consommation sont alignés sur le trigger, et le lien `/vehicles/<id>/fuel`, qui ne correspondait à aucune route, est corrigé. Index `fuel_records (vehicle_id, date, id)`.
+- **Comment** : `AsyncLocalStorage` limité au passage planifié, donc les alertes nées d'une requête HTTP restent immédiates. Les listes passent en un seul paramètre jsonb. Une tranche d'insertion en échec est rejouée ligne à ligne.
+- **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 2/4 rouges.
+- **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+
+## 2026-11-04T14:40:01+01:00 — #298 : verrou de sauvegarde, test isolé et garde listenerPool
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Clé injectable pour `createAdvisoryBackupLock`, clé unique dans le test.
+  - Connexions rendues en `finally`, plus de `listenerPool.end()` dans le test.
+  - Garde `listenerPool` en test : `setup-db` épingle les deux variables, et `resolveListenerConnectionString` refuse une autre base.
+- **Comment** :
+  - Le test tient lui-même la clé de production pendant son passage.
+  - La logique de chaîne de connexion est sortie de `server/db.ts` vers `server/lib/listener-connection.ts`, qui se teste sans base.
+- **Pourquoi** : #298. Cause : clé de production partagée sur une base de test commune aux sessions.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/backup-production.test.ts` ;
+  - preuve rouge : avec `SELECT pg_advisory_lock(hashtext('backup')), pg_sleep(90)` lancé sur la base de test, la version de main échoue.
+- **Reste / risques** : aucun changement de comportement hors `NODE_ENV=test`.
+## 2026-11-04T14:18:11+01:00 — suivi #297 : plafond de 50 testé, repli d'emitAlerts, liens carburant repris
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Test du plafond de 50 OT.
+  - `emitAlerts` : repli objet par objet quand le lot échoue.
+  - Reprise au démarrage des liens `/vehicles/<id>/fuel`.
+  - Précision sur la sortie de `remindDaily` pour l'alerte de consommation.
+- **Comment** :
+  - `emitAlerts` enveloppe `emitAlertBatch` : si le lot échoue, chaque candidate est retentée seule, avec un journal récapitulatif (nombre, échantillon, première erreur) plutôt qu'une ligne par candidate.
+  - `relinkLegacyFuelAlerts` (`server/init-database.ts`), appelée au démarrage : `UPDATE ... WHERE link ~ '^/vehicles/[0-9]+/fuel$'`.
+- **Pourquoi** : relecture de #297 par 0a.
+- **Alerte de consommation carburant, sortie de `remindDaily` (#297)** :
+  - Elle porte la clé du trigger, `fuel-consumption:<id du plein>`, à la place de la clé quotidienne `remindDaily`.
+  - Il y a donc une alerte par plein anormal, lue ou non, et plus de rappel quotidien tant que la consommation reste haute.
+  - Le plein anormal suivant produit une nouvelle alerte.
+  - Choix assumé : le trigger et le cycle ne doivent pas se doubler, et un rappel quotidien sur un fait passé (un plein) n'apporte rien.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/alert-work-orders-beyond-50.test.ts tests/integration/alert-emit-fallback-relink.test.ts` ;
+  - preuves rouges : le test des 50 échoue avec l'alert-service d'avant #297, le repli échoue avec celui de #297 (0 au lieu de 2).
+- **Reste / risques** : la reprise des liens ne touche que le motif exact `/vehicles/<n>/fuel` ; `/vehicles/<n>/fuel-cards` et les autres liens restent intacts.
+
+## 2026-11-04T15:07:03+01:00 — relecture #302 : coupe-circuit de la reprise, envoi unique de l'import, correction du journal
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - `alert-service.ts` : la reprise objet par objet d'un lot en échec s'arrête après 3 échecs consécutifs (`MAX_CONSECUTIVE_RETRY_FAILURES`), ou dès une erreur de connexion (`isConnectionError` : ECONNREFUSED, ECONNRESET, ETIMEDOUT, 57P01-03, 08xxx, cause comprise). Le récapitulatif compte les candidates abandonnées (`abandoned`, `lost`).
+  - `import-backup.tsx` : l'envoi passe par `useSingleFlightMutate` (AGENTS §10).
+- **Comment** : la boucle de reprise rompt sur la condition et calcule le reste ; aucun journal par candidate.
+- **Pourquoi** : base tombée avec N candidates, la reprise faisait N tentatives vaines. Une restauration lancée deux fois par double clic réécrit la base deux fois.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-emit-fallback-relink.test.ts` (au plus 1 + 3 appels, 2 sur ECONNREFUSED), `npx vitest run tests/unit/client/import-backup-single-flight.test.ts`.
+- **Correction de ce journal** : dans l'entrée du suivi #287, la ligne « 2/4 rouges » a été corrigée sur place depuis « 3/4 ». C'était une erreur de méthode : les corrections s'ajoutent désormais en fin de fichier, comme celle-ci. La ligne vide manquante avant le titre de l'entrée de 14:18 a été ajoutée.
+## 2026-11-04T15:28:00+01:00 — part-requirements-idempotence : course forcée par verrou de ligne
+- **Statut** : fait, PR brouillon
+- **Quoi** : le test « deux réceptions simultanées » retient les deux `UPDATE` sur un `FOR UPDATE` jusqu'à ce que les deux requêtes aient lu `ordered`.
+- **Comment** : `waitForBlockedUpdates(2)` interroge `pg_stat_activity` (`wait_event_type = 'Lock'`), puis le verrou est relâché.
+- **Pourquoi** : rouge 5 fois sur 5 sur main nu, alors que le stock était juste (5 → 7, un mouvement) ; la seconde requête lisait après le commit de la première et devenait un no-op réussi.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/part-requirements-idempotence.test.ts` ; rouge si l'on retire `eq(partRequirements.status, current.status)` du service.
+- **Reste / risques** : aucun ; le code produit n'est pas modifié.
+
+## 2026-11-04T15:46:52+01:00 — relecture #305 : variables du listener sur l'hôte direct
+- **Statut** : fait, PR #305
+- **Quoi** :
+  - `tests/support/listener-env.ts` pose `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` à `deriveDirectConnectionString(DATABASE_URL)` (sans `-pooler.`).
+  - `assertSafeTestDatabase` accepte cette forme directe pour ces deux variables seulement.
+  - LESSONS : la garde de `server/db.ts` est une seconde couche derrière `assertSafeTestDatabase`.
+- **Comment** : la dérivation existante est réutilisée côté setup et côté garde.
+- **Pourquoi** : sur une base de test Neon pooler, LISTEN et verrous de session passaient par le pooler. Une fois corrigé, le garde rejoué avant chaque fichier aurait refusé le second fichier.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/listener-connection.test.ts tests/unit/server/test-db-guard.test.ts` ; rouge mesuré sur le garde sans la tolérance.
+- **Reste / risques** : aucun.

@@ -35,6 +35,7 @@ import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
+import adminImportBackupRoutes from "./admin-import-backup.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
 import notificationSettingsRoutes from "./notification-settings.routes";
 import alertsRoutes from "./alerts.routes";
@@ -65,6 +66,8 @@ import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
+import { validateBody } from "../middleware/validate-body";
+import { pinLoginRequestSchema } from "@shared/contracts/auth-pin-login";
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
@@ -97,6 +100,12 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   );
   apiRouter.post(
     "/auth/pin-login",
+    // Identifiant validé puis ramené à sa forme canonique AVANT le garde : "12", "012" et 12 = un seul compteur.
+    validateBody(pinLoginRequestSchema),
+    (req, _res, next) => {
+      req.body.userId = String(Number(req.body.userId));
+      next();
+    },
     loginLockoutGuard({ store: lockoutStore, usernameField: "userId", keyPrefix: PIN_KEY_PREFIX }),
   );
   // Journal d'audit des ecritures, apres la session (req.user connu).
@@ -215,6 +224,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(authLockoutRoutes);
   apiRouter.use(auditLogsRoutes);
   apiRouter.use(backupsRoutes);
+  apiRouter.use(adminImportBackupRoutes);
   apiRouter.use(workOrderExportRoutes);
   apiRouter.use(notificationSettingsRoutes);
   apiRouter.use(alertsRoutes);

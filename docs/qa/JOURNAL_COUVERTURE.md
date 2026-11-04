@@ -2309,3 +2309,14 @@ soumission sans doublon.
 - **Preuves** : unitaire rouge si `document-renew.tsx` ajoute `includeInactive=1` (2 cas sur 3 en échec), vert après retour.
 
 - DRV2 passé à « Fait » : le défaut DRV2-4 est corrigé. **Quoi** : le tableau de bord chauffeur ne montrait que la première mission `assigned` ou `in_progress`. Toutes les missions à faire sont maintenant affichées : `in_progress` d'abord, puis par enlèvement croissant (`/api/drivers/me` trie à l'envers, l'ordre est refait côté client). Les suivantes sont listées sous la mission active, dans un bloc « Ensuite ». Il n'y a pas de filtre par jour (`splitDriverMissions`, `client/src/lib/driver-missions.ts`). Le `test.fail` DRV2-4 de `e2e/19-driver-space` est devenu un test ordinaire. **Comment** : un helper pur avec son test unitaire (`tests/unit/client/driver-missions.test.ts`), et l'écran qui le consomme. **Pourquoi** : panne vers OT, trame WebSocket à deux profils et cloison étaient déjà couverts. DRV2-4 était le seul écart restant. **Preuves** : e2e `19-driver-space` 15/15 en local (le DRV2-4 était rouge sur main, d'où son `test.fail`) ; unitaires 1946/1946 ; tsc 0.
+
+## 2026-11-04 14:14 — #286 : fusion de #278 et de main, échec dépendant de l'ordre (#293)
+
+- **Quoi** : fusion de `fix/login-identifier-digest` (#278) et de `main` dans `fix/change-password-attempts`. Commentaire de `keyOf` placé au-dessus de son champ dans `LockoutGuardOptions`.
+  - Filtre de reprise : les préfixes sans nom saisi (`pin:`, `cpw:`, empreinte) de #286 sont combinés avec la clause M-3 de #278 (nom numérique rangé dans `entity_id`).
+- **Comment** : conflits résolus bloc par bloc, sans `checkout --ours` (near miss consigné dans LESSONS). LESSONS fusionné en union, sans entrée en double.
+- **Pourquoi** : chaque PR de la pile ne doit montrer que son sujet face à `main`.
+- **Diagnostic #293** (« R8 : pin-login, compte inconnu et PIN faux ») :
+  - le test passe seul et n'échoue que dans la suite complète des contrats, selon l'ordre d'exécution ;
+  - cause : plusieurs fichiers de contrat utilisent le même identifiant chauffeur inexistant, donc le même compteur d'échecs `pin:999999999` sur la base de test partagée. Selon l'ordre, ce compteur est déjà au seuil ;
+  - piste : un identifiant inexistant propre à chaque fichier, ou le nettoyage de ce compteur (`storedLockoutKey`) avant chaque cas.

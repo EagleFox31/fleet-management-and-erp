@@ -12,12 +12,12 @@ export interface LockoutGuardOptions {
   usernameField?: string;
   /** Prefixe de la cle du compteur : separe les espaces (mot de passe, PIN, changement de mot de passe). */
   keyPrefix?: string;
+  /** Message du 429 (defaut : tentatives de connexion). */
+  lockedMessage?: string;
   /**
    * Identifiant compte, a la place du champ du corps : pour une route sous session
    * (changement de mot de passe), la cle est le compte de session, jamais une saisie.
    */
-  /** Message du 429 (defaut : tentatives de connexion). */
-  lockedMessage?: string;
   keyOf?: (req: Parameters<RequestHandler>[0]) => string | number | null | undefined;
 }
 

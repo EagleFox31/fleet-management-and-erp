@@ -17,7 +17,7 @@ const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const ALLOWED_WRITERS = new Set([
   "services/alert-inbox-service.ts",
   // Restauration de sauvegarde (admin) : vide toute la table.
-  "routes.ts",
+  "services/backup-import-service.ts",
   // markAlertAsRead / deleteAlert : plus appelées, voir le test suivant.
   "storage.ts",
 ]);

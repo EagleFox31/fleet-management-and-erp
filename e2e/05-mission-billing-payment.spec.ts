@@ -29,7 +29,7 @@ test.describe("Critical Journey 5 - Mission vers Facture vers Paiement", () => {
     const invoiceId = invoicesPayload.invoices[0].id;
     await page.goto(`/operations/invoices/${invoiceId}`, { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByTestId("invoice-number")).toBeVisible();
+    await expect(page.getByTestId("invoice-number-field")).toBeVisible();
     await expect(page.getByTestId("amount-ttc")).toBeVisible();
 
     const paymentButton = page.getByTestId("button-record-payment");

@@ -138,6 +138,14 @@ async function mockApi(context: BrowserContext): Promise<MockServer> {
 
 async function loginThroughUi(page: Page, user: MockUser): Promise<void> {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
+  // Pas de vert à vide : sans service worker actif, cette suite ne prouve rien.
+  // Hors serveur géré par Playwright, lancer le serveur avec VITE_ENABLE_SW=1 (ou un build de prod).
+  await expect
+    .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null), {
+      timeout: 60_000,
+      message: "le service worker ne contrôle pas la page (serveur lancé sans VITE_ENABLE_SW=1 ?)",
+    })
+    .toBe(true);
   await page.getByTestId("input-username").fill(user.username);
   await page.getByTestId("input-password").fill(user.password);
   await Promise.all([

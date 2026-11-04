@@ -163,3 +163,39 @@ describe("service worker : détection de /api insensible à la casse", () => {
     expect(Array.from(sw.caches.get("fleetos-static-v2")!.keys())).toEqual(["https://app.test/index.html"]);
   });
 });
+
+describe("service worker : la revalidation en arrière-plan ne sature pas les connexions", () => {
+  // Régression e2e 02/05/21 : chaque module en cache était re-téléchargé à chaque
+  // chargement (des centaines avec Vite), les appels /api/* de la page attendaient
+  // derrière sur les 6 connexions du navigateur et /api/auth/me dépassait 10 s.
+  const getRequest = (pathname: string, mode = "cors") => ({
+    url: `https://app.test${pathname}`,
+    method: "GET",
+    mode,
+  });
+
+  it("ne revalide pas un module déjà en cache", async () => {
+    const sw = loadServiceWorker();
+    await sw.dispatch("install");
+    await sw.dispatch("fetch", { request: getRequest("/src/pages/dashboard.tsx") });
+    sw.calls.fetched.length = 0;
+
+    const result = await sw.dispatch("fetch", { request: getRequest("/src/pages/dashboard.tsx") });
+
+    expect(result.responded).toBe(true);
+    expect(sw.calls.fetched).toEqual([]);
+  });
+
+  it("revalide la navigation et la coque statique", async () => {
+    const sw = loadServiceWorker();
+    await sw.dispatch("install");
+    await sw.dispatch("fetch", { request: getRequest("/vehicles", "navigate") });
+    await sw.dispatch("fetch", { request: getRequest("/manifest.json") });
+    sw.calls.fetched.length = 0;
+
+    await sw.dispatch("fetch", { request: getRequest("/vehicles", "navigate") });
+    await sw.dispatch("fetch", { request: getRequest("/manifest.json") });
+
+    expect(sw.calls.fetched).toEqual(["https://app.test/vehicles", "https://app.test/manifest.json"]);
+  });
+});

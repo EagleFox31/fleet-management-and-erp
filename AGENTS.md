@@ -284,6 +284,8 @@ npm run test:e2e           # Playwright (voir e2e/README.md)
 
 Arborescence et règles : `tests/README.md`. Ne pas colocaliser de `*.test.ts` dans `client/`, `server/` ou `shared/`.
 
+Relecture : tout changement de signature d'un service impose la suite d'intégration complète, rejouée par le relecteur (pas seulement les tests du domaine touché).
+
 ### Base de test : Postgres local par défaut
 
 Les suites **intégration** et **contrat** tournent sur le Postgres local Docker,
@@ -321,6 +323,9 @@ Notes :
   `node node_modules/@playwright/test/cli.js test`.
 - Les e2e écrivent sur la base réelle pointée par `DATABASE_URL`. Ne pas les
   lancer contre la production.
+- LESSONS, `docs/journal/*.md` et `PASSATION*.md` fusionnent en `merge=union` (`.gitattributes`) :
+  GitHub ne l'applique pas côté serveur, la PR reste CONFLICTING jusqu'au `git merge origin/main`
+  local, qui garde alors les deux entrées sans conflit. N'y écrire qu'en ajout de fin.
 
 ---
 
