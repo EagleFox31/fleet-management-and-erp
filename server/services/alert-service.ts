@@ -981,128 +981,153 @@ export class AlertService {
   private async emitAlerts(candidates: readonly AlertCandidate[]): Promise<number> {
     if (candidates.length === 0) return 0;
     try {
-      const byRole = await this.usersByRole([...new Set(candidates.flatMap((c) => c.targetRoles ?? []))]);
-
-      const prepared = candidates.map((alertData) => {
-        const explicit = (alertData.targetUserIds ?? []).filter(
-          (id): id is number => typeof id === "number" && id > 0,
-        );
-        const tousLesDestinataires = Array.from(
-          new Set([...(alertData.targetRoles ?? []).flatMap((role) => byRole.get(role) ?? []), ...explicit]),
-        );
-        // Retirer l'auteur du geste: personne n'a besoin qu'on lui annonce ce
-        // qu'il vient de faire, et une alerte non lue de plus dilue les vraies.
-        const recipients = alertData.excludeUserId
-          ? tousLesDestinataires.filter((userId) => userId !== alertData.excludeUserId)
-          : tousLesDestinataires;
-
-        let link = alertData.link ?? "";
-        if (!link) {
-          if (alertData.vehicleId) link = `/vehicles/${alertData.vehicleId}`;
-          else if (alertData.workOrderId) link = `/work-orders/${alertData.workOrderId}`;
-          else if (alertData.maintenanceScheduleId) link = `/maintenance/schedules/${alertData.maintenanceScheduleId}`;
-        }
-        const dedupeKey =
-          alertData.dedupeKey ??
-          (alertData.remindDaily ? dailyReminderDedupeKey(alertData.type, alertData.title, link) : undefined);
-        const topic: NotificationTopic = alertData.topic ?? alertData.type;
-        return { alertData, recipients, link, dedupeKey, topic };
-      });
-
-      // Préférences (P-12): chacun peut couper un thème pour lui seul. Une requête par thème.
-      const allowedByTopic = new Map<NotificationTopic, Set<number>>();
-      for (const topic of new Set(prepared.map((p) => p.topic))) {
-        const ids = [...new Set(prepared.filter((p) => p.topic === topic).flatMap((p) => p.recipients))];
-        allowedByTopic.set(topic, new Set(await filterUsersByTopic(ids, topic)));
-      }
-      for (const p of prepared) {
-        const allowed = allowedByTopic.get(p.topic)!;
-        p.recipients = p.recipients.filter((userId) => allowed.has(userId));
-      }
-
-      const recipientIds = [...new Set(prepared.flatMap((p) => p.recipients))];
-      if (recipientIds.length === 0) return 0;
-
-      // Existant utile au dédoublonnage, en une requête : les clés du lot et les non lues
-      // de mêmes titres. Remplace le chargement de toutes les alertes de chaque destinataire.
-      const keys = [...new Set(prepared.flatMap((p) => (p.dedupeKey ? [p.dedupeKey] : [])))];
-      const titles = [...new Set(prepared.map((p) => p.alertData.title))];
-      const existing = await db
-        .select({
-          userId: alerts.userId,
-          dedupeKey: alerts.dedupeKey,
-          type: alerts.type,
-          title: alerts.title,
-          link: alerts.link,
-          isRead: alerts.isRead,
-        })
-        .from(alerts)
-        .where(
-          and(
-            anyInt(alerts.userId, recipientIds),
-            or(
-              keys.length > 0 ? anyText(alerts.dedupeKey, keys) : sql`false`,
-              and(eq(alerts.isRead, false), anyText(alerts.title, titles)),
-            ),
-          ),
-        );
-
-      const takenKeys = new Set<string>(); // user|clé
-      const unreadSame = new Set<string>(); // user|type|titre|lien
-      const unreadSameAnyLink = new Set<string>(); // user|type|titre
-      const remember = (userId: number, dedupeKey: string | null | undefined, unread: boolean, type: string, title: string, link: string | null | undefined) => {
-        if (dedupeKey) takenKeys.add(`${userId}|${dedupeKey}`);
-        if (unread) {
-          unreadSame.add(`${userId}|${type}|${title}|${link ?? ""}`);
-          unreadSameAnyLink.add(`${userId}|${type}|${title}`);
-        }
-      };
-      for (const row of existing) {
-        if (row.userId !== null) remember(row.userId, row.dedupeKey, !row.isRead, row.type, row.title, row.link);
-      }
-
-      const rows: Array<typeof alerts.$inferInsert> = [];
-      for (const p of prepared) {
-        for (const userId of p.recipients) {
-          const blocked =
-            (p.dedupeKey !== undefined && takenKeys.has(`${userId}|${p.dedupeKey}`)) ||
-            (p.link
-              ? unreadSame.has(`${userId}|${p.alertData.type}|${p.alertData.title}|${p.link}`)
-              : unreadSameAnyLink.has(`${userId}|${p.alertData.type}|${p.alertData.title}`));
-          if (blocked) continue;
-          remember(userId, p.dedupeKey, true, p.alertData.type, p.alertData.title, p.link);
-          rows.push({
-            userId,
-            title: p.alertData.title,
-            message: p.alertData.message,
-            type: p.alertData.type,
-            priority: p.alertData.priority,
-            link: p.link || undefined,
-            topic: p.topic,
-            ...(p.dedupeKey ? { dedupeKey: p.dedupeKey } : {}),
-          });
-        }
-      }
-
-      const created = await this.insertAlertRows(rows);
-      const createdPerObject = new Map<string, number>(); // type|titre|lien
-      for (const alert of created) {
-        const objectKey = `${alert.type}|${alert.title}|${alert.link ?? ""}`;
-        createdPerObject.set(objectKey, (createdPerObject.get(objectKey) ?? 0) + 1);
-      }
-
-      for (const [objectKey, createdCount] of createdPerObject) {
-        const [type, title] = objectKey.split("|");
-        log.info({ title, type, createdCount }, "alertes créées");
-      }
-      return created.length;
+      return await this.emitAlertBatch(candidates);
     } catch (error) {
-      log.error(
-        { err: error, candidates: candidates.length, title: candidates[0]?.title, type: candidates[0]?.type },
-        "création d'alerte en échec",
-      );
-      return 0;
+      if (candidates.length === 1) {
+        log.error({ err: error, title: candidates[0].title, type: candidates[0].type }, "création d'alerte en échec");
+        return 0;
+      }
+      // Un lot en échec ne doit pas emporter tout le passage : reprise objet par objet,
+      // un seul journal récapitulatif (pas une ligne par candidate si la base est tombée).
+      log.warn({ err: error, candidates: candidates.length }, "lot d'alertes en échec, reprise objet par objet");
+      let created = 0;
+      const failed: Array<{ title: string; type: string }> = [];
+      let firstError: unknown;
+      for (const candidate of candidates) {
+        try {
+          created += await this.emitAlertBatch([candidate]);
+        } catch (candidateError) {
+          firstError ??= candidateError;
+          failed.push({ title: candidate.title, type: candidate.type });
+        }
+      }
+      if (failed.length > 0) {
+        log.error(
+          { err: firstError, failed: failed.length, candidates: candidates.length, sample: failed.slice(0, 5) },
+          "création d'alerte en échec",
+        );
+      }
+      return created;
     }
+  }
+
+  /** Un lot en une fois ; lève en cas d'échec (repli géré par emitAlerts). */
+  private async emitAlertBatch(candidates: readonly AlertCandidate[]): Promise<number> {
+    const byRole = await this.usersByRole([...new Set(candidates.flatMap((c) => c.targetRoles ?? []))]);
+
+    const prepared = candidates.map((alertData) => {
+      const explicit = (alertData.targetUserIds ?? []).filter(
+        (id): id is number => typeof id === "number" && id > 0,
+      );
+      const tousLesDestinataires = Array.from(
+        new Set([...(alertData.targetRoles ?? []).flatMap((role) => byRole.get(role) ?? []), ...explicit]),
+      );
+      // Retirer l'auteur du geste: personne n'a besoin qu'on lui annonce ce
+      // qu'il vient de faire, et une alerte non lue de plus dilue les vraies.
+      const recipients = alertData.excludeUserId
+        ? tousLesDestinataires.filter((userId) => userId !== alertData.excludeUserId)
+        : tousLesDestinataires;
+
+      let link = alertData.link ?? "";
+      if (!link) {
+        if (alertData.vehicleId) link = `/vehicles/${alertData.vehicleId}`;
+        else if (alertData.workOrderId) link = `/work-orders/${alertData.workOrderId}`;
+        else if (alertData.maintenanceScheduleId) link = `/maintenance/schedules/${alertData.maintenanceScheduleId}`;
+      }
+      const dedupeKey =
+        alertData.dedupeKey ??
+        (alertData.remindDaily ? dailyReminderDedupeKey(alertData.type, alertData.title, link) : undefined);
+      const topic: NotificationTopic = alertData.topic ?? alertData.type;
+      return { alertData, recipients, link, dedupeKey, topic };
+    });
+
+    // Préférences (P-12): chacun peut couper un thème pour lui seul. Une requête par thème.
+    const allowedByTopic = new Map<NotificationTopic, Set<number>>();
+    for (const topic of new Set(prepared.map((p) => p.topic))) {
+      const ids = [...new Set(prepared.filter((p) => p.topic === topic).flatMap((p) => p.recipients))];
+      allowedByTopic.set(topic, new Set(await filterUsersByTopic(ids, topic)));
+    }
+    for (const p of prepared) {
+      const allowed = allowedByTopic.get(p.topic)!;
+      p.recipients = p.recipients.filter((userId) => allowed.has(userId));
+    }
+
+    const recipientIds = [...new Set(prepared.flatMap((p) => p.recipients))];
+    if (recipientIds.length === 0) return 0;
+
+    // Existant utile au dédoublonnage, en une requête : les clés du lot et les non lues
+    // de mêmes titres. Remplace le chargement de toutes les alertes de chaque destinataire.
+    const keys = [...new Set(prepared.flatMap((p) => (p.dedupeKey ? [p.dedupeKey] : [])))];
+    const titles = [...new Set(prepared.map((p) => p.alertData.title))];
+    const existing = await db
+      .select({
+        userId: alerts.userId,
+        dedupeKey: alerts.dedupeKey,
+        type: alerts.type,
+        title: alerts.title,
+        link: alerts.link,
+        isRead: alerts.isRead,
+      })
+      .from(alerts)
+      .where(
+        and(
+          anyInt(alerts.userId, recipientIds),
+          or(
+            keys.length > 0 ? anyText(alerts.dedupeKey, keys) : sql`false`,
+            and(eq(alerts.isRead, false), anyText(alerts.title, titles)),
+          ),
+        ),
+      );
+
+    const takenKeys = new Set<string>(); // user|clé
+    const unreadSame = new Set<string>(); // user|type|titre|lien
+    const unreadSameAnyLink = new Set<string>(); // user|type|titre
+    const remember = (userId: number, dedupeKey: string | null | undefined, unread: boolean, type: string, title: string, link: string | null | undefined) => {
+      if (dedupeKey) takenKeys.add(`${userId}|${dedupeKey}`);
+      if (unread) {
+        unreadSame.add(`${userId}|${type}|${title}|${link ?? ""}`);
+        unreadSameAnyLink.add(`${userId}|${type}|${title}`);
+      }
+    };
+    for (const row of existing) {
+      if (row.userId !== null) remember(row.userId, row.dedupeKey, !row.isRead, row.type, row.title, row.link);
+    }
+
+    const rows: Array<typeof alerts.$inferInsert> = [];
+    for (const p of prepared) {
+      for (const userId of p.recipients) {
+        const blocked =
+          (p.dedupeKey !== undefined && takenKeys.has(`${userId}|${p.dedupeKey}`)) ||
+          (p.link
+            ? unreadSame.has(`${userId}|${p.alertData.type}|${p.alertData.title}|${p.link}`)
+            : unreadSameAnyLink.has(`${userId}|${p.alertData.type}|${p.alertData.title}`));
+        if (blocked) continue;
+        remember(userId, p.dedupeKey, true, p.alertData.type, p.alertData.title, p.link);
+        rows.push({
+          userId,
+          title: p.alertData.title,
+          message: p.alertData.message,
+          type: p.alertData.type,
+          priority: p.alertData.priority,
+          link: p.link || undefined,
+          topic: p.topic,
+          ...(p.dedupeKey ? { dedupeKey: p.dedupeKey } : {}),
+        });
+      }
+    }
+
+    const created = await this.insertAlertRows(rows);
+    const createdPerObject = new Map<string, number>(); // type|titre|lien
+    for (const alert of created) {
+      const objectKey = `${alert.type}|${alert.title}|${alert.link ?? ""}`;
+      createdPerObject.set(objectKey, (createdPerObject.get(objectKey) ?? 0) + 1);
+    }
+
+    for (const [objectKey, createdCount] of createdPerObject) {
+      const [type, title] = objectKey.split("|");
+      log.info({ title, type, createdCount }, "alertes créées");
+    }
+    return created.length;
   }
 
   /**
