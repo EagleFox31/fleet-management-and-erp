@@ -2554,3 +2554,26 @@ La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun ch
 
 ### Leçon généralisée
 Un trigger à effet secondaire s'accompagne du recensement des écritures en masse sur sa table (restauration, import, seed). Chacune pose la garde dans sa transaction. En PL/pgSQL, `WHEN OTHERS` ne couvre ni `query_canceled` ni `assert_failure`.
+
+## 2026-11-04 — Near miss : serveur d'agent lancé avec `--env-file=.env` d'un worktree pointant la production (récidive de #259)
+
+### Contexte
+Pour la spec PWA de #279, un agent a démarré le serveur de son worktree (`.claude/worktrees/agent-a91de81a6c5dc3623`) par `NODE_ENV=development node --env-file=.env … server/index.ts`. Le `.env` de ce worktree portait une ligne `DATABASE_URL` vers l'ancien Neon de production. C'est le deuxième démarrage de serveur avec `--env-file=.env` de la journée. Le premier est le near miss de #259.
+
+### Ce qui s'est passé
+- Le `.env` définissait `DATABASE_URL` deux fois. La ligne 2 visait la production, une ligne plus bas visait la base de test. `node --env-file` garde la dernière valeur : le serveur a donc visé la base de test, par le seul hasard de l'ordre des lignes.
+- Le log du serveur le confirme : connexion à la base de test seulement, l'URL wss des erreurs vise `ep-plain-lake`, aucune occurrence de `ep-bitter-term`. L'agent a été arrêté, et les lignes de production (la clé et un commentaire psql) ont été retirées du `.env` du worktree.
+- La garde de #259 (`server/lib/production-db-guard.ts`, appelée par `server/db.ts`) était présente dans la branche, et active : `NODE_ENV=development`.
+- Reproduction sur main, avec un `.env` factice dont l'hôte porte le marqueur (domaine `.invalid`, aucun contact réseau) : `node --env-file=<factice> … server/index.ts` s'arrête avant tout pool sur « Connexion refusée : DATABASE_URL vise la base de production ». La garde serveur lit la valeur effective : le chemin `--env-file` n'est pas un trou.
+- Trou trouvé dans la garde e2e : `databaseUrlFromDotenv` (`e2e/helpers/production-guard.ts`) lisait la **première** ligne `DATABASE_URL`, alors que Node garde la **dernière**. Avec la base de test en premier et la production en dernier, la garde Playwright laissait passer un serveur qui aurait visé la production.
+
+### Cause racine
+La copie d'un `.env` racine dans un worktree emporte l'URL de production. Le brief de l'agent ne lui interdisait pas `--env-file=.env`. La garde de #259 protège l'exécution, mais pas la présence de l'URL dans les fichiers.
+
+### Prévention (vérifiable)
+- Garde au démarrage : `tests/unit/server/production-db-guard.test.ts`, plus la reproduction ci-dessus, rejouable en une commande. Aucun trou côté serveur (marqueur, `NODE_ENV`, chemin de démarrage).
+- Clé en double : `databaseUrlFromDotenv` refuse un `.env` qui définit `DATABASE_URL` plus d'une fois (forme `export` comprise, lignes commentées et `DATABASE_URL_TEST` exclues). Le message ne contient pas l'URL. Test : `tests/unit/e2e/production-guard.test.ts`, rouge sur l'ancienne version, vert ensuite.
+- Règle de brief, tenue par l'orchestrateur : un agent qui démarre un serveur force `DATABASE_URL` depuis `DATABASE_URL_TEST`, avec une garde d'hôte, et n'utilise jamais `--env-file=.env`. Les `.env` de worktree ne portent que `DATABASE_URL_TEST`.
+
+### Leçon généralisée
+Avant de coder un deuxième contrôle après une récidive, rejouer le scénario contre le premier : ici, la garde serveur tenait. La récidive vient du geste (`--env-file` sur un `.env` qui porte la prod) : c'est le brief et le contenu des `.env` qu'il faut corriger. Une clé en double dans un `.env` est un piège : l'ordre des lignes décide de la base visée, et tout lecteur maison doit soit reproduire la règle du chargeur réel, soit refuser l'ambiguïté.
