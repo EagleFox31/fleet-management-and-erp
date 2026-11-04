@@ -304,6 +304,15 @@ Règles : `docs/journal/README.md`.
   - unitaires : 163 fichiers, 2034 tests ;
   - contrats : 20 fichiers, 279 tests (mission*, operations*, driver*, fuel-card-write-guards).
 
+## 2026-11-04 11:10 — R2 : gardes déclaratives du parcours d'acquisition
+- **Agent** : fleet-api · **Branche** : `fix/r2-vehicle-acquisition-guards`
+- **Statut** : fait, en relecture
+- **Quoi** : les 7 écritures gelées du parcours d'acquisition (POST et PATCH de la session, complete, abandon, abandon actif, téléversement et suppression de document) portent `isWorkflowDocumentWriter` (admin, secrétariat, logistique, chef d'atelier, client). Les corps passent par `validateBody` (schémas dans `shared/contracts/vehicle-acquisition.ts`, `purchasePrice` accepté dans `workflowData`). Les sept entrées quittent les listes gelées du cliquet, plus quatre de `KNOWN_AUTHENTICATE_ONLY`.
+- **Comment** : la cloison était déjà dans le service (`user_id` + `session_id`) ; `complete` et `abandon` répondaient 200 sur la session d'un autre. `completeWorkflow` et `abandonWorkflow` renvoient maintenant si la session est celle de l'utilisateur (quel que soit son statut : rejouer reste 200), la route répond 404 sinon. Les documents gardent le 403 du handler (`canAccessOwned`).
+- **Pourquoi** : une écriture sans garde de rôle laissait un technicien ou un magasinier créer des brouillons ; une clôture silencieuse sur la session d'un autre masquait l'accès hors périmètre.
+- **Écarts de droits** : technicien, magasinier, chauffeur, direction et comptable ne créent plus de session ni ne suppriment de document (403). Aucun écran ne leur ouvre ce parcours (route `/workflows/vehicle-acquisition` : admin et chef d'atelier).
+- **Preuves** : preuve rouge avant correctif, 10 cas sur 15 en échec (complete, abandon et abandon actif : 200 au lieu de 404 pour le client B ; 200 au lieu de 403 pour le technicien ; 400 sans `errors[]` sur le téléversement) ; ensuite 15/15. 0 `error TS` ; unitaires 2107 verts, seul `backup-db.test.ts` instable (non corrigé) ; contrats 145 fichiers, 1742 tests verts.
+
 ## 2026-11-04 — Prix d'achat du véhicule, clôture du « Reste » (#214)
 - **Quoi** : le « Reste » de l'entrée du 3 novembre est soldé. L'assistant d'acquisition n'envoie plus `purchasePrice` pour un rôle sans droit d'écriture (8bbfc6a). Le contrat pneus était rouge parce qu'il lisait `r.id`, `row.tire` et `row.vehicle`. La route renvoie des lignes de jointure `{ vehicle_tires, tires, vehicles }`, forme que lit déjà `pages/vehicles/[id].tsx` : le test a été corrigé, l'API n'a pas changé (192d934). La branche est fusionnée avec `origin/main`.
 - **Preuve rouge** : le contrat `vehicle-purchase-price-scope` a été rejoué sur le code de `origin/main` (9461373). Seule différence : la constante `VEHICLE_PURCHASE_PRICE_READ_ROLES`, absente de main, est remplacée par sa valeur littérale. Résultat : 52 cas rouges sur 89. Ils échouent pour les rôles hors lecture : liste 7, détail 7, `/all` 7, pneus 7, coûts de mission 5, missions 5, export 2, trame kilométrage 1, écriture PATCH 11. Sur la branche, les 89 cas passent.
