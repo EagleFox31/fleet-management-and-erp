@@ -2388,3 +2388,26 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Avant une passe e2e sur une autre base que celle de `COMPTES_ENVIRONNEMENT.md`, renseigner `E2E_USERNAME` / `E2E_MANAGER_USERNAME` / `E2E_VIEWER_USERNAME` (et `*_PASSWORD`) avec les comptes de cette base, et exporter `RECETTE_PASSWORD` pour les specs de recette.
 - Un skip silencieux n'est pas un vert : compter les skips dans le rapport de passe et en donner la cause.
+
+## 2026-11-04 — Triggers d'alertes carburant : jamais exécutés, ils cassaient la saisie du 2e plein (retirés de #263, réécrits)
+
+### Contexte
+- `server/db/triggers/fuel-alerts-triggers.sql` n'était posé par aucun bootstrap. Installé à la main, il faisait échouer tout INSERT de plein à partir du 2e : `AVG(... LAG() OVER ...)` lève « aggregate function calls cannot contain window function calls ». Il formatait aussi par `%.1f` (non supporté par `format()`) et envoyait l'alerte à `user_id = 1` en dur.
+
+### Cause racine
+- Classification : code SQL jamais exécuté par un test. Un trigger n'est éprouvé qu'à l'INSERT ; aucune suite n'installait le fichier, et l'alerte n'était pas isolée de l'écriture métier.
+
+### Résolution
+- Fichier réécrit et ajouté à `BOOTSTRAP_SQL_FILES` (`server/init-database.ts`) :
+  - moyenne sur une sous-requête de `lag()` (90 jours), `round()` au lieu de `%.1f` ;
+  - destinataires par rôles dans `alert_recipient_settings` (réglage conservé au rejeu), préférence `in_app` respectée ;
+  - déduplication `uq_alerts_user_dedupe` ;
+  - bloc `EXCEPTION WHEN OTHERS THEN RAISE WARNING` : une alerte en échec n'annule jamais le plein.
+
+### Prévention (vérifiable)
+- `tests/integration/fuel-alerts-triggers.test.ts` installe le fichier et insère des pleins. Rouge sur l'original (4/5, erreur fenêtre/agrégat), vert sur la réécriture. `FUEL_ALERTS_SQL` permet de rejouer la preuve sur une autre version.
+- `tests/unit/server/fuel-records-soft-delete-schema.test.ts` : fichier présent au bootstrap, ni `AVG(LAG`, ni `%.1f`, ni `VALUES (1,`, deux rattrapages d'exception, toutes les créations rejouables.
+
+### Règle Projet (obligatoire)
+- Un trigger posé au démarrage s'accompagne d'un test d'intégration qui l'installe et déclenche l'écriture qui l'appelle. Un effet secondaire (alerte, notification) attrape ses erreurs : il ne casse jamais l'écriture métier.
+- Un fichier posé au démarrage modifie toutes les suites d'intégration : lancer la suite complète, pas seulement les tests du domaine (ici `recette-seed-reset` comptait 3 alertes, il en compte 5).

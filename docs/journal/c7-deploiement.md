@@ -62,3 +62,14 @@ Entrées ajoutées à la fin, une par lot.
   - Agnostic : motif générique, couvre tout script `tsx watch`.
   - Idempotent et Retroactive : sans objet.
 - **Reste / risques** : à la montée en vite 6.1+, `configLoader: "runner"` supprimerait le fichier temporaire.
+
+## 2026-11-04T13:06:19+01:00 — Triggers d'alertes carburant réécrits et posés au démarrage
+
+- **Statut** : fait, PR brouillon
+- **Quoi** : réécriture de `fuel-alerts-triggers.sql`, table `alert_recipient_settings`, ajout à `BOOTSTRAP_SQL_FILES`, test d'intégration (5 cas), garde unitaire, attendu de `recette-seed-reset` passé de 3 à 5 alertes.
+- **Comment** : moyenne par sous-requête, `round()`, destinataires par rôles configurés, exception rattrapée puis WARNING, toutes les créations rejouables.
+- **Pourquoi** : demandé par 0a. Retirés de #263 : installés, ils cassaient l'INSERT du 2e plein.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/fuel-alerts-triggers.test.ts` (vert) ; avec `FUEL_ALERTS_SQL` pointé sur l'original : 4/5 rouges.
+- **Reste / risques** :
+  - `AlertService.fuelRecipients` reste en dur côté TypeScript (à brancher sur `alert_recipient_settings`).
+  - Le budget de 500 000 F CFA est encore une constante.
