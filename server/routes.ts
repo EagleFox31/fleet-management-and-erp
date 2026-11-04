@@ -64,6 +64,17 @@ import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realti
 
 const log = moduleLogger("routes");
 
+/**
+ * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
+ * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
+ */
+const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+
+/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
+function loginUsernameRef(username: string): string {
+  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
+}
+
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({
   username: z.string().min(1).max(255),
@@ -172,18 +183,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const { username, password, rememberMe } = parsed.data;
 
-      log.info({ event: "Login attempt", username, requestId: req.requestId }, "Login attempt");
+      log.info({ event: "Login attempt", usernameRef: loginUsernameRef(username), requestId: req.requestId }, "Login attempt");
 
       const user = await storage.getUserByUsername(username);
-      log.info({ event: "Login user lookup", username, found: Boolean(user), requestId: req.requestId }, "Login user lookup");
+      log.info({ event: "Login user lookup", usernameRef: loginUsernameRef(username), found: Boolean(user), requestId: req.requestId }, "Login user lookup");
       
       // Compte supprimé ou désactivé : même réponse qu'un identifiant inconnu.
       if (!user || user.deletedAt) {
+        await bcrypt.compare(password, LOGIN_DUMMY_HASH);
         return res.status(401).json({ message: "Identifiants invalides" });
       }
       
       // Verify password - support both bcrypt and legacy SHA-256 with auto-migration
-      let isPasswordValid = await bcrypt.compare(password, user.password);
+      // Hash non bcrypt (SHA-256 hérité) : bcrypt.compare rendrait false sans calcul, et un compte
+      // non migré répondrait plus vite qu'un nom inconnu. On compare alors au hash factice : un
+      // seul calcul bcrypt de coût 10, quel que soit le compte (#260, M1).
+      const isBcryptHash = user.password.length === 60 && user.password.startsWith("$2");
+      let isPasswordValid = (await bcrypt.compare(password, isBcryptHash ? user.password : LOGIN_DUMMY_HASH)) && isBcryptHash;
       let needsMigration = false;
       
       // If bcrypt fails and the hash looks like SHA-256 (64 hex chars), try legacy verification
@@ -196,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       log.info(
-        { event: "Login password check", username, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
+        { event: "Login password check", userId: user.id, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
         "Login password check",
       );
       
@@ -208,7 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (needsMigration) {
         const bcryptHash = await bcrypt.hash(password, 10);
         await storage.updateUser(user.id, { password: bcryptHash });
-        log.info({ event: "Login password migrated", username, requestId: req.requestId }, "Login password migrated to bcrypt");
+        log.info({ event: "Login password migrated", userId: user.id, requestId: req.requestId }, "Login password migrated to bcrypt");
       }
 
       const currentLoginAt = new Date();
@@ -857,7 +873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -879,7 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sha256Hash = crypto.createHash("sha256").update(currentPassword).digest("hex");
         if (sha256Hash === user.password) {
           isValidPassword = true;
-          console.log(`🔐 [PASSWORD CHANGE] Legacy SHA-256 hash detected for user ${userId}, will upgrade to bcrypt`);
+          log.info({ event: "Change password legacy hash", userId, requestId: req.requestId }, "Legacy SHA-256 hash, upgraded to bcrypt");
         }
       }
       
@@ -891,11 +907,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       // Update the password (also upgrades legacy SHA-256 to bcrypt)
-      await storage.updateUser(userId, { password: hashedPassword });
+      // updateUser avale l'erreur et renvoie undefined : sans ce contrôle, une panne répondait
+      // « modifié » alors que l'ancien mot de passe restait en place.
+      const updated = await storage.updateUser(userId, { password: hashedPassword });
+      if (!updated) {
+        log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
+        return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {
-      console.error("Change password error:", error);
+      log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4746,7 +4768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, isAnyUser, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4767,12 +4789,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update onboarding step error:", error);
+      log.error({ err: error, event: "Update onboarding step error", requestId: req.requestId }, "Update onboarding step error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, isAnyUser, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4792,12 +4814,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(completedOnboarding);
     } catch (error) {
-      console.error("Complete onboarding error:", error);
+      log.error({ err: error, event: "Complete onboarding error", requestId: req.requestId }, "Complete onboarding error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, isAnyUser, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;
@@ -4817,7 +4839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update mascot visibility error:", error);
+      log.error({ err: error, event: "Update mascot visibility error", requestId: req.requestId }, "Update mascot visibility error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
