@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -67,15 +67,15 @@ async function workflowWithDocument(originalName: string, documentType: "carte_g
     mimeType: "application/pdf",
     uploadedBy: user.id,
   });
-  return { sessionId, vehicleId: vehicle.id, document };
+  return { sessionId, vehicleId: vehicle.id, document, workflowId: workflow.id };
 }
 
 describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 }, () => {
   it("nom d'origine avec apostrophe et SQL : document créé, nom enregistré tel quel", async () => {
     const originalName = "carte d'origine'); DROP TABLE vehicle_documents; --.pdf";
-    const { sessionId, vehicleId } = await workflowWithDocument(originalName);
+    const { sessionId, vehicleId, workflowId } = await workflowWithDocument(originalName);
 
-    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
 
     const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(rows).toHaveLength(1);
@@ -86,18 +86,44 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
   });
 
   it("nom d'origine avec répertoires : fichier copié dans le dossier du véhicule", async () => {
-    const { sessionId, vehicleId } = await workflowWithDocument(`../../../${evilName}`);
+    const { sessionId, vehicleId, workflowId } = await workflowWithDocument(`../../../${evilName}`);
     const vehicleDir = join(process.cwd(), "uploads", "documents", `vehicle-${vehicleId}`);
 
-    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
 
-    expect(readdirSync(vehicleDir)).toEqual([`carte_grise_${evilName}`]);
+    const files = readdirSync(vehicleDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(new RegExp(`^carte_grise_[0-9a-f]{12}_${evilName.replace(/[.]/g, "\.")}$`));
     const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
-    expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/carte_grise_${evilName}`);
+    expect(row.filePath).toBe(`/uploads/documents/vehicle-${vehicleId}/${files[0]}`);
+  });
+
+  it("deux documents de même type et de même nom : deux fichiers distincts, chacun avec son contenu", async () => {
+    const { sessionId, vehicleId, workflowId, document: first } = await workflowWithDocument("doublon.pdf");
+    const second = await WorkflowDocumentService.saveWorkflowDocument({
+      workflowId,
+      sessionId,
+      documentType: "carte_grise",
+      originalName: "doublon.pdf",
+      fileBuffer: Buffer.from("SECOND"),
+      mimeType: "application/pdf",
+      uploadedBy: first.uploadedBy,
+    });
+    const vehicleDir = join(process.cwd(), "uploads", "documents", `vehicle-${vehicleId}`);
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.filePath)).size).toBe(2);
+    expect(readdirSync(vehicleDir)).toHaveLength(2);
+    const contents = rows.map((row) => readFileSync(join(vehicleDir, row.filename), "utf8")).sort();
+    expect(contents).toEqual(["SECOND", "TEST"]);
+    expect(second.id).not.toBe(first.id);
   });
 
   it("fichier source disparu : ce document n'est ni copié ni marqué transféré, les autres le sont", async () => {
-    const { sessionId, vehicleId, document: kept } = await workflowWithDocument("present.pdf");
+    const { sessionId, vehicleId, document: kept, workflowId } = await workflowWithDocument("present.pdf");
     const [workflow] = await db.select().from(vehicleAcquisitionWorkflows).where(eq(vehicleAcquisitionWorkflows.sessionId, sessionId));
     const lost = await WorkflowDocumentService.saveWorkflowDocument({
       workflowId: workflow.id,
@@ -110,7 +136,7 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
     });
     for (const candidate of uploadedFileCandidates(lost.filePath)) rmSync(candidate, { force: true });
 
-    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
 
     const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(rows.map((row) => row.name)).toEqual(["present.pdf"]);
@@ -120,10 +146,37 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
     expect(byId.get(lost.id)).toMatchObject({ isTransferred: false, vehicleId: null });
   });
 
-  it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {
-    const { sessionId, vehicleId } = await workflowWithDocument("facture.pdf", "factur_achat");
+  it("idempotent (#231) : un second transfert ne crée aucune ligne de plus", async () => {
+    const { sessionId, vehicleId, workflowId } = await workflowWithDocument("une-fois.pdf");
 
-    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["une-fois.pdf"]);
+  });
+
+  it("idempotent (#231) : document refusé puis rendu disponible, transféré une seule fois au rejeu", async () => {
+    const { sessionId, vehicleId, workflowId, document } = await workflowWithDocument("tardif.pdf");
+    const stored = uploadedFileCandidates(document.filePath).find((candidate) => existsSync(candidate))!;
+    const backup = readFileSync(stored);
+    rmSync(stored, { force: true });
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId))).toHaveLength(0);
+
+    writeFileSync(stored, backup);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["tardif.pdf"]);
+  });
+
+  it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {
+    const { sessionId, vehicleId, workflowId } = await workflowWithDocument("facture.pdf", "factur_achat");
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
 
     const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(row.type).toBe("autre");
