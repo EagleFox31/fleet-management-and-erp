@@ -3,7 +3,7 @@ import { inArray } from "drizzle-orm";
 import { alerts } from "../../shared/schema";
 import { db, pool } from "../../server/db";
 import { relinkLegacyFuelAlerts } from "../../server/init-database";
-import { alertService } from "../../server/services/alert-service";
+import { alertService, isConnectionError, MAX_CONSECUTIVE_RETRY_FAILURES } from "../../server/services/alert-service";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
@@ -48,6 +48,47 @@ describe("emitAlerts : un lot en échec ne perd pas toutes les candidates", { ti
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("emitAlerts : coupe-circuit sur la reprise", () => {
+  const candidates = Array.from({ length: 10 }, (_, i) => ({
+    type: "fuel",
+    title: `T${i}`,
+    message: "m",
+    priority: "medium",
+    link: `/x/${i}`,
+    targetUserIds: [1],
+  }));
+
+  async function attempts(error: Error): Promise<{ created: number; calls: number }> {
+    const service = alertService as any;
+    const spy = vi.spyOn(service, "emitAlertBatch").mockRejectedValue(error);
+    try {
+      const created = await service.emitAlerts(candidates);
+      return { created, calls: spy.mock.calls.length };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("base qui tombe en série : au plus 3 reprises, pas une par candidate", async () => {
+    const result = await attempts(new Error("échec"));
+    expect(MAX_CONSECUTIVE_RETRY_FAILURES).toBe(3);
+    expect(result).toEqual({ created: 0, calls: 1 + MAX_CONSECUTIVE_RETRY_FAILURES });
+  });
+
+  it("erreur de connexion : arrêt dès la première reprise", async () => {
+    const result = await attempts(Object.assign(new Error("connexion refusée"), { code: "ECONNREFUSED" }));
+    expect(result).toEqual({ created: 0, calls: 2 });
+  });
+
+  it("reconnaît les erreurs de connexion, y compris enveloppées", () => {
+    expect(isConnectionError(Object.assign(new Error(), { code: "57P01" }))).toBe(true);
+    expect(isConnectionError(Object.assign(new Error(), { code: "08006" }))).toBe(true);
+    expect(isConnectionError(new Error("requête", { cause: Object.assign(new Error(), { code: "ECONNRESET" }) }))).toBe(true);
+    expect(isConnectionError(Object.assign(new Error(), { code: "23505" }))).toBe(false);
+    expect(isConnectionError(new Error("sans code"))).toBe(false);
   });
 });
 

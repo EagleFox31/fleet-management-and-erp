@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
 import { useToast } from "@/hooks/use-toast";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { CheckCircle, AlertCircle, Upload, Database } from "lucide-react";
 
 export default function ImportBackup() {
@@ -30,9 +31,12 @@ export default function ImportBackup() {
     },
   });
 
+  // Une restauration vide puis réécrit la base : un second clic ne doit pas en lancer une deuxième.
+  const submitImport = useSingleFlightMutate(importMutation.mutate);
+
   const handleImport = () => {
     if (confirm("Êtes-vous sûr de vouloir importer les données de sauvegarde ? Cela remplacera les données existantes.")) {
-      importMutation.mutate();
+      submitImport();
     }
   };
 

@@ -123,6 +123,7 @@ Entrées ajoutées à la fin, une par lot.
 - **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
 - **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 2/4 rouges.
 - **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+
 ## 2026-11-04T14:18:11+01:00 — suivi #297 : plafond de 50 testé, repli d'emitAlerts, liens carburant repris
 - **Statut** : fait, PR brouillon
 - **Quoi** :
@@ -143,3 +144,14 @@ Entrées ajoutées à la fin, une par lot.
   - `npm run test:integration -- tests/integration/alert-work-orders-beyond-50.test.ts tests/integration/alert-emit-fallback-relink.test.ts` ;
   - preuves rouges : le test des 50 échoue avec l'alert-service d'avant #297, le repli échoue avec celui de #297 (0 au lieu de 2).
 - **Reste / risques** : la reprise des liens ne touche que le motif exact `/vehicles/<n>/fuel` ; `/vehicles/<n>/fuel-cards` et les autres liens restent intacts.
+
+## 2026-11-04T15:07:03+01:00 — relecture #302 : coupe-circuit de la reprise, envoi unique de l'import, correction du journal
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - `alert-service.ts` : la reprise objet par objet d'un lot en échec s'arrête après 3 échecs consécutifs (`MAX_CONSECUTIVE_RETRY_FAILURES`), ou dès une erreur de connexion (`isConnectionError` : ECONNREFUSED, ECONNRESET, ETIMEDOUT, 57P01-03, 08xxx, cause comprise). Le récapitulatif compte les candidates abandonnées (`abandoned`, `lost`).
+  - `import-backup.tsx` : l'envoi passe par `useSingleFlightMutate` (AGENTS §10).
+- **Comment** : la boucle de reprise rompt sur la condition et calcule le reste ; aucun journal par candidate.
+- **Pourquoi** : base tombée avec N candidates, la reprise faisait N tentatives vaines. Une restauration lancée deux fois par double clic réécrit la base deux fois.
+- **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-emit-fallback-relink.test.ts` (au plus 1 + 3 appels, 2 sur ECONNREFUSED), `npx vitest run tests/unit/client/import-backup-single-flight.test.ts`.
+- **Correction de ce journal** : dans l'entrée du suivi #287, la ligne « 2/4 rouges » a été corrigée sur place depuis « 3/4 ». C'était une erreur de méthode : les corrections s'ajoutent désormais en fin de fichier, comme celle-ci. La ligne vide manquante avant le titre de l'entrée de 14:18 a été ajoutée.
+- **Reste / risques** : aucun.
