@@ -78,6 +78,18 @@ describe("production-guard (e2e)", () => {
     expect(() => assertNotProductionDatabase(env({}), () => `DATABASE_URL=${PROD}\r\n`)).toThrow(/production/);
   });
 
+  it("refuse un DATABASE_URL en double dans le .env : la première ligne lue n'est pas celle que Node garde", () => {
+    // cas du 4 novembre 2026, inversé : test d'abord, production ensuite, node --env-file viserait la production
+    const dotenv = `DATABASE_URL=${TEST}\r\nSESSION_SECRET=x\r\nDATABASE_URL=${PROD}\r\n`;
+    expect(() => databaseUrlFromDotenv(dotenv)).toThrow(/2 fois/);
+    expect(() => assertNotProductionDatabase(env({}), () => dotenv)).toThrow(/2 fois/);
+    expect(() => databaseUrlFromDotenv(`DATABASE_URL=${TEST}\nexport DATABASE_URL=${PROD}\n`)).toThrow(/2 fois/);
+    // une ligne commentée et les clés voisines ne comptent pas
+    expect(databaseUrlFromDotenv(`# DATABASE_URL=${PROD}\nDATABASE_URL_TEST=${PROD}\nDATABASE_URL=${TEST}\n`)).toBe(TEST);
+    // la variable d'environnement prime : le .env n'est pas lu
+    expect(() => assertNotProductionDatabase(env({ DATABASE_URL: TEST }), () => dotenv)).not.toThrow();
+  });
+
   it("la variable d'environnement prime sur le .env", () => {
     expect(() => assertNotProductionDatabase(env({ DATABASE_URL: TEST }), () => `DATABASE_URL=${PROD}`)).not.toThrow();
   });
