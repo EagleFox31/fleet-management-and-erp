@@ -48,13 +48,6 @@ export function useTopSuppliers(limit?: number) {
   });
 }
 
-export function useSupplierInvoices(supplierId: number | null) {
-  return useQuery<any>({
-    queryKey: ['/api/suppliers', supplierId, 'invoices'],
-    enabled: !!supplierId && supplierId > 0,
-  });
-}
-
 export function useBillingRefresh() {
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/suppliers'] });

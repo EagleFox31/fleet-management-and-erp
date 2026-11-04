@@ -41,20 +41,6 @@ export function useVehicles() {
   };
 }
 
-export function useVehicle(id: number | null) {
-  return useQuery<any>({
-    queryKey: ['/api/vehicles', id],
-    enabled: !!id && id > 0,
-  });
-}
-
-export function useVehicleByRegistration(registration: string | null) {
-  return useQuery<any>({
-    queryKey: ['/api/vehicles/registration', registration],
-    enabled: !!registration,
-  });
-}
-
 export function useCreateVehicle() {
   return useMutation({
     mutationFn: async (vehicleData: any) => {
