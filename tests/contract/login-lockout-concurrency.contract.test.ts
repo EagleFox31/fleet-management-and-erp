@@ -106,6 +106,19 @@ describe("verrouillage : rafale de requêtes simultanées", { timeout: 120000 },
     expect((await change(TEST_USER_PASSWORD)).status, "le bon mot de passe reste refusé").toBe(429);
   });
 
+  it(`mot de passe, corps invalide : ${BURST} en parallèle ne créent aucune ligne de compteur, le compte reste ouvert`, async () => {
+    const created = await createTestUser({ role: "technician" });
+    ids.userIds.push(created.id);
+    const candidates = [storedLockoutKey(created.username)];
+    keys.push(...candidates);
+    const bodies = [{ username: created.username }, { username: created.username, password: 42 }, { username: created.username, password: "" }];
+    const results = await Promise.all(Array.from({ length: BURST }, (_, i) => post("/api/auth/login", bodies[i % bodies.length])));
+    expect(tally(results.map((r) => r.status))).toEqual({ 400: BURST });
+    const rows = await pool.query("SELECT 1 FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [candidates]);
+    expect(rows.rowCount, "aucune ligne de compteur").toBe(0);
+    expect((await post("/api/auth/login", { username: created.username, password: TEST_USER_PASSWORD })).status).toBe(200);
+  });
+
   it("limite par IP : succès intercalés sans effet, X-Forwarded-For forgé ignoré au-delà du premier saut", async () => {
     process.env.AUTH_IP_FAILURE_MAX = "3";
     // Adresse propre au test (dernier saut, celui que le proxy de confiance ajoute).

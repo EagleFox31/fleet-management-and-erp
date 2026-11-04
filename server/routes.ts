@@ -1,6 +1,7 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contracts/auth-login";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
 import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
@@ -87,12 +88,8 @@ const log = moduleLogger("routes");
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
-/** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
-const loginBodySchema = z.object({
-  username: z.string().min(1).max(255),
-  password: z.string().min(1).max(1024),
-  rememberMe: z.unknown().optional(),
-});
+/** Corps de POST /api/auth/login : schéma partagé avec la validation montée avant le compteur d'essais. */
+const loginBodySchema = loginRequestSchema;
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -191,7 +188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // bcrypt.compare pour un compte existant seulement, d'où un oracle d'énumération (#256).
       const parsed = loginBodySchema.safeParse(req.body);
       if (!parsed.success) {
-        return res.status(400).json({ message: "Nom d'utilisateur et mot de passe requis" });
+        return res.status(400).json({ message: LOGIN_BODY_INVALID_MESSAGE });
       }
       const { username, password, rememberMe } = parsed.data;
 
