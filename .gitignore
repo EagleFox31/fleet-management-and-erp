@@ -49,3 +49,6 @@ tmp-*.py
 uploads/**
 !uploads/**/
 !uploads/**/.gitkeep
+
+# Fichier temporaire de loadConfigFromFile (vite 5), supprimé aussitôt (server/vite.ts)
+*.timestamp-*.mjs
