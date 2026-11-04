@@ -264,3 +264,14 @@ Modèle et règles : `docs/journal/README.md`.
 - Quoi : la prévention de la leçon « `/:id` avant un littéral frère » finissait par « confiée à la session de. », une phrase qui se lisait comme tronquée.
 - Comment : elle nomme maintenant la garde (`route-order-hygiene.test.ts`, PR séparée) et ce qu'elle vérifie.
 - Pourquoi : une prévention doit être vérifiable, pas renvoyée à une personne.
+
+## 2026-11-04T13:01:58+01:00 — #280 : query morte retirée, garde-fou queryKey contre routes servies (#282)
+
+- Quoi : `useWarehouse` interrogeait `/api/parts/by-supplier`, une route qui n'existe pas (la vraie est `/api/warehouse/parts-by-supplier`). La donnée n'était lue par aucun écran : chaque montage produisait un 404, réessayé.
+- Comment :
+  - la query et son bloc `partsBySupplier` sont retirés ;
+  - `tests/support/query-route-scan.ts` croise les URL des `queryKey` littérales qui utilisent la queryFn par défaut avec les GET servis (routeurs montés de `server/api/`, `app.get` de `routes.ts`, squelettes `createStubRouter`) ;
+  - `tests/unit/client/query-keys-routes.test.ts` gèle les 15 écarts existants, en égalité stricte ;
+  - limites documentées en tête du scanner, dont le masquage de §9, laissé à `route-order-scan.ts`.
+- Pourquoi : une clé qui ne vise aucune route échoue en silence (404 réessayé, écran vide), et rien ne la signalait.
+- Preuve : rouge sur l'origine (by-supplier), vert après ; 3/3 ; tsc 0 erreur ; unitaires 2212/2212.

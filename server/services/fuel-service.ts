@@ -89,6 +89,11 @@ export class FuelService {
    * Supprime un enregistrement de carburant - COPIÉ depuis storage-backup.ts
    */
   async deleteFuelRecord(id: number, actor: { id: number; role: string }): Promise<boolean> {
+    // Acteur absent ou malformé : appel interne sans identité. 401 (non identifié) plutôt qu'un TypeError 500.
+    if (!actor || typeof actor.role !== "string" || !Number.isInteger(actor.id)) {
+      log.error({ fuelRecordId: id }, "deleteFuelRecord appelé sans acteur identifié");
+      throw new AppError(401, "Authentification requise pour supprimer un plein.");
+    }
     // Supprimer un débit ou une recharge change le solde : même verrou que l'écriture. La décision
     // (ligne vivante ? a-t-elle mouvementé la carte ?) est prise sous ce verrou, dans la transaction.
     return db.transaction(async (tx) => {
