@@ -49,6 +49,8 @@ async function applyPerformanceIndexes() {
     `CREATE INDEX IF NOT EXISTS idx_work_orders_status_created_at ON work_orders (status, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_work_orders_vehicle_status ON work_orders (vehicle_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_work_orders_technician_status ON work_orders (technician_id, status)`,
+    // Carburant : historique par véhicule (triggers d'alerte et cycle d'alertes, #287 / #281)
+    `CREATE INDEX IF NOT EXISTS idx_fuel_records_vehicle_date_id ON fuel_records (vehicle_id, date, id)`,
 
     // Part requirements
     `CREATE INDEX IF NOT EXISTS idx_part_requirements_work_order_status ON part_requirements (work_order_id, status)`,
