@@ -93,7 +93,7 @@ describe("triggers d'alertes carburant", { timeout: 120_000 }, () => {
           title: "Consommation carburant élevée",
           message: `Véhicule ${v.plate} - Consommation +100% vs moyenne (16.0 L/100 km)`,
           priority: "high",
-          link: `/vehicles/${v.id}/fuel`,
+          link: `/vehicles/${v.id}`,
           topic: "fuel",
           dedupe_key: `fuel-consumption:${lastId}`,
         },
