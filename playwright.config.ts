@@ -22,6 +22,9 @@ const workers = Number.isFinite(configuredWorkers) && configuredWorkers > 0 ? co
 
 export default defineConfig({
   testDir: "./e2e",
+  // Démos par profil (e2e/demo, seed e2e/demo/seed-demo.ts) : hors de la suite e2e standard,
+  // lancées avec E2E_DEMO=1 (voir e2e/demo/README.md).
+  testIgnore: process.env.E2E_DEMO === "1" ? [] : ["**/demo/**"],
   // Précharge l'app une fois hors test: en dev, la compilation Vite initiale
   // dépasse le timeout par test. Voir e2e/global-setup.ts.
   globalSetup: "./e2e/global-setup.ts",
