@@ -57,7 +57,7 @@ import { moduleLogger } from "./lib/logger";
 import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
 import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
-import { revokeOtherUserSessions, revokeUserAccess } from "./lib/user-sessions";
+import { closeOtherUserConnections, deleteOtherUserSessions, revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
@@ -918,29 +918,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Hash the new password with bcrypt
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Update the password (also upgrades legacy SHA-256 to bcrypt)
-      // updateUser avale l'erreur et renvoie undefined : sans ce contrôle, une panne répondait
-      // « modifié » alors que l'ancien mot de passe restait en place.
-      const updated = await storage.updateUser(userId, { password: hashedPassword });
-      if (!updated) {
-        log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
-        return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      // Tout ou rien : le nouveau hash (also upgrades legacy SHA-256 to bcrypt) et la révocation des autres
+      // sessions partent dans la même transaction. Un mot de passe changé (après compromission, par exemple)
+      // ne doit pas laisser les autres cookies valides, et un échec ne doit rien changer.
+      // UPDATE conditionné à l'ancien hash lu : un changement concurrent depuis une autre session du compte
+      // touche 0 ligne (409), au lieu d'écraser le gagnant avec un mot de passe vérifié sur l'ancien.
+      const changed = await db.transaction(async (tx) => {
+        const rows = await tx
+          .update(users)
+          .set({ password: hashedPassword })
+          .where(and(eq(users.id, userId), eq(users.password, user.password), isNull(users.deletedAt)))
+          .returning({ id: users.id });
+        if (rows.length === 0) return false;
+        await deleteOtherUserSessions(tx, userId, req.sessionID);
+        return true;
+      });
+      if (!changed) {
+        return next(new AppError(409, "Le mot de passe a été modifié entre-temps. Reconnectez-vous."));
       }
+      // Sockets fermées après le commit seulement.
+      closeOtherUserConnections(userId, req.sessionID, "password_changed");
 
-      // Un mot de passe changé (après compromission, par exemple) ne doit pas laisser les autres cookies valides.
-      // Le hash est écrit : une erreur 5xx serait réécrite en message générique et ferait croire à un échec.
-      // Succès partiel, dit à l'utilisateur ; l'incident part au journal avec sa référence.
-      try {
-        await revokeOtherUserSessions(userId, req.sessionID, "password_changed");
-      } catch (revokeErr) {
-        log.error({ err: revokeErr, event: "Revoke other sessions failed", userId, requestId: req.requestId }, "Revoke other sessions failed");
-        return res.status(200).json({
-          message: `Mot de passe modifié, mais la déconnexion de vos autres appareils a échoué. Reconnectez-vous avec le nouveau mot de passe sur ces appareils. Référence : ${req.requestId}`,
-          otherSessionsRevoked: false,
-        });
-      }
-
-      return res.status(200).json({ message: "Mot de passe modifié avec succès", otherSessionsRevoked: true });
+      return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {
       log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });

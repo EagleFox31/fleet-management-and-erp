@@ -63,17 +63,11 @@ export default function ProfilePage() {
 
     setIsChangingPassword(true);
     try {
-      const res = await apiRequest("POST", "/api/users/change-password", {
+      await apiRequest("POST", "/api/users/change-password", {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword,
       });
-      const body = await res.json().catch(() => ({}));
-      // Succès partiel : mot de passe changé, mais les autres appareils n'ont pas été déconnectés.
-      if (body?.otherSessionsRevoked === false) {
-        toast({ title: "Mot de passe modifié", description: body.message });
-      } else {
-        toast({ title: "Succès", description: "Mot de passe modifié avec succès" });
-      }
+      toast({ title: "Succès", description: "Mot de passe modifié avec succès" });
       setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (error: any) {
       toast({ title: "Erreur", description: userMessageOf(error, "Impossible de modifier le mot de passe"), variant: "destructive" });

@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
-import { revokeOtherUserSessions } from "../../server/lib/user-sessions";
+import { closeOtherUserConnections, deleteOtherUserSessions } from "../../server/lib/user-sessions";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
 
@@ -50,13 +50,27 @@ describe("revokeOtherUserSessions", { timeout: 60000 }, () => {
     const close = vi.fn();
     (global as { closeUserConnections?: unknown }).closeUserConnections = close;
 
-    expect(await revokeOtherUserSessions(userId, sid("keep"), "password_changed")).toBe(2);
+    expect(await deleteOtherUserSessions(db, userId, sid("keep"))).toBe(2);
     expect(await remaining()).toEqual([sid("keep"), sid("other")]);
+    expect(close, "les sockets ne sont fermées qu'après le commit").not.toHaveBeenCalled();
+    closeOtherUserConnections(userId, sid("keep"), "password_changed");
     expect(close).toHaveBeenCalledWith(userId, "password_changed", sid("keep"));
   });
 
+  it("transaction annulée : aucune session supprimée", async () => {
+    await insertSession("tx", userId);
+    await expect(
+      db.transaction(async (tx) => {
+        expect(await deleteOtherUserSessions(tx, userId, sid("keep"))).toBe(1);
+        throw new Error("annulation");
+      }),
+    ).rejects.toThrow("annulation");
+    expect(await remaining()).toContain(sid("tx"));
+    await db.execute(sql`DELETE FROM "session" WHERE sid = ${sid("tx")}`);
+  });
+
   it("second appel : 0 suppression (idempotent)", async () => {
-    expect(await revokeOtherUserSessions(userId, sid("keep"), "password_changed")).toBe(0);
+    expect(await deleteOtherUserSessions(db, userId, sid("keep"))).toBe(0);
     expect(await remaining()).toEqual([sid("keep"), sid("other")]);
   });
 });

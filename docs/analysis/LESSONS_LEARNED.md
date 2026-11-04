@@ -2508,3 +2508,17 @@ Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans
   autre compte intact) et `tests/integration/revoke-other-user-sessions.test.ts` (second appel = 0 suppression).
 - **Leçon** : toute modification d'un secret d'authentification (mot de passe, PIN) révoque les autres sessions du
   compte et ferme leurs sockets ; la session courante est exclue par son identifiant, jamais par un filtre sur l'utilisateur seul.
+
+## 4 novembre 2026 : un état partiel ne passe pas par une erreur 5xx
+
+- **Contexte** : changement de mot de passe, première version : hash écrit, puis révocation des autres sessions qui
+  pouvait échouer. Une AppError 5xx aurait fait croire à un échec du changement.
+- **Cause racine** : `error-handler.ts:97` remplace toujours le message d'une 5xx par le message générique ;
+  l'état partiel ne peut donc pas être annoncé par ce canal. Et deux écritures séparées laissent un état partiel.
+- **Prévention vérifiable** : le hash et le DELETE des sessions sont dans une seule transaction ; le contrat
+  `change-password-revoke-sessions` fait échouer le DELETE par un espion et vérifie : réponse >= 500, hash
+  inchangé, ancien mot de passe valable, autre session valide. L'UPDATE conditionné à l'ancien hash est couvert
+  par le contrat de deux changements concurrents (200 + 409).
+- **Leçon** : un état partiel à annoncer à l'utilisateur ne passe jamais par une AppError 5xx. Il passe par une
+  transaction (tout ou rien) ou par une réponse 2xx/4xx explicite. Les effets non transactionnels (sockets) se
+  déclenchent après le commit.
