@@ -19,8 +19,6 @@ import { describe, expect, it } from "vitest";
 const KNOWN_AUTHENTICATE_ONLY = [
   // Contrôle de rôle et de propriétaire fait dans le handler (tests : vehicles-lists-client-scope).
   "get /api/vehicles/:id",
-  // Contrôle de rôle fait dans le handler (lecture de l'utilisateur).
-  "get /api/maintenance-schedules/vehicle/:vehicleId",
   // Lecture de la session d'acquisition : cloison par propriétaire de la session (workflow-vehicle-acquisition). Les écritures portent isWorkflowDocumentWriter (R2).
   "get /api/workflows/vehicle-acquisition/:sessionId",
 ];
