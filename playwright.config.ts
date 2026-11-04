@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { assertNotProductionDatabase } from "./e2e/helpers/production-guard";
+import { isRecording, RECORD_VIEWPORT } from "./e2e/helpers/recording";
 
 // Refuse de démarrer si la base visée est la production (voir e2e/README.md).
 assertNotProductionDatabase();
@@ -15,8 +16,8 @@ const configuredWorkers = Number(process.env.E2E_WORKERS ?? "1");
 // E2E_RECORD=1 : mode enregistrement, pour un montage vidéo par fonctionnalité.
 // Vidéo et capture de chaque test (succès compris), à la taille du viewport, sans trace.
 // Un dossier par test : test-results/recordings/<spec>-<titre du test>-chromium/.
-const record = process.env.E2E_RECORD === "1";
-const viewport = { width: 1280, height: 720 };
+const record = isRecording();
+const viewport = { ...RECORD_VIEWPORT };
 const workers = Number.isFinite(configuredWorkers) && configuredWorkers > 0 ? configuredWorkers : 1;
 
 export default defineConfig({
