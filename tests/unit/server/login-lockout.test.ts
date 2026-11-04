@@ -86,3 +86,21 @@ describe("loginLockoutGuard", () => {
     }
   });
 });
+
+describe("MemoryLockoutStore.reserve", () => {
+  it("refuse sans modifier l'etat tant que le verrou est actif, puis repart de zero apres expiration", async () => {
+    const store = new MemoryLockoutStore();
+    let last = { allowed: true } as Awaited<ReturnType<MemoryLockoutStore["reserve"]>>;
+    for (let i = 0; i < cfg.maxAttempts; i++) last = await store.reserve("bob", t0, cfg);
+    expect(last.allowed).toBe(true);
+    const locked = await store.reserve("bob", t0, cfg);
+    expect(locked.allowed).toBe(false);
+    const again = await store.reserve("bob", new Date(t0.getTime() + 60_000), cfg);
+    expect(again.allowed).toBe(false);
+    expect(again.state).toEqual(locked.state);
+    const later = new Date(t0.getTime() + (cfg.lockMinutes + 1) * 60_000);
+    const fresh = await store.reserve("bob", later, cfg);
+    expect(fresh.allowed).toBe(true);
+    expect(fresh.state.failedCount).toBe(1);
+  });
+});
