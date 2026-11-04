@@ -3,6 +3,13 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
 import { validateBody } from "./middleware/validate-body";
+import { toggleUserRequestSchema } from "@shared/contracts/admin-users";
+import {
+  createMaintenanceScheduleRequestSchema,
+  dateMaintenanceTriggerRequestSchema,
+  type CreateMaintenanceScheduleRequest,
+  type DateMaintenanceTriggerRequest,
+} from "@shared/contracts/maintenance-schedules";
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
@@ -732,7 +739,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH /api/admin/users/:id/toggle - Activer/désactiver un utilisateur
-  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, async (req, res) => {
+  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { isActive } = req.body;
@@ -760,12 +767,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await revokeUserAccess(id, "deactivated_by_admin");
       }
 
+      // Ni le hash du mot de passe ni celui du PIN ne quittent le serveur.
+      const { password: _password, pin: _pin, ...safeUser } = updatedUser;
+
       return res.status(200).json({ 
         message: isActive ? "Utilisateur activé" : "Utilisateur désactivé",
-        user: updatedUser
+        user: safeUser
       });
     } catch (error) {
-      console.error("Toggle user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "activation ou désactivation d'un utilisateur en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1355,48 +1365,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/maintenance-schedules", isWorkshopManager, async (req, res, next) => {
+  app.post("/api/maintenance-schedules", isWorkshopManager, validateBody(createMaintenanceScheduleRequestSchema), async (req, res, next) => {
     try {
-      // Valider les données d'entrée
-      const validationSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        title: z.string().min(1),
-        description: z.string().optional(),
-        frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'mileage']),
-        frequencyValue: z.number().min(1),
-        scheduledDate: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}/, "Date invalide (AAAA-MM-JJ)")
-          .refine((value) => !Number.isNaN(Date.parse(value)), "Date invalide (AAAA-MM-JJ)"),
-        scheduledMileage: z.number().optional(),
-        isActive: z.boolean().default(true)
-      });
-
-      const scheduleData = validationSchema.parse(req.body);
+      const scheduleData = req.body as CreateMaintenanceScheduleRequest;
       if (!(await storage.getVehicle(scheduleData.vehicleId))) {
         return next(new AppError(404, "Véhicule introuvable : la planification n'a pas été créée."));
       }
-      
+
       // Utiliser le service pour créer la planification et générer automatiquement l'OT
       const schedule = await preventiveMaintenanceService.createMaintenanceSchedule(scheduleData);
-      
+
       return res.status(201).json(schedule);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Données de planification invalides",
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message
-          }))
-        });
-      }
-      
-      console.error("Create maintenance schedule error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la création de la planification de maintenance",
-        details: error instanceof Error ? error.message : "Erreur inconnue"
-      });
+      return next(new AppError(500, "Erreur lors de la création de la planification de maintenance", { cause: error }));
     }
   });
 
@@ -4310,22 +4291,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Endpoint pour déclencher une action depuis les alertes de maintenance
-  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, async (req, res) => {
+  app.post("/api/test-date-maintenance", isDocumentRenewalWriter, validateBody(dateMaintenanceTriggerRequestSchema), async (req, res) => {
     try {
-      const payloadSchema = z.object({
-        vehicleId: z.number().int().positive(),
-        alertType: z.enum(['maintenance', 'insurance', 'inspection', 'license'])
-      });
-      const parsedPayload = payloadSchema.safeParse(req.body);
-
-      if (!parsedPayload.success) {
-        return res.status(400).json({
-          message: "Payload invalide: vehicleId et alertType sont requis",
-          errors: parsedPayload.error.errors
-        });
-      }
-
-      const { vehicleId, alertType } = parsedPayload.data;
+      const { vehicleId, alertType } = req.body as DateMaintenanceTriggerRequest;
       const createdBy: number | undefined = req.session?.userId ?? undefined;
 
       if (alertType === 'maintenance') {
