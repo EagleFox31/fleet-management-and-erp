@@ -1,4 +1,5 @@
 import { createServer, type Server } from "http";
+import bcrypt from "bcryptjs";
 import session from "express-session";
 import { eq, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -46,6 +47,23 @@ async function settledFailedCount(): Promise<number> {
   return failedCount();
 }
 
+/**
+ * Coupure de la base sur la lecture de la ligne complète d'un compte (`db.select().from(users)`,
+ * celle de `storage.getUserByUsername`), les autres requêtes passent. La panne est simulée sous
+ * storage, pas sur storage : un mock qui rejette à la place de `getUserByUsername` passait même
+ * quand la vraie méthode avalait l'erreur et renvoyait `undefined` (garantie fictive, #260).
+ */
+function failUserRowLookup(error: Error): void {
+  const realSelect = db.select.bind(db) as (...args: unknown[]) => { from: (table: unknown) => unknown };
+  vi.spyOn(db, "select").mockImplementation(((...args: unknown[]) => {
+    const query = realSelect(...args);
+    if (args.length > 0) return query;
+    const realFrom = query.from.bind(query);
+    query.from = (table: unknown) => (table === users ? { where: () => Promise.reject(error) } : realFrom(table));
+    return query;
+  }) as unknown as typeof db.select);
+}
+
 beforeAll(async () => {
   server = createServer(await getContractApp());
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -71,7 +89,7 @@ afterAll(async () => {
 describe("POST /api/auth/login, base indisponible", { timeout: 60000 }, () => {
   it("répond 503 au contrat d'erreur, sans parler d'identifiants ni compter d'échec", async () => {
     const before = await failedCount();
-    vi.spyOn(storage, "getUserByUsername").mockRejectedValueOnce(new Error("Connection terminated unexpectedly"));
+    failUserRowLookup(new Error("Connection terminated unexpectedly"));
 
     const res = await login(TEST_USER_PASSWORD);
 
@@ -129,4 +147,31 @@ describe("POST /api/auth/login, corps mal typé", { timeout: 60000 }, () => {
       expect(lookup, "aucune recherche de compte avant validation").not.toHaveBeenCalled();
     });
   }
+});
+
+/**
+ * Oracle de temps (#260) : un nom inconnu répondait sans calcul bcrypt, donc plus vite qu'un compte
+ * existant. Le handler compare désormais à un hash factice : exactement une comparaison bcrypt
+ * dans les deux cas, même réponse.
+ */
+describe("POST /api/auth/login, même travail pour un nom inconnu", { timeout: 60000 }, () => {
+  it("une seule comparaison bcrypt pour un compte existant comme pour un nom inconnu", async () => {
+    const compare = vi.spyOn(bcrypt, "compare");
+
+    const known = await login("mauvais-mot-de-passe");
+    const knownCalls = compare.mock.calls.length;
+    compare.mockClear();
+    const unknown = await login("mauvais-mot-de-passe", `inconnu-${Date.now().toString(36)}`);
+
+    expect(known.status).toBe(401);
+    expect(unknown.status).toBe(401);
+    expect(JSON.parse(unknown.text).message).toBe(JSON.parse(known.text).message);
+    expect(knownCalls, "compte existant").toBe(1);
+    expect(compare.mock.calls.length, "nom inconnu").toBe(1);
+  });
+
+  it("la recherche du compte en panne n'est jamais lue comme un nom inconnu", async () => {
+    failUserRowLookup(new Error("Connection terminated unexpectedly"));
+    await expect(storage.getUserByUsername(username)).rejects.toThrow("Connection terminated");
+  });
 });

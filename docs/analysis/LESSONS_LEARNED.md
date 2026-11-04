@@ -2293,3 +2293,30 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un garde-fou de base se place à la **connexion** (`server/db.ts`), pas seulement dans les runners de test : tout point d'entrée qui construit un pool en hérite.
 - Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
 - Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
+
+## 2026-11-04 — Connexion : oracle de temps et mock qui rejette là où le code avale (#260)
+
+### Contexte
+Audit de sécurité de #256 (oracle du code HTTP sur `POST /api/auth/login`, déjà fermé).
+
+### Cause racine
+- Oracle de temps : pour un nom inconnu ou supprimé, le handler répondait 401 sans aucun calcul bcrypt (~70 ms de moins qu'un compte existant). La latence suffisait à énumérer les comptes.
+- Garantie fictive : le contrat de #254 simulait la panne par `vi.spyOn(storage, "getUserByUsername").mockRejectedValueOnce(...)`. Or la vraie méthode avalait l'erreur et renvoyait `undefined` : une vraie coupure donnait 401 (« identifiants », échec compté par le garde) et le test restait vert. Même défaut pour les contrôles d'unicité du nom (création, modification) : une panne y valait « nom libre ».
+- Les journaux de connexion portaient le nom saisi en clair ; un mot de passe tapé dans le champ identifiant y finissait.
+
+### Classification
+Sécurité (énumération de comptes, fuite de secret dans les journaux) + test à garantie fictive.
+
+### Résolution
+- Comparaison à un hash factice de coût 10 (`LOGIN_DUMMY_HASH`) quand le compte est inconnu ou supprimé.
+- `storage.getUserByUsername` journalise par `storageLog` et relance l'erreur.
+- Journaux de connexion : `usernameRef` (empreinte SHA-256 tronquée) ou `userId`, jamais le nom saisi.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : espion sur `bcrypt.compare`, exactement 1 appel pour un compte existant comme pour un nom inconnu, même réponse ; panne simulée **sous** storage (`db.select().from(users)`), et `getUserByUsername` doit rejeter.
+- Mutation rejouée : sans le hash factice ni la relance, 4 tests échouent.
+
+### Règle Projet (obligatoire)
+- Fermer l'oracle du code HTTP ne ferme pas celui du temps : chaque branche d'échec d'authentification fait le même travail coûteux.
+- Un mock se place sous la couche qui gère l'erreur, jamais à sa place : simuler l'échec de la dépendance, pas le résultat que l'on espère du code testé.
+- Une méthode de lecture qui sert à décider (existence, unicité, droit) ne transforme pas une panne en « absent ».
