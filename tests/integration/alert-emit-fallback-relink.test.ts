@@ -3,7 +3,7 @@ import { inArray } from "drizzle-orm";
 import { alerts } from "../../shared/schema";
 import { db, pool } from "../../server/db";
 import { relinkLegacyFuelAlerts } from "../../server/init-database";
-import { alertService, isConnectionError, MAX_CONSECUTIVE_RETRY_FAILURES } from "../../server/services/alert-service";
+import { alertService, emitLossContext, isConnectionError, MAX_CONSECUTIVE_RETRY_FAILURES } from "../../server/services/alert-service";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
@@ -78,9 +78,37 @@ describe("emitAlerts : coupe-circuit sur la reprise", () => {
     expect(result).toEqual({ created: 0, calls: 1 + MAX_CONSECUTIVE_RETRY_FAILURES });
   });
 
-  it("erreur de connexion : arrêt dès la première reprise", async () => {
+  it("lot entier en échec sur une erreur de connexion : aucune reprise unitaire", async () => {
     const result = await attempts(Object.assign(new Error("connexion refusée"), { code: "ECONNREFUSED" }));
-    expect(result).toEqual({ created: 0, calls: 2 });
+    expect(result).toEqual({ created: 0, calls: 1 });
+  });
+
+  it("erreur de connexion en cours de reprise : arrêt dès cette reprise", async () => {
+    const service = alertService as any;
+    const spy = vi
+      .spyOn(service, "emitAlertBatch")
+      .mockRejectedValueOnce(new Error("lot en échec"))
+      .mockRejectedValue(Object.assign(new Error("connexion perdue"), { code: "ECONNRESET" }));
+    try {
+      expect(await service.emitAlerts(candidates)).toBe(0);
+      expect(spy.mock.calls.length).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("récapitulatif : échantillons de 5 au plus, échouées et abandonnées", () => {
+    const err = new Error("x");
+    const brief = (list: typeof candidates) => list.map((c) => ({ title: c.title, type: c.type }));
+    expect(emitLossContext(err, candidates, [], 0)).toMatchObject({
+      failed: 0, abandoned: 10, lost: 10, candidates: 10, sample: [], abandonedSample: brief(candidates.slice(0, 5)),
+    });
+    expect(emitLossContext(err, candidates, candidates.slice(0, 1), 1)).toMatchObject({
+      failed: 1, abandoned: 9, lost: 10, sample: brief(candidates.slice(0, 1)), abandonedSample: brief(candidates.slice(1, 6)),
+    });
+    expect(emitLossContext(err, candidates, candidates.slice(0, 3), 10)).toMatchObject({
+      failed: 3, abandoned: 0, lost: 3, abandonedSample: [],
+    });
   });
 
   it("reconnaît les erreurs de connexion, y compris enveloppées", () => {

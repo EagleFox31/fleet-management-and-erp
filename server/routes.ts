@@ -595,7 +595,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Les écrans renvoient la fiche entière (id, createdAt, loginCount...) :
       // le schéma d'insertion écarte ces champs serveur et contrôle le reste.
       // Avant, createdAt en chaîne faisait échouer l'écriture, avalée en 404.
-      const { password, ...rest } = req.body ?? {};
+      // `pin` sort du schéma d'insertion : il ne s'écrit que haché, après validation.
+      const { password, pin, ...rest } = req.body ?? {};
       const userData = insertUserSchema.partial().parse(rest);
 
       // Le stockage avale l'erreur d'unicité : la vérifier ici pour un 409 lisible.
@@ -613,11 +614,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userData.password = await bcrypt.hash(password, 10);
       }
 
+      // PIN chauffeur : 4 chiffres (même règle que la création de compte chauffeur), haché ; vide, il est ignoré
+      if (pin !== undefined && pin !== null && String(pin).trim() !== "") {
+        if (!/^\d{4}$/.test(String(pin))) {
+          return next(new AppError(400, "Le PIN doit comporter exactement 4 chiffres."));
+        }
+        userData.pin = await bcrypt.hash(String(pin), 10);
+      }
+
       if (Object.keys(userData).length === 0) {
         return next(new AppError(400, "Aucune modification à enregistrer."));
       }
 
-      const updatedUser = await storage.updateUser(id, userData);
+      // Secret modifié : l'écriture de la fiche et la révocation des sessions du compte visé partent dans la
+      // même transaction (tout ou rien). L'admin qui modifie son propre compte garde sa session courante.
+      const secretChanged = userData.password !== undefined || userData.pin !== undefined;
+      const keepSid = id === req.user!.id ? req.sessionID : null;
+      let updatedUser;
+      if (secretChanged) {
+        let revoked = 0;
+        updatedUser = await db.transaction(async (tx) => {
+          const rows = await tx.update(users).set(userData).where(and(eq(users.id, id), isNull(users.deletedAt))).returning();
+          if (rows.length === 0) return undefined;
+          revoked = await deleteOtherUserSessions(tx, id, keepSid);
+          return rows[0];
+        });
+        if (updatedUser) {
+          // Après le commit seulement. La fiche est écrite : un échec de fermeture des sockets ne change pas la réponse.
+          log.info({ userId: id, revoked, requestId: req.requestId, reason: "secret_changed" }, "Sessions du compte révoquées");
+          try {
+            closeOtherUserConnections(id, keepSid, "secret_changed");
+          } catch (err) {
+            log.error({ err, userId: id, requestId: req.requestId }, "Fermeture des sockets impossible après changement de secret");
+          }
+        }
+      } else {
+        updatedUser = await storage.updateUser(id, userData);
+      }
       
       if (!updatedUser) {
         return res.status(404).json({ message: "Utilisateur non trouvé" });
@@ -924,15 +957,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .set({ password: hashedPassword })
           .where(and(eq(users.id, userId), eq(users.password, user.password), isNull(users.deletedAt)))
           .returning({ id: users.id });
-        if (rows.length === 0) return false;
-        await deleteOtherUserSessions(tx, userId, req.sessionID);
-        return true;
+        if (rows.length === 0) return null;
+        return await deleteOtherUserSessions(tx, userId, req.sessionID);
       });
-      if (!changed) {
+      if (changed === null) {
         return next(new AppError(409, "Le mot de passe a été modifié entre-temps. Reconnectez-vous."));
       }
-      // Sockets fermées après le commit seulement.
-      closeOtherUserConnections(userId, req.sessionID, "password_changed");
+      // Après le commit seulement. Le hash est écrit : un échec de fermeture des sockets ne change pas la réponse.
+      log.info({ userId, revoked: changed, requestId: req.requestId, reason: "password_changed" }, "Autres sessions du compte révoquées");
+      try {
+        closeOtherUserConnections(userId, req.sessionID, "password_changed");
+      } catch (err) {
+        log.error({ err, userId, requestId: req.requestId }, "Fermeture des sockets impossible après changement de mot de passe");
+      }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {

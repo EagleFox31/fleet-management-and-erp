@@ -2793,6 +2793,13 @@ Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelac
 - **Leçon** : toute modification d'un secret d'authentification (mot de passe, PIN) révoque les autres sessions du
   compte et ferme leurs sockets ; la session courante est exclue par son identifiant, jamais par un filtre sur l'utilisateur seul.
 
+## 4 novembre 2026 : le PATCH admin d'un utilisateur écrivait le PIN sans le hacher
+
+- **Contexte** : `PATCH /api/users/:id` hachait `password` mais laissait passer `pin` tel quel vers la base, alors que `POST /api/auth/pin-login` compare le PIN reçu à un hash bcrypt.
+- **Cause racine** : `insertUserSchema` est dérivé de la table (`createInsertSchema`) : il accepte toute colonne, y compris les colonnes secrètes. Seul le champ nommé explicitement dans le handler (`password`) était traité ; `pin` suivait le chemin générique.
+- **Prévention vérifiable** : `tests/contract/admin-patch-user-pin.contract.test.ts` (PIN valide stocké en bcrypt, jamais renvoyé, `pin-login` fonctionne ; PIN invalide : 400 ; PIN vide ignoré). Reprise rétroactive `hashPlainUserPins` (`server/lib/pin-hash-migration.ts`, appelée par `initializeDatabase`) testée par `tests/integration/pin-hash-migration.test.ts` (clair haché, hash existant intact, second passage à 0 écriture).
+- **Leçon** : un schéma d'insertion dérivé de la table accepte toute colonne secrète. Un secret écrit par une route générique passe par un hachage explicite, retiré du corps avant le `parse`, et une reprise idempotente traite les valeurs déjà stockées en clair.
+
 ## 4 novembre 2026 : un état partiel ne passe pas par une erreur 5xx
 
 - **Contexte** : changement de mot de passe, première version : hash écrit, puis révocation des autres sessions qui

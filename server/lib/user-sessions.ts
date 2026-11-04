@@ -48,9 +48,12 @@ type SqlExecutor = Pick<typeof db, "execute">;
  * celle de `keepSessionId` reste. À appeler avec le `tx` qui écrit le nouveau hash : tout ou rien.
  * Requête paramétrée. Idempotent : un second appel supprime 0 ligne.
  */
-export async function deleteOtherUserSessions(executor: SqlExecutor, userId: number, keepSessionId: string): Promise<number> {
+export async function deleteOtherUserSessions(executor: SqlExecutor, userId: number, keepSessionId: string | null = null): Promise<number> {
+  // Sans session à garder (admin qui change le secret d'un autre compte) : toutes les sessions du compte partent.
   const result = await executor.execute(
-    sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
+    keepSessionId === null
+      ? sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)}`
+      : sql`DELETE FROM "session" WHERE sess->>'userId' = ${String(userId)} AND sid <> ${keepSessionId}`,
   );
   return result.rowCount ?? 0;
 }
@@ -59,9 +62,9 @@ export async function deleteOtherUserSessions(executor: SqlExecutor, userId: num
  * Partie temps réel : ferme les sockets du compte hors `keepSessionId`. À appeler APRÈS le commit,
  * sinon une transaction annulée aurait déjà déconnecté les autres appareils.
  */
-export function closeOtherUserConnections(userId: number, keepSessionId: string, reason: string): void {
+export function closeOtherUserConnections(userId: number, keepSessionId: string | null, reason: string): void {
   const closeUserConnections = (global as { closeUserConnections?: unknown }).closeUserConnections;
   if (typeof closeUserConnections === "function") {
-    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId);
+    (closeUserConnections as (targetUserId: number, reason?: string, keepSessionId?: string) => void)(userId, reason, keepSessionId ?? undefined);
   }
 }
