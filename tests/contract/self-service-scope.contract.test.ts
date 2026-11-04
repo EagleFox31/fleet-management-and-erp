@@ -1,7 +1,8 @@
 import { createServer, type Server } from "http";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { storage } from "../../server/storage";
 import { loginAttemptsByUsername, userOnboarding } from "../../shared/schema";
 import { getContractApp } from "../support/app";
@@ -63,7 +64,7 @@ afterAll(async () => {
   const userIds = [accounts.a?.id, accounts.b?.id].filter((x): x is number => typeof x === "number");
   if (userIds.length) await db.delete(userOnboarding).where(inArray(userOnboarding.userId, userIds));
   for (const { username } of Object.values(accounts)) {
-    await db.delete(loginAttemptsByUsername).where(like(loginAttemptsByUsername.usernameNormalized, `%${username.trim().toLowerCase()}`));
+    await db.delete(loginAttemptsByUsername).where(eq(loginAttemptsByUsername.usernameNormalized, storedLockoutKey(username)));
   }
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));

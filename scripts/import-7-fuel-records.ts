@@ -2,6 +2,15 @@ import XLSX from 'xlsx';
 import { db } from "../server/db";
 import { fuelRecords, vehicles } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { suppressSideEffects } from "../server/lib/suppress-side-effects";
+
+/** Reprise d'historique : un plein importé ne déclenche pas d'alerte carburant (triggers #287). */
+async function insertFuelRecordQuietly(values: Record<string, unknown>) {
+  await db.transaction(async (tx) => {
+    await suppressSideEffects(tx);
+    await tx.insert(fuelRecords).values(values as typeof fuelRecords.$inferInsert);
+  });
+}
 
 const EXCEL_FILE = 'attached_assets/EXEMPLAIRE SUIVI TRESORERIE_1759168900037.xlsx';
 
@@ -188,7 +197,7 @@ async function importFuelRecords() {
         // Déterminer le type: APPROVISIONNEMENT (crédit) ou CONSOMMATION (débit)
         if (immat.toUpperCase().includes('APPROVISIONNEMENT')) {
           // C'est une RECHARGE (crédit)
-          await db.insert(fuelRecords).values({
+          await insertFuelRecordQuietly({
             vehicleId: null, // Pas de véhicule pour une recharge
             date: formatDateForDB(date) || undefined,
             year: year,
@@ -217,7 +226,7 @@ async function importFuelRecords() {
             continue;
           }
           
-          await db.insert(fuelRecords).values({
+          await insertFuelRecordQuietly({
             vehicleId: vehicle.id,
             date: formatDateForDB(date) || undefined,
             year: year,

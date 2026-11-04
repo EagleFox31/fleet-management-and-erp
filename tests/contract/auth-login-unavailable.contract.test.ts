@@ -2,10 +2,11 @@ import { createServer, type Server } from "http";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import session from "express-session";
-import { eq, like } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 import { loginAttemptsByUsername, users } from "../../shared/schema";
 import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
@@ -81,8 +82,8 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  // Clé du garde : préfixe (`pwd:`) puis nom normalisé.
-  await db.delete(loginAttemptsByUsername).where(like(loginAttemptsByUsername.usernameNormalized, `%${username.trim().toLowerCase()}`));
+  // Clé stockée : empreinte du nom (M3).
+  await db.delete(loginAttemptsByUsername).where(eq(loginAttemptsByUsername.usernameNormalized, storedLockoutKey(username)));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
 });
@@ -190,7 +191,7 @@ describe("POST /api/auth/login, même travail pour un nom inconnu", { timeout: 6
     const right = await login(legacyPassword, legacy.username);
     expect(right.status, "le mot de passe hérité reste accepté").toBe(200);
     expect(compare).toHaveBeenCalledTimes(1);
-    await db.delete(loginAttemptsByUsername).where(like(loginAttemptsByUsername.usernameNormalized, `%${legacy.username.trim().toLowerCase()}`));
+    await db.delete(loginAttemptsByUsername).where(eq(loginAttemptsByUsername.usernameNormalized, storedLockoutKey(legacy.username)));
   });
 
   it("la recherche du compte en panne n'est jamais lue comme un nom inconnu", async () => {

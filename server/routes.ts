@@ -40,6 +40,8 @@ import { checkWorkOrderTransition } from "@shared/constants/work-order-transitio
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
+// Référence courte et salée du nom saisi pour les journaux (M2) : HMAC, pas un SHA-256 brut qu'on inverse par dictionnaire.
+import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
@@ -61,6 +63,20 @@ import { revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
+import { loginLockoutGuard } from "./middleware/login-lockout-guard";
+import { CHANGE_PASSWORD_KEY_PREFIX, DbLockoutStore } from "./services/login-lockout-db-store";
+
+/**
+ * Essais sur le mot de passe actuel (POST /api/users/change-password) : même compteur et même seuil
+ * que la connexion, clé = compte de session. Sans lui, une session volée devine le mot de passe actuel
+ * sans limite, puis le remplace.
+ */
+const changePasswordAttemptsGuard = loginLockoutGuard({
+  store: new DbLockoutStore(),
+  keyPrefix: CHANGE_PASSWORD_KEY_PREFIX,
+  keyOf: (req) => req.session?.userId,
+  lockedMessage: "Trop d'essais du mot de passe actuel. Réessayez plus tard.",
+});
 
 const log = moduleLogger("routes");
 
@@ -70,10 +86,6 @@ const log = moduleLogger("routes");
  */
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
-/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
-function loginUsernameRef(username: string): string {
-  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
-}
 
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({
@@ -873,7 +885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, changePasswordAttemptsGuard, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -3807,119 +3819,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Route spéciale pour importer les données après déploiement
-  app.post("/api/admin/import-backup", authenticate, isAdmin, async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const fs = await import("fs");
-      const path = await import("path");
-      
-      // Chercher le fichier de backup
-      const backupDir = path.join(process.cwd(), 'backup');
-      if (!fs.existsSync(backupDir)) {
-        return res.status(404).json({ message: "Dossier de backup non trouvé" });
-      }
-
-      const files = fs.readdirSync(backupDir);
-      const backupFile = files.find(f => f.startsWith('fleet-backup-') && f.endsWith('.json'));
-      
-      if (!backupFile) {
-        // Le listage du dossier backup/ reste côté serveur (AGENTS.md §10).
-        return res.status(404).json({ message: "Fichier de backup non trouvé" });
-      }
-
-      const backupFilePath = path.join(backupDir, backupFile);
-      const backupData = JSON.parse(fs.readFileSync(backupFilePath, 'utf8'));
-
-      log.info({ requestId: req.requestId, backupFile }, "import de backup en cours");
-
-      // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
-      const { db } = await import("../server/db");
-      const { alerts, fuelRecords, maintenanceSchedules, workOrders, parts, vehicles, users } = await import("../shared/schema");
-      
-      await db.delete(alerts);
-      await db.delete(fuelRecords);
-      await db.delete(maintenanceSchedules);
-      await db.delete(workOrders);
-      await db.delete(parts);
-      await db.delete(vehicles);
-
-      let importStats = {
-        users: 0,
-        vehicles: 0,
-        parts: 0,
-        workOrders: 0,
-        maintenanceSchedules: 0,
-        fuelRecords: 0,
-        alerts: 0
-      };
-
-      // Importer les utilisateurs (éviter les doublons)
-      if (backupData.users && backupData.users.length > 0) {
-        const existingUsers = await db.select().from(users);
-        const existingUsernames = existingUsers.map((u: any) => u.username);
-        const usersToImport = backupData.users.filter((u: any) => !existingUsernames.includes(u.username));
-        
-        if (usersToImport.length > 0) {
-          await db.insert(users).values(usersToImport);
-          importStats.users = usersToImport.length;
-        }
-      }
-
-      // Importer les véhicules
-      if (backupData.vehicles && backupData.vehicles.length > 0) {
-        await db.insert(vehicles).values(backupData.vehicles);
-        importStats.vehicles = backupData.vehicles.length;
-      }
-
-      // Importer les pièces
-      if (backupData.parts && backupData.parts.length > 0) {
-        await db.insert(parts).values(backupData.parts);
-        importStats.parts = backupData.parts.length;
-      }
-
-      // Importer les ordres de travail
-      if (backupData.workOrders && backupData.workOrders.length > 0) {
-        await db.insert(workOrders).values(backupData.workOrders);
-        importStats.workOrders = backupData.workOrders.length;
-      }
-
-      // Importer les plannings
-      if (backupData.maintenanceSchedules && backupData.maintenanceSchedules.length > 0) {
-        await db.insert(maintenanceSchedules).values(backupData.maintenanceSchedules);
-        importStats.maintenanceSchedules = backupData.maintenanceSchedules.length;
-      }
-
-      // Importer les carburants
-      if (backupData.fuelRecords && backupData.fuelRecords.length > 0) {
-        await db.insert(fuelRecords).values(backupData.fuelRecords);
-        importStats.fuelRecords = backupData.fuelRecords.length;
-      }
-
-      // Importer les alertes
-      if (backupData.alerts && backupData.alerts.length > 0) {
-        await db.insert(alerts).values(backupData.alerts);
-        importStats.alerts = backupData.alerts.length;
-      }
-
-      log.info({ requestId: req.requestId, backupFile, importStats }, "import de backup terminé");
-
-      res.json({
-        success: true,
-        message: "Données importées avec succès",
-        stats: importStats,
-        backupFile: backupFile,
-        exportDate: backupData.exportDate
-      });
-
-    } catch (error) {
-      // Message générique + référence par le gestionnaire central ; le détail reste dans le log (AGENTS.md §10).
-      next(
-        withLogContext(
-          error instanceof AppError ? error : new AppError(500, "Erreur lors de l'import des données.", { cause: error }),
-          { event: "admin.import_backup.failed" },
-        ),
-      );
-    }
-  });
+  // POST /api/admin/import-backup : server/api/admin-import-backup.routes.ts (transaction, effets des triggers coupés).
 
   // ===== TIRE MANAGEMENT ROUTES =====
 

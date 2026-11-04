@@ -9,6 +9,7 @@ import { dbAuditSink } from "../../server/lib/audit-db-sink";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * Montage des gardes dans server/api/index.ts (T-57) :
@@ -46,7 +47,7 @@ afterAll(async () => {
     ...usernames.map((u) => `pwd:${u}`),
     ...ids.userIds.flatMap((id) => [`pwd:${id}`, `pin:${id}`]),
   ];
-  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys]);
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [keys.map(storedLockoutKey)]);
   if (ids.userIds.length) await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
   if (ids.partIds.length) await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   await cleanupCreated(ids);

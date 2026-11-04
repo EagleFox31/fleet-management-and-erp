@@ -2443,6 +2443,37 @@ Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il po
 ### Règle Projet (obligatoire)
 - « N'existe pas » se déduit d'un 404 seulement, jamais d'une erreur quelconque. Un écran de détail classe son erreur par une fonction pure testée par catégorie, pas par `if (error)`.
 
+## 2026-11-04 — Identifiants de connexion : empreinte salée pour les logs, les compteurs et l'audit (M2, M3)
+
+### Contexte
+L'audit de sécurité de #272 a relevé deux points. La référence de log du nom saisi était un SHA-256 non salé, qu'on inverse par dictionnaire. Les compteurs d'échecs (`login_attempts_by_username.username_normalized`) et l'audit de blocage d'un nom inconnu stockaient le nom saisi en clair, alors qu'un nom inconnu est souvent un mot de passe tapé dans le mauvais champ.
+
+### Cause racine
+La clé du compteur était le nom normalisé lui-même. Elle servait à la fois de clé de stockage et de critère pour le miroir sur `users`, si bien que personne ne s'est demandé ce qu'elle exposait au repos.
+
+### Classification
+Donnée sensible au repos et dans les journaux (fuite par saisie erronée), sans exploitation connue.
+
+### Résolution
+- `server/lib/login-identifier.ts` : HMAC-SHA256 sous une sous-clé dérivée du secret de session et du domaine `fleet:login-identifier:v1`. Le secret brut ne sert qu'à signer les cookies. `loginUsernameRef` (logs) en prend les 12 premiers caractères.
+- `DbLockoutStore` stocke `pwdh1:<empreinte>`. Le nom saisi reste en mémoire, comme simple paramètre du miroir `users`. L'audit `lock` d'un nom inconnu porte l'empreinte.
+- Reprise au démarrage (`migrateLoginIdentifiers`, dans `app.ts`), en une transaction :
+  - les clés en clair (`pwd:<nom>`, clé brute) fusionnent vers l'empreinte, au maximum de chaque champ ;
+  - seules les lignes d'audit `lock` à nom inconnu sont réécrites. C'est une modification d'historique assumée, et les autres lignes ne bougent pas ;
+  - les logs ne portent que des compteurs.
+- `server/services/user-service.ts` supprimé : aucun importeur. Son `getUserByUsername` avalait l'erreur, et son `authenticateUser` ne comparait pas de hash factice.
+- Une rotation de `SESSION_SECRET` ou un changement de domaine remet les compteurs à zéro : c'est accepté, un verrou dure 15 minutes.
+
+### Prévention (vérifiable)
+- `tests/integration/login-lockout-db-store.test.ts` : ni la ligne du compteur ni l'audit d'un nom inconnu ne contiennent le nom saisi, et la normalisation est identique à celle du garde.
+- `tests/integration/login-identifier-migration.test.ts` :
+  - fusion de deux clés d'un même nom ;
+  - réécriture du seul audit `lock` ;
+  - un second démarrage ne fait qu'une lecture, sans transaction ni écriture.
+
+### Règle Projet (obligatoire)
+- Une saisie libre non authentifiée (nom, e-mail, téléphone) ne se stocke ni ne se journalise en clair. On passe par `loginIdentifierDigest` / `loginUsernameRef`.
+- Une clé HMAC dérivée d'un secret existant porte un domaine versionné. On ne réutilise jamais le secret brut pour un second usage.
 ## 2026-11-04 — `npm run dev` redémarrait en boucle depuis #252, sans qu'aucune CI ne le voie
 
 ### Contexte
@@ -2463,6 +2494,31 @@ Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il po
 ### Règle Projet (obligatoire)
 - Un changement du chargement de vite ou du démarrage serveur se vérifie aussi en `npm run dev` **dans la durée** (au moins 2 minutes, 0 « Restarting »), pas seulement en build de prod.
 - Un fichier temporaire écrit dans le dépôt par un outil est exclu du watch et du `.gitignore`.
+
+## 2026-11-04 — Changement de mot de passe : essais du mot de passe actuel sans limite
+
+- **Contexte** : `POST /api/users/change-password` vérifie le mot de passe actuel, mais aucun compteur ne
+  s'y appliquait, alors que la connexion est limitée depuis P-03.
+- **Cause racine** : le garde de verrouillage ne savait lire sa clé que dans le corps (`username`). Une
+  route authentifiée, dont la clé est le compte de session, ne pouvait pas l'utiliser.
+- **Classification** : sécurité, contrôle absent sur un second point d'entrée du même secret.
+- **Résolution** : `loginLockoutGuard` accepte `keyOf(req)`. Sur change-password, la clé vaut
+  `cpw:<id de session>`, avec le même seuil et la même durée que la connexion. Ce compteur est à part de
+  celui de la connexion : bloquer le changement ne bloque pas la connexion, et l'inverse non plus. Il
+  n'a pas de miroir dans `users`, n'est jamais converti en empreinte par la reprise M3, et le
+  déverrouillage admin le lève.
+- **Prévention vérifiable** : `tests/contract/change-password-attempts.contract.test.ts` couvre
+  plusieurs cas :
+  - N échecs puis 429, même avec le bon mot de passe ;
+  - les autres comptes et la connexion ne sont pas touchés ;
+  - un succès remet le compteur à zéro ;
+  - un corps invalide n'est pas compté ;
+  - le déverrouillage admin lève ce verrou.
+
+  `tests/integration/login-identifier-migration.test.ts` vérifie que la clé `cpw:` reste telle quelle.
+- **Leçon** : tout point d'entrée qui vérifie un secret (mot de passe, PIN, code) passe par le même
+  compteur. Un garde dont la clé est codée en dur sur le corps de la requête ne protège que la route
+  pour laquelle il a été écrit.
 
 ## 2026-11-04 — Fichiers en ajout de fin : chaque fusion mettait les autres PR en conflit
 - Erreur répétée (cinq allers-retours le 4 novembre) : LESSONS, `docs/journal/*.md` et `PASSATION*.md` ne reçoivent que des entrées de fin, mais deux PR qui ajoutaient chacune la sienne entraient en conflit à chaque fusion. Prévention : `merge=union` dans `.gitattributes`, vérifiée par `tests/unit/gitattributes-union.test.ts` (attributs + merge réel de deux branches). Limite : GitHub n'applique pas union côté serveur, le `git merge origin/main` local reste nécessaire mais ne conflicte plus. Règle : n'y écrire qu'en ajout de fin, jamais en réécriture (union dupliquerait la ligne modifiée des deux côtés).
@@ -2524,6 +2580,50 @@ Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test
 
 ### Leçon généralisée
 Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.
+
+## 2026-11-04 — Conflit de fusion résolu par `checkout --ours` : les changements de main dans tout le fichier perdus (near miss, #278)
+- **Contexte** : fusion de main dans #278. `server/routes.ts` et `auth-login-unavailable.contract.test.ts` n'avaient qu'un bloc en conflit chacun ; je les ai résolus par `git checkout --ours <fichier>`.
+- **Cause racine** : `--ours` remplace le fichier entier par la version de la branche. Il n'écarte pas seulement le bloc en conflit : toutes les modifications de main y disparaissent, même celles qui fusionnaient sans conflit. Ici, la validation de `PATCH /api/admin/users/:id/toggle` et la garde `isAnyUser` du libre-service ont été perdues.
+- **Classification** : near miss, outillage git, régression silencieuse à la fusion. Elle a été vue avant le push par les cliquets `write-routes-ratchet` et les contrats R1/R8.
+- **Résolution** : les deux fichiers repartent de `origin/main`, et seul le delta propre de la branche y est réappliqué.
+- **Prévention vérifiable** :
+  - après chaque fusion de main, `git diff origin/main --stat` ne doit lister que les fichiers du sujet ;
+  - les suites unitaires et de contrat complètes sont rejouées avant le push (les cliquets de routes l'ont vu ici).
+- **Leçon** :
+  - `checkout --ours` ou `--theirs` ne résout un conflit que sur un fichier où l'on veut vraiment écarter l'autre côté en entier ;
+  - sinon, on édite le bloc en conflit ;
+  - pour un fichier en ajout de fin, `merge-file --union`.
+## 4 novembre 2026 - un trigger d'effet secondaire casse les reprises d'historique (suivi de #287)
+
+### Contexte
+#287 a posé au démarrage des triggers d'alertes carburant. Trois chemins insèrent des pleins en masse sans couper leurs effets :
+- la restauration de sauvegarde (`POST /api/admin/import-backup`) ;
+- `scripts/import-7-fuel-records.ts` ;
+- le seed.
+
+La restauration vidait `alerts`, réinsérait les pleins (les triggers alertaient sur tout l'historique), puis réinsérait les alertes sauvegardées. Celles-ci heurtaient `uq_alerts_user_dedupe` (23505). Sans transaction, la base restait à moitié restaurée.
+
+Deux défauts du trigger lui-même :
+- `WHEN OTHERS` n'attrape pas `query_canceled` (57014) : un délai dépassé pendant l'alerte annulait le plein ;
+- l'alerte n'avait pas de temps réel.
+
+### Cause racine
+La garde `fleetos.suppress_side_effects` existait déjà (CDC #9), mais aucun chemin de reprise ne la posait. L'ajout d'un trigger n'a pas déclenché la revue des écritures en masse sur la table.
+
+### Résolution
+- Restauration déplacée dans `server/api/admin-import-backup.routes.ts` et `server/services/backup-import-service.ts` : une transaction, `suppressSideEffects(tx)` avant toute écriture.
+- Même garde pour le script d'import et pour le seed.
+- `query_canceled OR OTHERS` dans les deux blocs d'exception.
+  Conséquence assumée : un `pg_cancel_backend` volontaire pendant le calcul de l'alerte est lui aussi absorbé. Le plein est enregistré, seule l'alerte manque, avec un `RAISE WARNING`. On préfère perdre une alerte, recalculable, plutôt qu'un plein saisi.
+- `pg_notify('fleet_events', alert_created)`, relayé par `db-event-relay` en trames nominatives.
+
+### Prévention (vérifiable)
+- `tests/unit/server/backup-import-service.test.ts` : la garde est posée avant la première écriture, et un échec annule tout.
+- `tests/integration/fuel-alerts-triggers.test.ts` : reprise sans alerte et sans 23505 ; 57014 rattrapé (rouge sur main).
+- `tests/integration/fuel-alerts-realtime.test.ts` (rouge sur main) et `tests/unit/server/db-event-relay-alerts.test.ts`.
+
+### Leçon généralisée
+Un trigger à effet secondaire s'accompagne du recensement des écritures en masse sur sa table (restauration, import, seed). Chacune pose la garde dans sa transaction. En PL/pgSQL, `WHEN OTHERS` ne couvre ni `query_canceled` ni `assert_failure`.
 ## 4 novembre 2026 - cycle d'alertes : requêtes par véhicule et ordres de travail plafonnés à 50 (#281)
 
 ### Contexte
@@ -2567,3 +2667,52 @@ La copie d'un `.env` racine dans un worktree emporte l'URL de production. Le bri
 
 ### Leçon généralisée
 Avant de coder un deuxième contrôle après une récidive, rejouer le scénario contre le premier : ici, la garde serveur tenait. La récidive vient du geste (`--env-file` sur un `.env` qui porte la prod) : c'est le brief et le contenu des `.env` qu'il faut corriger. Une clé en double dans un `.env` est un piège : l'ordre des lignes décide de la base visée, et tout lecteur maison doit soit reproduire la règle du chargeur réel, soit refuser l'ambiguïté.
+## 4 novembre 2026 - verrou consultatif de sauvegarde instable en suite complète (#298)
+
+### Contexte
+`tests/integration/backup-production.test.ts` (verrou consultatif) échouait pendant la suite complète, fichier compris, et passait lancé seul.
+
+### Cause racine
+Le test prenait la clé de production (`hashtext('backup')`), commune à toute la base. La base de test locale est partagée entre sessions, et un serveur local dont le planificateur sauvegarde sur cette base tient cette clé : `tryAcquire()` renvoie `false` sans défaut du code.
+
+Deux facteurs aggravants :
+- le test ne rendait pas ses connexions en cas d'échec ;
+- l'`afterAll` fermait `listenerPool`, partagé par toute la suite (`isolate: false`). Un `end()` bloqué sur une connexion non rendue fait échouer le fichier entier.
+
+Reproduit : avec un détenteur externe de la clé sur la base de test, la version de main échoue (`expected false to be true`). La branche reste verte.
+
+Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base. `assertSafeTestDatabase` (`e2e/helpers/production-guard.ts`) refuse déjà des variables `_LISTENER` et `_DIRECT` qui divergent de la base de test. La garde de `server/db.ts` (`resolveListenerConnectionString`) est une seconde couche, au point où la connexion s'ouvre.
+
+### Résolution
+- Clé du verrou injectable : `createAdvisoryBackupLock(lockKey)`. Le test utilise une clé unique par passage, rend ses connexions en `finally` et ne ferme plus le pool partagé.
+- `setup-db.ts` force les deux variables à la base de test, sur l'hôte direct (`deriveDirectConnectionString`, sans `-pooler.`).
+  `assertSafeTestDatabase` accepte donc pour ces deux variables la forme directe de la base de test, et pour elles seules. Ce garde est rejoué avant chaque fichier sous `isolate:false`, où l'environnement est partagé : sans cette tolérance, le second fichier serait refusé sur une base de test Neon pooler.
+- `resolveListenerConnectionString` refuse en `NODE_ENV=test` une variable dédiée qui vise une autre base.
+
+### Prévention (vérifiable)
+- `backup-production.test.ts` tient lui-même la clé de production pendant le test : il reste vert.
+- `tests/unit/server/listener-connection.test.ts` (refus, message sans URL, épinglage par setup-db).
+
+### Leçon généralisée
+Un test d'intégration n'emprunte jamais une ressource globale de production (verrou consultatif, canal, nom fixe) sur une base partagée. Il prend une clé à lui, rend tout en `finally`, et ne ferme pas un pool partagé par la suite.
+
+## 2026-11-04 — Fausse alerte « double entrée en stock » : test de concurrence qui ne forçait pas la course
+
+### Contexte
+`tests/integration/part-requirements-idempotence.test.ts` (« deux réceptions simultanées n'entrent le stock qu'une fois ») échouait 5 fois sur 5, seul et sous verrou, sur une base dédiée. L'échec se reproduisait sur `main` nu et même sur un commit qui était vert une heure plus tôt. Il annonçait 2 succès au lieu d'1, ce qui faisait craindre une double entrée en stock.
+
+### Ce qui s'est passé
+Le stock était juste : 5 → 7, un seul mouvement. Les deux appels partaient par `Promise.all`, mais la seconde requête lisait le statut **après** le commit de la première. Elle voyait alors `received → received`, prenait la branche sans changement de statut et rendait `success: true`. C'est le no-op voulu, que le test voisin « réception rejouée après coup » exige.
+
+### Cause racine
+Le test supposait que deux appels lancés ensemble lisent ensemble. L'entrelacement dépendait de la latence du pool et du proxy WebSocket : il a changé sans aucun commit et a fait basculer le résultat. Classification : test non déterministe, pas de régression du code.
+
+### Résolution
+Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le test attend que `pg_stat_activity` montre les deux `UPDATE` bloqués sur ce verrou, donc que les deux requêtes ont lu `ordered`, puis relâche le verrou. Le compare-and-set (`WHERE status = <lu>`) refuse alors exactement la seconde.
+
+### Prévention (vérifiable)
+- 5 passages verts sur base dédiée sous `lot-tools/db-lock.mjs`.
+- Rouge prouvé : sans le compare-and-set du service, le test échoue (2 succès).
+
+### Leçon généralisée
+Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.

@@ -18,6 +18,7 @@ import {
   matchProductionMarker,
   productionMarkers,
 } from "../../shared/production-database";
+import { deriveDirectConnectionString } from "../../server/lib/listener-connection";
 
 // Reconnaissance des marqueurs : source unique partagée avec le serveur (shared/production-database.ts).
 export { DEFAULT_PRODUCTION_MARKERS, hostOf, matchProductionMarker, productionMarkers };
@@ -184,7 +185,10 @@ export function assertSafeTestDatabase(env: NodeJS.ProcessEnv = process.env): st
 
   for (const name of ["DATABASE_URL", ...SIBLING_URLS] as const) {
     const other = env[name];
-    if (other && other !== testUrl) {
+    // _LISTENER / _DIRECT peuvent porter la forme directe (sans -pooler.) de la base de test :
+    // setup-db.ts les pose ainsi, et ce garde est rejoué avant chaque fichier.
+    const sameTarget = other === testUrl || (name !== "DATABASE_URL" && other === deriveDirectConnectionString(testUrl));
+    if (other && !sameTarget) {
       const powershell = name === "DATABASE_URL" ? POWERSHELL_UNSET : `Remove-Item Env:${name} -ErrorAction SilentlyContinue`;
       throw new Error(
         [
