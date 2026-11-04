@@ -9,7 +9,7 @@ import { formatPrice } from "@/lib/utils";
 interface DiscrepancyInvoice {
   id: number;
   invoiceNumber: string;
-  supplierId: number;
+  supplierId: number | null;
   supplierName: string;
   invoiceDate: string;
   totalAmountTTC: string;

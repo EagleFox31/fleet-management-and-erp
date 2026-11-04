@@ -415,6 +415,9 @@ export class ThreeWayMatchingService {
    */
   async escalateDiscrepancies(): Promise<{
     escalatedCount: number;
+    // Totaux affichés par l'écran /procurement/invoices/discrepancies.
+    totalDiscrepancyAmount: number;
+    averageVariance: number;
     discrepancies: Array<{
       invoiceId: number;
       invoiceNumber: string;
@@ -422,6 +425,14 @@ export class ThreeWayMatchingService {
       varianceAmount: number;
       variancePercentage: number;
       orderNumber?: string;
+      // Champs lus par l'écran des écarts (lien « Examiner », montant, date, statut).
+      // Ajoutés sans retirer les précédents : `invoiceId` et `orderNumber` restent consommés.
+      id: number;
+      supplierId: number | null;
+      invoiceDate: string;
+      totalAmountTTC: number;
+      status: string;
+      purchaseOrderNumber?: string;
     }>;
   }> {
     // Récupérer les factures avec écarts >5%
@@ -449,10 +460,23 @@ export class ThreeWayMatchingService {
       varianceAmount: this.num(invoice.priceVariance),
       variancePercentage: this.num(invoice.variancePercentage),
       orderNumber: order?.orderNumber,
+      id: invoice.id,
+      supplierId: invoice.supplierId,
+      invoiceDate: invoice.invoiceDate,
+      totalAmountTTC: this.num(invoice.totalTTC ?? invoice.totalAmount),
+      status: invoice.status,
+      purchaseOrderNumber: order?.orderNumber,
     }));
+
+    const totalDiscrepancyAmount = discrepancies.reduce((sum, d) => sum + Math.abs(d.varianceAmount), 0);
+    const averageVariance = discrepancies.length
+      ? discrepancies.reduce((sum, d) => sum + d.variancePercentage, 0) / discrepancies.length
+      : 0;
 
     return {
       escalatedCount: discrepancies.length,
+      totalDiscrepancyAmount,
+      averageVariance,
       discrepancies,
     };
   }
