@@ -139,6 +139,20 @@ Entrées ajoutées à la fin, une par lot.
 - **Pourquoi** : 531 requêtes pour 12 véhicules, et des ordres de travail jamais alertés au-delà de 50.
 - **Comment tester (QA)** : `npm run test:integration -- tests/integration/alert-cycle-query-count.test.ts` (4/4 vert) ; avec l'alert-service d'origine, 2/4 rouges.
 - **Reste / risques** : réserves 1, 2 et 5 de #287 en lot de suivi (restauration import-backup, scripts d'import et seed sans `suppress_side_effects`, 57014 non rattrapé, temps réel des alertes du trigger).
+## 2026-11-04T14:40:01+01:00 — #298 : verrou de sauvegarde, test isolé et garde listenerPool
+- **Statut** : fait, PR brouillon
+- **Quoi** :
+  - Clé injectable pour `createAdvisoryBackupLock`, clé unique dans le test.
+  - Connexions rendues en `finally`, plus de `listenerPool.end()` dans le test.
+  - Garde `listenerPool` en test : `setup-db` épingle les deux variables, et `resolveListenerConnectionString` refuse une autre base.
+- **Comment** :
+  - Le test tient lui-même la clé de production pendant son passage.
+  - La logique de chaîne de connexion est sortie de `server/db.ts` vers `server/lib/listener-connection.ts`, qui se teste sans base.
+- **Pourquoi** : #298. Cause : clé de production partagée sur une base de test commune aux sessions.
+- **Comment tester (QA)** :
+  - `npm run test:integration -- tests/integration/backup-production.test.ts` ;
+  - preuve rouge : avec `SELECT pg_advisory_lock(hashtext('backup')), pg_sleep(90)` lancé sur la base de test, la version de main échoue.
+- **Reste / risques** : aucun changement de comportement hors `NODE_ENV=test`.
 ## 2026-11-04T14:18:11+01:00 — suivi #297 : plafond de 50 testé, repli d'emitAlerts, liens carburant repris
 - **Statut** : fait, PR brouillon
 - **Quoi** :
@@ -167,3 +181,14 @@ Entrées ajoutées à la fin, une par lot.
 - **Pourquoi** : rouge 5 fois sur 5 sur main nu, alors que le stock était juste (5 → 7, un mouvement) ; la seconde requête lisait après le commit de la première et devenait un no-op réussi.
 - **Comment tester (QA)** : `npm run test:integration -- tests/integration/part-requirements-idempotence.test.ts` ; rouge si l'on retire `eq(partRequirements.status, current.status)` du service.
 - **Reste / risques** : aucun ; le code produit n'est pas modifié.
+
+## 2026-11-04T15:46:52+01:00 — relecture #305 : variables du listener sur l'hôte direct
+- **Statut** : fait, PR #305
+- **Quoi** :
+  - `tests/support/listener-env.ts` pose `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` à `deriveDirectConnectionString(DATABASE_URL)` (sans `-pooler.`).
+  - `assertSafeTestDatabase` accepte cette forme directe pour ces deux variables seulement.
+  - LESSONS : la garde de `server/db.ts` est une seconde couche derrière `assertSafeTestDatabase`.
+- **Comment** : la dérivation existante est réutilisée côté setup et côté garde.
+- **Pourquoi** : sur une base de test Neon pooler, LISTEN et verrous de session passaient par le pooler. Une fois corrigé, le garde rejoué avant chaque fichier aurait refusé le second fichier.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/listener-connection.test.ts tests/unit/server/test-db-guard.test.ts` ; rouge mesuré sur le garde sans la tolérance.
+- **Reste / risques** : aucun.

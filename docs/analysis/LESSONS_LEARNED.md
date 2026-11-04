@@ -2598,6 +2598,34 @@ La copie d'un `.env` racine dans un worktree emporte l'URL de production. Le bri
 
 ### Leçon généralisée
 Avant de coder un deuxième contrôle après une récidive, rejouer le scénario contre le premier : ici, la garde serveur tenait. La récidive vient du geste (`--env-file` sur un `.env` qui porte la prod) : c'est le brief et le contenu des `.env` qu'il faut corriger. Une clé en double dans un `.env` est un piège : l'ordre des lignes décide de la base visée, et tout lecteur maison doit soit reproduire la règle du chargeur réel, soit refuser l'ambiguïté.
+## 4 novembre 2026 - verrou consultatif de sauvegarde instable en suite complète (#298)
+
+### Contexte
+`tests/integration/backup-production.test.ts` (verrou consultatif) échouait pendant la suite complète, fichier compris, et passait lancé seul.
+
+### Cause racine
+Le test prenait la clé de production (`hashtext('backup')`), commune à toute la base. La base de test locale est partagée entre sessions, et un serveur local dont le planificateur sauvegarde sur cette base tient cette clé : `tryAcquire()` renvoie `false` sans défaut du code.
+
+Deux facteurs aggravants :
+- le test ne rendait pas ses connexions en cas d'échec ;
+- l'`afterAll` fermait `listenerPool`, partagé par toute la suite (`isolate: false`). Un `end()` bloqué sur une connexion non rendue fait échouer le fichier entier.
+
+Reproduit : avec un détenteur externe de la clé sur la base de test, la version de main échoue (`expected false to be true`). La branche reste verte.
+
+Risque voisin relevé : `listenerPool` lit `DATABASE_URL_LISTENER` et `DATABASE_URL_DIRECT` avant `DATABASE_URL`. Héritées d'un `.env`, elles feraient écouter et verrouiller les tests sur une autre base. `assertSafeTestDatabase` (`e2e/helpers/production-guard.ts`) refuse déjà des variables `_LISTENER` et `_DIRECT` qui divergent de la base de test. La garde de `server/db.ts` (`resolveListenerConnectionString`) est une seconde couche, au point où la connexion s'ouvre.
+
+### Résolution
+- Clé du verrou injectable : `createAdvisoryBackupLock(lockKey)`. Le test utilise une clé unique par passage, rend ses connexions en `finally` et ne ferme plus le pool partagé.
+- `setup-db.ts` force les deux variables à la base de test, sur l'hôte direct (`deriveDirectConnectionString`, sans `-pooler.`).
+  `assertSafeTestDatabase` accepte donc pour ces deux variables la forme directe de la base de test, et pour elles seules. Ce garde est rejoué avant chaque fichier sous `isolate:false`, où l'environnement est partagé : sans cette tolérance, le second fichier serait refusé sur une base de test Neon pooler.
+- `resolveListenerConnectionString` refuse en `NODE_ENV=test` une variable dédiée qui vise une autre base.
+
+### Prévention (vérifiable)
+- `backup-production.test.ts` tient lui-même la clé de production pendant le test : il reste vert.
+- `tests/unit/server/listener-connection.test.ts` (refus, message sans URL, épinglage par setup-db).
+
+### Leçon généralisée
+Un test d'intégration n'emprunte jamais une ressource globale de production (verrou consultatif, canal, nom fixe) sur une base partagée. Il prend une clé à lui, rend tout en `finally`, et ne ferme pas un pool partagé par la suite.
 
 ## 2026-11-04 — Fausse alerte « double entrée en stock » : test de concurrence qui ne forçait pas la course
 
