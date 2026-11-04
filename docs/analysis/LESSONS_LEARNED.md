@@ -2270,3 +2270,22 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Un garde-fou de base se place à la **connexion** (`server/db.ts`), pas seulement dans les runners de test : tout point d'entrée qui construit un pool en hérite.
 - Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
 - Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
+
+## 2026-11-04 — Comptes e2e absents de la base de test : la passe ressemble à une série de défauts produit (#245)
+
+### Contexte
+- Passe e2e complète sur la base de test (`ep-plain-lake`). Les comptes par défaut des specs (`admin`/`admin123`, `terry`, `fatou`) n'y existent pas. Chaque spec a échoué à la connexion, une par une, avant que la cause commune soit identifiée. Les specs 24/25, qui lisent `RECETTE_PASSWORD`, se sont de plus skippées sans bruit tant que la variable n'était pas exportée.
+
+### Cause racine
+- Classification : hypothèse d'environnement implicite. Les valeurs par défaut de `e2e/helpers/auth.ts` ne valent que pour la base décrite par `docs/qa/COMPTES_ENVIRONNEMENT.md`. Rien ne vérifiait, avant la suite, que la base visée connaissait ces comptes : un refus de connexion apparaissait comme un échec de spec.
+
+### Résolution
+- `e2e/helpers/account-preflight.ts` : sonde `POST /api/auth/login` pour chaque compte (admin, chef d'atelier, magasinier), dédoublonné. Seul un 401/403 est imputé au compte ; un serveur muet ou en 5xx ne l'est pas (les specs le diront).
+- Branché dans `e2e/global-setup.ts` : la suite s'arrête d'emblée avec un message qui nomme les comptes refusés, sans mot de passe, et rappelle les variables à renseigner. Dérogation explicite `E2E_SKIP_ACCOUNT_CHECK=1`.
+
+### Prévention (vérifiable)
+- `tests/unit/e2e/account-preflight.test.ts` : 401/403 retenus, `null`/500/503 non imputés, dédoublonnage, message sans mot de passe, et présence de l'appel bloquant dans `e2e/global-setup.ts`.
+
+### Règle Projet (obligatoire)
+- Avant une passe e2e sur une autre base que celle de `COMPTES_ENVIRONNEMENT.md`, renseigner `E2E_USERNAME` / `E2E_MANAGER_USERNAME` / `E2E_VIEWER_USERNAME` (et `*_PASSWORD`) avec les comptes de cette base, et exporter `RECETTE_PASSWORD` pour les specs de recette.
+- Un skip silencieux n'est pas un vert : compter les skips dans le rapport de passe et en donner la cause.
