@@ -7,6 +7,7 @@ import { ALL_APP_ROLES, VEHICLE_PURCHASE_PRICE_READ_ROLES, type AppRole } from "
 import { startContractSession } from "../support/contract-session";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { leakText } from "../support/api-error";
 
 /**
  * Prix d'achat d'un véhicule (`vehicles.purchasePrice`), décision du 3 novembre 2026 :
@@ -176,13 +177,14 @@ describe("GET /api/vehicles/:id/tires (jointure sur le véhicule entier)", () =>
   it.each(ROLES)("%s", async (role) => {
     const res = await session.call("GET", `/api/vehicles/${vehicleId}/tires`, { actor: role });
     expect(res.status).toBe(200);
-    const row = res.body.find((r: any) => r.id === vehicleTireId);
+    // Lignes de jointure Drizzle : { vehicle_tires, tires, vehicles } (forme lue par vehicles/[id].tsx).
+    const row = res.body.find((r: any) => r.vehicle_tires?.id === vehicleTireId);
     expect(row, "le pneu monté doit figurer dans la réponse").toBeDefined();
     // Le prix du pneu (autre objet) n'est pas concerné.
-    expect(Number(row.tire.purchasePrice)).toBe(1234);
-    if (ALLOWED.includes(role)) expect(Number(row.vehicle.purchasePrice)).toBe(Number(PRICE));
+    expect(Number(row.tires.purchasePrice)).toBe(1234);
+    if (ALLOWED.includes(role)) expect(Number(row.vehicles.purchasePrice)).toBe(Number(PRICE));
     else {
-      expect(row.vehicle.purchasePrice).toBeNull();
+      expect(row.vehicles.purchasePrice).toBeNull();
       expect(leaks(res.body)).toBe(false);
     }
   });
@@ -290,7 +292,7 @@ describe("écriture du prix d'achat (PATCH /api/vehicles/:id)", () => {
     const before = await priceInDb();
     const res = await patch(actor, body);
     expect(res.status).toBe(403);
-    expect(JSON.stringify(res.body)).not.toMatch(/constraint|SQL|stack/i);
+    expect(leakText(res.body)).not.toMatch(/constraint|SQL|stack/i);
     const after = await priceInDb();
     expect(after).toEqual(before);
     expect(Number(after.price)).toBe(Number(PRICE));
