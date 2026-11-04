@@ -13,6 +13,7 @@ import {
   FAR,
   purgeJourneyRows,
 } from "./helpers/mission-journey";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * MIS1, niveau E : le cycle de vie d'une mission rejoué au navigateur, sans écrire
@@ -121,8 +122,8 @@ test.describe("MIS1 : cycle de vie d'une mission au navigateur", () => {
     const vehicle = await createVehicle();
     const driver = await createDriver();
     const orderNumber = token("MIS");
-    const logisticsContext = await browser.newContext();
-    const observerContext = await browser.newContext();
+    const logisticsContext = await newE2EContext(browser, "logistics");
+    const observerContext = await newE2EContext(browser, "observer");
 
     try {
       const page = await logisticsContext.newPage();
@@ -261,7 +262,7 @@ test.describe("MIS1 : lancement refusé pour une raison métier", () => {
       test.setTimeout(240_000);
       const { vehicle, driver } = await refusal.setup();
       const orderNumber = token("REF");
-      const context = await browser.newContext();
+      const context = await newE2EContext(browser, "profil");
 
       try {
         const page = await context.newPage();
@@ -308,7 +309,7 @@ test.describe("MIS1 : lancement refusé pour une raison métier", () => {
     const vehicle = await createVehicle({ insuranceDoc: "2020-01-01" });
     const driver = await createDriver();
     const orderNumber = token("REG");
-    const context = await browser.newContext();
+    const context = await newE2EContext(browser, "profil");
 
     try {
       const page = await context.newPage();
@@ -354,7 +355,7 @@ test.describe("MIS1 : lancement bloqué par un document", () => {
   test.beforeAll(async ({ browser }) => {
     const vehicle = await createVehicle({ insuranceDoc: "2020-01-01" });
     const driver = await createDriver();
-    const context = await browser.newContext();
+    const context = await newE2EContext(browser, "profil");
     try {
       const page = await context.newPage();
       await loginWithSession(page, logistics);

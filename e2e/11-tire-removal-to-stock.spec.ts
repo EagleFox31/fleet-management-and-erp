@@ -7,6 +7,7 @@ import { createTestVehicle } from "../tests/support/factories";
 import { uniqueTestToken } from "../tests/support/ids";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * TIR3 niveau UI — démontage d'un pneu vers le stock, deux rôles :
@@ -60,8 +61,8 @@ test.afterAll(async () => {
 
 test("chef d'atelier : le pneu démonté revient en stock, le magasin est prévenu en temps réel", async ({ browser }) => {
   test.setTimeout(120_000);
-  const warehouseContext = await browser.newContext();
-  const workshopContext = await browser.newContext();
+  const warehouseContext = await newE2EContext(browser, "warehouse");
+  const workshopContext = await newE2EContext(browser, "workshop");
 
   try {
     const warehousePage = await warehouseContext.newPage();

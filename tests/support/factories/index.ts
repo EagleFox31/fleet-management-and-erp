@@ -141,6 +141,10 @@ export async function createTestSupplierInvoice(
       taxAmount: overrides.taxAmount ?? vatAmount,
       balance: overrides.balance ?? totalTTC,
       status: overrides.status ?? "received",
+      // Écart de rapprochement : transmis seulement quand l'appelant le fournit.
+      ...(overrides.hasDiscrepancy !== undefined ? { hasDiscrepancy: overrides.hasDiscrepancy } : {}),
+      ...(overrides.priceVariance !== undefined ? { priceVariance: overrides.priceVariance } : {}),
+      ...(overrides.variancePercentage !== undefined ? { variancePercentage: overrides.variancePercentage } : {}),
     })
     .returning();
   return row;

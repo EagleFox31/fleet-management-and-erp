@@ -5,6 +5,8 @@ import { assignments, clients, drivers, incidents, missions, users, vehicles, wo
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
+import { toastTitle } from "./helpers/toast";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * DRV2, niveau E : l'espace chauffeur (application mobile, `client/src/pages/driver/dashboard.tsx`).
@@ -103,7 +105,7 @@ async function addSecondMission(crew: Crew, clientId: number): Promise<{ mission
 }
 
 async function openSession(browser: Browser, credentials: E2ECredentials, before?: (page: Page) => void): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await newE2EContext(browser, "profil");
   const page = await context.newPage();
   before?.(page);
   await loginWithSession(page, credentials);
@@ -209,9 +211,8 @@ test.describe("DRV2 : espace chauffeur", () => {
     test("DRV2-1 : la déclaration de panne du chauffeur est acceptée", async ({ page }) => {
       const { status, body } = await declareBreakdown(page);
       expect(status, `POST de la panne : ${body.slice(0, 300)}`).toBeLessThan(300);
-      // `exact` : le Toast Radix annonce aussi le titre dans un <span aria-live> passager
-      // (« Notification Problème signalé… ») ; sans lui, le mode strict trouve 2 éléments par intermittence.
-      await expect(page.getByText("Problème signalé", { exact: true })).toBeVisible();
+      // Région des toasts seulement : Radix répète le titre dans un `status` aria-live (voir helpers/toast.ts).
+      await expect(toastTitle(page, "Problème signalé")).toBeVisible();
     });
   });
 
