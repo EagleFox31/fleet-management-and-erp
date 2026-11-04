@@ -136,8 +136,9 @@ export class WorkflowDocumentService {
   static async transferDocumentsToVehicle(sessionId: string, vehicleId: number, workflowId: number): Promise<void> {
     try {
       // Récupérer les documents du workflow
-      const documents = await this.getWorkflowDocuments(sessionId, null, workflowId);
-      
+      // Seuls les documents pas encore transférés : un rejeu ne duplique rien dans vehicle_documents.
+      const documents = (await this.getWorkflowDocuments(sessionId, null, workflowId)).filter((doc) => !doc.isTransferred);
+
       // Copier les fichiers vers le dossier du véhicule
       const vehicleUploadDir = path.join(process.cwd(), 'uploads', 'documents', `vehicle-${vehicleId}`);
       if (!fs.existsSync(vehicleUploadDir)) {
@@ -164,29 +165,29 @@ export class WorkflowDocumentService {
         fs.copyFileSync(originalPath, newPath);
 
         // Créer l'entrée dans vehicle_documents (requête paramétrée : le nom d'origine peut contenir une apostrophe)
-        await db.insert(vehicleDocuments).values({
-          vehicleId,
-          name: doc.originalName,
-          type: toVehicleDocumentType(doc.documentType),
-          description: "Document transféré depuis le workflow d'acquisition",
-          filename: newFileName,
-          filesize: doc.fileSize,
-          fileType: doc.mimeType,
-          filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
-          uploadedBy: doc.uploadedBy,
+        // Ligne véhicule et marque « transféré » dans la même transaction : l'une sans l'autre
+        // dupliquerait le document au rejeu. Le garde isTransferred = false écarte un rejeu concurrent.
+        const inserted = await db.transaction(async (tx) => {
+          const [claimed] = await tx
+            .update(workflowDocuments)
+            .set({ vehicleId, isTransferred: true })
+            .where(and(eq(workflowDocuments.id, doc.id), eq(workflowDocuments.workflowId, workflowId), eq(workflowDocuments.isTransferred, false)))
+            .returning({ id: workflowDocuments.id });
+          if (!claimed) return false;
+          await tx.insert(vehicleDocuments).values({
+            vehicleId,
+            name: doc.originalName,
+            type: toVehicleDocumentType(doc.documentType),
+            description: "Document transféré depuis le workflow d'acquisition",
+            filename: newFileName,
+            filesize: doc.fileSize,
+            fileType: doc.mimeType,
+            filePath: `/uploads/documents/vehicle-${vehicleId}/${newFileName}`,
+            uploadedBy: doc.uploadedBy,
+          });
+          return true;
         });
-        transferredIds.push(doc.id);
-      }
-      
-      // Marquer comme transférés les seuls documents copiés
-      if (transferredIds.length > 0) {
-        await db
-          .update(workflowDocuments)
-          .set({ 
-            vehicleId: vehicleId,
-            isTransferred: true 
-          })
-          .where(and(eq(workflowDocuments.workflowId, workflowId), inArray(workflowDocuments.id, transferredIds)));
+        if (inserted) transferredIds.push(doc.id);
       }
       
       log.info({ sessionId, vehicleId, transferred: transferredIds.length, skipped: documents.length - transferredIds.length }, "documents workflow transférés au véhicule");

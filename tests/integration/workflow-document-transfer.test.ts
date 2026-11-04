@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -118,6 +118,33 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
     const byId = new Map(sources.map((row) => [row.id, row]));
     expect(byId.get(kept.id)).toMatchObject({ isTransferred: true, vehicleId });
     expect(byId.get(lost.id)).toMatchObject({ isTransferred: false, vehicleId: null });
+  });
+
+  it("idempotent (#231) : un second transfert ne crée aucune ligne de plus", async () => {
+    const { sessionId, vehicleId, workflowId } = await workflowWithDocument("une-fois.pdf");
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["une-fois.pdf"]);
+  });
+
+  it("idempotent (#231) : document refusé puis rendu disponible, transféré une seule fois au rejeu", async () => {
+    const { sessionId, vehicleId, workflowId, document } = await workflowWithDocument("tardif.pdf");
+    const stored = uploadedFileCandidates(document.filePath).find((candidate) => existsSync(candidate))!;
+    const backup = readFileSync(stored);
+    rmSync(stored, { force: true });
+
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId))).toHaveLength(0);
+
+    writeFileSync(stored, backup);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+    await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+    const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+    expect(rows.map((row) => row.name)).toEqual(["tardif.pdf"]);
   });
 
   it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {
