@@ -21,6 +21,36 @@ const GUARD = "guardDatabaseConnection(";
 /** Import de valeur (pas `import type`) d'un driver SQL, alias compris : `import { Pool as P }`. */
 const DRIVER_IMPORT =
   /(?:^|\n)\s*import\s+(?!type\b)[^;]*?from\s*["'](?:@neondatabase\/serverless|pg|postgres)["']|require\(\s*["'](?:@neondatabase\/serverless|pg|postgres)["']\s*\)/;
+const DRIVER_MODULE = String.raw`["'](?:@neondatabase\/serverless|pg|postgres)["']`;
+const DRIVER_STATEMENT = new RegExp(
+  String.raw`(?:^|\n)\s*import\s+(?!type\b)([^;]*?)from\s*${DRIVER_MODULE}[^\n]*|(?:const|let|var)\s+([^=]+?)=\s*require\(\s*${DRIVER_MODULE}\s*\)[^\n]*`,
+  "g",
+);
+
+/**
+ * Noms locaux liés par un import de valeur d'un driver SQL : `{ Pool as P, neon }`, `pg`, `* as pg`,
+ * `{ Pool: P }` (require). Leur emploi (`new P(`, `neon(`, `new pg.Client(`) est une construction.
+ */
+export function driverBindings(src: string): string[] {
+  const names = new Set<string>();
+  for (const m of src.matchAll(DRIVER_STATEMENT)) {
+    const clause = (m[1] ?? m[2] ?? "").replace(/^\s*\*\s*as\s+/, "");
+    for (const part of clause.replace(/[{}]/g, ",").split(",")) {
+      const name = part.trim().split(/\s+as\s+|\s*:\s*/).pop()?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name) && name !== "type") names.add(name);
+    }
+  }
+  return [...names];
+}
+
+/** Première construction d'un nom lié au driver, hors des lignes d'import elles-mêmes (-1 si aucune). */
+function firstBoundConstruction(src: string): number {
+  const names = driverBindings(src);
+  if (names.length === 0) return -1;
+  const body = src.replace(DRIVER_STATEMENT, (m) => " ".repeat(m.length));
+  const use = new RegExp(String.raw`(?:new\s+)?\b(?:${names.join("|")})(?:\.[\w$]+)*\s*\(`);
+  return body.search(use);
+}
 const GUARD_IMPORT = /from\s*["'][^"']*production-db-guard(?:\.ts|\.js)?["']/;
 
 /** Retire commentaires de bloc et de ligne (sans toucher à `://` dans une chaîne d'URL). */
@@ -38,9 +68,13 @@ export function unguardedConnections(files: Record<string, string>): string[] {
     .filter(([file, raw]) => {
       if (file === "server/db.ts") return false;
       const src = stripComments(raw);
-      if (DRIVER_IMPORT.test(src) && !GUARD_IMPORT.test(src)) return true;
-      const construction = src.search(CONSTRUCTION);
-      if (construction < 0) return false;
+      const driver = DRIVER_IMPORT.test(src);
+      if (driver && !GUARD_IMPORT.test(src)) return true;
+      // Avec un driver importé, l'emploi d'un nom qu'il lie compte, alias compris (`new P(`) :
+      // le garde doit être appelé avant, pas seulement importé.
+      const found = [src.search(CONSTRUCTION), driver ? firstBoundConstruction(src) : -1].filter((i) => i >= 0);
+      if (found.length === 0) return false;
+      const construction = Math.min(...found);
       const guard = src.indexOf(GUARD);
       return guard < 0 || guard > construction;
     })
@@ -100,6 +134,29 @@ describe("connexions SQL : garde base de production (#264)", () => {
         "ok.ts": guarded + 'import { Pool as P } from "@neondatabase/serverless";\nguardDatabaseConnection("ok");\nnew P({});',
       }),
     ).toEqual(["alias.ts", "pg.ts", "req.cjs"]);
+  });
+
+  it("garde importé mais jamais appelé, ou appelé après, avec un alias : signalé", () => {
+    const imp = 'import { guardDatabaseConnection } from "../server/lib/production-db-guard";\nimport { Pool as P } from "@neondatabase/serverless";\n';
+    expect(
+      unguardedConnections({
+        "never.ts": imp + "const p = new P({});",
+        "late.ts": imp + 'const p = new P({});\nguardDatabaseConnection("late");',
+        "ok.ts": imp + 'guardDatabaseConnection("ok");\nconst p = new P({});',
+      }),
+    ).toEqual(["late.ts", "never.ts"]);
+  });
+
+  it("noms liés au driver : alias, défaut, espace de noms, require ; `new Set(` n'est pas une connexion", () => {
+    expect(
+      driverBindings(
+        'import { Pool as P, neon } from "@neondatabase/serverless";\nimport * as pg from "pg";\nconst { Client: C } = require("postgres");',
+      ).sort(),
+    ).toEqual(["C", "P", "neon", "pg"]);
+    const imp = 'import { guardDatabaseConnection } from "../server/lib/production-db-guard";\nimport { neon } from "@neondatabase/serverless";\n';
+    expect(
+      unguardedConnections({ "set.ts": imp + 'const s = new Set();\nguardDatabaseConnection("s");\nconst sql = neon(u);' }),
+    ).toEqual([]);
   });
 
   it("un garde en commentaire ne compte pas", () => {

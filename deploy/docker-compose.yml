@@ -158,8 +158,8 @@ services:
     command: ["npx", "tsx", "scripts/db-bootstrap.ts"]
     env_file: .env.prod
     # Cible `build` (x-tools) : NODE_ENV n'y est pas fixé. En production, le garde base de production
-    # (server/lib/production-db-guard.ts) est un no-op ; sans cette ligne, ajouter db-prod à
-    # E2E_PRODUCTION_DB_MARKERS bloquerait le déploiement (#264). Prime sur .env.prod.
+    # (server/lib/production-db-guard.ts) est un no-op ; sans cette ligne, le marqueur par défaut
+    # db-prod (#268) bloquerait le déploiement (#264). Prime sur .env.prod.
     environment:
       NODE_ENV: production
     depends_on:

@@ -63,6 +63,23 @@ Entrées ajoutées à la fin, une par lot.
   - Idempotent et Retroactive : sans objet.
 - **Reste / risques** : à la montée en vite 6.1+, `configLoader: "runner"` supprimerait le fichier temporaire.
 
+## 2026-11-04T11:17:27+01:00 — Garde base de production : drizzle-kit push et prod VPS (#268)
+
+- **Statut** : fait, PR brouillon empilée sur #267
+- **Quoi** :
+  - `drizzle.config.ts` appelle `guardDatabaseConnection("drizzle-kit")` ;
+  - marqueur par défaut `db-prod` (service Postgres de la prod VPS) ;
+  - message « Connexion refusée », valable pour le serveur, un script ou drizzle-kit, avec une mise en garde contre `NODE_ENV=production` en local ;
+  - `docs/deploiement/vps.md` : garde, NODE_ENV et alias d'hôte pour un tunnel SSH.
+- **Comment** : drizzle-kit charge sa configuration avec résolution des alias de tsconfig, donc l'import du garde serveur fonctionne tel quel (vérifié : `drizzle-kit push` sur un hôte marqué `.invalid` sort en 1 avant toute connexion ; sur le Postgres local, « Changes applied »).
+- **Pourquoi** : relecture de #267. `npm run db:push` avec une URL de prod écrivait le schéma sans refus, et la prod VPS n'était pas reconnue.
+- **Comment tester (QA)** :
+  - `npx vitest run tests/unit/server/drizzle-config-guard.test.ts tests/unit/server/production-db-guard.test.ts`.
+  - Mutations vérifiées, une rouge par chemin : garde retiré de drizzle.config, marqueur db-prod retiré, ligne NODE_ENV retirée du message.
+- **RAIDER** :
+  - Durable : la prod n'est pas affectée (NODE_ENV=production dans l'image runtime et dans schema-prod) ; `test:db:schema` local inchangé.
+  - Agnostic : marqueurs supplémentaires par `E2E_PRODUCTION_DB_MARKERS`, sans code.
+- **Reste / risques** : un tunnel vers `localhost` sans alias reste indétectable, documenté.
 ## 2026-11-04T12:06:10+01:00 — Contrat KPI pannes : mois sans panne vérifiés par différence avant/après (mineur de #266, PR #269)
 
 - **Statut** : fait, PR brouillon
