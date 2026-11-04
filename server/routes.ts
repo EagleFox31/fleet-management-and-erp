@@ -64,6 +64,17 @@ import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realti
 
 const log = moduleLogger("routes");
 
+/**
+ * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
+ * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
+ */
+const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
+
+/** Empreinte courte du nom saisi pour les journaux : un mot de passe tapé dans le champ identifiant n'y apparaît pas en clair. */
+function loginUsernameRef(username: string): string {
+  return crypto.createHash("sha256").update(username.trim().toLowerCase()).digest("hex").slice(0, 12);
+}
+
 /** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
 const loginBodySchema = z.object({
   username: z.string().min(1).max(255),
@@ -172,18 +183,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const { username, password, rememberMe } = parsed.data;
 
-      log.info({ event: "Login attempt", username, requestId: req.requestId }, "Login attempt");
+      log.info({ event: "Login attempt", usernameRef: loginUsernameRef(username), requestId: req.requestId }, "Login attempt");
 
       const user = await storage.getUserByUsername(username);
-      log.info({ event: "Login user lookup", username, found: Boolean(user), requestId: req.requestId }, "Login user lookup");
+      log.info({ event: "Login user lookup", usernameRef: loginUsernameRef(username), found: Boolean(user), requestId: req.requestId }, "Login user lookup");
       
       // Compte supprimé ou désactivé : même réponse qu'un identifiant inconnu.
       if (!user || user.deletedAt) {
+        await bcrypt.compare(password, LOGIN_DUMMY_HASH);
         return res.status(401).json({ message: "Identifiants invalides" });
       }
       
       // Verify password - support both bcrypt and legacy SHA-256 with auto-migration
-      let isPasswordValid = await bcrypt.compare(password, user.password);
+      // Hash non bcrypt (SHA-256 hérité) : bcrypt.compare rendrait false sans calcul, et un compte
+      // non migré répondrait plus vite qu'un nom inconnu. On compare alors au hash factice : un
+      // seul calcul bcrypt de coût 10, quel que soit le compte (#260, M1).
+      const isBcryptHash = user.password.length === 60 && user.password.startsWith("$2");
+      let isPasswordValid = (await bcrypt.compare(password, isBcryptHash ? user.password : LOGIN_DUMMY_HASH)) && isBcryptHash;
       let needsMigration = false;
       
       // If bcrypt fails and the hash looks like SHA-256 (64 hex chars), try legacy verification
@@ -196,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       log.info(
-        { event: "Login password check", username, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
+        { event: "Login password check", userId: user.id, role: user.role, success: isPasswordValid, needsMigration, requestId: req.requestId },
         "Login password check",
       );
       
@@ -208,7 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (needsMigration) {
         const bcryptHash = await bcrypt.hash(password, 10);
         await storage.updateUser(user.id, { password: bcryptHash });
-        log.info({ event: "Login password migrated", username, requestId: req.requestId }, "Login password migrated to bcrypt");
+        log.info({ event: "Login password migrated", userId: user.id, requestId: req.requestId }, "Login password migrated to bcrypt");
       }
 
       const currentLoginAt = new Date();

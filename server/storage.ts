@@ -636,8 +636,10 @@ export class DatabaseStorage implements IStorage {
       const [user] = await db.select().from(users).where(eq(users.username, username));
       return user;
     } catch (error) {
-      console.error('Error getting user by username:', error);
-      return undefined;
+      // Relancée, pas avalée : `undefined` se lisait « nom inconnu » (login en 401, contrôle
+      // d'unicité passé à tort) alors que la base était en panne (#260).
+      storageLog.error({ err: error }, "Error getting user by username");
+      throw error;
     }
   }
   
@@ -669,7 +671,7 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updatedUser;
     } catch (error) {
-      console.error("Error updating user:", error);
+      storageLog.error({ err: error, userId: id }, "Error updating user");
       return undefined;
     }
   }
