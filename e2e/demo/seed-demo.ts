@@ -139,9 +139,9 @@ async function seedLogistics(): Promise<void> {
   }
   await db
     .insert(drivers)
-    .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", licenseExpiry: "2099-12-31", isActive: true })
+    .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
     .onConflictDoNothing();
-  await db.update(drivers).set({ cpcStatus: "FORMÉ", isActive: true }).where(eq(drivers.employeeNumber, DEMO_MISSION.driverEmployee));
+  await db.update(drivers).set({ cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), isActive: true }).where(eq(drivers.employeeNumber, DEMO_MISSION.driverEmployee));
   const [credit] = await db.select({ id: fuelRecords.id }).from(fuelRecords).where(eq(fuelRecords.stationName, DEMO_MISSION.fuelStation));
   if (!credit) {
     await db.insert(fuelRecords).values({
