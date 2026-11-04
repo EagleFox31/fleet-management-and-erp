@@ -2337,3 +2337,24 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Règle Projet (obligatoire)
 - « N'existe pas » se déduit d'un 404 seulement, jamais d'une erreur quelconque. Un écran de détail classe son erreur par une fonction pure testée par catégorie, pas par `if (error)`.
+
+## 2026-11-04 — `npm run dev` redémarrait en boucle depuis #252, sans qu'aucune CI ne le voie
+
+### Contexte
+- #252 (image de prod `--omit=dev`) a remplacé l'import statique de `vite.config.ts` par `loadConfigFromFile` dans `server/vite.ts`.
+- Vite 5 écrit alors `vite.config.ts.timestamp-<n>-<hash>.mjs` à la racine, l'importe puis le supprime. tsx watch suit tout fichier importé : la suppression relançait le serveur environ toutes les 10 s (mesuré : 10 « Restarting » en 100 s).
+- Symptômes signalés par b7 : `npm run dev` instable, et le serveur e2e de Playwright (`webServer: npm run dev`) jamais prêt.
+
+### Cause racine
+- Classification : régression d'un mode d'exécution non couvert par la CI. La CI construit l'image et joue `node dist/index.js` ; aucun job ne lance `tsx watch`. La preuve « mode dev vérifié » de #252 était un appel ponctuel (`/` 200), pas une observation dans la durée : la boucle commence après le premier chargement.
+
+### Résolution
+- Script `dev` : `tsx watch --exclude "*.timestamp-*.mjs"`. `loadConfigFromFile` est conservé : c'est lui qui tient vite hors du bundle de prod (`tests/unit/deploy/runtime-deps.test.ts`). Vite 5.4 n'a pas d'option de chargement sans fichier temporaire (`configLoader: "runner"` arrive en 6.1).
+
+### Prévention (vérifiable)
+- `tests/unit/server/dev-watch-vite-config.test.ts` : tant que `server/vite.ts` utilise `loadConfigFromFile`, tout script `tsx watch` de `package.json` doit avoir un `--exclude` qui couvre `vite.config.ts.timestamp-*.mjs`. Rouge sur le `package.json` de main avant correctif.
+- Preuve manuelle : `npm run dev` pendant 145 s sur Postgres local, 0 « Restarting », `/api/health` et `/` à 200.
+
+### Règle Projet (obligatoire)
+- Un changement du chargement de vite ou du démarrage serveur se vérifie aussi en `npm run dev` **dans la durée** (au moins 2 minutes, 0 « Restarting »), pas seulement en build de prod.
+- Un fichier temporaire écrit dans le dépôt par un outil est exclu du watch et du `.gitignore`.
