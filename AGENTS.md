@@ -353,7 +353,6 @@ Notes :
   Revue faite le 3 novembre 2026. Risque résiduel accepté : la comparaison se fait sur le
   chemin résolu, pas sur `realpath`. Un lien symbolique placé dans `uploads/` pourrait donc
   viser un fichier extérieur. multer ne crée pas de lien, il faudrait un accès au disque.
-- `POST /api/admin/import-backup` (`server/routes.ts`, gelé) vide `alerts` puis réinsère les pleins sans transaction ni `fleetos.suppress_side_effects`. Les triggers carburant (#287) alertent alors sur tout l'historique, et l'insertion des alertes sauvegardées échoue en 23505 : la restauration reste à moitié faite. Déplacer la route dans un routeur `server/api/`, en transaction, avec `suppress_side_effects`, avant toute restauration réelle. Même manque dans `scripts/import-7-fuel-records.ts` et `server/seed-data.ts` (une alerte par plein).
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la

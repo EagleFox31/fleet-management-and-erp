@@ -1,6 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { partRequirementsService } from "../../server/services/part-requirements-service";
 import { partRequirements, parts, partsStockMovements } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -28,6 +28,20 @@ afterAll(async () => {
   await cleanupCreated(ids);
 });
 
+/** Attend que `count` UPDATE sur part_requirements soient bloqués sur un verrou de ligne. */
+async function waitForBlockedUpdates(count: number): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE 'update "part_requirements"%'`,
+    );
+    if (rows[0].n >= count) return;
+    if (Date.now() > deadline) throw new Error(`${rows[0].n} UPDATE bloqués sur ${count} attendus`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 async function setup(status: "ordered" | "received", quantity: number) {
   const requester = await createTestUser({ role: "workshop_manager" });
   const warehouse = await createTestUser({ role: "warehouse" });
@@ -52,10 +66,25 @@ describe("PartRequirementsService : double soumission", { timeout: 120000 }, () 
   it("deux réceptions simultanées n'entrent le stock qu'une fois", async () => {
     const { warehouse, part, requirement } = await setup("ordered", 5);
 
-    const results = await Promise.all([
-      partRequirementsService.updatePartRequirement(requirement.id, { status: "received" }, "warehouse", warehouse.id),
-      partRequirementsService.updatePartRequirement(requirement.id, { status: "received" }, "warehouse", warehouse.id),
-    ]);
+    // Course forcée : un verrou de ligne retient les deux UPDATE jusqu'à ce que les deux
+    // requêtes aient lu « ordered ». Sans lui, la seconde lit souvent après le commit de la
+    // première et devient un no-op réussi : le test dépendait alors de la latence.
+    const holder = await pool.connect();
+    let results: Awaited<ReturnType<typeof partRequirementsService.updatePartRequirement>>[];
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM part_requirements WHERE id = $1 FOR UPDATE", [requirement.id]);
+      const pending = Promise.all([
+        partRequirementsService.updatePartRequirement(requirement.id, { status: "received" }, "warehouse", warehouse.id),
+        partRequirementsService.updatePartRequirement(requirement.id, { status: "received" }, "warehouse", warehouse.id),
+      ]);
+      await waitForBlockedUpdates(2);
+      await holder.query("COMMIT");
+      results = await pending;
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      holder.release();
+    }
 
     expect(results.filter((r) => r.success)).toHaveLength(1);
     const refused = results.find((r) => !r.success);

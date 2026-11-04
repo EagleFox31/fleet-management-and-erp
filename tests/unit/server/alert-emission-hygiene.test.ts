@@ -21,7 +21,7 @@ const NOT_A_NEW_ALERT: Record<string, string> = {
   // Primitive : chacun de ses appelants est un site recensé et contrôlé.
   "server/storage.ts:createAlert": "primitive d'insertion",
   // Restauration de sauvegarde (admin) : rejoue des alertes historiques, rien à notifier.
-  "server/routes.ts:POST /api/admin/import-backup": "restauration de sauvegarde",
+  "server/services/backup-import-service.ts:restoreBackup": "restauration de sauvegarde",
 };
 
 /**

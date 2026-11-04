@@ -47,17 +47,18 @@ describe.each(ROUTERS)("server/api/%s.routes.ts relaie ses 500", (name) => {
   });
 });
 
-describe("server/routes.ts POST /api/admin/import-backup", () => {
+describe("POST /api/admin/import-backup (server/api/admin-import-backup.routes.ts)", () => {
   it("ne renvoie pas le listage du dossier backup/ dans sa 404", () => {
-    const source = readFileSync(join(ROOT, "server", "routes.ts"), "utf-8");
-    expect(source).not.toMatch(/availableFiles/);
+    for (const file of [["server", "api", "admin-import-backup.routes.ts"], ["server", "services", "backup-import-service.ts"]]) {
+      expect(readFileSync(join(ROOT, ...file), "utf-8")).not.toMatch(/availableFiles/);
+    }
   });
 
   it("relaie son erreur au gestionnaire central, sans message brut ni console.*", () => {
-    const source = readFileSync(join(ROOT, "server", "routes.ts"), "utf-8");
-    const start = source.indexOf('app.post("/api/admin/import-backup"');
+    const source = readFileSync(join(ROOT, "server", "api", "admin-import-backup.routes.ts"), "utf-8");
+    const start = source.indexOf('router.post("/admin/import-backup"');
     expect(start).toBeGreaterThan(-1);
-    const handler = source.slice(start, source.indexOf("\n  });", start));
+    const handler = source.slice(start, source.indexOf("\n});", start));
     expect(handler).not.toMatch(/\bconsole\.\w+\(/);
     expect(handler).not.toMatch(/\.status\s*\(\s*500\s*\)/);
     expect(handler).not.toMatch(/errorMessage|error\.message/);

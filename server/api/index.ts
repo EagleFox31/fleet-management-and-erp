@@ -35,6 +35,7 @@ import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
+import adminImportBackupRoutes from "./admin-import-backup.routes";
 import workOrderExportRoutes from "./work-order-export.routes";
 import notificationSettingsRoutes from "./notification-settings.routes";
 import alertsRoutes from "./alerts.routes";
@@ -223,6 +224,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(authLockoutRoutes);
   apiRouter.use(auditLogsRoutes);
   apiRouter.use(backupsRoutes);
+  apiRouter.use(adminImportBackupRoutes);
   apiRouter.use(workOrderExportRoutes);
   apiRouter.use(notificationSettingsRoutes);
   apiRouter.use(alertsRoutes);

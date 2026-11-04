@@ -1,6 +1,7 @@
 import { db } from './db';
 import { users, vehicles, parts, workOrders, maintenanceSchedules, fuelRecords } from '../shared/schema';
 import bcrypt from 'bcryptjs';
+import { suppressSideEffects } from './lib/suppress-side-effects';
 
 export async function seedDatabase() {
   console.log('🌱 Initialisation des données de démonstration...');
@@ -310,7 +311,10 @@ export async function seedDatabase() {
 
     // 6. Créer les enregistrements de carburant
     console.log('⛽ Création des données de carburant...');
-    await db.insert(fuelRecords).values([
+    // Reprise d'historique : pas d'alerte carburant par plein semé (triggers #287).
+    await db.transaction(async (tx) => {
+      await suppressSideEffects(tx);
+      await tx.insert(fuelRecords).values([
       {
         vehicleId: seedVehicles[0].id,
         date: new Date('2025-05-20'),
@@ -352,6 +356,7 @@ export async function seedDatabase() {
         createdById: seedUsers[0].id
       }
     ] as any);
+    });
 
     console.log('✅ Données de démonstration créées avec succès !');
     console.log('👤 Comptes créés:');
