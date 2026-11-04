@@ -7,6 +7,7 @@ import {
   T3_WITHOUT_BODY_VALIDATION,
   T4_WITHOUT_SERVER_FIELD_PROTECTION,
 } from "./support/write-routes-frozen";
+import { SELF_SERVICE_ROUTES } from "./support/write-routes-self-service";
 import {
   AUTH_ROLE_GUARDS,
   LOCAL_ROLE_GUARDS,
@@ -339,7 +340,7 @@ describe("cliquets sur les routes d'écriture", () => {
   it("T1 : toute route d'écriture a une garde de rôle", () => {
     check(
       "T1",
-      routes.filter((r) => !hasRoleGuard(r) && !PUBLIC_BY_DESIGN.has(r.key)),
+      routes.filter((r) => !hasRoleGuard(r) && !PUBLIC_BY_DESIGN.has(r.key) && !(r.key in SELF_SERVICE_ROUTES)),
       T1_WITHOUT_ROLE_GUARD,
       "T1_WITHOUT_ROLE_GUARD",
       "Ajoute une garde de rôle (`isStaff`, `isWorkshopManager`, `authorize([...])`...) sur la déclaration, ou monte le routeur derrière une garde dans server/api/index.ts.",
@@ -364,6 +365,27 @@ describe("cliquets sur les routes d'écriture", () => {
       "T4_WITHOUT_SERVER_FIELD_PROTECTION",
       "Valide avec un schéma d'insertion qui omet `createdBy`/`updatedBy`/montants (shared/schema.ts, `.omit`), ou écrase ces champs depuis `req.user` / le serveur, ou ne retiens que les champs nommés.",
     );
+  });
+
+  it("libre-service (exception T1) : isAnyUser déclaré et contrat de périmètre présent", () => {
+    const byKey = new Map(routes.map((r) => [r.key, r]));
+    const root = join(serverDir, "..");
+    for (const [key, entry] of Object.entries(SELF_SERVICE_ROUTES)) {
+      const route = byKey.get(key);
+      expect(route, `${key} : route libre-service introuvable, retire-la de write-routes-self-service.ts`).toBeDefined();
+      expect(route!.middlewares, `${key} : une route libre-service déclare isAnyUser (compte de session chargé)`).toContain("isAnyUser");
+      expect(hasRoleGuard(route!), `${key} : a une garde de rôle, ce n'est plus une exception, retire-la`).toBe(false);
+      expect(T1_WITHOUT_ROLE_GUARD, `${key} : à la fois gelée T1 et libre-service`).not.toContain(key);
+      expect(PUBLIC_BY_DESIGN.has(key), `${key} : publique et libre-service`).toBe(false);
+      let contract = "";
+      try {
+        contract = readFileSync(join(root, entry.contract), "utf8");
+      } catch {
+        // contrat absent : l'assertion suivante le dit
+      }
+      expect(contract, `${key} : contrat ${entry.contract} introuvable`).not.toBe("");
+      expect(contract.includes(entry.calls), `${key} : ${entry.contract} n'appelle pas la route (${entry.calls})`).toBe(true);
+    }
   });
 
   it("les listes gelées n'ont pas de doublon", () => {

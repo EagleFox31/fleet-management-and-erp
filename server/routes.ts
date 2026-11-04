@@ -846,7 +846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Changer le mot de passe - Tous les utilisateurs authentifiés
-  app.post("/api/users/change-password", authenticate, validateBody(changePasswordRequestSchema), async (req, res) => {
+  app.post("/api/users/change-password", authenticate, isAnyUser, validateBody(changePasswordRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       if (typeof userId !== "number") {
@@ -868,7 +868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sha256Hash = crypto.createHash("sha256").update(currentPassword).digest("hex");
         if (sha256Hash === user.password) {
           isValidPassword = true;
-          console.log(`🔐 [PASSWORD CHANGE] Legacy SHA-256 hash detected for user ${userId}, will upgrade to bcrypt`);
+          log.info({ event: "Change password legacy hash", userId, requestId: req.requestId }, "Legacy SHA-256 hash, upgraded to bcrypt");
         }
       }
       
@@ -880,11 +880,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       // Update the password (also upgrades legacy SHA-256 to bcrypt)
-      await storage.updateUser(userId, { password: hashedPassword });
+      // updateUser avale l'erreur et renvoie undefined : sans ce contrôle, une panne répondait
+      // « modifié » alors que l'ancien mot de passe restait en place.
+      const updated = await storage.updateUser(userId, { password: hashedPassword });
+      if (!updated) {
+        log.error({ event: "Change password not saved", userId, requestId: req.requestId }, "Change password not saved");
+        return res.status(503).json({ message: "Le mot de passe n'a pas pu être modifié, réessayez dans un instant." });
+      }
 
       return res.status(200).json({ message: "Mot de passe modifié avec succès" });
     } catch (error) {
-      console.error("Change password error:", error);
+      log.error({ err: error, event: "Change password error", requestId: req.requestId }, "Change password error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4770,7 +4776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/onboarding/step", authenticate, validateBody(onboardingStepRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/step", authenticate, isAnyUser, validateBody(onboardingStepRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { currentStep, stepsCompleted } = req.body;
@@ -4791,12 +4797,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update onboarding step error:", error);
+      log.error({ err: error, event: "Update onboarding step error", requestId: req.requestId }, "Update onboarding step error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/complete", authenticate, async (req, res) => {
+  app.patch("/api/onboarding/complete", authenticate, isAnyUser, async (req, res) => {
     try {
       const userId = req.session.userId;
       
@@ -4816,12 +4822,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(completedOnboarding);
     } catch (error) {
-      console.error("Complete onboarding error:", error);
+      log.error({ err: error, event: "Complete onboarding error", requestId: req.requestId }, "Complete onboarding error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.patch("/api/onboarding/mascot", authenticate, validateBody(onboardingMascotRequestSchema), async (req, res) => {
+  app.patch("/api/onboarding/mascot", authenticate, isAnyUser, validateBody(onboardingMascotRequestSchema), async (req, res) => {
     try {
       const userId = req.session.userId;
       const { mascotHidden } = req.body;
@@ -4841,7 +4847,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(200).json(updatedOnboarding);
     } catch (error) {
-      console.error("Update mascot visibility error:", error);
+      log.error({ err: error, event: "Update mascot visibility error", requestId: req.requestId }, "Update mascot visibility error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

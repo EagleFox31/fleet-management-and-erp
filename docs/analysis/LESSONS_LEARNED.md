@@ -2315,3 +2315,28 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Règle Projet (obligatoire)
 - Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
 - Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
+
+## 2026-11-04 — Routes libre-service : exception T1 déclarée, et un « mot de passe modifié » qui ne l'était pas (R1)
+
+### Contexte
+Huit routes d'écriture (mot de passe, accueil, préférences, boîte d'alertes) restaient gelées en T1 : sans garde de rôle, par nature, puisqu'elles servent tout compte connecté. La garde `selfScoped` de #235 jugeait le périmètre en analysant le handler, et chaque relecture la contournait.
+
+### Cause racine
+- Le cliquet T1 n'avait que deux issues, « garde de rôle » ou « gelée ». Aucune place pour une route légitimement ouverte à tous les rôles.
+- En écrivant le contrat, on a vu que `POST /api/users/change-password` répondait 200 quand `storage.updateUser` échouait : la méthode avale l'erreur et renvoie `undefined`, et le handler ne regardait pas le retour.
+
+### Classification
+Outillage de garde-fou (exception non modélisée) + erreur avalée, l'utilisateur croyant son mot de passe changé.
+
+### Résolution
+- `tests/unit/server/support/write-routes-self-service.ts` : table déclarée, route par route, avec son contrat de périmètre et la donnée touchée.
+- Les 4 routes de `routes.ts` déclarent `isAnyUser`, comme les routes d'alertes et de préférences.
+- change-password répond 503 quand l'enregistrement n'a pas eu lieu.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : pour chaque entrée libre-service, la route existe, déclare `isAnyUser`, n'est ni gelée ni publique, et son contrat existe et contient l'appel déclaré. Mutation : `isAnyUser` retiré d'une route, le test échoue.
+- `tests/contract/self-service-scope.contract.test.ts` : un client A agit avec l'`userId` de B dans le corps, et la ligne d'accueil comme le mot de passe de B restent inchangés. L'enregistrement non fait répond 503.
+
+### Règle Projet (obligatoire)
+- Une exception à un cliquet de sécurité se déclare par clé, avec sa preuve comportementale (un contrat). Elle ne passe jamais par l'analyse du code qu'elle exempte.
+- Après un appel de storage qui renvoie `undefined` en cas d'erreur, tester le retour avant de répondre « fait ».
