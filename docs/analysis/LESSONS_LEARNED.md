@@ -2301,6 +2301,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - `tests/unit/server/production-db-guard.test.ts` : refus en dev et sans `NODE_ENV`, sur les trois variables, marqueurs ajoutés, base locale acceptée, dérogation seulement sur `=1`, no-op en production, identité des fonctions réexportées (pas de copie), appel du garde avant `new Pool(` dans `server/db.ts`.
 - `tests/unit/server/db-pool-hygiene.test.ts` (#264) : hors `server/db.ts` et `tests/`, tout fichier qui construit un pool ou un client (`new Pool(`, `neon(`, `new Client(`) appelle le garde avant, et tout import de valeur de `@neondatabase/serverless`, `pg` ou `postgres` (alias compris) s'accompagne d'un import de `production-db-guard`. Commentaires retirés avant la recherche : un garde commenté ne compte pas. Liste gelée (`test-workflow-reminders.js`) qui ne peut que rétrécir. Chaque cas (pool sans garde, garde après, import aliasé, garde commenté) a sa preuve rouge.
 - `tests/unit/deploy/compose-prod-node-env.test.ts` : `schema-prod` garde `NODE_ENV: production`.
+- #268 : `drizzle.config.ts` appelle le garde (`drizzle-kit push` refusé sur une base marquée, `tests/unit/server/drizzle-config-guard.test.ts`) ; `db-prod`, service Postgres de la prod VPS, est un marqueur par défaut.
 - Preuve manuelle : `tsx server/index.ts` avec une URL portant le marqueur (hôte `.invalid`, aucune connexion) sort en erreur avant tout pool ; avec le Postgres local, `/api/health` répond 200.
 
 ### Règle Projet (obligatoire)
@@ -2308,6 +2309,32 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Les marqueurs de production ne se redéclarent pas : les importer depuis `shared/production-database.ts`.
 - Pour un serveur, un seed ou un e2e local, passer `DATABASE_URL` en variable d'environnement (elle prime sur `--env-file`) vers le Postgres local.
 
+## 2026-11-04 — Connexion : oracle de temps et mock qui rejette là où le code avale (#260)
+
+### Contexte
+Audit de sécurité de #256 (oracle du code HTTP sur `POST /api/auth/login`, déjà fermé).
+
+### Cause racine
+- Oracle de temps : pour un nom inconnu ou supprimé, le handler répondait 401 sans aucun calcul bcrypt (~70 ms de moins qu'un compte existant). La latence suffisait à énumérer les comptes.
+- Garantie fictive : le contrat de #254 simulait la panne par `vi.spyOn(storage, "getUserByUsername").mockRejectedValueOnce(...)`. Or la vraie méthode avalait l'erreur et renvoyait `undefined` : une vraie coupure donnait 401 (« identifiants », échec compté par le garde) et le test restait vert. Même défaut pour les contrôles d'unicité du nom (création, modification) : une panne y valait « nom libre ».
+- Les journaux de connexion portaient le nom saisi en clair ; un mot de passe tapé dans le champ identifiant y finissait.
+
+### Classification
+Sécurité (énumération de comptes, fuite de secret dans les journaux) + test à garantie fictive.
+
+### Résolution
+- Comparaison à un hash factice de coût 10 (`LOGIN_DUMMY_HASH`) quand le compte est inconnu ou supprimé.
+- `storage.getUserByUsername` journalise par `storageLog` et relance l'erreur.
+- Journaux de connexion : `usernameRef` (empreinte SHA-256 tronquée) ou `userId`, jamais le nom saisi.
+
+### Prévention (vérifiable)
+- `tests/contract/auth-login-unavailable.contract.test.ts` : espion sur `bcrypt.compare`, exactement 1 appel pour un compte existant comme pour un nom inconnu, même réponse ; panne simulée **sous** storage (`db.select().from(users)`), et `getUserByUsername` doit rejeter.
+- Mutation rejouée : sans le hash factice ni la relance, 4 tests échouent.
+
+### Règle Projet (obligatoire)
+- Fermer l'oracle du code HTTP ne ferme pas celui du temps : chaque branche d'échec d'authentification fait le même travail coûteux.
+- Un mock se place sous la couche qui gère l'erreur, jamais à sa place : simuler l'échec de la dépendance, pas le résultat que l'on espère du code testé.
+- Une méthode de lecture qui sert à décider (existence, unicité, droit) ne transforme pas une panne en « absent ».
 ## 2026-11-04 — Tests instables : une « période vide » partagée et un délai calibré sur un test en mémoire (kpi-cdc, backup-db)
 
 ### Contexte
@@ -2350,6 +2377,53 @@ Clé du compteur et identité réelle du compte calculées à deux endroits, de 
 - Contrat `tests/contract/pin-login-hardening.contract.test.ts` : 5 PIN faux sur "id", puis les formes équivalentes sont verrouillées (429) ou refusées (400), et une seule clé `pin:<id>` existe en base.
 - Intégration `tests/integration/driver-password-pin-revocation.test.ts` pour la reprise.
 
+## 2026-11-04 — Routes libre-service : exception T1 déclarée, et un « mot de passe modifié » qui ne l'était pas (R1)
+
+### Contexte
+Huit routes d'écriture (mot de passe, accueil, préférences, boîte d'alertes) restaient gelées en T1 : sans garde de rôle, par nature, puisqu'elles servent tout compte connecté. La garde `selfScoped` de #235 jugeait le périmètre en analysant le handler, et chaque relecture la contournait.
+
+### Cause racine
+- Le cliquet T1 n'avait que deux issues, « garde de rôle » ou « gelée ». Aucune place pour une route légitimement ouverte à tous les rôles.
+- En écrivant le contrat, on a vu que `POST /api/users/change-password` répondait 200 quand `storage.updateUser` échouait : la méthode avale l'erreur et renvoie `undefined`, et le handler ne regardait pas le retour.
+
+### Classification
+Outillage de garde-fou (exception non modélisée) + erreur avalée, l'utilisateur croyant son mot de passe changé.
+
+### Résolution
+- `tests/unit/server/support/write-routes-self-service.ts` : table déclarée, route par route, avec son contrat de périmètre et la donnée touchée.
+- Les 4 routes de `routes.ts` déclarent `isAnyUser`, comme les routes d'alertes et de préférences.
+- change-password répond 503 quand l'enregistrement n'a pas eu lieu.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : pour chaque entrée libre-service, la route existe, déclare `isAnyUser`, n'est ni gelée ni publique, et son contrat existe et contient l'appel déclaré. Mutation : `isAnyUser` retiré d'une route, le test échoue.
+- `tests/contract/self-service-scope.contract.test.ts` : un client A agit avec l'`userId` de B dans le corps, et la ligne d'accueil comme le mot de passe de B restent inchangés. L'enregistrement non fait répond 503.
+
+### Règle Projet (obligatoire)
+- Une exception à un cliquet de sécurité se déclare par clé, avec sa preuve comportementale (un contrat). Elle ne passe jamais par l'analyse du code qu'elle exempte.
+- Après un appel de storage qui renvoie `undefined` en cas d'erreur, tester le retour avant de répondre « fait ».
+
+## 2026-11-04 — Near miss : exception de cliquet prouvée par la présence d'une chaîne (R1, audit)
+
+### Contexte
+L'audit de sécurité de #274 a relevé que la preuve exigée pour une route libre-service était la présence, dans le contrat, du texte de l'appel (`calls`). Le test « sans session : 401 sur chaque route » suffisait à la fournir.
+
+### Cause racine
+Le garde-fou contrôlait un indice (l'appel apparaît dans le fichier), pas la propriété visée (un compte A ne touche pas aux données de B).
+
+### Classification
+Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il porte. Aucune route n'était fautive.
+
+### Résolution
+- L'appel doit figurer dans un test dont le titre contient « autre compte ». Les quatre contrats concernés ont été renommés en ce sens.
+- Le texte du handler ne doit lire aucun identifiant de compte de la requête (`req.params|query|body` vers `userId`, `user_id`, `ownerId`, `accountId`, accès direct ou déstructuration). C'est un motif de refus, jamais un critère d'acceptation : la preuve positive reste le contrat.
+
+### Prévention (vérifiable)
+- `write-routes-ratchet.test.ts` : `selfServiceProblems` refuse les quatre formes de lecture et un contrat dont seul un test 401 appelle la route (tests synthétiques).
+- Mutations jouées : une ligne `req.body.userId` dans change-password fait échouer le cliquet ; « autre compte » retiré du titre du contrat des préférences aussi.
+
+### Règle Projet (obligatoire)
+- Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.
+
 ## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
 
 ### Contexte
@@ -2389,3 +2463,42 @@ Clé du compteur et identité réelle du compte calculées à deux endroits, de 
 ### Règle Projet (obligatoire)
 - Un changement du chargement de vite ou du démarrage serveur se vérifie aussi en `npm run dev` **dans la durée** (au moins 2 minutes, 0 « Restarting »), pas seulement en build de prod.
 - Un fichier temporaire écrit dans le dépôt par un outil est exclu du watch et du `.gitignore`.
+
+## 2026-11-04 — Fichiers en ajout de fin : chaque fusion mettait les autres PR en conflit
+- Erreur répétée (cinq allers-retours le 4 novembre) : LESSONS, `docs/journal/*.md` et `PASSATION*.md` ne reçoivent que des entrées de fin, mais deux PR qui ajoutaient chacune la sienne entraient en conflit à chaque fusion. Prévention : `merge=union` dans `.gitattributes`, vérifiée par `tests/unit/gitattributes-union.test.ts` (attributs + merge réel de deux branches). Limite : GitHub n'applique pas union côté serveur, le `git merge origin/main` local reste nécessaire mais ne conflicte plus. Règle : n'y écrire qu'en ajout de fin, jamais en réécriture (union dupliquerait la ligne modifiée des deux côtés).
+## 2026-11-04 — Comptes e2e absents de la base de test : la passe ressemble à une série de défauts produit (#245)
+
+### Contexte
+- Passe e2e complète sur la base de test (`ep-plain-lake`). Les comptes par défaut des specs (`admin`/`admin123`, `terry`, `fatou`) n'y existent pas. Chaque spec a échoué à la connexion, une par une, avant que la cause commune soit identifiée. Les specs 24/25, qui lisent `RECETTE_PASSWORD`, se sont de plus skippées sans bruit tant que la variable n'était pas exportée.
+
+### Cause racine
+- Classification : hypothèse d'environnement implicite. Les valeurs par défaut de `e2e/helpers/auth.ts` ne valent que pour la base décrite par `docs/qa/COMPTES_ENVIRONNEMENT.md`. Rien ne vérifiait, avant la suite, que la base visée connaissait ces comptes : un refus de connexion apparaissait comme un échec de spec.
+
+### Résolution
+- `e2e/helpers/account-preflight.ts` : sonde `POST /api/auth/login` pour chaque compte (admin, chef d'atelier, magasinier), dédoublonné. Seul un 401/403 est imputé au compte ; un serveur muet ou en 5xx ne l'est pas (les specs le diront).
+- Branché dans `e2e/global-setup.ts` : la suite s'arrête d'emblée avec un message qui nomme les comptes refusés, sans mot de passe, et rappelle les variables à renseigner. Dérogation explicite `E2E_SKIP_ACCOUNT_CHECK=1`.
+
+### Prévention (vérifiable)
+- `tests/unit/e2e/account-preflight.test.ts` : 401/403 retenus, `null`/500/503 non imputés, dédoublonnage, message sans mot de passe, et présence de l'appel bloquant dans `e2e/global-setup.ts`.
+
+### Règle Projet (obligatoire)
+- Avant une passe e2e sur une autre base que celle de `COMPTES_ENVIRONNEMENT.md`, renseigner `E2E_USERNAME` / `E2E_MANAGER_USERNAME` / `E2E_VIEWER_USERNAME` (et `*_PASSWORD`) avec les comptes de cette base, et exporter `RECETTE_PASSWORD` pour les specs de recette.
+- Un skip silencieux n'est pas un vert : compter les skips dans le rapport de passe et en donner la cause.
+
+## 4 novembre 2026 - main rouge : signature de service changée, appelant de test oublié (#263)
+
+### Contexte
+#263 (suppression douce des pleins carburant) a ajouté un paramètre `actor` obligatoire à `FuelService.deleteFuelRecord`. Seul l'appelant de production (`fuel-records.routes.ts`) a été mis à jour ; `tests/integration/fuel-card-lock-coverage.test.ts` appelait encore `deleteFuelRecord(id)` : `TypeError: Cannot read properties of undefined (reading 'role')`, suite d'intégration rouge sur main.
+
+### Cause racine
+Le relecteur de #263 n'a rejoué que les tests carburant, pas la suite d'intégration complète. Un test d'intégration qui appelait le service n'a donc pas été exécuté.
+
+### Résolution
+Garde d'acteur en tête du service (`AppError` 401 au lieu d'un TypeError), test corrigé avec un acteur admin (le plein de la fabrique a mouvementé la carte : suppression douce, l'assertion d'origine « ligne absente » ne tenait plus), autres appelants recensés par grep (aucun autre).
+
+### Prévention vérifiable
+- La CI d'intégration est déjà un gate bloquant.
+- Règle de relecture ajoutée à `AGENTS.md` §8 : tout changement de signature d'un service impose la suite d'intégration complète, rejouée par le relecteur.
+
+### Leçon généralisée
+Le périmètre de relecture se déduit de ce qu'un changement de signature peut casser (tous ses appelants), pas du domaine métier du diff.

@@ -9,7 +9,13 @@
  * Consommateurs : garde Playwright et vitest (`e2e/helpers/production-guard.ts`), garde du
  * serveur hors production (`server/lib/production-db-guard.ts`). Fonctions pures, sans `node:*`.
  */
-export const DEFAULT_PRODUCTION_MARKERS: readonly string[] = ["ep-bitter-term-ai6i3ey4"];
+/**
+ * `ep-bitter-term-ai6i3ey4` : ancien Neon de production. `db-prod` : service Postgres de la prod VPS
+ * (deploy/docker-compose.yml), tel que le voit un conteneur du réseau compose. Un tunnel SSH vers
+ * `localhost` ne se distingue pas d'une base locale : le viser par un alias d'hôte et l'ajouter
+ * à E2E_PRODUCTION_DB_MARKERS sur le poste (docs/deploiement/vps.md).
+ */
+export const DEFAULT_PRODUCTION_MARKERS: readonly string[] = ["ep-bitter-term-ai6i3ey4", "db-prod"];
 
 export function productionMarkers(env: NodeJS.ProcessEnv = process.env): string[] {
   const extra = (env.E2E_PRODUCTION_DB_MARKERS ?? "")

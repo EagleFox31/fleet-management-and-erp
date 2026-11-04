@@ -177,7 +177,16 @@ test.describe("P6 - stock bas -> réapprovisionnement (navigateur)", () => {
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline && !frames.some((f) => f.includes("auth_success"))) await observerPage.waitForTimeout(250);
     seen.socketReady = frames.some((f) => f.includes("auth_success"));
-    seen.baseline = await observerAlertCount(observerPage);
+    // La tuile affiche 0 tant que /api/warehouse/reorder-alerts n'a pas répondu : relever la valeur
+    // attendue par l'API de la même session, puis attendre que la tuile l'affiche avant de s'en servir
+    // comme point de départ. Sans cela, une base qui compte déjà des pièces sous seuil donne 0 puis N+1.
+    const alertsResponse = await observerPage.request.get("/api/warehouse/reorder-alerts");
+    expect(alertsResponse.ok(), "alertes de réapprovisionnement lisibles par le chef d'atelier").toBeTruthy();
+    const expectedBaseline = Number((await alertsResponse.json())?.totalAlerts ?? 0);
+    await expect
+      .poll(() => observerAlertCount(observerPage), { timeout: 30_000, message: "compteur de départ chargé" })
+      .toBe(expectedBaseline);
+    seen.baseline = expectedBaseline;
 
     const { part, requirementId } = await draftOrderForLowPart(10);
     seen.partId = part.id;
