@@ -2357,6 +2357,26 @@ Sécurité (énumération de comptes, fuite de secret dans les journaux) + test 
 - Un test sur une base partagée n'affirme jamais qu'une période ou une table est vide s'il ne l'a pas créée vide lui-même. Il affirme des invariants, ou il filtre sur ses propres identifiants.
 - Un test qui lance un processus (bash, binaire) fixe un délai adapté à ce coût, et ne réserve pas aux pipes shell un calcul que le langage de test sait faire.
 
+## 2026-11-04 — Compteur anti-force brute indexé sur la chaîne reçue (pin-login)
+
+### Contexte
+Le garde de verrouillage de `POST /api/auth/pin-login` passait avant la validation et indexait son compteur sur la chaîne brute de `userId`, alors que le handler appliquait `Number(userId)`. Les formes "12", "012" et "0012" ouvraient chacune un compteur distinct pour le même compte. Les échecs d'identification répondaient en outre par des statuts et des messages différents (401, 403) et sans comparaison bcrypt quand il n'y avait pas de hash.
+
+### Cause racine
+Clé du compteur et identité réelle du compte calculées à deux endroits, de deux façons. Le garde ne connaissait que la chaîne reçue.
+
+### Résolution
+- L'identifiant est validé (`^[1-9]\d{0,8}$`) puis ramené à sa forme canonique avant le garde, au montage de la route.
+- Tous les échecs d'identification répondent le même 401 « Identifiants invalides », avec comparaison bcrypt factice.
+- Le mot de passe d'un compte chauffeur n'est plus le PIN haché ; reprise idempotente des comptes existants au démarrage.
+
+### Règle Projet (obligatoire)
+- La clé d'un compteur anti-force brute est la forme canonique de l'identifiant, jamais la chaîne reçue.
+
+### Prévention (vérifiable)
+- Contrat `tests/contract/pin-login-hardening.contract.test.ts` : 5 PIN faux sur "id", puis les formes équivalentes sont verrouillées (429) ou refusées (400), et une seule clé `pin:<id>` existe en base.
+- Intégration `tests/integration/driver-password-pin-revocation.test.ts` pour la reprise.
+
 ## 2026-11-04 — Routes libre-service : exception T1 déclarée, et un « mot de passe modifié » qui ne l'était pas (R1)
 
 ### Contexte
@@ -2403,6 +2423,7 @@ Near miss, outillage de garde-fou : contrôle plus faible que la règle qu'il po
 
 ### Règle Projet (obligatoire)
 - Un garde-fou d'exception vérifie la preuve elle-même, pas une trace qui l'accompagne. Avant de livrer, se demander quel test vide le satisferait.
+
 ## 2026-11-04 — Fiche véhicule : toute erreur de chargement se lisait « n'existe pas » (#255, #261)
 
 ### Contexte
