@@ -17,6 +17,7 @@ import {
   purgeJourneyRows,
 } from "./helpers/mission-journey";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * MIS1 et P2, niveau E : une mission créée par la logistique est facturée depuis
@@ -79,8 +80,8 @@ test.describe("Mission vers facture vers paiement : parcours complet", () => {
     test.setTimeout(360_000);
     const client = await createTestClient();
     ids.clientIds.push(client.id);
-    const logisticsContext = await browser.newContext();
-    const secretaryContext = await browser.newContext();
+    const logisticsContext = await newE2EContext(browser, "logistics");
+    const secretaryContext = await newE2EContext(browser, "secretary");
 
     try {
       const logisticsPage = await logisticsContext.newPage();
@@ -169,7 +170,7 @@ async function balanceOf(invoiceId: number): Promise<{ row: InvoiceRow; payments
 }
 
 async function openSession(browser: Browser, credentials: E2ECredentials) {
-  const context = await browser.newContext();
+  const context = await newE2EContext(browser, "profil");
   const page = await context.newPage();
   await loginWithSession(page, credentials);
   return { context, page };

@@ -14,10 +14,13 @@ const KEYS = [A, `pwd:${A}`, storedLockoutKey(A), CPW, C, storedLockoutKey(C), `
 // Nom inconnu numerique (M-3) : un id qui n'existe pas dans users, range dans entity_id.
 const NUMERIC_NAME = 987_654_321;
 const auditIds: number[] = [];
+// Compte connu propre a ce fichier (M-3) : jamais un compte existant de la base partagee.
+const KNOWN_USERNAME = "lot-m3-migration-probe-known";
 
 async function cleanup() {
   await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [KEYS]);
   if (auditIds.length) await pool.query("DELETE FROM activity_logs WHERE id = ANY($1)", [auditIds]);
+  await pool.query("DELETE FROM users WHERE username = $1", [KNOWN_USERNAME]);
 }
 
 describe("reprise M3 : identifiants de connexion en clair vers leur empreinte", { timeout: 60_000 }, () => {
@@ -83,7 +86,10 @@ describe("reprise M3 : identifiants de connexion en clair vers leur empreinte", 
   });
 
   it("M-3 : un nom inconnu numérique rangé dans entity_id est repris, un compte connu ne bouge pas", async () => {
-    const known = await pool.query("SELECT id FROM users ORDER BY id LIMIT 1");
+    const known = await pool.query(
+      `INSERT INTO users (username, password, email, name, role) VALUES ($1, 'x', $2, 'TEST M-3', 'driver') RETURNING id`,
+      [KNOWN_USERNAME, `${KNOWN_USERNAME}@test.invalid`],
+    );
     const audit = await pool.query(
       `INSERT INTO activity_logs (user_id, action, entity_type, entity_id, details)
        VALUES (NULL, 'lock', 'user', $1, '{}'::jsonb), ($2, 'lock', 'user', $2, '{}'::jsonb) RETURNING id`,

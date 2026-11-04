@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { uniqueTestToken } from "../tests/support/ids";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
 import { createE2EUser } from "./helpers/test-data";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * PRT1 niveau navigateur : catalogue de pièces (CRUD pièce, variante, spécification ;
@@ -154,8 +155,8 @@ test.describe("PRT1 - catalogue de pièces (navigateur)", () => {
     const contexts: BrowserContext[] = [];
 
     test.beforeAll(async ({ browser }) => {
-      const observerContext = await browser.newContext();
-      const writerContext = await browser.newContext();
+      const observerContext = await newE2EContext(browser, "observer");
+      const writerContext = await newE2EContext(browser, "writer");
       contexts.push(observerContext, writerContext);
 
       const observerPage = await observerContext.newPage();

@@ -41,7 +41,11 @@ export const users = pgTable("users", {
   canIssueStock: boolean("can_issue_stock").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
-});
+}, (table) => [
+  // PIN en clair refusé en base : hash bcrypt ($2a$, $2b$, $2y$) ou NULL.
+  // Jumelle de server/db/migrations/20261104_users_pin_bcrypt_check.sql (posée NOT VALID puis validée).
+  check("users_pin_bcrypt_check", sql`${table.pin} IS NULL OR ${table.pin} ~ '^[$]2[aby][$]'`),
+]);
 
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,

@@ -2716,6 +2716,71 @@ Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le 
 
 ### Leçon généralisée
 Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
+## 2026-11-04 — Compteur anti-force brute lu puis écrit en deux temps
+
+- **Contexte** : `loginLockoutGuard` protège la connexion par mot de passe (`pwd:`), par PIN (`pin:`) et
+  le changement de mot de passe (`cpw:`). Un audit de sécurité a montré qu'une rafale de requêtes
+  simultanées contournait le verrou. Sur la base de test, 20 PIN faux en parallèle donnaient 11 réponses
+  401 (11 PIN vérifiés), et 20 mots de passe faux donnaient 20 réponses 401, pour un seuil de 5.
+- **Cause racine** : la garde lisait l'état (`get`), laissait passer, et n'écrivait l'échec qu'à
+  `res.on("finish")`, après le bcrypt. Toutes les requêtes parties avant la fin du premier bcrypt
+  lisaient « non verrouillé ». L'écriture était atomique, mais la décision ne l'était pas.
+- **Classification** : sécurité, condition de concurrence (TOCTOU) sur un contrôle anti-force brute.
+  Elle était aggravée par :
+  - un PIN de 4 chiffres ;
+  - une liste des chauffeurs publique ;
+  - aucune limite par IP.
+- **Résolution** :
+  - `LockoutStore.reserve` compte la tentative avant le handler, de façon atomique :
+    lecture et écriture dans une transaction, sous verrou consultatif pris sur la clé (`pg_advisory_xact_lock`),
+    `SELECT` de l'état puis upsert ;
+  - au-delà du seuil, le verrou est posé et la requête refusée en 429 ;
+  - en fin de requête :
+    - 401 → `confirmFailure` (verrou au seuil) ;
+    - 2xx → `reset` ;
+    - 400 ou 5xx → `release` : la réponse ne dit rien du secret, et une panne n'est pas un échec de connexion
+      (`auth-login-unavailable.contract.test.ts`). Seuls les 401 consomment le seuil, la borne tient ;
+    - tout autre statut, ou une connexion coupée sans réponse, reste compté (le verrou expire seul) ;
+  - compteur indisponible : la garde refuse en 503 sans appeler le handler (fermée sur panne), le refus n'est pas compté ;
+  - lecture et écriture du compteur dans une transaction, sous `pg_advisory_xact_lock` pris sur la clé. Une
+    première version en CTE `FOR UPDATE` ne verrouillait rien tant que la ligne n'existait pas : 20 réservations
+    parallèles donnaient 20 audits `lock`. Le test d'intégration l'a vu ;
+  - l'audit `lock` n'est écrit qu'au passage « non verrouillé → verrouillé » ;
+  - en complément, un plafond d'échecs par IP est monté devant `/api/auth/login` et `/api/auth/pin-login`
+    (`server/middleware/auth-ip-limit.ts`). Un succès n'y rend que son propre jeton et ne réinitialise pas
+    la fenêtre. Seul le dernier saut est retenu (`trust proxy 1`). La mémoire est bornée.
+- **Prévention vérifiable** :
+  - `tests/contract/login-lockout-concurrency.contract.test.ts` (rouge sur l'ancien code) : 20 requêtes en
+    `Promise.all`, au plus MAX réponses 401 ; limite par IP avec succès intercalés et X-Forwarded-For forgé ;
+  - `tests/integration/login-lockout-db-store.test.ts` : 20 réservations parallèles, exactement MAX
+    admises, un seul audit ;
+  - `tests/unit/server/auth-ip-limit.test.ts` : rafale sur la garde, statuts rendus ou comptés, Map bornée,
+    Retry-After, 503 sans vérification si le compteur est en panne.
+- **Leçon** : un contrôle anti-force brute décide et compte dans la même écriture, avant le travail
+  coûteux. « Lire, laisser passer, écrire après » n'est jamais atomique, même si chaque requête SQL
+  l'est. Le test qui le prouve joue des requêtes simultanées. Des requêtes séquentielles ne verront
+  jamais ce défaut.
+
+## 2026-11-04 — `drizzle-kit push --force` tombé sur la base d'une autre session
+
+- **Contexte** : après un redémarrage de Docker Desktop, Windows a réservé la plage de ports TCP 54299-54398,
+  dont 54320 (base de test standard). Une pile de test alternative a été montée sur 55432 sans vérifier que
+  ce port était libre ; il appartenait à la pile `c7test` d'une autre session.
+- **Cause racine** : `DATABASE_URL=…@localhost:<port>` désigne un port, pas une pile. Le compose a échoué sur
+  « port is already allocated » pour mon conteneur, mais la commande suivante, enchaînée, a poussé le schéma
+  sur le conteneur qui tenait déjà le port.
+- **Classification** : near miss, écriture sur une ressource partagée appartenant à un tiers. Schéma poussé
+  identique à celui de `main` ; une divergence de schéma chez `c7test` aurait pu être modifiée en silence
+  (`--force` accepte les pertes de données).
+- **Résolution** : pile `fm-cpw` remontée sur 56432/56433 (fichier de ports hors dépôt), contrôle de ce qui
+  écoute avant tout push, propriétaire de `c7test` prévenu par l'orchestrateur.
+- **Prévention** :
+  - ne jamais enchaîner `compose up` et `drizzle-kit push` sans `&&` ni contrôle : un échec du premier doit
+    arrêter le second ;
+  - avant un `push --force`, vérifier le propriétaire du port (`docker ps --format '{{.Names}} {{.Ports}}'`) ;
+  - cibler la base par son nom propre à la session (`fleet_test_<session>`, `tests/README.md`).
+- **Leçon généralisée** : une commande destructive vise une identité (projet, base), jamais seulement un port ;
+  on vérifie ce qui répond avant de lui écrire.
 
 ## 4 novembre 2026 : changer le mot de passe ne coupait pas les autres sessions
 
@@ -2765,3 +2830,58 @@ Correctif additif côté service : les champs lus par la page sont ajoutés (`id
 
 ### Leçon généralisée
 Un écran qui type à la main la réponse d'une route est un contrat implicite. Le test de contrat de la route doit affirmer les champs que l'écran lit, pas seulement le statut HTTP ou la présence de l'id. Une spec e2e ignorée faute de données ne protège rien : la donnée se crée dans la spec.
+
+## 2026-11-04 — `trust proxy` fixé en dur : la limite par IP dépendait de la topologie
+
+- **Contexte** : la limite d'essais de connexion par adresse IP lit `req.ip`, donc `X-Forwarded-For` jusqu'au
+  nombre de sauts de confiance. Ce nombre était fixé à 1 dans `server/app.ts`.
+- **Cause racine** : le réglage décrivait le seul déploiement derrière Caddy. Le profil `site` du compose
+  publie l'application directement sur le réseau local : un client y choisit lui-même l'adresse comptée en
+  forgeant l'en-tête, et le plafond par IP ne joue plus. Détecté par l'audit de sécurité du lot, avant tout
+  usage de la limite sur ce profil.
+- **Classification** : sécurité, configuration dépendante de l'environnement (hypothèse de topologie en dur).
+  Near miss : aucune exploitation, la garde par compte restait active.
+- **Résolution** : `TRUST_PROXY` lu par `trustProxyFromEnv` (défaut 1, `0` = aucun proxy de confiance) ;
+  `app-site` fixe `TRUST_PROXY: "0"`.
+- **Prévention (vérifiable)** :
+  - `tests/contract/trust-proxy.contract.test.ts` : à `TRUST_PROXY=0`, un `X-Forwarded-For` changé à chaque essai
+    ne contourne pas le plafond (rouge sans le correctif) ;
+  - `tests/unit/server/trust-proxy.test.ts` : le profil `site` du compose fixe `TRUST_PROXY: "0"`, `vps` et
+    `recette` ne le désactivent pas.
+- **Leçon généralisée** : une valeur qui dépend de la topologie (sauts de proxy, hôtes de confiance, ports
+  publiés) se déclare par profil de déploiement, avec un défaut sûr et un test qui lit la configuration de
+  chaque profil. Elle ne se fixe pas en dur pour le cas de production.
+
+## 2026-11-04 — Compte chauffeur : le mot de passe était dérivé du PIN
+
+### Contexte
+La création d'un compte chauffeur (`POST /api/drivers/:id/create-user`) posait le PIN haché comme mot de passe. Un PIN de quatre chiffres, qui sert à `pin-login` (limité par compte), ouvrait donc aussi `/api/auth/login`.
+
+### Cause racine
+Un second secret (le mot de passe) a été rempli avec la valeur d'un premier (le PIN) « pour que la colonne ne soit pas vide ». Le secret le plus faible fixait la force de l'autre, et changer le PIN pouvait remettre le même lien en place.
+
+### Résolution
+Mot de passe aléatoire à la création (`randomPasswordHash`), reprise idempotente des comptes existants au démarrage (`revokePinDerivedDriverPasswords`, garde `password = pin`, zéro écriture au second passage), PATCH administrateur sans recopie du PIN.
+
+### Prévention (vérifiable)
+- `tests/contract/pin-login-hardening.contract.test.ts` (E2) : le mot de passe créé diffère du PIN et refuse PIN et identifiant.
+- `tests/contract/driver-account-secret.contract.test.ts` : après un changement de PIN par l'admin, ni l'ancien ni le nouveau PIN n'ouvrent `/api/auth/login`, seul le nouveau ouvre `pin-login`. Vu rouge quand le PATCH recopie le PIN dans le mot de passe.
+- `tests/integration/driver-password-pin-revocation.test.ts` : reprise idempotente.
+
+### Leçon généralisée
+Un secret ne se dérive jamais d'un autre secret, même pour remplir une colonne obligatoire : donner à chaque secret sa propre valeur aléatoire, et tester que changer l'un n'ouvre pas l'autre.
+
+## 2026-11-04 — Une CHECK de sécurité rend visible la valeur refusée dans les logs
+
+- **Contexte** : CHECK `users_pin_bcrypt_check` (PIN en base = hash bcrypt ou NULL), relue par la sécurité avant fusion (#320).
+- **Cause racine** : `POST /api/users` et `POST /api/auth/register` passaient `pin` brut à `storage.createUser` (`insertUserSchema` ne l'omet pas). Une écriture refusée renvoie 23514 avec `detail: "Failing row contains (…1234…)"`, journalisé tel quel : la contrainte qui protège le secret l'aurait écrit dans les logs. Le redact pino ne couvrait pas `err.detail`.
+- **Classification** : near miss (détecté en relecture, jamais déployé) ; défaut de conception : contrainte posée sans avoir passé en revue chaque chemin d'écriture de la colonne.
+- **Résolution** : PIN validé (4 chiffres) puis haché dans les deux routes de création (`server/lib/user-pin.ts`), 400 lisible au lieu de 500 ; `err.detail` et `err.where` masqués dans `server/lib/logger.ts`.
+- **Prévention vérifiable** : `tests/contract/user-create-pin-hashed.contract.test.ts` (clair jamais écrit, 400 sur PIN invalide) ; `tests/unit/server/logger-redact.test.ts` (aucune valeur d'une ligne refusée ne sort dans le journal).
+- **Leçon généralisée** : avant de poser une contrainte sur une colonne secrète, lister et tester chaque chemin d'écriture (routes, import de sauvegarde, scripts) ; un message d'erreur de base de données contient la donnée refusée, donc le redact doit couvrir `detail` et `where`.
+
+### Complément (2026-11-04) — le masquage pino ne couvre pas `console.*`
+Les `console.error("Error creating user:", error)` de `storage.createUser` et des routes de comptes affichaient l'erreur SQL brute, `detail` compris, hors de portée du `redact` pino. Migrés vers `moduleLogger` avec `{ err, requestId }` ; `tests/unit/server/accounts-no-console.test.ts` interdit tout `console.*` dans ces handlers et méthodes de stockage (liste gelée vide). Un log ne se supprime pas : il se migre.
+
+### Complément (2026-11-04) — l'import valide le PIN comme les routes
+L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `restoreBackup` passe par `pinForRestore` (`server/lib/user-pin.ts`) : vide → NULL, nombre → haché, non conforme (hors 4 chiffres et hors `$2a/b/y`) → NULL + `warn` avec le seul nom d'utilisateur, hash repris tel quel. Hachage fait avant `db.transaction` (pas de N bcrypt sous verrous après les DELETE), un PIN exotique n'annule plus toute la restauration. Prévention : `tests/unit/server/user-pin.test.ts` et `backup-import-service.test.ts`.

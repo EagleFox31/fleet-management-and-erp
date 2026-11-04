@@ -1,7 +1,8 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import { changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
+import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contracts/auth-login";
+import { PASSWORD_MIN_LENGTH, changePasswordRequestSchema, onboardingMascotRequestSchema, onboardingStepRequestSchema } from "@shared/contracts/self-service";
 import { workflowDocumentUploadRequestSchema } from "@shared/contracts/vehicle-acquisition";
 import { validateBody } from "./middleware/validate-body";
 import { toggleUserRequestSchema } from "@shared/contracts/admin-users";
@@ -84,15 +85,10 @@ const log = moduleLogger("routes");
  * Hash bcrypt de même coût que les comptes (10), comparé quand le nom est inconnu ou supprimé :
  * la réponse prend le même temps qu'un compte existant, sinon la latence révèle les comptes (#260).
  */
+import { hashNewUserPin } from "./lib/user-pin";
 import { DUMMY_BCRYPT_HASH as LOGIN_DUMMY_HASH } from "./lib/dummy-hash"; // même hash factice que pin-login
 
 
-/** Corps de POST /api/auth/login : chaînes non vides et bornées, validées avant la recherche du compte. */
-const loginBodySchema = z.object({
-  username: z.string().min(1).max(255),
-  password: z.string().min(1).max(1024),
-  rememberMe: z.unknown().optional(),
-});
 
 // Configuration multer pour l'upload en mémoire
 const upload = multer({
@@ -189,9 +185,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Corps validé avant toute recherche de compte : un `password` non chaîne faisait lever
       // bcrypt.compare pour un compte existant seulement, d'où un oracle d'énumération (#256).
-      const parsed = loginBodySchema.safeParse(req.body);
+      const parsed = loginRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        return res.status(400).json({ message: "Nom d'utilisateur et mot de passe requis" });
+        return res.status(400).json({ message: LOGIN_BODY_INVALID_MESSAGE });
       }
       const { username, password, rememberMe } = parsed.data;
 
@@ -325,7 +321,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const user = await storage.createUser({
         ...parsedUser,
-        password: hashedPassword
+        password: hashedPassword,
+        pin: await hashNewUserPin(parsedUser.pin),
       });
       
       return res.status(201).json({
@@ -343,7 +340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.error("Registration error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Registration error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -546,13 +543,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Hasher le mot de passe
       const hashedPassword = await bcrypt.hash(parsedUser.password, 10);
+      const hashedPin = await hashNewUserPin(parsedUser.pin); // hors du try d'écriture : un PIN invalide donne 400
 
       log.info({ requestId: req.requestId }, "Tentative de création utilisateur dans la base de données");
 
       try {
         const user = await storage.createUser({
           ...parsedUser,
-          password: hashedPassword
+          password: hashedPassword,
+          pin: hashedPin,
         });
 
         log.info({ requestId: req.requestId, userId: user.id }, "Utilisateur créé avec succès");
@@ -588,13 +587,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       
       if (isNaN(id)) {
-        return res.status(400).json({ message: "ID d'utilisateur invalide" });
+        return next(new AppError(400, "ID d'utilisateur invalide"));
       }
       
       const user = await storage.getUser(id);
       
       if (!user) {
-        return res.status(404).json({ message: "Utilisateur non trouvé" });
+        return next(new AppError(404, "Utilisateur non trouvé"));
       }
       
       // Les écrans renvoient la fiche entière (id, createdAt, loginCount...) :
@@ -616,6 +615,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Si le mot de passe est fourni, le hasher ; vide, il est ignoré
       if (typeof password === "string" && password.trim() !== "") {
+        // Même longueur minimale que le changement de mot de passe (source : shared/contracts/self-service).
+        if (password.length < PASSWORD_MIN_LENGTH) {
+          return next(new AppError(400, `Le mot de passe doit contenir au moins ${PASSWORD_MIN_LENGTH} caractères.`));
+        }
         userData.password = await bcrypt.hash(password, 10);
       }
 
@@ -658,7 +661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!updatedUser) {
-        return res.status(404).json({ message: "Utilisateur non trouvé" });
+        return next(new AppError(404, "Utilisateur non trouvé"));
       }
       
       return res.status(200).json({
@@ -674,7 +677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update user error");
-      return res.status(500).json({ message: "Erreur serveur" });
+      return next(new AppError(500, "Erreur serveur", { cause: error }));
     }
   });
 
@@ -702,7 +705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Delete user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

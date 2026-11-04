@@ -5,6 +5,7 @@ import { users } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../tests/support/factories";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
+import { newE2EContext } from "./helpers/contexts";
 
 /**
  * ADM2, niveau E : un administrateur change le rôle d'un compte au navigateur.
@@ -47,7 +48,7 @@ async function roleOf(id: number): Promise<string | undefined> {
 }
 
 async function openSession(browser: Browser, credentials: E2ECredentials): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await newE2EContext(browser, "profil");
   const page = await context.newPage();
   await loginWithSession(page, credentials);
   return page;
