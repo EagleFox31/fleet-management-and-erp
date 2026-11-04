@@ -169,7 +169,11 @@ export class DbLockoutStore implements LockoutStore {
     else if (mirror) await this.mirror(username, after);
   }
 
-  /** Reservation atomique (voir LockoutStore.reserve), meme calcul que le store memoire. */
+  /**
+   * Reservation atomique (voir LockoutStore.reserve), meme calcul que le store memoire.
+   * `afterWrite` s'execute apres le COMMIT : s'il echoue (miroir, audit `lock`), la garde repond 503
+   * alors que la tentative est deja comptee et jamais rendue. Fermee sur panne, voulu.
+   */
   async reserve(username: string, now: Date, cfg: LockoutConfig): Promise<Reservation> {
     let reservation!: Reservation;
     const { before } = await this.withKeyLock(storedLockoutKey(username), (b) => {

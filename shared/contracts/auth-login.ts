@@ -6,7 +6,7 @@ import { z } from "zod";
  * crée aucune ligne de compteur et reçoit la même réponse 400 pour un compte connu et inconnu.
  */
 export const loginRequestSchema = z.object({
-  username: z.string().min(1).max(255),
+  username: z.string().trim().min(1).max(255),
   password: z.string().min(1).max(1024),
   rememberMe: z.unknown().optional(),
 });

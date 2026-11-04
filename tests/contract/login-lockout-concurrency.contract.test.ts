@@ -111,7 +111,7 @@ describe("verrouillage : rafale de requêtes simultanées", { timeout: 120000 },
     ids.userIds.push(created.id);
     const candidates = [storedLockoutKey(created.username)];
     keys.push(...candidates);
-    const bodies = [{ username: created.username }, { username: created.username, password: 42 }, { username: created.username, password: "" }];
+    const bodies = [{ username: created.username }, { username: created.username, password: 42 }, { username: created.username, password: "" }, { username: "   ", password: "x" }];
     const results = await Promise.all(Array.from({ length: BURST }, (_, i) => post("/api/auth/login", bodies[i % bodies.length])));
     expect(tally(results.map((r) => r.status))).toEqual({ 400: BURST });
     const rows = await pool.query("SELECT 1 FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [candidates]);
