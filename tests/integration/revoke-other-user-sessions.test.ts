@@ -27,6 +27,9 @@ async function remaining(): Promise<string[]> {
 }
 
 beforeAll(async () => {
+  // La table est créée à l'exécution par le store de sessions (connect-pg-simple), pas par drizzle push :
+  // sur une base neuve elle n'existe pas. Même schéma que le store.
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "session" (sid varchar NOT NULL PRIMARY KEY, sess json NOT NULL, expire timestamp(6) NOT NULL)`);
   userId = (await createTestUser({ role: "technician" })).id;
   otherId = (await createTestUser({ role: "technician" })).id;
   ids.userIds.push(userId, otherId);
