@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_DB_INTEGER_ID, parseRouteId, routeIdOrNaN } from "../../../server/lib/route-id";
 import { countBoundRequestConversions, isRequestPart, looseNumericValue, unwrapValue } from "../../support/request-id-scan";
 import { sourceFiles, stripComments } from "../../support/route-guard-scan";
+import { REPO_SCAN_TIMEOUT_MS } from "../../support/repo-files";
 
 /**
  * Identifiant de route : une seule lecture, `parseRouteId` (`server/lib/route-id.ts`).
@@ -207,7 +208,7 @@ function actualCounts(): Record<string, number> {
 describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâches de req.params", () => {
   it("aucune lecture lâche nouvelle, et la liste gelée suit les retraits", () => {
     expect(actualCounts()).toEqual(FROZEN);
-  });
+  }, REPO_SCAN_TIMEOUT_MS);
 
   it("le motif voit les formes lâches, pas parseRouteId ni un commentaire", () => {
     expect(countLooseParamReads("const a = parseInt(req.params.id);")).toBe(1);
