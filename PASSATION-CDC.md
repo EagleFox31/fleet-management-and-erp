@@ -49,3 +49,6 @@
 
 ## 2026-11-05 03:30 — c7 : #339 poussée par merge de main (sans réécriture)
 - Branche distante fix/mission-status-planning-clash : merge de origin/main + commit des réserves (lecture périmée, 409 de POST / par next). Base de #339 = main. Contrats mission 222 / npm test 2413 / check 0 vérifiés sur l'arbre rebasé identique. En attente de relecture de 0a.
+
+## 2026-11-05 05:10 — c7 : entrée LESSONS « ordre de verrouillage unique des missions »
+- Branche docs/lessons-ordre-verrous-missions (depuis origin/main) : nouvelle entrée en fin de LESSONS_LEARNED (ligne mission FOR UPDATE, empreinte, advisory triés). Petite PR doc ; « mr » à 0a ensuite. #346 reste en attente de la décision de l'utilisatrice sur sa base.
