@@ -30,3 +30,13 @@
 ## 2026-11-05 01:11 — c7 : #328 déclencheur de test ciblé validé, attente de #327
 - Réserves de 0a sur #328 traitées. Déclencheur du test d'échec d'insertion ciblé (WHEN sur le véhicule du test), poussé ; 5/5 verts, aucun déclencheur résiduel. 0a a validé sans db-lock.
 - Prochaine étape inchangée : sur annonce de 0a que #327 est fusionnée, merger origin/main, garder isCpcStatusValid, relancer mission-create-assigned et mission-*, npm run check, push, message « mr 328 » à 0a.
+
+## 2026-11-05 01:32 — c7 : conflits de planning à l'écriture (fix/mission-planning-conflict)
+- #328 fusionnée (773b1f8). Branche fix/mission-planning-conflict depuis main : server/services/mission-planning.ts (findPlanningClash, verrou advisory), branché sur POST /api/missions, PATCH /:id (chauffeur, véhicule, dates), POST /:id/assignments, launch-readiness et la validation de lancement de PUT /:id/status (les 3 copies d'origine).
+- Preuves : contrat mission-planning-conflict-write (9 cas, 6 rouges sans contrôle, rafale rouge 3/3 sans verrou), intégration mission-planning-clash (4), contrats mission-* 189 verts, npm test 2320 verts, npm run check 0 erreur.
+- Suivi noté dans LESSONS : PUT /:id/status ne rejoue pas le contrôle.
+- Prochaine étape : PR prête, avis de 0a.
+
+## 2026-11-05 01:58 — c7 : #334 réserves de relecture traitées ; suivi PUT /status empilé
+- #334 : PATCH prend la ligne mission FOR UPDATE avant les verrous consultatifs ; helper lockPlanningPairs (ordre global trié et dédoublonné, véhicules puis chauffeurs) dans mission-planning.ts. Rafale PATCH dates + ajout d'affectation sur le même véhicule : rouge 3/3 sans le FOR UPDATE, verte avec. Doc corrigée (les 3 copies = launch-readiness, POST /:id/assignments, validation de lancement de PUT /status). liveAssignments relu hors transaction : noté en suivi.
+- Branche fix/mission-status-planning-clash (empilée sur #334, WIP commité, non poussée) : PUT /:id/status vers planned/assigned rejoue findPlanningClash sous verrou ; contrat mission-planning-conflict-status 5 cas (3 rouges sans correctif). À rebaser sur #334 corrigée, verrouiller la ligne mission FOR UPDATE avant les verrous consultatifs, puis PR.
