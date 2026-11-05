@@ -1,7 +1,7 @@
 /**
  * Seed des démos par profil (e2e/demo/*.spec.ts). Base locale jetable uniquement.
  *
- * Usage : node --env-file=.env --import tsx e2e/demo/seed-demo.ts
+ * Usage : node --import tsx e2e/demo/seed-demo.ts (DATABASE_URL local, voir e2e/demo/README.md)
  *
  * Idempotent : les comptes, véhicules et la pièce sont posés par clé naturelle
  * (ON CONFLICT DO NOTHING) ; l'état des scénarios (OT du technicien, échéance du
@@ -12,6 +12,8 @@
  * Choix reuse-first : scripts/recette-seed.ts exige un environnement de recette et
  * un mot de passe de 12 caractères ; il n'est pas adapté à une base Docker jetable.
  */
+import fs from "node:fs";
+import path from "node:path";
 import bcrypt from "bcryptjs";
 import { and, eq, inArray, like, ne } from "drizzle-orm";
 import { db, pool } from "../../server/db";
@@ -137,13 +139,28 @@ async function seedWorkshop(): Promise<void> {
   }
 }
 
+/** PDF minimal mais valide, pour que l'ouverture d'un document de démo ne donne pas 404. */
+function writeDemoPdf(name: string): void {
+  const dir = path.join(process.cwd(), "uploads", "demo");
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, name);
+  if (fs.existsSync(target)) return;
+  const body = ["%PDF-1.1", "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj", "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj", "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj", "trailer<</Root 1 0 R>>", "%%EOF", ""].join("\n");
+  fs.writeFileSync(target, body);
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
   const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
   const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
-    if (docs.some((d) => d.type === type)) continue;
+    writeDemoPdf(`${DEMO_MISSION.vehicle}-${type}.pdf`);
+    const existing = docs.find((d) => d.type === type);
+    if (existing) {
+      await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      continue;
+    }
     await db.insert(vehicleDocuments).values({
       vehicleId,
       name: `${DEMO_MISSION.vehicle} ${type}`,
@@ -235,6 +252,7 @@ export async function seedDemo(): Promise<void> {
     // Demandes de renouvellement créées par la démo précédente (périmètre : ce document seul).
     await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleDocumentId, documents.map((d) => d.id)));
   }
+  writeDemoPdf("assurance-demo.pdf");
   if (documents.length === 0) {
     await db.insert(vehicleDocuments).values({
       vehicleId: secretaryVehicleId,

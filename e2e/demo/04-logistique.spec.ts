@@ -37,7 +37,7 @@ test("démo logistique : de la création de la mission à la facture client", as
 
   await page.getByTestId("input-pickup-address").fill("Douala, port autonome");
   await page.getByTestId("input-delivery-address").fill("Yaoundé, entrepôt central");
-  await page.getByTestId("textarea-cargo").fill("Palettes de boissons, 18 tonnes").catch(() => undefined);
+  await page.getByTestId("textarea-cargo").fill("Palettes de boissons, 18 tonnes");
   await beat(page);
   await page.getByTestId("btn-next").click();
 

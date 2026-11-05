@@ -6,7 +6,7 @@ import { beat, loginThroughForm } from "./helpers";
 import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_PART, DEMO_WORK_ORDER_TITLE } from "./seed-demo";
 
 /**
- * Démo « technicien » (E2E_DEMO=1, état de départ : node --env-file=.env --import tsx e2e/demo/seed-demo.ts).
+ * Démo « technicien » (E2E_DEMO=1, état de départ : node --import tsx e2e/demo/seed-demo.ts, avec DATABASE_URL local, voir README).
  * Parcours : connexion, ouverture de son intervention, demande d'une pièce (le technicien ne
  * sort pas de stock : le magasinier sort), clôture de l'OT. Un seul navigateur.
  */
