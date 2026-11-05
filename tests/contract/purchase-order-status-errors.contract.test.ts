@@ -7,7 +7,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
-import { leakText } from "../support/api-error";
+import { leakText, messageText } from "../support/api-error";
 
 /**
  * Niveau C, erreurs des commandes fournisseur (`/api/purchase-orders`).
@@ -124,7 +124,7 @@ describe("Commandes fournisseur : erreurs au contrat commun", { timeout: 120000 
     expectErrorContract(res, "CONFLICT");
     expect(res.body.message).toContain("Annulée");
     expect(res.body.message).toContain("Transmise fournisseur");
-    expect(res.body.message).not.toMatch(/\bcancelled\b|\bsent\b/);
+    expect(messageText(res.body)).not.toMatch(/\bcancelled\b|\bsent\b/);
     expect(await statusOf(order.id)).toBe("cancelled");
   });
 

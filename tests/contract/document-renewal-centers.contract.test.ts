@@ -12,7 +12,7 @@ import { startContractActors } from "../support/contract-actors";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
 import { resolveRenewalCenter } from "../../server/lib/document-renewal-center-resolver";
-import { leakText } from "../support/api-error";
+import { leakText, messageText } from "../support/api-error";
 
 /** DOC1 : gestion des centres de renouvellement (écriture, désactivation, garde des demandes). */
 const ids = createIdBag();
@@ -127,12 +127,12 @@ describe("centres de renouvellement : écriture", { timeout: 180000 }, () => {
     expect(first.status).toBe(201);
     const second = await call("POST", DOCUMENT_RENEWAL_CENTERS_PATH, "admin", { name: `TEST nom ${SUFFIX}`, documentType: "assurance" });
     expect(second.status).toBe(409);
-    expect(second.body.message).not.toMatch(/type/i);
+    expect(messageText(second.body)).not.toMatch(/type/i);
     expect(leakText(second.body)).not.toMatch(/duplicate|constraint|sql/i);
     const patched = await createCenter(`TEST autre ${SUFFIX}`, "assurance");
     const clash = await call("PATCH", documentRenewalCenterPath(patched.body.id), "admin", { name: `TEST NOM ${SUFFIX}` });
     expect(clash.status).toBe(409);
-    expect(clash.body.message).not.toMatch(/type/i);
+    expect(messageText(clash.body)).not.toMatch(/type/i);
   });
 
   it("l'espace insécable est ramené à un espace simple avant insertion", async () => {
