@@ -197,7 +197,7 @@ export function VehicleTireRemoveDialog({ mountedTire, onOpenChange }: VehicleTi
               onChange={(e) => setRemovalMileage(e.target.value)}
             />
             {mileageInvalid ? (
-              <p className="text-xs text-destructive">
+              <p className="text-xs text-destructive-text">
                 Au moins {mountedTire?.installationMileage.toLocaleString("fr-FR")} km (kilométrage au montage).
               </p>
             ) : null}

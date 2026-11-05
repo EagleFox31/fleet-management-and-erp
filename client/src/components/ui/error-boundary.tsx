@@ -54,9 +54,9 @@ export class ErrorBoundary extends React.Component<
                   transition={{ duration: 0.8, delay: 0.2 }}
                   className="mx-auto mb-4 w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center"
                 >
-                  <Bug className="w-8 h-8 text-destructive" />
+                  <Bug className="w-8 h-8 text-destructive-text" />
                 </motion.div>
-                <CardTitle className="text-destructive">
+                <CardTitle className="text-destructive-text">
                   Oups ! Quelque chose s'est cassé
                 </CardTitle>
               </CardHeader>

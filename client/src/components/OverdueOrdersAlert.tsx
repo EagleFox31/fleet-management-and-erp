@@ -108,7 +108,7 @@ export function OverdueOrdersAlert({ userRole }: OverdueOrdersAlertProps) {
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 bg-destructive/10 rounded-full">
-              <AlertTriangle className="h-6 w-6 text-destructive" />
+              <AlertTriangle className="h-6 w-6 text-destructive-text" />
             </div>
             <div>
               <DialogTitle className="text-xl">
@@ -117,7 +117,7 @@ export function OverdueOrdersAlert({ userRole }: OverdueOrdersAlertProps) {
               <DialogDescription>
                 {overdueOrders.length} commande{overdueOrders.length > 1 ? 's' : ''} n'ont pas été livrée{overdueOrders.length > 1 ? 's' : ''} à temps
                 {criticalOrders > 0 && (
-                  <span className="text-destructive font-medium">
+                  <span className="text-destructive-text font-medium">
                     {' '}· {criticalOrders} critique{criticalOrders > 1 ? 's' : ''} (+7 jours)
                   </span>
                 )}
@@ -128,7 +128,7 @@ export function OverdueOrdersAlert({ userRole }: OverdueOrdersAlertProps) {
 
         {/* Résumé des retards */}
         <Alert className="bg-destructive/5 border-destructive/20">
-          <Clock className="h-4 w-4 text-destructive" />
+          <Clock className="h-4 w-4 text-destructive-text" />
           <AlertDescription className="ml-2">
             <strong>Retard total : {totalRetard} jours</strong>
             {' · '}Retard moyen : {Math.round(totalRetard / overdueOrders.length)} jours par commande
@@ -180,7 +180,7 @@ export function OverdueOrdersAlert({ userRole }: OverdueOrdersAlertProps) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Jours de retard :</span>
-                    <span className="font-bold text-destructive">
+                    <span className="font-bold text-destructive-text">
                       {order.daysOverdue} jour{order.daysOverdue > 1 ? 's' : ''}
                     </span>
                   </div>
