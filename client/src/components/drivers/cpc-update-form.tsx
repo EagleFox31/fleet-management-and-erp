@@ -82,8 +82,8 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
   const TONE_CLASSES: Record<CpcStatusTone, string> = {
     success: "bg-success/10 text-success border-success/30",
     warning: "bg-warning/10 text-warning-text border-warning/30",
-    danger: "bg-destructive text-destructive-foreground border-destructive",
-    neutral: "bg-muted text-muted-foreground border-border",
+    danger: "bg-destructive/10 text-destructive-text border-destructive/30",
+    neutral: "bg-muted text-foreground border-border",
   };
   const getStatusBadge = (status?: string) => TONE_CLASSES[cpcStatusTone(status)];
 

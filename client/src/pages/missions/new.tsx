@@ -542,9 +542,9 @@ export default function NewMission() {
                         <div>
                           <span className="text-muted-foreground">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
-                            driverCpc.eligible ? 'bg-success/10 text-success' :
+                            driverCpc.eligible ? 'border border-success/30 bg-background text-success' :
                             normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-warning/10 text-warning-text' :
-                            'bg-destructive/10 text-destructive'
+                            'bg-destructive/10 text-destructive-text'
                           }`}>
                             {driverCpcStatus ?? "Non défini"}
                           </p>
@@ -730,7 +730,7 @@ export default function NewMission() {
             <div
               role="alert"
               data-testid="cpc-block-guidance"
-              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive-text"
             >
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <div className="space-y-1">
@@ -745,7 +745,7 @@ export default function NewMission() {
             <div
               role="alert"
               data-testid="step-block-reason"
-              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive-text"
             >
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <p>{stepBlockReason}</p>

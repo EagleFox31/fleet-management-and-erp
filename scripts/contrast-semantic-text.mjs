@@ -34,6 +34,30 @@ export function compute() {
   }
   return out;
 }
+// Couples texte/fond reellement employes (mission, formulaire CPC). [libelle, texte, fond, alpha, surface]
+export const COUPLES = [
+  ["badge CPC expire avant (destructive-foreground sur destructive)", "destructive-foreground", "destructive", 1, "background"],
+  ["badge CPC expire apres (destructive-text sur destructive/10)", "destructive-text", "destructive", 0.1, "background"],
+  ["badge CPC neutre avant (muted-foreground sur muted)", "muted-foreground", "muted", 1, "background"],
+  ["badge CPC neutre apres (foreground sur muted)", "foreground", "muted", 1, "background"],
+  ["success sur success/10 (page)", "success", "success", 0.1, "background"],
+  ["success sur success/10 (carte muted)", "success", "success", 0.1, "muted"],
+  ["warning-text sur warning/10 (page)", "warning-text", "warning", 0.1, "background"],
+  ["warning-text sur warning/10 (carte muted)", "warning-text", "warning", 0.1, "muted"],
+  ["destructive-text sur destructive/10 (page)", "destructive-text", "destructive", 0.1, "background"],
+  ["destructive sur destructive/10 (page, ancien)", "destructive", "destructive", 0.1, "background"],
+  ["success-foreground sur success", "success-foreground", "success", 1, "background"],
+  ["muted-foreground sur page", "muted-foreground", "background", 1, "background"],
+];
+export function computeCouples() {
+  return COUPLES.map(([label, fg, bg, a, surf]) => ({
+    label,
+    ...Object.fromEntries(Object.entries(THEMES).map(([n, t]) => [n, ratio(hsl(t[fg]), over(hsl(t[bg]), hsl(t[surf]), a))])),
+  }));
+}
+if (process.argv[1]?.endsWith("contrast-semantic-text.mjs")) {
+  for (const r of computeCouples()) console.log(r.label.padEnd(68), r.clair.toFixed(2), r.sombre.toFixed(2));
+}
 if (process.argv[1]?.endsWith("contrast-semantic-text.mjs")) {
   for (const [k, v] of Object.entries(compute())) console.log(k, Object.fromEntries(Object.entries(v).map(([a, b]) => [a, b.toFixed(2)])));
 }

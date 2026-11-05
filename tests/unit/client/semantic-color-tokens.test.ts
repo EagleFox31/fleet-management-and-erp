@@ -21,3 +21,17 @@ describe("jetons de couleur sémantiques", () => {
     });
   }
 });
+
+describe("contraste du formulaire CPC", () => {
+  const source = readFileSync(resolve(process.cwd(), "client/src/components/drivers/cpc-update-form.tsx"), "utf8");
+  const toneLines = source.split(/\r?\n/).filter((l) => /^\s*(success|warning|danger|neutral):/.test(l));
+
+  it("le badge expiré n'est pas bg-destructive plein avec texte destructive-foreground", () => {
+    expect(source).not.toMatch(/bg-destructive text-destructive-foreground/);
+  });
+
+  it("aucun badge ne met text-muted-foreground sur bg-muted", () => {
+    const bad = toneLines.filter((l) => /\bbg-muted\b/.test(l) && /\btext-muted-foreground\b/.test(l));
+    expect(bad).toEqual([]);
+  });
+});
