@@ -2917,3 +2917,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-planning-conflict-write.contract.test.ts` (9 cas, 6 rouges sans le contrôle ; la rafale de 2 créations est rouge 3 fois sur 3 sans le verrou ; la rafale PATCH de dates + ajout d'affectation sur le même véhicule est rouge 3 fois sur 3 sans le `FOR UPDATE` du PATCH) ; `tests/integration/mission-planning-clash.test.ts` (chevauchement, bords inclus, statuts ignorés).
 - **Leçon généralisée** : une règle partagée entre plusieurs chemins d'écriture vit dans un seul module appelé par tous ; une garde « lire puis écrire » sur une ressource partagée se sérialise (verrou de transaction) et se prouve par un test en rafale. Deux familles de verrous (ligne et consultatif) exigent un seul ordre d'acquisition pour tous les appelants, prouvé par une rafale croisée.
 - **Suivis** : `PUT /:id/status` vers `planned` ou `assigned` ne rejoue pas le contrôle (branche empilée) ; `launch-readiness` et la validation de lancement lisent hors verrou (ils ne font qu'indiquer un blocage, sans écrire d'affectation) ; dans le PATCH, `liveAssignments` est lu avant la transaction : une affectation ajoutée entre la lecture et l'écriture n'est pas revue (suivi, hors de ce lot).
+
+## 2026-11-05 — Fichier SQL de trigger présent mais jamais appliqué
+
+- **Contexte** : revue des accès disque (lot 3). `server/db/triggers/vehicle-activation-triggers.sql` construisait des chemins de documents à partir d'un nom saisi.
+- **Cause racine** : le fichier n'était pas dans `BOOTSTRAP_SQL_FILES` (`server/init-database.ts`) et rien d'autre ne l'appliquait ; il visait une table `workflows` qui n'existe pas. Sa présence dans le dépôt le faisait passer pour un automatisme en place.
+- **Classification** : code mort trompeur (comportement supposé absent en base).
+- **Résolution** : fichier supprimé, code mort, non appliqué.
+- **Prévention vérifiable** : `tests/unit/server/bootstrap-sql-files.test.ts` échoue si un `.sql` de `server/db/triggers/` ou `server/db/functions/` n'est ni dans `BOOTSTRAP_SQL_FILES` ni dans la liste gelée `NOT_BOOTSTRAPPED_FROZEN` (avec raison) ; rouge avant la suppression. La liste gelée garde quatre fichiers d'alertes non appliqués, à installer ou supprimer.
+- **Leçon généralisée** : un automatisme en base n'existe que s'il est appliqué au démarrage ; avant de corriger un trigger, vérifier qu'il est installé.
