@@ -1,5 +1,5 @@
-import { readFileSync } from "fs";
-import { relative } from "path";
+import { existsSync, readFileSync, statSync } from "fs";
+import { dirname, join, normalize, relative } from "path";
 import ts from "typescript";
 
 /**
@@ -59,27 +59,84 @@ function isRouterFactory(init: ts.Expression | undefined): boolean {
   return name === "Router" || name === "express.Router" || name === "express";
 }
 
-export function scanMountedMiddlewares(source: string, file: string): MountedMiddleware[] {
-  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const found: MountedMiddleware[] = [];
+/** Lit un module relatif importe ; `undefined` pour une dependance ou un alias non resolu. */
+export type ReadModule = (spec: string, fromFile: string) => { file: string; source: string } | undefined;
 
-  // Receveurs et routeurs identifies par leur declaration, non par leur nom (R4, R6).
+export function fsModuleReader(root: string): ReadModule {
+  return (spec, fromFile) => {
+    if (!spec.startsWith(".")) return undefined;
+    const base = normalize(join(root, dirname(fromFile), spec));
+    for (const candidate of [base, `${base}.ts`, join(base, "index.ts")]) {
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        return { file: relative(root, candidate).replace(/\\/g, "/"), source: readFileSync(candidate, "utf8") };
+      }
+    }
+    return undefined;
+  };
+}
+
+/** Type declare d'un receveur : `Router`, `express.Router`, `Express`, `Application`, `IRouter` (R6). */
+function isReceiverType(type: ts.TypeNode | undefined): boolean {
+  if (!type || !ts.isTypeReferenceNode(type)) return false;
+  const n = ts.isIdentifier(type.typeName) ? type.typeName.text : type.typeName.right.text;
+  return n === "Router" || n === "Express" || n === "Application" || n === "IRouter";
+}
+
+/** Le module exporte-t-il `name` comme routeur (`export const name = Router()` ou type routeur) ? (R4) */
+function exportsRouter(source: string, name: string): boolean {
+  const sf = ts.createSourceFile("m.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let ok = false;
+  const visit = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && (isRouterFactory(n.initializer) || isReceiverType(n.type))) ok = true;
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return ok;
+}
+
+/** Receveurs et routeurs reconnus a leur declaration, leur type ou leur import, non a leur nom (R4, R6). */
+function collectRouters(sf: ts.SourceFile, file: string, read?: ReadModule) {
   const receivers = new Set(RECEIVERS);
   const routers = new Set<string>();
+  const factories = new Set<string>();
+  const functionLike = (init: ts.Expression | undefined) => !!init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
+  const pre = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name && isReceiverType(node.type)) factories.add(node.name.text);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && functionLike(node.initializer) && isReceiverType((node.initializer as ts.ArrowFunction).type)) factories.add(node.name.text);
+    if (ts.isParameter(node) && ts.isIdentifier(node.name) && isReceiverType(node.type)) receivers.add(node.name.text);
+    ts.forEachChild(node, pre);
+  };
+  pre(sf);
   const declare = (node: ts.Node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isRouterFactory(node.initializer)) {
-      receivers.add(node.name.text);
-      routers.add(node.name.text);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const init = node.initializer;
+      const viaFactory = !!init && ts.isCallExpression(init) && ts.isIdentifier(init.expression) && factories.has(init.expression.text);
+      if (isRouterFactory(init) || isReceiverType(node.type) || viaFactory) {
+        receivers.add(node.name.text);
+        routers.add(node.name.text);
+      }
     }
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && ROUTER_MODULE.test(node.moduleSpecifier.text)) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && !node.importClause?.isTypeOnly && ROUTER_MODULE.test(node.moduleSpecifier.text)) {
+      const spec = node.moduleSpecifier.text;
       const clause = node.importClause;
       if (clause?.name) routers.add(clause.name.text);
       const named = clause?.namedBindings;
-      if (named && ts.isNamedImports(named)) for (const el of named.elements) routers.add(el.name.text);
+      if (named && ts.isNamedImports(named)) {
+        // Un import nomme n'est un routeur que si le module l'exporte comme tel (R4).
+        const mod = read?.(spec, file);
+        for (const el of named.elements) if (mod && exportsRouter(mod.source, (el.propertyName ?? el.name).text)) routers.add(el.name.text);
+      }
     }
     ts.forEachChild(node, declare);
   };
   declare(sf);
+  return { receivers, routers };
+}
+
+export function scanMountedMiddlewares(source: string, file: string, read?: ReadModule): MountedMiddleware[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const found: MountedMiddleware[] = [];
+  const { receivers, routers } = collectRouters(sf, file, read);
 
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
@@ -111,11 +168,12 @@ export function scanMountedMiddlewares(source: string, file: string): MountedMid
 }
 
 export function scanFiles(paths: string[], root: string): MountedMiddleware[] {
+  const read = fsModuleReader(root);
   return paths.flatMap((path) => {
     const rel = relative(root, path).replace(/\\/g, "/");
     const source = readFileSync(path, "utf8");
     // Filtre peu couteux : un fichier sans `.use(` ni verbe de montage n'est pas analyse.
-    return /\.(use|get|post|put|patch|delete|all)\(/.test(source) ? scanMountedMiddlewares(source, rel) : [];
+    return /\.(use|get|post|put|patch|delete|all)\(/.test(source) ? scanMountedMiddlewares(source, rel, read) : [];
   });
 }
 
@@ -145,38 +203,155 @@ export function forbiddenImports(source: string, file: string): string[] {
   return out;
 }
 
+/** Fichiers ou `routeIdRangeGuard` peut etre monte : fichier -> receveur attendu. */
+const ROUTE_ID_GUARD_HOMES: Record<string, string> = { "server/api/index.ts": "apiRouter", "server/app.ts": "app" };
+
 /**
- * `routeIdRangeGuard` (borne des identifiants de route) doit couvrir tout le routeur /api : monte sans
- * prefixe, sur `apiRouter`, avant le premier montage de routeur. Retourne les ecarts (R3).
+ * `routeIdRangeGuard` (borne des identifiants de route) doit couvrir tout /api : monte dans le routeur
+ * (`apiRouter`, sans prefixe) ou dans l'application (`app`, sans prefixe ou sur `/api`), avant le premier
+ * montage de routeur de son fichier. Tout autre fichier, receveur ou prefixe est un ecart (R3).
  */
 export function routeIdGuardIssues(mounts: MountedMiddleware[], routerMountLines: Record<string, number>): string[] {
   const issues: string[] = [];
   for (const m of mounts.filter((x) => x.name === "routeIdRangeGuard")) {
     const where = `${m.file}:${m.line}`;
-    if (m.prefix !== null && m.prefix !== "/") issues.push(`${where} monte sur le prefixe ${JSON.stringify(m.prefix)} : il doit couvrir tout /api`);
-    if (m.receiver !== "apiRouter" && m.receiver !== "app") issues.push(`${where} monte sur ${m.receiver} : il doit l'etre sur apiRouter`);
+    const home = ROUTE_ID_GUARD_HOMES[m.file];
+    if (!home) {
+      issues.push(`${where} monte dans un fichier non prevu : il doit l'etre dans server/api/index.ts ou server/app.ts`);
+      continue;
+    }
+    if (m.receiver !== home) issues.push(`${where} monte sur ${m.receiver} : il doit l'etre sur ${home}`);
+    const allowed = m.prefix === null || m.prefix === "/" || (m.file === "server/app.ts" && m.prefix === "/api");
+    if (!allowed) issues.push(`${where} monte sur le prefixe ${JSON.stringify(m.prefix)} : il doit couvrir tout /api`);
     const first = routerMountLines[m.file];
     if (first !== undefined && m.line > first) issues.push(`${where} monte apres le premier routeur (ligne ${first}) : il doit le preceder`);
   }
   return issues;
 }
 
-/** Premiere ligne ou un routeur est monte (`x.use("/p", routeur)`) dans un fichier, pour `routeIdGuardIssues`. */
-export function firstRouterMountLine(source: string, file: string): number | undefined {
+/** Premiere ligne ou un routeur est monte (`x.use("/p", routeur)` ou `registerRoutes(app)`) dans un fichier. */
+export function firstRouterMountLine(source: string, file: string, read?: ReadModule): number | undefined {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const routers = new Set<string>();
-  const collect = (n: ts.Node) => {
-    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && ROUTER_MODULE.test(n.moduleSpecifier.text) && n.importClause?.name) routers.add(n.importClause.name.text);
-    ts.forEachChild(n, collect);
-  };
-  collect(sf);
+  const { receivers, routers } = collectRouters(sf, file, read);
   let first: number | undefined;
+  const at = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart()).line + 1;
   const visit = (n: ts.Node) => {
-    if (first === undefined && ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "use") {
-      if (n.arguments.some((a) => ts.isIdentifier(a) && routers.has(a.text))) first = sf.getLineAndCharacterOfPosition(n.getStart()).line + 1;
+    if (ts.isCallExpression(n)) {
+      const mounted =
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "use" &&
+        n.arguments.some((a) => ts.isIdentifier(a) && (routers.has(a.text) || receivers.has(a.text)));
+      const registers = ts.isIdentifier(n.expression) && n.expression.text === "registerRoutes";
+      if ((mounted || registers) && (first === undefined || at(n) < first)) first = at(n);
     }
     ts.forEachChild(n, visit);
   };
   visit(sf);
   return first;
+}
+
+/** Imports interdits d'un fichier, y compris par transitivite des modules relatifs : chaines `a.ts > b.ts > ../db` (R2). */
+export function forbiddenImportsDeep(source: string, file: string, read: ReadModule, seen: Set<string> = new Set()): string[] {
+  seen.add(file);
+  const specs: string[] = [];
+  for (const spec of allSpecifiers(source, file)) specs.push(spec);
+  const out: string[] = [];
+  for (const spec of specs) {
+    if (FORBIDDEN_IMPORT.test(spec)) {
+      out.push(`${file} > ${spec}`);
+      continue;
+    }
+    const mod = read(spec, file);
+    if (mod && !seen.has(mod.file)) for (const chain of forbiddenImportsDeep(mod.source, mod.file, read, seen)) out.push(`${file} > ${chain}`);
+  }
+  return out;
+}
+
+/** Tous les specificateurs charges par un fichier (hors imports de types). */
+function allSpecifiers(source: string, file: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const out: string[] = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && !n.importClause?.isTypeOnly) out.push(n.moduleSpecifier.text);
+    if (ts.isExportDeclaration(n) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier) && !n.isTypeOnly) out.push(n.moduleSpecifier.text);
+    if (ts.isCallExpression(n) && n.arguments.length > 0 && ts.isStringLiteralLike(n.arguments[0])) {
+      const c = n.expression;
+      if (c.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(c) && c.text === "require")) out.push(n.arguments[0].text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Module (chemin relatif a la racine) d'ou `file` importe `name`, `undefined` si non relatif ou introuvable (R2 : `source` reel). */
+export function importSourceOf(source: string, file: string, name: string, read: ReadModule): string | undefined {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || !st.importClause) continue;
+    const c = st.importClause;
+    const names = [c.name?.text];
+    if (c.namedBindings && ts.isNamedImports(c.namedBindings)) names.push(...c.namedBindings.elements.map((e) => e.name.text));
+    if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) names.push(c.namedBindings.name.text);
+    if (names.includes(name)) return read(st.moduleSpecifier.text, file)?.file;
+  }
+  // Constante locale issue d'une fabrique importee : `const x = createX()` -> module de `createX`.
+  let viaFactory: string | undefined;
+  const visit = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer && ts.isCallExpression(n.initializer) && ts.isIdentifier(n.initializer.expression)) {
+      viaFactory ??= importSourceOf(source, file, n.initializer.expression.text, read);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return viaFactory;
+}
+
+/** Fonctions anonymes montees : imports interdits (directs ou transitifs) atteints par les identifiants de leur corps (R2). */
+export function forbiddenInAnonymousMounts(source: string, file: string, read: ReadModule): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const { receivers } = collectRouters(sf, file, read);
+  const importOf = new Map<string, string>();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || !st.importClause || st.importClause.isTypeOnly) continue;
+    const c = st.importClause;
+    const spec = st.moduleSpecifier.text;
+    if (c.name) importOf.set(c.name.text, spec);
+    if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) importOf.set(e.name.text, spec);
+    if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) importOf.set(c.namedBindings.name.text, spec);
+  }
+  const out: string[] = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ts.isIdentifier(n.expression.expression) && receivers.has(n.expression.expression.text)) {
+      for (const arg of n.arguments) {
+        if (!ts.isArrowFunction(arg) && !ts.isFunctionExpression(arg)) continue;
+        const line = sf.getLineAndCharacterOfPosition(arg.getStart()).line + 1;
+        const used = new Set<string>();
+        const walk = (x: ts.Node) => {
+          if (ts.isIdentifier(x) && importOf.has(x.text)) used.add(x.text);
+          ts.forEachChild(x, walk);
+        };
+        walk(arg);
+        // import() et require() dans le corps echappent aux imports de tete : memes specificateurs que pour un module.
+        for (const spec of allSpecifiers(arg.getText(), file)) {
+          if (FORBIDDEN_IMPORT.test(spec)) out.push(`${file}:${line} fonction anonyme charge ${spec}`);
+          else {
+            const mod = read(spec, file);
+            if (mod) for (const chain of forbiddenImportsDeep(mod.source, mod.file, read)) out.push(`${file}:${line} fonction anonyme charge ${spec} > ${chain}`);
+          }
+        }
+        for (const id of used) {
+          const spec = importOf.get(id)!;
+          if (FORBIDDEN_IMPORT.test(spec)) out.push(`${file}:${line} fonction anonyme utilise ${id} (${spec})`);
+          else {
+            const mod = read(spec, file);
+            if (mod) for (const chain of forbiddenImportsDeep(mod.source, mod.file, read)) out.push(`${file}:${line} fonction anonyme utilise ${id} > ${chain}`);
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
 }

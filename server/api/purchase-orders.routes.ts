@@ -132,11 +132,7 @@ const checkApprovalPermission = (req: Request, res: Response, next: NextFunction
 
 /** Identifiant d'URL : entier positif, sinon 400 lisible (avant : NaN jusqu'à la base, 500). */
 const parseIdParam = (value: string, label: string): number => {
-  const id = Number(value);
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(id) || id <= 0) {
-    throw new AppError(400, `${label} invalide.`);
-  }
-  return id;
+  return parseRouteId(value, `${label} invalide.`);
 };
 
 /**

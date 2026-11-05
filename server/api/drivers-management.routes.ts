@@ -108,14 +108,6 @@ const toggleDriverSchema = z.object({
   isActive: z.boolean(),
 });
 
-function parseDriverId(rawId: string): number | null {
-  const parsed = Number.parseInt(rawId, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return null;
-  }
-  return parsed;
-}
-
 
 function broadcastDriverUpdate(
   eventType: "driver_created" | "driver_updated" | "driver_toggled",
@@ -194,8 +186,7 @@ router.get("/me", async (req, res, next) => {
 
 router.get("/:id/missions", async (req, res, next) => {
   try {
-    const driverId = parseDriverId(req.params.id);
-    if (!driverId) return res.status(400).json({ message: "ID de chauffeur invalide" });
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
     // Un chauffeur ne lit que ses propres missions (DRV2-3) ; le personnel lit celles de tous.
     const driverScope = await driverScopeOf(req.user);
@@ -225,6 +216,7 @@ router.get("/:id/missions", async (req, res, next) => {
 
     return res.status(200).json(rows);
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Lecture des missions du chauffeur en echec");
     return next(new AppError(500, "Impossible de charger les missions du chauffeur.", { cause: error }));
   }
@@ -232,14 +224,12 @@ router.get("/:id/missions", async (req, res, next) => {
 
 router.get("/:id", async (req, res, next) => {
   try {
-    const driverId = parseDriverId(req.params.id);
-    if (!driverId) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }), { event: "Fiche chauffeur en echec" }));
   }
 });
@@ -295,10 +285,7 @@ router.post("/", isDriverManager, async (req, res, next) => {
 
 router.patch("/:id", isDriverManager, async (req, res, next) => {
   try {
-    const driverId = parseDriverId(req.params.id);
-    if (!driverId) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
     const parsed = updateDriverSchema.parse(req.body);
     const hasOwn = (key: string) =>
@@ -364,6 +351,7 @@ router.patch("/:id", isDriverManager, async (req, res, next) => {
     broadcastDriverUpdate("driver_updated", fullDriver, driverId);
     return res.status(200).json(fullDriver);
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     if (isUniqueViolation(error)) {
       return res.status(409).json({
         message: "Matricule ou liaison utilisateur déjà utilisée",
@@ -381,10 +369,7 @@ router.patch("/:id", isDriverManager, async (req, res, next) => {
 
 router.patch("/:id/toggle", isDriverManager, async (req, res, next) => {
   try {
-    const driverId = parseDriverId(req.params.id);
-    if (!driverId) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
     const { isActive } = toggleDriverSchema.parse(req.body);
 
@@ -402,6 +387,7 @@ router.patch("/:id/toggle", isDriverManager, async (req, res, next) => {
     broadcastDriverUpdate("driver_toggled", fullDriver, driverId);
     return res.status(200).json(fullDriver);
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         message: "Données invalides",
@@ -416,10 +402,7 @@ router.patch("/:id/toggle", isDriverManager, async (req, res, next) => {
 
 router.delete("/:id", isAdmin, async (req, res, next) => {
   try {
-    const driverId = parseDriverId(req.params.id);
-    if (!driverId) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
     const [updatedDriver] = await db
       .update(drivers)
@@ -438,6 +421,7 @@ router.delete("/:id", isAdmin, async (req, res, next) => {
       driver: fullDriver,
     });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Desactivation du chauffeur en echec");
     return next(new AppError(500, "Impossible de désactiver le chauffeur.", { cause: error }));
   }

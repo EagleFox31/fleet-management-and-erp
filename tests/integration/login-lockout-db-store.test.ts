@@ -84,4 +84,35 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
     expect(await store.reserve(U, later, cfg)).toMatchObject({ allowed: true, state: { failedCount: 1, lockedUntil: null } });
     await store.reset(U);
   });
+
+  /**
+   * Une reservation lit puis ecrit sous le verrou consultatif de la cle. Un reset (DELETE) ou un release
+   * (UPDATE) hors verrou s'intercalait entre les deux : la reservation reecrivait l'ancien compteur + 1,
+   * et un echec unique apres une connexion reussie etait compte deux fois.
+   */
+  it.each([
+    ["reset", () => store.reset(U), 0],
+    ["release", () => store.release(U, new Date()), 1],
+  ] as const)("%s attend le verrou de la cle tenu par une reservation en cours", async (_label, write, expected) => {
+    await store.reset(U);
+    const now = new Date();
+    await store.reserve(U, now, cfg);
+    await store.reserve(U, now, cfg);
+    const holder = await pool.connect();
+    let pending: Promise<unknown> | undefined;
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + storedLockoutKey(U)]);
+      let done = false;
+      pending = write().then(() => (done = true));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(done, "ecriture faite sans attendre le verrou").toBe(false);
+      expect((await store.get(U)).failedCount).toBe(2);
+    } finally {
+      await holder.query("COMMIT").catch(() => undefined);
+      holder.release();
+      await pending;
+    }
+    expect((await store.get(U)).failedCount).toBe(expected);
+  });
 });

@@ -39,11 +39,13 @@ export function compute() {
 // surface : nom de jeton, ou { clair: [h,s,l], sombre: [h,s,l] } pour une couleur fixe (ex. carte CPC).
 const CPC = "client/src/components/drivers/cpc-update-form.tsx";
 const MIS = "client/src/pages/missions/new.tsx";
+const EB = "client/src/components/ui/error-boundary.tsx";
 const CARTE_CPC = { clair: [0, 0, 100], sombre: [222, 47, 11] }; // bg-white / dark:bg-slate-900
 export const COUPLES = [
   ["fond plein destructive : destructive-foreground sur destructive (bouton, badge, toast)", "destructive-foreground", "destructive", 1, "background", ["client/src/components/ui/button.tsx", "bg-destructive text-destructive-foreground"]],
   ["badge CPC expire apres (destructive-text sur destructive/10)", "destructive-text", "destructive", 0.1, "background", [CPC, "bg-destructive/10 text-destructive-text"]],
-  ["badge CPC neutre avant (muted-foreground sur muted)", "muted-foreground", "muted", 1, "background", null],
+  ["muted-foreground sur muted (badge neutre, secondary, accent)", "muted-foreground", "muted", 1, "background", ["client/src/components/ui/tabs.tsx", "bg-muted p-1 text-muted-foreground"]],
+  ["muted-foreground sur muted/50 dans une carte destructive/5 (Suggestions)", "muted-foreground", "muted", 0.5, { sous: [["destructive", 0.05]] }, [EB, "bg-muted/50"]],
   ["badge CPC neutre apres (foreground sur muted)", "foreground", "muted", 1, "background", [CPC, "bg-muted text-foreground"]],
   ["badge CPC valide (success sur success/10)", "success", "success", 0.1, "background", [CPC, "bg-success/10 text-success"]],
   ["badge CPC valide sur carte muted ancien (success sur success/10 sur muted)", "success", "success", 0.1, "muted", null],
@@ -60,11 +62,15 @@ export const COUPLES = [
 ];
 // Libelles exclus du seuil 4,5 : liste fixe, une ligne ajoutee ici doit etre justifiee en revue.
 export const EXCLUS_HISTORIQUE = [
-  "badge CPC neutre avant (muted-foreground sur muted)",
   "badge CPC valide sur carte muted ancien (success sur success/10 sur muted)",
   "destructive sur destructive/10 ancien (page)",
 ];
-const surfaceOf = (t, name, surf) => (typeof surf === "string" ? hsl(t[surf]) : hsl(surf[name]));
+// surface : jeton, couleur fixe { clair, sombre }, ou { sous: [[jeton, alpha], ...] } = couches posees sur --background.
+const surfaceOf = (t, name, surf) => {
+  if (typeof surf === "string") return hsl(t[surf]);
+  if (surf.sous) return surf.sous.reduce((acc, [tok, a]) => over(hsl(t[tok]), acc, a), hsl(t.background));
+  return hsl(surf[name]);
+};
 export function computeCouples() {
   return COUPLES.map(([label, fg, bg, a, surf, source]) => ({
     label,
