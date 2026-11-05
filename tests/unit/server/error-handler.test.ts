@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { STATUS_MESSAGES, describeIssue, looksTechnical } from "../../../shared/errors";
 import { AppError, errorHandler, errorResponseGuard, normalizeErrorBody, toHttpError } from "../../../server/middleware/error-handler";
+import { LAST_ADMIN_MESSAGE } from "../../../server/lib/last-admin-rule";
 import { leakText } from "../../support/api-error";
 
 /** Gestion d'erreurs centralisée, niveau U : contrat de réponse et absence de fuite. */
@@ -111,5 +112,24 @@ describe("toHttpError / errorHandler", () => {
     errorHandler(new Error("boom: secret connection string"), req, res as never, vi.fn());
     expect(res.statusCode).toBe(500);
     expect(leakText(res.body)).not.toMatch(/boom|secret/);
+  });
+});
+
+describe("toHttpError : erreurs de base de données à traduire", () => {
+  it("refus du trigger « dernier administrateur actif » : 400 au message lisible, sans détail technique", () => {
+    const err = Object.assign(new Error("Il doit rester au moins un administrateur actif."), { code: "23514", constraint: "users_keep_one_active_admin" });
+    expect(toHttpError(err)).toEqual({ status: 400, message: LAST_ADMIN_MESSAGE });
+    expect(toHttpError({ cause: err })).toMatchObject({ status: 400 });
+  });
+
+  it("une autre contrainte CHECK n'est pas confondue avec celle-ci", () => {
+    const err = Object.assign(new Error("x"), { code: "23514", constraint: "autre_check" });
+    expect(toHttpError(err).status).toBe(500);
+  });
+
+  it.each(["40P01", "40001"])("transaction annulée (%s) : 409 à réessayer", (code) => {
+    const err = Object.assign(new Error("deadlock detected"), { code });
+    expect(toHttpError(err)).toEqual({ status: 409, message: "Opération en cours, réessayez." });
+    expect(toHttpError({ cause: err })).toMatchObject({ status: 409 });
   });
 });

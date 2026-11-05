@@ -72,7 +72,7 @@ export function TireDotInput({
       {ageStatus !== "unknown" && ageYears !== null ? (
         <div className="flex items-start gap-2">
           {ageStatus === "critical" ? (
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
           ) : ageStatus === "warning" ? (
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           ) : (

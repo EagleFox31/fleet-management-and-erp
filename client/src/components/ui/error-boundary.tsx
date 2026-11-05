@@ -54,9 +54,9 @@ export class ErrorBoundary extends React.Component<
                   transition={{ duration: 0.8, delay: 0.2 }}
                   className="mx-auto mb-4 w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center"
                 >
-                  <Bug className="w-8 h-8 text-destructive" />
+                  <Bug className="w-8 h-8 text-destructive-text" />
                 </motion.div>
-                <CardTitle className="text-destructive">
+                <CardTitle className="text-destructive-text">
                   Oups ! Quelque chose s'est cassé
                 </CardTitle>
               </CardHeader>
@@ -65,7 +65,7 @@ export class ErrorBoundary extends React.Component<
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="text-center text-sm text-muted-foreground"
+                  className="text-center text-sm text-foreground"
                 >
                   Une erreur inattendue s'est produite dans l'application. 
                   Ne vous inquiétez pas, ce n'est probablement qu'un petit problème temporaire.
