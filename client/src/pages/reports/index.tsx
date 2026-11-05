@@ -1,6 +1,6 @@
 import { userMessageOf } from "@/lib/api-error";
 import React, { useMemo, useState } from "react";
-import { canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
+import { canReadDocumentation, canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -183,7 +183,7 @@ export default function ReportsIndex() {
   // Charger la liste des documents (admin + secrétaire)
   const { data: docs, isLoading: isLoadingDocs } = useQuery<{ files: { name: string; title: string; description: string; }[] }>({
     queryKey: ['/api/documentation'],
-    enabled: user?.role === 'admin' || user?.role === 'secretary',
+    enabled: canReadDocumentation(user?.role),
   });
 
   const { data: fleetStats, isLoading: fleetLoading } = useQuery<any>({
@@ -931,14 +931,6 @@ export default function ReportsIndex() {
         icon: <FileText className="h-4 w-4" />,
         iconWrapperClassName: "bg-blue-50 text-blue-600",
       },
-      {
-        key: "guides",
-        label: "Guides & procédures",
-        value: documentationCount,
-        subValue: "Documentation QA",
-        icon: <BookOpen className="h-4 w-4" />,
-        iconWrapperClassName: "bg-indigo-50 text-indigo-600",
-      },
     ];
 
     const logisticsKpis: ReportsKpiItem[] = [
@@ -1100,7 +1092,7 @@ export default function ReportsIndex() {
               label: "Exports",
               icon: <TabIcon icon={Download} />,
             },
-            ...((user?.role === "admin" || user?.role === "secretary")
+            ...(canReadDocumentation(user?.role)
               ? [{
                   value: "documentation",
                   label: (

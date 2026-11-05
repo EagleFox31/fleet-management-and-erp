@@ -305,6 +305,28 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  */
 export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
 
+/**
+ * Statistiques de facturation client (`GET /api/billing/statistics`, graphique CA par client) : les
+ * roles de la facturation plus la direction, qui lit le chiffre d'affaires sans recevoir les
+ * evenements de facture. Decision du 5 novembre 2026. Liste distincte de
+ * `CLIENT_BILLING_EVENT_ROLES`, qui garde les autres routes et le ciblage WebSocket.
+ */
+export const CLIENT_BILLING_STATS_ROLES: readonly AppRole[] = [...CLIENT_BILLING_EVENT_ROLES, "management"];
+
+export function canReadClientBilling(role: string | null | undefined): boolean {
+  return (CLIENT_BILLING_STATS_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Guides et cahier de tests servis par `GET /api/documentation` : la route serveur est réservée
+ * à l'admin (`isAdmin`). Un autre rôle ne doit ni émettre la requête ni voir l'onglet.
+ */
+export const DOCUMENTATION_READ_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+export function canReadDocumentation(role: string | null | undefined): boolean {
+  return (DOCUMENTATION_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }
