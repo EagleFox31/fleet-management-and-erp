@@ -12,7 +12,8 @@ import { createTestPart, createTestUser, createTestVehicle, TEST_USER_PASSWORD }
  * (`parseRouteId`), plus deux lectures de `server/routes.ts` (gelé, modifié en place).
  * - Écritures : `<id>abc` où `<id>` existe répond 400 avec son message, et l'objet `<id>` reste tel quel.
  * - `GET /api/vehicles/:id` : seuls des chiffres valent un id ; `<id>abc` est cherché comme immatriculation.
- * - `GET /api/users/:id` : monté sur `isAnyUser` (charge `req.user`) ; hors admin, chacun ne lit que son profil.
+ * - `GET /api/users/:id` : monté sur `isAnyUser` (charge `req.user`) ; admin, management et secretary lisent
+ *   tous les profils, les autres rôles seulement le leur.
  */
 
 const TITLE_PREFIX = "TEST lot 9";
@@ -26,7 +27,7 @@ const users = new Map<string, number>();
 const ids = createIdBag();
 let ownVehicleId = 0;
 
-type Role = "admin" | "client" | "technician";
+type Role = "admin" | "client" | "technician" | "management" | "secretary";
 
 async function login(role: Role) {
   const user = await createTestUser({ role });
@@ -70,6 +71,8 @@ beforeAll(async () => {
   await login("admin");
   await login("client");
   await login("technician");
+  await login("management");
+  await login("secretary");
   const vehicle = await createTestVehicle({ ownerId: users.get("client")! });
   ids.vehicleIds.push(vehicle.id);
   ownVehicleId = vehicle.id;
@@ -175,6 +178,17 @@ describe("ids de route (lot 9) : lectures de server/routes.ts", { timeout: 12000
       expect(await call(role, "GET", `/api/users/${users.get("admin")}`)).toEqual({ status: 403, message: "Accès non autorisé" });
     }
     expect((await call("admin", "GET", `/api/users/${users.get("technician")}`)).status).toBe(200);
+  });
+
+  it("GET /api/users/:id : direction et secrétariat lisent le profil d'un autre, mêmes 8 champs", async () => {
+    for (const role of ["management", "secretary"] as const) {
+      const response = await fetch(`${baseUrl}/api/users/${users.get("technician")}`, { headers: { Cookie: cookies.get(role)! } });
+      expect(response.status).toBe(200);
+      const profile = (await response.json()) as Record<string, unknown>;
+      expect(profile.id).toBe(users.get("technician"));
+      expect(Object.keys(profile).sort()).toEqual(["createdAt", "email", "id", "lastLoginAt", "loginCount", "name", "role", "username"]);
+    }
+    expect(await call("technician", "GET", `/api/users/${users.get("management")}`)).toEqual({ status: 403, message: "Accès non autorisé" });
   });
 
   it("GET /api/users/:id : le profil ne porte que ses 8 champs (ni mot de passe, ni PIN)", async () => {

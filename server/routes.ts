@@ -880,8 +880,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Récupérer un utilisateur spécifique - Administrateurs ou utilisateur lui-même
-  // isAnyUser charge req.user (authenticate seul ne le fait pas) ; hors admin, chacun ne lit que son profil (§11).
+  // Récupérer un utilisateur spécifique - admin, direction, secrétariat, ou l'utilisateur lui-même
+  // isAnyUser charge req.user (authenticate seul ne le fait pas) ; les autres rôles ne lisent que leur profil (§11).
+  const USER_PROFILE_READERS = new Set<string>(["admin", "management", "secretary"]);
   app.get("/api/users/:id", isAnyUser, async (req, res) => {
     try {
       const id = routeIdOrNaN(req.params.id);
@@ -895,8 +896,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Utilisateur non authentifié" });
       }
       
-      // Vérifier les permissions - admin peut voir tous les utilisateurs, sinon seulement son propre profil
-      if (currentUser.role !== "admin" && currentUser.id !== id) {
+      // admin, management et secretary lisent tous les profils ; les autres, seulement le leur
+      if (!USER_PROFILE_READERS.has(currentUser.role) && currentUser.id !== id) {
         return res.status(403).json({ message: "Accès non autorisé" });
       }
       

@@ -192,3 +192,7 @@
   - Nouveaux cas des cliquets : 4 rouges avec l'ancienne implémentation (autre nom de requête, `String(…)`, variable liée sous un autre nom, masquage par paramètre).
   - Le cliquet query réécrit retrouve sur le code d'avant le lot 11 les mêmes comptes (8 / 5). Les gels n'ont pas bougé.
   - tsc : 0 erreur. Unitaires : 2453 verts. 23 contrats (facturation, ids, stock) : 239 verts.
+### Lot 9 — complément : lecture des profils par la direction et le secrétariat
+
+- Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
+- Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
