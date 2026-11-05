@@ -163,6 +163,8 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
 export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
 export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+/** Lecture limitée aux comptes carte carburant (lot T2) : la logistique suit la carte, pas la banque. */
+export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics"] as const satisfies readonly AppRole[];
 
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
