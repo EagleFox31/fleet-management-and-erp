@@ -50,7 +50,17 @@ const decimal = (allowNegative: boolean) =>
     .union([z.string(), z.number()])
     .transform((v) => String(v).trim().replace(",", "."))
     .refine((v) => (allowNegative ? /^-?\d{1,13}(\.\d{1,2})?$/ : /^\d{1,13}(\.\d{1,2})?$/).test(v), "Montant invalide.")
-    .transform((v) => Number(v).toFixed(2));
+    .transform(toTwoDecimals);
+
+/** "x.yy" par manipulation de chaîne, sans passer par un flottant : "007.5" -> "7.50", "-0" -> "0.00". */
+function toTwoDecimals(v: string): string {
+  const negative = v.startsWith("-");
+  const [int, frac = ""] = (negative ? v.slice(1) : v).split(".");
+  const digits = int.replace(/^0+(?=\d)/, "");
+  const cents = frac.padEnd(2, "0");
+  const zero = /^0+$/.test(digits) && /^0+$/.test(cents);
+  return `${negative && !zero ? "-" : ""}${digits}.${cents}`;
+}
 
 export const positiveAmountSchema = decimal(false).refine((v) => Number(v) > 0, "Le montant doit être strictement positif.");
 export const signedAmountSchema = decimal(true);
@@ -175,12 +185,12 @@ export function ledgerOf(opening: string, entries: ReadonlyArray<{ direction: Tr
   return { balances, totals: { in: fromCents(inCents), out: fromCents(outCents), net: fromCents(inCents - outCents) }, closing: fromCents(balance) };
 }
 
-/** Mois "AAAA-MM" suivant, pour borner une requête à [début du mois, début du suivant[. */
 /** Mois en cours (AAAA-MM) dans le fuseau de l'exploitation : à Douala, minuit arrive une heure avant l'UTC. */
 export function currentTreasuryMonth(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: KPI_TIME_ZONE, year: "numeric", month: "2-digit" }).format(now).slice(0, 7);
 }
 
+/** Mois "AAAA-MM" suivant, pour borner une requête à [début du mois, début du suivant[. */
 export function nextMonth(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;

@@ -18,6 +18,11 @@ describe("journal de trésorerie : montants et dates", () => {
     expect(createTreasuryEntrySchema.parse({ ...entry, amount: "10,5" }).amount).toBe("10.50");
     expect(createTreasuryEntrySchema.parse({ ...entry, amount: 0.3 }).amount).toBe("0.30");
     expect(createTreasuryEntrySchema.parse(entry).amount).toBe("1250.00");
+    expect(createTreasuryEntrySchema.parse({ ...entry, amount: "007.5" }).amount).toBe("7.50");
+    // 13 chiffres entiers et des centimes : exact, aucun arrondi de flottant.
+    expect(createTreasuryEntrySchema.parse({ ...entry, amount: "9999999999999.99" }).amount).toBe("9999999999999.99");
+    expect(createTreasuryAccountSchema.parse({ code: "X", label: "x", kind: "cash", openingBalance: "-0" }).openingBalance).toBe("0.00");
+    expect(createTreasuryAccountSchema.parse({ code: "X", label: "x", kind: "cash", openingBalance: "-12.3" }).openingBalance).toBe("-12.30");
   });
 
   it("refuse un montant nul, négatif, à trois décimales ou illisible", () => {
