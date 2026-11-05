@@ -19,6 +19,7 @@ import {
   type PartRequestResult,
 } from "../services/work-order-part-request";
 import { isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-parts");
@@ -116,12 +117,8 @@ router.get("/:workOrderId/pending-part-requirements", isAnyUser, async (req, res
 
 router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
+    const workOrderId = parseRouteId(req.params.workOrderId, "ID d'ordre de travail invalide");
     const user = req.user;
-
-    if (isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
 
     const workOrder = await storage.getWorkOrder(workOrderId);
     if (!workOrder) {
@@ -250,7 +247,7 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
 router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
   try {
     const result = await requestPartForWorkOrder({
-      workOrderId: parseInt(req.params.workOrderId),
+      workOrderId: parseRouteId(req.params.workOrderId, "ID d'ordre de travail invalide"),
       partId: Number(req.body?.partId),
       quantity: req.body?.quantity === undefined ? 1 : Number(req.body.quantity),
       actor: { id: req.user!.id, role: String(req.user!.role) },
@@ -269,15 +266,11 @@ router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
   }
 });
 
-router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res) => {
+router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res, next) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
-    const requirementId = parseInt(req.params.requirementId);
+    const workOrderId = parseRouteId(req.params.workOrderId, "ID invalide");
+    const requirementId = parseRouteId(req.params.requirementId, "ID invalide");
     const user = req.user;
-
-    if (isNaN(workOrderId) || isNaN(requirementId)) {
-      return res.status(400).json({ message: "ID invalide" });
-    }
 
     const workOrder = await storage.getWorkOrder(workOrderId);
     if (!workOrder) {
@@ -472,6 +465,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         : "Pièce ajoutée définitivement à l'OT.",
     });
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Issue part requirement to work order error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
