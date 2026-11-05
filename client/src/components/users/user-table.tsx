@@ -190,7 +190,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        className="h-8 w-8 text-primary"
+                        className="h-8 w-8 text-primary-text"
                         onClick={() => handleEditClick(user)}
                         title="Modifier"
                       >

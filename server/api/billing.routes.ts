@@ -5,6 +5,11 @@ import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
 import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
+import { isAppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+import { parseRouteId } from "../lib/route-id";
+
+const log = moduleLogger("billing");
 
 const router = Router();
 
@@ -279,10 +284,10 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
  * GET /api/billing/invoices/:id
  * Détails d'une facture avec client, mission et paiements
  */
-router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const invoice = await clientBillingService.getInvoiceById(parseInt(id));
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    const invoice = await clientBillingService.getInvoiceById(id);
     const invoicePayload: any = { ...invoice };
 
     if (invoice?.mission && typeof invoice.mission === "object") {
@@ -298,7 +303,8 @@ router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response
 
     res.json(invoicePayload);
   } catch (error: unknown) {
-    console.error("Error fetching invoice:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Error fetching invoice");
     res.status(500).json({ error: getErrorMessage(error) });
   }
 });
@@ -309,7 +315,8 @@ router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response
  */
 router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    // Lu avant le corps : un id invalide répond 400 sans rien écrire.
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     // Un montant non numérique devenait NaN et était écrit tel quel dans le solde.
     const { amount, paymentDate, paymentMethod, reference, notes } = recordPaymentSchema.parse(req.body ?? {});
 
@@ -318,7 +325,7 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
     }
 
     const result = await clientBillingService.recordPayment(
-      parseInt(id),
+      id,
       {
         amount,
         paymentDate,
@@ -337,11 +344,11 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
     broadcastClientInvoiceUpdate(
       "client_invoice_payment_recorded",
       {
-        invoiceId: parseInt(id),
+        invoiceId: id,
         payment: result,
       },
       {
-        invoiceId: parseInt(id),
+        invoiceId: id,
         actorUserId: req.user?.id ?? null,
         actorRole: req.user?.role ?? null,
       },
@@ -359,13 +366,14 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
  * GET /api/billing/invoices/:id/payments
  * Historique des paiements d'une facture
  */
-router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const result = await clientBillingService.getInvoicePayments(parseInt(id));
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    const result = await clientBillingService.getInvoicePayments(id);
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error fetching invoice payments:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Error fetching invoice payments");
     res.status(500).json({ error: getErrorMessage(error) });
   }
 });
@@ -374,12 +382,12 @@ router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res:
  * GET /api/billing/invoices/:id/pdf
  * Télécharger la facture en PDF
  */
-router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+
     // Récupérer la facture avec tous les détails
-    const invoice = await clientBillingService.getInvoiceById(parseInt(id));
+    const invoice = await clientBillingService.getInvoiceById(id);
 
     if (!invoice.client) {
       return res.status(404).json({ error: "Client lié à la facture introuvable" });
@@ -423,7 +431,8 @@ router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Resp
     // Envoyer le PDF
     res.send(pdfBuffer);
   } catch (error: unknown) {
-    console.error("Error generating invoice PDF:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Error generating invoice PDF");
     res.status(500).json({ error: getErrorMessage(error) });
   }
 });

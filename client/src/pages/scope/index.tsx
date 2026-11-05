@@ -27,7 +27,7 @@ export default function ScopePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
+              <CheckCircle2 className="h-4 w-4 text-primary-text" aria-hidden="true" />
               Livré pour la recette du lundi 2 novembre
             </CardTitle>
           </CardHeader>
@@ -49,7 +49,7 @@ export default function ScopePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <FlaskConical className="h-4 w-4 text-primary" aria-hidden="true" />
+              <FlaskConical className="h-4 w-4 text-primary-text" aria-hidden="true" />
               En essai
             </CardTitle>
             <p className="text-sm text-muted-foreground">Activés seulement s'ils sont validés à la répétition.</p>
@@ -69,7 +69,7 @@ export default function ScopePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
+              <CalendarClock className="h-4 w-4 text-primary-text" aria-hidden="true" />
               Prochains lots
             </CardTitle>
             <p className="text-sm text-muted-foreground">

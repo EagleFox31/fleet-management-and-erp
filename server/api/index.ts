@@ -67,6 +67,7 @@ import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
+import { routeIdRangeGuard } from "../middleware/route-id-range-guard";
 import { validateBody } from "../middleware/validate-body";
 import { pinLoginRequestSchema } from "@shared/contracts/auth-pin-login";
 import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contracts/auth-login";
@@ -87,6 +88,8 @@ import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services
 
 export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   const apiRouter = Router();
+  // Id hors int4 refusé avant toute route /api (server/api puis routes.ts, servi après) : sinon erreur base 22003 et 500.
+  apiRouter.use(routeIdRangeGuard);
 
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes

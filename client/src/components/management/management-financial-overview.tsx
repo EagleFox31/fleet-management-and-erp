@@ -49,7 +49,7 @@ function GlassmorphicFinancialTooltip({ active, payload }: any) {
         <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
           <span className="font-semibold text-xs text-slate-300">{item.name}</span>
           {item.payload.percent != null && (
-            <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-bold">
+            <span className="text-[10px] bg-primary/20 text-primary-text px-1.5 py-0.5 rounded-full font-bold">
               {item.payload.percent.toFixed(1)}%
             </span>
           )}

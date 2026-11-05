@@ -3049,6 +3049,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
 - **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
 - **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
+## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
+
+- **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
+- **Cause racine** : lecture par `parseInt`/`Number` sans borne haute dans les routes pas encore passées à `parseRouteId` ; la base lève 22003 (valeur hors plage).
+- **Classification** : validation d'entrée manquante.
+- **Résolution** : `routeIdRangeGuard` (`server/middleware/route-id-range-guard.ts`), monté en tête de `apiRouter` (`server/api/index.ts`), donc avant les routeurs de `server/api` et ceux de `routes.ts` : un segment entièrement numérique au-delà de `MAX_DB_INTEGER_ID` (`server/lib/route-id.ts`) répond 400 sans toucher à la base. Le segment est décodé, puis son entier de tête est comparé à la borne : `parseInt` lit aussi une forme encodée, signée, décimale ou suivie de lettres, et une première version qui n'examinait que les segments entièrement numériques laissait ces formes en 500.
+- **Reste ouvert** : un id hors plage passé en paramètre de requête ou dans le corps n'est pas couvert par ce filet, qui ne lit que le chemin ; ces lectures passent à `parseRouteId` au fil des routes (cliquet `route-id-parse-hygiene`).
+- **Prévention vérifiable** : `tests/contract/route-id-range-guard.contract.test.ts` (rouge sans le montage, puis rouge sur les formes lues par `parseInt` avant leur prise en compte), `tests/unit/server/route-id-range-guard.test.ts`, règle R3 de `tests/unit/server/prefix-middleware-guardrail.test.ts` (montage sans préfixe, avant le premier routeur).
+- **Leçon généralisée** : une entrée qui provoque à coup sûr une erreur base se refuse avant la base, par un filet commun plutôt que route par route. Ce filet reproduit la lecture la plus permissive de l'entrée (ici `parseInt`), pas sa forme attendue.
 ## 2026-11-05 — Compteur de verrouillage : écriture hors du verrou de clé, mise à jour perdue
 
 - **Contexte** : `tests/contract/auth-login-unavailable.contract.test.ts` échouait par intermittence en CI (« expected 2 to be 1 ») : un seul mauvais mot de passe, juste après une connexion réussie, comptait deux échecs.

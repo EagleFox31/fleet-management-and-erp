@@ -279,8 +279,8 @@ export default function DateBasedAlertsPage() {
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return <ArrowUpDown className="h-3.5 w-3.5 ml-1 text-muted-foreground/50" />;
     return sortDir === 'asc'
-      ? <ArrowUp className="h-3.5 w-3.5 ml-1 text-primary" />
-      : <ArrowDown className="h-3.5 w-3.5 ml-1 text-primary" />;
+      ? <ArrowUp className="h-3.5 w-3.5 ml-1 text-primary-text" />
+      : <ArrowDown className="h-3.5 w-3.5 ml-1 text-primary-text" />;
   };
 
   const filters: { key: FilterKey; label: string; count: number }[] = [
@@ -388,7 +388,7 @@ export default function DateBasedAlertsPage() {
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
                 selectedFilter === f.key
                   ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-background text-muted-foreground border-border hover:border-primary hover:text-primary'
+                  : 'bg-background text-muted-foreground border-border hover:border-primary hover:text-primary-text'
               }`}
             >
               {f.label}

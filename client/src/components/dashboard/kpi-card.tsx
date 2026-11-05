@@ -181,7 +181,7 @@ export function KPICard({
   details,
   icon,
   trend,
-  iconColor = "text-primary",
+  iconColor = "text-primary-text",
   status,
   statusLabel,
   disableCriticalAnimation = false,
