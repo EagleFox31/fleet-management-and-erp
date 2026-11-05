@@ -228,6 +228,47 @@ async function seedWarehouse(): Promise<void> {
   });
 }
 
+export const DEMO_INVOICE = {
+  number: "DEMO-FAC-001",
+  numberPaid: "DEMO-FAC-002",
+  clientName: "Brasseries du Littoral (démo)",
+  amountHT: 1_000_000,
+  amountTTC: 1_192_500,
+  firstPayment: 500_000,
+} as const;
+
+/** Factures de la période : purgées (paiements en cascade) puis recréées, donc rejeu sans doublon. */
+async function seedClientInvoices(): Promise<void> {
+  await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, "DEMO-FAC-%"));
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const today = new Date().toISOString().slice(0, 10);
+  const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  await db.insert(clientInvoices).values([
+    {
+      invoiceNumber: DEMO_INVOICE.number,
+      clientId: client.id,
+      invoiceDate: today,
+      dueDate: due,
+      amountHT: String(DEMO_INVOICE.amountHT),
+      vatAmount: "192500",
+      amountTTC: String(DEMO_INVOICE.amountTTC),
+      balance: String(DEMO_INVOICE.amountTTC),
+      status: "pending",
+    },
+    {
+      invoiceNumber: DEMO_INVOICE.numberPaid,
+      clientId: client.id,
+      invoiceDate: today,
+      dueDate: due,
+      amountHT: "600000",
+      vatAmount: "115500",
+      amountTTC: "715500",
+      balance: "0",
+      status: "paid",
+    },
+  ]);
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
@@ -284,6 +325,7 @@ export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
   await purgeReceptionOrders();
   await seedLogistics();
+  await seedClientInvoices();
   await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
   await ensureUser(DEMO_ACCOUNTS.secretary);

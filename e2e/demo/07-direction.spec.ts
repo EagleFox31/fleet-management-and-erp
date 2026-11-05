@@ -30,6 +30,11 @@ test("démo direction : tableau de bord, corridors CEMAC et rapports", async ({ 
     await page.getByRole("tab", { name: label }).click();
     await expect(page.getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByText("Accès refusé")).toHaveCount(0);
+    if (label.startsWith("Trésorerie")) {
+      // Les factures de période du seed alimentent le rapport : encaissé et créances non nuls.
+      await expect(page.getByText(/715.500 FCFA/)).toBeVisible();
+      await expect(page.getByText(/1.192.500 FCFA/)).toBeVisible();
+    }
     await beat(page, 3000);
   }
 });
