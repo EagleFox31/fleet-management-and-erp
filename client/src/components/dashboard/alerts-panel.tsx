@@ -66,7 +66,7 @@ export function AlertsPanel({
       case "medium":
         return "bg-muted text-muted-foreground";
       case "low":
-        return "bg-primary/10 text-primary";
+        return "bg-primary/10 text-primary-text";
       default:
         return "bg-muted/30 text-muted-foreground";
     }

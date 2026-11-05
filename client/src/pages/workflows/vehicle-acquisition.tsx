@@ -773,7 +773,7 @@ export function VehicleAcquisitionWorkflow() {
                         <div className="shrink-0">
                         {status === 'success' && <CheckCircle className="h-5 w-5 text-green-500" />}
                         {status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary-text" />}
                         </div>
                       </div>
 
@@ -803,8 +803,8 @@ export function VehicleAcquisitionWorkflow() {
 
                       {isUploading && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-background/80 backdrop-blur-[1px]">
-                          <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                          <p className="text-sm font-medium text-primary">Import en cours…</p>
+                          <Loader2 className="h-8 w-8 animate-spin text-primary-text mb-2" />
+                          <p className="text-sm font-medium text-primary-text">Import en cours…</p>
                           <p className="text-xs text-muted-foreground mt-1">Ne fermez pas cette page</p>
                         </div>
                       )}

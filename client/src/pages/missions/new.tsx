@@ -251,7 +251,7 @@ export default function NewMission() {
           {currentStep === 1 && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
-                <Package className="w-8 h-8 text-primary" />
+                <Package className="w-8 h-8 text-primary-text" />
                 <h2 className="text-2xl font-bold">Informations Client & Mission</h2>
               </div>
 
@@ -323,7 +323,7 @@ export default function NewMission() {
           {currentStep === 2 && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
-                <MapPin className="w-8 h-8 text-primary" />
+                <MapPin className="w-8 h-8 text-primary-text" />
                 <h2 className="text-2xl font-bold">Trajet & Cargo</h2>
               </div>
 
@@ -460,7 +460,7 @@ export default function NewMission() {
           {currentStep === 3 && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
-                <Truck className="w-8 h-8 text-primary" />
+                <Truck className="w-8 h-8 text-primary-text" />
                 <h2 className="text-2xl font-bold">Affectation Ressources</h2>
               </div>
 
@@ -609,7 +609,7 @@ export default function NewMission() {
           {currentStep === 4 && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
-                <CheckCircle className="w-8 h-8 text-primary" />
+                <CheckCircle className="w-8 h-8 text-primary-text" />
                 <h2 className="text-2xl font-bold">Récapitulatif & Validation</h2>
               </div>
 

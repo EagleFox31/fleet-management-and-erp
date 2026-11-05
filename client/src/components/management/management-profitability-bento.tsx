@@ -157,15 +157,15 @@ export function ManagementProfitabilityBento({ data }: ManagementProfitabilityBe
         {/* Marge Cumulée Missions */}
         <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-transparent border border-primary/25 dark:border-primary/40 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-primary flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5 text-primary" /> Marge Nette Missions
+            <span className="text-xs font-semibold text-primary-text flex items-center gap-1.5">
+              <DollarSign className="h-3.5 w-3.5 text-primary-text" /> Marge Nette Missions
             </span>
-            <span className="p-1.5 rounded-lg bg-primary/20 text-primary">
+            <span className="p-1.5 rounded-lg bg-primary/20 text-primary-text">
               <Zap className="h-4 w-4" />
             </span>
           </div>
           <div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-primary tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-extrabold text-primary-text tabular-nums tracking-tight">
               {formatPrice(summary.totalMarginHT)}
             </div>
             <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -305,7 +305,7 @@ export function ManagementProfitabilityBento({ data }: ManagementProfitabilityBe
           <div className="p-5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-primary" />
+                <Building2 className="h-4 w-4 text-primary-text" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Top Clients (CA)</h4>
               </div>
               <span className="text-[10px] font-semibold text-muted-foreground">Portefeuille</span>

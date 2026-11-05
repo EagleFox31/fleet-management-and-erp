@@ -12,3 +12,6 @@
 | primary sur primary/10, /15, /20 (badges, pastilles) | 3,20 / 3,02 / 2,84 | 4 |
 
 Option A : `--primary` a `142 69% 31%` : blanc dessus 4,66 ; texte primary sur /10 4,10 (reste < 4,5 : prevoir un jeton `--primary-text`, comme destructive-text). Option B : ne rien changer (texte gras/grand 3:1 admis). Le gel disparait avec la decision.
+
+## Précision
+Le remplacement `bg-secondary/10 text-secondary` par `bg-muted text-muted-foreground` (badge.tsx variante `neutral`, alerts-panel.tsx) n'a aucun effet visible aujourd'hui : la variante n'a pas de consommateur et alerts-panel n'est importé nulle part. Correction préventive.
