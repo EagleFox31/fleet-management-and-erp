@@ -19,6 +19,8 @@ import {
   ClipboardCheck,
   Receipt,
   Search,
+  Download,
+  Loader2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Vehicle } from "@shared/schema";
@@ -29,6 +31,11 @@ import { PremiumTabsNav, KpiGrid, KpiTile } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { DOCUMENT_RENEWAL_VIEWER_ROLES } from "@shared/constants/roles";
+import { appToast } from "@/lib/app-toast";
+import { userMessageOf } from "@/lib/api-error";
+import { apiRequest } from "@/lib/queryClient";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -58,6 +65,7 @@ interface RenewalRequest {
   centerNameSnapshot: string | null;
   targetDate: string | null;
   comment: string | null;
+  proofFileName: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -197,6 +205,20 @@ function ExpiryBadge({ status, expiryDate }: { status: VehicleDoc["expiryStatus"
   );
 }
 
+/** Justificatif de renouvellement : le fichier est la reponse, recupere en blob sous le nom d'origine. */
+async function downloadRenewalProof(request: Pick<RenewalRequest, "id" | "proofFileName">): Promise<void> {
+  const res = await apiRequest("GET", `/api/document-renewals/requests/${request.id}/proof`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = request.proofFileName || `justificatif-renouvellement-${request.id}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 type ExpiryFilter = "all" | "valid" | "expiring" | "expired";
@@ -204,6 +226,24 @@ type ExpiryFilter = "all" | "valid" | "expiring" | "expired";
 export default function VehicleDocumentsPage() {
   const [, setLocation] = useLocation();
   const search = useSearch();
+  const { user } = useAuth();
+  const canReadRenewals = (DOCUMENT_RENEWAL_VIEWER_ROLES as readonly string[]).includes(String(user?.role || ""));
+  const [proofBusyId, setProofBusyId] = useState<number | null>(null);
+  const handleProofDownload = async (request: RenewalRequest) => {
+    if (proofBusyId !== null) return;
+    setProofBusyId(request.id);
+    try {
+      await downloadRenewalProof(request);
+    } catch (error) {
+      appToast({
+        title: "Téléchargement impossible",
+        description: userMessageOf(error, "Le justificatif n'a pas pu être téléchargé."),
+        variant: "destructive",
+      });
+    } finally {
+      setProofBusyId(null);
+    }
+  };
   const tableSectionRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<"documents" | "requests">(
     new URLSearchParams(search || "").get("tab") === "requests" ? "requests" : "documents",
@@ -687,6 +727,24 @@ export default function VehicleDocumentsPage() {
                                 onClick={() => openRenewalFlow(req)}
                               >
                                 <CheckCircle2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {canReadRenewals && req.proofFileName && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                title={`Télécharger le justificatif (${req.proofFileName})`}
+                                aria-label="Télécharger le justificatif"
+                                disabled={proofBusyId !== null}
+                                onClick={() => void handleProofDownload(req)}
+                                data-testid={`renewal-proof-download-${req.id}`}
+                              >
+                                {proofBusyId === req.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                                )}
                               </Button>
                             )}
                             <Button
