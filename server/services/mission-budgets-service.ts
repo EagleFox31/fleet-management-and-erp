@@ -18,6 +18,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { findFuelPriceAt, todayIsoDate } from "./fuel-price-service";
+import { linkMissionBudgetDisbursement } from "./treasury-links";
 
 const log = moduleLogger("mission-budgets");
 
@@ -243,13 +244,15 @@ const sameVersion = (expectedUpdatedAt: string) =>
  * Transition par UPDATE conditionnel sur le statut attendu ET la version lue (`expectedUpdatedAt`) :
  * un rejeu, deux clics simultanés ou un budget corrigé entre la lecture et la validation ne
  * trouvent plus la ligne et répondent 409, sans écriture.
- * `disbursed` est un marquage tant que le journal de trésorerie (T1) n'est pas branché.
+ * `disbursed` avec un compte de trésorerie écrit au journal dans la même transaction (L1c) :
+ * si l'écriture échoue, le budget reste approuvé. Sans compte, c'est un marquage.
  */
 export async function transitionMissionBudget(
   id: number,
   userId: number,
   action: keyof typeof TRANSITIONS,
   expectedUpdatedAt: string,
+  treasuryAccountId?: number | null,
 ): Promise<MissionBudget> {
   const t = TRANSITIONS[action];
   const now = new Date();
@@ -264,13 +267,19 @@ export async function transitionMissionBudget(
       .set({ status: t.to, ...stamp, updatedBy: userId, updatedAt: now })
       .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from), sameVersion(expectedUpdatedAt)))
       .returning();
-    if (updated) return updated;
+    if (updated) {
+      if (action !== "disburse") return updated;
+      const entryId = await linkMissionBudgetDisbursement(tx, updated, treasuryAccountId, userId);
+      if (entryId === null) return updated;
+      const [linked] = await tx.update(missionBudgets).set({ treasuryEntryId: entryId }).where(eq(missionBudgets.id, id)).returning();
+      return linked;
+    }
     const [current] = await tx.select({ status: missionBudgets.status }).from(missionBudgets).where(eq(missionBudgets.id, id));
     if (current.status !== t.from) throw new AppError(409, t.conflict);
     throw new AppError(409, "Ce budget a changé depuis votre lecture : rechargez-le avant de valider.");
   });
   const budget = toMissionBudget(row);
-  log.info({ budgetId: id, userId, status: budget.status }, "budget de mission : transition");
+  log.info({ budgetId: id, userId, status: budget.status, treasuryEntryId: budget.treasuryEntryId }, "budget de mission : transition");
   notify(budget);
   return budget;
 }
