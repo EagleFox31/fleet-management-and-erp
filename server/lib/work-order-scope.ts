@@ -1,14 +1,17 @@
 import { storage } from "../storage";
 import { AppError } from "./app-error";
-import { canAccessOwned, OUT_OF_SCOPE_MESSAGE, type ScopeReader } from "./client-scope";
+import { canAccessOwned, type ScopeReader } from "./client-scope";
 
 /**
  * Cloison client sur la lecture d'un ordre de travail (AGENTS.md §11).
  *
- * Applique la cloison client uniquement : l'OT doit exister (404), puis un
- * client n'accède qu'aux OT d'un véhicule dont il est propriétaire
- * (`vehicles.ownerId`). Le personnel n'est pas filtré ; un véhicule sans
- * propriétaire n'est lisible que par lui.
+ * Applique la cloison client uniquement : l'OT doit exister, puis un client
+ * n'accède qu'aux OT d'un véhicule dont il est propriétaire (`vehicles.ownerId`).
+ * Le personnel n'est pas filtré ; un véhicule sans propriétaire n'est lisible que par lui.
+ *
+ * Un OT hors périmètre répond comme un OT inexistant (même statut 404, même message) :
+ * un 403 distinct laisserait un client énumérer les OT des autres. Écart assumé avec le 403
+ * de `canAccessOwned` utilisé pour les véhicules et documents.
  *
  * Écart connu : GET /api/work-orders/:id bloque aussi un technicien sur l'OT
  * d'un autre technicien (routes.ts ~1851). Ce helper ne le fait pas.
@@ -22,14 +25,16 @@ export function assertValidDbId(value: number, message: string): void {
   }
 }
 
+const WORK_ORDER_NOT_FOUND_MESSAGE = "Ordre de travail non trouvé.";
+
 export async function assertWorkOrderReadable(reader: ScopeReader | undefined, workOrderId: number): Promise<void> {
   assertValidDbId(workOrderId, "ID d'ordre de travail invalide.");
   const workOrder = await storage.getWorkOrder(workOrderId);
   if (!workOrder) {
-    throw new AppError(404, "Ordre de travail non trouvé.");
+    throw new AppError(404, WORK_ORDER_NOT_FOUND_MESSAGE);
   }
   const allowed = await canAccessOwned(reader, async () => (await storage.getVehicle(workOrder.vehicleId))?.ownerId);
   if (!allowed) {
-    throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
+    throw new AppError(404, WORK_ORDER_NOT_FOUND_MESSAGE);
   }
 }
