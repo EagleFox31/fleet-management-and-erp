@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import {
   Edit, Trash2, Clock, Package, Truck, CheckCircle, ArrowRight, User, Wrench, FileText,
-  Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart,
+  Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart, XCircle,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -48,7 +48,6 @@ import {
   getRequirementUrgencyBorderColor,
 } from "@/lib/part-requirement-status";
 import { PartRequirementStatusHelp } from "@/components/inventory/part-requirement-status-help";
-import { XCircle } from "lucide-react";
 
 interface Part {
   id: number;

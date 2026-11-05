@@ -4,16 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { FlaskConical, Lock, Lightbulb } from "lucide-react";
-import { 
-  User, 
-  Wrench, 
-  ClipboardList, 
-  FileText, 
-  Truck, 
-  Package, 
-  Users 
-} from "lucide-react";
+import { User, Wrench, ClipboardList, FileText, Truck, Package, Users, FlaskConical, Lock, Lightbulb, Loader2 } from "lucide-react";
 
 interface Profile {
   username: string;
@@ -193,7 +184,7 @@ export default function ProfilesDevPage() {
                     >
                       {isLoading ? (
                         <>
-                          <span className="animate-spin mr-2">⏳</span>
+                          <Loader2 className="animate-spin mr-2 h-4 w-4" aria-hidden />
                           Connexion...
                         </>
                       ) : (

@@ -19,8 +19,7 @@ import { uploadFile } from '@/lib/api';
 import { userMessageOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
-import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2 } from 'lucide-react';
-import { Check } from "lucide-react";
+import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2, Check } from 'lucide-react';
 
 type DocumentKey = keyof VehicleAcquisitionData['documents'];
 type DocumentUploadStatus = 'idle' | 'uploading' | 'success' | 'error';

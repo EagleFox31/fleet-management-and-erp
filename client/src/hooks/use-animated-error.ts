@@ -100,7 +100,7 @@ export function useAnimatedError() {
         "Le serveur jongle avec trop de demandes"
       ],
       timeout: [
-        "L'opération prend son temps... ⏰",
+        "L'opération prend son temps...",
         "Patience, ça charge !",
         "Le temps file mais pas assez vite"
       ],

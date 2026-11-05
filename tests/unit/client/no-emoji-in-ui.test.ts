@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 
 // AGENTS.md §4 : aucun emoji dans l'UI (icone lucide-react a la place).
 // Plages bornees : emoji et pictogrammes (U+1F000-1FAFF), symboles et dingbats (U+2600-27BF), etoiles et ronds
-// (U+2B50, U+2B55), selecteur d'emoji (U+FE0F) et touche encadree (U+20E3). Les lettres accentuees, les fleches
+// (U+2B50, U+2B55), montres et horloges (U+231A-231B, U+23E9-23FA), selecteur d'emoji (U+FE0F) et touche encadree (U+20E3). Les lettres accentuees, les fleches
 // typographiques (U+2190-21FF), les puces, tirets et guillemets ne sont pas touches.
 // Les signes ✓ (2713), ✗ (2717) et ✕ (2715) ne sont pas des emoji Unicode mais des dingbats : ils sont comptes volontairement,
 // AGENTS.md §4 veut les icones Check et X de lucide-react a la place.
-export const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{FE0F}\u{20E3}]/u;
+export const EMOJI = /[\u{231A}-\u{231B}\u{23E9}-\u{23FA}\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{FE0F}\u{20E3}]/u;
 
 const root = process.cwd();
 const walk = (d: string): string[] =>
@@ -24,7 +24,7 @@ const GELES: Record<string, number> = {
   "client/src/components/dashboard/expiring-docs-alert.tsx": 1,
   "client/src/components/dashboard/overdue-orders-alert.tsx": 1,
   "client/src/components/management/executive-corridor-map.tsx": 1,
-  "client/src/components/ui/playful-error-messages.tsx": 22,
+  "client/src/components/ui/playful-error-messages.tsx": 24,
   "client/src/hooks/use-workflow-persistence.ts": 2, // console.* seulement (hors ecran)
   "client/src/lib/form-drafts.ts": 1, // commentaire seulement
   "client/src/pages/inventory/[id].tsx": 1,
