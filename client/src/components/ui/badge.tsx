@@ -21,7 +21,7 @@ const badgeVariants = cva(
         warning:
           "border-transparent bg-warning/10 text-warning-text",
         neutral:
-          "border-transparent bg-secondary/10 text-secondary",
+          "border-transparent bg-muted text-muted-foreground",
       },
       size: {
         default: "px-2 py-1 text-xs",

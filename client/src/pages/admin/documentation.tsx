@@ -279,7 +279,7 @@ export default function Documentation() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary-text" />
       </div>
     );
   }
@@ -299,7 +299,7 @@ export default function Documentation() {
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <FileText className="h-6 w-6 text-primary" />
+                  <FileText className="h-6 w-6 text-primary-text" />
                 </div>
                 <div>
                   <CardTitle>{doc.title}</CardTitle>
@@ -349,7 +349,7 @@ export default function Documentation() {
           
           {isLoadingContent ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <Loader2 className="h-8 w-8 animate-spin text-primary-text" />
             </div>
           ) : (
             <div className="prose prose-sm max-w-none dark:prose-invert">

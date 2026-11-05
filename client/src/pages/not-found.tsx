@@ -15,7 +15,7 @@ export default function NotFound() {
         <CardContent className="pt-10 pb-6 px-6 text-center">
           <div className="mb-6 flex justify-center">
             <div className="bg-primary/10 p-3 rounded-full">
-              <i className="fas fa-exclamation-triangle text-4xl text-primary"></i>
+              <i className="fas fa-exclamation-triangle text-4xl text-primary-text"></i>
             </div>
           </div>
           

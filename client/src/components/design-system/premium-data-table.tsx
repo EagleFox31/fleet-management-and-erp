@@ -97,9 +97,9 @@ export function PremiumDataTable<T>({
       return <ArrowUpDown className="h-3 w-3 shrink-0 text-gray-400 opacity-60" />;
     }
     return sortDirection === "asc" ? (
-      <ArrowUp className="h-3 w-3 shrink-0 text-primary" />
+      <ArrowUp className="h-3 w-3 shrink-0 text-primary-text" />
     ) : (
-      <ArrowDown className="h-3 w-3 shrink-0 text-primary" />
+      <ArrowDown className="h-3 w-3 shrink-0 text-primary-text" />
     );
   };
 

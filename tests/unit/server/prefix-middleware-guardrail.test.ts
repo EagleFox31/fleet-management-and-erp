@@ -64,6 +64,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "accessLog", file: APP, type: "ecrit-apres-reponse", source: "server/middleware/error-handler.ts", raison: "journal pino sur `finish` (methode, chemin, statut, userId), sans corps ni lecture de donnee" },
   { name: "errorResponseGuard", file: APP, type: "sans-base", source: "server/middleware/error-handler.ts", raison: "enveloppe res.json pour normaliser les erreurs >= 400 ; aucune lecture avant la reponse" },
   { name: "compression", file: APP, type: "sans-base", raison: "compression de la reponse, sans etat metier" },
+  { name: "routeIdRangeGuard", file: INDEX, type: "sans-base", source: "server/middleware/route-id-range-guard.ts", raison: "refuse en 400 un segment numerique de l'URL hors plage int4 avant toute lecture ; ne lit que le chemin" },
   { name: "(anonyme)@*", file: APP, type: "sans-base", occurrences: 2, raison: "deux fonctions : en-tetes Cache-Control sur /api, puis CORS (en-tetes d'origine, OPTIONS -> 204) ; aucun acces base" },
   { name: "express.json", file: APP, type: "sans-base", raison: "analyse du corps JSON (limite par defaut d'Express)" },
   { name: "express.urlencoded", file: APP, type: "sans-base", raison: "analyse du corps urlencoded" },
@@ -101,7 +102,6 @@ const DEROGATIONS_CONNUES: Array<{ name: string; file: string; raison: string }>
 
 /** Middlewares annonces par d'autres lots : tolerés absents, inscrits des maintenant pour ne pas bloquer leur arrivee. */
 const ATTENDUS_TOLERES_ABSENTS: Array<{ name: string; file?: string; raison: string }> = [
-  { name: "routeIdRangeGuard", file: INDEX, raison: "borne des identifiants de route (a venir) : doit etre sans base, valider le format avant toute lecture" },
 ];
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -110,7 +110,8 @@ const SERVER_DIR = join(ROOT, "server");
 const occurrences = (): MountedMiddleware[] => scanFiles(sourceFiles(SERVER_DIR), ROOT);
 const entriesFor = (o: MountedMiddleware) => MIDDLEWARES_JUSTIFIES.filter((e) => e.name === o.name && (!e.file || e.file === o.file));
 const isDerogation = (o: MountedMiddleware) => DEROGATIONS_CONNUES.some((d) => d.name === o.name && d.file === o.file);
-const isExpected = (o: MountedMiddleware) => ATTENDUS_TOLERES_ABSENTS.some((a) => a.name === o.name && (!a.file || a.file === o.file));
+const isExpectedIn = (list: typeof ATTENDUS_TOLERES_ABSENTS, o: MountedMiddleware) => list.some((a) => a.name === o.name && (!a.file || a.file === o.file));
+const isExpected = (o: MountedMiddleware) => isExpectedIn(ATTENDUS_TOLERES_ABSENTS, o);
 const describeMount = (o: MountedMiddleware) => `${o.file}:${o.line}  ${o.receiver}.${o.method}(${o.prefix ? JSON.stringify(o.prefix) + ", " : ""}${o.name})`;
 
 describe("middlewares montes sur un prefixe : recensement et liste blanche", () => {
@@ -366,7 +367,9 @@ describe("lot de suivi : R3, R4, R6 et fichier des attendus", () => {
     expect(scanMountedMiddlewares(typed, INDEX).map((x) => x.name)).toEqual(["leakA", "leakB", "leakC", "leakD"]);
   });
   it("attendus : la tolerance d'absence est propre a son fichier", () => {
-    expect(isExpected(m({ file: INDEX }))).toBe(true);
-    expect(isExpected(m({ file: "server/api/autre.ts" }))).toBe(false);
+    // Liste d'exemple : la liste reelle est vide depuis le montage de routeIdRangeGuard.
+    const list = [{ name: "routeIdRangeGuard", file: INDEX, raison: "exemple" }];
+    expect(isExpectedIn(list, m({ file: INDEX }))).toBe(true);
+    expect(isExpectedIn(list, m({ file: "server/api/autre.ts" }))).toBe(false);
   });
 });

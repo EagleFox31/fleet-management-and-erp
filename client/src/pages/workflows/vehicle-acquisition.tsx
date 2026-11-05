@@ -16,6 +16,7 @@ import { canWriteVehiclePurchasePrice } from '@shared/constants/roles';
 import { apiRequest } from '@/lib/queryClient';
 import { invalidateVehicleDocumentQueries } from '@/lib/vehicle-document-cache';
 import { uploadFile } from '@/lib/api';
+import { userMessageOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
 import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2 } from 'lucide-react';
@@ -295,7 +296,7 @@ export function VehicleAcquisitionWorkflow() {
         title: 'Document importé',
         description: `${docConfig.label} — ${file.name}`,
       });
-    } catch {
+    } catch (error) {
       setDocUploadStatus((prev) => ({ ...prev, [documentKey]: 'error' }));
       updateData((prev) => ({
         ...prev,
@@ -303,7 +304,7 @@ export function VehicleAcquisitionWorkflow() {
       }));
       toast({
         title: "Erreur d'import",
-        description: `Impossible d'importer ${docConfig.label}. Réessayez.`,
+        description: userMessageOf(error, `Impossible d'importer ${docConfig.label}. Réessayez.`),
         variant: 'destructive',
       });
     } finally {
@@ -773,7 +774,7 @@ export function VehicleAcquisitionWorkflow() {
                         <div className="shrink-0">
                         {status === 'success' && <CheckCircle className="h-5 w-5 text-green-500" />}
                         {status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary-text" />}
                         </div>
                       </div>
 
@@ -803,8 +804,8 @@ export function VehicleAcquisitionWorkflow() {
 
                       {isUploading && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-background/80 backdrop-blur-[1px]">
-                          <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                          <p className="text-sm font-medium text-primary">Import en cours…</p>
+                          <Loader2 className="h-8 w-8 animate-spin text-primary-text mb-2" />
+                          <p className="text-sm font-medium text-primary-text">Import en cours…</p>
                           <p className="text-xs text-muted-foreground mt-1">Ne fermez pas cette page</p>
                         </div>
                       )}
