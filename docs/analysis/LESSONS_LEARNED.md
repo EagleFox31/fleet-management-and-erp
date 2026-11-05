@@ -1698,6 +1698,13 @@ Test non déterministe (flake), sans défaut produit.
 ### Leçon généralisée
 Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
 
+### Récurrence (5 novembre 2026) : le garde-fou ne couvrait qu'une forme
+- Faux rouge en CI sur #405 (contract 4) : `role-guards-pistes-def.contract.test.ts:137` contrôlait `/sql|syntax|NaN/i` sur `JSON.stringify(await res.json())`, et un `requestId` « lMjhMsQlWe » contient « sQl ». `vehicle-documents-upload-errors` (`/form/`) avait le même risque.
+- Cause : le motif du garde-fou se limitait à `…body)).not.toMatch`. Les contrôles écrits sur `await res.json()` ou sur une variable `json` lui échappaient.
+- Prévention : motif élargi à `await x.json()` et aux variables `…json`, avec des cas positifs et un cas négatif (`data.payload`) dans `leak-check-hygiene.test.ts` ; les deux contrats passent par `leakText`.
+- Angles morts restants (hors motif) : `expect` sur plusieurs lignes, `res.text()`, `.not.toContain` sur un mot court. À traiter si un faux rouge en montre un.
+- Règle : un garde-fou par motif doit être éprouvé contre toutes les formes d'écriture du même contrôle, pas seulement celle qui a échoué la première fois.
+
 ## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
 
 ### Contexte

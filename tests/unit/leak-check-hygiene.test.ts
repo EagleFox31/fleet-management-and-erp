@@ -7,6 +7,9 @@ import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../support/repo-
  * passé sur le corps entier d'une réponse d'erreur inclut le `requestId` aléatoire
  * (`nanoid(10)`). « qrSqlREDR7 » a fait échouer `/sql/i`. Un contrôle de fuite passe par
  * `leakText(body)` (tests/support/api-error.ts), qui retire cette référence.
+ *
+ * Angles morts connus du motif : `expect` écrit sur plusieurs lignes, `res.text()`, `.not.toContain` sur un
+ * mot court. Les ajouter ici si un faux rouge en révèle un.
  */
 const RAW_BODY_LEAK_CHECK = /JSON\.stringify\(\s*(?:await\s+[\w.]+\.json\(\)|[\w.]*(?:body|json))\s*\)\s*\)\s*\.not\.toMatch/i;
 const SELF = "tests/unit/leak-check-hygiene.test.ts";
