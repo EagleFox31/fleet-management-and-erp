@@ -23,6 +23,7 @@ const path = (query = "") => `${FINANCE_WITHHOLDINGS_PATH}${query ? `?${query}` 
 let session: Awaited<ReturnType<typeof startContractSession<"admin" | "management" | "secretary" | "logistics" | "warehouse" | "technician" | "driver" | "client">>>;
 const client = { a: 0, b: 0 };
 const inv: Record<"a1" | "a2" | "b1", number> = { a1: 0, a2: 0, b1: 0 };
+let orphan = 0;
 
 async function deposited(
   clientId: number,
@@ -76,6 +77,9 @@ beforeAll(async () => {
   await deposited(client.a, "2001-06-01", A1);
   await deposited(client.a, "2001-05-15", A1, "cancelled");
   await deposited(client.a, null, A1);
+  // Facture sans client rattaché : ligne `clientId` nulle, groupe nul en dernier.
+  orphan = await deposited(client.b, "2001-05-20", B1);
+  await db.update(clientInvoices).set({ clientId: null }).where(eq(clientInvoices.id, orphan));
   // Taux changé après dépôt : les montants figés ne bougent pas.
   await db.update(clients).set({ withholdingVatRate: "50.00", withholdingIsRate: "10.00" }).where(eq(clients.id, client.a));
 }, 180000);
@@ -118,9 +122,12 @@ describe("paramètres", () => {
     ["to=demain", "Date attendue au format AAAA-MM-JJ."],
     ["from[]=2001-05-01", "Période invalide."],
     ["from=2001-05-01&from=2001-05-02", "Période invalide."],
-    ["status=paid", "Période invalide."],
+    ["status=paid", "Paramètre non reconnu."],
     [`${MAY}&clientId=12abc`, "Identifiant de client invalide."],
     [`${MAY}&clientId=0`, "Identifiant de client invalide."],
+    [`${MAY}&clientId=1&clientId=2`, "Identifiant de client invalide."],
+    ["from=2099-01-01", "La date de début ne peut pas dépasser aujourd'hui."],
+    ["from=2001-01-01&to=2004-01-01", "Période trop longue : 36 mois au plus."],
   ])("%s : 400 lisible", async (query, message) => {
     const r = await session.call("GET", path(query), { actor: "admin" });
     expect(apiErrorProblems(r.status, r.body, 400)).toEqual([]);
@@ -132,6 +139,17 @@ describe("paramètres", () => {
     const r = await session.call("GET", path(), { actor: "secretary" });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ from: `${today.slice(0, 8)}01`, to: today, clientId: null });
+  });
+
+  it("36 mois exactement : accepté", async () => {
+    expect((await session.call("GET", path("from=2001-01-01&to=2003-12-31"), { actor: "admin" })).status).toBe(200);
+  });
+
+  it("clientId vide : sans filtre", async () => {
+    const r = await session.call("GET", path(`${MAY}&clientId=`), { actor: "admin" });
+    expect(r.status).toBe(200);
+    expect(r.body.clientId).toBeNull();
+    expect(r.body.items.filter((i: { invoiceId: number }) => Object.values(inv).includes(i.invoiceId))).toHaveLength(3);
   });
 });
 
@@ -160,6 +178,16 @@ describe("récapitulatif", () => {
     expect(s.totals.netPayable).toBe(sum("netPayable"));
     expect(s.totals.withholdingVatAmount).toBe(sum("withholdingVatAmount"));
     expect(s.totals.count).toBe(s.items.length);
+  });
+
+  it("facture sans client : clientId nul sur la ligne, groupe nul placé en dernier", async () => {
+    const r = await session.call("GET", path(MAY), { actor: "admin" });
+    const s = financeWithholdingsResponseSchema.parse(r.body);
+    expect(s.items.find((i) => i.invoiceId === orphan)).toMatchObject({ clientId: null, clientName: null, netPayable: 9780 });
+    const last = s.byClient[s.byClient.length - 1];
+    expect(last).toMatchObject({ clientId: null, clientName: null });
+    expect(last.count).toBeGreaterThanOrEqual(1);
+    expect(s.byClient.filter((c) => c.clientId === null)).toHaveLength(1);
   });
 
   it("client sans dépôt dans la période : récapitulatif vide", async () => {
