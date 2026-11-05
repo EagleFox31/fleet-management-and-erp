@@ -59,7 +59,7 @@ export function TireDotInput({
       {dotHighlight ? (
         <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono">
           <span className="text-muted-foreground">{dotHighlight.prefix || "DOT … "}</span>
-          <span className="rounded bg-primary/15 px-1 font-semibold text-primary">
+          <span className="rounded bg-primary/15 px-1 font-semibold text-primary-text">
             {dotHighlight.week}
             {dotHighlight.yearSuffix}
           </span>

@@ -41,7 +41,7 @@ export function Stepper({ currentStep, steps }: StepperProps) {
                     <div
                       className={`text-sm font-medium ${
                         step.number === currentStep
-                          ? "text-primary"
+                          ? "text-primary-text"
                           : step.number < currentStep
                           ? "text-green-600"
                           : "text-gray-500"

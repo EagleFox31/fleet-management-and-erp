@@ -584,8 +584,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
                     />
                     {uploadMutation.isPending && (
                       <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-md bg-background/85 backdrop-blur-[1px]">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-sm font-medium text-primary">Import en cours…</span>
+                        <Loader2 className="h-4 w-4 animate-spin text-primary-text" />
+                        <span className="text-sm font-medium text-primary-text">Import en cours…</span>
                       </div>
                     )}
                   </div>
