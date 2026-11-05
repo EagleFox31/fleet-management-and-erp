@@ -59,3 +59,53 @@
 - Tester : `route-id-strict-lot5` compte 15 cas. Sur l'ancien code, 15 rouges. Le correctif les rend verts. `former-storage-stubs` reste vert.
 - Réserves de relecture : DELETE users (suppression douce) et DELETE admin/users (définitive) vérifient `deletedAt` nul ; un test cantonne `routeIdOrNaN` à `server/routes.ts`.
 - Hors périmètre : PATCH users (b7) et toggle admin-users (c7, #375).
+
+## Lot 6 — écritures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur 11 écritures.
+  - Véhicules : PATCH, restore, mileage/sync, POST tires.
+  - Planifications : generate-work-order, PATCH.
+  - PATCH work-orders, fuel-records et tires.
+  - PATCH vehicle-tires et vehicle-tires/remove.
+- Détails :
+  - `mileage/sync` n'avait aucun contrôle : il reçoit le 400 « ID de véhicule invalide ».
+  - `generate-work-order` (`Number`) acceptait `1e0` et `" 7 "`.
+- Comment : `ROUTES_TS_FROZEN = 28` (39 au lot 5). `POST /api/parts/:id/update-stock` est déjà strict : la route est `:id([0-9]+)` dans `parts-catalog.routes.ts`, donc hors lot.
+- Pourquoi : `PATCH /api/vehicles/<id>abc` modifiait le véhicule `<id>`, et `restore` le restaurait.
+- Tester : `route-id-strict-lot6` couvre 14 cas, dont 3 vérifient que l'objet reste intact (véhicule modifié, véhicule restauré, plein modifié).
+  - Ancien code : 14 rouges. Correctif : 14 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
+- Effet de bord assumé : un id `0` répondait 404 (objet absent), il répond désormais 400 (id invalide).
+- Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
+
+## Lot 7 — lectures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur les 26 lectures restantes.
+  - 11 d'entre elles passent par `canAccessOwned` : documents de véhicule, téléchargement de document, planifications, OT, carburant, kilométrage et son historique, historique de statut, pneus du véhicule, documents de workflow.
+  - `GET /api/work-orders/:id` (`Number`) acceptait `1e0`.
+- Comment :
+  - `ROUTES_TS_FROZEN = 2` : les deux lectures de la forme `parseInt(req.params…)` qui restent sont PATCH users (#379) et toggle admin-users (#375).
+  - Le cliquet ne voit pas les lectures qui passent par une variable : `GET /api/vehicles/:id` (`parseInt(idOrRegistration)`, id ou immatriculation) lit encore de façon lâche. Elle est confiée au lot 9, avec `GET /api/users/:id`, monté avec `authenticate` seul.
+  - `generate-work-order` était déjà couvert au lot 6.
+- Pourquoi : un client propriétaire du véhicule `<id>` qui demandait `<id>abc` recevait les données du véhicule `<id>` au lieu d'un 400.
+- Tester :
+  - `route-id-strict-lot7` : 26 cas. Un témoin (le client lit son véhicule avec un id valide), 8 cas côté client et 17 côté personnel.
+  - Ancien code : 25 rouges, le témoin reste vert. Correctif : 26 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 97 contrats du périmètre : 1115 verts.
+
+## Lot 8 — écritures de `server/api` (factures fournisseur, pièces d'OT, demandes de pièce)
+
+- Quoi : `parseRouteId` (AppError 400) remplace `parseInt` sur 9 lectures d'écriture.
+  - `supplier-invoices` : `PATCH /:id/validate`, `PATCH /:id/approve`, `POST /:id/payment`.
+  - `work-order-parts` : `POST /:workOrderId/awaiting-parts`, `POST /:workOrderId/parts`, `POST /:workOrderId/part-requirements/:requirementId/issue` (2 ids).
+  - `part-requirements` : `PATCH /:id`, `DELETE /:id`.
+- Comment :
+  - `work-order-parts` et `part-requirements` gardent leur message de 400. `supplier-invoices` n'avait aucun 400 sur ces trois routes : « Identifiant de facture invalide. » est un message nouveau, aligné sur celui du fichier.
+  - Les contrôles `isNaN` devenus morts sont retirés.
+  - `issue`, `PATCH` et `DELETE` de demande renvoyaient 500 pour toute erreur : leur catch relaie désormais les AppError (`next(error)`), le reste garde son log et son 500.
+  - FROZEN : `supplier-invoices` 5 → 2, `work-order-parts` 5 → 1, `part-requirements` 3 → 1. Le reste (lectures) est confié au lot 9.
+- Pourquoi : un appel sur `<id>abc` agissait sur l'objet `<id>`.
+- Tester : `route-id-strict-lot8`, 9 cas. Chacun vise `<id>abc` avec `<id>` existant et vérifie le 400, le message, puis que l'objet `<id>` est intact (statut de facture et aucun règlement ; quantité en stock, statut de demande, aucun mouvement ni pièce utilisée ; aucune demande créée ; statut d'OT ; demande ni modifiée ni supprimée).
+  - Ancien code : 9 rouges (200, 201 ou 204 ; `payment` répondait 400 sur un autre motif). Correctif : 9 verts.
+  - tsc : 0 erreur. Unitaires : 2441 verts. 24 contrats du périmètre : 418 verts.
+  - Ménage : sur l'ancien code, les routes écrivent (mouvement lié à l'OT, demande créée) et le mouvement bloquait la suppression de l'OT. Le `afterAll` retrouve désormais les OT par préfixe de titre (`TEST lot 8`) et les demandes par motif, puis supprime des enfants vers les parents. Rejoué : 0 résidu après le vert et après le rouge.

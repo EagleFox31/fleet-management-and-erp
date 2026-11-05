@@ -11,3 +11,7 @@
 - **Quoi** : `uploadFile` (`client/src/lib/api.ts`) lève `toApiError(response)` au lieu d'une `Error` portant le corps brut, et l'écran `pages/workflows/vehicle-acquisition.tsx` affiche `userMessageOf(error, repli)` dans son `catch`. `WorkflowDocumentsViewer`, qu'aucun module n'importait (vérifié par `git grep`, imports dynamiques compris), est supprimé.
 - **Pourquoi** : l'écran réellement utilisé affichait un texte fixe quel que soit le refus du serveur (403 de cloison, validation). #408 avait corrigé un composant mort ; le correctif portait donc sur un écran jamais affiché. Le message du serveur est maintenant lu là où l'utilisateur importe ses documents.
 - **Comment** : `toApiError` dans `uploadFile` (les autres appelants, `vehicle-documents.tsx`, lisent déjà `userMessageOf`), `catch (error)` dans `handleDocumentSelect`, le `console.error` migré vers `clientLogger`. Test `tests/unit/client/upload-file-error.test.ts` : rouge sans le correctif (le message contient le JSON brut), vert avec.
+## Message hors périmètre neutre (#410)
+
+- **Quoi** : `OUT_OF_SCOPE_MESSAGE` ne nomme plus le véhicule ; `GET /api/vehicles/:id` garde son texte historique (e2e 24).
+- **Pourquoi** : la même réponse sert à l'objet étranger et à l'identifiant absent, le message ne doit donc rien dire de l'objet.

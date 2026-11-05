@@ -481,3 +481,13 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+
+## 2026-11-05 — Compteur de verrouillage : toutes les écritures sous le verrou de clé
+- **Quoi** : `DbLockoutStore.reset` et `release` passent par `underKeyLock`, la transaction sous verrou consultatif déjà utilisée par `reserve` et `confirmFailure`. Dans `auth-login-unavailable`, l'attente fixe de 500 ms est remplacée par l'attente de l'état stable du garde ; l'import en double est retiré.
+- **Pourquoi** : test instable en CI. Une réservation lue avant le DELETE du succès précédent réécrivait l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store`, nouveaux cas rouges avant le correctif et verts après ; contrats du verrouillage verts sur trois passes.
+
+## 2026-11-05 — Déverrouillage admin sous le verrou de clé
+- **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
+- **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.

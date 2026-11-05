@@ -38,16 +38,16 @@ const LOOSE_PARAM_READ = /\b(?:Number\.)?parseInt\(\s*req\.params\b|\bNumber\(\s
 const FROZEN: Record<string, number> = {
   "admin-users-guard.routes.ts": 1,
   "document-renewals.routes.ts": 1,
-  "part-requirements.routes.ts": 3,
+  "part-requirements.routes.ts": 1,
   "parts-catalog.routes.ts": 3,
-  "supplier-invoices.routes.ts": 5,
+  "supplier-invoices.routes.ts": 2,
   "vehicles.routes.ts": 2,
   "work-order-items.routes.ts": 4,
-  "work-order-parts.routes.ts": 5,
+  "work-order-parts.routes.ts": 1,
 };
 
-/** Lectures lâches restantes dans `server/routes.ts` (gelé). Ne peut que baisser. */
-const ROUTES_TS_FROZEN = 39;
+/** Lectures lâches restantes dans `server/routes.ts` (gelé) : PATCH users et toggle admin-users, traités ailleurs. Ne peut que baisser. */
+const ROUTES_TS_FROZEN = 2;
 
 export function countLooseParamReads(source: string): number {
   return (stripComments(source).match(LOOSE_PARAM_READ) ?? []).length;
