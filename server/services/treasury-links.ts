@@ -223,6 +223,26 @@ export async function reverseSupplierSettlement(tx: DbExecutor, settlementId: nu
 
 const missionBudgetKey = (id: number, line: "carburant" | "fdr") => `mission-budget:${id}:${line}`;
 
+/** Dépenses justifiées (L1e) non supprimées, par budget et par ligne : clé `<budgetId>:<ligne>`. */
+export async function justifiedMissionBudgetExpenses(tx: DbExecutor, budgetIds: number[]): Promise<Map<string, number>> {
+  if (budgetIds.length === 0) return new Map();
+  const res = await tx.execute(sql`
+    SELECT budget_id, line, SUM(amount)::bigint::text AS total
+    FROM mission_budget_expenses
+    WHERE deleted_at IS NULL AND budget_id IN (${sql.join(budgetIds.map((id) => sql`${id}`), sql`, `)})
+    GROUP BY budget_id, line`);
+  const rows = res.rows as Array<{ budget_id: number; line: string; total: string }>;
+  return new Map(rows.map((r) => [`${r.budget_id}:${r.line}`, Number(r.total)]));
+}
+
+/** Vrai si le reliquat du budget a déjà été rendu au compte source (L1d) : ses dépenses sont figées. */
+export async function isMissionBudgetReversed(tx: DbExecutor, budgetId: number): Promise<boolean> {
+  const keys = [missionBudgetKey(budgetId, "fdr"), missionBudgetKey(budgetId, "carburant")].map((k) => `${k}:reverse`);
+  const res = await tx.execute(sql`
+    SELECT 1 FROM treasury_entries WHERE request_key IN (${sql.join(keys.map((k) => sql`${k}`), sql`, `)}) LIMIT 1`);
+  return res.rows.length > 0;
+}
+
 /**
  * Décaissement d'un budget de mission (L1c), dans la transaction de la transition `disbursed` :
  * deux sorties du compte choisi, liées à la mission — carburant, puis FDR et frais annexes.
@@ -280,12 +300,14 @@ export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetId
   const lines = res.rows as Array<{
     request_key: string; account_id: number; amount: string; category: TreasuryCategory; label: string; mission_id: number | null;
   }>;
+  // Dépenses justifiées (L1e) conservées : seul le reliquat revient. Lues dans la transaction de
+  // l'annulation, qui tient la ligne mission : une saisie concurrente est passée avant, ou sera refusée.
+  const justifiedByLine = await justifiedMissionBudgetExpenses(tx, budgetIds);
   let reversed = 0;
   for (const line of lines) {
-    // Dépenses justifiées conservées. Aucune pièce justificative n'existe encore sur le budget :
-    // justifié = 0, le reliquat est le montant décaissé.
-    const justified = 0;
-    const amount = toTreasuryAmount(Number(line.amount) - justified);
+    const [, budgetId, budgetLine] = line.request_key.split(":");
+    const justified = justifiedByLine.get(`${budgetId}:${budgetLine}`) ?? 0;
+    const amount = toTreasuryAmount(Math.max(0, Number(line.amount) - justified));
     if (!amount) continue;
     const written = await insertLinked(tx, userId, {
       accountId: Number(line.account_id),
