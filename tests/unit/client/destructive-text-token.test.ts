@@ -38,4 +38,14 @@ describe("jeton --destructive-text", () => {
       expect(l).not.toMatch(/text-destructive(?!-)/);
     }
   });
+
+  it("vehicle-documents n'utilise plus text-destructive sur bg-destructive/10", () => {
+    const src = read("client/src/components/vehicles/vehicle-documents.tsx");
+    const lignes = src.split("\n").filter((l) => l.includes("bg-destructive/10"));
+    expect(lignes.length).toBeGreaterThan(0);
+    for (const l of lignes) {
+      expect(l).toContain("text-destructive-text");
+      expect(l).not.toMatch(/text-destructive(?!-)/);
+    }
+  });
 });
