@@ -12,5 +12,14 @@
 ## Pourquoi
 Le tarif est une suggestion : l'écran ne modifie jamais une facture ni une mission.
 
+## Réserves de relecture (levées)
+- Garde écran / route : POST, PUT et DELETE déclarés.
+- Désactivation : confirmation préalable, échec nommé « Désactivation impossible ».
+- Réactivation depuis l'édition d'un tarif désactivé ; le 409 de chevauchement s'affiche tel quel.
+- Checkbox et Select du design system ; client absent de /api/clients : « Client #id (inactif) ».
+
+## Écart assumé à la règle des 3 couches
+Aucun événement WebSocket : donnée de référence modifiée par deux rôles seulement (admin, direction). Instantané local et invalidation de la liste sont faits ; pas de temps réel inter-profils.
+
 ## Dette connue
-Sélecteurs natifs (à passer au Select du design system), pas de pagination, `clientName` vide dans les réponses de création et modification.
+Pas de pagination ; `clientName` vide dans les réponses de création et modification.

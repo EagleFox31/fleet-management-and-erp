@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Tag } from "lucide-react";
-import { HeaderCard, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
+import { AlertModal, HeaderCard, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { LoadingError } from "@/components/ui/loading-error";
 import { useToast } from "@/hooks/use-toast";
@@ -72,6 +74,8 @@ export const tariffBodyOf = (d: Draft, active = true): TariffBody => ({
   active,
 });
 
+const NO_CLIENT = "none";
+
 const xaf = (n: number) => `${new Intl.NumberFormat("fr-FR").format(n)} XAF`;
 
 /** Grille tarifaire (O3) : prix suggérés, jamais appliqués seuls. `readOnly` hors admin et direction. */
@@ -80,6 +84,7 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
   const [activeOnly, setActiveOnly] = useState(true);
   const [editing, setEditing] = useState<TariffRow | "new" | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [confirmDeactivate, setConfirmDeactivate] = useState<TariffRow | null>(null);
 
   const query = useContractQuery(TARIFF_GRID_PATH, tariffListResponseSchema, { activeOnly: String(activeOnly) });
   const clients = useQuery<{ id: number; name: string }[]>({ queryKey: ["/api/clients"], enabled: !readOnly });
@@ -89,19 +94,25 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
     setEditing(null);
     toast({ title });
   };
-  const fail = (error: unknown) =>
-    toast({ title: "Enregistrement impossible", description: userMessageOf(error), variant: "destructive" });
+  const failWith = (title: string) => (error: unknown) =>
+    toast({ title, description: userMessageOf(error), variant: "destructive" });
 
   const save = useMutation({
     mutationFn: (v: { id: number | null; body: TariffBody }) =>
       v.id ? apiRequest("PUT", `${TARIFF_GRID_PATH}/${v.id}`, v.body) : apiRequest("POST", TARIFF_GRID_PATH, v.body),
     onSuccess: () => done("Tarif enregistré"),
-    onError: fail,
+    onError: failWith("Enregistrement impossible"),
   });
   const deactivate = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `${TARIFF_GRID_PATH}/${id}`),
-    onSuccess: () => done("Tarif désactivé"),
-    onError: fail,
+    onSuccess: () => {
+      setConfirmDeactivate(null);
+      done("Tarif désactivé");
+    },
+    onError: (error: unknown) => {
+      setConfirmDeactivate(null);
+      failWith("Désactivation impossible")(error);
+    },
   });
   const submit = useSingleFlightMutate(save.mutate);
   const submitDeactivate = useSingleFlightMutate(deactivate.mutate);
@@ -111,6 +122,9 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
     setDraft(t === "new" ? EMPTY : draftOf(t));
   };
   const set = (k: keyof Draft, v: string) => setDraft({ ...draft, [k]: v });
+  const knownClients = clients.data ?? [];
+  const missingClient = draft.clientId !== "" && clients.isSuccess && !knownClients.some((c) => String(c.id) === draft.clientId);
+  const editingRow = editing && editing !== "new" ? editing : null;
   const valid =
     draft.origin.trim() !== "" && draft.destination.trim() !== "" && draft.validFrom !== "" &&
     draft.unitPrice !== "" && Number.isInteger(Number(draft.unitPrice)) && Number(draft.unitPrice) >= 0;
@@ -133,7 +147,7 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} data-testid="filter-active" />
+          <Checkbox checked={activeOnly} onCheckedChange={(c) => setActiveOnly(c === true)} data-testid="filter-active" />
           Tarifs actifs seulement
         </label>
         {!readOnly && (
@@ -161,12 +175,16 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
           <div className="space-y-3">
             <label className="block text-sm">
               <span className="mb-1 block text-muted-foreground">Client (vide = tarif générique)</span>
-              <select className="h-9 w-full rounded-md border bg-background px-2" value={draft.clientId} onChange={(e) => set("clientId", e.target.value)} data-testid="tariff-client">
-                <option value="">Tous les clients</option>
-                {(clients.data ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              <Select value={draft.clientId || NO_CLIENT} onValueChange={(v) => set("clientId", v === NO_CLIENT ? "" : v)}>
+                <SelectTrigger data-testid="tariff-client"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLIENT}>Tous les clients</SelectItem>
+                  {missingClient && <SelectItem value={draft.clientId}>{`Client #${draft.clientId} (inactif)`}</SelectItem>}
+                  {knownClients.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
             {([
               ["origin", "Origine"],
@@ -181,11 +199,14 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">Unité</span>
-                <select className="h-9 w-full rounded-md border bg-background px-2" value={draft.pricingUnit} onChange={(e) => set("pricingUnit", e.target.value)} data-testid="tariff-unit">
-                  {PRICING_UNITS.map((u) => (
-                    <option key={u} value={u}>{PRICING_UNIT_LABELS[u]}</option>
-                  ))}
-                </select>
+                <Select value={draft.pricingUnit} onValueChange={(v) => set("pricingUnit", v)}>
+                  <SelectTrigger data-testid="tariff-unit"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PRICING_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>{PRICING_UNIT_LABELS[u]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">Prix (XAF, entier)</span>
@@ -207,13 +228,18 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
             <div className="flex gap-2">
               <Button
                 disabled={!valid || save.isPending}
-                onClick={() => submit({ id: editing && editing !== "new" ? editing.id : null, body: tariffBodyOf(draft, editing && editing !== "new" ? editing.active : true) })}
+                onClick={() => submit({ id: editingRow?.id ?? null, body: tariffBodyOf(draft, editingRow?.active ?? true) })}
                 data-testid="save-tariff"
               >
                 Enregistrer
               </Button>
-              {editing && editing !== "new" && editing.active && (
-                <Button variant="outline" disabled={deactivate.isPending} onClick={() => submitDeactivate(editing.id)} data-testid="deactivate-tariff">
+              {editingRow && !editingRow.active && (
+                <Button variant="outline" disabled={!valid || save.isPending} onClick={() => submit({ id: editingRow.id, body: tariffBodyOf(draft, true) })} data-testid="reactivate-tariff">
+                  Réactiver
+                </Button>
+              )}
+              {editingRow?.active && (
+                <Button variant="outline" disabled={deactivate.isPending} onClick={() => setConfirmDeactivate(editingRow)} data-testid="deactivate-tariff">
                   Désactiver
                 </Button>
               )}
@@ -221,6 +247,17 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertModal
+        open={confirmDeactivate !== null}
+        onOpenChange={(o) => !o && setConfirmDeactivate(null)}
+        variant="confirm"
+        title="Désactiver ce tarif ?"
+        description="Il ne sera plus suggéré. L'historique est conservé et le tarif peut être réactivé."
+        confirmLabel="Désactiver"
+        cancelLabel="Annuler"
+        onConfirm={() => confirmDeactivate && submitDeactivate(confirmDeactivate.id)}
+      />
     </div>
   );
 }

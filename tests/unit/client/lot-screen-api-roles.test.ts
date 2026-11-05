@@ -118,6 +118,18 @@ const SCREEN_APIS: Record<string, Declaration> = {
         gate: "canWriteTariffGrid",
         component: "TariffGridScreen",
       },
+      {
+        api: { file: "tariff-grid.routes.ts", method: "put", path: "/tariff-grid/:id" },
+        roles: "TARIFF_GRID_WRITE_ROLES",
+        gate: "canWriteTariffGrid",
+        component: "TariffGridScreen",
+      },
+      {
+        api: { file: "tariff-grid.routes.ts", method: "delete", path: "/tariff-grid/:id" },
+        roles: "TARIFF_GRID_WRITE_ROLES",
+        gate: "canWriteTariffGrid",
+        component: "TariffGridScreen",
+      },
     ],
   },
   "pending-invoices": { apis: [{ file: "pending-invoices.routes.ts", path: "/billing/pending-invoices" }] },
