@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
 import * as roles from "../../../shared/constants/roles";
@@ -7,6 +9,7 @@ import {
   EXCLUSIONS,
   MAX_EXCLUSIONS,
   missingFromSweep,
+  staleRows,
   signatureOf,
   SWEEP_ROUTES,
 } from "../../support/client-scope-sweep-table";
@@ -50,12 +53,85 @@ describe("balayage de cloison : aucune route ouverte a un client ne manque", () 
   it("une route couverte ailleurs figure bien dans le contrat nomme", () => {
     for (const c of COVERED_ELSEWHERE) {
       expect(existsSync(`${root}${c.file}`), c.file).toBe(true);
-      expect(readFileSync(`${root}${c.file}`, "utf8"), signatureOf(c)).toContain(c.fragment);
+      // chemin exact : le fragment doit se terminer sur le delimiteur du litteral, pas sur un chemin plus long
+      const source = readFileSync(`${root}${c.file}`, "utf8");
+      expect(["`", '"', "'"].some((q) => source.includes(`${c.fragment}${q}`)), signatureOf(c)).toBe(true);
     }
   });
 
   it("une route ne figure pas deux fois dans les listes", () => {
     const all = [...SWEEP_ROUTES, ...COVERED_ELSEWHERE, ...EXCLUSIONS].map((r) => `${signatureOf(r)}`);
     expect(all.length).toBe(new Set(all).size);
+  });
+
+  it("aucune ligne de la table n'est perimee (route supprimee, renommee ou restreinte)", () => {
+    expect(staleRows(found)).toEqual([]);
+  });
+});
+
+/** Le scan lit les gardes posees au montage et par `router.use`, pas seulement l'en-tete de la route. */
+describe("scan des gardes effectives (arbre synthetique)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sweep-scan-"));
+  const write = (name: string, text: string) => {
+    mkdirSync(join(dir, name, ".."), { recursive: true });
+    writeFileSync(join(dir, name), text);
+  };
+  const scan = () => scanClientOpenParamRoutes(dir, roles as never);
+  const routeFile = (head: string, route: string) =>
+    `import { Router } from "express";\nconst router = Router();\n${head}\nrouter.get("${route}", async (req, res) => { res.json({}); });\nexport default router;\n`;
+  mkdirSync(join(dir, "middleware"), { recursive: true });
+  copyFileSync(`${serverDir}/middleware/auth.ts`, join(dir, "middleware", "auth.ts"));
+  write(
+    "api/index.ts",
+    [
+      'import { Router } from "express";',
+      'import { isStaff } from "../middleware/auth";',
+      'import a from "./a.routes";',
+      'import b from "./b.routes";',
+      'import c from "./c.routes";',
+      'import d from "./d.routes";',
+      'import e from "./e.routes";',
+      'import f from "./f.routes";',
+      "const apiRouter = Router();",
+      'apiRouter.use("/a", a);',
+      'apiRouter.use("/b", b);',
+      'apiRouter.use("/c", isStaff, c);',
+      'apiRouter.use("/d", d);',
+      'apiRouter.use("/e", e);',
+      'apiRouter.use("/f", f);',
+      "",
+    ].join("\n"),
+  );
+  write("api/a.routes.ts", routeFile("router.use(isAnyUser);", "/x/:id"));
+  write("api/b.routes.ts", routeFile("", "/y/:id").replace('"/y/:id", async', '"/y/:id", authenticate, async'));
+  write("api/c.routes.ts", routeFile("router.use(authenticate);", "/z/:id"));
+  write("api/d.routes.ts", routeFile("", "/w/:id").replace('"/w/:id", async', '"/w/:id", isStaff, async'));
+  write("api/e.routes.ts", routeFile("", "/v/:id"));
+  write("api/f.routes.ts", routeFile("router.use(maGardeInconnue);", "/u/:id"));
+
+  it("retient router.use(isAnyUser) et authenticate en en-tete", () => {
+    const out = scan();
+    expect(out).toContain("GET /api/a/x/:p");
+    expect(out).toContain("GET /api/b/y/:p");
+  });
+
+  it("ignore une route couverte par une garde restrictive (montage ou en-tete) ou sans session", () => {
+    const out = scan();
+    expect(out).not.toContain("GET /api/c/z/:p");
+    expect(out).not.toContain("GET /api/d/w/:p");
+    expect(out).not.toContain("GET /api/e/v/:p");
+  });
+
+  it("une garde inconnue dans router.use compte comme permissive (echec ferme)", () => {
+    expect(scan()).toContain("GET /api/f/u/:p");
+  });
+
+  it("une garde de session ajoutee apres la route ne la couvre pas", () => {
+    write("api/e.routes.ts", routeFile("", "/v/:id").replace("export default", "router.use(isAnyUser);\nexport default"));
+    expect(scan()).not.toContain("GET /api/e/v/:p");
+  });
+
+  it("nettoyage", () => {
+    rmSync(dir, { recursive: true, force: true });
   });
 });

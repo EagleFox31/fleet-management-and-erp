@@ -326,6 +326,7 @@ Notes :
 - LESSONS, `docs/journal/*.md` et `PASSATION*.md` fusionnent en `merge=union` (`.gitattributes`) :
   GitHub ne l'applique pas côté serveur, la PR reste CONFLICTING jusqu'au `git merge origin/main`
   local, qui garde alors les deux entrées sans conflit. N'y écrire qu'en ajout de fin.
+- Dépôt principal partagé entre sessions : jamais de travail non commité, jamais de `checkout -- `/`reset --hard`/`clean`/`restore` dedans, et tout `cd` chaîné s'écrit `cd <chemin> || exit 1` (incident du 5 novembre 2026, `docs/analysis/LESSONS_LEARNED.md`).
 
 ---
 

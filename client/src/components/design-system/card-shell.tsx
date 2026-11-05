@@ -16,7 +16,7 @@ export function CardShell({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden",
+        "rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden",
         className,
       )}
       {...props}
@@ -24,7 +24,7 @@ export function CardShell({
       {topBar && (
         <div
           className={cn(
-            "h-0.5 bg-gradient-to-r from-green-500 to-emerald-400",
+            "h-0.5 bg-gradient-to-r from-primary to-primary/60",
             topBarClassName,
           )}
         />

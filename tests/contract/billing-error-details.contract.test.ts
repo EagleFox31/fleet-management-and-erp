@@ -55,6 +55,18 @@ afterAll(async () => {
   await cleanupCreated(ids);
 });
 
+describe("Facturation client : facture absente", { timeout: 120000 }, () => {
+  // Le service levait `Error("Facture non trouvée")` : une facture absente répondait 500.
+  for (const path of [`/api/billing/invoices/${ID}`, `/api/billing/invoices/${ID}/pdf`]) {
+    it(`GET ${path} : 404 « Facture non trouvée. »`, async () => {
+      const res = await fetch(baseUrl + path, { headers: { Cookie: cookie } });
+      const body = await res.json();
+      expect(apiErrorProblems(res.status, body, 404, undefined, res.headers.get("x-request-id"))).toEqual([]);
+      expect(body.message).toBe("Facture non trouvée.");
+    });
+  }
+});
+
 describe("Facturation client : une 500 sans détail technique", { timeout: 120000 }, () => {
   for (const { path, method } of ROUTES) {
     it(`GET ${path} : message générique et référence, sans le message du service`, async () => {

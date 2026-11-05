@@ -31,7 +31,7 @@ export function HeaderCard({
           <div className="flex items-center gap-3 min-w-0">
             {icon ? <IconSquare size="lg">{icon}</IconSquare> : null}
             <div className="min-w-0">
-              {moduleLabel ? <SectionLabel className="text-green-600">{moduleLabel}</SectionLabel> : null}
+              {moduleLabel ? <SectionLabel className="text-primary-text">{moduleLabel}</SectionLabel> : null}
               <h1 className="text-lg font-bold text-gray-900 truncate">{title}</h1>
               {subtitle ? <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p> : null}
             </div>

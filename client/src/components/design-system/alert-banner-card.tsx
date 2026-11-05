@@ -14,20 +14,20 @@ interface AlertBannerCardProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const variantStyles = {
   warning: {
-    card: "border-amber-200 bg-amber-50/60",
-    icon: "bg-amber-100 text-amber-600",
-    title: "text-amber-800",
-    desc: "text-amber-600",
-    link: "text-amber-700 hover:text-amber-900",
-    count: "bg-amber-200 text-amber-800",
+    card: "border-warning/30 bg-warning/10",
+    icon: "bg-warning/15 text-warning-text",
+    title: "text-warning-text",
+    desc: "text-warning-text",
+    link: "text-warning-text hover:opacity-80",
+    count: "bg-warning/20 text-warning-text",
   },
   danger: {
-    card: "border-red-200 bg-red-50/60",
-    icon: "bg-red-100 text-red-600",
-    title: "text-red-800",
-    desc: "text-red-600",
-    link: "text-red-700 hover:text-red-900",
-    count: "bg-red-200 text-red-800",
+    card: "border-destructive/30 bg-destructive/10",
+    icon: "bg-destructive/15 text-destructive-text",
+    title: "text-destructive-text",
+    desc: "text-destructive-text",
+    link: "text-destructive-text hover:opacity-80",
+    count: "bg-destructive/20 text-destructive-text",
   },
   info: {
     card: "border-blue-200 bg-blue-50/60",
