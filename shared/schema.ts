@@ -1673,6 +1673,24 @@ export const tariffGrid = pgTable("tariff_grid", {
   ).where(sql`${table.active}`),
 ]);
 export type TariffGridRow = typeof tariffGrid.$inferSelect;
+
+// Historique du prix convenu d'une mission (O3 lot 3b) : une ligne par changement, écrite dans la même transaction que l'UPDATE.
+// Les tarifs d'avant/après sont des instantanés d'identifiants, sans clé étrangère : l'historique survit à la suppression d'un tarif.
+export const missionPriceHistory = pgTable("mission_price_history", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  oldPrice: numeric("old_price", { precision: 15, scale: 0 }),
+  newPrice: numeric("new_price", { precision: 15, scale: 0 }),
+  oldTariffGridId: integer("old_tariff_grid_id"),
+  newTariffGridId: integer("new_tariff_grid_id"),
+  reason: text("reason"),
+  changedBy: integer("changed_by").references(() => users.id),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_price_history_price_check", sql`(${table.oldPrice} IS NULL OR ${table.oldPrice} >= 0) AND (${table.newPrice} IS NULL OR ${table.newPrice} >= 0)`),
+  index("mission_price_history_mission_idx").on(table.missionId, table.changedAt),
+]);
+export type MissionPriceHistoryRow = typeof missionPriceHistory.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({

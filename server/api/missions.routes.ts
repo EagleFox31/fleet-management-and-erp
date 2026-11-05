@@ -208,12 +208,18 @@ async function emitMissionEvent(
   }
 }
 
-async function broadcastMissionUpdate(
+/**
+ * Diffusion temps réel d'une mission. Le prix convenu et son tarif d'origine ne voyagent jamais dans
+ * l'événement : il part vers tout le personnel hors chauffeur (techniciens compris), qui n'a pas droit au prix.
+ * L'écran qui le lit rafraîchit sa requête sur l'événement.
+ */
+export async function broadcastMissionUpdate(
   eventType: MissionRealtimeEvent,
-  mission: Record<string, unknown>,
+  missionWithPrice: Record<string, unknown>,
   extraPayload: Record<string, unknown> = {},
   requestId?: string,
 ): Promise<void> {
+  const { agreedPrice: _price, tariffGridId: _tariff, ...mission } = missionWithPrice;
   const missionId =
     typeof mission.id === "number"
       ? mission.id
