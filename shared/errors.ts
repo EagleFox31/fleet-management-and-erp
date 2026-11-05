@@ -13,6 +13,8 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  /** 409 sur une écriture rattachée à un véhicule retiré (L3) : refus prononcé avant toute écriture. */
+  | "VEHICLE_RETIRED"
   | "RATE_LIMITED"
   | "INTERNAL";
 
@@ -31,6 +33,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   FORBIDDEN: "Votre profil ne permet pas cette action.",
   NOT_FOUND: "L'élément demandé n'existe plus ou a été déplacé.",
   CONFLICT: "Cet élément a été modifié entre-temps. Rechargez la page puis réessayez.",
+  VEHICLE_RETIRED: "Véhicule retiré : le restaurer avant de le modifier.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
 };
