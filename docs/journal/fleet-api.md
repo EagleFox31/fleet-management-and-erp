@@ -471,3 +471,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+
+## 2026-11-05 — Justificatif de règlement fournisseur : téléchargement forcé, extension tirée du type
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` sert le fichier en `attachment` avec `nosniff`, et choisit son type d'après l'extension sur disque, en liste blanche (`settlementProofContentType`). Toute autre extension part en `application/octet-stream`. Au dépôt, l'extension vient du type déclaré (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`), plus du nom d'origine. Le filtre de dépôt lit la même table.
+- **Pourquoi** : même forme que le justificatif de renouvellement. Un nom d'origine en `.html` déclaré PDF était écrit en `.html`, puis servi en ligne sur l'origine de l'application.
+- **Preuve** : contrat `supplier-settlement-proof-path` rouge 8/18 avant, vert 18/18 après. Avec les autres contrats de règlement : 31/31. Unitaires `settlement-proof` 41, et une mutation de la liste blanche tuée.

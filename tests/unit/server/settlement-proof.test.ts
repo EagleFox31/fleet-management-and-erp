@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   SETTLEMENT_PROOF_PREFIX,
   isSettlementProofReference,
+  settlementProofContentType,
   settlementProofFileName,
   settlementProofPath,
 } from "../../../server/lib/settlement-proof";
@@ -83,5 +84,31 @@ describe("nom disque du justificatif téléversé : toujours accepté à la rele
     const name = settlementProofFileName(original as string | undefined, "U");
     expect(name).toMatch(expected);
     expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
+  });
+});
+
+describe("justificatif : extension tirée du type déclaré, type servi en liste blanche", () => {
+  it.each([
+    ["page.html", "application/pdf", /^page-U\.pdf$/],
+    ["photo.svg", "image/png", /^photo-U\.png$/],
+    ["scan.PDF", "image/jpeg", /^scan-U\.jpg$/],
+    ["x.pdf", "text/html", /^x-U\.bin$/],
+    ["x.pdf", "constructor", /^x-U\.bin$/],
+  ])("%s déclaré %s", (original, mime, expected) => {
+    const name = settlementProofFileName(original, "U", mime);
+    expect(name).toMatch(expected);
+    expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
+  });
+
+  it.each([
+    ["a.pdf", "application/pdf"],
+    ["a.JPEG", "image/jpeg"],
+    ["a.webp", "image/webp"],
+    ["a.html", "application/octet-stream"],
+    ["a.svg", "application/octet-stream"],
+    ["a.bin", "application/octet-stream"],
+    ["a", "application/octet-stream"],
+  ])("%s servi en %s", (file, type) => {
+    expect(settlementProofContentType(file)).toBe(type);
   });
 });
