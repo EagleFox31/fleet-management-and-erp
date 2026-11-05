@@ -96,3 +96,11 @@
 - #386 : `toHttpError` traduit 40P01 et 40001 en 409 « Opération en cours, réessayez » (limite connue : l'interblocage possible entre la lecture verrouillante et le verrou consultatif ne casse pas l'intégrité, il se réessaie) ; tests unitaires de cette branche et de la violation du dernier administrateur ; cas « admin déjà inactif » ; réparation manuelle documentée en tête du test d'intégration. Description de PR : traduction HTTP par route renvoyée au complément #375.
 - Reste #386 : point 5 (une seule constante de message avec #379) dans le complément #375.
 - Complément #375 (après fusion de #379) : traduction sur PATCH users, DELETE users, DELETE admin/users, toggle ; storage.updateUser/deleteUser avalent l'erreur ; un contrat par route ; message commun avec #379.
+
+
+## 2026-11-05 06:50 — c7 : état
+
+- #388 : mineurs 1-4 de 0a poussés (version : repli documenté, 401 strict, cartographie, leçon). Santé terminée côté c7.
+- #379 (réserves, branche locale c7-lag-reserves = fix/last-active-admin-guard + 1 commit 7782c78f, NON poussé) : (a) restauration imbriquée et cleanupCreated en finally, (c) LAG3 ignoré (describe.skipIf) si trg_users_keep_active_admin présent. Mesuré : sans trigger 15/15 verts, avec trigger 9 verts + 6 ignorés. Reste (b) journal docs/journal/api-last-admin-guard.md : le « rouge B » est faux (retirer le contrôle writableFinished/destroyed laisse unitaires 10/10 et contrat 15/15 verts) ; « rouge C » non défini pour moi, à demander à 0a ; puis pousser avec `git push origin HEAD:fix/last-active-admin-guard` (fast-forward, sans force) et prévenir 0a.
+- Piège : tests/integration/users-keep-active-admin.test.ts repose le trigger sur c7test ; le retirer (node drop via pg sur 55432) avant de lancer les contrats de #379.
+- Ensuite : complément #375 ; #376 (merge main). Worktrees de b7 : node_modules inutilisable, travailler depuis c7-backup via branche locale + push HEAD:branche.
