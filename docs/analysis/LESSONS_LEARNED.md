@@ -2986,3 +2986,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : `userMessageOf(error, repli)` dans le toast ; `launchRefusalMessage` borne le message (conflit et budget d'abord, motifs en trop comptés).
 - **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, `tests/unit/server/launch-refusal-message.test.ts`, cas toast dans `tests/unit/client/api-error.test.ts`.
 - **Leçon généralisée** : un `onError` affiche `userMessageOf`, jamais un texte fixe ; tout message métier qui peut dépasser 300 caractères se borne à la source ; un test d'erreur vérifie le contenu du message, pas seulement le statut.
+
+## 2026-11-05 — Un middleware monté sur un préfixe contrôle le rôle avant sa première lecture
+
+- **Contexte** : la garde de réservation des OT, montée sur `/work-orders`, lisait la base et répondait avant les gardes de rôle des routes.
+- **Cause racine** : un middleware de préfixe s'exécute avant les gardes propres aux routes ; sa première lecture précédait donc tout contrôle de rôle.
+- **Classification** : sécurité, ordre des gardes.
+- **Résolution** : la garde rejoue d'abord la garde de rôle de la route protégée (POST : atelier ; PATCH : technicien compris), puis lit.
+- **Prévention vérifiable** : cas `contrôle de rôle avant lecture` dans `tests/contract/work-order-booking-guard.contract.test.ts` (client et chauffeur : 403), rouge avant le correctif.
+- **Leçon généralisée** : un middleware monté sur un préfixe vérifie le rôle avant sa première lecture en base.
