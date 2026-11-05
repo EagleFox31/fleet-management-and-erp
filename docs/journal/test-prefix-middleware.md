@@ -16,3 +16,16 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
   - Preuve : rouge constaté avec le montage fictif (1 échec, 7 verts), vert après retrait (8 verts).
 - **RAIDER** : D couvert (aucun code produit modifié) ; R : nouvelles règles dans une liste, pas dans le scanner ; I : lecture seule ; failure memory : prévention vérifiable par ce test.
 - **Reste / risques** : une dérogation suivie dans une PR liée (liste séparée du test).
+
+## Reserves de relecture R1 a R6
+
+Quoi : le recensement des middlewares montes sur un prefixe devient plus strict sur six points.
+Comment : chaque point a un test sur source synthetique et, quand le code reel le permet, un test sur `server/`.
+- R1 derogation perimee : `staleDerogations` signale toute derogation (nom + fichier) sans montage reel. Rouge : une derogation fantome fait echouer le test.
+- R2 « sans base » : analyse AST des imports (statique, re-export, `import()`, `require`) vers db, storage, services, drizzle, neon, pg ; une entree sans-base du projet doit citer sa `source` (bibliotheques exemptees).
+- R3 `routeIdRangeGuard` : s'il est monte, il l'est sans prefixe, sur `apiRouter`, avant le premier routeur (`routeIdGuardIssues`).
+- R4 routeurs : reconnus par leur declaration (`Router()`) ou leur import (`*.routes`), non par un suffixe de nom. Rouge : un suffixe de nom laisse passer `fooRoutes`, une fonction qui n'est pas un routeur.
+- R5 `requireFeature` : entree restreinte a `server/api/index.ts` au lieu de valoir partout.
+- R6 receveurs : decouverts par leur declaration (`Router()`, `express.Router()`, `express()`), en plus des trois noms connus.
+Pourquoi : une liste blanche qui survit au code, un nom qui sert de preuve ou un receveur oublie laissent passer un middleware avant les gardes de role. Lecture des reserves faite a partir de leur resume (texte exact non disponible) : interpretation a confirmer en relecture.
+Ajout lie : `/health/details` (route de main, `isAdmin` en tete de chaine) inscrit comme gestionnaire final.

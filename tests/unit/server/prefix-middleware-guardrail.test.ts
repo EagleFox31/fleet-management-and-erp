@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import { scanFiles, scanMountedMiddlewares, type MountedMiddleware } from "../../support/prefix-middleware-scan";
+import { firstRouterMountLine, forbiddenImports, routeIdGuardIssues, scanFiles, scanMountedMiddlewares, staleDerogations, type MountedMiddleware } from "../../support/prefix-middleware-scan";
 import { sourceFiles } from "../../support/route-guard-scan";
 
 /**
@@ -56,6 +56,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "sessionGuard", type: "garde-role", raison: "marque une garde de session ; enveloppe un repartiteur de gardes (/suppliers)" },
   { name: "exportsGuard", type: "garde-role", raison: "tableau [drapeau, isAnyUser, matrice de roles par export] : refus par defaut" },
   { name: "gardeApprovisionnement", type: "garde-role", raison: "authorize(PROCUREMENT_ROLES) pose en constante locale" },
+  { name: "(anonyme)@/health/details", file: INDEX, type: "garde-role", occurrences: 1, raison: "gestionnaire final de la route : isAdmin le precede dans la meme chaine, il ne s'execute qu'apres la garde" },
   { name: `(anonyme)@/part-sales`, file: INDEX, type: "garde-role", occurrences: 1, raison: "repartiteur : GET/HEAD passent, toute ecriture est confiee a authorize(PART_SALE_ROLES)" },
 
   // Fichier server/app.ts : pile globale, avant le routeur /api.
@@ -81,7 +82,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "loginLockoutGuard", file: INDEX, type: "pre-authentification", raison: "verrou de connexion monte sur /auth/login et /auth/pin-login uniquement (routes publiques, il n'existe pas de role a ce stade) ; compteur indexe par identifiant normalise, corps invalide ecarte avant" },
   { name: "auditWrites", file: INDEX, type: "ecrit-apres-reponse", source: "server/middleware/audit-writes.ts", raison: "n'ecrit qu'apres la reponse (`finish`, statut < 400), ne lit aucune donnee metier ; enregistrement non bloquant" },
   { name: "idempotencyGuard", file: INDEX, type: "indexe-par-session", raison: "ne s'active que pour les routes de IDEMPOTENCY_ROUTES, drapeau offline-writes (coupe par defaut), en-tete present et session ouverte ; reserve une cle indexee par userId et ne lit aucune donnee metier" },
-  { name: "requireFeature", type: "sans-base", source: "server/lib/feature-flags.ts", raison: "lit le drapeau de fonctionnalite en memoire/environnement (404 si coupe) ; aucun acces base" },
+  { name: "requireFeature", file: INDEX, type: "sans-base", source: "server/lib/feature-flags.ts", raison: "lit le drapeau de fonctionnalite en memoire/environnement (404 si coupe) ; aucun acces base" },
   // Surveillance : routes de vite.ts, jamais atteintes par /api (montees apres apiNotFound, developpement et statique).
   { name: "vite.middlewares", file: VITE, type: "hors-api", raison: "serveur de developpement Vite, monte apres apiNotFound : une requete /api n'y arrive jamais" },
   { name: "express.static", file: VITE, type: "hors-api", raison: "fichiers du build client, monte apres apiNotFound" },
@@ -154,11 +155,62 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
   });
 
   it("les middlewares « sans-base » n'importent pas la base dans leur fichier source", () => {
-    const offenders = MIDDLEWARES_JUSTIFIES.filter((e) => e.type === "sans-base" && e.source).flatMap((e) => {
-      const text = readFileSync(join(ROOT, e.source!), "utf8");
-      return /from\s+["'][^"']*\/db["']|from\s+["'][^"']*\/storage["']|from\s+["'][^"']*\/services\//.test(text) ? [`${e.name} (${e.source})`] : [];
-    });
+    const offenders = MIDDLEWARES_JUSTIFIES.filter((e) => e.type === "sans-base" && e.source).flatMap((e) =>
+      forbiddenImports(readFileSync(join(ROOT, e.source!), "utf8"), e.source!).map((spec) => `${e.name} (${e.source}) importe ${spec}`),
+    );
     expect(offenders, "Un middleware declare sans-base importe la base ou un service : reclasser l'entree apres lecture.").toEqual([]);
+  });
+
+  it("une entree sans-base du projet cite sa source (seules les bibliotheques en sont dispensees)", () => {
+    const LIBRARY = /^(compression|express\.(json|urlencoded|static))$/;
+    const missing = MIDDLEWARES_JUSTIFIES.filter((e) => e.type === "sans-base" && !e.source && !LIBRARY.test(e.name) && !e.name.startsWith("("));
+    expect(missing.map((e) => e.name), "Entree sans-base sans `source` : le fichier du middleware doit etre relu par le test.").toEqual([]);
+  });
+
+  it("R2 : la detection d'imports couvre import statique, import(), require et re-export", () => {
+    expect(forbiddenImports('import { db } from "../db";', "x.ts")).toEqual(["../db"]);
+    expect(forbiddenImports('import type { db } from "../db";', "x.ts")).toEqual([]);
+    expect(forbiddenImports('const m = await import("../storage");', "x.ts")).toEqual(["../storage"]);
+    expect(forbiddenImports('const s = require("../services/stock");', "x.ts")).toEqual(["../services/stock"]);
+    expect(forbiddenImports('export { db } from "../db";', "x.ts")).toEqual(["../db"]);
+    expect(forbiddenImports(['import { eq } from "drizzle-orm";', 'import pg from "pg";'].join("\n"), "x.ts")).toEqual(["drizzle-orm", "pg"]);
+    expect(forbiddenImports('import { x } from "../lib/pure";', "x.ts")).toEqual([]);
+  });
+
+  it("R1 : une derogation sans montage correspondant est detectee comme perimee", () => {
+    const mounts: MountedMiddleware[] = [{ file: INDEX, line: 1, receiver: "apiRouter", method: "use", prefix: "/x", name: "vivante" }];
+    expect(staleDerogations([{ name: "vivante", file: INDEX }, { name: "disparue", file: INDEX }, { name: "vivante", file: APP }], mounts)).toEqual([`${INDEX} disparue`, `${APP} vivante`]);
+  });
+
+  it("R1 : chaque derogation connue correspond a un montage reel", () => {
+    expect(staleDerogations(DEROGATIONS_CONNUES, occurrences()), "Derogation sans montage : la retirer de DEROGATIONS_CONNUES (elle a ete corrigee).").toEqual([]);
+  });
+
+  it("R3 : routeIdRangeGuard s'applique partout (sans prefixe, sur apiRouter, avant les routeurs)", () => {
+    const m = (over: Partial<MountedMiddleware>): MountedMiddleware => ({ file: INDEX, line: 5, receiver: "apiRouter", method: "use", prefix: null, name: "routeIdRangeGuard", ...over });
+    expect(routeIdGuardIssues([m({})], { [INDEX]: 10 })).toEqual([]);
+    expect(routeIdGuardIssues([m({ prefix: "/vehicles" })], { [INDEX]: 10 })).toHaveLength(1);
+    expect(routeIdGuardIssues([m({ receiver: "router" })], { [INDEX]: 10 })).toHaveLength(1);
+    expect(routeIdGuardIssues([m({ line: 12 })], { [INDEX]: 10 })).toHaveLength(1);
+  });
+
+  it("R3 : s'il est monte dans le code reel, il respecte la regle", () => {
+    const text = readFileSync(join(ROOT, INDEX), "utf8");
+    const first = firstRouterMountLine(text, INDEX);
+    expect(routeIdGuardIssues(occurrences(), first === undefined ? {} : { [INDEX]: first })).toEqual([]);
+  });
+
+  it("R4 : un routeur se reconnait a sa declaration ou a son import, pas a son nom", () => {
+    const seen = scanMountedMiddlewares(
+      ['import vehiclesRoutes from "./vehicles.routes";', "const auditRouter = Router();", "const fooRoutes = (req, res, next) => next();", 'apiRouter.use("/v", vehiclesRoutes, auditRouter, fooRoutes);'].join("\n"),
+      INDEX,
+    ).map((x) => x.name);
+    expect(seen).toEqual(["fooRoutes"]);
+  });
+
+  it("R6 : un receveur se decouvre par sa declaration, pas par une liste figee", () => {
+    const seen = scanMountedMiddlewares(["const adminApi = express.Router();", 'adminApi.use("/z", leak);'].join("\n"), INDEX).map((x) => x.name);
+    expect(seen).toEqual(["leak"]);
   });
 
   it("les gardes inscrites existent reellement (declarees dans server/middleware ou le routeur)", () => {
@@ -172,6 +224,7 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
   it("le recensement voit les montages multi-lignes, les spreads et les verbes de connexion", () => {
     const seen = scanMountedMiddlewares(
       [
+        'import xRoutes from "./x.routes";',
         "apiRouter.use(",
         '  "/x",',
         "  requireFeature(\"a\"),",
