@@ -8,8 +8,10 @@ import { describe, expect, it } from "vitest";
  * toute route de `server/api` (sous-dossiers compris) et de `server/routes.ts` qui reçoit un fichier
  * lie le sort du fichier à l'écriture qui le référence. Forme exigée, dans le handler de la route :
  *   - un drapeau `let <x> = false` ;
- *   - `<x> = true` après l'écriture : au moins un `await` le précède dans le `try`, et tout `await`
- *     qui le suit est un effet au mieux, dans son propre `try`/`catch` ;
+ *   - `<x> = true` après l'écriture : un `await` d'écriture le précède dans le `try` (un appel de
+ *     sa chaîne porte un nom d'écriture, `WRITE_NAME` : `insert`, `update`, `transaction`, `create…`,
+ *     `record…`, `save…`…), et tout `await` qui le suit est un effet au mieux, dans son propre
+ *     `try`/`catch`. Un `await` de lecture ou de contrôle seul ne suffit pas ;
  *   - un `finally` dont un `if (!<x> …)` appelle une suppression (`unlink*`, `rm*`, `remove*`,
  *     `deleteFile*`, `deleteUploaded*`).
  * Les suppressions écrites refus par refus oublient une sortie (orphelin) ou suppriment le fichier
@@ -39,6 +41,8 @@ const LIFECYCLE_FROZEN: Record<string, { reason: string; unfreezeWhen: string }>
 const ROUTE_METHODS = new Set(["get", "post", "put", "patch", "delete", "all", "use"]);
 const MULTER_METHODS = new Set(["single", "array", "fields", "any"]);
 const DELETE_NAME = /^(unlink|rm)(Sync)?$|^remove|^deleteFile|^deleteUploaded/;
+/** Appel d'écriture : `db.insert`, `tx.update`, `db.transaction`, `storage.create…`, `service.record…`, `save…`. */
+const WRITE_NAME = /^(insert|update|upsert|transaction|create|record|save|store|persist|finalize|register|replace)/;
 
 export type MulterRoute = { key: string; compliant: boolean };
 
@@ -145,6 +149,15 @@ function callsDeletion(node: ts.Node): boolean {
   });
 }
 
+/** Un `await` écrit si un appel de sa chaîne (callbacks compris, ex. `db.transaction(async (tx) => …)`) porte un nom d'écriture. */
+function isWriteAwait(awaitNode: ts.AwaitExpression): boolean {
+  return collect(awaitNode, ts.isCallExpression).some((call) => {
+    const callee = call.expression;
+    const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : "";
+    return WRITE_NAME.test(name);
+  });
+}
+
 /** Un `await` après le drapeau est un effet au mieux : un `try` avec `catch` l'entoure, sous le `try` gardé. */
 function isBestEffort(awaitNode: ts.Node, guarded: ts.Block): boolean {
   for (let node: ts.Node = awaitNode; node && node !== guarded; node = node.parent) {
@@ -187,7 +200,7 @@ function hasLifecycleFlag(route: ts.Node): boolean {
       const awaits = collect(guard.tryBlock, ts.isAwaitExpression);
       const ordered = sets.every(
         (set) =>
-          awaits.some((a) => a.end <= set.getStart()) &&
+          awaits.some((a) => a.end <= set.getStart() && isWriteAwait(a)) &&
           awaits.filter((a) => a.getStart() >= set.end).every((a) => isBestEffort(a, guard.tryBlock)),
       );
       if (ordered) return true;
@@ -272,6 +285,16 @@ describe("routes multer : fichier lié à l'écriture qui le référence (#178, 
         try { await check(req.body); ok = true; await save(req.file); res.sendStatus(201); }
         finally { if (!ok) remove(req.file); }
       }));
+      router.post("/lecture-seule", (req, res) => upload(req, res, async () => {
+        let ok = false;
+        try { await check(req.body); ok = true; res.sendStatus(201); }
+        finally { if (!ok) remove(req.file); }
+      }));
+      router.post("/transaction", (req, res) => upload(req, res, async () => {
+        let ok = false;
+        try { await db.transaction(async (tx) => { await tx.update(t).set({ f: req.file.path }).where(w); }); ok = true; res.sendStatus(201); }
+        finally { if (!ok) remove(req.file); }
+      }));
       router.post("/au-mieux", (req, res) => upload(req, res, async () => {
         let ok = false;
         try { await save(req.file); ok = true; try { await notify(); } catch (e) { log(e); } res.sendStatus(201); }
@@ -286,6 +309,8 @@ describe("routes multer : fichier lié à l'écriture qui le référence (#178, 
     expect(scanMulterRoutes("s.ts", sample)).toEqual([
       { key: "s.ts:POST /avant", compliant: false },
       { key: "s.ts:POST /entre", compliant: false },
+      { key: "s.ts:POST /lecture-seule", compliant: false },
+      { key: "s.ts:POST /transaction", compliant: true },
       { key: "s.ts:POST /au-mieux", compliant: true },
       { key: "s.ts:POST /sans-suppression", compliant: false },
     ]);
