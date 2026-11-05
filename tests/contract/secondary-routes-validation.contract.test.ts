@@ -102,14 +102,16 @@ describe("PATCH planification de maintenance", { timeout: 60000 }, () => {
     const schedule = await createSchedule();
     const res = await call("PATCH", `/api/maintenance-schedules/${schedule.id}`, {
       cookie: cookies.get("workshop_manager"),
-      body: { ...schedule, title: "TEST plan modifié", frequencyValue: 3, scheduledDate: "2026-12-01T00:00:00.000Z" },
+      // updatedAt périmé, en chaîne comme le renvoie l'écran : ignoré, le déclencheur pose l'horodatage.
+      body: { ...schedule, title: "TEST plan modifié", frequencyValue: 3, scheduledDate: "2026-12-01T00:00:00.000Z", updatedAt: "2001-01-01T00:00:00.000Z" },
     });
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     const [row] = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.id, schedule.id));
     expect(row.title).toBe("TEST plan modifié");
     expect(row.frequencyValue).toBe(3);
     expect(row.scheduledDate).toBe("2026-12-01");
     expect(row.createdAt).toEqual(schedule.createdAt);
+    expect(row.updatedAt!.getTime()).toBeGreaterThan(new Date("2026-01-01").getTime());
   });
 
   it("non-régression : activation seule depuis l'écran préventif", async () => {

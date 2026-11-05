@@ -308,11 +308,14 @@ export const maintenanceSchedules = pgTable("maintenance_schedules", {
   frequencyValue: integer("frequency_value").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Renouvelé par le déclencheur trg_maintenance_schedules_touch (init-database) ; NULL sur les plans antérieurs.
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const insertMaintenanceScheduleSchema = createInsertSchema(maintenanceSchedules).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 // Work orders (interventions)
