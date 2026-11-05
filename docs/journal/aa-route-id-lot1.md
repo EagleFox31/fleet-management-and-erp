@@ -201,3 +201,10 @@
 
 - Quoi : `singleFileChecker` comparait le nom de fichier brut à celui que `createProgram` normalise en `/`. Sous Windows (chemins en `\`), aucun fichier n'était trouvé : les conversions de variables liées n'étaient pas comptées. Le nom est normalisé en `/` avant usage. La docstring liste les limites, dont l'alias `const r = req` qui n'est pas suivi.
 - Tester : cas unitaire avec un chemin en `\`, rouge sans le correctif, vert avec. Mutation `const { id: rid } = req.params; Number(rid)` dans `billing.routes.ts` : non vue avant, vue après (`billing.routes.ts: 1`).
+
+## Lot 13 — facture client absente : 404
+
+- Quoi : `clientBillingService.getInvoiceById` levait `Error("Facture non trouvée")` ; `GET /api/billing/invoices/:id` et `/pdf` répondaient 500 sur une facture absente. Il lève `AppError(404, "Facture non trouvée.")`.
+- Les deux autres points demandés pour ce lot étaient déjà corrigés dans la pile : `DELETE /api/missions/:id/assignments/:assignmentId` passe par `parseRouteId`, et `supplier-invoices.routes.ts` n'a plus de lecture lâche ni d'entrée gelée.
+- Vu sans changement : `parts-service.ts:217` lève une `Error`, mais `parts-catalog.routes.ts` la traduit déjà en 404 par son message.
+- Tester : contrat `billing-error-details` (2 cas 404) rouge sur l'ancien service (500), vert après. Contrats facturation : 25 verts. tsc : 0 erreur.

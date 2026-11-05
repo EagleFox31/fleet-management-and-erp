@@ -442,7 +442,7 @@ export class ClientBillingService {
       .where(eq(clientInvoices.id, invoiceId));
     
     if (!result) {
-      throw new Error("Facture non trouvée");
+      throw new AppError(404, "Facture non trouvée.");
     }
     
     // Récupérer les paiements associés
