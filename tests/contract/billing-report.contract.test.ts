@@ -8,6 +8,7 @@ import { createTestClient, createTestClientInvoice } from "../support/factories"
  * - Rôles : `CLIENT_BILLING_EVENT_ROLES` (admin, secretary, logistics) ; autres profils 403.
  * - Période : année sur quatre chiffres obligatoire, mois 1-12 facultatif ; sinon 400 lisible.
  * - Client inconnu : rapport vide (200), pas de 404.
+ * - Facture annulée : hors rapport et hors totaux (même statut exclu que le relevé de compte).
  * Écrit en base ; client et factures supprimés en fin de fichier.
  */
 const reportPath = (name: string, query: string) => `/api/billing/reports/${encodeURIComponent(name)}?${query}`;
@@ -33,6 +34,8 @@ beforeAll(async () => {
     { invoiceDate: "2026-01-10", amountHT: "84000.00", vatAmount: "16000.00", amountTTC: "100000.00", balance: "60000.00" },
     { invoiceDate: "2026-03-05", amountHT: "42000.00", vatAmount: "8000.00", amountTTC: "50000.00", balance: "50000.00" },
     { invoiceDate: "2025-12-31", amountHT: "8400.00", vatAmount: "1600.00", amountTTC: "10000.00", balance: "0.00" },
+    // Annulée : hors totaux, comme au relevé de compte.
+    { invoiceDate: "2026-03-20", amountHT: "840000.00", vatAmount: "160000.00", amountTTC: "1000000.00", balance: "1000000.00", status: "cancelled" as const },
   ];
   for (const row of rows) {
     const invoice = await createTestClientInvoice({ clientId, ...row });
@@ -76,7 +79,7 @@ describe("période", () => {
 });
 
 describe("calcul", () => {
-  it("année : factures de l'année seulement, totaux HT, TVA, TTC, payé, restant", async () => {
+  it("année : factures de l'année seulement, annulée exclue, totaux HT, TVA, TTC, payé, restant", async () => {
     const r = await session.call("GET", reportPath(clientName, "year=2026"), { actor: "secretary" });
     expect(r.body).toMatchObject({
       clientName,
