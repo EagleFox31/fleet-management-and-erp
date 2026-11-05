@@ -8,6 +8,7 @@ import {
   documentRenewalCenters,
   documentRenewalRequests,
   fuelPrices,
+  missionOperations,
   missions,
   fuelRecords,
   partRequirements,
@@ -210,6 +211,9 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
+  // Suivi d'opération saisi par un compte de test sur une mission qui ne l'est pas (FK created_by/updated_by).
+  await db.delete(missionOperations).where(inArray(missionOperations.createdBy, testUsers));
+  await db.delete(missionOperations).where(inArray(missionOperations.updatedBy, testUsers));
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
