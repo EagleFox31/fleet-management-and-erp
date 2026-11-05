@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { ALL_APP_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -175,7 +175,7 @@ export const isAdmin = sessionGuard(async (req: Request, res: Response, next: Ne
 export const isWorkshopManager = authorize(['admin', 'workshop_manager']);
 export const isVehiclePatcher = authorize([...VEHICLE_PATCH_ROLES]);
 export const isTechnician = authorize(['admin', 'workshop_manager', 'technician']);
-export const isInventoryManager = authorize(['admin', 'workshop_manager', 'warehouse', 'secretary']);
+export const isInventoryManager = authorize([...INVENTORY_MANAGER_ROLES]);
 // Référentiel pièces (création/modification de la fiche): moindre privilège.
 // Le chef d'atelier et la secrétaire n'ont rien à modifier sur une fiche pièce;
 // ils restent couverts par `isInventoryManager` pour le workflow des demandes.
