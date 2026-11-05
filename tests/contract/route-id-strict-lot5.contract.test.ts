@@ -21,8 +21,9 @@ const ids = createIdBag();
 const BAD = "2147483000abc";
 
 const CASES: Array<[method: string, url: string, message: string]> = [
-  ["DELETE", `/api/users/${BAD}`, "ID d'utilisateur invalide"],
-  ["DELETE", `/api/admin/users/${BAD}`, "ID invalide"],
+  // Les deux suppressions d'utilisateur passent d'abord par la garde du dernier administrateur (#379), qui lit l'id strictement.
+  ["DELETE", `/api/users/${BAD}`, "Identifiant d'utilisateur invalide."],
+  ["DELETE", `/api/admin/users/${BAD}`, "Identifiant d'utilisateur invalide."],
   ["DELETE", `/api/vehicles/${BAD}`, "ID de véhicule invalide"],
   ["DELETE", `/api/maintenance-schedules/${BAD}`, "ID de planification invalide"],
   ["DELETE", `/api/work-orders/${BAD}`, "ID d'ordre de travail invalide."],
