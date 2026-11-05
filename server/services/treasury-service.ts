@@ -5,6 +5,7 @@ import {
   type CreateTreasuryAccountInput,
   type CreateTreasuryEntryInput,
   type CreateTreasuryTransferInput,
+  type FuelRechargeSourceAccount,
   type TreasuryAccount,
   type TreasuryCategory,
   type TreasuryDirection,
@@ -138,6 +139,18 @@ export const treasuryService = {
     const res = await db.execute(sql`SELECT kind FROM treasury_accounts WHERE id = ${id}`);
     const row = res.rows[0] as { kind: TreasuryAccount["kind"] } | undefined;
     return row?.kind ?? null;
+  },
+  /** Banques et caisses actives, pour le choix du compte qui paie une recharge. Aucun solde. */
+  async listRechargeSourceAccounts(): Promise<FuelRechargeSourceAccount[]> {
+    const res = await db.execute(
+      sql`SELECT id, code, label, kind FROM treasury_accounts WHERE is_active AND kind IN ('bank', 'cash') ORDER BY kind, code`,
+    );
+    return (res.rows as Array<Record<string, unknown>>).map((r) => ({
+      id: Number(r.id),
+      code: String(r.code),
+      label: String(r.label),
+      kind: r.kind as FuelRechargeSourceAccount["kind"],
+    }));
   },
   async listAccounts(): Promise<TreasuryAccount[]> {
     const res = await db.execute(sql`${ACCOUNT_SELECT} GROUP BY a.id ORDER BY a.is_active DESC, a.code`);
