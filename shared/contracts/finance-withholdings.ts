@@ -7,7 +7,8 @@
  * - Montants : ceux figés au dépôt (`client_invoices.withholding_*`, `net_payable`), jamais recalculés
  *   depuis les taux actuels du client.
  * - Dates : `deposited_at` est une date sans heure, comparée telle quelle. Par défaut, `to` vaut la date
- *   du jour à Africa/Douala et `from` le premier jour du mois de `to`.
+ *   du jour à Africa/Douala et `from` le premier jour du mois de `to`. Période de 36 mois au plus
+ *   (`KPI_MAX_SPAN_MONTHS`) ; `clientId` absent ou vide : tous les clients.
  * Lecture seule. Drapeau `finance`. Rôles : `FINANCE_RECEIVABLE_READ_ROLES`.
  */
 import { z } from "zod";

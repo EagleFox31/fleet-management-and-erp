@@ -6,12 +6,12 @@ import {
   invoiceDepositRequestSchema,
 } from "@shared/contracts/invoices-awaiting-payment";
 import { financeWithholdingsQuerySchema } from "@shared/contracts/finance-withholdings";
-import { isoDateInZone } from "@shared/contracts/kpi-period";
+import { KPI_MAX_SPAN_MONTHS, isoDateInZone, spanInMonths } from "@shared/contracts/kpi-period";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
 import { withholdingsSummary } from "../services/finance-withholdings-service";
 import { moduleLogger } from "../lib/logger";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { authorize } from "../middleware/auth";
 import {
   depositInvoice,
@@ -24,6 +24,7 @@ const router = Router();
 
 // Monté sur /api : chemins complets, drapeau sur chaque route (modèle pending-invoices.routes.ts).
 const finance = requireFeature("finance");
+const CLIENT_ID_INVALID = "Identifiant de client invalide.";
 
 function emit(event: "client_invoice_deposited" | "client_withholding_updated", id: number, requestId?: string): void {
   const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
@@ -53,13 +54,24 @@ router.get("/finance/withholdings", finance, authorize([...FINANCE_RECEIVABLE_RE
     if (!parsed.success) {
       // Valeur répétée ou tableau (`?from[]=x`), paramètre inconnu : le message de zod est technique.
       const issue = parsed.error.issues[0];
-      const readable = issue && issue.code !== "invalid_type" && issue.code !== "unrecognized_keys";
-      throw new AppError(400, readable ? issue.message : "Période invalide.");
+      if (issue?.code === "unrecognized_keys") throw new AppError(400, "Paramètre non reconnu.");
+      if (issue?.code === "invalid_type") {
+        throw new AppError(400, issue.path[0] === "clientId" ? CLIENT_ID_INVALID : "Période invalide.");
+      }
+      throw new AppError(400, issue?.message ?? "Période invalide.");
     }
-    const to = parsed.data.to ?? isoDateInZone(new Date());
+    const today = isoDateInZone(new Date());
+    const to = parsed.data.to ?? today;
     const from = parsed.data.from ?? `${to.slice(0, 8)}01`;
+    if (parsed.data.to === undefined && from > today) {
+      throw new AppError(400, "La date de début ne peut pas dépasser aujourd'hui.");
+    }
     if (from > to) throw new AppError(400, "La date de début doit précéder la date de fin.");
-    const clientId = parsed.data.clientId === undefined ? null : parseRouteId(parsed.data.clientId, "Identifiant de client invalide.");
+    if (spanInMonths(from, to) > KPI_MAX_SPAN_MONTHS) {
+      throw new AppError(400, `Période trop longue : ${KPI_MAX_SPAN_MONTHS} mois au plus.`);
+    }
+    // Absent ou vide : tous les clients.
+    const clientId = parseQueryId(parsed.data.clientId, CLIENT_ID_INVALID) ?? null;
     res.json(await withholdingsSummary(from, to, clientId));
   } catch (err) {
     next(err);
