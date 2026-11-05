@@ -311,7 +311,7 @@ export function WorkflowDocumentsViewer({
                         size="sm"
                         onClick={() => deleteMutation.mutate(document.id)}
                         disabled={deleteMutation.isPending}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                        className="h-8 w-8 p-0 text-destructive-text hover:text-destructive-text"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

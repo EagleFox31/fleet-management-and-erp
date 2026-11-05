@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { assertValidDbId } from "../lib/work-order-scope";
+import { parseRouteId } from "../lib/route-id";
 import { SETTLEMENT_PROOF_PREFIX, settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
@@ -584,11 +584,8 @@ router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Re
  */
 router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Lecture stricte : `parseInt("12abc")` vaudrait 12.
-    const invoiceId = strictRouteId(req.params.id);
-    const settlementId = strictRouteId(req.params.settlementId);
-    assertValidDbId(invoiceId, "Identifiant de facture ou de règlement invalide.");
-    assertValidDbId(settlementId, "Identifiant de facture ou de règlement invalide.");
+    const invoiceId = parseRouteId(req.params.id, "Identifiant de facture ou de règlement invalide.");
+    const settlementId = parseRouteId(req.params.settlementId, "Identifiant de facture ou de règlement invalide.");
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     const settlement = settlements.find((item) => item.id === settlementId);
@@ -625,10 +622,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         return next(new AppError(401, "Utilisateur non authentifié"));
       }
 
-      const invoiceId = parseInt(req.params.id);
-      if (Number.isNaN(invoiceId)) {
-        return next(new AppError(400, "ID facture invalide"));
-      }
+      const invoiceId = parseRouteId(req.params.id, "ID facture invalide");
 
       if (!req.file) {
         return next(new AppError(400, "Justificatif requis : joignez une image ou un PDF du règlement."));
@@ -723,11 +717,6 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
   });
 });
 
-/** Segment d'URL en chiffres seuls, sinon NaN (refusé ensuite par `assertValidDbId`). */
-function strictRouteId(raw: string): number {
-  return /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
-}
-
 /** Supprime le justificatif reçu, borné au dossier des justificatifs (liens résolus : settlementProofPath). */
 function removeUploadedProof(req: Request) {
   if (!req.file) return;
@@ -750,11 +739,8 @@ router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission,
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
-    const invoiceId = parseInt(req.params.id);
-    const settlementId = parseInt(req.params.settlementId);
-    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const invoiceId = parseRouteId(req.params.id, "ID invalide");
+    const settlementId = parseRouteId(req.params.settlementId, "ID invalide");
 
     const reconciliationNote = typeof req.body?.reconciliationNote === "string"
       ? req.body.reconciliationNote
@@ -795,11 +781,8 @@ router.patch("/:id/settlements/:settlementId/reject", checkPaymentPermission, as
     if (!req.user) {
       throw new AppError(401, "Utilisateur non authentifié");
     }
-    const invoiceId = Number.parseInt(req.params.id, 10);
-    const settlementId = Number.parseInt(req.params.settlementId, 10);
-    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      throw new AppError(400, "Identifiant invalide.");
-    }
+    const invoiceId = parseRouteId(req.params.id, "Identifiant invalide.");
+    const settlementId = parseRouteId(req.params.settlementId, "Identifiant invalide.");
     const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
 
     const result = await threeWayMatchingService.rejectInvoiceSettlement(invoiceId, settlementId, req.user.id, reason);

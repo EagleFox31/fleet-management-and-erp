@@ -472,3 +472,12 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/document-renewals/requests/:id/proof` répond en `attachment` avec `nosniff`, type tiré d'une liste blanche d'extensions (sinon `application/octet-stream`), chemin résolu contrôlé contre le dossier des justificatifs. Au dépôt, l'extension stockée vient du type accepté (table commune avec le récépissé).
 - **Pourquoi** : relecture de sécurité. Le type servi dépendait de l'extension du nom envoyé, que le filtre de dépôt ne contrôlait pas.
 - **Preuve** : contrats `document-renewal-proof-download` et `document-quick-renew-proof-lifecycle`, nouveaux cas rouges sur la route d'origine, verts après.
+## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
+- **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
+- **Preuve** : contrat `supplier-settlement-proof-path` (5 ids non stricts) rouge sur l'ancien code (200), vert après (15/15).
+
+## 2026-11-05 — Lecture commune des ids de route
+- **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
+- **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
+- **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).

@@ -2,10 +2,8 @@ import { Router } from "express";
 import { WORK_ORDER_COST_READ_ROLES } from "@shared/constants/roles";
 import { authorize } from "../middleware/auth";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { laborRateForWorkOrder, workOrderExists } from "../services/workshop-labor-rates-service";
-
-/** Plus grand `integer` Postgres : au-delà, la conversion échouerait en 500. */
-const MAX_INTEGER_ID = 2147483647;
 
 /**
  * Taux horaire en vigueur pour un OT, monté sur `/api/work-orders`.
@@ -20,10 +18,7 @@ export const workOrderLaborRateRoutes = Router();
 
 workOrderLaborRateRoutes.get("/:workOrderId/labor-rate", authorize([...WORK_ORDER_COST_READ_ROLES]), async (req, res, next) => {
   try {
-    const workOrderId = Number(req.params.workOrderId);
-    if (!Number.isInteger(workOrderId) || workOrderId <= 0 || workOrderId > MAX_INTEGER_ID) {
-      throw new AppError(400, "Identifiant d'ordre de travail invalide.");
-    }
+    const workOrderId = parseRouteId(req.params.workOrderId, "Identifiant d'ordre de travail invalide.");
     const rate = await laborRateForWorkOrder(workOrderId);
     if (rate === null && !(await workOrderExists(workOrderId))) {
       throw new AppError(404, "Ordre de travail introuvable.");
