@@ -1,3 +1,4 @@
+import { redactTirePrice } from "./lib/tire-price-scope";
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
@@ -25,7 +26,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelRecordWriter, isAnyUser, isStaff, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelRecordWriter, isAnyUser, isStaff, isTireValuationReader, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -3474,14 +3475,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         offset 
       });
       
-      return res.status(200).json(result);
+      return res.status(200).json(redactTirePrice(req.user?.role, result));
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "Get tires error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
-  app.get("/api/tires/statistics", isStaff, async (req, res) => {
+  app.get("/api/tires/statistics", isTireValuationReader, async (req, res) => {
     try {
       const stats = await tiresService.getTireStatistics();
       return res.status(200).json(stats);
@@ -3491,7 +3492,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tires/statistics-advanced", isStaff, async (req, res) => {
+  app.get("/api/tires/statistics-advanced", isTireValuationReader, async (req, res) => {
     try {
       const stats = await tiresService.getTireStatisticsAdvanced();
       return res.status(200).json(stats);
@@ -3504,7 +3505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tires/low-stock", isStaff, async (req, res) => {
     try {
       const lowStockTires = await tiresService.getLowStockTires();
-      return res.status(200).json(lowStockTires);
+      return res.status(200).json(redactTirePrice(req.user?.role, lowStockTires));
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "Get low stock tires error");
       return res.status(500).json({ message: "Erreur serveur" });
@@ -3525,7 +3526,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Pneu non trouvé" });
       }
       
-      return res.status(200).json(tire);
+      return res.status(200).json(redactTirePrice(req.user?.role, tire));
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "Get tire error");
       return res.status(500).json({ message: "Erreur serveur" });
