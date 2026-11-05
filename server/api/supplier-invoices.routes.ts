@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { uploadedFileCandidates } from "../lib/uploaded-file";
+import { SETTLEMENT_PROOF_PREFIX, settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
@@ -245,13 +245,8 @@ const uploadSettlementProof = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, settlementProofUploadDir),
     filename: (_req, file, cb) => {
-      const extension = path.extname(file.originalname || "").toLowerCase();
-      const baseName = (file.originalname || "proof")
-        .replace(/[^a-zA-Z0-9._-]/g, "_")
-        .replace(/\.[^.]+$/, "")
-        .slice(0, 40);
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${baseName || "proof"}-${uniqueSuffix}${extension || ".bin"}`);
+      cb(null, settlementProofFileName(file.originalname, uniqueSuffix));
     },
   }),
   fileFilter: (_req, file, cb) => {
@@ -596,9 +591,9 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     const settlement = settlements.find((item) => item.id === settlementId);
-    // Chemin stocké (libre via l'endpoint legacy /payment) : servi seulement s'il est sous uploads/.
-    const proofPath = uploadedFileCandidates(settlement?.proofReference).find((candidate) => fs.existsSync(candidate));
-    if (!proofPath) {
+    // Servi seulement depuis le dossier des justificatifs, y compris pour une ligne ancienne.
+    const proofPath = settlementProofPath(settlement?.proofReference);
+    if (!proofPath || !fs.existsSync(proofPath)) {
       throw new AppError(404, "Justificatif introuvable");
     }
 
@@ -614,6 +609,9 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
  */
 router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Response, next: NextFunction) => {
   uploadSettlementProof(req, res, async (err) => {
+    // Le justificatif n'est gardé qu'une fois référencé par un règlement enregistré : toute autre
+    // sortie (refus, échec, saisie rejouée) le supprime dans le finally, jamais après le commit.
+    let proofRecorded = false;
     try {
       if (err) {
         const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
@@ -623,19 +621,16 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
       }
 
       if (!req.user) {
-        return res.status(401).json({ error: "Utilisateur non authentifié" });
+        return next(new AppError(401, "Utilisateur non authentifié"));
       }
 
       const invoiceId = parseInt(req.params.id);
       if (Number.isNaN(invoiceId)) {
-        return res.status(400).json({ error: "ID facture invalide" });
+        return next(new AppError(400, "ID facture invalide"));
       }
 
       if (!req.file) {
-        return res.status(400).json({
-          error: "Justificatif requis",
-          details: "Le justificatif (image/PDF) est obligatoire pour enregistrer un règlement.",
-        });
+        return next(new AppError(400, "Justificatif requis : joignez une image ou un PDF du règlement."));
       }
 
       const readField = (value: unknown): string | undefined => {
@@ -670,7 +665,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         notes: z.string().trim().optional(),
       }).parse(normalizedPayload);
 
-      const proofReference = `/uploads/supplier-invoices/settlements/${req.file.filename}`;
+      const proofReference = `${SETTLEMENT_PROOF_PREFIX}${req.file.filename}`;
 
       const { settlement, invoice, replayed } = await threeWayMatchingService.recordInvoiceSettlement(
         invoiceId,
@@ -688,24 +683,29 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
       );
 
       // Saisie rejouée : le règlement existe déjà avec son propre justificatif,
-      // le fichier qui vient d'arriver ne sert à rien, et rien n'a changé.
+      // le fichier qui vient d'arriver ne sert à rien (supprimé par le finally), et rien n'a changé.
       if (replayed) {
-        removeUploadedProof(req);
         return res.status(200).json({
           invoice,
           settlement,
           message: "Ce règlement était déjà enregistré.",
         });
       }
+      proofRecorded = true;
 
-      broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_recorded", {
-        invoiceId: invoice.id,
-        purchaseOrderId: invoice.purchaseOrderId ?? null,
-        invoice,
-        settlement,
-        action: "settlement_recorded",
-        triggeredBy: req.user.id,
-      });
+      // Diffusion au mieux : le règlement référence déjà le fichier, un échec ici ne touche ni à l'un ni à l'autre.
+      try {
+        broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_recorded", {
+          invoiceId: invoice.id,
+          purchaseOrderId: invoice.purchaseOrderId ?? null,
+          invoice,
+          settlement,
+          action: "settlement_recorded",
+          triggeredBy: req.user.id,
+        });
+      } catch (broadcastError) {
+        log.error({ err: broadcastError, requestId: req.requestId, invoiceId }, "diffusion du règlement fournisseur");
+      }
 
       return res.status(201).json({
         invoice,
@@ -713,21 +713,24 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         message: "Règlement saisi. En attente de rapprochement bancaire.",
       });
     } catch (error) {
-      removeUploadedProof(req);
       // Le gestionnaire central journalise et rend une erreur lisible :
       // ZodError -> 400 par champ, AppError -> son statut, le reste -> 500 générique.
       return next(error);
+    } finally {
+      if (!proofRecorded) removeUploadedProof(req);
     }
   });
 });
 
+/** Supprime le justificatif reçu, borné au dossier des justificatifs (liens résolus : settlementProofPath). */
 function removeUploadedProof(req: Request) {
-  if (req.file?.path && fs.existsSync(req.file.path)) {
-    try {
-      fs.unlinkSync(req.file.path);
-    } catch (unlinkError) {
-      log.error({ err: unlinkError, requestId: req.requestId }, "suppression du justificatif téléversé impossible");
-    }
+  if (!req.file) return;
+  const proofPath = settlementProofPath(`${SETTLEMENT_PROOF_PREFIX}${req.file.filename}`);
+  if (!proofPath || !fs.existsSync(proofPath)) return;
+  try {
+    fs.unlinkSync(proofPath);
+  } catch (unlinkError) {
+    log.error({ err: unlinkError, requestId: req.requestId }, "suppression du justificatif téléversé impossible");
   }
 }
 

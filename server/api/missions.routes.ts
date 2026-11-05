@@ -21,12 +21,15 @@ import {
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
+import { assertPlanningStateUnchanged, findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
+import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
 import { toFieldErrors } from "@shared/errors";
 import {
   activeDriverAssignmentsOnMission,
   canAccessMissionAsDriver,
+  driverLiveAssignmentFilter,
   driverScopeOf,
   missionsOfDriversFilter,
   missionVehicleIdsForStaff,
@@ -299,7 +302,6 @@ const MISSION_STATUS_TRANSITIONS: Record<string, string[]> = {
   cancelled: [],
 };
 
-const ACTIVE_MISSION_STATUSES: string[] = ["planned", "assigned", "in_progress"];
 const DOCUMENT_REQUESTABLE_TYPES: VehicleDocumentRequirementType[] = [
   "carte_grise",
   "assurance",
@@ -359,21 +361,6 @@ function isDriverLicenseExpired(dateValue: Date | string | null | undefined): bo
 function isPaperExpired(dateValue: Date | string): boolean {
   if (toExpiryDateOnly(dateValue) === null) return true;
   return isExpiredOn(dateValue, todayUtcDateOnly());
-}
-
-function overlaps(
-  startA: Date | string | null | undefined,
-  endA: Date | string | null | undefined,
-  startB: Date | string | null | undefined,
-  endB: Date | string | null | undefined,
-): boolean {
-  if (!startA || !endA || !startB || !endB) return false;
-  const sA = new Date(startA).getTime();
-  const eA = new Date(endA).getTime();
-  const sB = new Date(startB).getTime();
-  const eB = new Date(endB).getTime();
-  if ([sA, eA, sB, eB].some((v) => Number.isNaN(v))) return false;
-  return sA <= eB && eA >= sB;
 }
 
 type MissionBudgetPlan = {
@@ -842,7 +829,7 @@ router.get("/", async (req, res) => {
     // Get assignments for each mission
     const missionsWithAssignments = await Promise.all(
       allMissions.map(async (mission) => {
-        const assignmentRows = await db
+        const rawAssignmentRows = await db
           .select({
             id: assignments.id,
             missionId: assignments.missionId,
@@ -865,6 +852,7 @@ router.get("/", async (req, res) => {
               lastName: drivers.lastName,
               employeeNumber: drivers.employeeNumber,
               cpcStatus: drivers.cpcStatus,
+              cpcTrainingDate: drivers.cpcTrainingDate,
             },
           })
           .from(assignments)
@@ -872,6 +860,8 @@ router.get("/", async (req, res) => {
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
           .orderBy(asc(assignments.id));
+        // Verdict CPC calculé ici, date de formation retirée (cloison de #127).
+        const assignmentRows = withAssignmentsCpcVerdict(rawAssignmentRows, req.user, driverScope);
         // Plusieurs chauffeurs possibles : `assignment` reste la valeur unique historique (celle du chauffeur
         // lecteur, sinon la plus ancienne active), `assignments` liste toutes celles qu'il a le droit de voir.
         const visibleAssignments = driverScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && driverScope.includes(a.driverId));
@@ -957,7 +947,7 @@ router.get("/:id", async (req, res) => {
     }
 
     // Get assignment
-    const assignmentRows = await db
+    const rawAssignmentRows = await db
       .select({
         id: assignments.id,
         missionId: assignments.missionId,
@@ -984,6 +974,7 @@ router.get("/:id", async (req, res) => {
           // Pas de donnée personnelle ici (permis, CNI...) : le détail mission est lu par tout le
           // personnel. La fiche complète passe par /api/drivers/:id, qui applique la rédaction.
           cpcStatus: drivers.cpcStatus,
+          cpcTrainingDate: drivers.cpcTrainingDate,
         },
       })
       .from(assignments)
@@ -993,6 +984,8 @@ router.get("/:id", async (req, res) => {
       .orderBy(asc(assignments.id));
     // Plusieurs chauffeurs possibles (voir la liste) : un chauffeur ne lit que ses propres affectations.
     const detailScope = await driverScopeOf(req.user);
+    // Verdict CPC calculé ici, date de formation retirée (cloison de #127).
+    const assignmentRows = withAssignmentsCpcVerdict(rawAssignmentRows, req.user, detailScope);
     const visibleAssignments = detailScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && detailScope.includes(a.driverId));
     const assignment = pickMissionAssignment(assignmentRows, detailScope);
 
@@ -1606,6 +1599,13 @@ router.get("/:id/launch-readiness", async (req, res) => {
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
+    // Même portée que la liste et le détail : un chauffeur ne lit que ses missions, et la
+    // checklist (verdict CPC compris) se calcule sur SA fiche, jamais sur celle d'un collègue.
+    const readinessScope = await driverScopeOf(req.user);
+    if (readinessScope !== undefined && !(await canAccessMissionAsDriver(req.user, missionId))) {
+      return res.status(403).json({ message: OUT_OF_DRIVER_SCOPE_MESSAGE });
+    }
+
     const [missionAssignment] = await db
       .select({
         id: assignments.id,
@@ -1628,7 +1628,11 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .from(assignments)
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
-      .where(eq(assignments.missionId, missionId))
+      .where(
+        readinessScope === undefined
+          ? eq(assignments.missionId, missionId)
+          : and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(readinessScope)),
+      )
       .orderBy(asc(assignments.id))
       .limit(1);
 
@@ -1786,35 +1790,14 @@ router.get("/:id/launch-readiness", async (req, res) => {
       mission.pickupDate &&
       mission.deliveryDate
     ) {
-      const planningConflicts = await db
-        .select({
-          missionId: assignments.missionId,
-          orderNumber: missions.orderNumber,
-          pickupDate: missions.pickupDate,
-          deliveryDate: missions.deliveryDate,
-        })
-        .from(assignments)
-        .innerJoin(missions, eq(assignments.missionId, missions.id))
-        .where(
-          and(
-            ne(assignments.missionId, mission.id),
-            inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
-            inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
-            or(
-              eq(assignments.vehicleId, missionAssignment.vehicleId),
-              eq(assignments.driverId, missionAssignment.driverId),
-            ),
-          ),
-        );
-
-      noPlanningConflict = !planningConflicts.some((candidate) =>
-        overlaps(
-          mission.pickupDate,
-          mission.deliveryDate,
-          candidate.pickupDate,
-          candidate.deliveryDate,
-        ),
-      );
+      noPlanningConflict =
+        (await findPlanningClash(db, {
+          missionId: mission.id,
+          pickupDate: mission.pickupDate,
+          deliveryDate: mission.deliveryDate,
+          vehicleId: missionAssignment.vehicleId,
+          driverId: missionAssignment.driverId,
+        })) === null;
     }
 
     const checks = [
@@ -1873,8 +1856,10 @@ router.get("/:id/launch-readiness", async (req, res) => {
         detail: hasDriver
           ? cpcValid
             ? "CPC conforme."
-            : (cpcCheck.reason ?? "CPC non valide.")
+            : (cpcCheck.label ?? "CPC non valide.")
           : "Assignez d'abord un chauffeur.",
+        // Code stable lu par les écrans ; jamais la raison datée (diffusée à tout le personnel).
+        ...(hasDriver && !cpcValid && cpcCheck.code ? { cpcIneligibleCode: cpcCheck.code } : {}),
       },
       {
         key: "doc_carte_grise",
@@ -1972,6 +1957,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       blocking: boolean;
       detail: string;
       status?: "passed" | "warning" | "failed";
+      cpcIneligibleCode?: string;
     }>;
 
     const openRenewalRequests = missionAssignment?.vehicleId
@@ -2054,7 +2040,7 @@ const createMissionSchema = insertMissionSchema
   .extend({ status: z.enum(["draft", "planned"]).optional() });
 
 // POST /api/missions - Créer une nouvelle mission
-router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
+router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     // Le routeur est monté derrière authenticate: la session porte toujours
     // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
@@ -2188,6 +2174,17 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
     // celle qui reçoit son affectation après coup (PATCH, POST /:id/assignments). Un brouillon reste brouillon.
     const withAssignment = assignmentVehicleId !== null && assignmentDriverId !== null;
     const newMission = await db.transaction(async (tx) => {
+      if (withAssignment) {
+        await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
+        const clash = await findPlanningClash(tx, {
+          missionId: null,
+          pickupDate: validatedData.pickupDate,
+          deliveryDate: validatedData.deliveryDate,
+          vehicleId: assignmentVehicleId!,
+          driverId: assignmentDriverId!,
+        });
+        if (clash) throw new AppError(409, planningClashMessage(clash));
+      }
       const [created] = await tx
         .insert(missions)
         .values(withAssignment && validatedData.status === "planned" ? { ...validatedData, status: "assigned" } : validatedData)
@@ -2211,6 +2208,8 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
 
     return res.status(201).json(newMission);
   } catch (error) {
+    // Conflit de planning : AppError traité par le gestionnaire central (code et requestId).
+    if (error instanceof AppError && error.status === 409) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
@@ -2446,6 +2445,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         .select({
           id: assignments.id,
           status: assignments.status,
+          vehicleId: assignments.vehicleId,
+          driverId: assignments.driverId,
         })
         .from(assignments)
         .where(eq(assignments.missionId, missionId))
@@ -2460,10 +2461,28 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         "Cette mission a plusieurs chauffeurs : modifiez ses affectations une par une (ajout ou annulation d'une affectation).",
       );
     }
+    // Écritures d'affectation différées dans la transaction finale : le contrôle de planning
+    // (verrou + conflit) doit précéder l'écriture et partager son sort.
+    let writeAssignment: ((tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<void>) | null = null;
+    // Paires (véhicule, chauffeur) à contrôler sur le créneau retenu.
+    let planningTargets: Array<{ vehicleId: number; driverId: number }> = [];
+    const effectivePickup = missionUpdates.pickupDate !== undefined ? missionUpdates.pickupDate : existingMission.pickupDate;
+    const effectiveDelivery = missionUpdates.deliveryDate !== undefined ? missionUpdates.deliveryDate : existingMission.deliveryDate;
+    const sameInstant = (a: unknown, b: unknown) => (a ? new Date(a as any).getTime() : null) === (b ? new Date(b as any).getTime() : null);
+    const datesChanged = !sameInstant(effectivePickup, existingMission.pickupDate) || !sameInstant(effectiveDelivery, existingMission.deliveryDate);
+    if (!assignmentProvided && datesChanged) {
+      planningTargets = liveAssignments
+        .filter((row) => row.vehicleId !== null && row.driverId !== null)
+        .map((row) => ({ vehicleId: row.vehicleId as number, driverId: row.driverId as number }));
+    }
+
     if (assignmentProvided) {
       if (payload.assignment == null) {
         if (existingAssignment?.id) {
-          await db.delete(assignments).where(and(eq(assignments.id, existingAssignment.id), eq(assignments.status, existingAssignment.status)));
+          const removed = existingAssignment;
+          writeAssignment = async (tx) => {
+            await tx.delete(assignments).where(and(eq(assignments.id, removed.id), eq(assignments.status, removed.status)));
+          };
         }
         if (existingMission.status === "assigned") {
           missionUpdates.status = "planned";
@@ -2553,23 +2572,28 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           });
         }
 
+        // Contrôlé si l'affectation change de véhicule ou de chauffeur, ou si le créneau bouge ;
+        // un renvoi à l'identique ne vérifie rien.
+        const pairChanged = !existingAssignment || existingAssignment.vehicleId !== vehicleId || existingAssignment.driverId !== driverId;
+        if (pairChanged || datesChanged) planningTargets = [{ vehicleId, driverId }];
+
         if (existingAssignment?.id) {
-          await db
-            .update(assignments)
-            .set({
-              vehicleId,
-              driverId,
-              status: existingAssignment.status === "in_progress" ? "in_progress" : "pending",
-              updatedAt: new Date(),
-            })
-            .where(and(eq(assignments.id, existingAssignment.id), eq(assignments.status, existingAssignment.status)));
+          const current = existingAssignment;
+          writeAssignment = async (tx) => {
+            await tx
+              .update(assignments)
+              .set({
+                vehicleId,
+                driverId,
+                status: current.status === "in_progress" ? "in_progress" : "pending",
+                updatedAt: new Date(),
+              })
+              .where(and(eq(assignments.id, current.id), eq(assignments.status, current.status)));
+          };
         } else {
-          await db.insert(assignments).values({
-            missionId,
-            vehicleId,
-            driverId,
-            status: "pending",
-          });
+          writeAssignment = async (tx) => {
+            await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" });
+          };
         }
 
         if (existingMission.status === "planned") {
@@ -2578,7 +2602,29 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
       }
     }
 
+    // Empreinte de ce qui a été lu avant la transaction (créneau et affectations vivantes).
+    const readKey = planningStateKey({ pickupDate: existingMission.pickupDate, deliveryDate: existingMission.deliveryDate, rows: liveAssignments });
     const updatedMission = await db.transaction(async (tx) => {
+      if (planningTargets.length > 0 || assignmentProvided || datesChanged) {
+        // Même ordre que POST /:id/assignments : ligne mission d'abord, verrous consultatifs ensuite
+        // (l'ordre inverse interbloquerait un PATCH et un ajout d'affectation sur la même mission).
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+        // Les décisions ci-dessus reposent sur une lecture antérieure : périmée, on refuse plutôt que de
+        // contrôler l'ancienne paire.
+        await assertPlanningStateUnchanged(tx, missionId, (s) => !isVoidAssignmentStatus(s), readKey);
+        await lockPlanningPairs(tx, planningTargets);
+      }
+      for (const target of planningTargets) {
+        const clash = await findPlanningClash(tx, {
+          missionId,
+          pickupDate: effectivePickup,
+          deliveryDate: effectiveDelivery,
+          vehicleId: target.vehicleId,
+          driverId: target.driverId,
+        });
+        if (clash) throw new AppError(409, planningClashMessage(clash));
+      }
+      if (writeAssignment) await writeAssignment(tx);
       if (hasBudgetPatch) {
         const current = await lockMissionWorkflowData(tx, missionId);
         missionUpdates.workflowData = mergeMissionBudgetPlan(current?.workflowData ?? existingMission.workflowData, budgetPatch);
@@ -2685,31 +2731,15 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
       if (already) throw new AppError(409, "Ce chauffeur est déjà affecté à cette mission.");
 
       // Conflit de planning (même règle que le lancement) : chaque chauffeur et chaque véhicule ajouté.
-      if (mission.pickupDate && mission.deliveryDate) {
-        const candidates = await tx
-          .select({
-            orderNumber: missions.orderNumber,
-            pickupDate: missions.pickupDate,
-            deliveryDate: missions.deliveryDate,
-            vehicleId: assignments.vehicleId,
-            driverId: assignments.driverId,
-          })
-          .from(assignments)
-          .innerJoin(missions, eq(assignments.missionId, missions.id))
-          .where(
-            and(
-              ne(assignments.missionId, missionId),
-              inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
-              inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
-              or(eq(assignments.vehicleId, vehicleId), eq(assignments.driverId, driverId)),
-            ),
-          );
-        const clash = candidates.find((c) => overlaps(mission.pickupDate, mission.deliveryDate, c.pickupDate, c.deliveryDate));
-        if (clash) {
-          const what = clash.driverId === driverId ? "Ce chauffeur" : "Ce véhicule";
-          throw new AppError(409, `Conflit de planning : ${what} est déjà affecté à la mission ${clash.orderNumber} sur ce créneau.`);
-        }
-      }
+      await lockPlanningResources(tx, vehicleId, driverId);
+      const clash = await findPlanningClash(tx, {
+        missionId,
+        pickupDate: mission.pickupDate,
+        deliveryDate: mission.deliveryDate,
+        vehicleId,
+        driverId,
+      });
+      if (clash) throw new AppError(409, planningClashMessage(clash));
 
       const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" }).returning();
       const [updatedMission] =
@@ -3000,37 +3030,14 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           }
 
           if (mission.pickupDate && mission.deliveryDate) {
-            const planningConflicts = await db
-              .select({
-                missionId: assignments.missionId,
-                orderNumber: missions.orderNumber,
-                pickupDate: missions.pickupDate,
-                deliveryDate: missions.deliveryDate,
-                vehicleId: assignments.vehicleId,
-                driverId: assignments.driverId,
-              })
-              .from(assignments)
-              .innerJoin(missions, eq(assignments.missionId, missions.id))
-              .where(
-                and(
-                  ne(assignments.missionId, mission.id),
-                  inArray(missions.status, ACTIVE_MISSION_STATUSES as any),
-                  inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
-                  or(
-                    eq(assignments.vehicleId, row.vehicleId),
-                    eq(assignments.driverId, row.driverId),
-                  ),
-                ),
-              );
-
-            const hasOverlap = planningConflicts.some((candidate) =>
-              overlaps(
-                mission.pickupDate,
-                mission.deliveryDate,
-                candidate.pickupDate,
-                candidate.deliveryDate,
-              ),
-            );
+            const hasOverlap =
+              (await findPlanningClash(db, {
+                missionId: mission.id,
+                pickupDate: mission.pickupDate,
+                deliveryDate: mission.deliveryDate,
+                vehicleId: row.vehicleId,
+                driverId: row.driverId,
+              })) !== null;
 
             if (hasOverlap) {
               rowErrors.push("Conflit planning détecté sur ce véhicule ou ce chauffeur.");
@@ -3100,7 +3107,34 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     }
 
     const needsExecutionDate = targetStatus === "in_progress" || targetStatus === "delivered" || targetStatus === "completed";
+    // Devenir « planned » ou « assigned » rend la mission active : ses affectations ne doivent pas
+    // chevaucher une autre mission active (même règle et même verrou que la création, le PATCH et l'ajout).
+    const claimsSlot = targetStatus === "planned" || targetStatus === "assigned";
+    const readKey = planningStateKey({
+      pickupDate: mission.pickupDate,
+      deliveryDate: mission.deliveryDate,
+      rows: missionAssignmentRows.filter((r) => isActiveAssignmentStatus(r.status)),
+    });
     const updatedMission = await db.transaction(async (tx) => {
+      if (claimsSlot) {
+        // Ligne mission d'abord, verrous consultatifs ensuite : même ordre que POST /:id/assignments et PATCH.
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+        // Affectations et créneau lus avant la transaction : refus si un PATCH concurrent est passé entre-temps.
+        await assertPlanningStateUnchanged(tx, missionId, isActiveAssignmentStatus, readKey);
+        const pairs = targetAssignments.flatMap((row) => (row.vehicleId && row.driverId ? [{ vehicleId: row.vehicleId, driverId: row.driverId }] : []));
+        await lockPlanningPairs(tx, pairs);
+        for (const row of targetAssignments) {
+          if (!row.vehicleId || !row.driverId) continue;
+          const clash = await findPlanningClash(tx, {
+            missionId,
+            pickupDate: mission.pickupDate,
+            deliveryDate: mission.deliveryDate,
+            vehicleId: row.vehicleId,
+            driverId: row.driverId,
+          });
+          if (clash) throw new AppError(409, planningClashMessage(clash));
+        }
+      }
       // Patch de workflowData appliqué à la version relue sous verrou de ligne, jamais à la copie lue en
       // tête de requête : une régularisation de plein validée entre-temps n'est plus effacée. Sans patch,
       // workflowData n'est pas réécrit du tout.

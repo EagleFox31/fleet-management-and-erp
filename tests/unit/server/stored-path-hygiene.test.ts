@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "fs";
-import { join, relative, sep } from "path";
+import { dirname, join, relative, sep } from "path";
 import { describe, expect, it } from "vitest";
 import { fileAccessKey, renamedAccessImports, scanFileAccesses, type FileAccessSite } from "../../support/file-access-scan";
 
@@ -13,8 +13,6 @@ import { fileAccessKey, renamedAccessImports, scanFileAccesses, type FileAccessS
  */
 const UNBOUNDED_FROZEN: Record<string, string> = {
   "server/api/document-renewals.routes.ts:removeUploadedProof:unlinkSync":
-    "req.file.path : fichier que multer vient d'écrire pour cette requête, jamais une valeur de la base",
-  "server/api/supplier-invoices.routes.ts:removeUploadedProof:unlinkSync":
     "req.file.path : fichier que multer vient d'écrire pour cette requête, jamais une valeur de la base",
   "server/services/workflow-document-service.ts:saveWorkflowDocument:rmSync":
     "nettoie le fichier que la même fonction vient d'écrire (sessionId contrôlé par isSafePathSegment)",
@@ -87,6 +85,29 @@ describe("accès disque : chemin borné à uploads/ ou exception justifiée (AGE
 
   it("chaque exception porte une justification", () => {
     for (const [key, reason] of Object.entries(UNBOUNDED_FROZEN)) expect(reason.length, key).toBeGreaterThan(20);
+  });
+
+  // Le scan reconnaît une borne par son nom : une fonction homonyme définie ailleurs passerait pour une borne.
+  it("chaque borne appelée vient de son module (pas d'homonyme local)", () => {
+    const BOUND_SOURCES: Record<string, string> = {
+      uploadedFileCandidates: "server/lib/uploaded-file.ts",
+      isInsideDirectory: "server/lib/uploaded-file.ts",
+      settlementProofPath: "server/lib/settlement-proof.ts",
+      existingUploadedFile: "server/services/workflow-document-service.ts",
+    };
+    const offenders: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(join(root, file), "utf8");
+      for (const [name, source] of Object.entries(BOUND_SOURCES)) {
+        if (file === source || !new RegExp(`\\b${name}\\s*\\(`).test(text)) continue;
+        const specifier = relative(dirname(file), source.replace(/\.ts$/, "")).split(sep).join("/");
+        const fromSource = new RegExp(
+          `import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']${specifier.startsWith(".") ? "" : "\\./"}${specifier.replace(/[.]/g, "\\.")}["']`,
+        );
+        if (!fromSource.test(text)) offenders.push(`${file}:${name}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

@@ -412,3 +412,37 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `usersWithSafeSecrets` (ex-`usersWithSafePins`) prépare PIN et mot de passe hors transaction ; `passwordForRestore` reprend bcrypt strict et SHA-256 hérité, hache un clair conforme, remplace le reste par un hash inutilisable avec `warn` (username seul).
 - **Pourquoi** : un mot de passe clair restauré était stocké en clair et le compte ne pouvait plus se connecter.
 - **Preuve** : contrat `backup-import-password` (clair → 200 au login, SHA-256 → 200 puis migré, trop court → 401), rouge sur le comportement de main (2 échecs, valeur stockée en clair) ; unitaire `user-password`.
+
+## 2026-11-05 — Fichiers téléversés : liens résolus
+- **Quoi** : `uploadedFileCandidates` refuse un candidat existant dont le chemin réel (liens et jonctions résolus) sort de `uploads/` (`realPathStaysInside`). Fichier absent : la comparaison lexicale suffit. `uploads/` monté par lien reste valide.
+- **Pourquoi** : risque résiduel de la revue §9 du 3 novembre ; la borne ne comparait que le chemin lexical.
+- **Preuve** : unitaire `uploaded-file` (jonction sortante refusée, rouge sur main ; lien de fichier sauté avec sa raison si l'OS refuse le droit de création).
+## 2026-11-05 — Justificatif de règlement fournisseur borné à son dossier
+- **Quoi** : `server/lib/settlement-proof.ts` (`isSettlementProofReference`, `settlementProofPath`). `recordInvoiceSettlement` refuse en 400 toute référence qui n'est pas un fichier de `/uploads/supplier-invoices/settlements/`, endpoint legacy `/payment` compris. La route du justificatif ne sert que ce dossier : une ligne ancienne hors dossier donne 404. `settlementProofPath` est ajoutée aux bornes du scan des accès disque.
+- **Pourquoi** : la référence était libre à l'écriture et la lecture n'était bornée qu'à `uploads/` en entier (dette AGENTS §9).
+- **Écrivains recensés** : téléversement `POST /:id/settlements` (toujours sous le dossier) et `POST /:id/payment` legacy (libre, sans appelant client). Ni seed, ni import de sauvegarde, ni trigger n'écrit `proof_reference`.
+- **Preuve** : contrat `supplier-settlement-proof-path` (écriture hors dossier 400 sans règlement créé, ligne en base hors dossier 404, téléversé 200, legacy avec justificatif du dossier 200) ; unitaire `settlement-proof`.
+
+## 2026-11-05 — Liens résolus : chemin absent, justificatif, destinations d'écriture
+- **Quoi** : `realPathStaysInside` contrôle, pour un fichier absent, le dernier élément existant du chemin : lien pendant ou lien sortant refusés. `settlementProofPath`, la copie des documents de workflow vers le dossier du véhicule et `vehicleDocumentDirectory` (multer) passent par ce contrôle en plus de la borne lexicale.
+- **Pourquoi** : relecture de #337. Un fichier absent derrière un lien était accepté, et une écriture l'aurait suivi hors du dossier ; deux destinations d'écriture n'étaient bornées que lexicalement.
+- **Preuve** : unitaires `uploaded-file` (lien pendant, absent derrière une jonction sortante, `uploads/` absent, racine montée par jonction via `uploadedFileCandidates`) et `settlement-proof` (jonction dans le dossier refusée).
+
+## 2026-11-05 — Liens résolus : référence = racine possédée
+- **Quoi** : la copie des documents de workflow contrôle `vehicle-<id>` contre `uploads/documents` avant tout `mkdir` (dossier refusé : rien transféré, `log.warn` sans chemin). Multer distingue id invalide (« ID de véhicule invalide ») et dossier sortant (« Dossier de destination invalide », `log.warn`).
+- **Pourquoi** : relecture de #340. La référence était `vehicle-<id>` lui-même : remplacé par une jonction, il se résolvait dehors avec le candidat et le contrôle passait.
+- **Preuve** : intégration `workflow-document-transfer` (jonction `vehicle-<id>` : rien copié dehors, document non transféré) et contrat `vehicle-documents-upload-path` (400 « Dossier de destination invalide »), rouges sur la version précédente, verts après.
+
+## 2026-11-05 — Suppressions de server/api : borne qui résout les liens
+- **Quoi** : `scanFileAccesses` prend en option le jeu de bornes acceptées (`LINK_RESOLVING_BOUND_CALLS`). Garde `upload-delete-hygiene` : toute suppression (`unlink`, `rm`, `rmdir`) d'une route de `server/api` passe par `uploadedFileCandidates`, `settlementProofPath` ou `existingUploadedFile` ; `isInsideDirectory` seul est refusé. Deux exceptions gelées (multer, `req.file.path`), chacune avec sa raison et sa condition de dégel.
+- **Pourquoi** : `stored-path-hygiene` accepte la borne lexicale, qu'un lien sous `uploads/` passe (AGENTS §9).
+- **Preuve** : suppression bornée lexicalement injectée dans une route : la nouvelle garde échoue, `stored-path-hygiene` passe ; cas synthétiques strict et défaut ; tsc 0, unitaires verts.
+## 2026-11-05 — Justificatifs téléversés liés à l'écriture
+- **Quoi** : règlement fournisseur (`POST /:id/settlements`) et récépissé de renouvellement (`POST /requests/:id/receipt`) suppriment le fichier dans le `finally` tant qu'aucune écriture validée ne le référence (`proofRecorded`, `receiptRecorded`). Diffusion du règlement au mieux (`log.error`).
+- **Pourquoi** : une diffusion qui levait rendait 500 et supprimait le justificatif d'un règlement créé ; un identifiant invalide laissait un fichier orphelin.
+- **Preuve** : contrat `supplier-settlement-proof-lifecycle` (3 cas, 2 rouges sur main) ; contrats `supplier-settlement*` et `document-renewal*` verts (64) ; tsc 0 ; unitaires 2417 verts.
+
+## 2026-11-05 — Routes multer : garde de cycle de vie, dépôt de document véhicule
+- **Quoi** : garde `multer-lifecycle-hygiene` (route de `server/api` qui lit `req.file` : drapeau + `finally`, ou exception gelée ; import Excel en mémoire gelé). Dépôt de document véhicule passé au patron, diffusion au mieux. Règlement fournisseur : `removeUploadedProof` par `settlementProofPath`, refus 401/400 en `AppError`.
+- **Pourquoi** : récidive de #178 en #348 ; le dépôt de document véhicule avait le même défaut (diffusion qui lève : 500 et fichier d'un document enregistré supprimé).
+- **Preuve** : contrat `vehicle-documents-upload-errors` (diffusion qui lève → 201, fichier conservé), rouge avant ; contrat `supplier-settlement-proof-lifecycle` (+ 409 facture non approuvée, aucun fichier) ; garde rouge sur l'ancien dépôt de document.

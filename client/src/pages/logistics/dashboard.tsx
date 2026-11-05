@@ -45,10 +45,6 @@ import { fr } from "date-fns/locale";
 
 // ── Mission blockers ───────────────────────────────────────────────────────
 
-function normalizeCpc(v: string | null | undefined): string {
-  return (v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-}
-
 function getMissionBlockers(mission: any): string[] {
   const blockers: string[] = [];
   const { status, assignment, deliveryDate, pickupDate } = mission;
@@ -63,9 +59,9 @@ function getMissionBlockers(mission: any): string[] {
 
   if (status === "assigned" || status === "in_progress") {
     if (assignment?.driver) {
-      const cpc = normalizeCpc(assignment.driver.cpcStatus);
-      if (cpc !== "FORME") {
-        blockers.push(`CPC chauffeur invalide (${assignment.driver.cpcStatus || "non défini"})`);
+      // Verdict calculé par le serveur (statut et expiration) ; absent = non communiqué à ce lecteur.
+      if (assignment.driver.cpcEligible === false) {
+        blockers.push(`CPC chauffeur invalide (${assignment.driver.cpcIneligibleReason ?? "non valide"})`);
       }
     } else {
       blockers.push("Aucun chauffeur affecté");

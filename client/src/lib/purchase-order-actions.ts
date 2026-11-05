@@ -50,3 +50,14 @@ export function orderStatusActions(input: {
       return [];
   }
 }
+
+/**
+ * Clic sur une ligne de tableau : navigation seulement pour un clic gauche simple. Ctrl/Cmd+clic, clic
+ * molette et fin de sélection de texte gardent leur comportement natif.
+ */
+export function isPlainRowClick(
+  e: { ctrlKey: boolean; metaKey: boolean; shiftKey?: boolean; button: number },
+  selectedText: string = "",
+): boolean {
+  return e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && selectedText.trim() === "";
+}

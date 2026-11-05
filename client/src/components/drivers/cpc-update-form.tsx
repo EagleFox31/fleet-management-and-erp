@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -8,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { GraduationCap, Calendar, Check, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { cpcStatusTone, type CpcStatusTone } from "@shared/constants/driver-cpc-eligibility";
 
 interface CPCUpdateFormProps {
   driverId: number;
@@ -29,10 +31,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       return await res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/expiring-cpc"] });
+      invalidateDriverCpcDependents(queryClient, driverId);
       toast({
         title: "Formation CPC mise à jour",
         description: `La certification CPC de ${driverName} a été enregistrée avec succès.`,
@@ -75,18 +74,13 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
     mutation.mutate(cpcDate);
   };
 
-  const getStatusBadge = (status?: string) => {
-    switch (status) {
-      case "FORMÉ":
-        return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/80";
-      case "À FORMER":
-        return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/80";
-      case "NON FORMÉ":
-        return "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200/80";
-      default:
-        return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200";
-    }
+  const TONE_CLASSES: Record<CpcStatusTone, string> = {
+    success: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/80",
+    warning: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/80",
+    danger: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200/80",
+    neutral: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200",
   };
+  const getStatusBadge = (status?: string) => TONE_CLASSES[cpcStatusTone(status)];
 
   return (
     <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">

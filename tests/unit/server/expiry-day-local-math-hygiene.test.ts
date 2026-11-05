@@ -30,7 +30,6 @@ const FROZEN = new Set<string>([
   "client/src/components/vehicles/vehicle-documents.tsx",
   "client/src/components/vehicles/vehicle-health-score.tsx",
   "client/src/pages/vehicles/document-renew.tsx",
-  "server/services/cpc-training-service.ts",
 ]);
 
 /** Fichiers dont le calcul local porte sur autre chose qu'une échéance de document (entretien). */
