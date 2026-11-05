@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,14 +25,14 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: async (date: string) => {
-      const res = await apiRequest("POST", `/api/drivers/${driverId}/update-cpc`, {
+    mutationFn: async ({ id, date }: { id: number; date: string }) => {
+      const res = await apiRequest("POST", `/api/drivers/${id}/update-cpc`, {
         cpcDate: date,
       });
       return await res.json();
     },
-    onSuccess: () => {
-      invalidateDriverCpcDependents(queryClient, driverId);
+    onSuccess: (_data, { id }) => {
+      invalidateDriverCpcDependents(queryClient, id);
       toast({
         title: "Formation CPC mise à jour",
         description: `La certification CPC de ${driverName} a été enregistrée avec succès.`,
@@ -46,6 +47,8 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       });
     },
   });
+
+  const submitCpc = useSingleFlightMutate(mutation.mutate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +74,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       return;
     }
 
-    mutation.mutate(cpcDate);
+    submitCpc({ id: driverId, date: cpcDate });
   };
 
   const TONE_CLASSES: Record<CpcStatusTone, string> = {
