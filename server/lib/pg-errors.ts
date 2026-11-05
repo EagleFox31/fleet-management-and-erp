@@ -32,3 +32,19 @@ export function isForeignKeyViolation(error: unknown): boolean {
 export function isCheckViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23514";
 }
+
+/** Interblocage (40P01) ou échec de sérialisation (40001) : Postgres a annulé la transaction, la réessayer est sûr. */
+export function isTransactionConflict(error: unknown): boolean {
+  const code = pgCodeOf(error);
+  return code === "40P01" || code === "40001";
+}
+
+export const TRANSACTION_CONFLICT_MESSAGE = "Opération en cours, réessayez.";
+
+/** Contrainte portée par le trigger `trg_users_keep_active_admin` (migration 20261105). */
+export const LAST_ACTIVE_ADMIN_CONSTRAINT = "users_keep_one_active_admin";
+
+/** Le trigger a refusé de retirer le dernier administrateur actif. */
+export function isLastActiveAdminViolation(error: unknown): boolean {
+  return isCheckViolation(error) && pgConstraintOf(error) === LAST_ACTIVE_ADMIN_CONSTRAINT;
+}

@@ -70,6 +70,40 @@
 ## 2026-11-05 03:19 — c7 : réserves de #354 (fonction pure du message de lancement)
 - #353 et #354 fusionnées, #358 aussi. Branche fix/launch-message-followup : launchRefusalMessage extraite (continue au lieu de break), test unitaire, cas toast client, entrée LESSONS. PR à ouvrir, « mr » à 0a. Stack c7test à garder jusqu'à la fin de cette PR.
 
+## 2026-11-05 04:50 — c7 : garantie en base « au moins un administrateur actif »
+
+- Branche `fix/last-admin-db-trigger` (depuis main) : trigger BEFORE UPDATE OF role, deleted_at / DELETE sur `users` ; refus (check_violation, contrainte `users_keep_one_active_admin`) si l'opération retire le dernier administrateur actif. Verrou consultatif pour sérialiser les sorties concurrentes.
+- SQL dans `server/init-database.ts` (`USERS_KEEP_ACTIVE_ADMIN_SQL`) et migration jumelle `20261105_users_keep_active_admin.sql`, comparés par un test unitaire de dérive. `CREATE OR REPLACE TRIGGER` (règle d'hygiène de concurrence d'init-database).
+- `toHttpError` : cette violation devient un 400 au message lisible, jamais un 500.
+- Preuves : check 0 erreur TS, unitaires, contrats 2031/2031, intégration 340/340 + 4 cas dédiés.
+- Reste : PR brouillon, puis avis 0a. Sur #381 : neutraliser la ligne « À venir après fusion de #379 » et `close` → `finish` dans booking-guard.ts. Puis complément #375 après #379.
+
+## 2026-11-05 05:20 — c7 : #386 relecture, points 1 à 3
+
+- Lecture verrouillante (FOR SHARE) des autres administrateurs actifs à la place du NOT EXISTS ; test d'intégration « isolation REPEATABLE READ couverte » (rouge avec l'ancien SQL, vert ensuite).
+- Tests de mise à jour et suppression en masse : refus. Nettoyage de test passé en transaction (SET LOCAL), plus de fuite dans le pool.
+- Suite : le refus du trigger donne un 500 sur les catch locaux de routes.ts tant que la garde #379 n'est pas devant : à traiter dans le complément #375. Puis reprise de la PR santé de b7 (fix/health-minimal-public).
+
+## 2026-11-05 05:45 — c7 : état et file de tâches
+
+- #381 (fix/booking-guard-role-first) : main fusionné (b97349eb), attend CI et ready. #386 (fix/last-admin-db-trigger, 4bb6f764) : relue, mineurs à traiter.
+- Ordre fixé par 0a : (A) PR santé de b7, branche fix/health-minimal-public (worktree agent-a5880f2fbf922de2e) : GET /api/health public = statut et version, détail derrière isAdmin, contrats anonyme / staff non admin / admin, texte neutre ; (B) #386 : 40P01 et 40001 vers 409 « Opération en cours, réessayez » dans toHttpError + test unitaire, test unitaire de la branche isLastActiveAdminViolation, test « admin déjà inactif » (ghost), description de PR corrigée (traduction HTTP par route : complément #375), documenter la réparation manuelle si le test RR meurt ; (C) complément #375 après fusion de #379 : traduction sur les 4 routes (PATCH users, DELETE users, admin/users, toggle), storage.updateUser/deleteUser qui avalent l'erreur, un contrat par route, constante de message commune avec #379.
+- c7test (55432/55433) : trigger retiré ; un redémarrage depuis #386 le repose. À arrêter en fin de session.
+
+## 2026-11-05 06:10 — c7 : #386 mineurs traités ; santé livrée
+
+- #388 (fix/health-minimal-public) : PR santé ouverte en brouillon, en relecture et contrôle sécurité chez 0a.
+- #386 : `toHttpError` traduit 40P01 et 40001 en 409 « Opération en cours, réessayez » (limite connue : l'interblocage possible entre la lecture verrouillante et le verrou consultatif ne casse pas l'intégrité, il se réessaie) ; tests unitaires de cette branche et de la violation du dernier administrateur ; cas « admin déjà inactif » ; réparation manuelle documentée en tête du test d'intégration. Description de PR : traduction HTTP par route renvoyée au complément #375.
+- Reste #386 : point 5 (une seule constante de message avec #379) dans le complément #375.
+- Complément #375 (après fusion de #379) : traduction sur PATCH users, DELETE users, DELETE admin/users, toggle ; storage.updateUser/deleteUser avalent l'erreur ; un contrat par route ; message commun avec #379.
+
+
+## 2026-11-05 06:50 — c7 : état
+
+- #388 : mineurs 1-4 de 0a poussés (version : repli documenté, 401 strict, cartographie, leçon). Santé terminée côté c7.
+- #379 (réserves, branche locale c7-lag-reserves = fix/last-active-admin-guard + 1 commit 7782c78f, NON poussé) : (a) restauration imbriquée et cleanupCreated en finally, (c) LAG3 ignoré (describe.skipIf) si trg_users_keep_active_admin présent. Mesuré : sans trigger 15/15 verts, avec trigger 9 verts + 6 ignorés. Reste (b) journal docs/journal/api-last-admin-guard.md : le « rouge B » est faux (retirer le contrôle writableFinished/destroyed laisse unitaires 10/10 et contrat 15/15 verts) ; « rouge C » non défini pour moi, à demander à 0a ; puis pousser avec `git push origin HEAD:fix/last-active-admin-guard` (fast-forward, sans force) et prévenir 0a.
+- Piège : tests/integration/users-keep-active-admin.test.ts repose le trigger sur c7test ; le retirer (node drop via pg sur 55432) avant de lancer les contrats de #379.
+- Ensuite : complément #375 ; #376 (merge main). Worktrees de b7 : node_modules inutilisable, travailler depuis c7-backup via branche locale + push HEAD:branche.
 ## 2026-11-05 — B1 garde de réservation OT : rôle avant lecture (fix/booking-guard-role-first, base main) ; état de session c7
 - Garde de réservation : contrôle de rôle (mêmes gardes que les routes d'écriture) avant la première lecture ; contrat client/chauffeur 403 rouge avant, vert après ; LESSONS ajoutée.
 - État : #373 mineurs poussés et fusionnés dans #375 ; #378 mineurs poussés (JSDoc, cas sans propriétaire) ; B1 à relire (« mr » envoyé).
