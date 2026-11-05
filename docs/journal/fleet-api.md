@@ -412,3 +412,9 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `usersWithSafeSecrets` (ex-`usersWithSafePins`) prépare PIN et mot de passe hors transaction ; `passwordForRestore` reprend bcrypt strict et SHA-256 hérité, hache un clair conforme, remplace le reste par un hash inutilisable avec `warn` (username seul).
 - **Pourquoi** : un mot de passe clair restauré était stocké en clair et le compte ne pouvait plus se connecter.
 - **Preuve** : contrat `backup-import-password` (clair → 200 au login, SHA-256 → 200 puis migré, trop court → 401), rouge sur le comportement de main (2 échecs, valeur stockée en clair) ; unitaire `user-password`.
+
+## 2026-11-05 — Justificatif de règlement fournisseur borné à son dossier
+- **Quoi** : `server/lib/settlement-proof.ts` (`isSettlementProofReference`, `settlementProofPath`). `recordInvoiceSettlement` refuse en 400 toute référence qui n'est pas un fichier de `/uploads/supplier-invoices/settlements/`, endpoint legacy `/payment` compris. La route du justificatif ne sert que ce dossier : une ligne ancienne hors dossier donne 404. `settlementProofPath` est ajoutée aux bornes du scan des accès disque.
+- **Pourquoi** : la référence était libre à l'écriture et la lecture n'était bornée qu'à `uploads/` en entier (dette AGENTS §9).
+- **Écrivains recensés** : téléversement `POST /:id/settlements` (toujours sous le dossier) et `POST /:id/payment` legacy (libre, sans appelant client). Ni seed, ni import de sauvegarde, ni trigger n'écrit `proof_reference`.
+- **Preuve** : contrat `supplier-settlement-proof-path` (écriture hors dossier 400 sans règlement créé, ligne en base hors dossier 404, téléversé 200, legacy avec justificatif du dossier 200) ; unitaire `settlement-proof`.
