@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { AppError } from "../lib/app-error";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
-import { moduleLogger } from "../lib/logger";
 import { parseRouteId } from "../lib/route-id";
 import { sendUploadedFile } from "../lib/uploaded-file-response";
 import { isAnyUser } from "../middleware/auth";
@@ -15,7 +14,6 @@ import { WorkflowDocumentService } from "../services/workflow-document-service";
  * Cloison §11 : un client ne lit que les documents de ses véhicules ou de ses sessions ; un id
  * inconnu lui répond comme un id hors périmètre.
  */
-const log = moduleLogger("uploaded-documents");
 const router = Router();
 
 function unknownDocument(user: Parameters<typeof ownerScopeOf>[0]): AppError {
@@ -31,11 +29,8 @@ router.get("/documents/:id/download", isAnyUser, async (req, res, next) => {
     if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(document.vehicleId)))) {
       throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
     }
-    const file = { mimeType: document.fileType, downloadName: document.filename, notFoundMessage: "Fichier introuvable sur le serveur" };
-    sendUploadedFile(res, document.filePath, file, (err) => {
-      log.error({ err, requestId: req.requestId }, "envoi du document en échec");
-      if (!res.headersSent) next(new AppError(500, "Erreur lors du téléchargement", { cause: err }));
-    });
+    const file = { mimeType: document.fileType, downloadName: document.filename, notFoundMessage: "Fichier introuvable sur le serveur", failureMessage: "Erreur lors du téléchargement" };
+    sendUploadedFile(res, document.filePath, file, next, req.requestId);
   } catch (error) {
     next(error);
   }
@@ -49,11 +44,8 @@ router.get("/workflows/documents/:documentId", isAnyUser, async (req, res, next)
     if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(document.workflowId)))) {
       throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
     }
-    const file = { mimeType: document.mimeType, downloadName: document.originalName, notFoundMessage: "Fichier non trouvé" };
-    sendUploadedFile(res, document.filePath, file, (err) => {
-      log.error({ err, requestId: req.requestId }, "envoi du document workflow en échec");
-      if (!res.headersSent) next(new AppError(500, "Erreur lors du téléchargement du document", { cause: err }));
-    });
+    const file = { mimeType: document.mimeType, downloadName: document.originalName, notFoundMessage: "Fichier non trouvé", failureMessage: "Erreur lors du téléchargement du document" };
+    sendUploadedFile(res, document.filePath, file, next, req.requestId);
   } catch (error) {
     next(error);
   }

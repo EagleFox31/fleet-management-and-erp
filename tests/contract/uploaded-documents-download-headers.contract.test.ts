@@ -20,6 +20,7 @@ import { uniqueTestToken } from "../support/ids";
 let server: Server;
 let baseUrl = "";
 let adminCookie = "";
+let clientCookie = "";
 let adminId = 0;
 const ids = createIdBag();
 const workflowIds: number[] = [];
@@ -32,21 +33,34 @@ function stored(name: string, content = "TEST"): string {
   return join("uploads", uploadsSubdir, name);
 }
 
-async function get(path: string): Promise<Response> {
-  return fetch(`${baseUrl}${path}`, { headers: { Cookie: adminCookie } });
+async function get(path: string, cookie = adminCookie): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, { headers: { Cookie: cookie } });
 }
 
-async function vehicleDocument(fileName: string, fileType: string, filename = fileName): Promise<number> {
+async function login(username: string): Promise<string> {
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password: TEST_USER_PASSWORD }),
+  });
+  expect(res.status).toBe(200);
+  return res.headers.get("set-cookie")!.split(";")[0];
+}
+
+/** Chemin stocké tel quel (sans fichier créé) : hors de uploads/, ou absent du disque. */
+type StoredPathOverride = string | undefined;
+
+async function vehicleDocument(fileName: string, fileType: string, filename = fileName, filePath?: StoredPathOverride): Promise<number> {
   const vehicle = await createTestVehicle();
   ids.vehicleIds.push(vehicle.id);
   const [row] = await db
     .insert(vehicleDocuments)
-    .values({ vehicleId: vehicle.id, name: "TEST doc", type: "autre", filename, filesize: 4, fileType, filePath: stored(fileName) })
+    .values({ vehicleId: vehicle.id, name: "TEST doc", type: "autre", filename, filesize: 4, fileType, filePath: filePath ?? stored(fileName) })
     .returning();
   return row.id;
 }
 
-async function workflowDocument(fileName: string, mimeType: string, originalName = fileName): Promise<number> {
+async function workflowDocument(fileName: string, mimeType: string, originalName = fileName, filePath?: StoredPathOverride): Promise<number> {
   const [workflow] = await db
     .insert(vehicleAcquisitionWorkflows)
     .values({ userId: adminId, sessionId: uniqueTestToken("TEST-dl"), workflowData: {} })
@@ -60,7 +74,7 @@ async function workflowDocument(fileName: string, mimeType: string, originalName
       documentType: "autre",
       originalName,
       storedName: fileName,
-      filePath: stored(fileName),
+      filePath: filePath ?? stored(fileName),
       fileSize: 4,
       mimeType,
     })
@@ -77,13 +91,10 @@ beforeAll(async () => {
   const admin = await createTestUser({ role: "admin" });
   ids.userIds.push(admin.id);
   adminId = admin.id;
-  const res = await fetch(`${baseUrl}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: admin.username, password: TEST_USER_PASSWORD }),
-  });
-  expect(res.status).toBe(200);
-  adminCookie = res.headers.get("set-cookie")!.split(";")[0];
+  adminCookie = await login(admin.username);
+  const client = await createTestUser({ role: "client" });
+  ids.userIds.push(client.id);
+  clientCookie = await login(client.username);
 }, 120000);
 
 afterAll(async () => {
@@ -133,5 +144,39 @@ describe.each(ROUTES)("$label : en-têtes du fichier servi", { timeout: 60000 },
     const res = await get(url(id));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/^image\/jpeg\b/);
+  });
+});
+
+/** Id au-delà de toute séquence de test, mais dans l'int4 : la ligne n'existe pas. */
+const UNKNOWN_ID = 2147483000;
+
+describe.each(ROUTES)("$label : erreurs", { timeout: 60000 }, ({ create, url }) => {
+  it("id inconnu : 404 pour le personnel, 403 pour un client (pas d'indice d'existence)", async () => {
+    const staff = await get(url(UNKNOWN_ID));
+    expect(staff.status).toBe(404);
+    const client = await get(url(UNKNOWN_ID), clientCookie);
+    expect(client.status).toBe(403);
+  });
+
+  it("chemin stocké hors de uploads/ : 404, sans chemin dans la réponse", async () => {
+    const outside = join(process.cwd(), "package.json");
+    const id = await create("package.json", "application/pdf", "package.json", outside);
+    const res = await get(url(id));
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text).not.toContain("package.json");
+    expect(text).not.toContain(process.cwd());
+    expect(text).not.toMatch(/[\\/]uploads?[\\/]/);
+  });
+
+  it("fichier absent du disque : 404 au contrat d'erreur", async () => {
+    const missing = join("uploads", uploadsSubdir, `${uniqueTestToken("absent")}.pdf`);
+    const id = await create("absent.pdf", "application/pdf", "absent.pdf", missing);
+    const res = await get(url(id));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(typeof body.message).toBe("string");
+    expect(body.requestId).toBe(res.headers.get("x-request-id"));
+    expect(JSON.stringify(body)).not.toContain(uploadsSubdir);
   });
 });
