@@ -141,7 +141,15 @@ export class WorkflowDocumentService {
       const documents = (await this.getWorkflowDocuments(sessionId, null, workflowId)).filter((doc) => !doc.isTransferred);
 
       // Copier les fichiers vers le dossier du véhicule
-      const vehicleUploadDir = path.join(process.cwd(), 'uploads', 'documents', `vehicle-${vehicleId}`);
+      // Référence du contrôle réel : la racine possédée, jamais le dossier calculé depuis l'id
+      // (un `vehicle-<id>` remplacé par un lien se résoudrait lui-même et passerait).
+      const documentsRoot = path.join(process.cwd(), 'uploads', 'documents');
+      const vehicleUploadDir = path.join(documentsRoot, `vehicle-${vehicleId}`);
+      if (!realPathStaysInside(documentsRoot, vehicleUploadDir)) {
+        // Avant tout mkdir : rien n'est créé ni copié dehors, les documents restent non transférés.
+        log.warn({ sessionId, vehicleId, reason: "dossier du véhicule hors de uploads/documents" }, "documents workflow non transférés");
+        return;
+      }
       if (!fs.existsSync(vehicleUploadDir)) {
         fs.mkdirSync(vehicleUploadDir, { recursive: true });
       }
@@ -155,7 +163,7 @@ export class WorkflowDocumentService {
         const newPath = path.join(vehicleUploadDir, newFileName);
 
         // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
-        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath) || !realPathStaysInside(vehicleUploadDir, newPath)) {
+        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath) || !realPathStaysInside(documentsRoot, newPath)) {
           // Ni copié ni marqué : le document reste dans le workflow, visible comme non transféré.
           log.warn(
             { sessionId, vehicleId, docId: doc.id, reason: originalPath ? "destination hors du dossier du véhicule" : "fichier source introuvable" },

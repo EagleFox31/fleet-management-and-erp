@@ -4,6 +4,9 @@ import fs from 'fs';
 import { Request } from 'express';
 import { AppError } from '../lib/app-error';
 import { isInsideDirectory, realPathStaysInside, uploadedFileCandidates } from '../lib/uploaded-file';
+import { moduleLogger } from '../lib/logger';
+
+const log = moduleLogger("upload");
 
 // Dossier pour stocker les documents des véhicules
 const UPLOAD_DIRECTORY = './uploads/documents';
@@ -40,9 +43,16 @@ export function vehicleDocumentDirectory(vehicleId: unknown): string | null {
 const vehicleDocumentStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     // Créer un dossier pour chaque véhicule
-    const vehicleDirectory = vehicleDocumentDirectory(req.params.vehicleId);
-    if (!vehicleDirectory) {
+    const vehicleId = isVehicleIdSegment(req.params.vehicleId) ? req.params.vehicleId : null;
+    if (!vehicleId) {
       cb(new AppError(400, "ID de véhicule invalide"), "");
+      return;
+    }
+    const vehicleDirectory = vehicleDocumentDirectory(vehicleId);
+    if (!vehicleDirectory) {
+      // Identifiant valide mais `vehicle-<id>` mène hors de `uploads/documents` (lien) : ce n'est pas l'id qui est en cause.
+      log.warn({ vehicleId, reason: "dossier du véhicule hors de uploads/documents" }, "dépôt de document refusé");
+      cb(new AppError(400, "Dossier de destination invalide"), "");
       return;
     }
 

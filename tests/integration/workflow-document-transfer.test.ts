@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -171,6 +172,27 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
 
     const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(rows.map((row) => row.name)).toEqual(["tardif.pdf"]);
+  });
+
+  it("dossier du véhicule remplacé par une jonction qui mène dehors : rien copié dehors, document non transféré", async () => {
+    const { sessionId, vehicleId, workflowId, document } = await workflowWithDocument("piege.pdf");
+    const vehicleDir = join(process.cwd(), "uploads", "documents", `vehicle-${vehicleId}`);
+    const outside = mkdtempSync(join(tmpdir(), "fleet-transfer-out-"));
+    mkdirSync(join(process.cwd(), "uploads", "documents"), { recursive: true });
+    rmSync(vehicleDir, { recursive: true, force: true });
+    symlinkSync(outside, vehicleDir, "junction");
+    try {
+      await WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId);
+
+      expect(readdirSync(outside)).toEqual([]);
+      expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId))).toHaveLength(0);
+      const [source] = await db.select().from(workflowDocuments).where(eq(workflowDocuments.id, document.id));
+      expect(source).toMatchObject({ isTransferred: false, vehicleId: null });
+    } finally {
+      // La jonction seule, jamais sa cible par récursion.
+      rmdirSync(vehicleDir);
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("facture d'achat : rangée en « autre », seul type véhicule sans catégorie propre", async () => {

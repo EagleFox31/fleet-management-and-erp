@@ -2907,3 +2907,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/unit/shared/driver-cpc-eligibility.test.ts` (date absente, récente, expirée, jour J) ; `tests/unit/client/mission-wizard-rules.test.ts` ; `tests/contract/mission-driver-cpc-status.contract.test.ts` (400 sur création, PATCH, ajout d'affectation et lancement pour un chauffeur « FORMÉ » à J-800 ; FORME sans accent accepté ; `cpcStatusRecorded` exposé), vu rouge sans le correctif (6 échecs sur 7) puis vert.
 - **Leçon généralisée** : un statut dérivé que l'on stocke sans recalcul planifié devient périmé en silence ; une garde réglementaire avec expiration juge la date, pas le statut. Une règle métier a un seul module partagé : toute copie locale finit par diverger.
 
+
+## 2026-11-05 — Contrôle de lien : la référence était le dossier visé lui-même
+
+- **Contexte** : #340 ajoutait `realPathStaysInside` à la copie des documents de workflow vers le dossier du véhicule. Relecture : le contrôle ne refusait rien (near miss, détecté avant fusion).
+- **Cause racine** : la référence passée était `uploads/documents/vehicle-<id>`, calculée depuis l'id. Si ce dossier est lui-même une jonction vers l'extérieur, référence et candidat se résolvent tous deux dehors : le candidat reste « sous » la référence. Le contrôle venait en plus après le `mkdirSync`.
+- **Classification** : garde de sécurité inopérante par mauvais choix de référence ; near miss.
+- **Résolution** : référence = racine possédée `uploads/documents`, contrôle avant tout `mkdir` ; dossier refusé → aucun document transféré, `log.warn` sans chemin. Côté multer, un id valide dont le dossier mène dehors renvoie « Dossier de destination invalide » (plus « ID de véhicule invalide »).
+- **Prévention vérifiable** : `tests/integration/workflow-document-transfer.test.ts` (jonction `vehicle-<id>` vers un dossier extérieur : rien copié, document non transféré) et `tests/contract/vehicle-documents-upload-path.contract.test.ts` (400 « Dossier de destination invalide », rien écrit dehors), rouges sur la version précédente, verts après.
+- **Leçon généralisée** : la référence d'un contrôle de chemin réel est la racine de l'application, jamais un sous-dossier calculé depuis une donnée de requête ou un id : ce sous-dossier est précisément ce qu'un lien peut remplacer.

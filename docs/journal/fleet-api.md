@@ -427,3 +427,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `realPathStaysInside` contrôle, pour un fichier absent, le dernier élément existant du chemin : lien pendant ou lien sortant refusés. `settlementProofPath`, la copie des documents de workflow vers le dossier du véhicule et `vehicleDocumentDirectory` (multer) passent par ce contrôle en plus de la borne lexicale.
 - **Pourquoi** : relecture de #337. Un fichier absent derrière un lien était accepté, et une écriture l'aurait suivi hors du dossier ; deux destinations d'écriture n'étaient bornées que lexicalement.
 - **Preuve** : unitaires `uploaded-file` (lien pendant, absent derrière une jonction sortante, `uploads/` absent, racine montée par jonction via `uploadedFileCandidates`) et `settlement-proof` (jonction dans le dossier refusée).
+
+## 2026-11-05 — Liens résolus : référence = racine possédée
+- **Quoi** : la copie des documents de workflow contrôle `vehicle-<id>` contre `uploads/documents` avant tout `mkdir` (dossier refusé : rien transféré, `log.warn` sans chemin). Multer distingue id invalide (« ID de véhicule invalide ») et dossier sortant (« Dossier de destination invalide », `log.warn`).
+- **Pourquoi** : relecture de #340. La référence était `vehicle-<id>` lui-même : remplacé par une jonction, il se résolvait dehors avec le candidat et le contrôle passait.
+- **Preuve** : intégration `workflow-document-transfer` (jonction `vehicle-<id>` : rien copié dehors, document non transféré) et contrat `vehicle-documents-upload-path` (400 « Dossier de destination invalide »), rouges sur la version précédente, verts après.
