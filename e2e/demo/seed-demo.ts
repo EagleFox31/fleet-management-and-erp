@@ -40,7 +40,7 @@ export const DEMO_ACCOUNTS = {
   clientB: { username: "client2", password: "client123", name: "Logistique Fotso", role: "client" },
   warehouse: { username: "fatou", password: "warehouse123", name: "Fatoumata Diallo", role: "warehouse" },
   logistics: { username: "logi1", password: "logi123", name: "Jean Tchoumi", role: "logistics" },
-  workshopManager: { username: "terry", password: "terry123", name: "Terry Ekambi", role: "workshop_manager" },
+  workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
   management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
   driver: { username: "chauffeur1", password: "chauffeur123", name: "Samuel Biyick", role: "driver" },
@@ -52,6 +52,7 @@ export const DEMO_VEHICLES = {
   clientB1: "DEMO-C2-001",
   workshop: "DEMO-ATL-001",
   secretary: "DEMO-SEC-001",
+  atelierChef: "DEMO-CHEF-001",
 } as const;
 
 export const DEMO_MISSION = {
@@ -61,6 +62,8 @@ export const DEMO_MISSION = {
   driverEmployee: "DEMO-EMP-001",
   fuelStation: "DEMO-APPROVISIONNEMENT",
 } as const;
+
+export const DEMO_OT_PREFIX = "Démo atelier - ";
 
 export const DEMO_PART = { reference: "DEMO-FILTRE-HUILE", name: "Filtre à huile démo" } as const;
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
@@ -119,6 +122,21 @@ function isoDayFromNow(days: number): string {
 }
 
 /** Logistique : client donneur d'ordre, véhicule aux papiers valides, chauffeur formé, carte carburant créditée. */
+/** Atelier : chef d'atelier ; le technicien tech1 est affecté par la démo. */
+async function seedWorkshop(): Promise<void> {
+  await ensureUser(DEMO_ACCOUNTS.workshopManager);
+  await ensureUser(DEMO_ACCOUNTS.technician);
+  const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
+  const old = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.vehicleId, vehicleId), like(workOrders.title, `${DEMO_OT_PREFIX}%`)));
+  if (old.length > 0) {
+    const ids = old.map((o) => o.id);
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, ids));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, ids));
+    await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, ids));
+    await db.delete(workOrders).where(inArray(workOrders.id, ids));
+  }
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
@@ -169,6 +187,7 @@ async function seedLogistics(): Promise<void> {
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
   await seedLogistics();
+  await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
   await ensureUser(DEMO_ACCOUNTS.secretary);
   const clientAId = await ensureUser(DEMO_ACCOUNTS.clientA);
