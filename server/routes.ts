@@ -2260,30 +2260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/work-orders/:workOrderId/parts : server/api/work-order-parts.routes.ts
   // (« Demander la pièce », le serveur décide entre sortie directe et demande).
 
-  app.delete("/api/parts-used/:id", isTechnician, async (req, res) => {
-    try {
-      const id = routeIdOrNaN(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de pièce utilisée invalide" });
-      }
-      
-      await storage.removePartFromWorkOrder(id, req.user?.id);
-      
-      // Diffuser la mise à jour via WebSocket temps réel
-      if ((global as any).broadcastUpdate) {
-        (global as any).broadcastUpdate('part_used_removed', {
-          scope: workOrderStaffScope(),
-          partUsedId: id
-        });
-      }
-      
-      return res.status(204).send();
-    } catch (error) {
-      console.error("Remove part from work order error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // DELETE /api/parts-used/:id : server/api/parts-used.routes.ts (retour en stock transactionnel).
 
   app.get("/api/work-orders/:workOrderId/tire-rotations", isAnyUser, async (req, res, next) => {
     try {
