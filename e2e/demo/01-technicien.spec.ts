@@ -25,7 +25,7 @@ test("démo technicien : demander une pièce puis clôturer son intervention", a
   await beat(page, 1200);
 
   // Geste de démarrage : le technicien commence l intervention qui lui est assignée.
-  await page.locator("[data-help-target=\"tech-wo-start\"]").first().click();
+  await page.locator("div").filter({ hasText: DEMO_WORK_ORDER_TITLE }).filter({ has: page.locator('[data-help-target="tech-wo-start"]') }).last().locator('[data-help-target="tech-wo-start"]').click();
   const startDialog = page.getByRole("dialog", { name: "Commencer l'intervention" });
   await expect(startDialog).toBeVisible();
   await beat(page, 1200);

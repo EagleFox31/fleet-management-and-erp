@@ -46,7 +46,7 @@ export const DEMO_ACCOUNTS = {
   clientA: { username: "client1", password: "client123", name: "Transports Kamga", role: "client" },
   clientB: { username: "client2", password: "client123", name: "Logistique Fotso", role: "client" },
   warehouse: { username: "fatou", password: "warehouse123", name: "Fatoumata Diallo", role: "warehouse" },
-  logistics: { username: "logi1", password: "logi123", name: "Rodrigue Fotsing", role: "logistics" },
+  logistics: { username: "logi1", password: "logi123", name: "Jean Tchoumi", role: "logistics" },
   workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
   management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
@@ -131,10 +131,12 @@ async function ensureVehicle(registration: string, model: string, ownerId: numbe
   return row.id;
 }
 
+/** Jour calendaire LOCAL décalé de `days` (les rapports raisonnent en heure locale, pas en UTC). */
 function isoDayFromNow(days: number): string {
   const date = new Date();
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  date.setDate(date.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** Logistique : client donneur d'ordre, véhicule aux papiers valides, chauffeur formé, carte carburant créditée. */
@@ -246,8 +248,8 @@ export const DEMO_INVOICE = {
 async function seedClientInvoices(): Promise<void> {
   await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, "DEMO-FAC-%"));
   const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
-  const today = new Date().toISOString().slice(0, 10);
-  const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const today = isoDayFromNow(0);
+  const due = isoDayFromNow(30);
   await db.insert(clientInvoices).values([
     {
       invoiceNumber: DEMO_INVOICE.number,
@@ -301,7 +303,7 @@ async function seedFleetAudit(vehicleId: number): Promise<void> {
     })
     .returning({ id: missions.id });
   await db.insert(assignments).values({ missionId: mission.id, vehicleId, status: "completed", completedAt: now });
-  const today = now.toISOString().slice(0, 10);
+  const today = isoDayFromNow(0);
   await db.insert(clientInvoices).values({
     invoiceNumber: DEMO_TCO.invoiceNumber,
     missionId: mission.id,
