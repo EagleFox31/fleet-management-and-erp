@@ -3,13 +3,13 @@ import { TO_QUOTE_LABEL, isToQuote } from "../../../client/src/components/billin
 import { ALL_APP_ROLES, KPI_VIEWER_ROLES, canViewKpi } from "../../../shared/constants/roles";
 
 describe("montant des factures en attente", () => {
-  it("un montant nul s'affiche « À chiffrer »", () => {
+  it("« À chiffrer » seulement quand aucune opération n'a de prix", () => {
     expect(TO_QUOTE_LABEL).toBe("À chiffrer");
-    expect(isToQuote(0)).toBe(true);
+    expect(isToQuote({ operationCount: 2, missionsWithoutPrice: 2 })).toBe(true);
   });
-  it("un montant renseigné reste un prix", () => {
-    expect(isToQuote(150000)).toBe(false);
-    expect(isToQuote(0.5)).toBe(false);
+  it("une opération au moins valorisée garde le montant affiché", () => {
+    expect(isToQuote({ operationCount: 2, missionsWithoutPrice: 1 })).toBe(false);
+    expect(isToQuote({ operationCount: 1, missionsWithoutPrice: 0 })).toBe(false);
   });
 });
 

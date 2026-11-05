@@ -37,7 +37,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const a = server.address();
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
-  for (const role of ["admin", "management", "technician", "client", "secretary"] as const) await login(role);
+  for (const role of ["admin", "management", "technician", "client", "secretary", "driver", "logistics"] as const) await login(role);
   const v = await createTestVehicle();
   vehicleId = v.id;
   ids.vehicleIds.push(v.id);
@@ -75,7 +75,8 @@ describe("lectures agregees", { timeout: 120000 }, () => {
     expect((await get(PENDING_INVOICES_PATH)).status).toBe(401);
     expect((await get(PENDING_INVOICES_PATH, "technician")).status).toBe(403);
     expect((await get(PENDING_INVOICES_PATH, "client")).status).toBe(403);
-    for (const role of ["secretary", "management", "admin"]) {
+    expect((await get(PENDING_INVOICES_PATH, "driver")).status).toBe(403);
+    for (const role of ["secretary", "management", "admin", "logistics"]) {
       const ok = await get(PENDING_INVOICES_PATH, role);
       expect(ok.status).toBe(200);
       expect(pendingInvoicesResponseSchema.safeParse(ok.body).success).toBe(true);

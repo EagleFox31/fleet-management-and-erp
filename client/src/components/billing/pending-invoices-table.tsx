@@ -17,10 +17,10 @@ export function ageInDays(oldestOperationDate: string, now: Date = new Date()): 
   return Math.max(0, Math.floor((now.getTime() - start) / DAY_MS));
 }
 
-/** `missions` ne porte aucun tarif : le serveur renvoie 0, l'écran affiche « À chiffrer ». */
+/** Aucune opération du client n'a de prix convenu : l'écran affiche « À chiffrer ». */
 export const TO_QUOTE_LABEL = "À chiffrer";
-export function isToQuote(amount: number): boolean {
-  return amount === 0;
+export function isToQuote(row: Pick<PendingInvoice, "operationCount" | "missionsWithoutPrice">): boolean {
+  return row.missionsWithoutPrice >= row.operationCount;
 }
 
 export function sortByAgeDesc(rows: readonly PendingInvoice[]): PendingInvoice[] {
@@ -41,10 +41,17 @@ export function PendingInvoicesTable({ now }: { now?: Date }) {
     { id: "client", header: "Client", cell: (r) => r.clientName },
     { id: "ops", header: "Opérations", align: "right", cell: (r) => r.operationCount },
     { id: "amount", header: "Montant", align: "right", cell: (r) =>
-        isToQuote(r.amount) ? (
+        isToQuote(r) ? (
           <span className="text-muted-foreground" data-testid="amount-to-quote">{TO_QUOTE_LABEL}</span>
         ) : (
-          formatPrice(r.amount)
+          <span>
+            {formatPrice(r.amount)}
+            {r.missionsWithoutPrice > 0 && (
+              <span className="ml-2 text-xs text-muted-foreground" data-testid="missions-without-price">
+                {r.missionsWithoutPrice} sans prix
+              </span>
+            )}
+          </span>
         ),
     },
     { id: "oldest", header: "Plus ancienne", cell: (r) => formatDate(r.oldestOperationDate) },
