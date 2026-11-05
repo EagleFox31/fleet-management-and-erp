@@ -35,3 +35,25 @@ Même méthode que `success` (WCAG 2.x, texte sur `bg-warning/10` composé sur `
 
 ### Comment tester
 `node node_modules/typescript/bin/tsc --noEmit -p .` ; `npm test` ; afficher un `Badge variant="warning"` en thème clair puis sombre après migration.
+
+## Migration des usages de `text-warning` vers `text-warning-text` (fix/warning-text-usages)
+
+### Quoi
+Quatre lignes basculées sur `text-warning-text` : `client/src/components/ui/badge.tsx:22`, `client/src/components/dashboard/alerts-panel.tsx:63` et `:65`, `client/src/components/vehicles/vehicle-form.tsx:403`. Rien d'autre.
+
+### Comment (ratios WCAG, script Node jetable, `--background` clair 0 0% 100%, sombre 240 10% 3.9%)
+- Clair, sur `bg-warning/10` : `text-warning` 1,98:1 -> `text-warning-text` 7,64:1.
+- Clair, sur fond de page (légende du formulaire véhicule) : 8,24:1.
+- Sombre, sur `bg-warning/10` : 8,20:1 ; sur fond de page : 9,31:1. En sombre `--warning-text` = `--warning`, donc aucun changement visuel et lisible.
+- Recherche : aucun test ni snapshot sous `tests/` ne référence `text-warning`. Les consommateurs du variant `warning` du Badge reçoivent le correctif par la classe du variant, sans changement d'appel.
+
+### Pourquoi
+`text-warning` sur `bg-warning/10` était illisible en thème clair (1,98:1) ; le jeton `warning-text` de la PR #372 règle le contraste.
+
+### Comment tester
+`node node_modules/typescript/bin/tsc --noEmit -p .` (0 error TS) ; `npm test` ; afficher un Badge warning, le panneau d'alertes (sévérités moyenne/haute) et la légende du formulaire véhicule en clair puis en sombre.
+
+## Test instable (2 échecs vitest non identifiés)
+
+Au premier passage de `vitest run --reporter=dot` sur fix/warning-text-usages : 2 tests en échec sur 2444 (210 fichiers verts sur 212), la sortie « dot » ne nommait pas les tests. Les journaux montraient des `ReferenceError: indexedDB is not defined`, mais ce message apparaît aussi dans des passages verts : il n'est donc pas prouvé comme cause.
+Relances en reporter JSON : 3 passages supplémentaires (plus 2 passages verts antérieurs), tous à 0 échec sur 2442. Non reproduit (0 fois sur 3) : fichiers et tests en échec non retrouvés, aucune correction faite. Piste : conserver la sortie JSON dès le premier passage pour nommer l'échec si cela se reproduit.
