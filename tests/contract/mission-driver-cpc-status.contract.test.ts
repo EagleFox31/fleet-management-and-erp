@@ -227,7 +227,9 @@ describe("CPC chauffeur : bornes de l'expiration et launch-readiness", () => {
     const check = res.body.checks.find((c: any) => c.key === "driver_cpc_valid");
     expect(check.passed).toBe(false);
     expect(check.blocking).toBe(true);
-    expect(check.detail).toMatch(EXPIRED);
+    // Libellé fixe sans date : launch-readiness est lu par tout le personnel, chauffeurs compris.
+    expect(check.detail).toBe("Formation CPC expirée.");
+    expect(check.cpcIneligibleCode).toBe("EXPIRED");
   }, 60000);
 });
 
