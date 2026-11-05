@@ -220,4 +220,50 @@ describe("Droit de sortie du chef d'atelier", { timeout: 120000 }, () => {
     expect(res.status).toBe(200);
     expect(await stockOf(part.id)).toBe(2);
   });
+
+  it("le technicien ne sort jamais, même en dérogation motivée : 403, stock intact", async () => {
+    const technician = await userWithSession("technician");
+    const { part, workOrder, requirement } = await receivedRequirement(technician.user.id);
+
+    const res = await call("POST", `/api/work-orders/${workOrder.id}/part-requirements/${requirement.id}/issue`, {
+      cookie: technician.cookie,
+      body: OVERRIDE,
+    });
+
+    expect(res.status).toBe(403);
+    expect(await stockOf(part.id)).toBe(3);
+    const [stored] = await db.select().from(partRequirements).where(eq(partRequirements.id, requirement.id));
+    expect(stored.status).toBe("received");
+  });
+
+  it("réglage du droit : sans session 401, id invalide 400, technicien 400, utilisateur supprimé 404", async () => {
+    const admin = await userWithSession("admin");
+    const chef = await userWithSession("workshop_manager");
+    const technician = await userWithSession("technician");
+    const body = { canIssueStock: false };
+
+    const anonymous = await call("PATCH", `/api/users/${chef.user.id}/stock-issue-permission`, { body });
+    expect(anonymous.status).toBe(401);
+
+    const badId = await call("PATCH", `/api/users/abc/stock-issue-permission`, { cookie: admin.cookie, body });
+    expect(badId.status).toBe(400);
+
+    // Le technicien n'a pas ce réglage : on ne peut pas lui accorder la sortie.
+    const onTechnician = await call("PATCH", `/api/users/${technician.user.id}/stock-issue-permission`, {
+      cookie: admin.cookie,
+      body: { canIssueStock: true },
+    });
+    expect(onTechnician.status).toBe(400);
+
+    const deleted = await userWithSession("workshop_manager");
+    await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, deleted.user.id));
+    const onDeleted = await call("PATCH", `/api/users/${deleted.user.id}/stock-issue-permission`, {
+      cookie: admin.cookie,
+      body,
+    });
+    expect(onDeleted.status).toBe(404);
+
+    const rows = await db.select().from(users).where(inArray(users.id, [chef.user.id, deleted.user.id]));
+    expect(rows.every((u) => u.canIssueStock === true)).toBe(true);
+  });
 });
