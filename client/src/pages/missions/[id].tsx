@@ -678,6 +678,8 @@ export default function MissionDetailsPage() {
     if (missingFromReadiness.size > 0) {
       return MISSION_BUDGET_FIELDS.filter((field) => missingFromReadiness.has(field));
     }
+    // Finance active : seul le serveur (budget de mission) fait foi, l'ancien budget n'est plus un repli.
+    if (financeEnabled) return [];
 
     const fallbackMissing: MissionBudgetField[] = [];
     if (missionBudgetValues.fuelBudget === null || missionBudgetValues.fuelBudget <= 0) {
@@ -1352,6 +1354,17 @@ export default function MissionDetailsPage() {
 
     if (primaryMissionAction.nextStatus === "in_progress") {
       const missingFields = getMissingBudgetFieldsForLaunch();
+      // Finance active : le budget de mission (onglet Budget) remplace l'ancien bloc, qui n'est plus saisi ici.
+      if (financeEnabled && missingFields.length > 0) {
+        const budgetCheck = launchReadiness?.checks?.find((check: { key?: string; passed?: boolean }) => CHECK_TO_BUDGET_FIELD[String(check?.key || "")] && !check?.passed);
+        toast({
+          title: "Lancement impossible",
+          description: budgetCheck?.detail || "Créer et faire approuver le budget dans l'onglet Budget.",
+          variant: "destructive",
+        });
+        if (showBudgetTab) setActiveTab("budget");
+        return;
+      }
       if (missingFields.length > 0) {
         setBudgetDialogMode("launch");
         setMissingBudgetFields(missingFields);
@@ -1991,7 +2004,7 @@ export default function MissionDetailsPage() {
                   <FileText className="h-3.5 w-3.5" /> Modifier
                 </Button>
               )}
-              {canManageMission && (
+              {canManageMission && !financeEnabled && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2000,6 +2013,17 @@ export default function MissionDetailsPage() {
                   data-testid="button-open-mission-budgets"
                 >
                   <Wallet className="h-3.5 w-3.5" /> Budgets mission
+                </Button>
+              )}
+              {financeEnabled && showBudgetTab && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={() => setActiveTab("budget")}
+                  data-testid="button-go-mission-budget-tab"
+                >
+                  <Wallet className="h-3.5 w-3.5" /> Voir l'onglet Budget
                 </Button>
               )}
               <Button
@@ -2368,7 +2392,7 @@ export default function MissionDetailsPage() {
                           <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
                             <Wallet className="h-3.5 w-3.5 text-success" />
                           </div>
-                          <span className="text-sm font-semibold text-gray-800">Budgets mission</span>
+                          <span className="text-sm font-semibold text-gray-800">{financeEnabled ? "Budget planifié (historique)" : "Budgets mission"}</span>
                         </div>
                         <div className="space-y-1.5">
                           {missionBudgetValues.fuelBudget !== null && (
