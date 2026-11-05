@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
+import { isoDateInZone } from "@shared/contracts/kpi-period";
 import type { TreasuryCategory, TreasuryDirection } from "@shared/contracts/treasury";
 import { treasuryEntries, type FuelRecord, type SupplierInvoiceSettlement } from "@shared/schema";
 import { AppError } from "../lib/app-error";
 import { isFeatureEnabled } from "../lib/feature-flags";
+import { moduleLogger } from "../lib/logger";
 import type { DbExecutor } from "../lib/fuel-card-lock";
 import { requireActiveAccount } from "./treasury-service";
+
+const log = moduleLogger("treasury-links");
 
 /**
  * Écritures de trésorerie posées par une autre opération (lots T2 et T3), toujours dans la
@@ -54,11 +58,15 @@ async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedL
 async function activeFuelCardAccountId(tx: DbExecutor): Promise<number | null> {
   const res = await tx.execute(sql`SELECT id FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active LIMIT 1`);
   const row = res.rows[0] as { id: number } | undefined;
+  // Drapeau actif sans compte carte : les mouvements de la carte échappent au journal.
+  if (!row) log.warn("Drapeau finance actif sans compte carte carburant actif : mouvement de carte non écrit au journal");
   return row ? Number(row.id) : null;
 }
 
 const fuelKey = (id: number) => `fuel:${id}`;
-const fuelDate = (record: FuelRecord) => (record.date ? String(record.date).slice(0, 10) : new Date().toISOString().slice(0, 10));
+/** Jour local (Africa/Douala), pas le jour UTC : une écriture passée à 0 h 30 est datée du jour même. */
+const today = () => isoDateInZone(new Date());
+const fuelDate = (record: FuelRecord) => (record.date ? String(record.date).slice(0, 10) : today());
 
 /**
  * Recharge de la carte : entrée sur le compte carte. Avec un compte source, la recharge devient un
@@ -86,10 +94,53 @@ export async function linkFuelRecharge(
     return;
   }
   const source = await requireActiveAccount(tx as never, sourceAccountId);
-  if (source.id === cardId || source.kind === "fuel_card") throw new AppError(400, "Le compte source d'une recharge ne peut pas être la carte elle-même.");
+  // Banque ou caisse seulement, jamais la carte (ni un type de compte ajouté plus tard sans décision).
+  if (source.id === cardId || (source.kind !== "bank" && source.kind !== "cash")) {
+    throw new AppError(400, "Le compte source d'une recharge doit être une banque ou une caisse.");
+  }
   const transferGroup = randomUUID();
   await insertLinked(tx, userId, { ...base, accountId: source.id, direction: "out", label: "Recharge carte carburant", category: "virement_interne", counterpartyLabel: "Carte carburant", transferGroup, requestKey: `${fuelKey(record.id)}:source` });
   await insertLinked(tx, userId, { ...base, accountId: cardId, direction: "in", label: "Recharge carte carburant", category: "virement_interne", counterpartyLabel: source.label, transferGroup, requestKey: fuelKey(record.id) });
+}
+
+/**
+ * Suppression d'un plein ou d'une recharge : contre-passation de ses écritures (`fuel:<id>` et,
+ * pour une recharge payée par un compte source, `fuel:<id>:source`). L'historique reste, le solde
+ * du journal redevient celui de la carte. Indépendant du drapeau : on corrige ce qui a été écrit.
+ * L'appelant tient `lockFuelCard`.
+ */
+export async function reverseFuelLink(tx: DbExecutor, fuelRecordId: number, userId: number | null): Promise<void> {
+  const keys = [fuelKey(fuelRecordId), `${fuelKey(fuelRecordId)}:source`];
+  const res = await tx.execute(sql`
+    SELECT request_key, account_id, direction, amount::text AS amount, category, label, piece_ref,
+           counterparty_label, transfer_group, vehicle_id, mission_id
+    FROM treasury_entries WHERE request_key IN (${sql.join(keys.map((k) => sql`${k}`), sql`, `)})
+    ORDER BY request_key`);
+  const lines = res.rows as Array<{
+    request_key: string; account_id: number; direction: TreasuryDirection; amount: string; category: TreasuryCategory;
+    label: string; piece_ref: string | null; counterparty_label: string | null; transfer_group: string | null;
+    vehicle_id: number | null; mission_id: number | null;
+  }>;
+  if (lines.length === 0) return;
+  // Un virement contre-passé reste un virement : ses deux lignes inverses partagent un nouveau groupe.
+  const transferGroup = lines.some((l) => l.transfer_group) ? randomUUID() : null;
+  for (const line of lines) {
+    await insertLinked(tx, userId, {
+      accountId: Number(line.account_id),
+      direction: line.direction === "in" ? "out" : "in",
+      amount: line.amount,
+      entryDate: today(),
+      label: `Annulation : ${line.label}`,
+      category: line.category,
+      pieceRef: line.piece_ref,
+      counterpartyLabel: line.counterparty_label,
+      transferGroup: line.transfer_group ? transferGroup : null,
+      vehicleId: line.vehicle_id,
+      missionId: line.mission_id,
+      fuelRecordId,
+      requestKey: `${line.request_key}:reverse`,
+    });
+  }
 }
 
 /** Plein payé par la carte : sortie du compte carte, liée au plein. Sans drapeau ni compte carte : rien. */
@@ -156,7 +207,7 @@ export async function reverseSupplierSettlement(tx: DbExecutor, settlementId: nu
     accountId: Number(out.account_id),
     direction: "in",
     amount: out.amount,
-    entryDate: new Date().toISOString().slice(0, 10),
+    entryDate: today(),
     label: `Annulation : ${out.label}`,
     category: "reglement_fournisseur",
     pieceRef: out.piece_ref,

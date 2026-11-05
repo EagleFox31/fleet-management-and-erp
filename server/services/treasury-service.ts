@@ -133,6 +133,12 @@ function replay(existing: TreasuryEntry, input: CreateTreasuryEntryInput): { ent
 const KEY_CONFLICT = "Cette clé de requête a déjà servi pour une autre opération.";
 
 export const treasuryService = {
+  /** Type d'un compte, ou `null` s'il n'existe pas : contrôle d'accès avant toute lecture du livre. */
+  async accountKind(id: number): Promise<TreasuryAccount["kind"] | null> {
+    const res = await db.execute(sql`SELECT kind FROM treasury_accounts WHERE id = ${id}`);
+    const row = res.rows[0] as { kind: TreasuryAccount["kind"] } | undefined;
+    return row?.kind ?? null;
+  },
   async listAccounts(): Promise<TreasuryAccount[]> {
     const res = await db.execute(sql`${ACCOUNT_SELECT} GROUP BY a.id ORDER BY a.is_active DESC, a.code`);
     return (res.rows as Row[]).map(toAccount);

@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { type ClientInvoice, type ClientPayment } from '@shared/schema';
+import { type ClientPayment } from '@shared/schema';
+import { type PublicClientInvoice } from '../lib/client-public-columns';
 import { readTayHeaderImage } from '../lib/tay-header-asset';
 
 /**
@@ -27,7 +28,7 @@ export class PDFGenerationService {
    * Générer une facture PDF
    */
   async generateInvoicePDF(invoiceData: {
-    invoice: ClientInvoice;
+    invoice: PublicClientInvoice;
     client: { name: string; address?: string; email?: string; phone?: string };
     mission?: {
       orderNumber: string;
@@ -187,7 +188,7 @@ export class PDFGenerationService {
    * Générer un reçu de paiement PDF
    */
   async generateReceiptPDF(receiptData: {
-    invoice: ClientInvoice;
+    invoice: PublicClientInvoice;
     payment: ClientPayment;
     client: { name: string; address?: string };
     receiptNumber: string;

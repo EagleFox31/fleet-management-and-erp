@@ -112,6 +112,59 @@ describe("schéma trésorerie : réconciliation des contraintes", { timeout: 60_
     });
   });
 
+  it("deux cartes carburant actives : index unique non posé, démarrage non bloqué ; posé une fois réglé", async () => {
+    await withClient(async (client) => {
+      await client.query(`DROP INDEX uq_treasury_accounts_active_fuel_card`);
+      await client.query(`UPDATE treasury_accounts SET is_active = false WHERE kind = 'fuel_card'`);
+      await client.query(`INSERT INTO treasury_accounts (code, label, kind) VALUES ('TRECONC1', 'x', 'fuel_card'), ('TRECONC2', 'y', 'fuel_card')`);
+      const index = async () => (await client.query(`SELECT to_regclass('uq_treasury_accounts_active_fuel_card') AS r`)).rows[0].r;
+      expect((await sqlState(client, SQL)).code).toBe("ok");
+      expect(await index()).toBeNull();
+      await client.query(`UPDATE treasury_accounts SET is_active = false WHERE code = 'TRECONC2'`);
+      await client.query(SQL);
+      expect(await index()).not.toBeNull();
+    });
+  });
+
+  it("FK véhicule et mission sans ON DELETE : remplacées en SET NULL sous le même nom ; second passage sans effet", async () => {
+    await withClient(async (client) => {
+      const fks = async () =>
+        (
+          await client.query(
+            `SELECT k.conname, k.confdeltype, k.convalidated FROM pg_constraint k
+             JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+             WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname IN ('vehicle_id', 'mission_id')
+             ORDER BY k.conname`,
+          )
+        ).rows;
+      const before = await fks();
+      expect(before).toHaveLength(2);
+      expect(before.every((r) => r.confdeltype === "n")).toBe(true);
+      for (const { conname } of before) {
+        const ref = conname.includes("vehicle") ? ["vehicle_id", "vehicles"] : ["mission_id", "missions"];
+        await client.query(`ALTER TABLE treasury_entries DROP CONSTRAINT ${conname}, ADD CONSTRAINT ${conname} FOREIGN KEY (${ref[0]}) REFERENCES ${ref[1]}(id)`);
+      }
+      expect((await fks()).every((r) => r.confdeltype === "a")).toBe(true);
+      await client.query(SQL);
+      expect(await fks()).toEqual(before);
+      await client.query(SQL);
+      expect(await fks()).toEqual(before);
+
+      // Suppression d'un véhicule lié (restauration de sauvegarde) : l'écriture reste, le lien passe à NULL.
+      const { rows: [vehicle] } = await client.query(
+        `INSERT INTO vehicles (registration_number, brand, model, year) VALUES ('TRECON-V', 'x', 'y', 2020) RETURNING id`,
+      );
+      const { rows: [account] } = await client.query(`INSERT INTO treasury_accounts (code, label, kind) VALUES ('TRECON3', 'x', 'cash') RETURNING id`);
+      const { rows: [entry] } = await client.query(
+        `INSERT INTO treasury_entries (account_id, entry_date, label, direction, amount, vehicle_id) VALUES ($1, '2026-11-05', 'x', 'out', 1, $2) RETURNING id`,
+        [account.id, vehicle.id],
+      );
+      await client.query(`DELETE FROM vehicles WHERE id = $1`, [vehicle.id]);
+      const { rows: [after] } = await client.query(`SELECT vehicle_id FROM treasury_entries WHERE id = $1`, [entry.id]);
+      expect(after.vehicle_id).toBeNull();
+    });
+  });
+
   it("des clés de rejeu en double laissent l'unicité absente sans bloquer le démarrage", async () => {
     await withClient(async (client) => {
       await client.query(`ALTER TABLE treasury_entries DROP CONSTRAINT treasury_entries_request_key_key`);

@@ -11,6 +11,7 @@
  */
 import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
+  FINANCE_RECEIVABLE_READ_ROLES,
   FUEL_READ_ROLES,
   GPS_VIEW_ROLES,
   MISSION_ADVISORY_ROLES,
@@ -171,6 +172,16 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: STAFF_ROLES },
     invalidates: ["/api/vehicles", "/api/work-orders", ...KPI_QUERY_KEYS],
   } as EventDefinition<{ batchId: number; kind: string }>,
+  // Facture déposée chez le client (F1) : compteur de jours et retenues figées changent.
+  client_invoice_deposited: {
+    scope: { type: "roles", roles: FINANCE_RECEIVABLE_READ_ROLES },
+    invalidates: ["/api/finance/invoices-awaiting-payment", "/api/billing/invoices"],
+  } as EventDefinition<{ id: number }>,
+  // Taux de retenue d'un client modifiés (F1) : les retenues non figées sont recalculées.
+  client_withholding_updated: {
+    scope: { type: "roles", roles: FINANCE_RECEIVABLE_READ_ROLES },
+    invalidates: ["/api/finance/invoices-awaiting-payment", "/api/clients"],
+  } as EventDefinition<{ id: number }>,
 } as const;
 
 export type RealtimeEventName = keyof typeof REALTIME_EVENTS;

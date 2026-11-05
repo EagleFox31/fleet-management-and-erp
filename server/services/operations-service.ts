@@ -1,3 +1,4 @@
+import { publicClientColumns } from "../lib/client-public-columns";
 import { db } from "../db";
 import {
   missions,
@@ -115,7 +116,7 @@ export class OperationsService {
 
     // Vérifier/créer le client
     let [client] = await db
-      .select()
+      .select(publicClientColumns)
       .from(clients)
       .where(eq(clients.name, additionalData.clientName))
       .limit(1);
@@ -129,7 +130,7 @@ export class OperationsService {
           isActive: true,
           createdBy: additionalData.userId,
         })
-        .returning();
+        .returning(publicClientColumns);
       
       console.log(`Client ${additionalData.clientName} créé automatiquement`);
     }
@@ -192,7 +193,7 @@ export class OperationsService {
 
     // Récupérer le client
     const [client] = await db
-      .select()
+      .select(publicClientColumns)
       .from(clients)
       .where(eq(clients.name, clientName))
       .limit(1);
@@ -310,7 +311,7 @@ export class OperationsService {
 
     const results = await db
       .select({
-        client: clients,
+        client: publicClientColumns,
         missions: sql<number>`COUNT(${missions.id})`,
         totalFuel: sql<string>`COALESCE(SUM(${missions.actualFuelQuantity}), 0)`,
         totalFuelCost: sql<string>`COALESCE(SUM(${missions.actualFuelCost}), 0)`,
@@ -374,7 +375,7 @@ export class OperationsService {
     let query = db
       .select({
         mission: missions,
-        client: clients,
+        client: publicClientColumns,
         vehicle: vehicles,
         assignment: assignments,
       })
