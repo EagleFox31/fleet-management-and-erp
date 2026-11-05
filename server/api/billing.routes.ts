@@ -436,14 +436,21 @@ router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: R
     const { clientName } = req.params;
     const { year, month } = req.query;
 
-    if (!year) {
-      return res.status(400).json({ error: "year est requis" });
+    // `parseInt` seul acceptait « abc » (période « NaN ») ou « 2026x » ; mois hors 1-12 : rapport vide silencieux.
+    if (year === undefined || year === "") {
+      throw new AppError(400, "L'année est requise.");
+    }
+    if (typeof year !== "string" || !/^\d{4}$/.test(year)) {
+      throw new AppError(400, "Année attendue sur quatre chiffres.");
+    }
+    if (month !== undefined && (typeof month !== "string" || !/^(0?[1-9]|1[0-2])$/.test(month))) {
+      throw new AppError(400, "Mois attendu entre 1 et 12.");
     }
 
     const report = await clientBillingService.getClientBillingReport(
       clientName,
-      parseInt(year as string),
-      month ? parseInt(month as string) : undefined
+      Number(year),
+      month === undefined ? undefined : Number(month)
     );
 
     res.json(report);
