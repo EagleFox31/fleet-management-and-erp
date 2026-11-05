@@ -7,6 +7,7 @@ import { idParam } from "../lib/route-helpers";
 import { parseRouteId } from "../lib/route-id";
 import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
 import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+import type { FuelRecord } from "@shared/schema";
 import { authorize, isAnyUser } from "../middleware/auth";
 import { FuelService } from "../services/fuel-service";
 
@@ -16,8 +17,9 @@ const fuelService = new FuelService();
 
 /**
  * Pleins d'un véhicule, sortis de server/routes.ts (gelé) : même cloison que les autres lectures
- * rattachées au véhicule. Un client ne lit que les pleins de son véhicule, et plus du tout une fois
- * le véhicule retiré ; le personnel lit tout, véhicule retiré compris.
+ * rattachées au véhicule. Par ce chemin, un client ne lit que les pleins de son véhicule, et plus
+ * une fois le véhicule retiré ; le personnel lit tout, véhicule retiré compris. Limite : les filtres
+ * `?vehicleId=` de `/fuel-records` et `/fuel-records/consumption-history` ne sont pas encore cloisonnés (L1b).
  */
 router.get("/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res, next) => {
   try {
@@ -25,7 +27,7 @@ router.get("/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res, next)
     await assertVehicleSubresourcesReadable(req, vehicleId);
     const records = await fuelService.getFuelRecordsByVehicleId(vehicleId);
     return res.status(200).json(
-      records.map((record: any) => ({
+      records.map((record: FuelRecord) => ({
         ...record,
         pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
         totalCost: Number(record.cost),
