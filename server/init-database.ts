@@ -1626,6 +1626,20 @@ export async function initializeDatabase() {
     await reportDriverUserIdUniqueGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
+    // Désactivations posées par la suppression douce d'un véhicule, rejouées par sa restauration
+    // (server/services/vehicle-lifecycle-service.ts). Additif et idempotent.
+    await pool.query(`CREATE TABLE IF NOT EXISTS vehicle_deletion_effects (
+  id serial PRIMARY KEY,
+  vehicle_id integer NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+  table_name text NOT NULL,
+  row_id integer NOT NULL,
+  column_name text NOT NULL,
+  previous_value jsonb NOT NULL,
+  applied_value jsonb NOT NULL,
+  created_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
+);`);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).

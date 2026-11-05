@@ -1235,69 +1235,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/vehicles/:id", isAdmin, async (req, res, next) => {
-    try {
-      const { VehicleDeletionService } = await import('./services/vehicle-deletion-service-trigger');
-      const id = routeIdOrNaN(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      
-      const vehicle = await storage.getVehicle(id);
-      
-      // Déjà retiré de la flotte (suppression douce) : rien à refaire.
-      if (!vehicle || vehicle.deletedAt) {
-        return res.status(404).json({ message: "Véhicule non trouvé" });
-      }
-      
-      const reason = req.body?.reason || 'Suppression administrative';
-      try {
-        const result = await VehicleDeletionService.deleteVehicle(id, reason);
-        return res.status(200).json({
-          message: "Véhicule supprimé et archivé avec succès",
-          result,
-        });
-      } catch (deleteError) {
-        // Un véhicule référencé (OT, missions, factures...) ne se supprime pas
-        // physiquement : on le masque (deletedAt) pour garder l'historique.
-        const pgCode = (deleteError as any)?.code ?? (deleteError as any)?.cause?.code;
-        if (pgCode !== "23503") throw deleteError;
-        await db.update(vehicles).set({ deletedAt: new Date() }).where(eq(vehicles.id, id));
-        return res.status(200).json({
-          message: "Véhicule retiré de la flotte. Son historique est conservé.",
-          result: { vehicleId: id, archived: false, softDeleted: true },
-        });
-      }
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Delete vehicle error");
-      return next(new AppError(500, "Erreur lors de la suppression du véhicule", { cause: error }));
-    }
-  });
-
-  // Route pour restaurer un véhicule archivé
-  app.post("/api/vehicles/:id/restore", isAdmin, async (req, res) => {
-    try {
-      const { VehicleDeletionService } = await import('./services/vehicle-deletion-service-trigger');
-      const id = routeIdOrNaN(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      
-      await VehicleDeletionService.restoreVehicle(id);
-      
-      return res.status(200).json({ 
-        message: "Véhicule restauré avec succès" 
-      });
-    } catch (error) {
-      console.error("Restore vehicle error:", error);
-      return res.status(500).json({ 
-        message: "Erreur lors de la restauration du véhicule",
-        error: error instanceof Error ? error.message : "Erreur serveur"
-      });
-    }
-  });
+  // DELETE /api/vehicles/:id et POST /api/vehicles/:id/restore : server/api/vehicle-lifecycle.routes.ts
 
   // Vehicle Documents Routes
   app.get("/api/vehicles/:vehicleId/documents", isAnyUser, async (req, res) => {
