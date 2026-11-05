@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { STATUS_MESSAGES, describeIssue, looksTechnical } from "../../../shared/errors";
 import { AppError, errorHandler, errorResponseGuard, normalizeErrorBody, toHttpError } from "../../../server/middleware/error-handler";
+import { LAST_ADMIN_MESSAGE } from "../../../server/lib/last-admin-rule";
 import { leakText } from "../../support/api-error";
 
 /** Gestion d'erreurs centralisée, niveau U : contrat de réponse et absence de fuite. */
@@ -117,7 +118,7 @@ describe("toHttpError / errorHandler", () => {
 describe("toHttpError : erreurs de base de données à traduire", () => {
   it("refus du trigger « dernier administrateur actif » : 400 au message lisible, sans détail technique", () => {
     const err = Object.assign(new Error("Il doit rester au moins un administrateur actif."), { code: "23514", constraint: "users_keep_one_active_admin" });
-    expect(toHttpError(err)).toEqual({ status: 400, message: "Il doit rester au moins un administrateur actif." });
+    expect(toHttpError(err)).toEqual({ status: 400, message: LAST_ADMIN_MESSAGE });
     expect(toHttpError({ cause: err })).toMatchObject({ status: 400 });
   });
 
