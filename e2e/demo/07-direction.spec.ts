@@ -36,7 +36,8 @@ test("démo direction : tableau de bord, corridors CEMAC et rapports", async ({ 
     }
     if (label.startsWith("Trésorerie")) {
       // La base de test est partagée : on vérifie des montants non nuls, pas un total exact.
-      await expect(page.getByText(/[1-9][0-9.\s]*FCFA/).first()).toBeVisible();
+      const encaisse = page.locator("div.rounded-3xl", { hasText: "Encaissé (factures clients réglées)" }).last();
+      await expect(encaisse.getByText(/[1-9][0-9.\s]*FCFA/).first()).toBeVisible();
     }
     await beat(page, 3000);
   }
