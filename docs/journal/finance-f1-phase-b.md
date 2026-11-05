@@ -81,3 +81,26 @@ Preuves : `finance-receivables.contract.test.ts` (32 tests), `finance-withholdin
 - **Pourquoi** : c'est la décision de l'utilisatrice. Le fichier « SUIVI OPERATION & FACTURATION » de la logistique porte déjà la TVA retenue, l'acompte et le solde net.
 - **Hors périmètre** : les projections publiques de facturation et des missions (`client-public-columns`) ne portent aucun champ finance, quel que soit le rôle, administrateur compris. Elles restent inchangées, et la lecture finance passe par les routes ci-dessus.
 - **Preuves** : `finance-receivables.contract.test.ts` vérifie que la logistique lit (200), reçoit 403 en écriture, et voit les taux sur la fiche client. Le technicien et le chauffeur ne les voient pas.
+
+## Garde-fou des champs finance : angles morts fermés (2026-11-05, suite de #472)
+
+- **Quoi** : `client-finance-select-hygiene` repère désormais d'autres façons de lire les tables `clients` et `client_invoices` en entier :
+  - `getTableColumns(...)` placé hors d'une projection ;
+  - la table nommée par espace de noms (`schema.clients`) ;
+  - les noms qui masquent la table : import renommé (`import { clients as c }`), accès par crochets (`schema["clients"]`) et copie locale (`const t = clients;`). Ces trois formes sont interdites sans exception.
+  
+  Côté contrat, `POST /api/clients` ignore les taux envoyés : la fiche reste en base HT, avec des taux nuls.
+- **Comment** :
+  - le préfixe d'espace de noms est accepté partout où la table est cherchée ;
+  - les espaces de noms sont lus dans `import * as X from ".../shared/schema"` ;
+  - les deux `getTableColumns` de `client-public-columns.ts` sont en liste blanche, avec leur justification.
+- **Pourquoi** : la relecture sécurité de #472 a relevé ces formes. Chacune contournait le détecteur sans que la fuite change.
+- **Limite connue** : un nom passé par paramètre de fonction (`function f(t = clients)`) ou par déstructuration n'est pas suivi. La relecture reste le filet.
+- **Preuves** : cas de détecteur positifs et négatifs dans le test unitaire. `finance-receivables.contract.test.ts` vérifie le POST pour l'administration, le secrétariat et la logistique.
+
+## 2026-11-05 — Relevé de compte client (GET /api/clients/:id/statement)
+- **Quoi** : relevé d'un donneur d'ordre. Les factures TTC sont au débit et les paiements au crédit, avec un solde courant calculé en SQL par une fonction fenêtre. Le solde d'ouverture est celui de la veille de `from`. Les factures annulées sont exclues avec leurs paiements. Contrat : `shared/contracts/client-statement.ts`.
+- **Droits** : la route est derrière `isAnyUser`, puis `canAccessOwned` (cloison §11), puis les rôles de lecture finance. Un compte client reçoit 403 hors périmètre, avec le même message pour un id absent : aucun compte utilisateur n'est rattaché à une fiche `clients`. Le routeur est monté avant `/clients` (`isStaff`) pour que cette cloison s'applique.
+- **Champs finance** : la réponse ne porte que `client.id` et `client.name`, sans aucun taux de retenue. Les retenues restent sur l'écran des factures en attente.
+- **Limite connue** : le jour où une fiche client sera rattachée à un compte, il faudra brancher `statementOwner` sur ce lien. Deux conditions : (a) ajouter le rôle `client` à `FINANCE_RECEIVABLE_READ_ROLES`, sans quoi le contrôle de rôle suivant renverra toujours 403 ; (b) `statementOwner` devra renvoyer l’`users.id` rattaché à la fiche, jamais `clients.id`, car `canAccessOwned` compare à `req.user.id` et deux tables d’identifiants qui se recoupent ouvriraient un accès par collision d’identifiant (IDOR). Deux autres limites : `parseRouteId` passe avant la cloison, si bien qu’un compte client qui envoie `12abc` reçoit 400 au lieu de 403 (le statut ne dépend que de la forme de l’identifiant, aucune donnée ne fuit) ; les factures sans `client_id` (saisies au seul nom du client) n’apparaissent dans aucun relevé.
+- **Preuves** : `client-statement.contract.test.ts` (15 cas : droits par rôle, 401/403/404/400, solde courant, période, annulation). La route est inscrite à `COVERED_ELSEWHERE` du balayage de cloison.

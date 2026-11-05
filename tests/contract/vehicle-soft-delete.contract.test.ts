@@ -12,11 +12,10 @@ import { uniqueTestToken } from "../support/ids";
  * VEH2, suppression d'un véhicule : masqué des listes, OT et missions passés
  * consultables, véhicule non assignable.
  *
- * La colonne `vehicles.deletedAt` existe et les listes la filtrent, mais aucune
- * route ne la pose : `DELETE /api/vehicles/:id` supprime physiquement la ligne
- * (le déclencheur l'archive). Un véhicule portant un OT fait donc échouer la
- * route (clé étrangère). Les cas qui posent `deletedAt` à la main prouvent le
- * comportement des consommateurs ; le dernier cas de la route porte le défaut.
+ * Les cas qui posent `deletedAt` à la main prouvent le comportement des
+ * consommateurs. `DELETE /api/vehicles/:id` (server/api/vehicle-lifecycle.routes.ts)
+ * supprime physiquement un véhicule sans aucune action et en douceur sinon ;
+ * détail, 409 et restauration : `vehicle-lifecycle.contract.test.ts`.
  */
 
 type Actor = "admin" | "technician";

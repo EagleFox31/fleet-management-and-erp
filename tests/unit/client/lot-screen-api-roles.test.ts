@@ -109,6 +109,29 @@ const SCREEN_APIS: Record<string, Declaration> = {
     ],
   },
   "mission-operations": { apis: [{ file: "mission-operations.routes.ts", path: "/mission-operations" }] },
+  "tariff-grid": {
+    apis: [{ file: "tariff-grid.routes.ts", path: "/tariff-grid" }],
+    writes: [
+      {
+        api: { file: "tariff-grid.routes.ts", method: "post", path: "/tariff-grid" },
+        roles: "TARIFF_GRID_WRITE_ROLES",
+        gate: "canWriteTariffGrid",
+        component: "TariffGridScreen",
+      },
+      {
+        api: { file: "tariff-grid.routes.ts", method: "put", path: "/tariff-grid/:id" },
+        roles: "TARIFF_GRID_WRITE_ROLES",
+        gate: "canWriteTariffGrid",
+        component: "TariffGridScreen",
+      },
+      {
+        api: { file: "tariff-grid.routes.ts", method: "delete", path: "/tariff-grid/:id" },
+        roles: "TARIFF_GRID_WRITE_ROLES",
+        gate: "canWriteTariffGrid",
+        component: "TariffGridScreen",
+      },
+    ],
+  },
   "pending-invoices": { apis: [{ file: "pending-invoices.routes.ts", path: "/billing/pending-invoices" }] },
   // Direction en lecture seule ; dépôt réservé à admin et secrétariat.
   "invoices-awaiting-payment": {

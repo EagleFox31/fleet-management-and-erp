@@ -38,7 +38,8 @@ const log = moduleLogger("supplier-invoices");
 type InvoiceWorkflowScope = "parts" | "non_parts" | "none";
 type UserRole = "admin" | "secretary" | "warehouse" | "logistics" | "workshop_manager" | "technician" | string;
 
-const INVOICE_READ_ROLES: readonly UserRole[] = ["admin", "secretary", "warehouse", "logistics", "workshop_manager"];
+// Aligné sur la garde de montage (PROCUREMENT_ROLES) : le chef d'atelier ne voit pas les factures fournisseur.
+const INVOICE_READ_ROLES: readonly UserRole[] = ["admin", "secretary", "warehouse", "logistics"];
 const INVOICE_CREATE_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_APPROVAL_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_PAYMENT_ROLES: readonly UserRole[] = ["admin", "secretary"];
@@ -155,7 +156,7 @@ const checkReadPermission = async (req: Request, res: Response, next: NextFuncti
     req,
     res,
     INVOICE_READ_ROLES,
-    "Accès facture réservé à l'administration, secrétariat, magasin, achats et atelier"
+    "Accès facture réservé à l'administration, au secrétariat, au magasin et à la logistique"
   )) {
     return;
   }
