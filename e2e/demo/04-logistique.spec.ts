@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { clientInvoices, missions } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_MISSION } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_MISSION, seedDemo } from "./seed-demo";
 
 /**
  * Démo « logistique » : créer une mission pour un donneur d'ordre, l'affecter (véhicule
@@ -17,7 +17,10 @@ async function missionStatus(): Promise<string | undefined> {
   return row?.status;
 }
 
-test.beforeAll(() => assertLocalDatabase());
+test.beforeAll(async () => {
+  assertLocalDatabase();
+  await seedDemo();
+});
 
 test("démo logistique : de la création de la mission à la facture client", async ({ page }) => {
   test.setTimeout(300_000);
@@ -37,7 +40,7 @@ test("démo logistique : de la création de la mission à la facture client", as
 
   await page.getByTestId("input-pickup-address").fill("Douala, port autonome");
   await page.getByTestId("input-delivery-address").fill("Yaoundé, entrepôt central");
-  await page.getByTestId("textarea-cargo").fill("Palettes de boissons, 18 tonnes").catch(() => undefined);
+  await page.getByTestId("textarea-cargo").fill("Palettes de boissons, 18 tonnes");
   await beat(page);
   await page.getByTestId("btn-next").click();
 
