@@ -74,9 +74,22 @@ ALTER TABLE mission_budgets ADD COLUMN IF NOT EXISTS destination_id integer;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'mission_budgets_destination_id_mission_destinations_id_fk') THEN
+  -- Posée NOT VALID puis validée : une destination_id orpheline laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_destination_id_mission_destinations_id_fk') THEN
     ALTER TABLE mission_budgets
       ADD CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk
-      FOREIGN KEY (destination_id) REFERENCES mission_destinations(id);
+      FOREIGN KEY (destination_id) REFERENCES mission_destinations(id) NOT VALID;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+             AND conname = 'mission_budgets_destination_id_mission_destinations_id_fk' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_budgets VALIDATE CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'mission_budgets_destination_id_mission_destinations_id_fk laissée NOT VALID : destination_id vers une destination absente';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'mission_budgets_destination_id_mission_destinations_id_fk non posée : verrou indisponible';
 END $$;

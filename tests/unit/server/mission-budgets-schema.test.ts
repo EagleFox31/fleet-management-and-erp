@@ -141,5 +141,10 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
     const fk = getTableConfig(missionBudgets).foreignKeys.map((k) => k.getName());
     expect(fk).toContain("mission_budgets_destination_id_mission_destinations_id_fk");
     expect(sql).toContain("CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk");
+    // Orphelins possibles sur une base existante : NOT VALID, VALIDATE en repli WARNING, relue au démarrage.
+    expect(sql).toContain("REFERENCES mission_destinations(id) NOT VALID");
+    expect(sql).toContain("VALIDATE CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk");
+    expect(sql).toContain("EXCEPTION WHEN foreign_key_violation");
+    expect(reconciled).toContain("'mission_budgets_destination_id_mission_destinations_id_fk'");
   });
 });
