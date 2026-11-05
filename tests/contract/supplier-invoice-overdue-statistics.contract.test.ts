@@ -101,6 +101,16 @@ describe("factures en retard", () => {
   });
 });
 
+describe("validation d'une facture", () => {
+  // La garde de montage refuse le chef d'atelier avant le calcul du périmètre (pièces ou non) : 403 quel qu'il soit.
+  it("workshop_manager : 403, facture inchangée", async () => {
+    const r = await session.call("PATCH", `/api/supplier-invoices/${created.future}/validate`, { actor: "workshop", body: {} });
+    expect(r.status).toBe(403);
+    const [row] = await db.select({ status: supplierInvoices.status }).from(supplierInvoices).where(eq(supplierInvoices.id, created.future));
+    expect(row.status).toBe("received");
+  });
+});
+
 describe("statistiques", () => {
   it("corps au contrat, factures du test comptées", async () => {
     const r = await session.call("GET", STATISTICS, { actor: "warehouse" });
