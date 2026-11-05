@@ -48,8 +48,8 @@ export function KpiTile({
         "rounded-xl border px-3.5 py-3 sm:px-4 sm:py-3.5 flex flex-col gap-1",
         featured
           ? featuredTone === "danger"
-            ? "border-transparent bg-gradient-to-br from-red-600 to-rose-700 shadow-sm"
-            : "border-transparent bg-gradient-to-br from-emerald-600 to-green-700 shadow-sm"
+            ? "border-transparent bg-gradient-to-br from-destructive to-destructive/80 shadow-sm"
+            : "border-transparent bg-gradient-to-br from-primary to-primary/80 shadow-sm"
           : "border-gray-100 bg-gray-50",
         isClickable &&
           "cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -76,7 +76,7 @@ export function KpiTile({
             "w-8 h-8 rounded-lg flex items-center justify-center",
             featured
               ? "bg-white/15 text-white"
-              : "bg-green-50 text-green-600",
+              : "bg-primary/10 text-primary-text",
             !featured && iconWrapperClassName,
           )}
         >
