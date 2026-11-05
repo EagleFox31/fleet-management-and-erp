@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { MISSION_PRICE_REASON_MIN } from "../constants/roles";
-import { bodyIdSchema } from "./common";
+import { bodyIdSchema, MAX_DB_INTEGER_ID } from "./common";
+
+const dbId = z.number().int().positive().max(MAX_DB_INTEGER_ID);
 
 /** Prix convenu d'une mission (O3 lot 3b) : lecture avec historique, changement avec motif. XAF entier. */
 export const missionPricePath = (missionId: number | string) => `/api/missions/${missionId}/agreed-price`;
@@ -20,20 +22,20 @@ export const missionPriceBodySchema = z
 export type MissionPriceBody = z.infer<typeof missionPriceBodySchema>;
 
 export const missionPriceHistoryRowSchema = z.object({
-  id: z.number(),
+  id: dbId,
   oldPrice: z.number().nullable(),
   newPrice: z.number().nullable(),
-  oldTariffGridId: z.number().nullable(),
-  newTariffGridId: z.number().nullable(),
+  oldTariffGridId: dbId.nullable(),
+  newTariffGridId: dbId.nullable(),
   reason: z.string().nullable(),
-  changedBy: z.number().nullable(),
+  changedBy: dbId.nullable(),
   changedByName: z.string().nullable(),
   changedAt: z.string(),
 });
 
 export const missionPriceResponseSchema = z.object({
   agreedPrice: z.number().nullable(),
-  tariffGridId: z.number().nullable(),
+  tariffGridId: dbId.nullable(),
   history: z.array(missionPriceHistoryRowSchema),
 });
 export type MissionPriceResponse = z.infer<typeof missionPriceResponseSchema>;
