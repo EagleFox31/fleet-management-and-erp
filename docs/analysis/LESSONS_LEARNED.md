@@ -1698,6 +1698,13 @@ Test non déterministe (flake), sans défaut produit.
 ### Leçon généralisée
 Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
 
+### Récurrence (5 novembre 2026) : le garde-fou ne couvrait qu'une forme
+- Faux rouge en CI sur #405 (contract 4) : `role-guards-pistes-def.contract.test.ts:137` contrôlait `/sql|syntax|NaN/i` sur `JSON.stringify(await res.json())`, et un `requestId` « lMjhMsQlWe » contient « sQl ». `vehicle-documents-upload-errors` (`/form/`) avait le même risque.
+- Cause : le motif du garde-fou se limitait à `…body)).not.toMatch`. Les contrôles écrits sur `await res.json()` ou sur une variable `json` lui échappaient.
+- Prévention : motif élargi à `await x.json()` et aux variables `…json`, avec des cas positifs et un cas négatif (`data.payload`) dans `leak-check-hygiene.test.ts` ; les deux contrats passent par `leakText`.
+- Angles morts restants (hors motif) : `expect` sur plusieurs lignes, `res.text()`, `.not.toContain` sur un mot court. À traiter si un faux rouge en montre un.
+- Règle : un garde-fou par motif doit être éprouvé contre toutes les formes d'écriture du même contrôle, pas seulement celle qui a échoué la première fois.
+
 ## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
 
 ### Contexte
@@ -3040,6 +3047,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
 
+## 2026-11-05 — Justificatif de règlement fournisseur servi en ligne
+
+- **Contexte** : le justificatif d'un règlement fournisseur était ouvert dans un onglet et servi en ligne sur l'origine de l'application. L'extension écrite sur disque venait du nom d'origine.
+- **Cause racine** : le type servi dépendait du nom fourni au dépôt, pas d'une décision du serveur. Ni `Content-Disposition: attachment` ni `X-Content-Type-Options: nosniff` n'étaient posés.
+- **Classification** : sécurité (fichier téléversé). Near miss : relevé en revue, avant tout signalement.
+- **Résolution** : l'extension disque vient du type déclaré, pris dans une liste blanche (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`) ; le type est obligatoire dans `settlementProofFileName`. La route sert en `attachment` avec `nosniff`, et un type tiré de l'extension en liste blanche, sinon `application/octet-stream`. Le lien de l'écran devient « Télécharger la preuve ».
+- **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
+- **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
+- **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
 ## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
 
 - **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
