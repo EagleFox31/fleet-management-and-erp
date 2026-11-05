@@ -129,13 +129,24 @@ async function findReplayedFuelSubmission(
   return record;
 }
 
+/** Identifiant de mission d'URL : entier strict (chiffres seuls), sinon 400. Seule lecture de `:id`. */
+export function parseMissionId(value: unknown): number {
+  const text = typeof value === "string" ? value : "";
+  const id = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(id) || id <= 0) {
+    throw new AppError(400, "Identifiant de mission invalide.");
+  }
+  return id;
+}
+
 // Cloison chauffeur (DRV2-3) : toute route `/:id/...` du routeur refuse un chauffeur
 // non affecté à la mission. Le personnel n'est pas filtré. Mission inconnue : 403 aussi,
 // pour ne pas révéler l'existence d'un identifiant.
 router.param("id", async (req, _res, next, value) => {
   try {
-    const missionId = Number(value);
-    if (!Number.isInteger(missionId)) return next();
+    // Une garde refuse ce qu'elle ne sait pas lire : un identifiant qui n'est pas un entier strict
+    // n'atteint jamais un handler (qui le relirait autrement).
+    const missionId = parseMissionId(value);
     if (!(await canAccessMissionAsDriver(req.user, missionId))) {
       throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
     }
@@ -895,7 +906,7 @@ router.get("/", async (req, res) => {
 // GET /api/missions/:id - Détails d'une mission
 router.get("/:id", async (req, res) => {
   try {
-    const missionId = parseInt(req.params.id);
+    const missionId = parseMissionId(req.params.id);
 
     const [mission] = await db
       .select({
@@ -1013,7 +1024,7 @@ router.get("/:id", async (req, res) => {
 // GET /api/missions/:id/fuel-records - Historique carburant lié à la mission
 router.get("/:id/fuel-records", async (req, res) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -1067,7 +1078,7 @@ router.get("/:id/fuel-records", async (req, res) => {
 // Débite la carte de l'entreprise : gestionnaires de mission et chauffeur affecté seulement (contrôle du chauffeur plus bas).
 router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"]), async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -1232,7 +1243,7 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
 // POST /api/missions/:id/fuel-records/regularize - Régulariser un plein oublié après clôture/livraison
 router.post("/:id/fuel-records/regularize", async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -1458,7 +1469,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 // POST /api/missions/:id/fuel-records/declare-no-refuel - Déclarer une mission terminée sans ravitaillement
 router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -1570,7 +1581,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
 // GET /api/missions/:id/launch-readiness - Checklist métier de lancement mission
 router.get("/:id/launch-readiness", async (req, res) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -2244,7 +2255,7 @@ const updateMissionSchema = z.object({
 // chauffeur, technicien et magasinier modifier coût carburant, dates, chauffeur et véhicule.
 router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id);
+    const missionId = parseMissionId(req.params.id);
     if (!Number.isInteger(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -2662,7 +2673,7 @@ const editionBlockedMessage = (status: string) => `Mission ${status === "complet
 // (FOR UPDATE) : deux ajouts concurrents du même chauffeur se serrent, le second voit le premier et reçoit 409.
 router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateBody(addAssignmentSchema), async (req, res, next) => {
   try {
-    const missionId = Number(req.params.id);
+    const missionId = parseMissionId(req.params.id);
     assertValidDbId(missionId, "ID mission invalide.");
     const { vehicleId, driverId } = req.body as z.infer<typeof addAssignmentSchema>;
     assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
@@ -2762,7 +2773,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
 // Le chauffeur perd aussitôt le droit de saisie (activeDriverAssignmentsOnMission ne compte que les actives).
 router.delete("/:id/assignments/:assignmentId", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
-    const missionId = Number(req.params.id);
+    const missionId = parseMissionId(req.params.id);
     const assignmentId = Number(req.params.assignmentId);
     assertValidDbId(missionId, "ID mission invalide.");
     assertValidDbId(assignmentId, "ID affectation invalide.");
@@ -2821,7 +2832,7 @@ router.delete("/:id/assignments/:assignmentId", authorize([...MISSION_MANAGER_RO
 // PUT /api/missions/:id/status - Mettre à jour le statut d'une mission
 router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id);
+    const missionId = parseMissionId(req.params.id);
     const { status, actualFdrCost: actualFdrCostBody } = req.body || {};
     const targetStatus = String(status || "").trim();
 
@@ -3281,7 +3292,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
 // GET /api/missions/:id/document-renewal-requests - Lister les demandes documentaires ouvertes pour cette mission
 router.get("/:id/document-renewal-requests", async (req, res) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (Number.isNaN(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
@@ -3418,7 +3429,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
 // POST /api/missions/:id/document-renewal-requests - Créer des demandes documentaires depuis un blocage mission
 router.post("/:id/document-renewal-requests", async (req, res, next) => {
   try {
-    const missionId = parseInt(req.params.id, 10);
+    const missionId = parseMissionId(req.params.id);
     if (Number.isNaN(missionId)) {
       return res.status(400).json({ message: "ID mission invalide." });
     }
