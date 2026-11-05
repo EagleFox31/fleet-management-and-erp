@@ -9,7 +9,6 @@ import {
   FileText, 
   Search, 
   Download, 
-  Eye, 
   Filter,
   Calendar,
   User,
@@ -107,7 +106,6 @@ export default function WorkflowDocumentsPage() {
     const link = document.createElement('a');
     link.href = `/api/workflows/documents/${documentId}`;
     link.download = fileName;
-    link.target = '_blank';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -321,15 +319,6 @@ export default function WorkflowDocumentsPage() {
                             className="h-8 w-8 p-0"
                           >
                             <Download className="h-4 w-4" />
-                          </Button>
-                          
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => window.open(`/api/workflows/documents/${document.id}`, '_blank')}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Eye className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
