@@ -1745,6 +1745,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 ### Exceptions nommées
 - Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
 - Routes multer de `server/api` (récépissé, règlement fournisseur, dépôt de document véhicule) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ». Restent à revoir selon ce patron, hors `server/api` : missions, commandes fournisseur (purchase-orders), `server/middleware/upload.ts` et `server/routes.ts`.
+- Les autres routes multer (récépissé, preuves) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ».
 
 ### Prévention (vérifiable)
 - `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
