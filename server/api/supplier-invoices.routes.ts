@@ -15,6 +15,9 @@ import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
+import { isoDateInZone } from "@shared/contracts/kpi-period";
+import { supplierAnnualRecapQuerySchema } from "@shared/contracts/supplier-annual-recap";
+import { supplierAnnualRecap } from "../services/supplier-annual-recap-service";
 import {
   SETTLEMENT_PROOF_EXTENSION_BY_MIME,
   SETTLEMENT_PROOF_PREFIX,
@@ -414,6 +417,30 @@ router.get("/statistics", checkReadPermission, async (req: Request, res: Respons
     res.json(stats);
   } catch (error) {
     next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des statistiques.", { cause: error }), { event: "Erreur lors de la récupération des statistiques" }));
+  }
+});
+
+/**
+ * GET /api/supplier-invoices/annual-recap?year=AAAA[&supplierId=N]
+ * HT, TVA, TTC et reste dû actuel par fournisseur et par mois. Déclarée avant `/:id`.
+ */
+router.get("/annual-recap", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = supplierAnnualRecapQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      // Paramètre inconnu, valeur répétée ou tableau : le message de zod est technique.
+      const issue = parsed.error.issues[0];
+      if (issue?.code === "unrecognized_keys") throw new AppError(400, "Paramètre non reconnu.");
+      if (issue?.code === "invalid_type") {
+        throw new AppError(400, issue.path[0] === "supplierId" ? "Identifiant de fournisseur invalide." : "Année invalide.");
+      }
+      throw new AppError(400, issue?.message ?? "Année invalide.");
+    }
+    const year = Number(parsed.data.year ?? isoDateInZone(new Date()).slice(0, 4));
+    const supplierId = parseQueryId(parsed.data.supplierId, "Identifiant de fournisseur invalide.") ?? null;
+    res.json(await supplierAnnualRecap(year, supplierId));
+  } catch (error) {
+    next(error);
   }
 });
 
