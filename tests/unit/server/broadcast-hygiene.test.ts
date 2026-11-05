@@ -61,6 +61,8 @@ const KINDS = new Set(["roles", "user", "broadcast"]);
  */
 const OPAQUE_SCOPES: Record<string, number> = {
 "server/api/document-renewals.routes.ts": 2,
+  "server/api/drivers-management.routes.ts": 1,
+  "server/api/drivers.routes.ts": 1,
   "server/api/finance-receivables.routes.ts": 1,
   "server/api/fuel-anomalies.routes.ts": 1,
   "server/api/fuel-vouchers.routes.ts": 1,
