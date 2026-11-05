@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * Toute réponse 500 locale ou tout `console.*` réintroduit ici est une régression.
  */
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
-const ROUTERS = ["clients", "document-renewals", "operations", "supplier-invoices", "suppliers", "vehicles"];
+const ROUTERS = ["billing", "clients", "document-renewals", "operations", "supplier-invoices", "suppliers", "vehicles"];
 
 const sourceOf = (name: string) =>
   readFileSync(join(ROOT, "server", "api", `${name}.routes.ts`), "utf-8");
