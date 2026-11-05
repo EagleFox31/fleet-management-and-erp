@@ -2183,26 +2183,30 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
       }
     }
 
-    // Create mission
-    const [newMission] = await db
-      .insert(missions)
-      .values(validatedData)
-      .returning();
-
-    // If assignment data is provided, create assignment
-    if (assignmentVehicleId !== null && assignmentDriverId !== null) {
-      const assignmentData = insertAssignmentSchema.parse({
-        missionId: newMission.id,
-        vehicleId: assignmentVehicleId,
-        driverId: assignmentDriverId,
-        status: "pending" as const,
-      });
-      
-      await db.insert(assignments).values(assignmentData);
-    }
+    // Mission et affectation dans une même transaction : l'une sans l'autre laisserait une mission
+    // orpheline. Une mission planifiée et affectée naît `assigned` (affectation `pending`), comme
+    // celle qui reçoit son affectation après coup (PATCH, POST /:id/assignments). Un brouillon reste brouillon.
+    const withAssignment = assignmentVehicleId !== null && assignmentDriverId !== null;
+    const newMission = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(missions)
+        .values(withAssignment && validatedData.status === "planned" ? { ...validatedData, status: "assigned" } : validatedData)
+        .returning();
+      if (withAssignment) {
+        await tx.insert(assignments).values(
+          insertAssignmentSchema.parse({
+            missionId: created.id,
+            vehicleId: assignmentVehicleId,
+            driverId: assignmentDriverId,
+            status: "pending" as const,
+          }),
+        );
+      }
+      return created;
+    });
 
     await broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
-      hasAssignment: assignmentVehicleId !== null && assignmentDriverId !== null,
+      hasAssignment: withAssignment,
     }, req.requestId);
 
     return res.status(201).json(newMission);
