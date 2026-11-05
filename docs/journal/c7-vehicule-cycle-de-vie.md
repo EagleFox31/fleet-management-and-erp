@@ -359,3 +359,22 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Limites connues** :
   - une route qui n'atteint le véhicule que par `workOrderId`, ou qui passe le corps entier à Zod sans nommer le véhicule, échappe au marqueur d'hygiène. Le plancher de la table compense en partie ;
   - les sous-routeurs montés dans un routeur ne sont pas balayés.
+
+## 2026-11-05T23:48:10+01:00 — L3 : le refus « véhicule retiré » n'est plus mis en cache par l'idempotence (réserve de relecture)
+
+- **Quoi** :
+  - le 409 de la garde L3 porte le code `VEHICLE_RETIRED` (`shared/errors.ts`) ;
+  - la garde d'idempotence libère la clé sur ce code (`PRE_WRITE_REFUSAL_CODES`, `isPreWriteRefusal`) au lieu de mémoriser la réponse.
+- **Pourquoi** :
+  - `isReplayableStatus` mettait en cache tout statut de 200 à 499, sauf 401, 403, 408 et 429 ;
+  - `PUT /vehicles/:id/mileage` est à la fois idempotent et dans la table L3 ;
+  - après restauration du véhicule, le rejeu avec la même clé renvoyait donc le 409 gardé en cache, et la saisie ne passait jamais.
+- **Comment** :
+  - `errorHandler` fait maintenant suivre le `code` d'une `AppError`. Avant, il le perdait : la sortie recalculait `CONFLICT` à partir du statut. Les deux `AppError` qui passaient déjà un code (`RATE_LIMITED` en 429, `CONFLICT` en 409) avaient le code par défaut de leur statut, donc l'existant ne change pas ;
+  - la garde de sortie accepte le code, qui figure dans `STATUS_MESSAGES` ;
+  - côté client, `VEHICLE_RETIRED` est traité comme un conflit.
+- **Preuve** :
+  - un contrat dans `vehicle-retired-writes` : retirer le véhicule, saisir le kilométrage avec une clé (409 `VEHICLE_RETIRED`), restaurer, rejouer la même clé. On obtient 200 sans en-tête de rejeu, le kilométrage est écrit, et un troisième envoi est bien rejoué ;
+  - des tests unitaires dans `idempotency-guard.test` : un 409 `CONFLICT` reste rejouable, un corps nul n'est pas un refus.
+- **Ordre des refus** : pour le personnel, le 409 de la garde passe avant le 403 de la route. Il n'y a pas de fuite : le personnel voit tous les véhicules (§11). Un anonyme ou un client ne passe pas par la garde (`!user || role === "client"`) : il reçoit le 401 ou le 403 de la route, sans rien apprendre de l'état du véhicule.
+- **À surveiller** : `prefix-middleware-guardrail` met 3,9 s pour une limite de 5 s. Il risque de devenir instable sous charge.

@@ -16,6 +16,7 @@ import {
   workOrderItems,
   workOrders,
 } from "../../shared/schema";
+import { IDEMPOTENCY_HEADER, IDEMPOTENCY_REPLAYED_HEADER } from "../../server/lib/idempotency-config";
 import { VEHICLE_RETIRED_EDIT_MESSAGE } from "../../server/lib/vehicle-retired";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -220,5 +221,42 @@ describe("témoins : le refus ne vise que le véhicule retiré et le personnel",
   it("démontage de pneus laissé ouvert sur véhicule retiré", async () => {
     const res = await actors.call("PATCH", `/api/vehicle-tires/${R.vt}/remove`, { actor: "admin", body: { removalDate: today, removalMileage: 50000, reason: "TEST" } });
     expect(res.status).not.toBe(409);
+  });
+});
+
+describe("véhicule retiré et idempotence : le refus n'est pas mis en cache", { timeout: 60000 }, () => {
+  const previousFlags = process.env.FEATURE_FLAGS;
+  beforeAll(() => {
+    process.env.FEATURE_FLAGS = "offline-writes=on";
+  });
+  afterAll(() => {
+    if (previousFlags === undefined) delete process.env.FEATURE_FLAGS;
+    else process.env.FEATURE_FLAGS = previousFlags;
+  });
+
+  it("retirer, saisir avec une clé (409), restaurer, rejouer la même clé : 200 et écriture faite", async () => {
+    const vehicle = await createTestVehicle({ mileage: 100 });
+    ids.vehicleIds.push(vehicle.id);
+    await db.update(vehicles).set({ deletedAt: new Date() }).where(eq(vehicles.id, vehicle.id));
+    const key = `l3-${uniqueTestToken()}`;
+    const send = () =>
+      actors.call("PUT", `/api/vehicles/${vehicle.id}/mileage`, { actor: "admin", body: { kilometers: 1200 }, headers: { [IDEMPOTENCY_HEADER]: key } });
+
+    const refused = await send();
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe("VEHICLE_RETIRED");
+    expect(refused.body.message).toBe(VEHICLE_RETIRED_EDIT_MESSAGE);
+
+    await db.update(vehicles).set({ deletedAt: null }).where(eq(vehicles.id, vehicle.id));
+    const retried = await send();
+    expect(retried.status, JSON.stringify(retried.body).slice(0, 200)).toBe(200);
+    expect(retried.headers.get(IDEMPOTENCY_REPLAYED_HEADER)).toBeNull();
+    const [row] = await db.select({ mileage: vehicles.mileage }).from(vehicles).where(eq(vehicles.id, vehicle.id));
+    expect(row.mileage).toBe(1200);
+
+    // La réponse 200 est, elle, mise en cache : le rejeu suivant la renvoie sans réécrire.
+    const replay = await send();
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get(IDEMPOTENCY_REPLAYED_HEADER)).toBe("true");
   });
 });
