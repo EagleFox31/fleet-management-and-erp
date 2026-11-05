@@ -21,7 +21,7 @@ test("démo direction : tableau de bord, corridors CEMAC et rapports", async ({ 
 
   await page.getByText("Rapports Direction", { exact: true }).first().click();
   await page.getByRole("link", { name: "Board Pack Stratégique" }).first().click();
-  await expect(page).toHaveURL(//management/reports/board-pack/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/management\/reports\/board-pack/, { timeout: 30_000 });
   await beat(page, 3000);
   for (const label of ["Trésorerie & Recouvrement", "Audit Flotte & TCO"]) {
     await page.getByRole("tab", { name: label }).click();
