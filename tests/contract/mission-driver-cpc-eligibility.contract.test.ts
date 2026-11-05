@@ -204,3 +204,86 @@ describe("verdict CPC des affectations de mission", () => {
     }, 60000);
   });
 });
+
+/** Toutes les clés d'un JSON, à tout niveau (objets et tableaux imbriqués). */
+function collectKeys(node: unknown, into: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const item of node) collectKeys(item, into);
+  } else if (node !== null && typeof node === "object") {
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      into.push(key);
+      collectKeys(value, into);
+    }
+  }
+  return into;
+}
+
+describe("parcours récursif : aucune fuite du CPC d'un autre chauffeur ni de la date", () => {
+  const DATE_FR = /\d{2}\/\d{2}\/\d{4}/;
+
+  it("chauffeur sur une mission partagée : liste, détail et launch-readiness", async () => {
+    const own = await ownDriver("FORMÉ", daysAgo(100));
+    const other = await newDriver("FORMÉ", daysAgo(800));
+    // L'autre chauffeur est affecté en premier : sans portée, launch-readiness lirait sa fiche.
+    const missionId = await missionWith(other.id, own.id);
+
+    const detail = await call("GET", `/api/missions/${missionId}`, { actor: "driver" });
+    const list = await call("GET", "/api/missions", { actor: "driver" });
+    const readiness = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "driver" });
+    expect([detail.status, list.status, readiness.status]).toEqual([200, 200, 200]);
+
+    const listed = (list.body as any[]).find((m) => m.id === missionId);
+    for (const [name, body] of [["liste", listed], ["détail", detail.body], ["launch-readiness", readiness.body]] as const) {
+      const keys = collectKeys(body);
+      expect(keys, name).not.toContain("cpcTrainingDate");
+      expect(leakText(body), name).not.toContain(other.employeeNumber as string);
+      expect(leakText(body), name).not.toContain(daysAgo(800));
+    }
+
+    // Fiche de l'autre chauffeur : ni cpcEligible ni cpcIneligibleCode, nulle part.
+    for (const body of [listed, detail.body]) {
+      const others = (body.assignments as any[]).filter((a) => a.driver?.id === other.id);
+      expect(others).toEqual([]);
+    }
+    // launch-readiness porte sur la fiche du lecteur (éligible) : aucun motif d'inéligibilité.
+    const check = readiness.body.checks.find((c: any) => c.key === "driver_cpc_valid");
+    expect(check.passed).toBe(true);
+    expect(collectKeys(readiness.body)).not.toContain("cpcIneligibleCode");
+    expect(check.detail).not.toMatch(DATE_FR);
+  }, 60000);
+
+  it("chauffeur : launch-readiness d'une mission qui ne lui est pas affectée refusé (403)", async () => {
+    await ownDriver("FORMÉ", daysAgo(100));
+    const other = await newDriver("FORMÉ", daysAgo(800));
+    const missionId = await missionWith(other.id);
+    const res = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "driver" });
+    expect(res.status).toBe(403);
+    expect(collectKeys(res.body)).not.toContain("cpcIneligibleCode");
+    expect(leakText(res.body)).not.toContain(other.employeeNumber as string);
+  }, 60000);
+
+  it("personnel : launch-readiness donne le code et un libellé fixe, sans date", async () => {
+    const d = await newDriver("FORMÉ", daysAgo(800));
+    const missionId = await missionWith(d.id);
+    const res = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "logistics" });
+    expect(res.status).toBe(200);
+    const keys = collectKeys(res.body);
+    expect(keys).not.toContain("cpcTrainingDate");
+    const check = res.body.checks.find((c: any) => c.key === "driver_cpc_valid");
+    expect(check.passed).toBe(false);
+    expect(check.cpcIneligibleCode).toBe("EXPIRED");
+    expect(check.detail).toBe("Formation CPC expirée.");
+    for (const failure of res.body.blockingFailures) expect(failure.detail).not.toMatch(DATE_FR);
+    expect(leakText(res.body)).not.toContain(daysAgo(800));
+  }, 60000);
+
+  it("liste et détail : cpcIneligibleCode à côté du libellé", async () => {
+    const d = await newDriver("NON FORMÉ", null);
+    const missionId = await missionWith(d.id);
+    for (const read of [driverOfList, driverOfDetail]) {
+      const { driver } = await read(missionId);
+      expect(driver.cpcIneligibleCode).toBe("NOT_VALID");
+    }
+  }, 60000);
+});
+

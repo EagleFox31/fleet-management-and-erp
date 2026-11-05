@@ -29,6 +29,7 @@ import { toFieldErrors } from "@shared/errors";
 import {
   activeDriverAssignmentsOnMission,
   canAccessMissionAsDriver,
+  driverLiveAssignmentFilter,
   driverScopeOf,
   missionsOfDriversFilter,
   missionVehicleIdsForStaff,
@@ -1598,6 +1599,13 @@ router.get("/:id/launch-readiness", async (req, res) => {
       return res.status(404).json({ message: "Mission non trouvée." });
     }
 
+    // Même portée que la liste et le détail : un chauffeur ne lit que ses missions, et la
+    // checklist (verdict CPC compris) se calcule sur SA fiche, jamais sur celle d'un collègue.
+    const readinessScope = await driverScopeOf(req.user);
+    if (readinessScope !== undefined && !(await canAccessMissionAsDriver(req.user, missionId))) {
+      return res.status(403).json({ message: OUT_OF_DRIVER_SCOPE_MESSAGE });
+    }
+
     const [missionAssignment] = await db
       .select({
         id: assignments.id,
@@ -1620,7 +1628,11 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .from(assignments)
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
-      .where(eq(assignments.missionId, missionId))
+      .where(
+        readinessScope === undefined
+          ? eq(assignments.missionId, missionId)
+          : and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(readinessScope)),
+      )
       .orderBy(asc(assignments.id))
       .limit(1);
 
@@ -1844,8 +1856,10 @@ router.get("/:id/launch-readiness", async (req, res) => {
         detail: hasDriver
           ? cpcValid
             ? "CPC conforme."
-            : (cpcCheck.reason ?? "CPC non valide.")
+            : (cpcCheck.label ?? "CPC non valide.")
           : "Assignez d'abord un chauffeur.",
+        // Code stable lu par les écrans ; jamais la raison datée (diffusée à tout le personnel).
+        ...(hasDriver && !cpcValid && cpcCheck.code ? { cpcIneligibleCode: cpcCheck.code } : {}),
       },
       {
         key: "doc_carte_grise",
@@ -1943,6 +1957,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       blocking: boolean;
       detail: string;
       status?: "passed" | "warning" | "failed";
+      cpcIneligibleCode?: string;
     }>;
 
     const openRenewalRequests = missionAssignment?.vehicleId
