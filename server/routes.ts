@@ -1047,13 +1047,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Un client reçoit la même réponse (403, même message) pour un véhicule absent et pour celui d'un
       // autre : il ne peut pas deviner quels identifiants existent. Le personnel garde le 404.
       if (!vehicle) {
-        if (user.role === 'client') return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        if (user.role === 'client') return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
         return res.status(404).json({ message: "Véhicule non trouvé" });
       }
 
       // Vérifier les permissions : les clients ne peuvent voir que leurs véhicules
       if (user.role === 'client' && vehicle.ownerId !== user.id) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
       }
       
       return res.status(200).json(redactVehiclePrice({ role: normalizeRole(user.role) }, vehicle));
