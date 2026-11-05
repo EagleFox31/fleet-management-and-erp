@@ -3181,6 +3181,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, cas « un motif de document tu par la borne du message reste dans body.motifs ». Rouge si `details` est retiré de la levée dans `server/api/missions.routes.ts`.
 - **Leçon généralisée** : retirer ou renommer un champ de réponse exige de chercher ses lecteurs (client, e2e) et de figer le champ conservé par un test de contrat, pas seulement par un e2e.
 
+## 2026-11-05 — Prix convenu (O3) : une donnée réservée fuyait par les routes qui renvoient la ligne entière
+
+- **Contexte** : le prix convenu d'une mission n'est lisible que par les lecteurs de la grille tarifaire. La revue de #487 a relevé que `GET /api/operations/missions*`, la réponse de `PUT /api/missions/:id/status` (chauffeur) et la trame WebSocket de mission (tout le personnel, technicien compris) renvoyaient la ligne `missions` entière, donc `agreedPrice`.
+- **Cause racine** : la colonne a été ajoutée en pensant aux écrans de saisie ; les consommateurs qui sélectionnent `missions` en bloc n'ont pas été énumérés.
+- **Classification** : fuite de donnée sensible par projection implicite (même famille que le prix d'achat véhicule).
+- **Résolution** : `server/lib/mission-price-scope.ts` (`redactMissionPrice`, clés à `null`, échec fermé) appliqué aux routes operations, au PUT status et à la trame temps réel. Facturation client, exports et tableau de bord direction n'ont que des rôles lecteurs : sans exposition.
+- **Prévention vérifiable** : `tests/contract/mission-price-redaction.contract.test.ts` (technicien et chauffeur, vu rouge sans le helper) et `tests/unit/server/mission-price-scope.test.ts`.
+- **Leçon généralisée** : ajouter une colonne réservée à un rôle impose d'énumérer toutes les lectures de la table (`select()`, `mission: missions`, trames) avant de livrer, pas seulement l'écran de saisie.
 ## 2026-11-05 — Effet argent sur une transition dont le statut est lu hors verrou (L1d, #491)
 
 - **Contexte** : L1d branche la contre-passation du budget de mission sur `PUT /api/missions/:id/status` (annulation). La relecture sécurité de #491 a relevé que la route lisait le statut courant avant la transaction, sans verrou, puis écrivait par un UPDATE non conditionné.

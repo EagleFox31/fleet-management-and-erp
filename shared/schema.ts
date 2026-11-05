@@ -1347,6 +1347,9 @@ export const missions = pgTable("missions", {
   
   // Distance et coûts
   estimatedDistance: integer("estimated_distance"), // km
+  // O3 lot 3 : prix convenu en XAF entier (saisi ou repris d'un tarif) et tarif d'origine, tracé sans l'imposer.
+  agreedPrice: numeric("agreed_price", { precision: 15, scale: 0 }),
+  tariffGridId: integer("tariff_grid_id").references(() => tariffGrid.id, { onDelete: "set null" }),
   actualDistance: integer("actual_distance"), // km réel
   estimatedFuelCost: numeric("estimated_fuel_cost", { precision: 15, scale: 2 }),
   actualFuelCost: numeric("actual_fuel_cost", { precision: 15, scale: 2 }),

@@ -469,6 +469,12 @@ export const TARIFF_GRID_READ_ROLES = ["admin", "management", "secretary", "logi
 /** Grille tarifaire (O3) : écriture réservée à la direction et à l'admin. */
 export const TARIFF_GRID_WRITE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 
+/** Prix convenu d'une mission (O3) : saisi à la création par les gestionnaires de missions qui lisent la grille. */
+export function canSetMissionPrice(role: string | null | undefined): boolean {
+  return (MISSION_MANAGER_ROLES as readonly string[]).includes(String(role ?? "")) &&
+    (TARIFF_GRID_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canWriteTariffGrid(role: string | null | undefined): boolean {
   return (TARIFF_GRID_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
 }
