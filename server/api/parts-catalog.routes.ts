@@ -26,6 +26,8 @@ const router = Router();
 
 const failWith = makeFailWith(log);
 
+// Sans contrainte `([0-9]+)` dans le chemin : un id illisible (« 1abc ») doit recevoir un 400, pas tomber dans le 404 du routeur.
+const PART_ID_INVALID_MESSAGE = "Identifiant de pièce invalide.";
 /**
  * Couche 2 (AGENTS.md §2) : toute écriture sur une fiche pièce prévient le personnel, qui
  * ré-interroge liste, détail et écrans du magasin. Portée PART_CATALOG_EVENT_ROLES : ni
@@ -68,9 +70,6 @@ router.post("/parts", authenticate, isPartsCatalogManager, async (req, res, next
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Échec de la création de la pièce" }));
   }
 });
-
-// Sans contrainte `([0-9]+)` dans le chemin : un id illisible (« 1abc ») doit recevoir un 400, pas tomber dans le 404 du routeur.
-const PART_ID_INVALID_MESSAGE = "Identifiant de pièce invalide.";
 
 router.delete("/parts/:id", isAdmin, async (req, res, next) => {
   try {
