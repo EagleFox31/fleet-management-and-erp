@@ -2302,7 +2302,7 @@ export const vehicleDeletionEffects = pgTable("vehicle_deletion_effects", {
   columnName: text("column_name").notNull(),
   previousValue: jsonb("previous_value").notNull(),
   appliedValue: jsonb("applied_value").notNull(),
-  createdBy: integer("created_by").references(() => users.id),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   unique("vehicle_deletion_effects_row_key").on(table.vehicleId, table.tableName, table.rowId, table.columnName),

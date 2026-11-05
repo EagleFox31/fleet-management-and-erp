@@ -1636,7 +1636,7 @@ export async function initializeDatabase() {
   column_name text NOT NULL,
   previous_value jsonb NOT NULL,
   applied_value jsonb NOT NULL,
-  created_by integer REFERENCES users(id),
+  created_by integer REFERENCES users(id) ON DELETE SET NULL,
   created_at timestamp NOT NULL DEFAULT now(),
   CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
 );`);
