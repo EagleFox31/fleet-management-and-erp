@@ -54,7 +54,7 @@ import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./l
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
-import { PROCUREMENT_ROLES } from "@shared/constants/roles";
+import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
@@ -883,8 +883,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Récupérer un utilisateur spécifique - Administrateurs ou utilisateur lui-même
-  app.get("/api/users/:id", authenticate, async (req, res) => {
+  // Récupérer un utilisateur spécifique - admin, direction, secrétariat, ou l'utilisateur lui-même
+  // isAnyUser charge req.user (authenticate seul ne le fait pas) ; les autres rôles ne lisent que leur profil (§11).
+  const USER_PROFILE_READERS = new Set<AppRole>(["admin", "management", "secretary"]);
+  app.get("/api/users/:id", isAnyUser, async (req, res) => {
     try {
       const id = routeIdOrNaN(req.params.id);
       const currentUser = req.user;
@@ -897,8 +899,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Utilisateur non authentifié" });
       }
       
-      // Vérifier les permissions - admin peut voir tous les utilisateurs, sinon seulement son propre profil
-      if (currentUser.role !== "admin" && currentUser.id !== id) {
+      // admin, management et secretary lisent tous les profils ; les autres, seulement le leur
+      if (!USER_PROFILE_READERS.has(currentUser.role) && currentUser.id !== id) {
         return res.status(403).json({ message: "Accès non autorisé" });
       }
       
@@ -919,7 +921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: user.lastLoginAt
       });
     } catch (error) {
-      console.error("Get user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1034,11 +1036,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Utilisateur non trouvé" });
       }
       
-      // Essayons d'abord de l'interpréter comme un ID numérique
-      const id = parseInt(idOrRegistration);
-      
-      if (!isNaN(id)) {
-        // C'est un ID numérique
+      // Chiffres seuls : un id (strict, 400 hors bornes). Sinon une immatriculation : `12abc` ne lit pas le véhicule 12.
+      if (/^\d+$/.test(idOrRegistration)) {
+        const id = routeIdOrNaN(idOrRegistration);
+        if (isNaN(id)) {
+          return res.status(400).json({ message: "ID de véhicule invalide" });
+        }
         vehicle = await storage.getVehicle(id);
       } else {
         // C'est probablement une immatriculation
@@ -1059,7 +1062,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(redactVehiclePrice({ role: normalizeRole(user.role) }, vehicle));
     } catch (error) {
-      console.error("Get vehicle error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
