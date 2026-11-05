@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { LAST_ADMIN_MESSAGE } from "../../server/lib/last-admin-rule";
 import { listActiveAdminIds } from "../../server/lib/last-admin";
+import { storage } from "../../server/storage";
 import { users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -16,24 +17,21 @@ import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
  * requête, en retirant l'appelant des admins actifs juste avant l'écriture, depuis la lecture ou l'écriture
  * de la cible dans le stockage.
  */
-const race = vi.hoisted(() => ({ before: undefined as undefined | (() => Promise<void>), targetId: 0 }));
-vi.mock("../../server/storage", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../server/storage")>();
-  const wrap = <K extends "getUser" | "deleteUser">(name: K) => {
-    const original = (mod.storage as any)[name].bind(mod.storage);
-    (mod.storage as any)[name] = async (id: number, ...rest: unknown[]) => {
+const race = { before: undefined as undefined | (() => Promise<void>), targetId: 0 };
+const spies: Array<{ mockRestore: () => void }> = [];
+function interceptTarget(name: "getUser" | "deleteUser") {
+  const original = (storage[name] as (id: number, ...rest: unknown[]) => unknown).bind(storage);
+  spies.push(
+    vi.spyOn(storage, name).mockImplementation((async (id: number, ...rest: unknown[]) => {
       if (id === race.targetId && race.before) {
         const run = race.before;
         race.before = undefined;
         await run();
       }
       return original(id, ...rest);
-    };
-  };
-  wrap("getUser");
-  wrap("deleteUser");
-  return mod;
-});
+    }) as never),
+  );
+}
 
 const triggerPresent =
   (await db.execute(sql`SELECT 1 AS present FROM pg_trigger WHERE tgname = 'trg_users_keep_active_admin' AND NOT tgisinternal`)).rows.length > 0;
@@ -73,6 +71,9 @@ async function setDeletedAt(userIds: number[], deletedAt: Date | null) {
 }
 
 beforeAll(async () => {
+  // Instance partagée entre fichiers (isolate:false) : les espions sont retirés dans afterAll.
+  interceptTarget("getUser");
+  interceptTarget("deleteUser");
   const app = await getContractApp();
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -82,6 +83,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   race.before = undefined;
+  for (const spy of spies) spy.mockRestore();
   try {
     await setDeletedAt([...preexisting], null);
     await cleanupCreated(ids);
