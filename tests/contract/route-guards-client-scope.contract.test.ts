@@ -136,3 +136,31 @@ describe("GET /api/alerts/type/:type", () => {
     expect((await get("/api/alerts/type/maintenance")).status).toBe(401);
   });
 });
+
+describe("listes ouvertes à un client : jamais la liste d'un autre", () => {
+  for (const path of ["/api/alerts", "/api/alerts/unread", "/api/alerts/active"]) {
+    it(`GET ${path} : chacun ne reçoit que ses alertes`, async () => {
+      for (const key of ["A", "B"] as const) {
+        const res = await get(path, `client${key}`);
+        expect(res.status, path).toBe(200);
+        const titles = res.body.map((x: { title: string }) => x.title).filter((t: string) => t.startsWith("TEST alerte"));
+        expect(titles, path).toEqual([`TEST alerte ${key}`]);
+      }
+    });
+  }
+
+  for (const path of ["/api/users", "/api/technician/my-work-orders", "/api/document-renewals/requests", "/api/document-renewals/centers"]) {
+    it(`GET ${path} : refusé à un client (403), sans liste`, async () => {
+      const res = await get(path, "clientA");
+      expect(res.status, path).toBe(403);
+      expect(Array.isArray(res.body), path).toBe(false);
+    });
+  }
+
+  it("GET /api/workflows/active et /stats : calculés sur la session, jamais sur un autre utilisateur", async () => {
+    const active = await get("/api/workflows/active", "clientA");
+    expect(active.status).toBe(200);
+    expect(JSON.stringify(active.body)).not.toContain("clientB");
+    expect((await get("/api/workflows/stats", "clientA")).status).toBe(200);
+  });
+});
