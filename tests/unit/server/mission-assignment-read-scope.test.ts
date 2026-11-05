@@ -12,15 +12,18 @@ import { describe, expect, it } from "vitest";
  * `assignments` doit passer par `driverLiveAssignmentFilter` ou `driverScopeOf`.
  *
  * Même modèle que assignment-write-hygiene.test.ts : liste gelée qui ne peut que rétrécir.
+ *
+ * Limites : c'est une heuristique de texte. Une simple mention de `driverLiveAssignmentFilter` ou
+ * `driverScopeOf` dans le handler suffit à la satisfaire, que le filtre soit réellement appliqué ou non.
+ * Une lecture d'`assignments` faite dans une fonction utilitaire hors du handler lui échappe. Elle ne
+ * vérifie que la portée chauffeur : le cas de l'affectation annulée ou refusée est protégé par les
+ * contrats (mission-launch-readiness-live-assignment, mission-document-renewal-live-assignment).
  */
 
 const routesFile = fileURLToPath(new URL("../../../server/api/missions.routes.ts", import.meta.url));
 
 /** Handlers lisant `assignments` sans filtre de portée, gelés : liste à vider, jamais à remplir. */
-const FROZEN_UNSCOPED: string[] = [
-  "GET /:id/document-renewal-requests",
-  "POST /:id/document-renewal-requests",
-];
+const FROZEN_UNSCOPED: string[] = [];
 
 const ROUTE = /^router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/gm;
 const READS_ASSIGNMENTS = /\.from\(\s*assignments\s*\)|\.(left|inner)Join\(\s*assignments\b/;

@@ -3288,6 +3288,12 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
       return res.status(400).json({ message: "ID mission invalide." });
     }
 
+    const renewalScope = await driverScopeOf(req.user);
+    const liveAssignmentOn =
+      renewalScope === undefined
+        ? notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])
+        : driverLiveAssignmentFilter(renewalScope);
+
     // Fetch mission + vehicle to scope requests
     const [mission] = await db
       .select({
@@ -3296,7 +3302,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
         vehicleId: assignments.vehicleId,
       })
       .from(missions)
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
+      .leftJoin(assignments, and(eq(assignments.missionId, missions.id), liveAssignmentOn))
       .where(eq(missions.id, missionId))
       .orderBy(asc(assignments.id))
       .limit(1);
@@ -3437,6 +3443,12 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       throw new AppError(403, "Accès refusé: seuls Admin, Secrétaire, Logisticien et Chef d'atelier peuvent créer cette demande.");
     }
 
+    const renewalScope = await driverScopeOf(req.user);
+    const liveAssignmentOn =
+      renewalScope === undefined
+        ? notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])
+        : driverLiveAssignmentFilter(renewalScope);
+
     const payloadSchema = z.object({
       documentTypes: z.array(z.enum(["carte_grise", "assurance", "visite_technique"])).optional().default([]),
       note: z.string().optional(),
@@ -3459,7 +3471,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
         vehicleRegistration: vehicles.registrationNumber,
       })
       .from(missions)
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
+      .leftJoin(assignments, and(eq(assignments.missionId, missions.id), liveAssignmentOn))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(eq(missions.id, missionId))
       .orderBy(asc(assignments.id))
