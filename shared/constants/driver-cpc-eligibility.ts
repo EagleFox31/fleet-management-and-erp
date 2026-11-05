@@ -7,9 +7,11 @@
  * La règle porte sur le statut CPC ENREGISTRÉ du chauffeur (`drivers.cpc_status`),
  * insensible à la casse et aux accents, ET sur l'expiration de la formation quand la
  * date existe (date + 731 jours, jour J valable). Date absente : le statut fait foi.
- * La marge d'alerte de 59 jours n'en fait pas partie. La liste `/api/drivers` recalcule son statut d'affichage depuis
- * `cpcTrainingDate`, ce qui donne « NON FORMÉ » à un chauffeur dont le statut
- * enregistré est valide mais dont la date est absente.
+ * La garde elle-même ne calcule aucune marge d'alerte. Mais le statut enregistré, lui, en porte une :
+ * `calculateCPCStatus` y inscrit « À FORMER » dès 59 jours avant l'expiration, et la garde bloque alors
+ * un chauffeur dont la formation est encore valable. Le statut n'est recalculé que lors d'une mise à jour
+ * du CPC (aucune tâche planifiée). La liste `/api/drivers` recalcule son statut d'affichage depuis
+ * `cpcTrainingDate`, ce qui peut afficher « NON FORMÉ » ou « FORMÉ » à l'inverse du statut enregistré.
  */
 
 import { addDaysToDateOnly, daysBetweenDateOnly, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "./expiry-day";

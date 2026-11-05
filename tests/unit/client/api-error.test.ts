@@ -73,6 +73,14 @@ describe("userMessageOf", () => {
   });
 });
 
+describe("userMessageOf : toast d'une mutation", () => {
+  it("affiche la raison du serveur et non le texte de repli fixe", () => {
+    const reason = "Impossible de lancer la mission : Budget carburant non renseigné. Contactez l'exploitation.";
+    const error = new ApiError(400, reason, null);
+    expect(userMessageOf(error, "Impossible de mettre à jour le statut.")).toBe(reason);
+  });
+});
+
 describe("isApiError", () => {
   it("filtre par statut", () => {
     const error = new ApiError(401, "Session expirée", null);
