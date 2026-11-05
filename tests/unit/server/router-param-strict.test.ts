@@ -12,14 +12,22 @@ import { readRepoFile, repoFiles, REPO_SCAN_TIMEOUT_MS } from "../../support/rep
  *   - le callback est une fonction littérale à quatre paramètres `(req, res, next, value)` ;
  *   - une instruction `parseX(value)` (appel direct, ou initialiseur d'un `const`) figure au
  *     premier niveau du corps, ou au premier niveau d'un `try` lui-même au premier niveau ;
- *   - tout appel de passage (`next()` ou `next("route")`) est placé après elle dans ce même bloc
- *     (ou dans un bloc imbriqué qui suit) : aucune sortie ne la contourne ;
+ *   - tout appel de passage est placé après elle dans ce même bloc (ou dans un bloc imbriqué qui
+ *     suit) : aucune sortie ne la contourne. Passage = `next()`, `next("route")`, ou `next` avec
+ *     une valeur fausse (`null`, `undefined`, `void 0`, `false`, `0`, `""`), qu'Express traite
+ *     comme un passage normal ;
  *   - `parseX` n'est pas `parseInt` / `parseFloat` ; s'il est déclaré dans le fichier, son corps
  *     contient un `throw` (un parseur strict refuse, il ne rend pas `NaN`).
- * `next(err)` (appel avec une valeur non littérale) est une sortie en erreur, toujours permise.
+ * `next(err)` (appel avec une autre expression) est une sortie en erreur, toujours permise.
+ * Un `.param` dont le nom n'est pas une chaîne littérale (`param(["id"], cb)`, `param(nom, cb)`)
+ * est signalé illisible.
  *
- * Limites connues : un callback nommé ou importé, un parseur appelé dans une condition, un parseur
- * importé d'un autre module (non vérifié) ; les deux premiers échouent (faux positif) au lieu de passer.
+ * Limites connues :
+ *   - refusés à tort (faux positif) : callback nommé ou importé, parseur appelé dans une condition ;
+ *   - non vus (faux négatif) : parseur importé d'un autre module (son `throw` n'est pas vérifié),
+ *     alias de `next` (`const go = next; go()`), `next` passé à une fonction imbriquée ou différée
+ *     (`setImmediate(next)`, `.then(() => next())`), et `.param (` écrit avec une espace, qui échappe
+ *     au préfiltre textuel du scan de dépôt.
  */
 
 const LOOSE_PARSERS = new Set(["parseInt", "parseFloat"]);
@@ -35,11 +43,15 @@ export function scanRouterParams(file: string, text: string): ParamGuard[] {
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === "param" &&
-      node.arguments.length === 2 &&
-      ts.isStringLiteralLike(node.arguments[0])
+      node.arguments.length === 2
     ) {
       const line = source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
-      found.push({ key: `${file}:${line} param("${node.arguments[0].text}")`, problem: checkCallback(node.arguments[1], throwingParsers) });
+      const [name, callback] = node.arguments;
+      if (ts.isStringLiteralLike(name)) {
+        found.push({ key: `${file}:${line} param("${name.text}")`, problem: checkCallback(callback, throwingParsers) });
+      } else {
+        found.push({ key: `${file}:${line} param(${name.getText()})`, problem: "nom non littéral : illisible" });
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -94,14 +106,24 @@ function parserCallOf(statement: ts.Statement, value: string): string | null {
   return arg && ts.isIdentifier(arg) && arg.text === value ? name : null;
 }
 
-/** Appels qui laissent passer la requête : `next()` ou `next(<littéral>)`, hors fonctions imbriquées. */
+/** Valeur qu'Express traite comme un passage : chaîne (`"route"`, `""`) ou valeur fausse littérale. */
+function isPassArgument(arg: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(arg) || ts.isAsExpression(arg) || ts.isNonNullExpression(arg)) arg = arg.expression;
+  if (ts.isStringLiteralLike(arg)) return true;
+  if (arg.kind === ts.SyntaxKind.NullKeyword || arg.kind === ts.SyntaxKind.FalseKeyword) return true;
+  if (ts.isIdentifier(arg) && arg.text === "undefined") return true;
+  if (ts.isVoidExpression(arg)) return true;
+  return ts.isNumericLiteral(arg) && Number(arg.text) === 0;
+}
+
+/** Appels qui laissent passer la requête (`next()`, `next("route")`, `next(null)`…), hors fonctions imbriquées. */
 function passCalls(body: ts.Block, next: string): ts.CallExpression[] {
   const calls: ts.CallExpression[] = [];
   const visit = (node: ts.Node) => {
     if (node !== body && ts.isFunctionLike(node)) return;
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === next) {
       const [arg] = node.arguments;
-      if (!arg || ts.isStringLiteralLike(arg)) calls.push(node);
+      if (!arg || isPassArgument(arg)) calls.push(node);
     }
     ts.forEachChild(node, visit);
   };
@@ -153,6 +175,11 @@ describe("router.param : parseur strict avant next() (#353)", { timeout: REPO_SC
     expect(sample(`(req, res, next, value) => { const id = parseInt(value); next(); }`)).toMatch(/parseInt n'est pas/);
     expect(sample(`(req, res, next, value) => { const id = parseLoose(value); next(); }`, `const parseLoose = (v: string) => Number(v);\n`)).toMatch(/ne lève jamais/);
     expect(sample(`(req, res, next, value) => { const id = parseThingId(req.query.id); next(); }`)).toMatch(/aucun parseur/);
+    for (const pass of ["null", "undefined", "void 0", "false", "0", `""`]) {
+      expect(sample(`(req, res, next, value) => { if (!value) { next(${pass}); return; } parseThingId(value); next(); }`)).toMatch(/next\(\) avant/);
+    }
+    expect(scanRouterParams("s.ts", `router.param(["id"], (req, res, next, value) => { next(); });`)[0].problem).toMatch(/nom non littéral/);
+    expect(scanRouterParams("s.ts", `const k = "id";\nrouter.param(k, (req, res, next, value) => { next(); });`)[0].problem).toMatch(/nom non littéral/);
     expect(sample(`checkId`)).toMatch(/non littéral/);
     expect(sample(`(req, res, next) => { next(); }`)).toMatch(/sans paramètres/);
   });
