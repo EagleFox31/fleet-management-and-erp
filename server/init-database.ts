@@ -458,6 +458,12 @@ BEGIN
   ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id) ON DELETE SET NULL;
 EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'vehicles.deleted_by non ajoutée, verrou de table indisponible sous 5 s : suppression douce en échec jusqu''au prochain démarrage';
+END $$;
+DO $$
+BEGIN
+  ALTER TABLE vehicle_deletion_effects ADD COLUMN IF NOT EXISTS applied_stamp timestamp;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'vehicle_deletion_effects.applied_stamp non ajoutée, verrou indisponible sous 5 s : restauration en échec jusqu''au prochain démarrage';
 END $$;`;
 
 /**

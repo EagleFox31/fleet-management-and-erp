@@ -163,30 +163,36 @@ export function VehicleImportButton() {
           if (vehicleData.registrationNumber) {
             const checkResponse = await fetch(`/api/vehicles/check/${vehicleData.registrationNumber}`);
             const existingVehicle = await checkResponse.json();
-            
-            if (existingVehicle && existingVehicle.id) {
-              // Update existing vehicle
-              await fetch(`/api/vehicles/${existingVehicle.id}`, {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(vehicleData),
-                credentials: 'include'
-              });
+
+            if (existingVehicle?.retired) {
+              // Retiré de la flotte : son immatriculation reste réservée, on ne le modifie pas.
+              results.errors++;
+              results.errorMessages.push(
+                `Ligne ${i + 1}: le véhicule ${vehicleData.registrationNumber} est retiré de la flotte. Restaurez-le avant de l'importer.`
+              );
             } else {
-              // Create new vehicle
-              await fetch('/api/vehicles', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(vehicleData),
-                credentials: 'include'
-              });
+              const saved = existingVehicle && existingVehicle.id
+                ? await fetch(`/api/vehicles/${existingVehicle.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(vehicleData),
+                    credentials: 'include'
+                  })
+                : await fetch('/api/vehicles', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(vehicleData),
+                    credentials: 'include'
+                  });
+              if (saved.ok) {
+                results.success++;
+              } else {
+                // Message déjà normalisé par le serveur (shared/errors.ts).
+                const body = await saved.json().catch(() => null);
+                results.errors++;
+                results.errorMessages.push(`Ligne ${i + 1}: ${body?.message || "enregistrement refusé"}`);
+              }
             }
-            
-            results.success++;
           } else {
             results.errors++;
             results.errorMessages.push(`Ligne ${i + 1}: Immatriculation manquante`);
