@@ -41,8 +41,15 @@ const LIFECYCLE_FROZEN: Record<string, { reason: string; unfreezeWhen: string }>
 const ROUTE_METHODS = new Set(["get", "post", "put", "patch", "delete", "all", "use"]);
 const MULTER_METHODS = new Set(["single", "array", "fields", "any"]);
 const DELETE_NAME = /^(unlink|rm)(Sync)?$|^remove|^deleteFile|^deleteUploaded/;
-/** Appel d'écriture : `db.insert`, `tx.update`, `db.transaction`, `storage.create…`, `service.record…`, `save…`. */
-const WRITE_NAME = /^(insert|update|upsert|transaction|create|record|save|store|persist|finalize|register|replace)/;
+/**
+ * Appel d'écriture : `db.insert`, `tx.update`, `db.transaction`, `storage.create…`, `service.record…`, `save…`.
+ * Le verbe est un mot entier (fin du nom ou majuscule suivante : `createDocument`, pas `created`).
+ * `NOT_WRITE_NAME` écarte les homonymes qui ne persistent rien (`createReadStream`, `recordView`,
+ * `registerListener`…). Limite : un nom de lecture qui commence par un de ces verbes et n'est pas
+ * écarté compte comme écriture ; l'ajouter à `NOT_WRITE_NAME` quand il apparaît.
+ */
+const WRITE_NAME = /^(insert|update|upsert|transaction|create|record|save|store|persist|finalize|register|replace)(?=[A-Z_]|$)/;
+const NOT_WRITE_NAME = /(Stream|Listener|Handler|Hash|View|Views|Server|Reader)$/;
 
 export type MulterRoute = { key: string; compliant: boolean };
 
@@ -154,7 +161,7 @@ function isWriteAwait(awaitNode: ts.AwaitExpression): boolean {
   return collect(awaitNode, ts.isCallExpression).some((call) => {
     const callee = call.expression;
     const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : "";
-    return WRITE_NAME.test(name);
+    return WRITE_NAME.test(name) && !NOT_WRITE_NAME.test(name);
   });
 }
 
@@ -305,6 +312,11 @@ describe("routes multer : fichier lié à l'écriture qui le référence (#178, 
         try { await save(req.file); ok = true; res.sendStatus(201); }
         finally { if (!ok) log("fichier orphelin"); }
       }));
+      router.post("/homonymes", (req, res) => upload(req, res, async () => {
+        let ok = false;
+        try { await fs.createReadStream(req.file.path); await audit.recordView(1); await bus.registerListener(f); await createdAt(); ok = true; res.sendStatus(201); }
+        finally { if (!ok) remove(req.file); }
+      }));
     `;
     expect(scanMulterRoutes("s.ts", sample)).toEqual([
       { key: "s.ts:POST /avant", compliant: false },
@@ -313,6 +325,7 @@ describe("routes multer : fichier lié à l'écriture qui le référence (#178, 
       { key: "s.ts:POST /transaction", compliant: true },
       { key: "s.ts:POST /au-mieux", compliant: true },
       { key: "s.ts:POST /sans-suppression", compliant: false },
+      { key: "s.ts:POST /homonymes", compliant: false },
     ]);
   });
 

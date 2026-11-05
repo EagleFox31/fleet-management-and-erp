@@ -463,6 +463,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `upload-delete-hygiene` compte les suppressions non bornées par clé gelée (`count`) ; `multer-lifecycle-hygiene` exige qu'un `await` d'écriture (`WRITE_NAME` : `insert`, `update`, `transaction`, `create…`, `record…`, `save…`) précède le drapeau, un `await` de lecture seul ne suffit plus.
 - **Pourquoi** : réserves non bloquantes de la relecture de #355 (seconde suppression dans une fonction gelée, `await` quelconque avant le drapeau).
 - **Preuve** : seconde `unlinkSync` injectée dans une fonction gelée → garde rouge (1 → 2) ; cas `/lecture-seule` accepté sans la règle, refusé avec ; cas `/transaction` accepté ; 11/11.
+
 ## 2026-11-05 — Coûts de mission : id strict, mission inconnue en 404
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
