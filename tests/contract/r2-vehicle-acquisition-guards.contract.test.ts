@@ -205,3 +205,44 @@ describe("R2 : documents de session", { timeout: 120000 }, () => {
     expect(bad.status).toBe(400);
   });
 });
+
+/** Cloison (AGENTS.md §11) : pour un client, la session d'un autre et une session absente répondent pareil. */
+describe.each([
+  { label: "PATCH session", path: (s: string) => `${URL}/${s}`, body: { currentStep: 2 } },
+  { label: "PATCH complete", path: (s: string) => `${URL}/${s}/complete`, body: undefined },
+  { label: "PATCH abandon", path: (s: string) => `${URL}/${s}/abandon`, body: undefined },
+  { label: "PATCH active abandon", path: (s: string) => `/api/workflows/active/${s}/abandon`, body: undefined },
+])("R2 : étranger = absent, $label", { timeout: 120000 }, ({ path, body }) => {
+  it("le client B reçoit la même réponse pour la session de A et pour une session absente", async () => {
+    const s = sid();
+    await create(s);
+    const foreign = await session.call("PATCH", path(s), { actor: "clientB", body });
+    const absent = await session.call("PATCH", path(sid()), { actor: "clientB", body });
+    expect(absent.status, JSON.stringify(absent.body)).toBe(foreign.status);
+    expect(foreign.status).toBe(404);
+    expect(absent.body.message).toBe(foreign.body.message);
+    expect(absent.body.code).toBe(foreign.body.code);
+  });
+});
+
+describe("R2 : étranger = absent, documents de session", { timeout: 120000 }, () => {
+  it("POST : le client B reçoit la même réponse pour la session de A et pour une session absente", async () => {
+    const s = sid();
+    await create(s);
+    const wf = (await rowOf(s)).id;
+    const send = (sessionId: string, workflowId: number) => {
+      uploadDirs.push(sessionId);
+      const form = new FormData();
+      form.append("workflowId", String(workflowId));
+      form.append("documentType", "carte_grise");
+      form.append("document", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-doc.pdf");
+      return session.raw("POST", `/api/workflows/${sessionId}/documents`, "clientB", form);
+    };
+    const foreign = await send(s, wf);
+    const absent = await send(sid(), 2_000_000_000);
+    const [f, a] = [await foreign.json(), await absent.json()];
+    expect(absent.status, JSON.stringify(a)).toBe(foreign.status);
+    expect(a.message).toBe(f.message);
+    expect(a.code).toBe(f.code);
+  });
+});

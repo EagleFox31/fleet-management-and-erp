@@ -87,10 +87,10 @@ interface SupplierInvoiceSettlementItem {
 
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   received: { label: "Reçue", color: "bg-blue-100 text-blue-700 border border-blue-200", icon: FileText },
-  validated: { label: "Validée", color: "bg-green-100 text-green-700 border border-green-200", icon: CheckCircle },
-  approved: { label: "Approuvée", color: "bg-emerald-100 text-emerald-700 border border-emerald-200", icon: CheckCircle },
+  validated: { label: "Validée", color: "bg-success/15 text-success border border-success/30", icon: CheckCircle },
+  approved: { label: "Approuvée", color: "bg-success/15 text-success border border-success/30", icon: CheckCircle },
   paid: { label: "Payée", color: "bg-indigo-100 text-indigo-700 border border-indigo-200", icon: DollarSign },
-  disputed: { label: "Contestée", color: "bg-red-100 text-red-700 border border-red-200", icon: XCircle },
+  disputed: { label: "Contestée", color: "bg-destructive/15 text-destructive-text border border-destructive/30", icon: XCircle },
 };
 
 const paymentMethodLabels: Record<string, string> = {
@@ -331,8 +331,8 @@ export default function SupplierInvoiceDetailsPage() {
   if (isLoading) {
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-          <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+          <div className="h-0.5 bg-gradient-to-r from-success to-success" />
           <div className="px-7 py-6 space-y-4">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-8 w-48" />
@@ -345,7 +345,7 @@ export default function SupplierInvoiceDetailsPage() {
 
   if (!invoiceDetails) {
     return (
-      <div className="rounded-2xl border border-gray-100 shadow-sm bg-white px-7 py-16 text-center text-gray-400">
+      <div className="rounded-2xl border border-gray-100 shadow-sm bg-card px-7 py-16 text-center text-gray-400">
         Facture introuvable
       </div>
     );
@@ -402,7 +402,7 @@ export default function SupplierInvoiceDetailsPage() {
 
     const { invoiceTotal, orderTotal, invoiceQuantity, orderQuantity } = validation.details;
     return (
-      <div className="mt-3 rounded-xl bg-white border border-orange-100 px-4 py-3 text-sm text-orange-700 space-y-1">
+      <div className="mt-3 rounded-xl bg-card border border-orange-100 px-4 py-3 text-sm text-orange-700 space-y-1">
         <p>
           Montant facture: <span className="font-semibold">{formatCurrency(invoiceTotal || 0)}</span> •
           Commande: <span className="font-semibold">{formatCurrency(orderTotal || 0)}</span>
@@ -419,8 +419,8 @@ export default function SupplierInvoiceDetailsPage() {
     <div className="space-y-5">
 
       {/* ── Header card ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
           {/* Back + actions row */}
           <div className="flex items-start justify-between mb-5">
@@ -437,13 +437,13 @@ export default function SupplierInvoiceDetailsPage() {
               <div className="flex gap-2">
                 {invoice.status === 'received' && canValidate && (
                   <Button size="sm" onClick={() => setShowValidateDialog(true)} data-testid="button-validate"
-                    className="bg-green-600 hover:bg-green-700 text-white gap-1.5">
+                    className="bg-success hover:brightness-90 text-white gap-1.5">
                     <CheckCircle className="h-3.5 w-3.5" />Valider
                   </Button>
                 )}
                 {invoice.status === 'validated' && canApprove && (
                   <Button size="sm" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}
-                    data-testid="button-approve" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                    data-testid="button-approve" className="bg-success hover:brightness-90 text-white gap-1.5">
                     <CheckCircle className="h-3.5 w-3.5" />Approuver
                   </Button>
                 )}
@@ -470,7 +470,7 @@ export default function SupplierInvoiceDetailsPage() {
               </span>
             )}
             {isOverdue && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700 border border-red-200">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-destructive/15 text-destructive-text border border-destructive/30">
                 <Clock className="h-3.5 w-3.5" />Échue
               </span>
             )}
@@ -478,11 +478,11 @@ export default function SupplierInvoiceDetailsPage() {
 
           {/* Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center shrink-0">
-              <FileText className="h-5 w-5 text-green-600" />
+            <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
+              <FileText className="h-5 w-5 text-success" />
             </div>
             <div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Facture fournisseur</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-success">Facture fournisseur</span>
               <h1 className="text-xl font-bold text-gray-900 leading-tight" data-testid="invoice-number">
                 {invoice.invoiceNumber}
               </h1>
@@ -498,8 +498,8 @@ export default function SupplierInvoiceDetailsPage() {
             {[
               { icon: <DollarSign className="h-4 w-4 text-gray-500" />, iconBg: "bg-gray-100", label: "Montant HT", value: formatCurrency(invoice.totalAmountHT), testId: "amount-ht" },
               { icon: <DollarSign className="h-4 w-4 text-blue-500" />, iconBg: "bg-blue-50", label: "TVA", value: formatCurrency(invoice.vatAmount), testId: "amount-vat" },
-              { icon: <DollarSign className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50", label: "Total TTC", value: formatCurrency(invoice.totalAmountTTC), testId: "amount-ttc" },
-              { icon: <Calendar className="h-4 w-4 text-amber-500" />, iconBg: "bg-amber-50", label: "Échéance", value: formatDateShort(invoice.dueDate), testId: "due-date" },
+              { icon: <DollarSign className="h-4 w-4 text-success" />, iconBg: "bg-success/10", label: "Total TTC", value: formatCurrency(invoice.totalAmountTTC), testId: "amount-ttc" },
+              { icon: <Calendar className="h-4 w-4 text-warning-text" />, iconBg: "bg-warning/10", label: "Échéance", value: formatDateShort(invoice.dueDate), testId: "due-date" },
             ].map((kpi) => (
               <div key={kpi.label} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-1">
                 <div className={`w-7 h-7 rounded-lg ${kpi.iconBg} flex items-center justify-center`}>{kpi.icon}</div>
@@ -522,11 +522,11 @@ export default function SupplierInvoiceDetailsPage() {
               <p className="text-sm font-semibold text-orange-800">Écart détecté — Contrôle 3 voies</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-white border border-orange-100 px-4 py-3">
+              <div className="rounded-xl bg-card border border-orange-100 px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400 mb-1">Écart en %</p>
                 <p className="text-2xl font-bold text-orange-600">{Number(effectiveVariancePercentage).toFixed(2)}%</p>
               </div>
-              <div className="rounded-xl bg-white border border-orange-100 px-4 py-3">
+              <div className="rounded-xl bg-card border border-orange-100 px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400 mb-1">Écart en montant</p>
                 <p className="text-2xl font-bold text-orange-600">{formatCurrency(effectiveVarianceAmount)}</p>
               </div>
@@ -540,7 +540,7 @@ export default function SupplierInvoiceDetailsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* Invoice details */}
-        <div className="lg:col-span-2 rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+        <div className="lg:col-span-2 rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
               <FileText className="h-3.5 w-3.5 text-blue-500" />
@@ -557,11 +557,11 @@ export default function SupplierInvoiceDetailsPage() {
               ].map((f) => (
                 <div key={f.label} className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{f.label}</p>
-                  <p className={`text-sm font-semibold ${(f as any).warn ? 'text-red-500' : 'text-gray-800'}`}>{f.value}</p>
+                  <p className={`text-sm font-semibold ${(f as any).warn ? 'text-destructive-text' : 'text-gray-800'}`}>{f.value}</p>
                 </div>
               ))}
-              <div className="col-span-2 rounded-xl bg-green-50 border border-green-100 px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-green-500 mb-1">Montant total TTC</p>
+              <div className="col-span-2 rounded-xl bg-success/10 border border-success/20 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-success mb-1">Montant total TTC</p>
                 <p className="text-xl font-bold text-gray-900">{formatCurrency(invoice.totalAmountTTC)}</p>
               </div>
             </div>
@@ -579,13 +579,13 @@ export default function SupplierInvoiceDetailsPage() {
                 <div className="space-y-1.5">
                   {invoice.validatedDate && (
                     <div className="flex items-center gap-2 text-sm">
-                      <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                      <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />
                       <span className="text-gray-600">Validée le <span className="font-medium">{formatDate(invoice.validatedDate)}</span></span>
                     </div>
                   )}
                   {invoice.approvedDate && (
                     <div className="flex items-center gap-2 text-sm">
-                      <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />
                       <span className="text-gray-600">Approuvée le <span className="font-medium">{formatDate(invoice.approvedDate)}</span></span>
                     </div>
                   )}
@@ -605,21 +605,21 @@ export default function SupplierInvoiceDetailsPage() {
 
         {/* Actions / Status sidebar */}
         <div className="space-y-4">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                <CreditCard className="h-3.5 w-3.5 text-green-600" />
+              <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                <CreditCard className="h-3.5 w-3.5 text-success" />
               </div>
               <p className="text-sm font-semibold text-gray-800">Actions</p>
             </div>
             <div className="p-4 space-y-3">
               {invoice.status === 'received' && canValidate && (
-                <Button className="w-full bg-green-600 hover:bg-green-700 text-white gap-2" onClick={() => setShowValidateDialog(true)} data-testid="button-validate-sidebar">
+                <Button className="w-full bg-success hover:brightness-90 text-white gap-2" onClick={() => setShowValidateDialog(true)} data-testid="button-validate-sidebar">
                   <CheckCircle className="h-4 w-4" />Valider la facture
                 </Button>
               )}
               {invoice.status === 'validated' && canApprove && (
-                <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} data-testid="button-approve-sidebar">
+                <Button className="w-full bg-success hover:brightness-90 text-white gap-2" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} data-testid="button-approve-sidebar">
                   <CheckCircle className="h-4 w-4" />Approuver
                 </Button>
               )}
@@ -635,8 +635,8 @@ export default function SupplierInvoiceDetailsPage() {
               )}
               {invoice.status === 'paid' && (
                 <div className="text-center py-4">
-                  <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-2">
-                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  <div className="w-12 h-12 rounded-full bg-success/15 flex items-center justify-center mx-auto mb-2">
+                    <CheckCircle className="h-6 w-6 text-success" />
                   </div>
                   <p className="font-semibold text-gray-800">Facture payée</p>
                   <p className="text-xs text-gray-400 mt-1">{formatDate(invoice.paidDate)}</p>
@@ -646,15 +646,15 @@ export default function SupplierInvoiceDetailsPage() {
                 </div>
               )}
               {invoice.status === "received" && !canValidate && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">{validationHint}</p>
+                <p className="text-xs text-warning-text bg-warning/10 border border-warning/30 rounded-xl px-3 py-2">{validationHint}</p>
               )}
               {invoice.status === "validated" && !canApprove && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <p className="text-xs text-warning-text bg-warning/10 border border-warning/30 rounded-xl px-3 py-2">
                   Approbation réservée à l&apos;administrateur ou à la secrétaire.
                 </p>
               )}
               {invoice.status === "approved" && !canPay && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <p className="text-xs text-warning-text bg-warning/10 border border-warning/30 rounded-xl px-3 py-2">
                   Enregistrement du règlement réservé à l&apos;administrateur ou à la secrétaire.
                 </p>
               )}
@@ -663,7 +663,7 @@ export default function SupplierInvoiceDetailsPage() {
 
           {/* Supplier info */}
           {supplier && (
-            <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+            <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
                   <Building2 className="h-3.5 w-3.5 text-purple-500" />
@@ -682,7 +682,7 @@ export default function SupplierInvoiceDetailsPage() {
 
       {/* ── Purchase order linked ── */}
       {purchaseOrder && (
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
               <Package className="h-3.5 w-3.5 text-indigo-500" />
@@ -705,7 +705,7 @@ export default function SupplierInvoiceDetailsPage() {
       )}
 
       {/* ── Settlements (supplier payments) ── */}
-      <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
@@ -729,11 +729,11 @@ export default function SupplierInvoiceDetailsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Rapproché</p>
-              <p className="text-sm font-bold text-emerald-700">{formatCurrency(reconciledAmount)}</p>
+              <p className="text-sm font-bold text-success">{formatCurrency(reconciledAmount)}</p>
             </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">Saisi non rapproché</p>
-              <p className="text-sm font-bold text-amber-700">{formatCurrency(pendingReconciliationAmount)}</p>
+            <div className="rounded-xl bg-warning/10 border border-warning/20 px-4 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-warning-text mb-1">Saisi non rapproché</p>
+              <p className="text-sm font-bold text-warning-text">{formatCurrency(pendingReconciliationAmount)}</p>
             </div>
             <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1">Solde restant</p>
@@ -786,24 +786,24 @@ export default function SupplierInvoiceDetailsPage() {
                               Télécharger la preuve
                             </a>
                           ) : (
-                            <span className="text-xs text-red-500">Manquante</span>
+                            <span className="text-xs text-destructive-text">Manquante</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
                           {isReconciled ? (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-success/15 text-success border border-success/30">
                               Rapproché
                             </span>
                           ) : isRejected ? (
                             <span
-                              className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 border border-red-200"
+                              className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/15 text-destructive-text border border-destructive/30"
                               title={settlement.rejectionReason ?? undefined}
                               data-testid={`badge-settlement-rejected-${settlement.id}`}
                             >
                               Rejeté
                             </span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-warning/15 text-warning-text border border-warning/30">
                               Saisi
                             </span>
                           )}
@@ -814,7 +814,7 @@ export default function SupplierInvoiceDetailsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-8 text-red-600 hover:text-red-700"
+                              className="h-8 text-destructive-text hover:text-destructive-text"
                               onClick={() => { setRejectTarget(settlement); setRejectReason(""); }}
                               data-testid={`button-reject-settlement-${settlement.id}`}
                             >
@@ -909,7 +909,7 @@ export default function SupplierInvoiceDetailsPage() {
             <div>
               <Label>Méthode de paiement *</Label>
               <select
-                className="w-full border border-gray-200 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-400"
+                className="w-full border border-gray-200 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-success focus:border-success"
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value)}
                 data-testid="select-payment-method"
@@ -952,7 +952,7 @@ export default function SupplierInvoiceDetailsPage() {
                 Obligatoire. Formats acceptés: PDF, JPG, PNG, WEBP (max 8 MB).
               </p>
               {proofFile && (
-                <p className="text-xs text-green-700 mt-1">
+                <p className="text-xs text-success mt-1">
                   Fichier sélectionné: {proofFile.name}
                 </p>
               )}

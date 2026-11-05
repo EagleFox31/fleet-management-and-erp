@@ -60,6 +60,7 @@ import {
   type MissionRegularizationEntry,
 } from "../lib/mission-fuel-regularization";
 import type { FuelRecord } from "@shared/schema";
+import { idSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("missions");
 
@@ -1082,7 +1083,7 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
     }
 
     const payloadSchema = z.object({
-      vehicleId: z.coerce.number().int().positive(),
+      vehicleId: idSchema,
       quantity: z.coerce.number().positive(),
       // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
@@ -1248,7 +1249,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     }
 
     const payloadSchema = z.object({
-      vehicleId: z.coerce.number().int().positive(),
+      vehicleId: idSchema,
       quantity: z.coerce.number().positive(),
       // Obligatoire (contrat), mais retenu pour admin et logistique seulement ; sinon prix du jour.
       unitPrice: z.coerce.number().positive(),
@@ -2229,8 +2230,8 @@ const updateMissionSchema = z.object({
   }).optional().nullable(),
   specialInstructions: z.string().optional().nullable(),
   assignment: z.object({
-    vehicleId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
-    driverId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+    vehicleId: idSchema,
+    driverId: idSchema,
   }).optional().nullable(),
 });
 
@@ -2642,8 +2643,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
 });
 
 const addAssignmentSchema = z.object({
-  vehicleId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
-  driverId: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+  vehicleId: idSchema,
+  driverId: idSchema,
 });
 
 const editionBlockedMessage = (status: string) => `Mission ${status === "completed" ? "terminée" : "annulée"} : édition bloquée.`;

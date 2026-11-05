@@ -10,6 +10,7 @@ import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { toFieldErrors } from "@shared/errors";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
+import { bodyIdSchema } from "@shared/contracts/common";
 import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
 import { randomPasswordHash } from "../lib/dummy-hash";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
@@ -93,7 +94,7 @@ const createDriverSchema = z.object({
   geoTrainingDate: optionalDateField,
   cpcTrainingDate: pastOrTodayDateField,
   isActive: z.boolean().optional(),
-  userId: z.number().int().positive().nullable().optional(),
+  userId: bodyIdSchema.nullable().optional(),
 });
 
 const updateDriverSchema = createDriverSchema
