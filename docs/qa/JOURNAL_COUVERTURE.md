@@ -2415,3 +2415,83 @@ soumission sans doublon.
 - **Comment tester (QA)** : `E2E_DEMO=1` sur `e2e/demo`, 2 passages de 7 specs verts avec rejeu du seed entre les deux (3,7 min chacun) ; `npm run check` à 0 erreur ; unitaires 202 fichiers / 2335 tests verts.
 - **RAIDER** : I (specs rejouables seules) ; D (assertions dures) ; ne s'applique pas : code produit.
 - **Reste / risques** : facture de période pour les rapports de direction et paiement de facture dans la PR suivante.
+
+## 2026-11-05T02:40:00+01:00 — Démo paiement de facture et factures de période (lot 4)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : démo « paiement de facture » (secrétaire : acompte puis solde) ; deux factures de période au seed, qui alimentent les rapports de direction (715 500 FCFA encaissés, 1 192 500 FCFA de créances), avec assertion dure dans la spec direction.
+- **Comment** : `seedClientInvoices` purge `DEMO-FAC-%` (paiements en cascade) puis recrée ; `e2e/demo/08-paiement-facture.spec.ts` ; `07-direction.spec.ts`.
+- **Comment tester (QA)** : seed puis specs 07 et 08, 2 passages verts chacune avec rejeu du seed.
+- **RAIDER** : I (purge et recréation, sans doublon) ; ne s'applique pas : code produit.
+- **Reste / risques** : audit flotte et TCO à 0 (aucune mission terminée au seed).
+
+## 2026-11-05T03:10:00+01:00 — Démo administrateur (lot 4)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : l'administrateur ouvre Administration, Utilisateurs, modifie le compte « recrue1 » (magasinier) et lui donne le rôle de technicien.
+- **Comment** : `e2e/demo/09-admin.spec.ts` ; seed : comptes admin1 et recrue1 (le rôle de départ est rétabli à chaque seed par `ensureUser`).
+- **Comment tester (QA)** : seed puis spec, 2 passages verts (36,5 s et 42,5 s).
+- **RAIDER** : I (rôle rétabli au rejeu) ; ne s'applique pas : code produit.
+- **Reste / risques** : aucun.
+
+## 2026-11-05T03:40:00+01:00 — Mission terminée au seed : audit flotte et TCO non nul (lot 4)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le rapport « Audit Flotte & TCO » était à 0 faute de donnée : le seed crée une mission terminée de la période, affectée à un camion et facturée.
+- **Comment** : `seedFleetAudit` (mission DEMO-TCO-001, affectation terminée, facture DEMO-FAC-003 payée), purgée puis recréée à chaque seed ; assertions « 1 camion » et encaissé 1 668 900 FCFA dans `07-direction.spec.ts`.
+- **Comment tester (QA)** : specs 07, 04 et 08 vertes après le seed (04 non perturbée par la nouvelle mission).
+- **RAIDER** : I (purge et recréation) ; ne s'applique pas : code produit.
+- **Reste / risques** : aucun.
+
+## 2026-11-05T04:10:00+01:00 — Démo e2e chauffeur : mission du jour et départ (lot 4)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : dixième profil de démo, le chauffeur voit sa mission du jour sur son tableau de bord et confirme le départ (statut en cours en base).
+- **Comment** : `seedDriverDay` (compte chauffeur1 relié à une fiche chauffeur, véhicule aux papiers valides, mission affectée avec budgets carburant, FDR et imprévus) ; helper `ensureValidPapers` extrait du seed logistique ; spec `10-chauffeur.spec.ts`. Le départ est refusé sans budgets renseignés (constaté au premier essai, 400), le seed les pose.
+- **Comment tester (QA)** : `E2E_DEMO=1 ... test e2e/demo/10-chauffeur.spec.ts`, 2 passages verts avec rejeu du seed (13 s de vidéo) ; 04 reste verte.
+- **RAIDER** : I (mission purgée puis recréée) ; ne s'applique pas : code produit.
+- **Reste / risques** : aucun.
+
+## 2026-11-05T05:00:00+01:00 — Démos 01 et 05 : geste Commencer du technicien, mineurs du seed (lot 4)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : le démarrage d'une intervention est fait par le technicien (bouton « Commencer »), plus par le chef d'atelier ; deux mineurs de relecture du seed levés.
+- **Comment** : 01 : l'OT du seed est `pending`, le technicien l'ouvre dans « En attente » et le démarre. 05 : le chef crée et assigne à un technicien de démo dédié (`demotech2`, l'assignation du technicien principal étant refusée par un conflit de créneau avec son OT en attente), déconnexion par le menu, le technicien démarre, le chef clôture. `loginThroughForm` reclique si le premier clic après démarrage du serveur n'a pas déclenché l'appel de connexion ; `ensureUser` réconcilie aussi le nom ; échéances de papiers écrites seulement si la date diffère ; mouvements d'entrée des réceptions précédentes purgés (11 avant et après deux seeds consécutifs).
+- **Comment tester (QA)** : specs 01 et 05 vertes sur 2 passages avec rejeu du seed (05 : 41 s de vidéo), 06 verte sur 2 passages ; `npm run check` 0 erreur, unitaires 202 fichiers / 2335 tests.
+- **RAIDER** : I (écritures seulement si l'état diffère, purge des mouvements) ; ne s'applique pas : code produit.
+- **Reste / risques** : l'assignation d'un OT à un technicien déjà affecté en attente répond 409 (conflit de créneau, comportement produit).
+
+## 2026-11-05T03:30:00+01:00 — Démos : réserves de relecture de #344 (nom logi1, ciblage 01, montants 07, dates locales)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : quatre réserves de relecture levées sur le seed et les specs de démo.
+- **Comment** : seed : `logi1` redevient « Jean Tchoumi » (plus de doublon de nom avec `demotech2`) ; `isoDayFromNow` et les dates « aujourd'hui / échéance » passent en jour calendaire local au lieu d'UTC. 01 : le bouton Commencer est celui de la carte qui porte le titre de l'OT de démo. 07 : montants exacts remplacés par des assertions non nulles, la base de test étant partagée.
+- **Comment tester (QA)** : `npm run check` 0 erreur ; unitaires 210 fichiers / 2432 tests ; rejeu e2e/demo 01 à 10, 2 passages (résultats dans le rapport de PR).
+- **RAIDER** : I (seed rejouable) ; D (assertions indépendantes des autres données) ; ne s'applique pas : code produit.
+- **Reste / risques** : aucun.
+
+## 2026-11-05T04:10:00+01:00 — Démo 09 : recherche du compte dans la liste paginée
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la démo admin échouait une fois sur quatre passages (ligne `recrue1` introuvable en 30 s).
+- **Comment** : la liste `/admin/users` est paginée par 10 sur une base partagée ; la spec saisit désormais le nom du compte dans le champ de recherche avant de viser la ligne. Cause probable (non reproduite à l'identique, artefacts écrasés par le passage suivant) : le compte sorti de la première page.
+- **Comment tester (QA)** : 09 verte sur 2 passages avec rejeu du seed (20,6 s et 16,5 s) ; passage complet 01 à 10 : 10/10 au passage 2.
+- **RAIDER** : D (indépendance vis-à-vis du volume de comptes) ; ne s'applique pas : code produit.
+- **Reste / risques** : le diagnostic reste une hypothèse ; si le défaut revient, regarder le délai de la requête `/api/admin/users`.
+
+## 2026-11-05T04:40:00+01:00 — Démo 07 : montant limité à la carte « Encaissé »
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-4` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : l'assertion Trésorerie pouvait passer grâce au seul « Poste Carburant ».
+- **Comment** : le montant FCFA non nul est cherché uniquement dans la carte « Encaissé (factures clients réglées) ».
+- **Comment tester (QA)** : 07 verte sur 2 passages avec rejeu du seed (28,6 s et 39,0 s) ; `npm run check` 0 erreur.
+- **RAIDER** : D (assertion qui cible la bonne donnée) ; ne s'applique pas : code produit.
+- **Reste / risques** : aucun.

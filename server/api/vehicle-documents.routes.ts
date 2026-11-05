@@ -120,7 +120,8 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
         });
         // vehicle_documents fait foi : la colonne miroir de vehicles suit le dépôt.
         // Dépôt : le miroir n'avance que si la date est plus récente (jamais de recul).
-        // Si la synchro échoue, la ligne document est retirée (le fichier l'est par le finally).
+        // Si la synchro échoue, la ligne document est retirée (le fichier l'est par le finally) ;
+        // si ce retrait échoue aussi, la ligne et son fichier sont conservés ensemble.
         let mirrorWritten = false;
         try {
           mirrorWritten = await syncVehicleDocumentMirror(vehicleId, document.type, document.expiryDate, "later");
@@ -128,6 +129,8 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
           try {
             await storage.deleteVehicleDocument(document.id);
           } catch (cleanupError) {
+            // La ligne reste en base : le fichier qu'elle référence reste aussi (le finally ne le supprime pas).
+            fileRecorded = true;
             log.error({ err: cleanupError, requestId: req.requestId, documentId: document.id }, "document orphelin après échec de synchro du miroir");
           }
           throw new AppError(500, "Le document n'a pas pu être enregistré. Réessayez.", { cause: syncError });

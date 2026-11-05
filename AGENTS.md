@@ -425,6 +425,8 @@ sessions d'acquisition qu'il a créées.
 - Saisie d'exploitation sur un véhicule (kilométrage, position) : `isStaff`. Un
   client consulte son véhicule, il ne saisit rien dessus.
 - Objet isolé : `canAccessOwned(req.user, () => propriétaire)` → 403 hors périmètre.
+  Exception : un ordre de travail hors périmètre répond 404, comme un OT inexistant
+  (`assertWorkOrderReadable`), pour ne pas laisser énumérer les OT des autres.
 - Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).
 - Source : `server/lib/client-scope.ts`. Test de référence :
   `tests/contract/vehicle-documents-client-scope.contract.test.ts`.

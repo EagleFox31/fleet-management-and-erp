@@ -99,8 +99,15 @@ const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [];
  * au handler de `routes.ts`, qui reste donc vivant. Ne pas supprimer ces déclarations.
  * `PATCH /api/admin/users/:id/toggle` : `admin-users-guard.routes.ts` refuse l'auto-désactivation,
  * `routes.ts` écrit `deletedAt` et révoque l'accès.
+ * `PATCH /api/users/:id` (rôle), `DELETE /api/users/:id` et `DELETE /api/admin/users/:id` : `last-admin-guard.routes.ts`
+ * refuse de retirer le dernier administrateur actif, `routes.ts` écrit.
  */
-const CHAINED_GUARD_ROUTES: string[] = ["PATCH /api/admin/users/:p/toggle"];
+const CHAINED_GUARD_ROUTES: string[] = [
+  "DELETE /api/admin/users/:p",
+  "DELETE /api/users/:p",
+  "PATCH /api/admin/users/:p/toggle",
+  "PATCH /api/users/:p",
+];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const roleConstants = roles as unknown as Record<string, readonly string[]>;
