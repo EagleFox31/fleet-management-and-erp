@@ -91,7 +91,7 @@ function classSets(src: string, b: Block): Frag[][] {
         i = end - 1;
       }
     }
-    const combos = product(axes.length ? axes : [[]]).map((c) => [...base, ...c]);
+    const combos = product(axes.filter((a) => a.length)).map((c) => [...base, ...c]);
     const compound = propBody(src, "compoundVariants", b.start, b.end, "[", "]");
     const extras = compound
       ? [...src.slice(compound[0], compound[1]).matchAll(/\bclass(?:Name)?\s*:\s*(["'`])((?:(?!\1)[^\\])*?)\1/g)].map((m) => ({
@@ -184,6 +184,11 @@ describe("detecteur de paires", () => {
     expect(analyse(src)).toEqual([{ key: "secondary sur secondary/10", line: 1 }]);
     const sansFond = 'cva("text-foreground", { variants: { v: { a: "p-1" } }, compoundVariants: [{ v: "a", class: "bg-background" }] })';
     expect(keys(sansFond)).toEqual([]);
+  });
+
+  it("cva sans variants, ou avec un axe vide : la base reste verifiee", () => {
+    expect(keys('cva("bg-secondary/10 text-secondary")')).toEqual(["secondary sur secondary/10"]);
+    expect(keys('cva("bg-secondary/10 text-secondary", { variants: { v: {} } })')).toEqual(["secondary sur secondary/10"]);
   });
 
   it("classNames={{ }} : chaque cle est un element distinct", () => {
