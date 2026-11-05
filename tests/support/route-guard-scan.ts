@@ -542,11 +542,8 @@ export function parseMounts(indexSource: string, kinds: GuardKinds): Mount[] {
 const fullPathOf = (file: string, prefix: string, path: string) => (file === "server/routes.ts" ? path : `/api${prefix}${path}`);
 const underPrefix = (fullPath: string, prefix: string) => fullPath === `/api${prefix}` || fullPath.startsWith(`/api${prefix}/`);
 
-/**
- * Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`),
- * les déclarations illisibles et les routes vues.
- */
-export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants) {
+/** Gardes de base (auth.ts) et montages de `server/api/index.ts`, communs aux scans de routes. */
+function guardContext(serverDir: string, roleConstants: RoleConstants) {
   const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
   // gardes locales de index.ts et des middlewares qu'il importe (ex. `exportsGuard`)
   let indexKinds = extendKinds(baseKinds, "");
@@ -559,6 +556,15 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
   const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
   indexKinds = extendKinds(indexKinds, indexSource);
   const mounts = parseMounts(indexSource, indexKinds);
+  return { baseKinds, mounts };
+}
+
+/**
+ * Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`),
+ * les déclarations illisibles et les routes vues.
+ */
+export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants) {
+  const { baseKinds, mounts } = guardContext(serverDir, roleConstants);
 
   const offenders: string[] = [];
   const unanalysable: string[] = [];
@@ -638,17 +644,19 @@ export function scanShadowedRoutes(serverDir: string) {
  * Routes (toutes methodes) dont le chemin porte un parametre et dont l'en-tete contient la garde
  * `isAnyUser` : un client peut y viser un objet. Chaque route doit figurer au balayage de cloison
  * (`tests/support/client-scope-sweep-table.ts`) ou a sa liste d'exclusions justifiee. Renvoie des
- * signatures `METHODE /api/chemin/:p` (cf. `routeSignature`). Limite : seule la garde ecrite dans
- * l'en-tete est vue (pas une garde posee au montage ni un routeur importe par un autre fichier).
+ * signatures `METHODE /api/chemin/:p` (cf. `routeSignature`). Gardes effectives = montages, `router.use`
+ * poses avant la route et en-tete ; toute route avec une garde de session sans garde restrictive est retenue.
+ * Limite : un routeur importe par un autre fichier que `server/api/index.ts` n'est pas rattache a son prefixe.
  */
 export function scanClientOpenParamRoutes(serverDir: string, roleConstants: RoleConstants): string[] {
-  const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
-  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
-  const mounts = parseMounts(indexSource, extendKinds(baseKinds, indexSource));
+  const { baseKinds, mounts } = guardContext(serverDir, roleConstants);
   const found = new Set<string>();
   for (const path of sourceFiles(serverDir)) {
     const file = `server/${path.slice(serverDir.length + 1).replace(/\\/g, "/")}`;
-    const source = stripComments(readFileSync(path, "utf8"));
+    const raw = readFileSync(path, "utf8");
+    const source = stripComments(raw);
+    const kinds = extendKinds(baseKinds, raw);
+    for (const name of RESTRICTIVE_ALLOWLIST[file] ?? []) kinds.restrictive.add(name);
     const routers = routerVarsOf(source);
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
     for (const m of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
@@ -657,9 +665,16 @@ export function scanClientOpenParamRoutes(serverDir: string, roleConstants: Role
       const close = matchingClose(source, open);
       if (close === -1) continue;
       const header = splitTopLevel(source.slice(open + 1, close)).slice(1, -1);
-      if (!header.some((arg) => /^isAnyUser$/.test(arg.trim()))) continue;
       const own = fileMounts.find((x) => x.variable === m[1]) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
-      found.add(routeSignature(m[2], fullPathOf(file, own?.prefix ?? "", m[4])));
+      const fullPath = fullPathOf(file, own?.prefix ?? "", m[4]);
+      // memes gardes effectives que scanOpenGetReads : montages masquants, montage propre, `router.use` poses avant, en-tete
+      const servedAt = file === "server/routes.ts" ? Number.POSITIVE_INFINITY : (own?.order ?? Number.POSITIVE_INFINITY);
+      const masking = mounts.filter((x) => x.prefix && x.order <= servedAt && underPrefix(fullPath, x.prefix) && x !== own).flatMap((x) => x.guards);
+      const effective = [...masking, ...(own?.guards ?? []), ...(routerLevelGuards(raw, kinds, m.index!).get(m[1]) ?? []), ...header];
+      // echec ferme : une garde de session sans garde restrictive laisse passer un client
+      const chain = classifyChain(effective, kinds);
+      if (!chain.session || chain.restrictive) continue;
+      found.add(routeSignature(m[2], fullPath));
     }
   }
   return [...found].sort();

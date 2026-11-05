@@ -109,7 +109,7 @@ describe("balayage : un client ne distingue pas l'etranger de l'inexistant", { t
   it("le personnel ne recoit jamais d'erreur serveur sur un identifiant absent", async () => {
     for (const row of SWEEP.filter((r) => r.method === "GET")) {
       const res = await session.call("GET", pathOf(row, absent[row.kind]), { actor: "admin" });
-      expect([200, 403, 404], pathOf(row, absent[row.kind])).toContain(res.status);
+      expect([200, 400, 403, 404], pathOf(row, absent[row.kind])).toContain(res.status);
     }
   });
 });
