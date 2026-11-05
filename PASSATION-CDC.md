@@ -88,3 +88,8 @@
 ## 2026-11-05 04:04 — #369 : réserves de relecture et sécurité levées
 - isNaN mort retiré (part-requirements PATCH), constantes work-order-parts placées après le dernier import, contrat : /issue avec « 1abc » par technicien et par client → 403 (garde de rôle avant lecture de l'id). Rectif. de rapport : sur /parts le statut des AppError ne change pas, seul « 1abc » passe en 400.
 - #373 (dernière liste hors aa) est empilée sur #369 : fusionner #369 dedans après chaque changement. Reste : admin-users-guard:14 (audit sécurité, en dernier).
+
+## 2026-11-05 04:08 — admin-users-guard:14 (audit sécurité demandé), branche fix/strict-id-admin-guard sur #373
+- Garde d'auto-désactivation : elle lisait `parseInt(id, 10)`, la route aval (routes.ts:809) `parseInt(id)` sans base. « 0x<hex de son id> » valait 0 pour la garde et son id pour la route : un admin pouvait se désactiver (contournement réel). La garde lit désormais par `parseRouteId` (400 sur tout id non numérique pur) avant la route.
+- Preuve : contrat `admin-users-guard-strict-id` (3 cas), 2 échecs sur l'ancienne lecture (mutation), 3/3 sur la nouvelle ; non-régression : un autre utilisateur se désactive et se réactive.
+- DETTE (routes.ts gelé) : `GET /api/parts/:id(\d+)` garde sa contrainte (le retirer masquerait `/api/parts/stock-movements`) ; la route aval `toggle` (routes.ts:809) lit encore `parseInt` sans base, protégée par la garde amont. À convertir quand routes.ts sera dégelé.
