@@ -7,6 +7,7 @@ import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { randomPasswordHash } from "../lib/dummy-hash";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
@@ -39,6 +40,13 @@ const optionalDateField = z
     message: "Format de date invalide (YYYY-MM-DD)",
   });
 
+// Une formation ne peut pas avoir eu lieu dans le futur (jour UTC). Controle de saisie seulement :
+// les imports (scripts/) et les donnees deja en base ne passent pas par ce schema.
+const pastOrTodayDateField = optionalDateField.refine(
+  (value) => value === null || value <= todayUtcDateOnly(),
+  { message: "La date de formation CPC ne peut pas être dans le futur." },
+);
+
 const createDriverSchema = z.object({
   firstName: z.string().trim().min(1, "Le prénom est requis"),
   lastName: z.string().trim().min(1, "Le nom est requis"),
@@ -50,7 +58,7 @@ const createDriverSchema = z.object({
   licenseExpiry: optionalDateField,
   hireDate: optionalDateField,
   geoTrainingDate: optionalDateField,
-  cpcTrainingDate: optionalDateField,
+  cpcTrainingDate: pastOrTodayDateField,
   isActive: z.boolean().optional(),
   userId: z.number().int().positive().nullable().optional(),
 });
@@ -245,7 +253,7 @@ router.post("/", isDriverManager, async (req, res) => {
 
     if (error instanceof z.ZodError) {
       return res.status(400).json({
-        message: "Données chauffeur invalides",
+        message: error.errors[0]?.message ?? "Données chauffeur invalides",
         errors: error.errors,
       });
     }
@@ -334,7 +342,7 @@ router.patch("/:id", isDriverManager, async (req, res) => {
 
     if (error instanceof z.ZodError) {
       return res.status(400).json({
-        message: "Données chauffeur invalides",
+        message: error.errors[0]?.message ?? "Données chauffeur invalides",
         errors: error.errors,
       });
     }
