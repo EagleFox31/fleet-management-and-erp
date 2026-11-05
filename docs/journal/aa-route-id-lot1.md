@@ -77,3 +77,18 @@
   - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
 - Effet de bord assumé : un id `0` répondait 404 (objet absent), il répond désormais 400 (id invalide).
 - Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
+
+## Lot 7 — lectures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur les 26 lectures restantes.
+  - 11 d'entre elles passent par `canAccessOwned` : documents de véhicule, téléchargement de document, planifications, OT, carburant, kilométrage et son historique, historique de statut, pneus du véhicule, documents de workflow.
+  - `GET /api/work-orders/:id` (`Number`) acceptait `1e0`.
+- Comment :
+  - `ROUTES_TS_FROZEN = 2` : les deux lectures de la forme `parseInt(req.params…)` qui restent sont PATCH users (#379) et toggle admin-users (#375).
+  - Le cliquet ne voit pas les lectures qui passent par une variable : `GET /api/vehicles/:id` (`parseInt(idOrRegistration)`, id ou immatriculation) lit encore de façon lâche. Elle est confiée au lot 9, avec `GET /api/users/:id`, monté avec `authenticate` seul.
+  - `generate-work-order` était déjà couvert au lot 6.
+- Pourquoi : un client propriétaire du véhicule `<id>` qui demandait `<id>abc` recevait les données du véhicule `<id>` au lieu d'un 400.
+- Tester :
+  - `route-id-strict-lot7` : 26 cas. Un témoin (le client lit son véhicule avec un id valide), 8 cas côté client et 17 côté personnel.
+  - Ancien code : 25 rouges, le témoin reste vert. Correctif : 26 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 97 contrats du périmètre : 1115 verts.
