@@ -3,6 +3,7 @@ import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
+import { MAX_DB_INTEGER_ID } from "./contracts/common";
 import { WORK_ORDER_ITEM_STATUSES } from "./constants/work-order-items";
 
 // Users and authentication
@@ -838,7 +839,11 @@ const faultPartOptionalSchema = z.boolean({ invalid_type_error: "Le caractère o
 export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts)
   .omit({ id: true, createdAt: true, faultCatalogId: true })
   .extend({
-    partId: z.number({ invalid_type_error: "La pièce est obligatoire." }).int("La pièce est invalide.").positive("La pièce est invalide."),
+    partId: z
+      .number({ invalid_type_error: "La pièce est obligatoire." })
+      .int("La pièce est invalide.")
+      .positive("La pièce est invalide.")
+      .max(MAX_DB_INTEGER_ID, "La pièce est invalide."),
     quantity: faultPartQuantitySchema.optional().default(1),
     isOptional: faultPartOptionalSchema.optional().default(false),
   });

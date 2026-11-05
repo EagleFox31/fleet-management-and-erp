@@ -3129,7 +3129,9 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** :
   - `tests/contract/id-range-query-body.contract.test.ts` : 15 cas, 400 sur le champ id. Rouge sur l'ancien code (500, ou 400 sur un autre champ).
   - Cliquet `tests/unit/server/zod-id-range-hygiene.test.ts` : une propriété nommée comme un id déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`, dans `server/api` ou `shared/contracts`. La liste gelée ne contient que des schémas de réponse. Le test passe au rouge si l'on retire la borne de `fuel-card`.
-- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne ; à reprendre quand la route passera dans un routeur de `server/api/`. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+  - Complété le 5 novembre 2026 (relecture de la PR) : deux ids échappaient au premier relevé et répondaient 500. `insertFaultCatalogPartSchema.partId` (`shared/schema.ts`, hors du périmètre scanné) et le plein lu dans la clé d'anomalie carburant (`consumption-gap:<id>`, chaîne découpée après validation par regex). Les deux sont bornés à `MAX_DB_INTEGER_ID`, avec un cas au contrat (`fault-catalog-lifecycle`, `fuel-anomalies`), rouge en 500 sur l'ancien code. Le cliquet scanne aussi `shared/schema.ts` et n'accepte plus qu'une borne `.max(MAX_DB_INTEGER_ID)` (ou sa valeur littérale) : une autre borne `.max(` laissait passer la valeur jusqu'à la base.
+  - Toujours hors cliquet : un id extrait d'une chaîne composite (clé, jeton). Le borner dans le schéma de la chaîne, pas au point de lecture.
 - **Leçon généralisée** : un filet posé sur un seul canal (le chemin) ne couvre pas la même valeur reçue par un autre canal (query, corps). La borne appartient au type partagé (`idSchema`), pas à chaque route.
 ## 2026-11-05 — Modifications non commitées perdues : `cd` en échec suivi d'un `git checkout -- .` dans le dépôt principal
 
