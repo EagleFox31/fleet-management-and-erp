@@ -93,11 +93,11 @@ function getStatusColor(status: string) {
     case "in_progress":
       return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
     case "awaiting_parts":
-      return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300";
+      return "bg-warning/15 text-warning-text dark:bg-warning/20 dark:text-warning-text";
     case "completed":
-      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+      return "bg-success/15 text-success dark:bg-success/20 dark:text-success";
     case "cancelled":
-      return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
+      return "bg-destructive/15 text-destructive-text dark:bg-destructive/20 dark:text-destructive-text";
     default:
       return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
   }
@@ -106,13 +106,13 @@ function getStatusColor(status: string) {
 function getPriorityColor(priority: string) {
   switch (priority) {
     case "critical":
-      return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
+      return "bg-destructive/15 text-destructive-text dark:bg-destructive/20 dark:text-destructive-text";
     case "high":
       return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300";
     case "medium":
       return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
     case "low":
-      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+      return "bg-success/15 text-success dark:bg-success/20 dark:text-success";
     default:
       return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
   }
@@ -983,21 +983,21 @@ export default function WorkOrderDetails({
     return (
       <div className="space-y-5">
         {/* Hero skeleton */}
-        <div className="rounded-2xl overflow-hidden bg-green-50 p-6 md:p-8 space-y-5">
-          <Skeleton className="h-5 w-40 bg-green-200/60" />
+        <div className="rounded-2xl overflow-hidden bg-success/10 p-6 md:p-8 space-y-5">
+          <Skeleton className="h-5 w-40 bg-success/20" />
           <div className="space-y-2">
-            <Skeleton className="h-4 w-28 bg-green-200/60" />
-            <Skeleton className="h-9 w-3/4 bg-green-200/60" />
+            <Skeleton className="h-4 w-28 bg-success/20" />
+            <Skeleton className="h-9 w-3/4 bg-success/20" />
             <div className="flex gap-2">
-              <Skeleton className="h-5 w-20 rounded-full bg-green-200/60" />
-              <Skeleton className="h-5 w-16 rounded-full bg-green-200/60" />
+              <Skeleton className="h-5 w-20 rounded-full bg-success/20" />
+              <Skeleton className="h-5 w-16 rounded-full bg-success/20" />
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="rounded-xl bg-white/55 border border-green-100 p-4 space-y-2">
-                <Skeleton className="h-3 w-20 bg-green-200/60" />
-                <Skeleton className="h-5 w-28 bg-green-200/60" />
+              <div key={i} className="rounded-xl bg-card/55 border border-success/20 p-4 space-y-2">
+                <Skeleton className="h-3 w-20 bg-success/20" />
+                <Skeleton className="h-5 w-28 bg-success/20" />
               </div>
             ))}
           </div>
@@ -1024,7 +1024,7 @@ export default function WorkOrderDetails({
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <AlertTriangle className="h-12 w-12 text-destructive-text mx-auto mb-4" />
           <h2 className="text-xl font-semibold mb-2">Ordre de travail introuvable</h2>
           <p className="text-muted-foreground mb-4">
             L'ordre de travail demandé n'existe pas ou n'a pas pu être chargé.
@@ -1151,7 +1151,7 @@ export default function WorkOrderDetails({
             <Button
               variant="ghost"
               size="sm"
-              className="-ml-1 text-green-800 hover:bg-green-100/60"
+              className="-ml-1 text-success hover:bg-success/15"
               onClick={() => {
                 if (window.history.length > 1) {
                   window.history.back();
@@ -1168,7 +1168,7 @@ export default function WorkOrderDetails({
                 <Button
                   size="sm"
                   onClick={() => setShowStartConfirm(true)}
-                  className="bg-green-600 hover:bg-green-700"
+                  className="bg-success hover:brightness-90"
                   data-testid="button-start-work-order"
                   data-help-target="wo-start"
                 >
@@ -1194,7 +1194,7 @@ export default function WorkOrderDetails({
                 onClick={handlePrintWorkOrder}
                 disabled={printBlockedByLaborRate}
                 title={printBlockedByLaborRate ? printBlockedReason : undefined}
-                className="bg-white/70 border-green-200 hover:bg-white text-green-800"
+                className="bg-card/70 border-success/30 hover:bg-card text-success"
                 data-testid="button-print-work-order"
               >
                 <Printer className="h-4 w-4 mr-2" />
@@ -1204,7 +1204,7 @@ export default function WorkOrderDetails({
               {canEditWorkOrder && !["completed", "cancelled"].includes(workOrder.status) && (
                 <Dialog>
                   <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="bg-white/70 border-green-200 hover:bg-white text-green-800">
+                    <Button variant="outline" size="sm" className="bg-card/70 border-success/30 hover:bg-card text-success">
                       <Edit className="h-4 w-4 mr-2" />
                       Modifier
                     </Button>
@@ -1262,7 +1262,7 @@ export default function WorkOrderDetails({
 
           {/* Title + badges */}
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap mt-3">
-            <h1 className="text-base sm:text-lg font-bold text-green-950 leading-tight">
+            <h1 className="text-base sm:text-lg font-bold text-foreground leading-tight">
               {workOrder.title || `Ordre de travail #${workOrder.id}`}
             </h1>
             <Badge className={getStatusColor(workOrder.status)}>
@@ -1280,42 +1280,42 @@ export default function WorkOrderDetails({
 
           {/* KPI tiles */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
-              <Car className="h-4 w-4 text-green-600 shrink-0" />
+            <div className="bg-card/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-success/20 flex items-center gap-2.5 min-w-0">
+              <Car className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Véhicule</div>
-                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">{getVehicleRegistration()}</div>
+                <div className="text-[10px] text-success font-medium uppercase tracking-wide">Véhicule</div>
+                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">{getVehicleRegistration()}</div>
                 {getVehicleBrandModel() && (
-                  <div className="text-[10px] text-green-700 truncate">{getVehicleBrandModel()}</div>
+                  <div className="text-[10px] text-success truncate">{getVehicleBrandModel()}</div>
                 )}
               </div>
             </div>
 
-            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
-              <User className="h-4 w-4 text-green-600 shrink-0" />
+            <div className="bg-card/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-success/20 flex items-center gap-2.5 min-w-0">
+              <User className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Technicien</div>
-                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">
+                <div className="text-[10px] text-success font-medium uppercase tracking-wide">Technicien</div>
+                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">
                   {technicianLabel}
                 </div>
               </div>
             </div>
 
-            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
-              <Calendar className="h-4 w-4 text-green-600 shrink-0" />
+            <div className="bg-card/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-success/20 flex items-center gap-2.5 min-w-0">
+              <Calendar className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Date de fin</div>
-                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">
+                <div className="text-[10px] text-success font-medium uppercase tracking-wide">Date de fin</div>
+                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">
                   {workOrder.endDate ? formatDate(workOrder.endDate) : "—"}
                 </div>
               </div>
             </div>
 
-            <div className="bg-white/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-green-100/90 flex items-center gap-2.5 min-w-0">
-              <DollarSign className="h-4 w-4 text-green-600 shrink-0" />
+            <div className="bg-card/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-success/20 flex items-center gap-2.5 min-w-0">
+              <DollarSign className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Coût total</div>
-                <div className="text-xs sm:text-sm font-semibold text-green-950 truncate">{formatCurrency(grandTotal)}</div>
+                <div className="text-[10px] text-success font-medium uppercase tracking-wide">Coût total</div>
+                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">{formatCurrency(grandTotal)}</div>
               </div>
             </div>
           </div>
@@ -1330,12 +1330,12 @@ export default function WorkOrderDetails({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <Play className="h-5 w-5 text-green-600" />
+              <Play className="h-5 w-5 text-success" />
               Commencer le travail
             </AlertDialogTitle>
             <AlertDialogDescription>
               {!workOrder?.technicianId ? (
-                <span className="text-amber-600 font-medium">
+                <span className="text-warning-text font-medium">
                   Cet ordre de travail n'est pas encore assigné. Veuillez sélectionner un technicien avant de commencer.
                 </span>
               ) : (
@@ -1350,7 +1350,7 @@ export default function WorkOrderDetails({
           {!workOrder?.technicianId && (
             <div className="py-4">
               <Label htmlFor="technician-select" className="text-sm font-medium mb-2 block">
-                Assigner un technicien <span className="text-red-500">*</span>
+                Assigner un technicien <span className="text-destructive-text">*</span>
               </Label>
               <Select
                 value={selectedTechnicianId?.toString() || ""}
@@ -1373,16 +1373,16 @@ export default function WorkOrderDetails({
           <BookingConflictAlert conflicts={bookingConflicts} />
 
           {demarreurEstAutre && (
-            <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 cursor-pointer">
+            <label className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 cursor-pointer">
               <input
                 type="checkbox"
                 checked={reprendreAMonNom}
                 onChange={(event) => setReprendreAMonNom(event.target.checked)}
                 className="mt-0.5"
               />
-              <span className="text-sm text-amber-900">
+              <span className="text-sm text-warning-text">
                 Je reprends cette intervention à mon nom
-                <span className="block text-xs text-amber-700 mt-0.5">
+                <span className="block text-xs text-warning-text mt-0.5">
                   Sans cette case, l'intervention reste assignée à {technicianLabel}.
                 </span>
               </span>
@@ -1405,7 +1405,7 @@ export default function WorkOrderDetails({
                   : selectedTechnicianId || undefined;
                 startWorkOrderMutation.mutate(techId);
               }}
-              className="bg-green-600 hover:bg-green-700"
+              className="bg-success hover:brightness-90"
               disabled={startWorkOrderMutation.isPending || (!workOrder?.technicianId && !selectedTechnicianId)}
             >
               {startWorkOrderMutation.isPending ? "Démarrage..." : "Commencer"}
@@ -1452,19 +1452,19 @@ export default function WorkOrderDetails({
 
         {/* ── DÉTAILS ── */}
         <TabsContent value="details" data-help-target="wo-details">
-          <div className="rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 overflow-hidden">
-            <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+          <div className="rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm bg-card dark:bg-slate-900 overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-success to-success" />
             <div className="px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 rounded-lg bg-green-50 dark:bg-green-950/40 flex items-center justify-center">
-                  <Wrench className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                <div className="w-7 h-7 rounded-lg bg-success/10 dark:bg-success/20 flex items-center justify-center">
+                  <Wrench className="h-3.5 w-3.5 text-success dark:text-success" />
                 </div>
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Détails de l'intervention</span>
               </div>
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5 text-emerald-600" />
+                  <FileText className="h-3.5 w-3.5 text-success" />
                   Description & Contexte d'intervention
                 </div>
                 <FormattedWorkOrderDescription description={workOrder.description} />
@@ -1514,18 +1514,18 @@ export default function WorkOrderDetails({
 
         {/* ── PIÈCES ── */}
         <TabsContent value="parts">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-            <div className="h-0.5 bg-gradient-to-r from-amber-400 to-orange-300" />
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-warning to-orange-300" />
             <div className="px-5 py-4">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
-                    <Package className="h-3.5 w-3.5 text-amber-600" />
+                  <div className="w-7 h-7 rounded-lg bg-warning/10 flex items-center justify-center">
+                    <Package className="h-3.5 w-3.5 text-warning-text" />
                   </div>
                   <span className="text-sm font-semibold text-gray-800">Pièces détachées utilisées</span>
                 </div>
               {workOrder?.status === 'completed' ? (
-                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                <Badge variant="outline" className="bg-success/10 text-success border-success/30">
                   <CheckCircle className="h-4 w-4 mr-1" />
                   OT Terminé - Modifications bloquées
                 </Badge>
@@ -1562,7 +1562,7 @@ export default function WorkOrderDetails({
                               ? <Badge variant="destructive" className="ml-2 text-xs">Rupture</Badge>
                               : partStock < minStock 
                                 ? <Badge variant="outline" className="ml-2 text-xs bg-orange-100 text-orange-800">Stock bas ({partStock})</Badge>
-                                : <Badge variant="outline" className="ml-2 text-xs bg-green-100 text-green-800">{partStock} en stock</Badge>;
+                                : <Badge variant="outline" className="ml-2 text-xs bg-success/15 text-success">{partStock} en stock</Badge>;
                             
                             return (
                               <SelectItem key={part.id} value={part.id.toString()}>
@@ -1580,15 +1580,15 @@ export default function WorkOrderDetails({
                     {/* Stock info card */}
                     {selectedPart && (
                       <div className={`p-3 rounded-lg border ${
-                        stockStatus === 'rupture' ? 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800' :
+                        stockStatus === 'rupture' ? 'bg-destructive/10 border-destructive/30 dark:bg-destructive/20 dark:border-destructive/30' :
                         stockStatus === 'low' ? 'bg-orange-50 border-orange-200 dark:bg-orange-950 dark:border-orange-800' :
-                        'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800'
+                        'bg-success/10 border-success/30 dark:bg-success/20 dark:border-success/30'
                       }`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Package className={`h-4 w-4 ${
-                              stockStatus === 'rupture' ? 'text-red-600' :
-                              stockStatus === 'low' ? 'text-orange-600' : 'text-green-600'
+                              stockStatus === 'rupture' ? 'text-destructive-text' :
+                              stockStatus === 'low' ? 'text-orange-600' : 'text-success'
                             }`} />
                             <span className="text-sm font-medium">Stock disponible: {stockAvailable}</span>
                           </div>
@@ -1613,12 +1613,12 @@ export default function WorkOrderDetails({
                     {/* Ce qui se passera au clic (le serveur relit le stock et tranche) */}
                     {isStockInsufficient && selectedPart && (
                       <div
-                        className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950 dark:border-amber-800"
+                        className="p-3 rounded-lg bg-warning/10 border border-warning/30 dark:bg-warning/20 dark:border-warning/30"
                         data-testid="part-request-preview"
                       >
                         <div className="flex items-start gap-2">
-                          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-1 flex-1 text-sm text-amber-800 dark:text-amber-200">
+                          <AlertTriangle className="h-5 w-5 text-warning-text flex-shrink-0 mt-0.5" />
+                          <div className="space-y-1 flex-1 text-sm text-warning-text dark:text-warning-text">
                             <p className="font-medium">
                               Stock insuffisant : {stockAvailable} disponible(s) pour {partQuantity} demandée(s).
                             </p>
@@ -1686,18 +1686,18 @@ export default function WorkOrderDetails({
                     </thead>
                     <tbody>
                       {partsUsed.map((partUsed: any) => (
-                        <tr key={partUsed.id} className="group border-b border-gray-50 last:border-0 transition-colors hover:bg-amber-50/30">
+                        <tr key={partUsed.id} className="group border-b border-gray-50 last:border-0 transition-colors hover:bg-warning/10">
                           <td className="px-5 py-3.5 font-medium text-gray-800">{partUsed.partName || "Pièce inconnue"}</td>
                           <td className="px-4 py-3.5 font-mono text-xs text-gray-400">{partUsed.partReference || "—"}</td>
                           <td className="px-4 py-3.5">
-                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-warning/15 text-warning-text text-xs font-bold">
                               {partUsed.quantity}
                             </span>
                           </td>
                           <td className="px-4 py-3.5 text-gray-500">{formatCurrency(partUsed.unitPrice)}</td>
                           <td className="px-4 py-3.5 font-semibold text-gray-800">{formatCurrency(partLineCost(partUsed.unitPrice, partUsed.quantity))}</td>
                           <td className="px-4 py-3.5">
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                            <Badge variant="outline" className="bg-success/10 text-success border-success/30">
                               Utilisée
                             </Badge>
                           </td>
@@ -1707,7 +1707,7 @@ export default function WorkOrderDetails({
                                 <button
                                   onClick={() => removePartMutation.mutate(partUsed.id)}
                                   disabled={removePartMutation.isPending}
-                                  className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive-text hover:text-destructive-text transition-colors"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
@@ -1717,30 +1717,30 @@ export default function WorkOrderDetails({
                         </tr>
                       ))}
                       {pendingPartRequirements.map((requirement: any) => (
-                        <tr key={`pending-${requirement.id}`} className="border-b border-amber-100 bg-amber-50/40 last:border-0">
-                          <td className="px-5 py-3.5 font-medium text-amber-900">
+                        <tr key={`pending-${requirement.id}`} className="border-b border-warning/20 bg-warning/10 last:border-0">
+                          <td className="px-5 py-3.5 font-medium text-warning-text">
                             {requirement.partName || "Pièce demandée"}
                           </td>
-                          <td className="px-4 py-3.5 font-mono text-xs text-amber-700/80">
+                          <td className="px-4 py-3.5 font-mono text-xs text-warning-text/80">
                             {requirement.partReference || "—"}
                           </td>
                           <td className="px-4 py-3.5">
-                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-warning/15 text-warning-text text-xs font-bold">
                               {requirement.quantityNeeded}
                             </span>
                           </td>
-                          <td className="px-4 py-3.5 text-amber-700">
+                          <td className="px-4 py-3.5 text-warning-text">
                             {formatCurrency(requirement.unitPrice || 0)}
                           </td>
-                          <td className="px-4 py-3.5 font-semibold text-amber-900">
+                          <td className="px-4 py-3.5 font-semibold text-warning-text">
                             {formatCurrency((requirement.unitPrice || 0) * requirement.quantityNeeded)}
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex flex-col gap-1">
-                              <Badge variant="outline" className="w-fit bg-amber-100 text-amber-800 border-amber-200">
+                              <Badge variant="outline" className="w-fit bg-warning/15 text-warning-text border-warning/30">
                                 {getPendingRequirementStatusLabel(requirement.status)}
                               </Badge>
-                              <span className="text-[11px] text-amber-700">
+                              <span className="text-[11px] text-warning-text">
                                 Stock: {requirement.stockAvailable}
                                 {requirement.shortage > 0 ? ` (manque ${requirement.shortage})` : " (ok)"}
                               </span>
@@ -1756,7 +1756,7 @@ export default function WorkOrderDetails({
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-8 text-xs border-amber-300 text-amber-800 hover:bg-amber-50"
+                                    className="h-8 text-xs border-warning/40 text-warning-text hover:bg-warning/10"
                                     onClick={() => {
                                       setOverrideRequirementId(requirement.id);
                                       setOverrideReason("");
@@ -1773,7 +1773,7 @@ export default function WorkOrderDetails({
                                     variant="outline"
                                     className={
                                       requirement.progressBlocking
-                                        ? "bg-red-50 text-red-700 border-red-200"
+                                        ? "bg-destructive/10 text-destructive-text border-destructive/30"
                                         : "bg-gray-50 text-gray-600 border-gray-200"
                                     }
                                   >
@@ -1782,7 +1782,7 @@ export default function WorkOrderDetails({
                                 ) : (
                                   <Button
                                     size="sm"
-                                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                    className="h-8 text-xs bg-success hover:brightness-90"
                                     onClick={() =>
                                       submitIssueRequirement({
                                         requirementId: requirement.id,
@@ -1810,17 +1810,17 @@ export default function WorkOrderDetails({
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400 border-t border-gray-100">
-                  <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center">
-                    <Package className="h-5 w-5 text-amber-400" />
+                  <div className="w-12 h-12 rounded-full bg-warning/10 border border-warning/20 flex items-center justify-center">
+                    <Package className="h-5 w-5 text-warning-text" />
                   </div>
                   <p className="text-sm">Aucune pièce utilisée dans cet ordre de travail.</p>
                 </div>
               )}
               {Array.isArray(partsUsed) && partsUsed.length > 0 && (
                 <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
-                  <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-2 flex items-center gap-3">
-                    <span className="text-sm text-amber-700">Total pièces</span>
-                    <span className="text-base font-bold text-amber-900">{formatCurrency(totalPartsCost)}</span>
+                  <div className="bg-warning/10 border border-warning/20 rounded-lg px-4 py-2 flex items-center gap-3">
+                    <span className="text-sm text-warning-text">Total pièces</span>
+                    <span className="text-base font-bold text-warning-text">{formatCurrency(totalPartsCost)}</span>
                   </div>
                 </div>
               )}
@@ -1839,7 +1839,7 @@ export default function WorkOrderDetails({
 
         {/* ── PNEUS ── */}
         <TabsContent value="tires">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
             <div className="h-0.5 bg-gradient-to-r from-blue-500 to-sky-300" />
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
@@ -1919,7 +1919,7 @@ export default function WorkOrderDetails({
         {/* ── RAPPORT ── */}
         {workOrder.status === 'completed' && (
           <TabsContent value="report">
-            <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+            <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
               <div className="h-0.5 bg-gradient-to-r from-purple-500 to-violet-300" />
               <div className="px-5 py-4 border-b border-gray-100">
                 <div className="flex items-center gap-2">
@@ -2095,7 +2095,7 @@ export default function WorkOrderDetails({
               Annuler
             </Button>
             <Button
-              className="bg-amber-600 hover:bg-amber-700"
+              className="bg-warning hover:brightness-90"
               disabled={
                 overrideReason.trim().length < MOTIF_MIN ||
                 issuePendingRequirementMutation.isPending
