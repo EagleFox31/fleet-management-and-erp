@@ -21,7 +21,7 @@ const EMITTERS: Record<string, { cost: number; staff: number }> = {
   "server/api/technician-work-orders.routes.ts": { cost: 1, staff: 0 },
   "server/api/work-order-items.routes.ts": { cost: 0, staff: 1 },
   "server/api/work-order-parts.routes.ts": { cost: 5, staff: 1 },
-  "server/routes.ts": { cost: 2, staff: 3 },
+  "server/routes.ts": { cost: 2, staff: 2 },
   "server/services/incident-service.ts": { cost: 1, staff: 0 },
   "server/services/preventive-maintenance-service.ts": { cost: 1, staff: 0 },
   "server/services/procurement-service.ts": { cost: 0, staff: 2 },
