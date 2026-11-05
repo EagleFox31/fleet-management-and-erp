@@ -39,3 +39,10 @@
 - Comment : `driverScopeOf`, `canAccessMissionAsDriver` et `driverLiveAssignmentFilter` dans la route ; parcours récursif des clés JSON dans le contrat.
 - Pourquoi : la raison datée sortait vers tout le personnel, chauffeurs compris ; un repli client concluait à l'éligibilité sans verdict.
 - Tester : `tests/contract/mission-driver-cpc-eligibility.contract.test.ts` (3 échecs sur 15 sans le correctif), `tests/contract/mission-driver-cpc-status.contract.test.ts` (1 échec), `tests/contract/drivers-input-validation.contract.test.ts` (1 échec), `tests/unit/shared/driver-cpc-eligibility-codes.test.ts`.
+
+## 2026-11-05 — launch-readiness : affectation vivante seule, erreurs par AppError, garde de lecture
+
+- Quoi : la check-list de lancement ne lit plus une affectation annulée ou refusée pour le personnel ; le 403 chauffeur hors mission (défense en profondeur) et le 500 passent par `AppError` (plus de `res.status`). Garde unitaire sur les lectures d'`assignments` des handlers `/:id/*` ouverts aux chauffeurs ; reste gelé : `GET` et `POST /:id/document-renewal-requests`.
+- Comment : filtre `notInArray(assignments.status, VOID_ASSIGNMENT_STATUSES)` côté personnel, `driverLiveAssignmentFilter` côté chauffeur ; le `catch` relaie les `AppError` telles quelles.
+- Pourquoi : `router.param` cloisonne la mission, pas l'affectation lue ; mineurs de la relecture de #345.
+- Tester : `tests/contract/mission-launch-readiness-live-assignment.contract.test.ts` (2 échecs sur 2 sans le correctif), `tests/unit/server/mission-assignment-read-scope.test.ts`.

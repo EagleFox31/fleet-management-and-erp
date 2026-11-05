@@ -1568,7 +1568,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
 });
 
 // GET /api/missions/:id/launch-readiness - Checklist métier de lancement mission
-router.get("/:id/launch-readiness", async (req, res) => {
+router.get("/:id/launch-readiness", async (req, res, next) => {
   try {
     const missionId = parseInt(req.params.id, 10);
     if (!Number.isInteger(missionId)) {
@@ -1603,7 +1603,8 @@ router.get("/:id/launch-readiness", async (req, res) => {
     // checklist (verdict CPC compris) se calcule sur SA fiche, jamais sur celle d'un collègue.
     const readinessScope = await driverScopeOf(req.user);
     if (readinessScope !== undefined && !(await canAccessMissionAsDriver(req.user, missionId))) {
-      return res.status(403).json({ message: OUT_OF_DRIVER_SCOPE_MESSAGE });
+      // Défense en profondeur : router.param("id") a déjà refusé ce chauffeur.
+      throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
     }
 
     const [missionAssignment] = await db
@@ -1630,7 +1631,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(
         readinessScope === undefined
-          ? eq(assignments.missionId, missionId)
+          ? and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]))
           : and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(readinessScope)),
       )
       .orderBy(asc(assignments.id))
@@ -2014,8 +2015,9 @@ router.get("/:id/launch-readiness", async (req, res) => {
       openRenewalRequests,
     });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Get mission launch readiness error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de calculer la check-list de lancement. Réessayez.", { cause: error }));
   }
 });
 
