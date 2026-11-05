@@ -19,9 +19,9 @@ BEGIN
      AND (TG_OP = 'DELETE' OR NEW.role IS DISTINCT FROM 'admin' OR NEW.deleted_at IS NOT NULL) THEN
     -- Sérialise les sorties concurrentes : la seconde relit l'état validé par la première.
     PERFORM pg_advisory_xact_lock(hashtext('fleetmaster_last_active_admin'));
-    IF NOT EXISTS (
-      SELECT 1 FROM users u WHERE u.role = 'admin' AND u.deleted_at IS NULL AND u.id <> OLD.id
-    ) THEN
+    -- Lecture verrouillante (FOR SHARE) : un autre administrateur ne peut pas sortir avant la fin de cette transaction.
+    PERFORM 1 FROM users u WHERE u.role = 'admin' AND u.deleted_at IS NULL AND u.id <> OLD.id FOR SHARE;
+    IF NOT FOUND THEN
       RAISE EXCEPTION 'Il doit rester au moins un administrateur actif.'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'users_keep_one_active_admin';
     END IF;

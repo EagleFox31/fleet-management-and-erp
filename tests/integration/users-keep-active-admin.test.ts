@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { USERS_KEEP_ACTIVE_ADMIN_SQL } from "../../server/init-database";
 import { isLastActiveAdminViolation } from "../../server/lib/pg-errors";
 import { users } from "../../shared/schema";
@@ -53,8 +53,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (created.length) {
-    await db.execute(sql`SET session_replication_role = replica`).catch(() => {});
-    await db.delete(users).where(inArray(users.id, created));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role = replica`);
+      await tx.delete(users).where(inArray(users.id, created));
+    });
   }
 }, 60_000);
 
@@ -94,5 +96,52 @@ describe("trigger users_keep_one_active_admin", { timeout: 60_000 }, () => {
     await db.execute(sql.raw(USERS_KEEP_ACTIVE_ADMIN_SQL));
     const [row] = (await db.execute(sql`SELECT count(*)::int AS n FROM pg_trigger WHERE tgname = 'trg_users_keep_active_admin' AND NOT tgisinternal`)).rows as any[];
     expect(row.n).toBe(1);
+  });
+
+  it("mise à jour et suppression en masse des administrateurs : refusées", async () => {
+    const [a, b] = [await makeUser("admin"), await makeUser("admin")];
+    await withOnlyAdmins([a.id, b.id], async (tx) => {
+      await tx.execute(sql`SAVEPOINT m`);
+      expect(await refused(() => tx.execute(sql`UPDATE users SET deleted_at = now() WHERE role = 'admin'`))).toBe(true);
+      await tx.execute(sql`ROLLBACK TO SAVEPOINT m`);
+      expect(await refused(() => tx.execute(sql`UPDATE users SET role = 'driver' WHERE role = 'admin'`))).toBe(true);
+      await tx.execute(sql`ROLLBACK TO SAVEPOINT m`);
+      expect(await refused(() => tx.execute(sql`DELETE FROM users WHERE role = 'admin'`))).toBe(true);
+    });
+  });
+});
+
+describe("isolation REPEATABLE READ couverte", { timeout: 60_000 }, () => {
+  it("deux connexions dédiées, deux administrateurs : au moins une sortie échoue", async () => {
+    const [a, b] = [await makeUser("admin"), await makeUser("admin")];
+    const others = (await db.execute(sql`SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL AND id NOT IN (${a.id}, ${b.id})`)).rows.map((r: any) => r.id as number);
+    const setOthers = async (value: "now()" | "NULL") => {
+      if (!others.length) return;
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL session_replication_role = replica`);
+        await tx.execute(sql`UPDATE users SET deleted_at = ${sql.raw(value)} WHERE id IN (${sql.join(others.map((i) => sql`${i}`), sql`, `)})`);
+      });
+    };
+    await setOthers("now()");
+    const [c1, c2] = [await pool.connect(), await pool.connect()];
+    try {
+      for (const c of [c1, c2]) {
+        await c.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+        await c.query("SELECT count(*) FROM users"); // fige l'instantané
+      }
+      const run = (c: typeof c1, id: number) =>
+        c.query("UPDATE users SET deleted_at = now() WHERE id = $1", [id]).then(
+          () => c.query("COMMIT").then(() => true),
+          () => c.query("ROLLBACK").then(() => false),
+        );
+      const results = await Promise.all([run(c1, a.id), run(c2, b.id)]);
+      expect(results.filter(Boolean).length).toBeLessThan(2);
+      const [row] = (await db.execute(sql`SELECT count(*)::int AS n FROM users WHERE id IN (${a.id}, ${b.id}) AND deleted_at IS NULL`)).rows as any[];
+      expect(row.n).toBeGreaterThanOrEqual(1);
+    } finally {
+      c1.release();
+      c2.release();
+      await setOthers("NULL");
+    }
   });
 });

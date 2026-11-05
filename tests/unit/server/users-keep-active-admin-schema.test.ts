@@ -51,5 +51,7 @@ describe("users : au moins un administrateur actif, init-database et migration j
     expect(sql).not.toContain("hashtext('fleetmaster_last_admin')");
     // Même définition d'« actif » que la garde : rôle admin et compte non supprimé.
     expect(sql).toContain("u.role = 'admin' AND u.deleted_at IS NULL");
+    expect(sql).toContain("FOR SHARE;");
+    expect(sql).not.toContain("NOT EXISTS");
   });
 });

@@ -77,3 +77,9 @@
 - `toHttpError` : cette violation devient un 400 au message lisible, jamais un 500.
 - Preuves : check 0 erreur TS, unitaires, contrats 2031/2031, intégration 340/340 + 4 cas dédiés.
 - Reste : PR brouillon, puis avis 0a. Sur #381 : neutraliser la ligne « À venir après fusion de #379 » et `close` → `finish` dans booking-guard.ts. Puis complément #375 après #379.
+
+## 2026-11-05 05:20 — c7 : #386 relecture, points 1 à 3
+
+- Lecture verrouillante (FOR SHARE) des autres administrateurs actifs à la place du NOT EXISTS ; test d'intégration « isolation REPEATABLE READ couverte » (rouge avec l'ancien SQL, vert ensuite).
+- Tests de mise à jour et suppression en masse : refus. Nettoyage de test passé en transaction (SET LOCAL), plus de fuite dans le pool.
+- Suite : le refus du trigger donne un 500 sur les catch locaux de routes.ts tant que la garde #379 n'est pas devant : à traiter dans le complément #375. Puis reprise de la PR santé de b7 (fix/health-minimal-public).
