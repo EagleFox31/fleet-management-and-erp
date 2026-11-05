@@ -13,9 +13,25 @@
  * un mot de passe de 12 caractères ; il n'est pas adapté à une base Docker jetable.
  */
 import bcrypt from "bcryptjs";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, like, ne } from "drizzle-orm";
 import { db, pool } from "../../server/db";
-import { documentRenewalRequests, partRequirements, parts, partsStockMovements, partsUsed, users, vehicleDocuments, vehicles, workOrders } from "../../shared/schema";
+import {
+  assignments,
+  clientInvoices,
+  clients,
+  documentRenewalRequests,
+  drivers,
+  fuelRecords,
+  missions,
+  partRequirements,
+  parts,
+  partsStockMovements,
+  partsUsed,
+  users,
+  vehicleDocuments,
+  vehicles,
+  workOrders,
+} from "../../shared/schema";
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
@@ -23,6 +39,11 @@ export const DEMO_ACCOUNTS = {
   clientA: { username: "client1", password: "client123", name: "Transports Kamga", role: "client" },
   clientB: { username: "client2", password: "client123", name: "Logistique Fotso", role: "client" },
   warehouse: { username: "fatou", password: "warehouse123", name: "Fatoumata Diallo", role: "warehouse" },
+  logistics: { username: "logi1", password: "logi123", name: "Jean Tchoumi", role: "logistics" },
+  workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
+  management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
+  admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
+  driver: { username: "chauffeur1", password: "chauffeur123", name: "Samuel Biyick", role: "driver" },
 } as const;
 
 export const DEMO_VEHICLES = {
@@ -31,7 +52,18 @@ export const DEMO_VEHICLES = {
   clientB1: "DEMO-C2-001",
   workshop: "DEMO-ATL-001",
   secretary: "DEMO-SEC-001",
+  atelierChef: "DEMO-CHEF-001",
 } as const;
+
+export const DEMO_MISSION = {
+  clientName: "Brasseries du Littoral (démo)",
+  orderPrefix: "DEMO-MIS-",
+  vehicle: "DEMO-LOG-001",
+  driverEmployee: "DEMO-EMP-001",
+  fuelStation: "DEMO-APPROVISIONNEMENT",
+} as const;
+
+export const DEMO_OT_PREFIX = "Démo atelier - ";
 
 export const DEMO_PART = { reference: "DEMO-FILTRE-HUILE", name: "Filtre à huile démo" } as const;
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
@@ -89,8 +121,73 @@ function isoDayFromNow(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Logistique : client donneur d'ordre, véhicule aux papiers valides, chauffeur formé, carte carburant créditée. */
+/** Atelier : chef d'atelier ; le technicien tech1 est affecté par la démo. */
+async function seedWorkshop(): Promise<void> {
+  await ensureUser(DEMO_ACCOUNTS.workshopManager);
+  await ensureUser(DEMO_ACCOUNTS.technician);
+  const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
+  const old = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.vehicleId, vehicleId), like(workOrders.title, `${DEMO_OT_PREFIX}%`)));
+  if (old.length > 0) {
+    const ids = old.map((o) => o.id);
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, ids));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, ids));
+    await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, ids));
+    await db.delete(workOrders).where(inArray(workOrders.id, ids));
+  }
+}
+
+async function seedLogistics(): Promise<void> {
+  await ensureUser(DEMO_ACCOUNTS.logistics);
+  await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
+  const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
+  const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+  for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
+    if (docs.some((d) => d.type === type)) continue;
+    await db.insert(vehicleDocuments).values({
+      vehicleId,
+      name: `${DEMO_MISSION.vehicle} ${type}`,
+      type,
+      filename: `${type}.pdf`,
+      filesize: 4,
+      fileType: "application/pdf",
+      filePath: `uploads/demo/${DEMO_MISSION.vehicle}-${type}.pdf`,
+      expiryDate: "2099-12-31",
+    });
+  }
+  await db
+    .insert(drivers)
+    .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
+    .onConflictDoNothing();
+  await db.update(drivers).set({ cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), isActive: true }).where(eq(drivers.employeeNumber, DEMO_MISSION.driverEmployee));
+  const [credit] = await db.select({ id: fuelRecords.id }).from(fuelRecords).where(eq(fuelRecords.stationName, DEMO_MISSION.fuelStation));
+  if (!credit) {
+    await db.insert(fuelRecords).values({
+      date: "2026-01-15",
+      quantity: 1,
+      cost: "0",
+      creditAmount: "50000000",
+      debitAmount: "0",
+      year: 2026,
+      month: 1,
+      stationName: DEMO_MISSION.fuelStation,
+      notes: "Crédit de carte (démo)",
+    });
+  }
+  // Missions de la démo : retirées à chaque lancement (factures et affectations d'abord).
+  const old = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${DEMO_MISSION.orderPrefix}%`));
+  if (old.length > 0) {
+    const oldIds = old.map((m) => m.id);
+    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, oldIds));
+    await db.delete(assignments).where(inArray(assignments.missionId, oldIds));
+    await db.delete(missions).where(inArray(missions.id, oldIds));
+  }
+}
+
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
+  await seedLogistics();
+  await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
   await ensureUser(DEMO_ACCOUNTS.secretary);
   const clientAId = await ensureUser(DEMO_ACCOUNTS.clientA);
