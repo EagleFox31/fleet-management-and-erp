@@ -77,3 +77,19 @@ Règles : `docs/journal/README.md`.
 - **Reste / risques** : `POST /api/users` et `POST /api/auth/register` (`server/routes.ts`, gelé) acceptent encore `pin` via `insertUserSchema` sans le hacher : avec la contrainte, un PIN fourni y donne une erreur 500 au lieu d'un stockage en clair ; correction côté fleet-api.
 
 - 2026-11-04 18:40 : branche poussée, PR #320 ouverte (la mention « sans push ni PR » ci-dessus est périmée). Correctifs de relecture : PIN haché dans les deux routes de création, err.detail masqué dans le logger, préfixe $2 non conforme exclu de la reprise et compté.
+
+## 2026-11-05T15:24:00+01:00 — QHSE lot Q1 : contraintes nommées déclarées dans Drizzle (bloquant de relecture #462)
+
+- **Quoi** : les CHECK de `qhse_inspection_criteria` (label, category) et `qhse_inspections` (kind, location, items), plus l'unicité du code, sont déclarés nommés dans `shared/schema.ts` et posés sous les mêmes noms par `QHSE_INSPECTIONS_SQL` et sa migration jumelle ; les six noms entrent dans `CDC_RECONCILED_CONSTRAINTS`.
+- **Comment** : patron PR #122 : contrainte nommée dans le CREATE TABLE, puis bloc DO qui pose NOT VALID la contrainte absente et la valide (check_violation piégée : WARNING, démarrage non bloqué). Unicité posée par un ancien push (`qhse_inspection_criteria_code_unique`) renommée en `_code_key`. Mineurs : filtres from/to au jour Africa/Douala en SQL, `inspectedAt` refusé au-delà de 5 min dans le futur, portée chauffeur dans le WHERE de `getInspection` (403 identique absent/interdit).
+- **Pourquoi** : un CHECK écrit seulement dans CREATE TABLE IF NOT EXISTS n'existe pas sur une base poussée par drizzle-kit et un push --force le retire.
+- **Preuves** : Postgres local jetable (ports 62432/62433), schéma par drizzle-kit push --force : les six contraintes présentes et validées avant tout init-database, INSERT category='road' rejeté (qhse_inspection_criteria_category_check). Contrat qhse-inspections 6/6, intégration cdc-schema-idempotence 13/13, unitaires 2726 verts, tsc 0 erreur. Filtre Douala : rouge avec l'ancien calcul UTC, vert après.
+- **Reste / risques** : aucune donnée réécrite ; une base où des lignes violent un CHECK garde la contrainte NOT VALID, signalée au démarrage.
+
+## 2026-11-05T15:40:00+01:00 — QHSE lot Q1 : fusion de main (T1, O1) dans #462, test 403 chauffeur sans fiche
+
+- **Quoi** : `git merge origin/main` (sans rebase ni force-push) sur `feat/qhse-inspections` ; ajout au contrat qhse-inspections du cas compte `driver` sans fiche chauffeur → 403 sur `GET /api/qhse/inspections/:id` (contrôle existant et id absent).
+- **Comment** : conflits résolus en gardant les deux côtés : `shared/constants/roles.ts` (`INVENTORY_MANAGER_ROLES` puis groupes QHSE), `shared/schema.ts` (tables `treasury_*` puis `qhse_*`). `init-database.ts`, `api/index.ts`, `tests/support/cleanup.ts` fusionnés automatiquement, relus (montages trésorerie, opérations, QHSE présents ; suppressions QHSE et trésorerie avant les utilisateurs).
+- **Pourquoi** : #462 n'était plus fusionnable après #461 et #465.
+- **Preuves** : tsc 0 erreur ; unitaires 252 fichiers, 2796 verts ; Postgres local jetable (ports 57320/57433, supprimé ensuite), schéma par drizzle-kit push --force : intégration cleanup-users-fk-coverage + cdc-schema-idempotence 16/16, contrat qhse-inspections 6/6 ; nouvelle assertion rouge si l'on attend 200, verte à 403.
+- **Reste / risques** : aucun effet en base partagée ; aucune migration nouvelle.

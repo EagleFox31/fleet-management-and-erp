@@ -2095,3 +2095,72 @@ export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omi
 });
 export type TreasuryAccountRow = typeof treasuryAccounts.$inferSelect;
 export type TreasuryEntryRow = typeof treasuryEntries.$inferSelect;
+
+// Contrôles inopinés QHSE (lot Q1, drapeau `qhse`). Jumelle SQL : QHSE_INSPECTIONS_SQL dans
+// server/init-database.ts et server/db/migrations/20261105_qhse_inspections.sql (AGENTS.md §5).
+export const QHSE_CRITERION_CATEGORIES = ["cabin", "stop"] as const;
+
+export const qhseInspectionCriteria = pgTable("qhse_inspection_criteria", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  label: text("label").notNull(),
+  category: text("category", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  // Noms identiques à ceux posés par QHSE_INSPECTIONS_SQL (CDC_RECONCILED_CONSTRAINTS) : un push Drizzle
+  // les pose aussi, et un push --force ne les retire plus.
+  unique("qhse_inspection_criteria_code_key").on(table.code),
+  check("qhse_inspection_criteria_label_check", sql`length(btrim(${table.label})) > 0`),
+  check("qhse_inspection_criteria_category_check", sql`${table.category} IN ('cabin', 'stop')`),
+]);
+
+export const qhseInspections = pgTable("qhse_inspections", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  inspectedAt: timestamp("inspected_at").defaultNow().notNull(),
+  location: text("location").notNull(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id),
+  driverId: integer("driver_id").notNull().references(() => drivers.id),
+  inspectorId: integer("inspector_id").notNull().references(() => users.id),
+  items: jsonb("items").$type<Array<{
+    criterionId: number;
+    code: string;
+    label: string;
+    conform: boolean;
+    observation?: string;
+  }>>().notNull().default(sql`'[]'::jsonb`),
+  generalObservation: text("general_observation"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_qhse_inspections_driver").on(table.driverId, table.inspectedAt),
+  index("idx_qhse_inspections_vehicle").on(table.vehicleId),
+  check("qhse_inspections_kind_check", sql`${table.kind} IN ('cabin', 'stop')`),
+  check("qhse_inspections_location_check", sql`length(btrim(${table.location})) > 0`),
+  check("qhse_inspections_items_check", sql`jsonb_typeof(${table.items}) = 'array'`),
+]);
+
+export const insertQhseInspectionCriterionSchema = createInsertSchema(qhseInspectionCriteria).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).omit({
+  id: true,
+  inspectorId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
+export type QhseInspectionRow = typeof qhseInspections.$inferSelect;
