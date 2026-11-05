@@ -804,3 +804,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Comment** : `resolveLaunchBudget(missionId, legacy, role)` renvoie aussi `present`, qui met en forme la réponse (`hideLaunchBudgetAmounts`, fonction pure), et `fuelShortfallMotif` pour le PUT. `missions.routes.ts` (gelé) : 5 lignes modifiées en place, aucune ajoutée.
 - **Pourquoi** : constat sécurité sur #515 : la route est ouverte au personnel (`isStaff`), la lecture du budget ne l'est pas.
 - **Preuve** : contrat 14/14 (technicien sans montant, logistique avec, drapeau coupé inchangé ; refus du PUT relu en base : mission toujours `assigned`) ; unitaires dédiés 8/8 ; mutants 6/6 tués.
+## 2026-11-05T22:19:06+01:00 — Retrait d'une pièce posée sur un OT (DELETE /api/parts-used/:id)
+- **Statut** : fait
+- **Quoi** : le retrait remet la pièce en stock une seule fois, refuse un OT terminé (409), un id inconnu (404) et le technicien (403).
+- **Comment** : route déplacée de `server/routes.ts` vers `server/api/parts-used.routes.ts` (monté avant `registerRoutes`, garde `isStockIssuer` sur la route pour laisser `GET /api/parts-used` à routes.ts) ; service `server/services/part-used-removal.ts` : transaction, `DELETE ... RETURNING`, crédit seulement si la ligne a été supprimée par l'appel, `recordStockMovement` avec `executor = tx`. Erreurs en `AppError`, log `moduleLogger`. Événement `part_used_removed` conservé, portée par rôles écrite en clair ; compteurs gelés de `broadcast-hygiene` (routes.ts 5 vers 4) et `work-order-scope-hygiene` (personnel 3 vers 2) diminués.
+- **Pourquoi** : l'ancien chemin lisait, créditait puis supprimait sans transaction, avalait l'erreur et répondait 204 dans tous les cas.
+- **Comment tester (QA)** : `tests/contract/parts-used-removal-defects.contract.test.ts` (10 passés) sur Postgres local ; mutants : sans garde de statut 2 échecs, sans transaction 1 échec.
+- **Reste / risques** : l'écran OT affiche encore la corbeille au technicien (403 à l'usage) et seulement hors `completed` (pas `cancelled`) : à aligner côté front.

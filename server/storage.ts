@@ -258,7 +258,6 @@ export interface IStorage {
   getPartsUsedForWorkOrder(workOrderId: number): Promise<PartUsed[]>;
   addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number, options?: StockWriteOptions): Promise<PartUsed>;
   updatePartUsed(id: number, partUsed: Partial<InsertPartUsed>): Promise<PartUsed | undefined>;
-  removePartFromWorkOrder(id: number, actorUserId?: number): Promise<boolean>;
   
   // Parts stock movements methods
   getPartStockHistory(partId: number): Promise<PartStockHistoryItem[]>;
@@ -1851,31 +1850,6 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async removePartFromWorkOrder(id: number, actorUserId?: number): Promise<boolean> {
-    try {
-      // Récupérer les détails avant suppression pour remettre en stock
-      const [partUsedDetails] = await db.select().from(partsUsed).where(eq(partsUsed.id, id));
-      
-      if (partUsedDetails) {
-        // Remettre la pièce en stock
-        await this.recordStockMovement(
-          partUsedDetails.partId,
-          'in',
-          partUsedDetails.quantity,
-          partUsedDetails.workOrderId,
-          'Retour en stock - suppression de l\'ordre de travail',
-          actorUserId
-        );
-      }
-      
-      await db.delete(partsUsed).where(eq(partsUsed.id, id));
-      return true;
-    } catch (error) {
-      console.error('Error removing part from work order:', error);
-      return false;
-    }
-  }
-  
   async getPartStockHistory(partId: number): Promise<PartStockHistoryItem[]> {
     try {
       const stockMovements = await db
