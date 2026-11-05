@@ -83,7 +83,7 @@ describe("un client ne distingue pas l'étranger de l'inexistant", { timeout: 60
     expect(shape(absent)).toEqual(shape(foreign));
   });
 
-  it("GET /api/vehicles/:id : le message affiche par l'ecran (e2e 24) est fige, absent comme etranger", async () => {
+  it("GET /api/vehicles/:id : le message affiché par l'écran (e2e 24) est figé, absent comme étranger", async () => {
     const foreign = await session.call("GET", `/api/vehicles/${foreignVehicle}`, { actor: "client" });
     const absent = await session.call("GET", `/api/vehicles/${ABSENT}`, { actor: "client" });
     expect(foreign.body?.message).toBe("Accès non autorisé à ce véhicule");

@@ -3033,7 +3033,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - Classification : cohérence manquante entre routes d'une même cloison. Les routes plus anciennes avaient leur propre contrôle d'existence avant la cloison, et aucun test ne comparait les deux cas.
 
 ### Résolution
-- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner).
+- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner). Exception : `GET /api/vehicles/:id` garde son message historique « Accès non autorisé à ce véhicule » (absent comme étranger), que l'e2e 24 attend et que l'écran affiche ; le contrat le fige.
 - Ne renverse pas #255 : le 403 reste celui que l'écran lit comme « Accès refusé ». Un client qui saisit un identifiant absent lit donc aussi « Accès refusé », par choix assumé pour ne rien révéler.
 
 ### Prévention (vérifiable)
