@@ -43,7 +43,7 @@ const GELES: Record<string, number> = {
   "client/src/components/design-system/alert-modal.tsx": 8,
   "client/src/components/design-system/icon-square.tsx": 3,
   "client/src/components/design-system/kpi-tile.tsx": 2,
-  "client/src/components/design-system/status-badge.tsx": 54,
+  "client/src/components/design-system/status-badge.tsx": 33,
   "client/src/components/design-system/status-metric-strip.tsx": 5,
   "client/src/components/design-system/urgency-badge.tsx": 6,
   "client/src/components/drivers/cpc-alerts-panel.tsx": 31,
