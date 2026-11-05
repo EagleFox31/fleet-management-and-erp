@@ -85,3 +85,6 @@
 - routes.ts `GET /api/parts/:id(\d+)` LAISSÉ : retirer la contrainte masquerait `/api/parts/stock-movements` (déclarée plus bas, l.2664). Le 404 sur « 1abc » y est conservé.
 - Test supplier-invoice-error-details : son « 500 de référence » était un id illisible, désormais 400 ; test réécrit en 400 VALIDATION (la réécriture des 5xx reste couverte par tests/unit/server/error-handler.test.ts).
 - Contrat route-id-strict-last (17 cas). Reste à traiter : admin-users-guard:14 (audit sécurité, en dernier).
+## 2026-11-05 04:04 — #369 : réserves de relecture et sécurité levées
+- isNaN mort retiré (part-requirements PATCH), constantes work-order-parts placées après le dernier import, contrat : /issue avec « 1abc » par technicien et par client → 403 (garde de rôle avant lecture de l'id). Rectif. de rapport : sur /parts le statut des AppError ne change pas, seul « 1abc » passe en 400.
+- #373 (dernière liste hors aa) est empilée sur #369 : fusionner #369 dedans après chaque changement. Reste : admin-users-guard:14 (audit sécurité, en dernier).
