@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { pinForRestore } from "../lib/user-pin";
+import { passwordForRestore } from "../lib/user-password";
 import { moduleLogger } from "../lib/logger";
 import { alerts, fuelRecords, maintenanceSchedules, parts, users, vehicles, workOrders } from "@shared/schema";
 import { db } from "../db";
@@ -47,20 +48,24 @@ export function readBackupFile(backupDir = join(process.cwd(), "backup")): { bac
 const log = moduleLogger("backup-import");
 
 /**
- * users.pin n'accepte qu'un hash bcrypt (CHECK users_pin_bcrypt_check). L'import valide le PIN comme les
- * routes : haché hors transaction (N bcrypt sous verrous apres les DELETE), non conforme -> NULL + warn.
+ * Secrets des comptes importés, validés comme dans les routes : l'import ne se contente pas de les hacher.
+ * PIN : users_pin_bcrypt_check ; mot de passe : un clair stocké tel quel bloquerait le login. Hachage hors
+ * transaction (pas de N bcrypt sous verrous après les DELETE) ; warn avec le seul username, jamais la valeur.
  */
-async function usersWithSafePins(list: NonNullable<BackupData["users"]>) {
+export async function usersWithSafeSecrets(list: NonNullable<BackupData["users"]>) {
   return Promise.all(
     list.map(async (u) => ({
       ...u,
       pin: await pinForRestore(u.pin, () => log.warn({ username: u.username }, "PIN de sauvegarde non conforme : ignore")),
+      password: await passwordForRestore(u.password, () =>
+        log.warn({ username: u.username }, "mot de passe de sauvegarde non conforme : compte a reinitialiser"),
+      ),
     })),
   );
 }
 
 export async function restoreBackup(data: BackupData): Promise<BackupImportStats> {
-  const importedUsers = data.users?.length ? await usersWithSafePins(data.users) : [];
+  const importedUsers = data.users?.length ? await usersWithSafeSecrets(data.users) : [];
   return db.transaction(async (tx) => {
     await suppressSideEffects(tx);
 
