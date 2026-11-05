@@ -156,3 +156,8 @@
   - Les 3 GET sur `<id>abc` : 400.
   - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
   - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
+- Réserves de relecture :
+  - contrat : un client lit son véhicule par son immatriculation, et reçoit 403 sur celle d'un autre client ;
+  - le profil `GET /api/users/:id` ne porte que ses 8 champs (garde-fou contre un futur mot de passe ou PIN) ;
+  - les `console.error` des deux catch touchés dans `server/routes.ts` sont migrés vers `log.error`.
+  - Contrat : 14 verts, 0 résidu.
