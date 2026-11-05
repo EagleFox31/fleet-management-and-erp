@@ -80,10 +80,10 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
   };
 
   const TONE_CLASSES: Record<CpcStatusTone, string> = {
-    success: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/80",
-    warning: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/80",
-    danger: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200/80",
-    neutral: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200",
+    success: "bg-success/10 text-success border-success/30",
+    warning: "bg-warning/10 text-warning-text border-warning/30",
+    danger: "bg-destructive text-destructive-foreground border-destructive",
+    neutral: "bg-muted text-muted-foreground border-border",
   };
   const getStatusBadge = (status?: string) => TONE_CLASSES[cpcStatusTone(status)];
 
@@ -149,7 +149,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
           type="submit"
           disabled={mutation.isPending || !cpcDate}
           size="sm"
-          className="w-full h-8 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 cursor-pointer"
+          className="w-full h-8 text-xs font-semibold rounded-xl bg-success text-success-foreground hover:bg-success/90 gap-1.5 cursor-pointer"
           data-testid={`btn-update-cpc-${driverId}`}
         >
           {mutation.isPending ? (
