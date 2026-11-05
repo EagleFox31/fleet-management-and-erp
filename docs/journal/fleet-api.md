@@ -446,3 +446,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : garde `multer-lifecycle-hygiene` (route de `server/api` qui lit `req.file` : drapeau + `finally`, ou exception gelée ; import Excel en mémoire gelé). Dépôt de document véhicule passé au patron, diffusion au mieux. Règlement fournisseur : `removeUploadedProof` par `settlementProofPath`, refus 401/400 en `AppError`.
 - **Pourquoi** : récidive de #178 en #348 ; le dépôt de document véhicule avait le même défaut (diffusion qui lève : 500 et fichier d'un document enregistré supprimé).
 - **Preuve** : contrat `vehicle-documents-upload-errors` (diffusion qui lève → 201, fichier conservé), rouge avant ; contrat `supplier-settlement-proof-lifecycle` (+ 409 facture non approuvée, aucun fichier) ; garde rouge sur l'ancien dépôt de document.
+
+## 2026-11-05 — Coûts de mission : id strict, mission inconnue en 404
+- **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
+- **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
+- **Preuve** : contrat `operations-driver-scope` (cas id non strict et inconnu) rouge sur l'ancien code, vert après (10/10).
