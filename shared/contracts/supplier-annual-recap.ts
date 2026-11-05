@@ -4,8 +4,10 @@
  * - Factures retenues : `invoice_date` dans l'année demandée (1er janvier au 31 décembre inclus),
  *   tous statuts (il n'existe pas de statut annulé). Les factures en litige (`disputed`) sont comptées
  *   et isolées en plus dans `disputedCount` / `disputedAmountTtc`.
- * - Colonnes en double dans le schéma : TVA = `vat_amount`, sinon `tax_amount`, sinon 0 ;
- *   TTC = `total_ttc`, sinon `total_amount`, sinon HT + TVA.
+ * - Colonnes en double dans le schéma : TTC = `total_ttc`, sinon `total_amount`, sinon HT + TVA ;
+ *   TVA = `vat_amount`, sinon `tax_amount`, sinon TTC − HT si un TTC est renseigné, sinon 0.
+ *   Ainsi HT + TVA = TTC sur chaque facture dont la TVA n'est pas saisie.
+ * - Mois, fournisseurs et totaux sont calculés à partir d'une seule lecture : ils sont cohérents entre eux.
  * - `outstandingAsOfToday` : reste dû actuel (`balance`) à la date de lecture, pas un solde historique
  *   de l'année. La variante « TTC moins les règlements de l'année » n'est pas couverte ici.
  * - Par défaut, `year` vaut l'année en cours à Africa/Douala. `supplierId` absent ou vide : tous.

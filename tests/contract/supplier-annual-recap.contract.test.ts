@@ -20,7 +20,7 @@ const Y = "year=2002";
 const path = (query = "") => `${SUPPLIER_ANNUAL_RECAP_PATH}${query ? `?${query}` : ""}`;
 
 let session: Awaited<ReturnType<typeof startContractSession<"admin" | "secretary" | "warehouse" | "logistics" | "management" | "workshop" | "technician" | "driver" | "client">>>;
-const supplier = { a: 0, b: 0 };
+const supplier = { a: 0, b: 0, c: 0 };
 let orphan = 0;
 
 async function invoice(
@@ -44,7 +44,7 @@ beforeAll(async () => {
     driver: "driver",
     client: "client",
   });
-  for (const key of ["a", "b"] as const) {
+  for (const key of ["a", "b", "c"] as const) {
     const row = await createTestSupplier();
     session.ids.supplierIds.push(row.id);
     supplier[key] = row.id;
@@ -60,6 +60,9 @@ beforeAll(async () => {
   await db.update(supplierInvoices).set({ totalTTC: null, totalAmount: null, taxAmount: null }).where(eq(supplierInvoices.id, bare));
   // B : une facture en litige, en juin.
   await invoice(supplier.b, "2002-06-10", { status: "disputed" });
+  // C : TTC renseigné, TVA absente des deux colonnes, en mai : TVA = TTC − HT.
+  const noVat = await invoice(supplier.c, "2002-05-05", { amountHT: "10000.00", totalTTC: "11925.00", balance: "0.00" });
+  await db.update(supplierInvoices).set({ vatAmount: null, taxAmount: null, totalAmount: null }).where(eq(supplierInvoices.id, noVat));
   // Hors année : veille et lendemain.
   await invoice(supplier.a, "2001-12-31");
   await invoice(supplier.a, "2003-01-01");
@@ -148,6 +151,14 @@ describe("récapitulatif", () => {
     const s = supplierAnnualRecapResponseSchema.parse(r.body);
     expect(s.totals).toMatchObject({ count: 1, amountTtc: 119250, disputedCount: 1, disputedAmountTtc: 119250 });
     expect(s.months[5]).toMatchObject({ disputedCount: 1, disputedAmountTtc: 119250 });
+  });
+
+  it("TVA absente et TTC présent : TVA = TTC − HT, donc HT + TVA = TTC", async () => {
+    const r = await session.call("GET", path(`${Y}&supplierId=${supplier.c}`), { actor: "admin" });
+    const s = supplierAnnualRecapResponseSchema.parse(r.body);
+    const expected = { count: 1, amountHt: 10000, vatAmount: 1925, amountTtc: 11925 };
+    expect(s.totals).toMatchObject(expected);
+    expect(s.months[4]).toMatchObject(expected);
   });
 
   it("tous fournisseurs : ligne sans fournisseur unique et placée en dernier, totaux = somme des lignes", async () => {
