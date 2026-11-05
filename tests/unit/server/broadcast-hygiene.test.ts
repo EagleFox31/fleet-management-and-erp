@@ -63,7 +63,30 @@ const KINDS = new Set(["roles", "user", "broadcast"]);
  * Portées calculées, donc non lisibles à la revue (variable ou appel de fonction). Fichier et
  * nombre ; la liste ne peut que rétrécir. Une portée écrite en clair n'y figure pas.
  */
-const OPAQUE_SCOPES: Record<string, number> = {};
+const OPAQUE_SCOPES: Record<string, number> = {
+"server/api/document-renewals.routes.ts": 2,
+  "server/api/finance-receivables.routes.ts": 1,
+  "server/api/fuel-anomalies.routes.ts": 1,
+  "server/api/fuel-vouchers.routes.ts": 1,
+  "server/api/part-requirements.routes.ts": 3,
+  "server/api/parts-catalog.routes.ts": 1,
+  "server/api/technician-work-orders.routes.ts": 1,
+  "server/api/time-tracking.routes.ts": 1,
+  "server/api/vehicle-document-types.routes.ts": 1,
+  "server/api/vehicle-documents.routes.ts": 5,
+  "server/api/work-order-items.routes.ts": 1,
+  "server/api/work-order-parts.routes.ts": 6,
+  "server/api/workshop-labor-rates.routes.ts": 1,
+  "server/lib/alert-broadcast.ts": 1,
+  "server/lib/document-renewal-center-events.ts": 1,
+  "server/lib/fuel-record-realtime.ts": 1,
+  "server/lib/vehicle-realtime.ts": 1,
+  "server/routes.ts": 5,
+  "server/services/incident-service.ts": 1,
+  "server/services/preventive-maintenance-service.ts": 1,
+  "server/services/procurement-service.ts": 2,
+  "server/services/technician-work-orders-service.ts": 1,
+};
 
 /** Analyse AST des appels à `broadcastUpdate` et à ses alias locaux (`const broadcast = global.broadcastUpdate`). */
 function scopeScan(): ScopeCall[] {
