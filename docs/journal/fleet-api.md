@@ -482,6 +482,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
 
+## 2026-11-05 — Justificatif de règlement fournisseur : téléchargement forcé, extension tirée du type
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` sert le fichier en `attachment` avec `nosniff`, et choisit son type d'après l'extension sur disque, en liste blanche (`settlementProofContentType`). Toute autre extension part en `application/octet-stream`. Au dépôt, l'extension vient du type déclaré (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`), plus du nom d'origine. Le filtre de dépôt lit la même table.
+- **Pourquoi** : même forme que le justificatif de renouvellement. Un nom d'origine en `.html` déclaré PDF était écrit en `.html`, puis servi en ligne sur l'origine de l'application.
+- **Preuve** : contrat `supplier-settlement-proof-path` rouge 8/18 avant, vert 18/18 après. Avec les autres contrats de règlement : 31/31. Unitaires `settlement-proof` 41, et une mutation de la liste blanche tuée.
 ## 2026-11-05 — Filet des ids de route hors int4
 - **Quoi** : `routeIdRangeGuard` monté en tête de `apiRouter` (`server/api/index.ts`) : segment dont l'entier de tête (après décodage, signe admis) dépasse `MAX_DB_INTEGER_ID` → `AppError(400, "Identifiant invalide.")`, pour `server/api` comme pour `routes.ts`. Inscrit dans la liste blanche du garde-fou des middlewares (sans base), retiré des attendus. Le contrat d'upload de document véhicule attend ce message pour un id hors plage (même 400).
 - **Pourquoi** : un id hors plage répondait 500 après une erreur base 22003.

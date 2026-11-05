@@ -45,7 +45,7 @@ async function api(method: string, url: string, body?: unknown) {
   } catch {
     // Fichier servi : le corps est le contenu brut.
   }
-  return { status: response.status, body: parsed, text };
+  return { status: response.status, body: parsed, text, headers: response.headers };
 }
 
 async function approvedInvoice() {
@@ -181,6 +181,41 @@ describe("justificatif de règlement fournisseur : borné à son dossier", { tim
     const proof = await proofOf(invoice.id, settlement.id);
     expect(proof.status).toBe(200);
     expect(proof.text).toBe("%PDF-1.4 EXOTIC");
+    // Extension déduite du type déclaré, pas du nom d'origine.
+    expect(settlement.proofReference).toMatch(/\.pdf$/);
+  });
+
+  it("servi en téléchargement : type du fichier, attachment, nosniff", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(200);
+    expect(proof.headers.get("content-type")).toMatch(/^application\/pdf/);
+    expect(proof.headers.get("content-disposition")).toMatch(/^attachment; filename="/);
+    expect(proof.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("nom d'origine en .html avec un type PDF : stocké en .pdf, servi en PDF", async () => {
+    const { invoice, settlement } = await uploadedSettlement("%PDF-1.4 HTMLNAME", `${PROOF_NAME}-page.html`);
+    expect(settlement.proofReference).toMatch(/\.pdf$/);
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(200);
+    expect(proof.headers.get("content-type")).toMatch(/^application\/pdf/);
+    expect(proof.headers.get("content-disposition")).toMatch(/^attachment;/);
+  });
+
+  it("ligne déjà en base avec une extension hors liste : octet-stream, attachment, nosniff", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    const legacyName = `${PROOF_NAME}-legacy.html`;
+    fs.writeFileSync(path.join(PROOF_DIR, legacyName), "<p>TEST-legacy</p>");
+    await db
+      .update(supplierInvoiceSettlements)
+      .set({ proofReference: `/uploads/supplier-invoices/settlements/${legacyName}` })
+      .where(eq(supplierInvoiceSettlements.id, settlement.id));
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(200);
+    expect(proof.headers.get("content-type")).toMatch(/^application\/octet-stream/);
+    expect(proof.headers.get("content-disposition")).toMatch(/^attachment;/);
+    expect(proof.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("identifiants lus strictement : 400 lisible, aucun fichier servi", async () => {
