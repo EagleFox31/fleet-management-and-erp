@@ -28,6 +28,7 @@ import { renewalReceiptErrorOf, withoutDiskPaths } from "../lib/renewal-receipts
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated as broadcastSharedAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
@@ -796,8 +797,7 @@ router.post(
     // toute autre sortie le supprime dans le finally, jamais après le commit.
     let receiptRecorded = false;
     try {
-      const id = Number.parseInt(req.params.id, 10);
-      if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de demande invalide.");
+      const id = parseRouteId(req.params.id, "Identifiant de demande invalide.");
       if (!file) throw new AppError(400, "Le fichier du récépissé est obligatoire (PDF, JPG, PNG ou WEBP).");
       if (!isInsideDirectory(renewalReceiptUploadDir, file.path)) {
         throw new AppError(400, "Fichier du récépissé invalide.");

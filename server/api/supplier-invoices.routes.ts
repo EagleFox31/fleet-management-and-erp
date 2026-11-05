@@ -622,10 +622,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         return next(new AppError(401, "Utilisateur non authentifié"));
       }
 
-      const invoiceId = parseInt(req.params.id);
-      if (Number.isNaN(invoiceId)) {
-        return next(new AppError(400, "ID facture invalide"));
-      }
+      const invoiceId = parseRouteId(req.params.id, "ID facture invalide");
 
       if (!req.file) {
         return next(new AppError(400, "Justificatif requis : joignez une image ou un PDF du règlement."));
@@ -742,11 +739,8 @@ router.patch("/:id/settlements/:settlementId/reconcile", checkPaymentPermission,
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
-    const invoiceId = parseInt(req.params.id);
-    const settlementId = parseInt(req.params.settlementId);
-    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const invoiceId = parseRouteId(req.params.id, "ID invalide");
+    const settlementId = parseRouteId(req.params.settlementId, "ID invalide");
 
     const reconciliationNote = typeof req.body?.reconciliationNote === "string"
       ? req.body.reconciliationNote
@@ -787,11 +781,8 @@ router.patch("/:id/settlements/:settlementId/reject", checkPaymentPermission, as
     if (!req.user) {
       throw new AppError(401, "Utilisateur non authentifié");
     }
-    const invoiceId = Number.parseInt(req.params.id, 10);
-    const settlementId = Number.parseInt(req.params.settlementId, 10);
-    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      throw new AppError(400, "Identifiant invalide.");
-    }
+    const invoiceId = parseRouteId(req.params.id, "Identifiant invalide.");
+    const settlementId = parseRouteId(req.params.settlementId, "Identifiant invalide.");
     const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
 
     const result = await threeWayMatchingService.rejectInvoiceSettlement(invoiceId, settlementId, req.user.id, reason);

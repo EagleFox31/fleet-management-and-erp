@@ -2755,9 +2755,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
 router.delete("/:id/assignments/:assignmentId", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    const assignmentId = Number(req.params.assignmentId);
-    assertValidDbId(missionId, "ID mission invalide.");
-    assertValidDbId(assignmentId, "ID affectation invalide.");
+    const assignmentId = parseRouteId(req.params.assignmentId, "ID affectation invalide.");
 
     const result = await db.transaction(async (tx) => {
       const [mission] = await tx
