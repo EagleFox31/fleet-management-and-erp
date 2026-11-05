@@ -61,23 +61,78 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
+/** Clés de montant, à toute profondeur de la réponse. */
+function amountKeys(value: unknown, found: string[] = []): string[] {
+  if (Array.isArray(value)) value.forEach((item) => amountKeys(item, found));
+  else if (value && typeof value === "object") {
+    for (const [key, inner] of Object.entries(value)) {
+      if (/cost|price|amount|montant|valuation/i.test(key)) found.push(key);
+      amountKeys(inner, found);
+    }
+  }
+  return found;
+}
+
 describe("coût de maintenance de la flotte", { timeout: 120000 }, () => {
-  it.each(["driver", "client"] as const)("%s : 403, aucun montant", async (role) => {
+  it.each(["driver", "client", "technician"] as const)("%s : 403 par la garde, aucun montant", async (role) => {
     const res = await get("/api/statistics/maintenance-cost/year", role);
     expect(res.status).toBe(403);
     const text = await res.text();
     expect(text).not.toContain(COST_SENTINEL);
-    expect(JSON.parse(text)).not.toHaveProperty("cost");
+    expect(JSON.parse(text).message).toBe("Accès non autorisé");
   });
 
-  it("technicien : toujours refusé par la route", async () => {
-    expect((await get("/api/statistics/maintenance-cost/year", "technician")).status).toBe(403);
+  it("sans session : 401", async () => {
+    expect((await fetch(`${baseUrl}/api/statistics/maintenance-cost/year`)).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/statistics/fleet-kpi`)).status).toBe(401);
+  });
+
+  it("variante de casse et barre finale : la garde s'applique toujours au chauffeur", async () => {
+    expect((await get("/API/Statistics/Maintenance-Cost/YEAR/", "driver")).status).toBe(403);
+    expect((await get("/API/Statistics/Fleet-KPI/", "driver")).status).toBe(403);
   });
 
   it.each(["admin", "workshop_manager"] as const)("%s : 200 avec le coût", async (role) => {
     const res = await get("/api/statistics/maintenance-cost/year", role);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ cost: expect.any(Number) });
+  });
+});
+
+describe("KPI de flotte (coût par véhicule)", { timeout: 120000 }, () => {
+  it.each(["driver", "client"] as const)("%s : 403", async (role) => {
+    const res = await get("/api/statistics/fleet-kpi", role);
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain("maintenanceCostPerVehicle");
+  });
+
+  it("technicien : 200 avec le coût par véhicule (tableau de bord atelier)", async () => {
+    const res = await get("/api/statistics/fleet-kpi", "technician");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toHaveProperty("maintenanceCostPerVehicle");
+  });
+});
+
+describe("statistics/* : aucun montant pour le chauffeur ni le client", { timeout: 120000 }, () => {
+  const routes = [
+    "/api/statistics/maintenance-cost/year",
+    "/api/statistics/fleet-kpi",
+    "/api/statistics/fleet",
+    "/api/statistics/fleet-history",
+    "/api/statistics/maintenance-compliance",
+    "/api/statistics/scheduled-maintenance",
+    "/api/statistics/work-orders",
+  ];
+  const cases = routes.flatMap((path) => (["driver", "client"] as const).map((role) => [path, role] as const));
+
+  it.each(cases)("%s × %s : refus ou réponse sans montant", async (path, role) => {
+    const res = await get(path, role);
+    const text = await res.text();
+    expect(text).not.toContain(COST_SENTINEL);
+    expect(text).not.toContain(PRICE_SENTINEL);
+    if (res.status === 403) return;
+    expect(res.status).toBe(200);
+    expect(amountKeys(JSON.parse(text))).toEqual([]);
   });
 });
 
