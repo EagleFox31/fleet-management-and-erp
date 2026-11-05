@@ -15,6 +15,7 @@ import {
   type MissionBudgetExpenses,
   type DailyNeed,
   type MissionBudget,
+  type MissionBudgetListItem,
   type MissionBudgetStatus,
   type MissionDestination,
   type UpdateMissionBudgetRequest,
@@ -158,17 +159,18 @@ async function activeDestination(ex: Executor, id: number) {
   return row;
 }
 
-export async function listMissionBudgets(filter: { date?: string; status?: MissionBudgetStatus; missionId?: number }): Promise<MissionBudget[]> {
+export async function listMissionBudgets(filter: { date?: string; status?: MissionBudgetStatus; missionId?: number }): Promise<MissionBudgetListItem[]> {
   const where: SQL[] = [];
   if (filter.missionId !== undefined) where.push(eq(missionBudgets.missionId, filter.missionId));
   if (filter.date) where.push(eq(missionBudgets.budgetDate, filter.date));
   if (filter.status) where.push(eq(missionBudgets.status, filter.status));
   const rows = await db
-    .select()
+    .select({ budget: missionBudgets, missionOrderNumber: missions.orderNumber })
     .from(missionBudgets)
+    .innerJoin(missions, eq(missions.id, missionBudgets.missionId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(asc(missionBudgets.budgetDate), asc(missionBudgets.id));
-  return rows.map(toMissionBudget);
+  return rows.map((row) => ({ ...toMissionBudget(row.budget), missionOrderNumber: row.missionOrderNumber }));
 }
 
 export async function getMissionBudget(id: number): Promise<MissionBudget> {

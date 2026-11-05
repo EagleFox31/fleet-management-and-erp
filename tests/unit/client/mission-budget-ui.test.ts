@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canReadMissionBudget, formatXaf, missionBudgetActions, remainingOf } from "../../../client/src/lib/mission-budget-ui";
+import { canReadMissionBudget, formatXaf, missionBudgetActions, remainingOf, toDisburseOf } from "../../../client/src/lib/mission-budget-ui";
 import { ALL_APP_ROLES } from "@shared/constants/roles";
 
 const none = { create: false, edit: false, approve: false, disburse: false, expenses: false };
@@ -39,6 +39,14 @@ describe("budget de mission (L1f) : actions visibles selon le rôle et les statu
     expect(remainingOf(expenses, "fdr")).toBe(30_000);
     expect(remainingOf(expenses, "carburant")).toBe(0);
     expect(remainingOf(undefined, "fdr")).toBe(0);
+  });
+
+  it("reste à décaisser du jour : demandés + approuvés, jamais les décaissés ; 0 tant que rien n'est lu", () => {
+    const stat = (totalAmount: number) => ({ count: 1, fuelAmount: 0, fdrAmount: 0, extrasAmount: 0, totalAmount });
+    const byStatus = { requested: stat(100_000), approved: stat(250_000), disbursed: stat(900_000) };
+    expect(toDisburseOf({ byStatus } as never)).toBe(350_000);
+    expect(toDisburseOf({ byStatus: { disbursed: stat(900_000) } } as never)).toBe(0);
+    expect(toDisburseOf(undefined)).toBe(0);
   });
 
   it("montant en FCFA arrondi à l'unité, séparateur de milliers", () => {
