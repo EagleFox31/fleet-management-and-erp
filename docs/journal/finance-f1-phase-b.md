@@ -65,3 +65,11 @@ Quoi, comment, pourquoi, point par point :
 8. Espace manquant dans `= z.infer`.
 
 Preuves : `finance-receivables.contract.test.ts` (32 tests), `finance-withholding-schema.test.ts`, `cdc-schema-idempotence` et `cleanup-users-fk-coverage` sont verts, plus les 5 contrats qui touchent `/api/clients` ; 2755 tests unitaires passent et tsc renvoie 0 erreur.
+
+## Filtrage des champs finance étendu aux jointures (2026-11-05)
+
+- **Quoi** : les taux de retenue du client, ainsi que les retenues et le net figés de la facture, ne sortent plus par les lectures hors finance. Cela couvre les missions et la création de mission depuis un plein, la facturation client (liste, détail, création, PDF), les exports et le tableau de bord de direction.
+- **Comment** : une projection publique unique, `server/lib/client-public-columns.ts` (`publicClientColumns`, `publicClientInvoiceColumns`), est passée à `select()` et `returning()`. La trame `mission_created_from_fuel` part au personnel (`STAFF_ROLES`), plus en `broadcast`. `/api/clients` garde son filtrage par rôle.
+- **Pourquoi** : les colonnes ajoutées par le lot arrivaient avec toute lecture entière de `clients` ou `client_invoices`.
+- **Prévention** : `tests/unit/server/client-finance-select-hygiene.test.ts` échoue sur toute lecture entière de ces tables (`select()` vide, `{ x: clients }`, `getTableColumns`, `returning()` vide) hors liste blanche justifiée. La liste gelée de `broadcast-hygiene` perd une entrée.
+- **Preuves** : `tests/contract/client-finance-fields-scope.contract.test.ts` vérifie la réponse et la trame de la création de mission (aucun compte client destinataire), `GET /api/operations/missions` côté chauffeur affecté et côté logistique, et `GET /api/billing/invoices` et `/:id` côté logistique. Sans la projection, 3 des 4 tests échouent.

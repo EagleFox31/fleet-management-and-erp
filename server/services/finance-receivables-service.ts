@@ -96,6 +96,12 @@ const SELECT_INVOICES = sql`
 
 type Executor = Pick<typeof db, "execute">;
 
+/**
+ * `lock` : verrouille la seule facture (`FOR UPDATE OF i`), pas le client. Deux dépôts concurrents
+ * de la même facture sont sérialisés ; un changement de taux concurrent n'est pas bloqué, et le dépôt
+ * fige les taux lus à cet instant (ceux validés avant la lecture). C'est voulu : le taux figé est
+ * celui en vigueur au moment du dépôt, un changement ultérieur ne touche que les factures non déposées.
+ */
 async function invoiceRow(executor: Executor, id: number, lock: boolean): Promise<InvoiceRow | undefined> {
   const result = await executor.execute(
     lock ? sql`${SELECT_INVOICES} WHERE i.id = ${id} FOR UPDATE OF i` : sql`${SELECT_INVOICES} WHERE i.id = ${id}`,

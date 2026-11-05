@@ -13,7 +13,6 @@ import { extractQueryKeyUrls, matchesServed, scanUnservedQueryKeys } from "../..
  * nouvelle entrée est une régression.
  */
 const UNSERVED_QUERY_KEYS_FROZEN: string[] = [
-  "client/src/components/charts/fuel-consumption-chart.tsx /api/fuel-card/consumption-history",
   "client/src/hooks/useBilling.ts /api/invoices/unpaid",
   "client/src/hooks/useMaintenance.ts /api/maintenance/faults",
   "client/src/hooks/useMaintenance.ts /api/maintenance/preventive",

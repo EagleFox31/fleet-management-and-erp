@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { canReadClientBilling } from "@shared/constants/roles";
 import {
   ResponsiveContainer,
   BarChart,
@@ -155,8 +157,10 @@ export function InvoicingDashboard() {
     refetchOnWindowFocus: false,
   } as const;
 
+  const { user } = useAuth();
   const { data: stats, isLoading } = useQuery<BillingStatistics>({
     queryKey: ["/api/billing/statistics"],
+    enabled: canReadClientBilling(user?.role),
     ...liveQueryConfig,
   });
 
