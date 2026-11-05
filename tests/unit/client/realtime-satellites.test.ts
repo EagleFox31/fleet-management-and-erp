@@ -77,9 +77,10 @@ const TABLE_WITHOUT_EMITTER = ["alert_read", "alert_updated", "mission_completed
 
 /**
  * Écran satellite : compteur, statistique, tableau de bord, alerte ou valeur. Toute clé de ce
- * type posée par un écran doit être rafraîchie par au moins un événement.
+ * type posée par un écran doit être rafraîchie par au moins un événement. « count » n'est pas
+ * lu dans « account » : une liste de comptes est un référentiel, pas un compteur.
  */
-const SATELLITE_KEY = /(dashboard|statistics|stats|kpi|alerts|low-on-stock|low-stock|reorder|inventory-value|stock-value|awaiting-parts|balance|summary|count|overdue|compliance)/;
+const SATELLITE_KEY = /(dashboard|statistics|stats|kpi|alerts|low-on-stock|low-stock|reorder|inventory-value|stock-value|awaiting-parts|balance|summary|(?<!ac)count|overdue|compliance)/;
 
 /**
  * Écrans satellites qu'aucun événement ne rafraîchit encore. Liste gelée : retirer une clé dès

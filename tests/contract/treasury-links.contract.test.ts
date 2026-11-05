@@ -342,6 +342,30 @@ describe("T2 : carte carburant au journal de trésorerie", { timeout: 120000 }, 
       expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/${cardId}/entries`, { actor })).status, actor).toBe(403);
     }
   });
+
+  it("comptes source proposés à l'écran : banques et caisses actives, sans solde, pour les seuls rôles autorisés", async () => {
+    const cash = await newAccount("S", "cash");
+    const closed = await newAccount("X", "bank");
+    await db.update(treasuryAccounts).set({ isActive: false }).where(eq(treasuryAccounts.id, closed.body.id));
+    for (const actor of ["admin", "secretary", "logistics"] as const) {
+      const res = await session.call("GET", "/api/fuel-card/source-accounts", { actor });
+      expect(res.status, actor).toBe(200);
+      const ids = res.body.map((a: any) => a.id);
+      expect(ids, actor).toEqual(expect.arrayContaining([bankId, cash.body.id]));
+      expect(ids, actor).not.toContain(closed.body.id);
+      expect(ids, actor).not.toContain(cardId);
+      for (const account of res.body) {
+        expect(Object.keys(account).sort(), actor).toEqual(["code", "id", "kind", "label"]);
+        expect(["bank", "cash"], actor).toContain(account.kind);
+      }
+    }
+    for (const actor of ["management", "technician", "workshop_manager"] as const) {
+      expect((await session.call("GET", "/api/fuel-card/source-accounts", { actor })).status, actor).toBe(403);
+    }
+    const off = await withFinanceOff(() => session.call("GET", "/api/fuel-card/source-accounts", { actor: "logistics" }));
+    expect(off.status).toBe(200);
+    expect(off.body).toEqual([]);
+  });
 });
 
 describe("T3 : règlement fournisseur au journal de trésorerie", { timeout: 120000 }, () => {

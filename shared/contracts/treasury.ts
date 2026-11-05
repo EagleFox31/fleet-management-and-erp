@@ -132,6 +132,9 @@ export type TreasuryAccount = {
   currentBalance: string;
 };
 
+/** Compte qui peut payer une recharge de carte (`GET /api/fuel-card/source-accounts`) : sans solde. */
+export type FuelRechargeSourceAccount = Pick<TreasuryAccount, "id" | "code" | "label" | "kind">;
+
 export type TreasuryEntry = {
   id: number;
   accountId: number;
