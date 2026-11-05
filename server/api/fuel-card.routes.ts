@@ -1,5 +1,7 @@
 import { Router } from "express";
-import { authenticate, isFuelCardManager } from "../middleware/auth";
+import { authenticate, authorize, isFuelCardManager } from "../middleware/auth";
+import { isFeatureEnabled } from "../lib/feature-flags";
+import { treasuryService } from "../services/treasury-service";
 import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { moduleLogger } from "../lib/logger";
 import { ownerScopeOf } from "../lib/client-scope";
@@ -53,6 +55,16 @@ const broadcastFuelCardUpdate = (
 
 // Apply authentication middleware to ALL routes in this router
 router.use(authenticate);
+
+// Comptes qui peuvent payer une recharge (banque, caisse), sans solde : la logistique choisit le compte
+// sans lire la trésorerie. Drapeau `finance` coupé : liste vide, le champ disparaît de l'écran.
+router.get("/source-accounts", authorize([...FUEL_RECHARGE_SOURCE_ROLES]), async (_req, res, next) => {
+  try {
+    res.json(isFeatureEnabled("finance") ? await treasuryService.listRechargeSourceAccounts() : []);
+  } catch (error) {
+    next(withLogContext(error, { event: "liste des comptes source de recharge en échec" }));
+  }
+});
 
 // Solde actuel de la carte carburant
 router.get("/balance", async (_req, res) => {
