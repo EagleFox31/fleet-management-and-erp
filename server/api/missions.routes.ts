@@ -3070,12 +3070,25 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
 
       if (launchErrors.length > 0) {
-        return res.status(400).json({
-          // Les motifs vont dans le message : le gestionnaire central réduit
-          // un `details` de chaînes à « Ce champ n'est pas valide. ».
-          message: `Impossible de lancer la mission : ${launchErrors.join(" ")}`,
-          errors: launchErrors.map((motif) => ({ field: "status", message: motif })),
-        });
+        // Les motifs vont dans le message (le gestionnaire central réduit un `details` de chaînes à
+        // « Ce champ n'est pas valide. »). Un chauffeur ne peut pas corriger un budget : on lui dit à qui s'adresser.
+        const suffix = statusDriverScope !== undefined ? " Contactez l'exploitation." : "";
+        // Pas de `fieldErrors` : le gestionnaire central remplacerait alors le message par un libellé générique.
+        // Le contrat d'erreur écarte tout message de plus de 300 caractères (looksTechnical) : on garde les
+        // premiers motifs qui tiennent et on compte les autres.
+        const head = "Impossible de lancer la mission : ";
+        const room = 240 - head.length - suffix.length;
+        const kept: string[] = [];
+        // Conflit et budget d'abord : ce sont les motifs que le message doit toujours nommer.
+        const urgent = (motif: string) => /Conflit|Budget|Solde/.test(motif);
+        const ordered = [...launchErrors.filter(urgent), ...launchErrors.filter((m) => !urgent(m))];
+        for (const motif of ordered) {
+          if ([...kept, motif].join(" ").length > room) break;
+          kept.push(motif);
+        }
+        const hidden = launchErrors.length - kept.length;
+        const more = hidden > 0 ? ` (et ${hidden} autre${hidden > 1 ? "s" : ""} point${hidden > 1 ? "s" : ""} à corriger)` : "";
+        throw new AppError(400, `${head}${kept.join(" ")}${more}${suffix}`);
       }
     }
 
