@@ -68,9 +68,13 @@ export function getCpcBlockGuidance(
     MISSING: "Le statut CPC de ce chauffeur n'est pas renseigné : il ne peut pas être affecté à une mission.",
     FUTURE_DATE: "La date de formation CPC de ce chauffeur est postérieure à aujourd'hui : elle doit être vérifiée avant toute affectation.",
   };
-  const action = canEditDriver
-    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC avec le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation » ; le statut enregistré est alors recalculé)."
-    : "Choisissez un autre chauffeur, ou demandez à la logistique ou au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mise à jour des certifications CPC ».";
+  // Le formulaire « Mise à jour des certifications CPC » n'est affiché que sur le
+  // tableau de bord du secrétariat : seul ce rôle peut le suivre tel quel. Les autres
+  // rôles autorisés (admin, logistique) y sont renvoyés par le secrétariat, en attendant
+  // que le formulaire soit exposé sur la fiche chauffeur.
+  const action = role === "secretary"
+    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC depuis votre tableau de bord, avec le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation » ; le statut enregistré est alors recalculé)."
+    : "Choisissez un autre chauffeur, ou demandez au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mise à jour des certifications CPC » de son tableau de bord.";
   return { title: "CPC non à jour", why: why[cpc.code], action, canEditDriver };
 }
 

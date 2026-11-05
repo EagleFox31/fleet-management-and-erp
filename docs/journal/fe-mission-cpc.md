@@ -15,3 +15,7 @@
 - (b) Marge de 59 jours : `calculateCPCStatus` enregistre « À FORMER » 59 jours avant l'expiration ; la garde bloque alors que la formation est encore valable. Le commentaire de `driver-cpc-eligibility.ts` affirmait le contraire ; il est corrigé, la règle n'est pas touchée.
 
 **Tester.** `node node_modules/vitest/vitest.mjs run tests/unit/client/mission-wizard-cpc-guidance.test.ts tests/unit/client/mission-wizard-rules.test.ts`.
+
+## Consigne suivable par rôle
+
+Le formulaire « Mise à jour des certifications CPC » n est rendu que sur le tableau de bord du secrétariat (App.tsx : un tableau de bord par rôle ; admin et logistique ont le leur, sans ce formulaire). La consigne dit donc au secrétariat de l utiliser depuis son tableau de bord ; admin, logistique et les autres rôles sont renvoyés vers le secrétariat. POST update-cpc autorise toujours admin et logistique : exposer le formulaire sur la fiche chauffeur (drivers/[id].tsx) est le suivi prévu, la consigne pourra alors pointer vers la fiche.

@@ -14,20 +14,32 @@ describe("explication du blocage CPC (étape 3)", () => {
     expect(getCpcBlockGuidance({ cpcStatus: "NON FORMÉ", cpcStatusRecorded: "FORMÉ" }, "logistics")).toBeNull();
   });
 
-  it("NON FORMÉ : dit pourquoi et propose de corriger la fiche aux rôles autorisés", () => {
+  it("NON FORMÉ : dit pourquoi ; les rôles autorisés gardent canEditDriver", () => {
     for (const role of DRIVER_MANAGER_ROLES) {
       const g = getCpcBlockGuidance(nonForme, role);
       expect(g?.why).toContain("pas à jour de sa formation CPC");
       expect(g?.canEditDriver).toBe(true);
-      expect(g?.action).toContain("enregistrez la nouvelle date de formation CPC");
       expect(g?.action).toContain("Mise à jour des certifications CPC");
     }
   });
 
-  it("autres rôles : renvoie vers la logistique ou le secrétariat, sans action de correction", () => {
+  it("secrétariat : suit le formulaire depuis son tableau de bord", () => {
+    const g = getCpcBlockGuidance(nonForme, "secretary");
+    expect(g?.action).toContain("enregistrez la nouvelle date de formation CPC depuis votre tableau de bord");
+  });
+
+  it("admin et logistique n'ont pas le formulaire : consigne suivable, renvoi au secrétariat", () => {
+    for (const role of ["admin", "logistics"]) {
+      const g = getCpcBlockGuidance(nonForme, role);
+      expect(g?.action).toContain("demandez au secrétariat");
+      expect(g?.action).not.toContain("votre tableau de bord");
+    }
+  });
+
+  it("autres rôles : renvoie vers le secrétariat, sans action de correction", () => {
     const g = getCpcBlockGuidance(nonForme, "workshop_manager");
     expect(g?.canEditDriver).toBe(false);
-    expect(g?.action).toContain("demandez à la logistique ou au secrétariat");
+    expect(g?.action).toContain("demandez au secrétariat");
     expect(getCpcBlockGuidance(nonForme, undefined)?.canEditDriver).toBe(false);
   });
 
