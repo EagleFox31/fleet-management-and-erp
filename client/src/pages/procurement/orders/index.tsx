@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
+import { isPlainRowClick } from "@/lib/purchase-order-actions";
 import {
   Package,
   Plus,
@@ -225,7 +226,7 @@ export default function PurchaseOrdersListPage() {
                   return (
                     <tr
                       key={order.id}
-                      onClick={() => setLocation(`/procurement/orders/${order.id}`)}
+                      onClick={(e) => { if (isPlainRowClick(e, window.getSelection()?.toString())) setLocation(`/procurement/orders/${order.id}`); }}
                       className={`group cursor-pointer border-b border-gray-50 last:border-0 transition-colors hover:bg-gray-50/60 border-l-2 ${urgencyBorder}`}
                       data-testid={`order-${order.id}`}
                     >

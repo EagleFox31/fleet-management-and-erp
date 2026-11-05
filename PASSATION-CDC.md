@@ -30,3 +30,25 @@
 ## 2026-11-05 01:11 — c7 : #328 déclencheur de test ciblé validé, attente de #327
 - Réserves de 0a sur #328 traitées. Déclencheur du test d'échec d'insertion ciblé (WHEN sur le véhicule du test), poussé ; 5/5 verts, aucun déclencheur résiduel. 0a a validé sans db-lock.
 - Prochaine étape inchangée : sur annonce de 0a que #327 est fusionnée, merger origin/main, garder isCpcStatusValid, relancer mission-create-assigned et mission-*, npm run check, push, message « mr 328 » à 0a.
+
+## 2026-11-05 01:32 — c7 : conflits de planning à l'écriture (fix/mission-planning-conflict)
+- #328 fusionnée (773b1f8). Branche fix/mission-planning-conflict depuis main : server/services/mission-planning.ts (findPlanningClash, verrou advisory), branché sur POST /api/missions, PATCH /:id (chauffeur, véhicule, dates), POST /:id/assignments, launch-readiness et la validation de lancement de PUT /:id/status (les 3 copies d'origine).
+- Preuves : contrat mission-planning-conflict-write (9 cas, 6 rouges sans contrôle, rafale rouge 3/3 sans verrou), intégration mission-planning-clash (4), contrats mission-* 189 verts, npm test 2320 verts, npm run check 0 erreur.
+- Suivi noté dans LESSONS : PUT /:id/status ne rejoue pas le contrôle.
+- Prochaine étape : PR prête, avis de 0a.
+
+## 2026-11-05 01:58 — c7 : #334 réserves de relecture traitées ; suivi PUT /status empilé
+- #334 : PATCH prend la ligne mission FOR UPDATE avant les verrous consultatifs ; helper lockPlanningPairs (ordre global trié et dédoublonné, véhicules puis chauffeurs) dans mission-planning.ts. Rafale PATCH dates + ajout d'affectation sur le même véhicule : rouge 3/3 sans le FOR UPDATE, verte avec. Doc corrigée (les 3 copies = launch-readiness, POST /:id/assignments, validation de lancement de PUT /status). liveAssignments relu hors transaction : noté en suivi.
+- Branche fix/mission-status-planning-clash (empilée sur #334, WIP commité, non poussée) : PUT /:id/status vers planned/assigned rejoue findPlanningClash sous verrou ; contrat mission-planning-conflict-status 5 cas (3 rouges sans correctif). À rebaser sur #334 corrigée, verrouiller la ligne mission FOR UPDATE avant les verrous consultatifs, puis PR.
+
+## 2026-11-05 02:15 — c7 : PUT /:id/status rejoue le contrôle de planning (PR empilée sur #334)
+- Branche fix/mission-status-planning-clash rebasée sur #334 corrigée ; PUT /status vers planned/assigned prend la ligne mission FOR UPDATE, puis lockPlanningPairs, puis findPlanningClash ; 409 lisible (AppError). Contrat mission-planning-conflict-status : 5 cas (3 rouges sans correctif), cancelled non régressé. Suivi de LESSONS (« PUT /status ne rejoue pas ») clos.
+
+## 2026-11-05 03:05 — c7 : #339 réserves de relecture (lecture périmée, 409 centralisé)
+- PATCH (liveAssignments, créneau) et PUT /status comparent, sous le FOR UPDATE de la mission, l'empreinte lue avant la transaction à celle de la base (assertPlanningStateUnchanged) : 409 lisible si périmée. Contrat tests/contract/mission-planning-stale-read : déterministe via un verrou de ligne tenu par le test, rouge 2/2 sans la comparaison. POST / renvoie son 409 par next(error) (Express 4 : un throw dans le handler async ne répond jamais). Cas draft vers planned sans affectation : 200. Suivi liveAssignments clos.
+
+## 2026-11-05 03:30 — c7 : #339 poussée par merge de main (sans réécriture)
+- Branche distante fix/mission-status-planning-clash : merge de origin/main + commit des réserves (lecture périmée, 409 de POST / par next). Base de #339 = main. Contrats mission 222 / npm test 2413 / check 0 vérifiés sur l'arbre rebasé identique. En attente de relecture de 0a.
+
+## 2026-11-05 05:10 — c7 : entrée LESSONS « ordre de verrouillage unique des missions »
+- Branche docs/lessons-ordre-verrous-missions (depuis origin/main) : nouvelle entrée en fin de LESSONS_LEARNED (ligne mission FOR UPDATE, empreinte, advisory triés). Petite PR doc ; « mr » à 0a ensuite. #346 reste en attente de la décision de l'utilisatrice sur sa base.

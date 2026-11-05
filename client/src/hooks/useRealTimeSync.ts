@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
 import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
@@ -1267,11 +1268,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           queryClient.invalidateQueries({ queryKey: [`/api/drivers/${driverId}`] });
         }
       }
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/expiring-cpc"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
+      invalidateDriverCpcDependents(queryClient);
       break;
 
     // Pneus: le catalogue est tenu par le magasin, le montage par l'atelier.
@@ -1532,10 +1529,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           queryClient.invalidateQueries({ queryKey: [`/api/drivers/${driverId}`] });
         }
       }
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
+      invalidateDriverCpcDependents(queryClient);
       // Création de compte depuis la fiche (#113) : la liste des utilisateurs change aussi.
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users/statistics"] });
