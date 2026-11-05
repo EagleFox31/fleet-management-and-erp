@@ -24,6 +24,7 @@ import {
   tireInspections,
   tireRotationDetails,
   tireRotations,
+  supplierInvoiceSettlements,
   treasuryAccounts,
   treasuryEntries,
   vehicleAcquisitionWorkflows,
@@ -75,6 +76,8 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
   if (ids.vehicleIds.length > 0) {
     // Contrôles QHSE sur un véhicule de test : qhse_inspections_vehicle_id_fkey bloquerait la suppression.
     await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, ids.vehicleIds));
+    // Écriture de trésorerie liée au véhicule (recharge carte, lot T2) : bloquerait la suppression (FK).
+    await db.delete(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds));
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
@@ -104,6 +107,8 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       await db.delete(qhseInspections).where(inArray(qhseInspections.updatedBy, ids.userIds));
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, ids.userIds));
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, ids.userIds));
+      // Trésorerie : écritures auto (plein, recharge, règlement) et comptes créés par un compte de test.
+      await deleteTreasuryOfUsers(ids.userIds);
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -113,6 +118,23 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       }
     }
   }
+}
+
+/** Écritures de trésorerie et comptes créés par ces utilisateurs ; un règlement garde son paiement, perd le lien de compte. */
+async function deleteTreasuryOfUsers(userIds: number[]): Promise<void> {
+  const accounts = db
+    .select({ id: treasuryAccounts.id })
+    .from(treasuryAccounts)
+    .where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
+  await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, accounts));
+  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts));
+  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds)));
+  await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
+}
+
+/** Une écriture de plein garde sa mission (FK sans cascade) : à supprimer avant la mission. */
+export async function deleteTreasuryEntriesOfMissions(missionIds: number[]): Promise<void> {
+  if (missionIds.length > 0) await db.delete(treasuryEntries).where(inArray(treasuryEntries.missionId, missionIds));
 }
 
 /**
@@ -244,6 +266,7 @@ async function deleteOrphanTestRows(): Promise<void> {
     .select({ id: treasuryAccounts.id })
     .from(treasuryAccounts)
     .where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
+  await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, testTreasuryAccounts));
   await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts));
   await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
   await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));

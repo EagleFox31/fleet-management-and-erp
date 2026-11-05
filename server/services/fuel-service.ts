@@ -2,6 +2,7 @@ import { db } from "../db";
 import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
 import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
+import { reverseFuelLink } from "./treasury-links";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { hasMovedFuelCard } from "../lib/fuel-record-ledger-lock";
@@ -113,6 +114,7 @@ export class FuelService {
           .update(fuelRecords)
           .set({ deletedAt: new Date(), deletedBy: actor.id })
           .where(eq(fuelRecords.id, id));
+        await reverseFuelLink(tx, id, actor.id);
         return true;
       }
 

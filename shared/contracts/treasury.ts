@@ -148,6 +148,10 @@ export type TreasuryEntry = {
   missionId: number | null;
   clientId: number | null;
   supplierId: number | null;
+  /** Plein ou recharge de carte à l'origine de la ligne (lot T2), posé par le serveur. */
+  fuelRecordId: number | null;
+  /** Règlement fournisseur à l'origine de la ligne (lot T3), posé par le serveur. */
+  supplierSettlementId: number | null;
   /** Solde du compte juste après cette écriture (ordre : date, puis numéro). */
   balanceAfter: string;
 };

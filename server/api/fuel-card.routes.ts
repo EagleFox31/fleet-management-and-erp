@@ -10,10 +10,39 @@ import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
+import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("fuel-card");
 
 const router = Router();
+// Nombre ou chaîne de chiffres seulement : `z.coerce` seul ferait de `true` le compte 1.
+const sourceAccountIdSchema = z.union([z.number(), z.string().trim().regex(/^\d+$/)]).pipe(z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID));
+
+/** Nombre JSON ou chaîne décimale (formulaires) : jamais « 100abc » lu 100 comme le faisait parseFloat. */
+const positiveAmount = z.union([z.number(), z.string().trim().regex(/^\d+(\.\d+)?$/)]).pipe(z.coerce.number().finite().positive());
+const optionalText = (max: number) => z.string().trim().max(max).nullish().transform((v) => v || undefined);
+
+/**
+ * Corps entier de POST /recharge, strict : une clé inconnue ou un type inattendu (`date: {}`) donne 400,
+ * jamais 500. `sourceAccountId` reste brut ici : le rôle est contrôlé avant de lire l'identifiant.
+ */
+const rechargeBodySchema = z
+  .object({
+    amount: positiveAmount,
+    quantity: positiveAmount.nullish(),
+    unitPrice: positiveAmount.nullish(),
+    priceSource: z.enum(["real", "fallback", "manual"]).nullish(),
+    date: z.string().trim().min(1).max(40).refine((v) => !Number.isNaN(new Date(v).getTime()), "Date de recharge illisible."),
+    paymentMode: z.string().trim().min(1).max(50),
+    orderNumber: optionalText(100),
+    notes: optionalText(2000),
+    sourceAccountId: z.unknown().optional(),
+  })
+  .strict()
+  .refine((body) => body.quantity != null || body.unitPrice != null, {
+    message: "Indiquez la quantité ou le prix par litre.",
+    path: ["unitPrice"],
+  });
 
 const broadcastFuelCardUpdate = (
   eventType: string,
@@ -66,42 +95,37 @@ router.get("/balance", async (_req, res) => {
 // Rôles autorisés: admin, logistics, secretary
 router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
-    const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
-
-    const amountValue = Number.parseFloat(String(amount));
-    const quantityValue = quantity !== undefined && quantity !== null
-      ? Number.parseFloat(String(quantity))
-      : NaN;
-    const unitPriceValue = unitPrice !== undefined && unitPrice !== null
-      ? Number.parseFloat(String(unitPrice))
-      : NaN;
-    const hasQuantity = Number.isFinite(quantityValue) && quantityValue > 0;
-    const hasUnitPrice = Number.isFinite(unitPriceValue) && unitPriceValue > 0;
-
-    if (!Number.isFinite(amountValue) || amountValue <= 0 || !date || !paymentMode || (!hasQuantity && !hasUnitPrice)) {
-      return res.status(400).json({ message: "Données de recharge incomplètes" });
+    const body = rechargeBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      return res.status(400).json({ message: "Données de recharge incomplètes", errors: toFieldErrors(body.error.issues) });
+    }
+    const { amount: amountValue, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes, sourceAccountId } = body.data;
+    // Compte de trésorerie qui paie la recharge (facultatif, lot T2).
+    let sourceAccountValue: number | null = null;
+    if (sourceAccountId !== undefined && sourceAccountId !== null && sourceAccountId !== "") {
+      // Débiter une banque ou une caisse : liste explicite, refus avant toute lecture du compte.
+      if (!(FUEL_RECHARGE_SOURCE_ROLES as readonly string[]).includes(String(req.user?.role ?? ""))) {
+        throw new AppError(403, "Votre rôle ne permet pas de choisir le compte qui paie la recharge.");
+      }
+      const parsed = sourceAccountIdSchema.safeParse(sourceAccountId);
+      if (!parsed.success) return res.status(400).json({ message: "Compte source de la recharge invalide" });
+      sourceAccountValue = parsed.data;
     }
 
-    const resolvedQuantity = hasQuantity
-      ? quantityValue
-      : amountValue / unitPriceValue;
-    const resolvedUnitPrice = hasUnitPrice
-      ? unitPriceValue
-      : amountValue / quantityValue;
+    const resolvedQuantity = quantity ?? amountValue / unitPrice!;
+    const resolvedUnitPrice = unitPrice ?? amountValue / quantity!;
     
     const result = await fuelCardService.rechargeCard({
       amount: amountValue,
       quantity: resolvedQuantity,
       unitPrice: resolvedUnitPrice,
-      priceSource:
-        priceSource === "real" || priceSource === "fallback" || priceSource === "manual"
-          ? priceSource
-          : undefined,
+      priceSource: priceSource ?? undefined,
       date,
       paymentMode,
       orderNumber,
       notes,
-      userId: (req as any).session.userId
+      userId: (req as any).session.userId,
+      sourceAccountId: sourceAccountValue,
     });
 
     broadcastFuelCardUpdate(

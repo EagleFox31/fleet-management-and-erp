@@ -22,7 +22,7 @@ type Row = Record<string, unknown>;
 const ENTRY_COLUMNS = sql`
   e.id, e.account_id, to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, e.piece_ref, e.label, e.direction,
   e.amount::text AS amount, e.category, e.counterparty_label, e.transfer_group, e.notes,
-  e.vehicle_id, e.mission_id, e.client_id, e.supplier_id`;
+  e.vehicle_id, e.mission_id, e.client_id, e.supplier_id, e.fuel_record_id, e.supplier_settlement_id`;
 
 function toEntry(r: Row): TreasuryEntry {
   return {
@@ -41,6 +41,8 @@ function toEntry(r: Row): TreasuryEntry {
     missionId: r.mission_id == null ? null : Number(r.mission_id),
     clientId: r.client_id == null ? null : Number(r.client_id),
     supplierId: r.supplier_id == null ? null : Number(r.supplier_id),
+    fuelRecordId: r.fuel_record_id == null ? null : Number(r.fuel_record_id),
+    supplierSettlementId: r.supplier_settlement_id == null ? null : Number(r.supplier_settlement_id),
     balanceAfter: String(r.balance_after),
   };
 }
@@ -91,7 +93,7 @@ function pgCode(error: unknown): string | undefined {
   return e?.code ?? e?.cause?.code;
 }
 
-async function requireActiveAccount(ex: Executor, id: number): Promise<TreasuryAccount> {
+export async function requireActiveAccount(ex: Executor, id: number): Promise<TreasuryAccount> {
   const account = await accountById(ex, id);
   if (!account.isActive) throw new AppError(409, "Ce compte est désactivé.");
   return account;
@@ -131,6 +133,12 @@ function replay(existing: TreasuryEntry, input: CreateTreasuryEntryInput): { ent
 const KEY_CONFLICT = "Cette clé de requête a déjà servi pour une autre opération.";
 
 export const treasuryService = {
+  /** Type d'un compte, ou `null` s'il n'existe pas : contrôle d'accès avant toute lecture du livre. */
+  async accountKind(id: number): Promise<TreasuryAccount["kind"] | null> {
+    const res = await db.execute(sql`SELECT kind FROM treasury_accounts WHERE id = ${id}`);
+    const row = res.rows[0] as { kind: TreasuryAccount["kind"] } | undefined;
+    return row?.kind ?? null;
+  },
   async listAccounts(): Promise<TreasuryAccount[]> {
     const res = await db.execute(sql`${ACCOUNT_SELECT} GROUP BY a.id ORDER BY a.is_active DESC, a.code`);
     return (res.rows as Row[]).map(toAccount);
@@ -153,7 +161,11 @@ export const treasuryService = {
         .returning({ id: treasuryAccounts.id });
       return await accountById(db, row.id);
     } catch (error) {
-      if (pgCode(error) === "23505") throw new AppError(409, "Ce code de compte existe déjà.", { cause: error });
+      if (pgCode(error) === "23505") {
+        const e = error as { constraint?: string; cause?: { constraint?: string } };
+        const fuelCard = (e?.constraint ?? e?.cause?.constraint) === "uq_treasury_accounts_active_fuel_card";
+        throw new AppError(409, fuelCard ? "Un compte carte carburant actif existe déjà." : "Ce code de compte existe déjà.", { cause: error });
+      }
       throw error;
     }
   },
