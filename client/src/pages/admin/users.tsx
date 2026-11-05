@@ -116,21 +116,21 @@ const roleOrder: UsersOverviewRole[] = [
 ];
 
 const ROLE_COLORS: Record<string, string> = {
-  admin: "bg-red-50 text-red-700 border border-red-200",
+  admin: "bg-destructive/10 text-destructive-text border border-destructive/30",
   management: "bg-slate-100 text-slate-800 border border-slate-300",
   workshop_manager: "bg-blue-50 text-blue-700 border border-blue-200",
   technician: "bg-purple-50 text-purple-700 border border-purple-200",
   secretary: "bg-orange-50 text-orange-700 border border-orange-200",
-  logistics: "bg-green-50 text-green-700 border border-green-200",
-  warehouse: "bg-amber-50 text-amber-700 border border-amber-200",
+  logistics: "bg-success/10 text-success border border-success/30",
+  warehouse: "bg-warning/10 text-warning-text border border-warning/30",
   client: "bg-gray-100 text-gray-600 border border-gray-200",
   user: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
 const CPC_TONE_CLASSES: Record<CpcStatusTone, string> = {
-  success: "bg-green-50 text-green-700 border border-green-200",
-  warning: "bg-amber-50 text-amber-700 border border-amber-200",
-  danger: "bg-red-50 text-red-700 border border-red-200",
+  success: "bg-success/10 text-success border border-success/30",
+  warning: "bg-warning/10 text-warning-text border border-warning/30",
+  danger: "bg-destructive/10 text-destructive-text border border-destructive/30",
   neutral: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
@@ -141,11 +141,11 @@ function PresenceDot({ isOnline }: { isOnline?: boolean }) {
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
         online
-          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+          ? "bg-success/10 text-success border-success/30"
           : "bg-gray-50 text-gray-500 border-gray-200"
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", online ? "bg-emerald-500" : "bg-gray-400")} />
+      <span className={cn("h-1.5 w-1.5 rounded-full", online ? "bg-success" : "bg-gray-400")} />
       {online ? "En ligne" : "Hors-ligne"}
     </span>
   );
@@ -167,7 +167,7 @@ function SearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-100 rounded-lg outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-400 transition-all placeholder:text-gray-400"
+        className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-100 rounded-lg outline-none focus:ring-2 focus:ring-success focus:border-success transition-all placeholder:text-gray-400"
       />
     </div>
   );
@@ -234,7 +234,7 @@ export default function UsersAdminPage() {
   if (user?.role !== "admin") {
     return (
       <div className="p-6">
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white p-8 text-center">
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card p-8 text-center">
           <h2 className="text-lg font-semibold mb-2">Accès refusé</h2>
           <p className="text-sm text-gray-500">
             Vous n'avez pas les permissions nécessaires pour accéder à cette page.
@@ -405,7 +405,7 @@ export default function UsersAdminPage() {
       id: "status",
       header: "Statut",
       cell: (u) => (
-        <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border", u.deletedAt ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-green-50 text-green-700 border-green-200")}>
+        <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border", u.deletedAt ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-success/10 text-success border-success/30")}>
           {u.deletedAt ? "Désactivé" : "Actif"}
         </span>
       ),
@@ -420,7 +420,7 @@ export default function UsersAdminPage() {
       header: "Connexions",
       cell: (u) => {
         const n = (() => { const p = Math.trunc(Number(u.loginCount)); return (Number.isFinite(p) ? Math.max(0, p) : 0) || (u.lastLoginAt ? 1 : 0); })();
-        const cls = n === 0 ? "bg-red-50 text-red-700 border border-red-200" : n < 5 ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-green-50 text-green-700 border border-green-200";
+        const cls = n === 0 ? "bg-destructive/10 text-destructive-text border border-destructive/30" : n < 5 ? "bg-warning/10 text-warning-text border border-warning/30" : "bg-success/10 text-success border border-success/30";
         return <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", cls)}>{n} connexion{n > 1 ? "s" : ""}</span>;
       },
     },
@@ -438,10 +438,10 @@ export default function UsersAdminPage() {
           <button onClick={() => handleEditUser(u)} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition-colors" title="Modifier">
             <Edit className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => handleToggleUser(u)} className="p-1.5 rounded-lg hover:bg-amber-50 text-amber-500 transition-colors" title={u.deletedAt ? "Activer" : "Désactiver"}>
+          <button onClick={() => handleToggleUser(u)} className="p-1.5 rounded-lg hover:bg-warning/10 text-warning-text transition-colors" title={u.deletedAt ? "Activer" : "Désactiver"}>
             {u.deletedAt ? <Shield className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}
           </button>
-          <button onClick={() => handleDeleteUser(u)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Supprimer">
+          <button onClick={() => handleDeleteUser(u)} className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive-text transition-colors" title="Supprimer">
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -492,7 +492,7 @@ export default function UsersAdminPage() {
       id: "status",
       header: "Statut",
       cell: (d) => (
-        <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border", d.isActive ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-500 border-gray-200")}>
+        <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border", d.isActive ? "bg-success/10 text-success border-success/30" : "bg-gray-100 text-gray-500 border-gray-200")}>
           {d.isActive ? "Actif" : "Inactif"}
         </span>
       ),
@@ -503,13 +503,13 @@ export default function UsersAdminPage() {
       align: "right",
       cell: (d) => (
         <div className="flex justify-end gap-0.5">
-          <button onClick={() => openCreateAccountDialog(d)} className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 transition-colors" title="Créer compte utilisateur">
+          <button onClick={() => openCreateAccountDialog(d)} className="p-1.5 rounded-lg hover:bg-success/10 text-success transition-colors" title="Créer compte utilisateur">
             <UserPlus className="h-3.5 w-3.5" />
           </button>
           <button onClick={() => openEditDriverDialog(d)} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition-colors" title="Modifier">
             <Edit className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => handleToggleDriver(d)} className="p-1.5 rounded-lg hover:bg-amber-50 text-amber-500 transition-colors" title={d.isActive ? "Désactiver" : "Activer"}>
+          <button onClick={() => handleToggleDriver(d)} className="p-1.5 rounded-lg hover:bg-warning/10 text-warning-text transition-colors" title={d.isActive ? "Désactiver" : "Activer"}>
             {d.isActive ? <ShieldOff className="h-3.5 w-3.5" /> : <Shield className="h-3.5 w-3.5" />}
           </button>
         </div>
@@ -541,7 +541,7 @@ export default function UsersAdminPage() {
         moduleLabel="Administration"
         title="Utilisateurs & Chauffeurs"
         subtitle="Gérer les comptes utilisateurs et les équipes"
-        icon={<Users className="h-5 w-5 text-green-600" />}
+        icon={<Users className="h-5 w-5 text-success" />}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -614,9 +614,9 @@ export default function UsersAdminPage() {
           ) : driverCpcStats ? (
             <KpiGrid columns={4} withTopBorder={false} className="md:grid-cols-3 xl:grid-cols-5">
               <KpiTile label="Chauffeurs actifs" value={driverCpcStats.total} icon={<CarTaxiFront className="h-4 w-4" />} iconWrapperClassName="bg-blue-50 text-blue-500" />
-              <KpiTile label="CPC formés" value={driverCpcStats.forme} icon={<CheckCircle2 className="h-4 w-4" />} iconWrapperClassName="bg-green-50 text-green-600" />
-              <KpiTile label="CPC à former" value={driverCpcStats.aFormer} icon={<AlertTriangle className="h-4 w-4" />} iconWrapperClassName="bg-amber-50 text-amber-600" />
-              <KpiTile label="CPC non formés" value={driverCpcStats.nonForme} icon={<XCircle className="h-4 w-4" />} iconWrapperClassName="bg-red-50 text-red-600" />
+              <KpiTile label="CPC formés" value={driverCpcStats.forme} icon={<CheckCircle2 className="h-4 w-4" />} iconWrapperClassName="bg-success/10 text-success" />
+              <KpiTile label="CPC à former" value={driverCpcStats.aFormer} icon={<AlertTriangle className="h-4 w-4" />} iconWrapperClassName="bg-warning/10 text-warning-text" />
+              <KpiTile label="CPC non formés" value={driverCpcStats.nonForme} icon={<XCircle className="h-4 w-4" />} iconWrapperClassName="bg-destructive/10 text-destructive-text" />
               <KpiTile label="Inactifs" value={driverCpcStats.inactiveDrivers} icon={<UserCog className="h-4 w-4" />} iconWrapperClassName="bg-gray-100 text-gray-500" />
             </KpiGrid>
           ) : null}
@@ -698,8 +698,8 @@ export default function UsersAdminPage() {
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                <UserPlus className="h-4 w-4 text-green-600" />
+              <div className="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
+                <UserPlus className="h-4 w-4 text-success" />
               </div>
               Créer un compte chauffeur
             </DialogTitle>
@@ -751,7 +751,7 @@ export default function UsersAdminPage() {
               <Button type="button" variant="outline" onClick={() => setCreateAccountDialog({ open: false, driver: null })}>
                 Annuler
               </Button>
-              <Button type="submit" disabled={createAccountLoading || createAccountForm.pin.length !== 4} className="bg-green-600 hover:bg-green-700">
+              <Button type="submit" disabled={createAccountLoading || createAccountForm.pin.length !== 4} className="bg-success hover:brightness-90">
                 {createAccountLoading ? "Création…" : "Créer le compte"}
               </Button>
             </div>
