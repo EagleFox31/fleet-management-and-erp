@@ -1,24 +1,42 @@
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { isoDateInZone } from "@shared/contracts/kpi-period";
 import {
   computeMissionBudget,
   isBudgetDateInWindow,
   MISSION_BUDGET_DATE_WINDOW_DAYS,
   MISSION_BUDGET_STATUSES,
   MISSION_STATUSES_WITHOUT_BUDGET,
+  MISSION_BUDGET_EXPENSE_LINES,
+  type CreateMissionBudgetExpenseRequest,
   type CreateMissionBudgetRequest,
+  type MissionBudgetExpense,
+  type MissionBudgetExpenseLine,
+  type MissionBudgetExpenses,
   type DailyNeed,
   type MissionBudget,
   type MissionBudgetStatus,
   type MissionDestination,
   type UpdateMissionBudgetRequest,
 } from "@shared/contracts/mission-budgets";
-import { missionBudgets, missionDestinations, missions, type MissionBudgetRow } from "@shared/schema";
+import {
+  missionBudgetExpenses,
+  missionBudgets,
+  missionDestinations,
+  missions,
+  type MissionBudgetExpenseRow,
+  type MissionBudgetRow,
+} from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { findFuelPriceAt, todayIsoDate } from "./fuel-price-service";
-import { linkMissionBudgetDisbursement, reverseMissionBudgetDisbursements } from "./treasury-links";
+import {
+  isMissionBudgetReversed,
+  justifiedMissionBudgetExpenses,
+  linkMissionBudgetDisbursement,
+  reverseMissionBudgetDisbursements,
+} from "./treasury-links";
 
 const log = moduleLogger("mission-budgets");
 
@@ -297,6 +315,120 @@ export async function onMissionStatusChange(tx: Executor, missionId: number, nex
     .where(and(eq(missionBudgets.missionId, missionId), eq(missionBudgets.status, "disbursed")));
   const reversed = await reverseMissionBudgetDisbursements(tx as never, disbursed.map((b) => b.id), userId);
   if (reversed > 0) log.info({ missionId, budgetIds: disbursed.map((b) => b.id), reversed }, "budget de mission contre-passé (mission annulée)");
+}
+
+/** Montant décaissé sur une ligne : FDR + frais annexes, ou carburant. Plafond de ses dépenses (L1e). */
+function disbursedOf(row: MissionBudgetRow, line: MissionBudgetExpenseLine): number {
+  return line === "fdr" ? Number(row.fdrAmount) + Number(row.extrasAmount) : Number(row.fuelAmount);
+}
+
+function toMissionBudgetExpense(row: MissionBudgetExpenseRow): MissionBudgetExpense {
+  return {
+    id: row.id,
+    budgetId: row.budgetId,
+    line: row.line,
+    amount: row.amount,
+    label: row.label,
+    expenseDate: row.expenseDate,
+    createdBy: row.createdBy ?? null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Budget dont on saisit ou retire une dépense (L1e), même ordre de verrous que les transitions :
+ * mission FOR SHARE (lockOpenMission, 409 si terminée ou annulée), puis budget FOR UPDATE, tenu
+ * pendant le contrôle de somme : deux saisies simultanées ne dépassent pas le décaissé.
+ * Une annulation concurrente tient la ligne mission : elle attend la saisie, et sa contre-passation
+ * compte la dépense ; ou elle passe avant, et la saisie est refusée.
+ */
+async function lockBudgetForExpenses(tx: Executor, budgetId: number): Promise<MissionBudgetRow> {
+  const [target] = await tx.select({ missionId: missionBudgets.missionId }).from(missionBudgets).where(eq(missionBudgets.id, budgetId));
+  if (!target) throw new AppError(404, "Budget de mission introuvable.");
+  await lockOpenMission(tx, target.missionId);
+  const [row] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId)).for("update");
+  if (row.status !== "disbursed") throw new AppError(409, "Ce budget n'est pas décaissé : aucune dépense à justifier.");
+  if (await isMissionBudgetReversed(tx as never, budgetId)) {
+    throw new AppError(409, "Le reliquat de ce budget a été rendu au compte source : ses dépenses ne changent plus.");
+  }
+  return row;
+}
+
+const xaf = (value: number) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(value)} FCFA`;
+
+/** Dépenses non supprimées d'un budget, et par ligne : décaissé, justifié, reste à justifier. */
+export async function listMissionBudgetExpenses(budgetId: number): Promise<MissionBudgetExpenses> {
+  const [budget] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId));
+  if (!budget) throw new AppError(404, "Budget de mission introuvable.");
+  const rows = await db
+    .select()
+    .from(missionBudgetExpenses)
+    .where(and(eq(missionBudgetExpenses.budgetId, budgetId), isNull(missionBudgetExpenses.deletedAt)))
+    .orderBy(asc(missionBudgetExpenses.expenseDate), asc(missionBudgetExpenses.id));
+  const justified = await justifiedMissionBudgetExpenses(db as never, [budgetId]);
+  const lines = MISSION_BUDGET_EXPENSE_LINES.map((line) => {
+    const disbursed = budget.status === "disbursed" ? disbursedOf(budget, line) : 0;
+    const spent = justified.get(`${budgetId}:${line}`) ?? 0;
+    return { line, disbursed, justified: spent, remaining: Math.round((disbursed - spent) * 100) / 100 };
+  });
+  return { budgetId, lines, expenses: rows.map(toMissionBudgetExpense) };
+}
+
+/**
+ * Saisie d'une dépense justifiée sur un budget décaissé (L1e). Somme des dépenses non supprimées de
+ * la ligne ≤ montant décaissé sur la ligne, sinon 409 (avance complémentaire : lot ultérieur).
+ */
+export async function createMissionBudgetExpense(
+  budgetId: number,
+  userId: number,
+  input: CreateMissionBudgetExpenseRequest,
+): Promise<MissionBudgetExpense> {
+  const today = isoDateInZone(new Date());
+  const expenseDate = input.expenseDate ?? today;
+  if (expenseDate > today) throw new AppError(400, "La date de la dépense ne peut pas être dans le futur.");
+  const { budget, row } = await db.transaction(async (tx) => {
+    const budget = await lockBudgetForExpenses(tx, budgetId);
+    const spent = (await justifiedMissionBudgetExpenses(tx as never, [budgetId])).get(`${budgetId}:${input.line}`) ?? 0;
+    const remaining = Math.round((disbursedOf(budget, input.line) - spent) * 100) / 100;
+    if (input.amount > remaining) {
+      throw new AppError(409, `Dépense au-delà du montant décaissé sur cette ligne : il reste ${xaf(Math.max(0, remaining))} à justifier.`);
+    }
+    const now = new Date();
+    const [row] = await tx
+      .insert(missionBudgetExpenses)
+      .values({ budgetId, line: input.line, amount: input.amount, label: input.label, expenseDate, createdBy: userId, updatedBy: userId, createdAt: now, updatedAt: now })
+      .returning();
+    return { budget, row };
+  });
+  log.info({ budgetId, expenseId: row.id, userId, line: row.line, amount: row.amount }, "budget de mission : dépense justifiée saisie");
+  notify(toMissionBudget(budget));
+  return toMissionBudgetExpense(row);
+}
+
+/**
+ * Suppression douce d'une dépense (L1e) : deleted_at et deleted_by, jamais d'effacement. Rejouable :
+ * une dépense déjà supprimée ne change plus. Mêmes refus que la saisie (mission close, reliquat rendu).
+ */
+export async function deleteMissionBudgetExpense(budgetId: number, expenseId: number, userId: number): Promise<void> {
+  const { budget, changed } = await db.transaction(async (tx) => {
+    const budget = await lockBudgetForExpenses(tx, budgetId);
+    const [expense] = await tx
+      .select({ id: missionBudgetExpenses.id, deletedAt: missionBudgetExpenses.deletedAt })
+      .from(missionBudgetExpenses)
+      .where(and(eq(missionBudgetExpenses.id, expenseId), eq(missionBudgetExpenses.budgetId, budgetId)));
+    if (!expense) throw new AppError(404, "Dépense introuvable sur ce budget.");
+    if (expense.deletedAt) return { budget, changed: false };
+    const now = new Date();
+    const updated = await tx
+      .update(missionBudgetExpenses)
+      .set({ deletedAt: now, deletedBy: userId, updatedBy: userId, updatedAt: now })
+      .where(and(eq(missionBudgetExpenses.id, expenseId), isNull(missionBudgetExpenses.deletedAt)))
+      .returning({ id: missionBudgetExpenses.id });
+    return { budget, changed: updated.length > 0 };
+  });
+  if (!changed) return;
+  log.info({ budgetId, expenseId, userId }, "budget de mission : dépense justifiée supprimée");
+  notify(toMissionBudget(budget));
 }
 
 /** Besoin du jour : somme en base des budgets de la date, au total et par statut. */

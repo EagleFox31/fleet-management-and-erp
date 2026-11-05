@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { missionBudgets, missionDestinations } from "../../../shared/schema";
+import { missionBudgetExpenses, missionBudgets, missionDestinations } from "../../../shared/schema";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
 
@@ -82,7 +82,7 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
 
   it("l'écart de contraintes est relu après la création de mission_budgets, pas avant", () => {
     const src = norm(readFileSync("server/init-database.ts", "utf8"));
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(DESTINATIONS|BUDGETS_TREASURY)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(DESTINATIONS|BUDGETS_TREASURY|BUDGET_EXPENSES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
     expect(src).not.toMatch(/async function applyCdcSchema\(\) \{[^}]*reportCdcConstraintGaps/);
   });
 });
@@ -102,7 +102,7 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
 
   it("init-database porte exactement le SQL de la migration, appliqué après celui des budgets", () => {
     expect(initSql()).toBe(migration());
-    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGETS_TREASURY|BUDGET_EXPENSES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("additif et idempotent : seed sans réécriture, aucune suppression", () => {
@@ -165,7 +165,7 @@ describe("L1c : FK trésorerie de mission_budgets, init-database et migration ju
     const start = src.indexOf(marker);
     expect(start).toBeGreaterThan(-1);
     expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
-    expect(src).toMatch(/await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("les fichiers de migration passent par ordre alphabétique : celui-ci après la création de mission_budgets", () => {
@@ -187,5 +187,59 @@ describe("L1c : FK trésorerie de mission_budgets, init-database et migration ju
     const src = initSource();
     const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
     expect(src.slice(listStart, src.indexOf("];", listStart))).toContain(`'${FK}'`);
+  });
+});
+
+describe("L1e : dépenses justifiées mission_budget_expenses, init-database, migration jumelle et Drizzle", () => {
+  const MIGRATION = "server/db/migrations/20261106_mission_budget_expenses.sql";
+  const CHECKS = ["mission_budget_expenses_line_check", "mission_budget_expenses_amount_check"];
+  const migration = () =>
+    norm(norm(readFileSync(MIGRATION, "utf8")).split("\n").filter((line) => !line.startsWith("--")).join("\n"));
+  const initSource = () => norm(readFileSync("server/init-database.ts", "utf8"));
+
+  it("init-database porte exactement le SQL de la migration, appliqué après le lien trésorerie et avant le relevé", () => {
+    const src = initSource();
+    const marker = "export const MISSION_BUDGET_EXPENSES_SQL = `";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+  });
+
+  it("les fichiers de migration passent par ordre alphabétique : celui-ci après la création de mission_budgets", () => {
+    expect(["20261106_mission_budget_expenses.sql", "20261105_mission_budgets.sql"].sort()[0]).toBe("20261105_mission_budgets.sql");
+  });
+
+  it("Drizzle et SQL déclarent les mêmes colonnes, CHECK, FK et index, sous les mêmes noms", () => {
+    const sql = migration();
+    const config = getTableConfig(missionBudgetExpenses);
+    for (const column of config.columns) expect(sql, column.name).toMatch(new RegExp(`\\n  ${column.name} `));
+    for (const name of CHECKS) {
+      expect(config.checks.map((c) => c.name)).toContain(name);
+      expect(sql).toMatch(new RegExp(`CONSTRAINT ${name}\\s`));
+      expect(sql).toContain(`('${name}', 'CHECK (`);
+    }
+    for (const fk of config.foreignKeys.map((k) => k.getName())) expect(sql).toContain(`CONSTRAINT ${fk} REFERENCES`);
+    expect(config.foreignKeys).toHaveLength(4);
+    expect(config.indexes.map((i) => i.config.name)).toEqual(["idx_mission_budget_expenses_budget_id"]);
+    expect(sql).toContain("CREATE INDEX IF NOT EXISTS idx_mission_budget_expenses_budget_id ON mission_budget_expenses (budget_id);");
+  });
+
+  it("additif, idempotent, verrou borné ; CHECK réconciliés et relus au démarrage ; aucune suppression physique", () => {
+    const sql = migration();
+    expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS mission_budget_expenses (");
+    expect(sql).toContain("ADD CONSTRAINT %I %s NOT VALID");
+    expect(sql).toContain("VALIDATE CONSTRAINT %I");
+    expect(sql).toContain("EXCEPTION WHEN check_violation");
+    expect(sql).toContain("EXCEPTION WHEN lock_not_available");
+    expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
+    // Suppression douce : la colonne existe, aucune cascade ne l'efface avec son budget.
+    expect(sql).toContain("\n  deleted_at timestamp,");
+    expect(sql).not.toMatch(/ON DELETE CASCADE/i);
+    const src = initSource();
+    const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
+    for (const name of CHECKS) expect(src.slice(listStart, src.indexOf("];", listStart))).toContain(`'${name}'`);
   });
 });

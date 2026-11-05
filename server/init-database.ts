@@ -1363,6 +1363,57 @@ EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'lien trésorerie de mission_budgets non réconcilié : verrou de table indisponible';
 END $$;`;
 
+// Dépenses justifiées du budget de mission (L1e) — jumelle de server/db/migrations/20261106_mission_budget_expenses.sql.
+// Après MISSION_BUDGETS_SQL (FK vers mission_budgets).
+export const MISSION_BUDGET_EXPENSES_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS mission_budget_expenses (
+  id serial PRIMARY KEY,
+  budget_id integer NOT NULL
+    CONSTRAINT mission_budget_expenses_budget_id_mission_budgets_id_fk REFERENCES mission_budgets(id),
+  line text NOT NULL,
+  amount integer NOT NULL,
+  label text NOT NULL,
+  expense_date date NOT NULL,
+  created_by integer CONSTRAINT mission_budget_expenses_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_budget_expenses_updated_by_users_id_fk REFERENCES users(id),
+  deleted_by integer CONSTRAINT mission_budget_expenses_deleted_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  deleted_at timestamp,
+  CONSTRAINT mission_budget_expenses_line_check CHECK (line IN ('fdr', 'carburant')),
+  CONSTRAINT mission_budget_expenses_amount_check CHECK (amount > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mission_budget_expenses_budget_id ON mission_budget_expenses (budget_id);
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push) : CHECK posé NOT VALID puis validé ; une ligne
+  -- non conforme laisse un WARNING, relu par reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS).
+  -- Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_budget_expenses_line_check', 'CHECK (line IN (''fdr'', ''carburant''))'),
+    ('mission_budget_expenses_amount_check', 'CHECK (amount > 0)')
+  ) AS t(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budget_expenses'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_budget_expenses ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budget_expenses'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_budget_expenses VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_budget_expenses : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_budget_expenses non réconciliées : verrou de table indisponible';
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1573,6 +1624,9 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_budgets_destination_id_mission_destinations_id_fk',
   // Posée par MISSION_BUDGETS_TREASURY_SQL (lot L1c).
   'mission_budgets_treasury_entry_id_treasury_entries_id_fk',
+  // Posées par MISSION_BUDGET_EXPENSES_SQL (lot L1e).
+  'mission_budget_expenses_line_check',
+  'mission_budget_expenses_amount_check',
   // Posées par TARIFF_GRID_SQL (lot O3).
   'tariff_grid_pricing_unit_check',
   'tariff_grid_unit_price_check',
@@ -2144,6 +2198,8 @@ export async function initializeDatabase() {
     await pool.query(MISSION_DESTINATIONS_SQL);
     // Lien trésorerie du budget (L1c) — jumelle de server/db/migrations/20261105_mission_budgets_treasury.sql.
     await pool.query(MISSION_BUDGETS_TREASURY_SQL);
+    // Dépenses justifiées (L1e) — jumelle de server/db/migrations/20261106_mission_budget_expenses.sql.
+    await pool.query(MISSION_BUDGET_EXPENSES_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);

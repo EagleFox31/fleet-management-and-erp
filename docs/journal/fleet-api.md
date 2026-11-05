@@ -689,3 +689,33 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - `Promise.all` clôture + annulation ;
   - drapeau finance coupé après un décaissement au journal : contre-passation quand même.
   - Le rejeu de l'annulation garde `cancelledAt` ; `mission-budgets` 34/34.
+
+## 2026-11-05 — Budget de mission (L1e) : dépenses justifiées
+
+- **Quoi** : sur un budget décaissé, la logistique, le secrétariat et l'administrateur saisissent les dépenses justifiées, ligne FDR et frais annexes ou ligne carburant. L'annulation de la mission ne rend plus au compte source que le reliquat.
+- **Comment** :
+  - table `mission_budget_expenses` : montant entier en XAF, libellé, date au jour de Douala, auteurs et horodatages. Migration `20261106_mission_budget_expenses.sql` et sa jumelle dans `init-database.ts`. Les deux CHECK sont réconciliés et relus au démarrage ;
+  - `GET`, `POST` et `DELETE /api/mission-budgets/:id/expenses`, sous le drapeau finance :
+    - lecture par les rôles qui lisent le budget ;
+    - saisie et suppression par ceux qui décaissent ;
+  - suppression douce (`deleted_at`, `deleted_by`), rejouable. Les sommes ignorent les lignes supprimées ;
+  - même ordre de verrous que les transitions : mission `FOR SHARE`, puis budget `FOR UPDATE` pendant le contrôle de somme ;
+  - 409 dans quatre cas :
+    - mission annulée ou terminée ;
+    - reliquat déjà contre-passé ;
+    - budget non décaissé ;
+    - somme d'une ligne au-delà de son décaissé ;
+  - `reverseMissionBudgetDisbursements` lit la somme justifiée de chaque ligne. Une ligne entièrement justifiée n'écrit aucune contre-passation.
+- **Pourquoi** : lot L1e validé par l'orchestrateur. Une dépense est une trace financière : elle ne s'efface jamais.
+- **Limites connues** : un dépassement (avance complémentaire) relève d'un lot ultérieur ; il est refusé aujourd'hui. Pas encore d'écran ni de pièce jointe.
+- **Preuve** :
+  - contrat `mission-budget-expenses` 11/11 :
+    - rôles ;
+    - corps invalides et date future ;
+    - plafond par ligne ;
+    - trois saisies simultanées, et une saisie qui attend le verrou d'une autre non validée ;
+    - suppression douce ;
+    - reliquat partiel ;
+    - mission terminée, mission annulée, reliquat rendu, drapeau coupé ;
+  - 9 mutants sur 9 tués (verrou du budget, mission ouverte, budget décaissé, reliquat rendu, plafond, lignes supprimées dans la somme, reliquat, suppression physique, date future) ;
+  - test unitaire jumelle et Drizzle.
