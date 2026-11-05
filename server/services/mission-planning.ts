@@ -5,8 +5,8 @@ import type { db } from "../db";
 
 /**
  * Conflit de planning : un chauffeur ou un véhicule ne peut pas porter deux missions actives qui se
- * chevauchent. Règle unique, partagée par la création, le PATCH, l'ajout d'affectation, le lancement
- * et l'import (elle existait en trois copies).
+ * chevauchent. Règle unique, partagée par la création, le PATCH, l'ajout d'affectation, launch-readiness
+ * et la validation de lancement de PUT /:id/status (les trois copies d'origine).
  */
 export const ACTIVE_MISSION_STATUSES: string[] = ["planned", "assigned", "in_progress"];
 
@@ -72,18 +72,20 @@ export function planningClashMessage(clash: PlanningClash): string {
 }
 
 /**
- * Sérialise les contrôles de planning concurrents sur un même chauffeur ou véhicule : deux créations
+ * Sérialise les contrôles de planning concurrents sur les mêmes chauffeurs ou véhicules : deux écritures
  * simultanées passeraient sinon toutes deux le contrôle avant que l'une n'ait inséré son affectation.
- * Verrou de transaction (libéré au commit/rollback), pris dans un ordre fixe pour éviter l'interblocage.
+ * Verrou de transaction (libéré au commit/rollback). Ordre global trié et dédoublonné : tous les
+ * véhicules par id croissant, puis tous les chauffeurs par id croissant, quel que soit l'appelant
+ * (une mission à plusieurs affectations ne prend donc jamais ses verrous dans le désordre).
  * À appeler dans la transaction, AVANT findPlanningClash.
  */
-export async function lockPlanningResources(tx: Executor, vehicleId: number, driverId: number): Promise<void> {
+export async function lockPlanningPairs(tx: Executor, pairs: Array<{ vehicleId: number; driverId: number }>): Promise<void> {
+  const sorted = (values: number[]) => Array.from(new Set(values)).sort((a, b) => a - b);
   // Deux espaces de clés distincts (véhicule / chauffeur) : le premier entier du couple sert de namespace.
-  const keys: Array<[number, number]> = [
-    [1, vehicleId],
-    [2, driverId],
-  ];
-  for (const [ns, id] of keys) {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${ns}, ${id})`);
-  }
+  for (const id of sorted(pairs.map((p) => p.vehicleId))) await tx.execute(sql`SELECT pg_advisory_xact_lock(1, ${id})`);
+  for (const id of sorted(pairs.map((p) => p.driverId))) await tx.execute(sql`SELECT pg_advisory_xact_lock(2, ${id})`);
+}
+
+export function lockPlanningResources(tx: Executor, vehicleId: number, driverId: number): Promise<void> {
+  return lockPlanningPairs(tx, [{ vehicleId, driverId }]);
 }

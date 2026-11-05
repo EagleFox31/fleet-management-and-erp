@@ -21,7 +21,7 @@ import {
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
-import { findPlanningClash, lockPlanningResources, planningClashMessage } from "../services/mission-planning";
+import { findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { toFieldErrors } from "@shared/errors";
@@ -2580,8 +2580,13 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
     }
 
     const updatedMission = await db.transaction(async (tx) => {
+      if (planningTargets.length > 0) {
+        // Même ordre que POST /:id/assignments : ligne mission d'abord, verrous consultatifs ensuite
+        // (l'ordre inverse interbloquerait un PATCH et un ajout d'affectation sur la même mission).
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+        await lockPlanningPairs(tx, planningTargets);
+      }
       for (const target of planningTargets) {
-        await lockPlanningResources(tx, target.vehicleId, target.driverId);
         const clash = await findPlanningClash(tx, {
           missionId,
           pickupDate: effectivePickup,

@@ -127,18 +127,17 @@ describe("PATCH /api/missions/:id : conflit de planning", { timeout: 120000 }, (
     await occupy(v, d, day(10), day(12));
     const mine = await create({ pickupDate: day(20).toISOString(), deliveryDate: day(22).toISOString(), assignment: { vehicleId: await vehicle(), driverId: await driver() } });
     expect(mine.status, JSON.stringify(mine.body)).toBe(201);
-    return { v, d, mineId: mine.body.id as number, mineBefore: (await rowsOf(mine.body.id))[0] };
+    return { v, d, mineId: mine.body.id as number };
   }
 
   it("changer de chauffeur vers un chauffeur pris : 409, affectation inchangée", async () => {
-    const { d, mineId, mineBefore } = await setup();
+    const { d } = await setup();
     // Le créneau de la mission passe sur celui du chauffeur occupé, sans affectation à contrôler.
     const moved = await create({ pickupDate: day(10).toISOString(), deliveryDate: day(11).toISOString(), assignment: { vehicleId: await vehicle(), driverId: await driver() } });
     expect(moved.status).toBe(201);
     const res = await patch(moved.body.id, { assignment: { vehicleId: (await rowsOf(moved.body.id))[0].vehicleId, driverId: d } });
     expect(res.status, JSON.stringify(res.body)).toBe(409);
     expect((await rowsOf(moved.body.id))[0].driverId).not.toBe(d);
-    expect(mineBefore.missionId).toBe(mineId);
   });
 
   it("changer de véhicule vers un véhicule pris : 409, affectation inchangée", async () => {
@@ -175,5 +174,21 @@ describe("PATCH /api/missions/:id : conflit de planning", { timeout: 120000 }, (
     expect(mine.status).toBe(201);
     const res = await patch(mine.body.id, { pickupDate: day(25).toISOString(), deliveryDate: day(26).toISOString() });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+  });
+});
+
+describe("verrous : PATCH et ajout d'affectation concurrents", { timeout: 120000 }, () => {
+  it("PATCH de dates et ajout d'affectation sur la même mission, en rafale : aucune 500 (pas d'interblocage)", async () => {
+    for (let i = 0; i < 4; i++) {
+      const [v1, d1, d2] = [await vehicle(), await driver(), await driver()];
+      // Même véhicule des deux côtés : les deux requêtes visent la même clé consultative (cycle possible).
+      const mine = await create({ pickupDate: day(10 + i * 3).toISOString(), deliveryDate: day(11 + i * 3).toISOString(), assignment: { vehicleId: v1, driverId: d1 } });
+      expect(mine.status, JSON.stringify(mine.body)).toBe(201);
+      const results = await Promise.all([
+        patch(mine.body.id, { pickupDate: day(11 + i * 3).toISOString(), deliveryDate: day(12 + i * 3).toISOString() }),
+        session.call("POST", `/api/missions/${mine.body.id}/assignments`, { actor: "logistics", body: { vehicleId: v1, driverId: d2 } }),
+      ]);
+      for (const r of results) expect(r.status, JSON.stringify(r.body)).toBeLessThan(500);
+    }
   });
 });
