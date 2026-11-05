@@ -46,3 +46,15 @@
   - `route-id-strict-lot4` : 18 cas. Ancien code : 16 rouges ; restent verts le 404 du centre agréé (non-régression) et create-user (corrigé au lot 3). Correctif : 18 verts.
   - tsc : 0 erreur. Unitaires : 2438 verts. 32 contrats touchés : 445 verts.
 - Hors périmètre : le filet contre les id au-delà de l'int4 (middleware `/api`) est confié à la session de.
+
+## Lot 5 — `server/routes.ts` (en place) et statistiques carburant
+
+- Quoi :
+  - `routeIdOrNaN` (`server/lib/route-id.ts`) fait la même lecture que `parseRouteId`, mais rend `NaN` au lieu de lever. Il remplace `parseInt` en place dans `server/routes.ts`, qui est gelé et dont les handlers testent déjà `isNaN`.
+  - Routes concernées : 9 DELETE (users, admin/users, vehicles, maintenance-schedules, work-orders, parts-used, fault-catalog, tires, workflows/documents), plus `GET /api/work-orders/vehicle/:vehicleId` et `/technician/:technicianId`.
+  - `fuel-card.routes.ts` : stats et anomalies par véhicule passent par `parseRouteId`. Le catch laisse passer l'`AppError`.
+- Comment : le cliquet compte les lectures lâches de `routes.ts` (`ROUTES_TS_FROZEN = 39`, contre 50 sur `origin/main`). fuel-card sort de FROZEN.
+- Pourquoi : `DELETE /api/vehicles/<id>abc` visait le véhicule `<id>`.
+- Correctif de méthode : les deux GET d'OT, d'abord notés comme masqués par `GET /api/work-orders/:id`, sont vivants (`:id` = un seul segment). Ils sont corrigés et non supprimés (voir LESSONS, 2026-11-05).
+- Tester : `route-id-strict-lot5` compte 15 cas. Sur l'ancien code, 15 rouges. Le correctif les rend verts. `former-storage-stubs` reste vert.
+- Hors périmètre : PATCH users (b7) et toggle admin-users (c7, #375).

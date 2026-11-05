@@ -47,7 +47,7 @@ const FROZEN: Record<string, number> = {
 };
 
 /** Lectures lâches restantes dans `server/routes.ts` (gelé). Ne peut que baisser. */
-const ROUTES_TS_FROZEN = 41;
+const ROUTES_TS_FROZEN = 39;
 
 export function countLooseParamReads(source: string): number {
   return (stripComments(source).match(LOOSE_PARAM_READ) ?? []).length;

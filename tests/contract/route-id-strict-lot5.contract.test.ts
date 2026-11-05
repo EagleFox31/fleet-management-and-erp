@@ -8,7 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
 
 /**
- * Lot 5 de #360 : validation stricte des identifiants sur les suppressions de `server/routes.ts`
+ * Lot 5 de #360 : validation stricte des identifiants sur les suppressions et les listes d'OT par véhicule ou technicien de `server/routes.ts`
  * (gelé, modifié en place par `routeIdOrNaN`) et sur les statistiques carburant par véhicule.
  * Un identifiant suivi de lettres répond 400, avec le message existant de chaque route.
  * Le préfixe numérique vise un id absent : sur l'ancien code, le test échoue sans rien supprimer.
@@ -30,6 +30,8 @@ const CASES: Array<[method: string, url: string, message: string]> = [
   ["DELETE", `/api/fault-catalog/${BAD}`, "ID invalide"],
   ["DELETE", `/api/tires/${BAD}`, "ID de pneu invalide"],
   ["DELETE", `/api/workflows/documents/${BAD}`, "ID de document invalide"],
+  ["GET", `/api/work-orders/vehicle/${BAD}`, "ID de véhicule invalide"],
+  ["GET", `/api/work-orders/technician/${BAD}`, "ID de technicien invalide"],
   ["GET", `/api/fuel-card/vehicle/${BAD}/stats`, "ID de véhicule invalide"],
   ["GET", `/api/fuel-card/vehicle/${BAD}/anomalies`, "ID de véhicule invalide"],
 ];

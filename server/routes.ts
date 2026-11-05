@@ -1819,15 +1819,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/work-orders/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
-      const vehicleId = parseInt(req.params.vehicleId);
-      
+      const vehicleId = routeIdOrNaN(req.params.vehicleId);
+
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
         return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
-      
+
       const orders = await storage.getWorkOrdersByVehicleId(vehicleId);
       
       return res.status(200).json(orders);
@@ -1839,8 +1839,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/work-orders/technician/:technicianId", isTechnician, async (req, res) => {
     try {
-      const technicianId = parseInt(req.params.technicianId);
-      
+      const technicianId = routeIdOrNaN(req.params.technicianId);
+
       if (isNaN(technicianId)) {
         return res.status(400).json({ message: "ID de technicien invalide" });
       }
