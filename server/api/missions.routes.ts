@@ -20,6 +20,7 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
+import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
@@ -129,17 +130,9 @@ async function findReplayedFuelSubmission(
   return record;
 }
 
-/** Identifiant de mission d'URL : entier strict (chiffres seuls), sinon 400. Seule lecture de `:id`. */
-/** Plus grand entier de la colonne id (integer Postgres) : au-delà, la base répondrait par une erreur. */
-const MAX_INT4 = 2147483647;
-
+/** Identifiant de mission d'URL : entier strict (`parseRouteId`), sinon 400. Seule lecture de `:id`. */
 export function parseMissionId(value: unknown): number {
-  const text = typeof value === "string" ? value : "";
-  const id = Number(text);
-  if (!/^\d+$/.test(text) || !Number.isSafeInteger(id) || id <= 0 || id > MAX_INT4) {
-    throw new AppError(400, "Identifiant de mission invalide.");
-  }
-  return id;
+  return parseRouteId(value, MISSION_ID_INVALID_MESSAGE);
 }
 
 // Cloison chauffeur (DRV2-3) : toute route `/:id/...` du routeur refuse un chauffeur
