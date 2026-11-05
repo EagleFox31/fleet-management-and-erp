@@ -63,6 +63,14 @@ describe("dates impossibles", () => {
     }, 60000);
   }
 
+  it("PATCH cpcTrainingDate : 0000-01-01 donne 400, jamais 500", async () => {
+    const d = await newDriver("NON FORMÉ");
+    const res = await call("PATCH", `/api/drivers/${d.id}`, { actor: "logistics", body: { cpcTrainingDate: "0000-01-01" } });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("VALIDATION");
+    expect(leakText(res.body)).not.toMatch(/SQLSTATE|invalid input syntax|out of range/i);
+  }, 60000);
+
   it("POST : 2026-02-30 donne 400", async () => {
     const res = await call("POST", "/api/drivers", {
       actor: "logistics",

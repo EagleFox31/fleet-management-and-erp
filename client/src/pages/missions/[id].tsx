@@ -19,7 +19,6 @@ import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
-import { normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
 import { isApiError, userMessageOf } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
@@ -2211,13 +2210,20 @@ export default function MissionDetailsPage() {
                             {mission.assignment.driver.firstName} {mission.assignment.driver.lastName}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5">{mission.assignment.driver.employeeNumber}</p>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block ${
-                            mission.assignment.driver.cpcEligible ?? normalizeCpcStatus(mission.assignment.driver.cpcStatus) === "FORME"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-orange-100 text-orange-700"
-                          }`}>
-                            {mission.assignment.driver.cpcStatus}
-                          </span>
+                          {typeof mission.assignment.driver.cpcEligible === "boolean" ? (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block ${
+                              mission.assignment.driver.cpcEligible
+                                ? "bg-green-100 text-green-700"
+                                : "bg-orange-100 text-orange-700"
+                            }`}>
+                              {mission.assignment.driver.cpcStatus}
+                            </span>
+                          ) : (
+                            // Verdict non communiqué à ce lecteur : on ne conclut pas à l'éligibilité.
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block bg-gray-100 text-gray-500">
+                              Verdict CPC indisponible
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5 text-center">
