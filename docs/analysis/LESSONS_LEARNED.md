@@ -1744,8 +1744,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Exceptions nommées
 - Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
-- Routes multer de `server/api` (récépissé, règlement fournisseur, dépôt de document véhicule) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ». Hors `server/api`, vérifié le même jour : missions et commandes fournisseur (purchase-orders) n'ont aucune route multer ; `server/middleware/upload.ts` ne sert que ce dépôt de document véhicule ; la seule route multer de `server/routes.ts` (`POST /api/workflows/:sessionId/documents`, gelé) est en `memoryStorage` : `WorkflowDocumentService.saveWorkflowDocument` n'écrit le fichier qu'au moment de l'INSERT et le supprime si celui-ci est refusé. Rien d'autre à revoir selon ce patron.
-- Les autres routes multer (récépissé, preuves) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ».
+- Routes multer (récépissé, preuves de renouvellement, règlement fournisseur, dépôt de document véhicule) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ». Missions et commandes fournisseur n'ont aucune route multer ; `server/middleware/upload.ts` ne sert que le dépôt de document véhicule ; la seule route multer de `server/routes.ts` (`POST /api/workflows/:sessionId/documents`, gelé) est en `memoryStorage`, gelée dans `multer-lifecycle-hygiene` : `WorkflowDocumentService.saveWorkflowDocument` n'écrit le fichier qu'au moment de l'INSERT et le supprime si celui-ci est refusé. Si la synchro du miroir puis le retrait de la ligne échouent, la ligne et son fichier sont conservés ensemble (`vehicle-documents-orphan-row-file.contract.test.ts`).
 
 ### Prévention (vérifiable)
 - `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
@@ -2944,6 +2943,18 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : fichier supprimé, code mort, non appliqué.
 - **Prévention vérifiable** : `tests/unit/server/bootstrap-sql-files.test.ts` échoue si un `.sql` de `server/db/triggers/` ou `server/db/functions/` n'est ni dans `BOOTSTRAP_SQL_FILES` ni dans la liste gelée `NOT_BOOTSTRAPPED_FROZEN` (avec raison) ; rouge avant la suppression. La liste gelée garde quatre fichiers d'alertes non appliqués, à installer ou supprimer.
 - **Leçon généralisée** : un automatisme en base n'existe que s'il est appliqué au démarrage ; avant de corriger un trigger, vérifier qu'il est installé.
+- **Suivis** : `PUT /:id/status` vers `planned` ou `assigned` rejoue désormais le contrôle sous le même ordre de verrous (ligne mission, puis clés triées) ; `launch-readiness` et la validation de lancement lisent hors verrou (ils ne font qu'indiquer un blocage, sans écrire d'affectation) ; dans le PATCH, `liveAssignments` est lu avant la transaction : une affectation ajoutée entre la lecture et l'écriture n'est pas revue (suivi, hors de ce lot).
+- **Suivis** : `PUT /:id/status` vers `planned` ou `assigned` rejoue désormais le contrôle sous le même ordre de verrous (ligne mission, puis clés triées) ; `launch-readiness` et la validation de lancement lisent hors verrou (ils ne font qu'indiquer un blocage, sans écrire d'affectation) ; dans le PATCH et dans `PUT /status`, les affectations et le créneau sont lus avant la transaction : sous le verrou de ligne, `assertPlanningStateUnchanged` compare leur empreinte à la base et refuse (409 lisible « La mission vient d'être modifiée… ») si un écrivain concurrent est passé entre-temps, au lieu de contrôler l'ancienne paire. Prouvé de façon déterministe (une connexion tient le verrou, la paire est remplacée, le verrou est libéré) : rouge 2/2 sans la comparaison. Le 409 de `POST /` passe par le gestionnaire central (code, requestId).
+
+## 2026-11-05 — Cloison par portée : router.param cloisonne la mission, pas l'affectation lue
+
+- **Contexte** : relecture de #345 (launch-readiness). Le chauffeur était déjà cloisonné sur la mission par `router.param("id")`, mais la check-list lisait ensuite `assignments` avec `.limit(1)`.
+- **Cause racine** : pour le personnel, la lecture prenait la première affectation de la mission, même annulée ou refusée ; la cloison de la mission ne dit rien sur la ligne d'affectation que le handler choisit. Même risque (première ligne, fiche d'un autre chauffeur) sur les routes satellites `/:id/*`.
+- **Classification** : cloison incomplète, route satellite non revue lors d'un correctif sur la route principale.
+- **Résolution** : `launch-readiness` ne lit que les affectations vivantes (`VOID_ASSIGNMENT_STATUSES` exclus pour le personnel, `driverLiveAssignmentFilter` pour le chauffeur) ; le 403 de défense en profondeur et le 500 passent par `AppError`.
+- **Prévention vérifiable** : `tests/unit/server/mission-assignment-read-scope.test.ts` échoue si un handler `/:id/*` de `missions.routes.ts` ouvert aux chauffeurs lit `assignments` sans `driverLiveAssignmentFilter` ni `driverScopeOf` : il ne vérifie que la portée chauffeur (heuristique de texte, ses limites sont documentées dans son en-tête) et ne protège pas le cas de l'affectation annulée ou refusée, que couvre le contrat `tests/contract/mission-launch-readiness-live-assignment.contract.test.ts` (rouge 2/2 sans le correctif). La liste gelée du garde est désormais vide.
+- **Leçon généralisée** : la cloison par portée se vérifie sur toutes les routes satellites d'une ressource, et à la lecture de chaque ligne enfant, pas seulement à l'entrée de la ressource.
+- **Dette soldée** : `GET` et `POST /:id/document-renewal-requests` lisent désormais l'affectation vivante (jointure filtrée par `driverLiveAssignmentFilter` pour un chauffeur, `VOID_ASSIGNMENT_STATUSES` exclus pour le personnel) ; la liste gelée du garde est vide ; le cas de l'affectation annulée est protégé par le contrat `tests/contract/mission-document-renewal-live-assignment.contract.test.ts` (rouge 3/5 sans le correctif), non par le garde.
 
 ## 2026-11-05 — Justificatif de règlement fournisseur supprimé après enregistrement
 
@@ -2976,7 +2987,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : deux lectures différentes du même paramètre (garde stricte, handlers tolérants) et un repli permissif de la garde sur une valeur illisible. Là où les deux lectures divergent, la garde ne protège pas.
 - **Classification** : sécurité, contrôle d'accès, garde permissive par défaut.
 - **Résolution** : `parseMissionId` est la seule lecture de `:id` (chiffres seuls, entier sûr, positif, sinon 400 via `AppError`) ; la garde l'appelle et tous les handlers l'utilisent.
-- **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` échoue si un `router.param` fait un `return next()` nu.
+- **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` lit l'AST de `server/` (#363 ; la première version, textuelle, ne voyait que `return next()` et laissait passer `next(); return;`) : tout `.param` doit appeler un parseur strict `parseX(value)` (pas `parseInt` / `parseFloat`, un `throw` dans le corps s'il est local) avant tout passage (`next()`, `next("route")`, `next(null)` et autres valeurs fausses) ; un nom ou un callback non littéral est refusé comme illisible.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
 
 ## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
@@ -2996,3 +3007,35 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : relevé refait après `git fetch` sur `origin/main`. Les deux routes sont gardées et corrigées en place (`routeIdOrNaN`). Le contrat existant `former-storage-stubs` montrait déjà que la route technicien est vivante.
 - **Prévention vérifiable** : `route-id-strict-lot5` vérifie que les deux routes répondent 400 et non 200 sur `<id>abc`. Cela n'est possible que si la route est atteinte, donc vivante. Règle de méthode : avant de déclarer une route morte, faire passer un appel HTTP dans un contrat et chercher ses appelants (`client/src`, `tests/`).
 - **Leçon généralisée** : un relevé part de `git fetch` et de `origin/<base>`, jamais d'une branche locale. Une route n'est déclarée morte que sur la preuve d'un appel qui ne l'atteint pas, jamais sur la seule lecture de l'ordre des déclarations.
+## 2026-11-05 — Toast à message fixe qui masque la raison serveur
+
+- **Contexte** : le refus de lancement d'une mission disait pourquoi (budget, conflit), mais le toast du chauffeur affichait un texte fixe, et le message serveur de plus de 300 caractères était remplacé par un libellé générique.
+- **Cause racine** : deux masques empilés, un `onError` à texte codé en dur et la règle `looksTechnical` du contrat d'erreur ; chacun cachait la raison, et le test de contrat ne vérifiait que le statut.
+- **Classification** : message d'erreur inutile à l'utilisateur, non détecté par les tests.
+- **Résolution** : `userMessageOf(error, repli)` dans le toast ; `launchRefusalMessage` borne le message (conflit et budget d'abord, motifs en trop comptés).
+- **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, `tests/unit/server/launch-refusal-message.test.ts`, cas toast dans `tests/unit/client/api-error.test.ts`.
+- **Leçon généralisée** : un `onError` affiche `userMessageOf`, jamais un texte fixe ; tout message métier qui peut dépasser 300 caractères se borne à la source ; un test d'erreur vérifie le contenu du message, pas seulement le statut.
+
+## 2026-11-05 — Verrou de garde tenu jusqu'à la fin de la réponse
+
+- **Contexte** : une garde sérialise une vérification et l'écriture qui suit par un verrou consultatif Postgres pris sur une connexion dédiée, rendu à la fin de la réponse HTTP.
+- **Cause racine** : les écouteurs de fin de réponse étaient posés après les attentes (connexion, prise du verrou). Un client coupé pendant l'attente avait déjà émis son événement de fermeture : rien ne libérait plus ni la connexion ni le verrou, et les gardes suivantes expiraient. S'y ajoutaient une connexion rendue au pool après un déverrouillage en échec et une libération sur fermeture avant la fin de l'écriture aval.
+- **Classification** : fuite de ressource, concurrence, cas limite de cycle de vie de la requête.
+- **Résolution** : état de la réponse contrôlé juste après la prise du verrou (terminée ou détruite), libération sur `finish`, libération à l'appel de `res.end` (après l'écriture aval), minuteur réduit à un filet long de 30 s, connexion détruite si le déverrouillage échoue, expiration traduite en 409 lisible.
+- **Prévention vérifiable** : `tests/unit/server/last-admin-lock.test.ts` (client factice, une entrée par cas) et le cas de contrat « déconnexion pendant l'attente du verrou » dans `tests/contract/last-active-admin-guard.contract.test.ts`.
+- **Leçon généralisée** : toute ressource liée à la durée d'une requête s'enregistre avant le premier `await`, ou contrôle l'état déjà terminé juste après ; elle n'est rendue qu'à la fin de la réponse, et une connexion dont l'état de session est incertain est détruite, jamais rendue au pool. Un minuteur lié à la socket libère selon l'état du réseau, pas selon la fin du traitement.
+## 2026-11-05 — Un middleware monté sur un préfixe contrôle le rôle avant sa première lecture
+
+- **Contexte** : la garde de réservation des OT, montée sur `/work-orders`, lisait la base et répondait avant les gardes de rôle des routes.
+- **Cause racine** : un middleware de préfixe s'exécute avant les gardes propres aux routes ; sa première lecture précédait donc tout contrôle de rôle.
+- **Classification** : sécurité, ordre des gardes.
+- **Résolution** : la garde rejoue d'abord la garde de rôle de la route protégée (POST : atelier ; PATCH : technicien compris), puis lit.
+- **Prévention vérifiable** : cas `contrôle de rôle avant lecture` dans `tests/contract/work-order-booking-guard.contract.test.ts` (client et chauffeur : 403), rouge avant le correctif.
+- **Leçon généralisée** : un middleware monté sur un préfixe vérifie le rôle avant sa première lecture en base.
+
+## 2026-11-05 — Une route publique répond par une liste blanche de clés
+
+- **Contexte** : un point d'entrée sans session renvoyait un descriptif complet de l'API.
+- **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
+- **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
+- **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.

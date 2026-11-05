@@ -123,3 +123,27 @@ export async function assertPlanningStateUnchanged(
   const key = planningStateKey({ pickupDate: mission?.pickupDate, deliveryDate: mission?.deliveryDate, rows: rows.filter((r) => keep(r.status)) });
   if (key !== expectedKey) throw new AppError(409, PLANNING_STALE_MESSAGE);
 }
+
+/** Taille maximale du message : le contrat d'erreur écarte tout message de plus de 300 caractères (looksTechnical). */
+const LAUNCH_MESSAGE_BUDGET = 240;
+const LAUNCH_HEAD = "Impossible de lancer la mission : ";
+const URGENT_LAUNCH_MOTIF = /Conflit|Budget|Solde/;
+
+/**
+ * Message d'un lancement refusé : conflit et budget d'abord, motifs ajoutés tant qu'ils tiennent (un motif
+ * trop long est sauté, il ne vide pas le message), les autres comptés. Un chauffeur ne peut pas corriger
+ * un budget : on lui dit à qui s'adresser.
+ */
+export function launchRefusalMessage(motifs: string[], options: { forDriver: boolean }): string {
+  const suffix = options.forDriver ? " Contactez l'exploitation." : "";
+  const room = LAUNCH_MESSAGE_BUDGET - LAUNCH_HEAD.length - suffix.length;
+  const ordered = [...motifs.filter((m) => URGENT_LAUNCH_MOTIF.test(m)), ...motifs.filter((m) => !URGENT_LAUNCH_MOTIF.test(m))];
+  const kept: string[] = [];
+  for (const motif of ordered) {
+    if ([...kept, motif].join(" ").length > room) continue;
+    kept.push(motif);
+  }
+  const hidden = motifs.length - kept.length;
+  const more = hidden > 0 ? ` (et ${hidden} autre${hidden > 1 ? "s" : ""} point${hidden > 1 ? "s" : ""} à corriger)` : "";
+  return `${LAUNCH_HEAD}${kept.join(" ")}${more}${suffix}`;
+}
