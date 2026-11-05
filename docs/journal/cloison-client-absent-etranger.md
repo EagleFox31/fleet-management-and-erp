@@ -41,3 +41,11 @@
 - **Quoi** : `tests/unit/leak-check-hygiene.test.ts` détecte maintenant `expect` sur plusieurs lignes (virgule finale), `JSON.stringify(corps, null, 2)`, `String(corps)`, `res.text` / `await res.text()`, et le contrôle en deux temps (`const t = ...; expect(t).not...`), pour `.not.toMatch` comme `.not.toContain`.
 - **Comment** : une aiguille n'est dangereuse que si elle est courte (moins de 5 caractères) et faite de caractères d'un `requestId` (lettres, chiffres, `_`, `-`) ; `%PDF` ou un chemin ne le sont pas. Cas positifs et négatifs au test. Le balayage du dépôt a trouvé un seul vrai cas (`"4821"` dans admin-patch-user-pin), passé par `leakText`.
 - **Pourquoi** : la première garde ne voyait que `JSON.stringify(x)).not.toMatch` sur une ligne. Limite : une aiguille passée par une variable n'est pas évaluée.
+
+## Reliquat de #429 : trois angles du scan fermés, r2 prouvé
+
+- `router.use(garde)` posé dans un `if`, une boucle, un ternaire ou après `&&`/`||` n'est plus compté comme inconditionnel (`isConditionalAt`).
+- Un chemin de route en gabarit (`${}` -> `:p`) ou illisible (appel, variable) est retenu sous son texte, jamais ignoré. Les 3 routes d'alertes construites par `relative(alertPath(...))` sont inscrites en « couvert ailleurs » (`alerts-inbox`), avec `exact` pour un fragment qui ne finit pas sur un guillemet.
+- Un second routeur du fichier (non exporté) ne reprend plus le montage d'un autre : `mountOf`. Il n'est retenu que s'il porte sa propre garde de session.
+- r2 : pour les 4 PATCH du brouillon d'acquisition et POST des documents, statut, message et code de l'objet d'un autre client sont identiques à ceux d'un identifiant absent (contrat, 22/22).
+- Preuves par mutation : retirer `isConditionalAt`, le traitement des gabarits ou `mountOf` fait échouer respectivement 1, 2 et 9 tests.
