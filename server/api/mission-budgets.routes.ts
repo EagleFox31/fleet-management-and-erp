@@ -4,6 +4,7 @@ import {
   dailyNeedQuerySchema,
   dailyNeedResponseSchema,
   missionBudgetSchema,
+  missionBudgetTransitionRequestSchema,
   missionBudgetsQuerySchema,
   missionBudgetsResponseSchema,
   updateMissionBudgetRequestSchema,
@@ -81,7 +82,8 @@ const transition =
   async (req, res, next) => {
     try {
       const id = budgetId(req.params.id);
-      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action)));
+      const { expectedUpdatedAt } = missionBudgetTransitionRequestSchema.parse(req.body ?? {});
+      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action, expectedUpdatedAt)));
     } catch (error) {
       next(error);
     }

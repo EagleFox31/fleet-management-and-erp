@@ -1,6 +1,8 @@
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import {
   computeMissionBudget,
+  isBudgetDateInWindow,
+  MISSION_BUDGET_DATE_WINDOW_DAYS,
   MISSION_BUDGET_STATUSES,
   type CreateMissionBudgetRequest,
   type DailyNeed,
@@ -13,7 +15,7 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
-import { getFuelPriceAt } from "./fuel-price-service";
+import { findFuelPriceAt, todayIsoDate } from "./fuel-price-service";
 
 const log = moduleLogger("mission-budgets");
 
@@ -44,9 +46,26 @@ function toMissionBudget(row: MissionBudgetRow): MissionBudget {
   };
 }
 
+/**
+ * Prix du litre à `date` pour un budget : jamais de prix par défaut figé en silence.
+ * Aucun prix posé à cette date ou avant : 409. Une erreur de lecture remonte (500 + référence).
+ */
+export async function resolveBudgetFuelPrice(date: string): Promise<number> {
+  const price = await findFuelPriceAt(date);
+  if (price === null) throw new AppError(409, "Aucun prix carburant pour cette date : faites poser le prix avant de saisir le budget.");
+  return price;
+}
+
+function assertBudgetDate(budgetDate: string) {
+  if (!isBudgetDateInWindow(budgetDate, todayIsoDate())) {
+    throw new AppError(400, `La date du budget doit être à moins de ${MISSION_BUDGET_DATE_WINDOW_DAYS} jours d'aujourd'hui.`);
+  }
+}
+
 /** Colonnes de montant, prix du jour de `budgetDate` figé au moment de l'écriture. */
 async function amountColumns(input: { budgetDate: string; fuelLiters: number; fdrAmount: number; extrasAmount: number }) {
-  const fuelUnitPrice = await getFuelPriceAt(input.budgetDate);
+  assertBudgetDate(input.budgetDate);
+  const fuelUnitPrice = await resolveBudgetFuelPrice(input.budgetDate);
   const { fuelAmount, totalAmount } = computeMissionBudget({ ...input, fuelUnitPrice });
   return {
     budgetDate: input.budgetDate,
@@ -140,23 +159,34 @@ const TRANSITIONS = {
   disburse: { from: "approved", to: "disbursed", conflict: "Ce budget doit être approuvé avant d'être décaissé." },
 } as const;
 
+/** `updatedAt` lu par le client (ISO, milliseconde) comparé à la colonne tronquée à la milliseconde. */
+const sameVersion = (expectedUpdatedAt: string) =>
+  sql`date_trunc('milliseconds', ${missionBudgets.updatedAt}) = ${new Date(expectedUpdatedAt).toISOString().replace("T", " ").replace("Z", "")}::timestamp`;
+
 /**
- * Transition par UPDATE conditionnel sur le statut attendu : un rejeu ou deux clics simultanés
- * ne trouvent plus la ligne au statut de départ et répondent 409, sans double écriture.
+ * Transition par UPDATE conditionnel sur le statut attendu ET la version lue (`expectedUpdatedAt`) :
+ * un rejeu, deux clics simultanés ou un budget corrigé entre la lecture et la validation ne
+ * trouvent plus la ligne et répondent 409, sans écriture.
  * `disbursed` est un marquage tant que le journal de trésorerie (T1) n'est pas branché.
  */
-export async function transitionMissionBudget(id: number, userId: number, action: keyof typeof TRANSITIONS): Promise<MissionBudget> {
+export async function transitionMissionBudget(
+  id: number,
+  userId: number,
+  action: keyof typeof TRANSITIONS,
+  expectedUpdatedAt: string,
+): Promise<MissionBudget> {
   const t = TRANSITIONS[action];
   const now = new Date();
   const stamp = action === "approve" ? { approvedBy: userId, approvedAt: now } : { disbursedBy: userId, disbursedAt: now };
   const [row] = await db
     .update(missionBudgets)
     .set({ status: t.to, ...stamp, updatedBy: userId, updatedAt: now })
-    .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from)))
+    .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from), sameVersion(expectedUpdatedAt)))
     .returning();
   if (!row) {
-    await getMissionBudget(id); // 404 si le budget n'existe pas
-    throw new AppError(409, t.conflict);
+    const current = await getMissionBudget(id); // 404 si le budget n'existe pas
+    if (current.status !== t.from) throw new AppError(409, t.conflict);
+    throw new AppError(409, "Ce budget a changé depuis votre lecture : rechargez-le avant de valider.");
   }
   const budget = toMissionBudget(row);
   log.info({ budgetId: id, userId, status: budget.status }, "budget de mission : transition");
