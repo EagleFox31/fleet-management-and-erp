@@ -4,7 +4,7 @@ import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
-import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
+import { CLIENT_BILLING_EVENT_ROLES, CLIENT_BILLING_STATS_ROLES } from "@shared/constants/roles";
 import { AppError, isAppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
@@ -123,6 +123,7 @@ const normalizeInvoiceItems = (value: unknown): InvoicePdfItem[] | undefined => 
 // Secretary: créer, consulter, enregistrer paiements  
 // Logistics: créer, consulter
 const canAccessBilling = authorize([...CLIENT_BILLING_EVENT_ROLES]);
+const canReadBillingStatistics = authorize([...CLIENT_BILLING_STATS_ROLES]);
 const canRecordPayment = authorize(['admin', 'secretary']);
 
 const broadcastClientInvoiceUpdate = (
@@ -455,7 +456,7 @@ router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: R
  * GET /api/billing/statistics
  * Statistiques globales de facturation par client
  */
-router.get("/statistics", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/statistics", canReadBillingStatistics, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await clientBillingService.getBillingStatistics();
     res.json(stats);

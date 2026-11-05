@@ -192,7 +192,6 @@ export function ClientsPanel() {
     queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
     queryClient.invalidateQueries({ queryKey: ["/api/clients/all"] });
     queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
     queryClient.invalidateQueries({ queryKey: ["/api/operations/missions"] });
   };
 

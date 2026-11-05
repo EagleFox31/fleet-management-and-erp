@@ -79,8 +79,8 @@ export const STATUS_PERMISSIONS: Record<PartRequirementStatus, Partial<Record<Pa
     // Validation : Chef d'atelier, Secrétaire ou Admin (pas le demandeur si possible)
     'approved': ['admin', 'workshop_manager', 'secretary'],
     'rejected': ['admin', 'workshop_manager', 'secretary'],
-    // Annulation simple avant approbation : tout le monde peut
-    'cancelled': ['admin', 'workshop_manager', 'technician']
+    // Annulation avant approbation : la route PATCH est sous isInventoryManager (le technicien n'y a pas accès)
+    'cancelled': ['admin', 'workshop_manager']
   },
   'approved': {
     // Commande : Magasinier + Secrétaire (flux standard), Admin en backup

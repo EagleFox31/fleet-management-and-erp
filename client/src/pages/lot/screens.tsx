@@ -10,6 +10,8 @@ import { TireMovementsTable } from "@/components/inventory/tire-movements-table"
 import { TimeGrid } from "@/components/time-tracking/time-grid";
 import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
+import { MissionOperationsTable } from "@/components/operations/mission-operations-table";
+import { MISSION_OPERATIONS_WRITE_ROLES } from "@shared/constants/roles";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
 import { canEditTankCapacity, canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
@@ -26,6 +28,12 @@ export function IncidentsListScreen() {
 
 export function TireMovementsScreen() {
   return <TireMovementsTable />;
+}
+
+export function MissionOperationsScreen() {
+  const { user } = useAuth();
+  const canWrite = !!user?.role && (MISSION_OPERATIONS_WRITE_ROLES as readonly string[]).includes(user.role);
+  return <MissionOperationsTable canWrite={canWrite} />;
 }
 
 export function PendingInvoicesScreen() {

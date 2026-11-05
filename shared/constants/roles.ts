@@ -160,6 +160,10 @@ export function canWriteFuelPrice(role: string | null | undefined): boolean {
 /** Mouvements de pneus (`GET /api/tires/movements`), lecture seule. */
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 
+/** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
+export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
@@ -167,6 +171,11 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logis
 export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
+/** Suivi des opérations clients (`mission_operations`) : saisie par l'administration et la logistique. */
+export const MISSION_OPERATIONS_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+/** Lecture du suivi des opérations : + secrétariat et direction. */
+export const MISSION_OPERATIONS_READ_ROLES = ["admin", "logistics", "secretary", "management"] as const satisfies readonly AppRole[];
 
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
@@ -310,6 +319,28 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  */
 export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
 
+/**
+ * Statistiques de facturation client (`GET /api/billing/statistics`, graphique CA par client) : les
+ * roles de la facturation plus la direction, qui lit le chiffre d'affaires sans recevoir les
+ * evenements de facture. Decision du 5 novembre 2026. Liste distincte de
+ * `CLIENT_BILLING_EVENT_ROLES`, qui garde les autres routes et le ciblage WebSocket.
+ */
+export const CLIENT_BILLING_STATS_ROLES: readonly AppRole[] = [...CLIENT_BILLING_EVENT_ROLES, "management"];
+
+export function canReadClientBilling(role: string | null | undefined): boolean {
+  return (CLIENT_BILLING_STATS_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Guides et cahier de tests servis par `GET /api/documentation` : la route serveur est réservée
+ * à l'admin (`isAdmin`). Un autre rôle ne doit ni émettre la requête ni voir l'onglet.
+ */
+export const DOCUMENTATION_READ_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+export function canReadDocumentation(role: string | null | undefined): boolean {
+  return (DOCUMENTATION_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }
@@ -379,3 +410,9 @@ export function canRoleSetMissionStatus(role: string | null | undefined, targetS
 
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/**
+ * Gestion des demandes de pièce (`PATCH /api/part-requirements/:id`, `isInventoryManager`).
+ * Toute transition de `STATUS_PERMISSIONS` doit rester dans ce jeu, sinon le droit est mort.
+ */
+export const INVENTORY_MANAGER_ROLES = ["admin", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
