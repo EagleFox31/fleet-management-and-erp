@@ -21,3 +21,10 @@ Dériver le statut évite une seconde source de vérité à côté de la factura
 ## Preuves
 Unitaire (`mission-operations-contract.test.ts`), contrat (403 par rôle, 404 drapeau, idempotence, récapitulatif suit la
 facture). Mutations vues rouges : retrait de `requireFeature`, élargissement des rôles d'écriture.
+
+## Compléments de relecture
+- Ménage des tests : FK `created_by`/`updated_by` vers `users` supprimées par compte dans `tests/support/cleanup.ts`.
+- Pas d'événement WebSocket volontairement : c'est une saisie de suivi, pas une transition métier (règle des 3 couches non applicable) ; la liste se resynchronise par invalidation de requête.
+- Dates lues en texte UTC (`to_char`) : colonnes `timestamp` sans fuseau, pas de décalage d'un jour si le serveur n'est pas en UTC.
+- Remorque inconnue : 400 (et non 500 par violation de FK).
+- Dette notée : `<select>` natifs à passer au Select du design system ; pagination de la liste.

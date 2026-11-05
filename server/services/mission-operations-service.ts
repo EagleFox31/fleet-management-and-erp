@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
-import { missionOperations, missions } from "@shared/schema";
+import { missionOperations, missions, vehicles } from "@shared/schema";
 import {
   OPERATION_RECAP_STATUSES,
   recapStatusOf,
@@ -17,7 +17,8 @@ function rowsOf<T>(result: unknown): T[] {
   return ((result as { rows?: T[] }).rows ?? (result as T[])) as T[];
 }
 
-const iso = (v: unknown): string | null => (v ? new Date(v as string | Date).toISOString() : null);
+/** Colonnes `timestamp` sans fuseau, lues en texte UTC : jamais réinterprétées à l'heure locale du serveur. */
+const iso = (v: unknown): string | null => (v ? String(v) : null);
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 
 export type MissionOperationsFilter = { clientId?: number; month?: string };
@@ -34,8 +35,8 @@ export async function listMissionOperations(filter: MissionOperationsFilter): Pr
     SELECT m.id AS mission_id, m.order_number, m.client_id, c.name AS client_name,
            m.pickup_address, m.delivery_address, m.status AS mission_status,
            inv.invoice_number, inv.status AS invoice_status,
-           o.trailer_vehicle_id, o.container_number, o.bl_number, o.sector, o.loading_date,
-           o.departure_date, o.return_date, o.unloading_date, o.goods_nature, o.comment
+           o.trailer_vehicle_id, o.container_number, o.bl_number, o.sector, to_char(o.loading_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS loading_date,
+           to_char(o.departure_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS departure_date, to_char(o.return_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS return_date, to_char(o.unloading_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS unloading_date, o.goods_nature, o.comment
     FROM missions m
     LEFT JOIN clients c ON c.id = m.client_id
     LEFT JOIN mission_operations o ON o.mission_id = m.id
@@ -100,6 +101,10 @@ function valuesOf(body: MissionOperationBody) {
 export async function upsertMissionOperation(missionId: number, body: MissionOperationBody, userId: number) {
   const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId));
   if (!mission) throw new AppError(404, "Mission introuvable.");
+  if (body.trailerVehicleId) {
+    const [v] = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.id, body.trailerVehicleId));
+    if (!v) throw new AppError(400, "Remorque introuvable.");
+  }
   const values = valuesOf(body);
   const [row] = await db
     .insert(missionOperations)

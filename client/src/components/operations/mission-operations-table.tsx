@@ -84,12 +84,14 @@ export function MissionOperationsTable({ canWrite }: { canWrite: boolean }) {
   const params = { ...(clientId ? { clientId } : {}), ...(month ? { month } : {}) };
   const query = useContractQuery(MISSION_OPERATIONS_PATH, missionOperationsResponseSchema, params);
   const data = query.data;
+  // Liste des clients tirée de la requête sans filtre : un client ne disparaît pas selon le mois choisi.
+  const allRows = useContractQuery(MISSION_OPERATIONS_PATH, missionOperationsResponseSchema).data?.rows;
 
   const clients = useMemo(() => {
     const seen = new Map<number, string>();
-    for (const r of data?.rows ?? []) if (r.clientId && r.clientName) seen.set(r.clientId, r.clientName);
+    for (const r of allRows ?? []) if (r.clientId && r.clientName) seen.set(r.clientId, r.clientName);
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [data]);
+  }, [allRows]);
 
   const save = useMutation({
     mutationFn: (v: { missionId: number; body: MissionOperationBody }) =>

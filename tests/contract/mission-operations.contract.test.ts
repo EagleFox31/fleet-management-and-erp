@@ -115,6 +115,21 @@ describe("suivi des opérations clients", { timeout: 120000 }, () => {
     expect(row).toMatchObject({ containerNumber: "MSKU1234567", blNumber: null, recapStatus: "trip" });
   });
 
+  it("remorque inconnue : 400 (pas de 500 par violation de FK)", async () => {
+    const res = await call("PUT", `${MISSION_OPERATIONS_PATH}/${missionId}`, "logistics", { trailerVehicleId: 2147483000 });
+    expect(res.status).toBe(400);
+  });
+
+  it("dates : relues à l'identique après chaque sauvegarde (pas de recul d'un jour)", async () => {
+    const path = `${MISSION_OPERATIONS_PATH}/${missionId}`;
+    for (let i = 0; i < 3; i++) {
+      expect((await call("PUT", path, "logistics", { loadingDate: "2026-03-01", unloadingDate: "2026-03-06" })).status).toBe(200);
+      const { row } = await rowOf();
+      expect(row.loadingDate).toBe("2026-03-01T00:00:00Z");
+      expect(row.unloadingDate).toBe("2026-03-06T00:00:00Z");
+    }
+  });
+
   it("récapitulatif : suit la facture liée (facturation, attente, payée)", async () => {
     await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, missionId));
     expect((await rowOf()).row.recapStatus).toBe("invoicing");
