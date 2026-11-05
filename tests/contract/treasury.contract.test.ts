@@ -151,9 +151,48 @@ describe("journal de tresorerie", { timeout: 120000 }, () => {
     expect(second.status).toBe(200);
     expect(second.body.id).toBe(first.body.id);
     expect((await call("POST", path, "secretary", { ...body, amount: "41" })).status).toBe(409);
+    // Tous les champs comptent, pas seulement compte, sens, montant et date.
+    expect((await call("POST", path, "secretary", { ...body, label: "Autre libelle" })).status).toBe(409);
+    expect((await call("POST", path, "secretary", { ...body, category: "salaire" })).status).toBe(409);
+    expect((await call("POST", path, "secretary", { ...body, pieceRef: "P-1" })).status).toBe(409);
     const ledger = await call("GET", entriesPath(acc.id, "?month=2026-11"), "admin");
     expect(ledger.body.entries).toHaveLength(1);
     expect(ledger.body.closingBalance).toBe("1040.00");
+  });
+
+  it("cles : une ecriture de cle « K:out » ne bloque pas le virement de cle « K »", async () => {
+    const from = await newAccount("K");
+    const to = await newAccount("L");
+    const key = `c-${suffix}`;
+    const entry = { accountId: from.id, entryDate: "2026-11-05", label: "Piege", direction: "out", amount: "1", requestKey: `${key}:out` };
+    expect((await call("POST", `${TREASURY_BASE_PATH}/entries`, "secretary", entry)).status).toBe(201);
+    const transfer = { fromAccountId: from.id, toAccountId: to.id, entryDate: "2026-11-05", amount: "5", label: "Virement", requestKey: key };
+    const res = await call("POST", `${TREASURY_BASE_PATH}/transfers`, "secretary", transfer);
+    expect(res.status).toBe(201);
+    expect((await call("POST", `${TREASURY_BASE_PATH}/transfers`, "secretary", transfer)).status).toBe(200);
+    expect((await call("POST", `${TREASURY_BASE_PATH}/transfers`, "secretary", { ...transfer, label: "Autre" })).status).toBe(409);
+    expect((await call("GET", entriesPath(from.id, "?month=2026-11"), "admin")).body.entries).toHaveLength(2);
+  });
+
+  it("ids du corps hors borne integer : 400, jamais 500", async () => {
+    const acc = await newAccount("M");
+    const tooBig = 2147483648;
+    const entry = { accountId: tooBig, entryDate: "2026-11-05", label: "x", direction: "in", amount: "1" };
+    expect((await call("POST", `${TREASURY_BASE_PATH}/entries`, "admin", entry)).status).toBe(400);
+    expect((await call("POST", `${TREASURY_BASE_PATH}/entries`, "admin", { ...entry, accountId: acc.id, vehicleId: tooBig })).status).toBe(400);
+    expect((await call("POST", `${TREASURY_BASE_PATH}/entries`, "admin", { ...entry, accountId: "12" })).status).toBe(400);
+    const transfer = { fromAccountId: acc.id, toAccountId: tooBig, entryDate: "2026-11-05", amount: "5", label: "x" };
+    expect((await call("POST", `${TREASURY_BASE_PATH}/transfers`, "admin", transfer)).status).toBe(400);
+  });
+
+  it("virement vers un compte inactif : 409, aucune ligne ecrite", async () => {
+    const from = await newAccount("N");
+    const to = await newAccount("O");
+    await db.update(treasuryAccounts).set({ isActive: false }).where(inArray(treasuryAccounts.id, [to.id]));
+    const transfer = { fromAccountId: from.id, toAccountId: to.id, entryDate: "2026-11-05", amount: "5", label: "x" };
+    expect((await call("POST", `${TREASURY_BASE_PATH}/transfers`, "secretary", transfer)).status).toBe(409);
+    expect((await call("GET", entriesPath(from.id, "?month=2026-11"), "admin")).body.entries).toHaveLength(0);
+    expect((await call("GET", entriesPath(to.id, "?month=2026-11"), "admin")).body.entries).toHaveLength(0);
   });
 
   it("virement : deux lignes liees, soldes justes, neutre sur l'ensemble, rejeu sans doublon", async () => {
@@ -202,8 +241,8 @@ describe("journal de tresorerie", { timeout: 120000 }, () => {
     const before = process.env.FEATURE_FLAGS;
     process.env.FEATURE_FLAGS = "finance=off";
     try {
-      const res = await call("GET", `${TREASURY_BASE_PATH}/accounts`, "admin");
-      expect([403, 404]).toContain(res.status);
+      expect((await call("GET", `${TREASURY_BASE_PATH}/accounts`, "admin")).status).toBe(404);
+      expect((await call("POST", `${TREASURY_BASE_PATH}/entries`, "admin", {})).status).toBe(404);
     } finally {
       process.env.FEATURE_FLAGS = before;
     }

@@ -14,6 +14,8 @@
  * clé pour un autre contenu = 409.
  */
 import { z } from "zod";
+import { bodyIdSchema } from "./common";
+import { KPI_TIME_ZONE } from "./kpi-period";
 
 export const TREASURY_BASE_PATH = "/api/treasury";
 export const TREASURY_ACCOUNT_KINDS = ["bank", "cash", "fuel_card"] as const;
@@ -57,7 +59,8 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().nullable().transform((v) => (v ? v : null));
 const requestKeySchema = z.string().trim().min(1).max(100).optional();
-const idSchema = z.number().int().positive();
+// Id lu dans un corps JSON : entier strict, borné au type `integer` de PostgreSQL (sinon 500 en base).
+const idSchema = bodyIdSchema;
 
 export const createTreasuryAccountSchema = z.object({
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{1,20}$/, "Code invalide (lettres, chiffres, - et _, 20 au plus)."),
@@ -173,6 +176,11 @@ export function ledgerOf(opening: string, entries: ReadonlyArray<{ direction: Tr
 }
 
 /** Mois "AAAA-MM" suivant, pour borner une requête à [début du mois, début du suivant[. */
+/** Mois en cours (AAAA-MM) dans le fuseau de l'exploitation : à Douala, minuit arrive une heure avant l'UTC. */
+export function currentTreasuryMonth(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: KPI_TIME_ZONE, year: "numeric", month: "2-digit" }).format(now).slice(0, 7);
+}
+
 export function nextMonth(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;

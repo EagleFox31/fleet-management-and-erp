@@ -3,6 +3,7 @@ import {
   createTreasuryAccountSchema,
   createTreasuryEntrySchema,
   createTreasuryTransferSchema,
+  currentTreasuryMonth,
   ledgerOf,
   ledgerToCsv,
   nextMonth,
@@ -94,6 +95,19 @@ describe("journal de trésorerie : mois et export", () => {
   it("mois suivant, passage d'année compris", () => {
     expect(nextMonth("2026-11")).toBe("2026-12");
     expect(nextMonth("2026-12")).toBe("2027-01");
+  });
+
+  it("mois en cours lu à Douala : le 31 à 23 h 30 UTC, c'est déjà le mois suivant", () => {
+    expect(currentTreasuryMonth(new Date("2026-10-31T23:30:00Z"))).toBe("2026-11");
+    expect(currentTreasuryMonth(new Date("2026-12-31T23:30:00Z"))).toBe("2027-01");
+    expect(currentTreasuryMonth(new Date("2026-11-15T12:00:00Z"))).toBe("2026-11");
+  });
+
+  it("ids du corps bornés au type integer et stricts", () => {
+    const base = { entryDate: "2026-11-05", label: "x", direction: "in", amount: "1" };
+    expect(createTreasuryEntrySchema.safeParse({ ...base, accountId: 2147483647 }).success).toBe(true);
+    expect(createTreasuryEntrySchema.safeParse({ ...base, accountId: 2147483648 }).success).toBe(false);
+    expect(createTreasuryEntrySchema.safeParse({ ...base, accountId: "12" }).success).toBe(false);
   });
 
   it("requête : mois valide ou refus", () => {

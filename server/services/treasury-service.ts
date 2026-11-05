@@ -105,14 +105,30 @@ async function entryByKey(ex: Executor, key: string): Promise<TreasuryEntry | un
   return rows[0];
 }
 
-type Comparable = { accountId: number; direction: TreasuryDirection; amount: string; entryDate: string };
-const sameEntry = (e: TreasuryEntry, input: Comparable) =>
-  e.accountId === input.accountId && e.direction === input.direction && e.amount === input.amount && e.entryDate === input.entryDate;
+/**
+ * Espaces de clés séparés : la clé reçue du client est préfixée selon l'opération (`entry:K`,
+ * `transfer:K:out`, `transfer:K:in`), ce qui empêche une écriture de clé « K:out » de bloquer le
+ * virement de clé « K ». Les lignes posées par une autre opération ont leurs propres préfixes
+ * (`fuel:`, `settlement:`), hors de portée d'une clé client.
+ */
+const entryKey = (key: string) => `entry:${key}`;
+const transferKeys = (key: string) => ({ out: `transfer:${key}:out`, inn: `transfer:${key}:in` });
+
+type Comparable = Pick<TreasuryEntry, "accountId" | "direction" | "amount" | "entryDate" | "label" | "category" | "pieceRef" | "notes"> &
+  Partial<Pick<TreasuryEntry, "counterpartyLabel" | "vehicleId" | "missionId" | "clientId" | "supplierId">>;
+const COMPARED: (keyof Comparable)[] = ["accountId", "direction", "amount", "entryDate", "label", "category", "pieceRef", "notes"];
+const LINKS: (keyof Comparable)[] = ["counterpartyLabel", "vehicleId", "missionId", "clientId", "supplierId"];
+
+/** Rejeu : tous les champs saisis doivent être identiques ; sinon la clé a servi à autre chose. */
+const sameEntry = (e: TreasuryEntry, input: Comparable, withLinks: boolean) =>
+  (withLinks ? [...COMPARED, ...LINKS] : COMPARED).every((field) => (e[field] ?? null) === (input[field] ?? null));
 
 function replay(existing: TreasuryEntry, input: CreateTreasuryEntryInput): { entry: TreasuryEntry; replayed: boolean } {
-  if (!sameEntry(existing, input)) throw new AppError(409, "Cette clé de requête a déjà servi pour une autre écriture.");
+  if (!sameEntry(existing, input, true)) throw new AppError(409, "Cette clé de requête a déjà servi pour une autre écriture.");
   return { entry: existing, replayed: true };
 }
+
+const KEY_CONFLICT = "Cette clé de requête a déjà servi pour une autre opération.";
 
 export const treasuryService = {
   async listAccounts(): Promise<TreasuryAccount[]> {
@@ -152,25 +168,26 @@ export const treasuryService = {
         (a.opening_balance + COALESCE(SUM(CASE WHEN e.direction = 'in' THEN e.amount ELSE -e.amount END) FILTER (WHERE e.entry_date < ${from}::date), 0))::numeric(15,2)::text AS opening_balance,
         COALESCE(SUM(e.amount) FILTER (WHERE e.direction = 'in' AND e.entry_date >= ${from}::date AND e.entry_date < ${to}::date), 0)::numeric(15,2)::text AS total_in,
         COALESCE(SUM(e.amount) FILTER (WHERE e.direction = 'out' AND e.entry_date >= ${from}::date AND e.entry_date < ${to}::date), 0)::numeric(15,2)::text AS total_out,
+        COALESCE(SUM(CASE WHEN e.direction = 'in' THEN e.amount ELSE -e.amount END) FILTER (WHERE e.entry_date >= ${from}::date AND e.entry_date < ${to}::date), 0)::numeric(15,2)::text AS net,
         (a.opening_balance + COALESCE(SUM(CASE WHEN e.direction = 'in' THEN e.amount ELSE -e.amount END) FILTER (WHERE e.entry_date < ${to}::date), 0))::numeric(15,2)::text AS closing_balance
       FROM treasury_accounts a LEFT JOIN treasury_entries e ON e.account_id = a.id
       WHERE a.id = ${accountId} GROUP BY a.id`);
     const t = res.rows[0] as Row;
-    const net = (Number(t.total_in) * 100 - Number(t.total_out) * 100) / 100;
     return {
       account,
       month,
       openingBalance: String(t.opening_balance),
       entries,
-      totals: { in: String(t.total_in), out: String(t.total_out), net: net.toFixed(2) },
+      totals: { in: String(t.total_in), out: String(t.total_out), net: String(t.net) },
       closingBalance: String(t.closing_balance),
     };
   },
 
   /** Une écriture. Rejouée avec la même `requestKey` et le même contenu : la ligne existante, `replayed: true`. */
   async createEntry(userId: number, input: CreateTreasuryEntryInput): Promise<{ entry: TreasuryEntry; replayed: boolean }> {
-    if (input.requestKey) {
-      const existing = await entryByKey(db, input.requestKey);
+    const key = input.requestKey ? entryKey(input.requestKey) : null;
+    if (key) {
+      const existing = await entryByKey(db, key);
       if (existing) return replay(existing, input);
     }
     await requireActiveAccount(db, input.accountId);
@@ -191,7 +208,7 @@ export const treasuryService = {
           missionId: input.missionId,
           clientId: input.clientId,
           supplierId: input.supplierId,
-          requestKey: input.requestKey ?? null,
+          requestKey: key,
           createdBy: userId,
           updatedBy: userId,
         })
@@ -200,9 +217,10 @@ export const treasuryService = {
       return { entry, replayed: false };
     } catch (error) {
       const code = pgCode(error);
-      if (code === "23505" && input.requestKey) {
-        const existing = await entryByKey(db, input.requestKey);
+      if (code === "23505" && key) {
+        const existing = await entryByKey(db, key);
         if (existing) return replay(existing, input);
+        throw new AppError(409, KEY_CONFLICT, { cause: error });
       }
       if (code === "23503") {
         throw new AppError(422, "Un lien (véhicule, mission, client ou fournisseur) n'existe pas.", { cause: error });
@@ -213,16 +231,18 @@ export const treasuryService = {
 
   /** Virement interne : sortie du compte source et entrée du compte cible, liées par `transferGroup`, dans une transaction. */
   async createTransfer(userId: number, input: CreateTreasuryTransferInput): Promise<{ entries: [TreasuryEntry, TreasuryEntry]; replayed: boolean }> {
-    const outKey = input.requestKey ? `${input.requestKey}:out` : null;
-    const inKey = input.requestKey ? `${input.requestKey}:in` : null;
+    const keys = input.requestKey ? transferKeys(input.requestKey) : null;
+    const outKey = keys?.out ?? null;
+    const inKey = keys?.inn ?? null;
     const replayOf = async () => {
       if (!outKey || !inKey) return undefined;
       const out = await entryByKey(db, outKey);
       const inn = await entryByKey(db, inKey);
       if (!out || !inn) return undefined;
+      const shared = { amount: input.amount, entryDate: input.entryDate, label: input.label, category: "virement_interne" as const, pieceRef: input.pieceRef, notes: input.notes };
       const same =
-        sameEntry(out, { accountId: input.fromAccountId, direction: "out", amount: input.amount, entryDate: input.entryDate }) &&
-        sameEntry(inn, { accountId: input.toAccountId, direction: "in", amount: input.amount, entryDate: input.entryDate });
+        sameEntry(out, { ...shared, accountId: input.fromAccountId, direction: "out" }, false) &&
+        sameEntry(inn, { ...shared, accountId: input.toAccountId, direction: "in" }, false);
       if (!same) throw new AppError(409, "Cette clé de requête a déjà servi pour un autre virement.");
       return { entries: [out, inn] as [TreasuryEntry, TreasuryEntry], replayed: true };
     };
@@ -261,6 +281,7 @@ export const treasuryService = {
       if (pgCode(error) === "23505" && outKey) {
         const raced = await replayOf();
         if (raced) return raced;
+        throw new AppError(409, KEY_CONFLICT, { cause: error });
       }
       throw error;
     }

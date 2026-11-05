@@ -3,6 +3,7 @@ import {
   createTreasuryAccountSchema,
   createTreasuryEntrySchema,
   createTreasuryTransferSchema,
+  currentTreasuryMonth,
   treasuryLedgerQuerySchema,
 } from "@shared/contracts/treasury";
 import { TREASURY_READ_ROLES, TREASURY_WRITE_ROLES } from "@shared/constants/roles";
@@ -29,7 +30,7 @@ const handle =
     }
   };
 
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+const currentMonth = () => currentTreasuryMonth();
 
 router.get(
   "/treasury/accounts",
