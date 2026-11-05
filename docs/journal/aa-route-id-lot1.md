@@ -145,3 +145,8 @@
   - le profil `GET /api/users/:id` ne porte que ses 8 champs (garde-fou contre un futur mot de passe ou PIN) ;
   - les `console.error` des deux catch touchés dans `server/routes.ts` sont migrés vers `log.error`.
   - Contrat : 14 verts, 0 résidu.
+
+### Lot 9 — complément : lecture des profils par la direction et le secrétariat
+
+- Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
+- Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
