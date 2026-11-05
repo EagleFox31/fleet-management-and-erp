@@ -26,6 +26,7 @@ let withoutProof = 0;
 let missingFile = 0;
 let outsideProofDir = 0;
 let ownedByClient = 0;
+let unlistedExtension = 0;
 
 async function createRequest(vehicleId: number, proofFilePath: string | null) {
   const [document] = await db
@@ -72,12 +73,14 @@ beforeAll(async () => {
   const token = randomUUID().slice(0, 8);
   writeFile(PROOF_DIR, `TEST-proof-${token}.pdf`);
   writeFile(OTHER_DIR, `TEST-not-proof-${token}.pdf`);
+  writeFile(PROOF_DIR, `TEST-proof-${token}.html`);
 
   withProof = await createRequest(vehicle.id, `/uploads/document-renewals/proofs/TEST-proof-${token}.pdf`);
   withoutProof = await createRequest(vehicle.id, null);
   missingFile = await createRequest(vehicle.id, `/uploads/document-renewals/proofs/TEST-absent-${token}.pdf`);
   outsideProofDir = await createRequest(vehicle.id, `/uploads/documents/TEST-not-proof-${token}.pdf`);
   ownedByClient = await createRequest(clientVehicle.id, `/uploads/document-renewals/proofs/TEST-proof-${token}.pdf`);
+  unlistedExtension = await createRequest(vehicle.id, `/uploads/document-renewals/proofs/TEST-proof-${token}.html`);
 }, 120000);
 
 afterAll(async () => {
@@ -93,7 +96,17 @@ describe("GET /api/document-renewals/requests/:id/proof", () => {
     const res = await session.raw("GET", proofUrl(withProof), actor);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/pdf");
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="justificatif.pdf"');
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.from(await res.arrayBuffer()).equals(PDF)).toBe(true);
+  });
+
+  it("extension stockée hors liste (fichier antérieur) : téléchargé en octet-stream, jamais rendu", async () => {
+    const res = await session.raw("GET", proofUrl(unlistedExtension), "secretary");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/octet-stream");
+    expect(res.headers.get("content-disposition")).toMatch(/^attachment;/);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it.each(["driver", "client"] as const)("%s : 403, rien servi", async (actor) => {

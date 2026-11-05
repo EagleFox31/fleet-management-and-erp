@@ -466,3 +466,9 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/document-renewals/requests/:id/proof` sert le justificatif déposé au renouvellement rapide. Rôles lecteurs des demandes (`DOCUMENT_RENEWAL_VIEWER_ROLES`), id par `parseRouteId`, cloison `canAccessOwned`, fichier servi depuis le seul dossier `uploads/document-renewals/proofs` (`uploadedFileCandidates` + `isInsideDirectory`), 404 lisible si la demande n'a pas de justificatif ou si le fichier a disparu.
 - **Pourquoi** : décision produit (option A) : le justificatif était écrit sur disque mais jamais consultable.
 - **Preuve** : contrat `document-renewal-proof-download` rouge sans la route (12/13), vert après (13/13) ; contrats renouvellement voisins 28/28 ; unitaires 2524, tsc 0.
+
+
+## 2026-11-05 — Justificatif de renouvellement : toujours en téléchargement
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` répond en `attachment` avec `nosniff`, type tiré d'une liste blanche d'extensions (sinon `application/octet-stream`), chemin résolu contrôlé contre le dossier des justificatifs. Au dépôt, l'extension stockée vient du type accepté (table commune avec le récépissé).
+- **Pourquoi** : relecture de sécurité. Le type servi dépendait de l'extension du nom envoyé, que le filtre de dépôt ne contrôlait pas.
+- **Preuve** : contrats `document-renewal-proof-download` et `document-quick-renew-proof-lifecycle`, nouveaux cas rouges sur la route d'origine, verts après.
