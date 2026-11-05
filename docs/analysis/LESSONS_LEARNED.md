@@ -1744,7 +1744,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Exceptions nommées
 - Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
-- Routes multer de `server/api` (récépissé, règlement fournisseur, dépôt de document véhicule) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ». Restent à revoir selon ce patron, hors `server/api` : missions, commandes fournisseur (purchase-orders), `server/middleware/upload.ts` et `server/routes.ts`.
+- Routes multer de `server/api` (récépissé, règlement fournisseur, dépôt de document véhicule) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ». Hors `server/api`, vérifié le même jour : missions et commandes fournisseur (purchase-orders) n'ont aucune route multer ; `server/middleware/upload.ts` ne sert que ce dépôt de document véhicule ; la seule route multer de `server/routes.ts` (`POST /api/workflows/:sessionId/documents`, gelé) est en `memoryStorage` : `WorkflowDocumentService.saveWorkflowDocument` n'écrit le fichier qu'au moment de l'INSERT et le supprime si celui-ci est refusé. Rien d'autre à revoir selon ce patron.
 - Les autres routes multer (récépissé, preuves) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ».
 
 ### Prévention (vérifiable)
