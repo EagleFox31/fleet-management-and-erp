@@ -148,9 +148,9 @@ export const mockTimeEntries = (): TimeTrackingEntry[] => [
 ];
 
 export const mockPendingInvoices = (): PendingInvoice[] => [
-  { clientId: 5, clientName: "SOCOGIB", operationCount: 6, amount: 1_840_000, oldestOperationDate: "2026-09-12" },
-  { clientId: 8, clientName: "Brakina", operationCount: 3, amount: 720_500, oldestOperationDate: "2026-10-14" },
-  { clientId: 9, clientName: "Sodigaz", operationCount: 1, amount: 95_000, oldestOperationDate: "2026-10-29" },
+  { clientId: 5, clientName: "SOCOGIB", operationCount: 6, amount: 1_840_000, missionsWithoutPrice: 0, oldestOperationDate: "2026-09-12" },
+  { clientId: 8, clientName: "Brakina", operationCount: 3, amount: 720_500, missionsWithoutPrice: 0, oldestOperationDate: "2026-10-14" },
+  { clientId: 9, clientName: "Sodigaz", operationCount: 1, amount: 95_000, missionsWithoutPrice: 0, oldestOperationDate: "2026-10-29" },
 ];
 
 export const mockLockedUsers = (): LockedUser[] => [

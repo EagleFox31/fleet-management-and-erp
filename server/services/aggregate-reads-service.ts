@@ -128,12 +128,15 @@ export const aggregateReadsService = {
   },
 
   /**
-   * Missions terminées sans facture client active, par client. Aucun tarif
-   * n'est porté par `missions` : `amount` vaut 0 tant qu'un tarif n'existe pas.
+   * Missions terminées sans facture client active, par client. `amount` somme les prix
+   * convenus (`missions.agreed_price`) ; une mission sans prix n'est pas valorisée à 0 en
+   * silence, elle est comptée à part dans `missionsWithoutPrice`.
    */
   async pendingInvoices(): Promise<PendingInvoice[]> {
     const res = await db.execute(sql`
       SELECT c.id AS client_id, c.name AS client_name, count(*)::int AS operation_count,
+             COALESCE(sum(m.agreed_price), 0)::float8 AS amount,
+             (count(*) FILTER (WHERE m.agreed_price IS NULL))::int AS without_price,
              to_char(min(COALESCE(m.completed_at, m.delivery_date, m.created_at)), 'YYYY-MM-DD') AS oldest
       FROM missions m
       JOIN clients c ON c.id = m.client_id
@@ -147,7 +150,8 @@ export const aggregateReadsService = {
       clientId: Number(r.client_id),
       clientName: String(r.client_name),
       operationCount: Number(r.operation_count),
-      amount: 0,
+      amount: Number(r.amount),
+      missionsWithoutPrice: Number(r.without_price),
       oldestOperationDate: String(r.oldest),
     }));
   },
