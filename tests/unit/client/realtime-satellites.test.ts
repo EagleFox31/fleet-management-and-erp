@@ -228,6 +228,13 @@ describe("couche 3 : table des écrans satellites", () => {
     }
   });
 
+  it("budget de mission (L1g) : la check-list de lancement de la seule mission touchée", () => {
+    const { keys } = satelliteTargetsOf("mission_budget_updated", { missionId: 7 });
+    expect(keys).toEqual(expect.arrayContaining(["/api/missions/7/launch-readiness", "/api/mission-budgets", "/api/mission-budgets/daily-need"]));
+    expect(keys.filter((k) => k.includes("launch-readiness"))).toEqual(["/api/missions/7/launch-readiness"]);
+    expect(satelliteTargetsOf("mission_budget_updated", {}).keys.some((k) => k.includes("launch-readiness"))).toBe(false);
+  });
+
   it("sans identifiant dans la charge, repli sur toutes les fiches véhicule (trop plutôt que pas assez)", () => {
     for (const payload of [undefined, {}, { vehicleId: "abc" }, { vehicleId: 0 }]) {
       expect(satelliteTargetsOf("vehicle_mileage_updated", payload).prefixes).toContain("/api/vehicles/");
@@ -236,9 +243,11 @@ describe("couche 3 : table des écrans satellites", () => {
 
   it("chaque gabarit par identifiant correspond à une clé construite par un écran", () => {
     const groups = Object.entries(SATELLITE_GROUPS) as Array<[SatelliteGroupName, { byId?: readonly string[] }]>;
+    // Identifiant au milieu du chemin (`/api/missions/:missionId/launch-readiness`) : la clé écran doit être `.../${…}/launch-readiness`.
+    const inner = (template: string) => new RegExp(`^${template.split(/:\w+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\$\\{[^}]+\\}")}$`);
     const orphans = groups.flatMap(([name, group]) =>
       (group.byId ?? [])
-        .filter((template) => !clientTemplates.has(template.replace(/:\w+$/, "${")) && ![...clientTemplates].some((key) => key.startsWith(template.replace(/:\w+$/, "${"))))
+        .filter((template) => !clientTemplates.has(template.replace(/:\w+$/, "${")) && ![...clientTemplates].some((key) => key.startsWith(template.replace(/:\w+$/, "${")) || (!/:\w+$/.test(template) && inner(template).test(key))))
         .map((template) => `${name}: ${template}`),
     );
     expect(orphans).toEqual([]);

@@ -777,3 +777,23 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
     - technicien sans page ni menu ;
   - 3 mutants sur 3 tués (jointure retirée, décaissés comptés, technicien ajouté à l'écran) ;
   - typage 0 erreur.
+
+## 2026-11-05 — Lancement de mission sur le budget de mission (L1g)
+
+- **Quoi** :
+  - drapeau finance actif : les contrôles budget de `GET /api/missions/:id/launch-readiness` et de `PUT /api/missions/:id/status` (vers `in_progress`) lisent le budget de mission ;
+  - seul un budget approuvé ou décaissé passe. Correspondance : carburant = montant carburant, FDR = FDR, imprévus = frais annexes ;
+  - absent ou seulement demandé : motif qui dit quoi faire, une seule fois dans les motifs du PUT ;
+  - drapeau coupé : ancien budget de la fiche (`workflowData.budgetPlan`), comportement inchangé.
+- **Comment** :
+  - règle pure `launchBudgetOf` et lecture `resolveLaunchBudget` dans `server/services/mission-launch-budget.ts`, réexportées par `mission-budgets-service` (import existant de `missions.routes.ts`) ;
+  - `missions.routes.ts` (gelé) : 9 lignes modifiées en place, aucune ajoutée ;
+  - fiche mission : drapeau actif, « Lancer la mission » affiche le motif et ouvre l'onglet Budget, sans l'ancienne saisie ni de repli sur l'ancien budget. Le bouton « Budgets mission » devient « Voir l'onglet Budget ». L'ancien total reste affiché, en historique ;
+  - temps réel : `mission_budget_updated` invalide aussi la check-list de lancement de la mission touchée (gabarit `byId` à `:missionId`). Le garde-fou des gabarits accepte un identifiant en milieu de chemin.
+- **Pourquoi** : sans ce lot, l'ancien bloc en lecture seule aurait bloqué tout lancement, car les contrôles budget sont bloquants. Décision de l'utilisatrice : un budget de mission approuvé est requis, y compris pour une mission préparée avant L1.
+- **Preuve** :
+  - contrat `mission-launch-budget` 11/11 : drapeau coupé ou actif × budget absent, demandé, approuvé, décaissé, plus le PUT ;
+  - contrats missions 352/352 ;
+  - unitaires 2987 ; typage 0 erreur ;
+  - e2e `28-mission-launch-budget` 1/1 : refus lisible, onglet Budget ; la direction approuve et la logistique (second compte, autre rôle) reçoit la trame, puis sa check-list est relue sans rechargement ;
+  - mutants : 7 sur 7 tués.
