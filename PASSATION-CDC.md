@@ -21,3 +21,8 @@
 - Branche fix/mission-create-assigned (worktree c7-backup), base main. GO de 0a : POST /api/missions planned+affectation => assigned + affectation pending, en transaction ; draft+aff reste draft ; affectation refusée => aucune mission. Ne pas toucher PUT /status. Note docs : ambiguïté affectée/acceptée (question ouverte). Couche 3 : realtime-satellites mission_created, compléter ou justifier. Pas dans routes.ts. Push simple, PR ready, échéance ~1 h 30.
 - Script #229 : branche locale chore/recensement-229 (80f4ddb+), non poussée, en attente de décision utilisatrice.
 - Piège : port 54320 réservé Windows ; pile de test perso : docker compose -p c7test -f $TEMP/c7-compose.yml (ports 55432/55433), DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:55433/v1, drizzle-kit push avec DATABASE_URL=...55432 ; down -v ensuite.
+
+## 2026-11-05 01:01 — c7 : #328 en relecture, attente de #327
+- PR #328 (fix/mission-create-assigned) livrée, relue par 0a. Conflit prévu avec #327 (aa) : garde CPC de création remplacée par isCpcStatusValid (shared/constants/driver-cpc-eligibility.ts).
+- Prochaine étape : quand 0a annonce #327 fusionnée, merger origin/main dans fix/mission-create-assigned, GARDER la règle partagée (pas normalizeCpcStatus local à la création), relancer le test mission-create-assigned (fixture CPC FORME sans accent : vérifier qu isCpcStatusValid l accepte, sinon adapter la fixture), push simple.
+- Script #229 : chore/recensement-229 locale, non poussée, en attente de décision utilisatrice.
