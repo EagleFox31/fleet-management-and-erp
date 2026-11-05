@@ -14,8 +14,8 @@ import { AppError } from "./app-error";
 export type ScopeReader = { id: number; role: string };
 
 /**
- * Message commun a tous les objets hors perimetre (vehicule, document, document de workflow...) : il ne
- * nomme pas l'objet, car la meme reponse sert aussi a l'identifiant absent (cf. LESSONS_LEARNED, 2026-11-05).
+ * Message commun à tous les objets hors périmètre (véhicule, document, document de workflow...) : il ne
+ * nomme pas l'objet, car la même réponse sert aussi à l'identifiant absent (cf. LESSONS_LEARNED, 2026-11-05).
  * `GET /api/vehicles/:id` garde son texte historique « Accès non autorisé à ce véhicule » (e2e 24).
  */
 export const OUT_OF_SCOPE_MESSAGE = "Accès refusé : cet élément n'appartient pas à votre compte.";
