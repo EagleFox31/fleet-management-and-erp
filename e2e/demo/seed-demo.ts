@@ -49,6 +49,7 @@ export const DEMO_ACCOUNTS = {
   workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
   management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
+  recruit: { username: "recrue1", password: "recrue123", name: "Paul Recrue", role: "warehouse" },
   driver: { username: "chauffeur1", password: "chauffeur123", name: "Samuel Biyick", role: "driver" },
 } as const;
 
@@ -333,6 +334,8 @@ export async function seedDemo(): Promise<void> {
   const clientBId = await ensureUser(DEMO_ACCOUNTS.clientB);
   await ensureUser(DEMO_ACCOUNTS.warehouse);
   await ensureUser(DEMO_ACCOUNTS.management);
+  await ensureUser(DEMO_ACCOUNTS.admin);
+  await ensureUser(DEMO_ACCOUNTS.recruit);
 
   await ensureVehicle(DEMO_VEHICLES.clientA1, "T480", clientAId);
   await ensureVehicle(DEMO_VEHICLES.clientA2, "Master", clientAId);
