@@ -18,4 +18,4 @@
 
 ## Consigne suivable par rôle
 
-Le formulaire « Mise à jour des certifications CPC » n est rendu que sur le tableau de bord du secrétariat (App.tsx : un tableau de bord par rôle ; admin et logistique ont le leur, sans ce formulaire). La consigne dit donc au secrétariat de l utiliser depuis son tableau de bord ; admin, logistique et les autres rôles sont renvoyés vers le secrétariat. POST update-cpc autorise toujours admin et logistique : exposer le formulaire sur la fiche chauffeur (drivers/[id].tsx) est le suivi prévu, la consigne pourra alors pointer vers la fiche.
+Le formulaire « Mise à jour des certifications CPC » n'est rendu que sur le tableau de bord du secrétariat (App.tsx : un tableau de bord par rôle ; admin et logistique ont le leur, sans ce formulaire). La consigne dit donc au secrétariat de l'utiliser depuis son tableau de bord ; admin, logistique et les autres rôles sont renvoyés vers le secrétariat. POST update-cpc autorise toujours admin et logistique : exposer le formulaire sur la fiche chauffeur (drivers/[id].tsx) est le suivi prévu, la consigne pourra alors pointer vers la fiche.
