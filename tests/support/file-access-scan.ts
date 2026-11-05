@@ -7,7 +7,7 @@ import { scopeOf } from "./alert-emission-scan";
  *
  * Accès : appel dont le nom figure dans `ACCESS_CALLS` (`fs.x`, `res.x` ou import nommé).
  * Borné : le chemin est relié à une borne (`uploadedFileCandidates`, `existingUploadedFile`,
- * `isInsideDirectory`) dans la même portée, par la structure de l'expression (`isBoundExpression`) :
+ * `settlementProofPath`, `isInsideDirectory`) dans la même portée, par la structure de l'expression (`isBoundExpression`) :
  * résultat d'un appel de borne, accès ou méthode sur ce résultat, variable dont toutes les
  * déclarations sont bornées, ou variable reçue directement par un appel de borne (garde).
  * `a ?? b` n'est borné que si chaque branche l'est. Pour `copyFile`, `cp` et `rename`, la
@@ -62,7 +62,7 @@ export const ACCESS_CALLS = new Set([
   "rmdir",
   "rmdirSync",
 ]);
-const BOUND_CALLS = new Set(["uploadedFileCandidates", "existingUploadedFile", "isInsideDirectory"]);
+const BOUND_CALLS = new Set(["uploadedFileCandidates", "existingUploadedFile", "settlementProofPath", "isInsideDirectory"]);
 
 function calleeName(node: ts.CallExpression): string | null {
   const callee = node.expression;
