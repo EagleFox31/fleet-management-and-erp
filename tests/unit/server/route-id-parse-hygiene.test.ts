@@ -278,6 +278,8 @@ describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâc
     expect(countLooseBoundParamReads("/x/a.ts", closure, none)).toBe(1);
     expect(countLooseParamReads("const a = +req.params.id;\nconst b = parseFloat(req.params.id);")).toBe(2);
     expect(countLooseBoundParamReads("/x/a.ts", named("const { id } = request.params;\nconst a = +id;"), none)).toBe(1);
+    // Chemin Windows (`server\api\…`) : même compte qu'avec des `/`.
+    expect(countLooseBoundParamReads(String.raw`C:\x\server\api\a.ts`, closure, none)).toBe(1);
     // `params` d'un objet qui n'est pas la requête : pas compté.
     expect(countLooseParamReads(named("const a = Number(route.params.id);"))).toBe(0);
   });

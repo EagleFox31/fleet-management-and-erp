@@ -196,3 +196,8 @@
 
 - Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
 - Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
+
+### Lot 12 — complément : chemins Windows dans le repérage partagé
+
+- Quoi : `singleFileChecker` comparait le nom de fichier brut à celui que `createProgram` normalise en `/`. Sous Windows (chemins en `\`), aucun fichier n'était trouvé : les conversions de variables liées n'étaient pas comptées. Le nom est normalisé en `/` avant usage. La docstring liste les limites, dont l'alias `const r = req` qui n'est pas suivi.
+- Tester : cas unitaire avec un chemin en `\`, rouge sans le correctif, vert avec. Mutation `const { id: rid } = req.params; Number(rid)` dans `billing.routes.ts` : non vue avant, vue après (`billing.routes.ts: 1`).

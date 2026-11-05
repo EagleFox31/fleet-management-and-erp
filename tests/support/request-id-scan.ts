@@ -9,6 +9,10 @@ import ts from "typescript";
  *   est rattachée à sa déclaration par le vérificateur de TypeScript (un seul fichier, sans lib) :
  *   un nom masqué par une déclaration interne (`for (const { id } of rows)`, paramètre homonyme)
  *   n'est pas compté, et un nom lié n'est pas cherché ailleurs que là où il est visible.
+ *
+ * Limites : un alias de la requête (`const r = req; r.params.id`) n'est pas suivi, seul le
+ * renommage du premier paramètre l'est. Une valeur passée par une autre variable (`const a = id`)
+ * ou par un autre fichier n'est pas suivie non plus.
  */
 
 export type RequestPart = "params" | "query";
@@ -80,8 +84,13 @@ function boundIdentifiers(decl: ts.VariableDeclaration, part: RequestPart, field
   return read !== null && field(read) && ts.isIdentifier(decl.name) ? [decl.name] : [];
 }
 
-/** Programme d'un seul fichier, sans lib ni résolution : assez pour relier un nom à sa déclaration. */
-function singleFileChecker(fileName: string, source: string): { sf: ts.SourceFile; checker: ts.TypeChecker } {
+/**
+ * Programme d'un seul fichier, sans lib ni résolution : assez pour relier un nom à sa déclaration.
+ * `createProgram` normalise les chemins en `/` : un chemin Windows (`C:\x\a.ts`) comparé tel quel
+ * ne serait jamais trouvé, et le compte tomberait à 0.
+ */
+function singleFileChecker(rawName: string, source: string): { sf: ts.SourceFile; checker: ts.TypeChecker } {
+  const fileName = rawName.split("\\").join("/");
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const host: ts.CompilerHost = {
     getSourceFile: (name) => (name === fileName ? sf : undefined),
