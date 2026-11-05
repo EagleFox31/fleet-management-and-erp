@@ -16,3 +16,8 @@
 ## 2026-11-04 17:55 — c7 : #312 CI rouge corrigée
 - Cause : mock de moduleLogger non fiable en suite complète (module déjà chargé). Remplacé par emitLossContext, fonction pure exportée et testée ; suite intégration complète 328/328, check 0.
 - Leçon : ne pas asserter sur un logger instancié à l import ; extraire le contexte en fonction pure.
+
+## 2026-11-05 00:48 — c7 : état pour reprise (création mission assigned)
+- Branche fix/mission-create-assigned (worktree c7-backup), base main. GO de 0a : POST /api/missions planned+affectation => assigned + affectation pending, en transaction ; draft+aff reste draft ; affectation refusée => aucune mission. Ne pas toucher PUT /status. Note docs : ambiguïté affectée/acceptée (question ouverte). Couche 3 : realtime-satellites mission_created, compléter ou justifier. Pas dans routes.ts. Push simple, PR ready, échéance ~1 h 30.
+- Script #229 : branche locale chore/recensement-229 (80f4ddb+), non poussée, en attente de décision utilisatrice.
+- Piège : port 54320 réservé Windows ; pile de test perso : docker compose -p c7test -f $TEMP/c7-compose.yml (ports 55432/55433), DATABASE_URL_TEST=postgres://fleet:fleet@postgres:5432/fleet_test DATABASE_WS_PROXY=localhost:55433/v1, drizzle-kit push avec DATABASE_URL=...55432 ; down -v ensuite.
