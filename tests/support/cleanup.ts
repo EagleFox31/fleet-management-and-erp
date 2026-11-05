@@ -9,6 +9,7 @@ import {
   documentRenewalRequests,
   fuelPrices,
   missionBudgetExpenses,
+  missionPriceHistory,
   missionBudgets,
   missionDestinations,
   missionOperations,
@@ -117,6 +118,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, ids.userIds));
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, ids.userIds));
       // Trésorerie : écritures auto (plein, recharge, règlement) et comptes créés par un compte de test.
+      await db.delete(missionPriceHistory).where(inArray(missionPriceHistory.changedBy, ids.userIds));
       await deleteTreasuryOfUsers(ids.userIds);
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
@@ -272,6 +274,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(fuelPrices).where(inArray(fuelPrices.createdBy, testUsers));
   // Mission créée par un compte de test : bloquait la suppression du compte (FK
   // missions_created_by_users_id_fk) et faisait échouer le hook global de tous les fichiers.
+  // Historique du prix convenu (O3 3b) : changed_by vers users sans cascade, y compris sur une mission hors du lot.
+  await db.delete(missionPriceHistory).where(inArray(missionPriceHistory.changedBy, testUsers));
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
