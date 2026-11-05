@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -94,13 +95,13 @@ const getStatusMeta = (schedule: MaintenanceSchedule) => {
     return { status: "draft", label: "Inactif" };
   }
 
-  const scheduledDate = toDateSafe(schedule.scheduledDate);
-  if (!scheduledDate) {
+  // Jour d'échéance UTC (#342) : plus de division de millisecondes dépendante du fuseau.
+  const scheduledDay = toExpiryDateOnly(schedule.scheduledDate);
+  if (scheduledDay === null) {
     return { status: "pending", label: "A verifier" };
   }
 
-  const now = new Date();
-  const diffDays = Math.ceil((scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const diffDays = daysBetweenDateOnly(scheduledDay, todayUtcDateOnly());
 
   if (diffDays < 0) {
     return { status: "cancelled", label: "En retard" };
