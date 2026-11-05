@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, or, sql, type AnyColumn, type SQLWrapper } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql, type AnyColumn, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db } from "../../server/db";
 import {
   activityLogs,
@@ -82,7 +82,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     // Écriture de trésorerie liée au véhicule (recharge carte, lot T2) : bloquerait la suppression (FK).
     await db.delete(paymentInstruments).where(inArray(paymentInstruments.vehicleId, ids.vehicleIds));
     await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds)));
-    await db.delete(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds));
+    await deleteTreasuryEntriesWhere(inArray(treasuryEntries.vehicleId, ids.vehicleIds));
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
@@ -128,6 +128,16 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
   }
 }
 
+/**
+ * Suppression d'écritures de trésorerie : un budget de mission décaissé (L1c) qui en vise une la perd
+ * d'abord (FK treasury_entry_id, nullable), sinon la suppression échoue.
+ */
+async function deleteTreasuryEntriesWhere(where: SQL | undefined): Promise<void> {
+  const entries = db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(where);
+  await db.update(missionBudgets).set({ treasuryEntryId: null }).where(inArray(missionBudgets.treasuryEntryId, entries));
+  await db.delete(treasuryEntries).where(where);
+}
+
 /** Écritures de trésorerie et comptes créés par ces utilisateurs ; un règlement garde son paiement, perd le lien de compte. */
 async function deleteTreasuryOfUsers(userIds: number[]): Promise<void> {
   const accounts = db
@@ -139,8 +149,8 @@ async function deleteTreasuryOfUsers(userIds: number[]): Promise<void> {
   await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, userIds), inArray(paymentInstruments.updatedBy, userIds)));
   await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts)));
   await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds))));
-  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts));
-  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds)));
+  await deleteTreasuryEntriesWhere(inArray(treasuryEntries.accountId, accounts));
+  await deleteTreasuryEntriesWhere(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds)));
   await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
 }
 
@@ -151,7 +161,7 @@ async function deleteInstrumentsOfEntries(entryIds: SQLWrapper): Promise<void> {
 
 /** Une écriture de plein garde sa mission (FK sans cascade) : à supprimer avant la mission. */
 export async function deleteTreasuryEntriesOfMissions(missionIds: number[]): Promise<void> {
-  if (missionIds.length > 0) await db.delete(treasuryEntries).where(inArray(treasuryEntries.missionId, missionIds));
+  if (missionIds.length > 0) await deleteTreasuryEntriesWhere(inArray(treasuryEntries.missionId, missionIds));
 }
 
 /**
@@ -298,8 +308,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, testUsers), inArray(paymentInstruments.updatedBy, testUsers)));
   await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts)));
   await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers))));
-  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts));
-  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
+  await deleteTreasuryEntriesWhere(inArray(treasuryEntries.accountId, testTreasuryAccounts));
+  await deleteTreasuryEntriesWhere(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
   await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));

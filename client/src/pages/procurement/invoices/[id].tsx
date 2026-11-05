@@ -371,7 +371,7 @@ export default function SupplierInvoiceDetailsPage() {
 
   const canValidate = (() => {
     if (!currentRole) return false;
-    if (scope === "parts") return ["admin", "warehouse", "workshop_manager"].includes(currentRole);
+    if (scope === "parts") return ["admin", "warehouse"].includes(currentRole);
     if (scope === "non_parts") return ["admin", "secretary", "logistics"].includes(currentRole);
     return ["admin", "secretary"].includes(currentRole);
   })();

@@ -15,6 +15,8 @@ const ids = createIdBag();
 const cookies = new Map<string, string>();
 const missionIds: number[] = [];
 let tariffId = 0;
+let ownClientId = 0;
+let otherClientId = 0;
 const origin = uniqueTestToken("orig");
 
 async function login(role: TestUserRole) {
@@ -57,6 +59,10 @@ beforeAll(async () => {
   await login("technician");
   const client = await createTestClient();
   ids.clientIds.push(client.id);
+  ownClientId = client.id;
+  const otherClient = await createTestClient();
+  ids.clientIds.push(otherClient.id);
+  otherClientId = otherClient.id;
   const [t] = await db
     .insert(tariffGrid)
     .values({ origin, destination: "x", pricingUnit: "ton", unitPrice: "100", validFrom: "2026-01-01", createdBy: admin.id, updatedBy: admin.id })
@@ -96,6 +102,20 @@ describe("prix convenu d'une mission", { timeout: 120000 }, () => {
 
   it("rôle hors gestion des missions : 403 (rôles inchangés)", async () => {
     expect((await post("technician", { agreedPrice: 1 })).status).toBe(403);
+  });
+
+  it("tarif d'un autre client, inactif ou hors période : 400 ; tarif du bon client ou générique valide : 201", async () => {
+    const base = { pricingUnit: "trip", unitPrice: "5", destination: "z", validFrom: "2026-01-01" };
+    const [other] = await db.insert(tariffGrid).values({ ...base, origin, clientId: otherClientId }).returning();
+    const [inactive] = await db.insert(tariffGrid).values({ ...base, origin, destination: "z2", active: false }).returning();
+    const [expired] = await db.insert(tariffGrid).values({ ...base, origin, destination: "z3", validTo: "2026-01-31" }).returning();
+    const [own] = await db.insert(tariffGrid).values({ ...base, origin, destination: "z4", clientId: ownClientId }).returning();
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: other.id, clientId: ownClientId })).status).toBe(400);
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: other.id })).status).toBe(400);
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: inactive.id })).status).toBe(400);
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: expired.id, pickupDate: "2026-06-01T08:00:00Z" })).status).toBe(400);
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: own.id, clientId: ownClientId })).status).toBe(201);
+    expect((await post("admin", { agreedPrice: 5, tariffGridId: tariffId, clientId: ownClientId })).status).toBe(201);
   });
 
   it("tarif supprimé : la mission garde son prix, le lien passe à NULL", async () => {

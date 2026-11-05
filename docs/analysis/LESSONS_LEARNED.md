@@ -3180,3 +3180,26 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : #466 remonte la liste complète en `motifs` à la racine du corps (`AppError` `details`, fusionnés par `mergeErrorDetails`).
 - **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, cas « un motif de document tu par la borne du message reste dans body.motifs ». Rouge si `details` est retiré de la levée dans `server/api/missions.routes.ts`.
 - **Leçon généralisée** : retirer ou renommer un champ de réponse exige de chercher ses lecteurs (client, e2e) et de figer le champ conservé par un test de contrat, pas seulement par un e2e.
+
+## 2026-11-05 — Prix convenu (O3) : une donnée réservée fuyait par les routes qui renvoient la ligne entière
+
+- **Contexte** : le prix convenu d'une mission n'est lisible que par les lecteurs de la grille tarifaire. La revue de #487 a relevé que `GET /api/operations/missions*`, la réponse de `PUT /api/missions/:id/status` (chauffeur) et la trame WebSocket de mission (tout le personnel, technicien compris) renvoyaient la ligne `missions` entière, donc `agreedPrice`.
+- **Cause racine** : la colonne a été ajoutée en pensant aux écrans de saisie ; les consommateurs qui sélectionnent `missions` en bloc n'ont pas été énumérés.
+- **Classification** : fuite de donnée sensible par projection implicite (même famille que le prix d'achat véhicule).
+- **Résolution** : `server/lib/mission-price-scope.ts` (`redactMissionPrice`, clés à `null`, échec fermé) appliqué aux routes operations, au PUT status et à la trame temps réel. Facturation client, exports et tableau de bord direction n'ont que des rôles lecteurs : sans exposition.
+- **Prévention vérifiable** : `tests/contract/mission-price-redaction.contract.test.ts` (technicien et chauffeur, vu rouge sans le helper) et `tests/unit/server/mission-price-scope.test.ts`.
+- **Leçon généralisée** : ajouter une colonne réservée à un rôle impose d'énumérer toutes les lectures de la table (`select()`, `mission: missions`, trames) avant de livrer, pas seulement l'écran de saisie.
+## 2026-11-05 — Effet argent sur une transition dont le statut est lu hors verrou (L1d, #491)
+
+- **Contexte** : L1d branche la contre-passation du budget de mission sur `PUT /api/missions/:id/status` (annulation). La relecture sécurité de #491 a relevé que la route lisait le statut courant avant la transaction, sans verrou, puis écrivait par un UPDATE non conditionné.
+- **Cause racine** : une clôture et une annulation concurrentes d'une mission `delivered` lisaient toutes deux `delivered` et passaient le contrôle de transition. La seconde écrasait la première. On obtenait une mission `completed` dont le budget était rendu, ou une mission `completed` réécrite en `cancelled`. Avant L1d, l'écrasement ne touchait qu'un statut. Avec L1d, il déplace de l'argent.
+- **Classification** : concurrence (mise à jour perdue) sur une transition qui porte un effet financier. C'est un near miss : relevé en relecture, avant fusion.
+- **Résolution** :
+  - l'UPDATE est conditionné au statut lu ; 0 ligne → 409 « Le statut de cette mission a changé entre-temps : rechargez-la. ». L'effet (`onMissionStatusChange`) ne s'exécute qu'après une écriture réussie ;
+  - le rejeu `cancelled → cancelled` ne réécrit plus `cancelledAt` (ni `completedAt` pour `completed`) ;
+  - la contre-passation compte les lignes réellement insérées, et un rejeu ne journalise plus « contre-passé ».
+  - Recensement : `PUT /:id/status` est le seul écrivain qui annule ou clôture une mission ; la route d'annulation d'affectation n'écrit que l'affectation.
+- **Prévention vérifiable** : contrat `tests/contract/mission-budgets.contract.test.ts` :
+  - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
+  - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
+- **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
