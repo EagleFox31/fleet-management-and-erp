@@ -37,8 +37,20 @@ export const VEHICLE_REFERENCES_NOT_ACTIVITY: Readonly<Record<string, string>> =
  * Éléments désactivés par la suppression douce, journalisés dans `vehicle_deletion_effects`, et
  * rejoués à l'identique par la restauration. Les pneus restent montés (décision du 5 novembre
  * 2026) ; l'historique et l'argent ne sont jamais touchés.
+ *
+ * `stampColumn` : horodatage que tout écrivain de la table renouvelle. La suppression le pose et
+ * le journalise ; la restauration ne rouvre la ligne que s'il n'a pas bougé, ce qui distingue
+ * « rejeté par la suppression » de « rejeté à la main pendant le retrait » (même valeur).
+ * Sans horodatage (`maintenance_schedules` n'en a pas), seule la valeur est comparée : un plan
+ * désactivé à la main pendant le retrait est réactivé par la restauration. Limite assumée.
  */
-export const VEHICLE_DEACTIVATIONS: readonly { table: string; column: string; activeValues: readonly (string | boolean)[]; applied: string | boolean }[] = [
+export const VEHICLE_DEACTIVATIONS: readonly {
+  table: string;
+  column: string;
+  activeValues: readonly (string | boolean)[];
+  applied: string | boolean;
+  stampColumn?: string;
+}[] = [
   { table: "maintenance_schedules", column: "is_active", activeValues: [true], applied: false },
-  { table: "document_renewal_requests", column: "status", activeValues: ["pending", "in_progress"], applied: "rejected" },
+  { table: "document_renewal_requests", column: "status", activeValues: ["pending", "in_progress"], applied: "rejected", stampColumn: "updated_at" },
 ];

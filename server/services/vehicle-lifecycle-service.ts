@@ -123,16 +123,17 @@ export async function deleteVehicle(vehicleId: number, actorUserId: number | nul
     for (const d of VEHICLE_DEACTIVATIONS) {
       const table = sql.identifier(d.table);
       const column = sql.identifier(d.column);
+      const stamp = d.stampColumn ? sql.identifier(d.stampColumn) : null;
       const res = await tx.execute(sql`
         WITH changed AS (
-          UPDATE ${table} AS t SET ${column} = ${d.applied}
+          UPDATE ${table} AS t SET ${column} = ${d.applied}${stamp ? sql`, ${stamp} = now()` : sql``}
           FROM (SELECT id, ${column} AS previous FROM ${table}
                 WHERE vehicle_id = ${vehicleId} AND ${column} IN (${list(d.activeValues)}) FOR UPDATE) AS old
           WHERE t.id = old.id
-          RETURNING t.id, old.previous
+          RETURNING t.id, old.previous, ${stamp ? sql`t.${stamp}` : sql`NULL::timestamp`} AS stamp
         )
-        INSERT INTO vehicle_deletion_effects (vehicle_id, table_name, row_id, column_name, previous_value, applied_value, created_by)
-        SELECT ${vehicleId}::int, ${d.table}::text, id, ${d.column}::text, to_jsonb(previous), ${JSON.stringify(d.applied)}::jsonb, ${actorUserId}::int
+        INSERT INTO vehicle_deletion_effects (vehicle_id, table_name, row_id, column_name, previous_value, applied_value, applied_stamp, created_by)
+        SELECT ${vehicleId}::int, ${d.table}::text, id, ${d.column}::text, to_jsonb(previous), ${JSON.stringify(d.applied)}::jsonb, stamp, ${actorUserId}::int
         FROM changed
         ON CONFLICT ON CONSTRAINT vehicle_deletion_effects_row_key DO NOTHING`);
       deactivated += res.rowCount ?? 0;
@@ -158,18 +159,24 @@ export async function restoreVehicle(vehicleId: number, actorUserId: number | nu
 
     let reactivated = 0;
     const effects = await tx.execute(sql`
-      SELECT id, table_name, row_id, column_name, previous_value, applied_value
+      SELECT id, table_name, row_id, column_name, previous_value, applied_value, applied_stamp IS NOT NULL AS stamped
       FROM vehicle_deletion_effects WHERE vehicle_id = ${vehicleId} ORDER BY id`);
-    for (const e of effects.rows as { table_name: string; row_id: number; column_name: string; previous_value: unknown; applied_value: unknown }[]) {
+    type Effect = { id: number; table_name: string; row_id: number; column_name: string; previous_value: unknown; applied_value: unknown; stamped: boolean };
+    for (const e of effects.rows as Effect[]) {
       const known = VEHICLE_DEACTIVATIONS.find((d) => d.table === e.table_name && d.column === e.column_name);
       if (!known) {
         log.warn({ vehicleId, table: e.table_name, column: e.column_name }, "effet de suppression inconnu, ignoré à la restauration");
         continue;
       }
       const column = sql.identifier(known.column);
+      const stamp = known.stampColumn ? sql.identifier(known.stampColumn) : null;
+      // Horodatage comparé en SQL : la microseconde de Postgres ne survit pas à un aller-retour JS.
+      const untouched = stamp && e.stamped
+        ? sql` AND ${stamp} = (SELECT applied_stamp FROM vehicle_deletion_effects WHERE id = ${e.id})`
+        : sql``;
       const res = await tx.execute(sql`
-        UPDATE ${sql.identifier(known.table)} SET ${column} = ${e.previous_value as string | boolean}
-        WHERE id = ${e.row_id} AND vehicle_id = ${vehicleId} AND ${column} = ${e.applied_value as string | boolean}`);
+        UPDATE ${sql.identifier(known.table)} SET ${column} = ${e.previous_value as string | boolean}${stamp ? sql`, ${stamp} = now()` : sql``}
+        WHERE id = ${e.row_id} AND vehicle_id = ${vehicleId} AND ${column} = ${e.applied_value as string | boolean}${untouched}`);
       reactivated += res.rowCount ?? 0;
     }
     await tx.execute(sql`DELETE FROM vehicle_deletion_effects WHERE vehicle_id = ${vehicleId}`);
