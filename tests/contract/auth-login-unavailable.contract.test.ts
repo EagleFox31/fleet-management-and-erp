@@ -12,7 +12,6 @@ import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
-import { storedLockoutKey } from "../../server/services/login-lockout-db-store";
 
 /**
  * Niveau C, #254 : une panne pendant la connexion est une 5xx, jamais un 401.
@@ -44,10 +43,30 @@ async function failedCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
-/** Le garde écrit son compteur sur `finish`, sans être attendu : on lui laisse le temps d'écrire. */
+/** Compteur stocké par le garde pour ce compte (ligne absente = 0). */
+async function storedCount(): Promise<number> {
+  const [row] = await db
+    .select({ count: loginAttemptsByUsername.failedCount })
+    .from(loginAttemptsByUsername)
+    .where(eq(loginAttemptsByUsername.usernameNormalized, storedLockoutKey(username)));
+  return row?.count ?? 0;
+}
+
+/**
+ * Le garde écrit sur `finish`, sans être attendu : reset après un 200, release après une 5xx,
+ * confirmation après un 401. Tant qu'une tentative reste réservée, le compteur stocké dépasse
+ * le miroir `users`. On attend leur égalité plutôt qu'un délai fixe : un test ne démarre pas
+ * pendant l'écriture du précédent (une réservation lue avant le reset du 200 précédent
+ * comptait un échec de trop).
+ */
 async function settledFailedCount(): Promise<number> {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  return failedCount();
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [stored, mirrored] = await Promise.all([storedCount(), failedCount()]);
+    if (stored === mirrored) return mirrored;
+    if (Date.now() > deadline) throw new Error(`compteur du garde instable : stocké ${stored}, miroir ${mirrored}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /**
@@ -91,7 +110,7 @@ afterAll(async () => {
 
 describe("POST /api/auth/login, base indisponible", { timeout: 60000 }, () => {
   it("répond 503 au contrat d'erreur, sans parler d'identifiants ni compter d'échec", async () => {
-    const before = await failedCount();
+    const before = await settledFailedCount();
     failUserRowLookup(new Error("Connection terminated unexpectedly"));
 
     const res = await login(TEST_USER_PASSWORD);
@@ -108,14 +127,14 @@ describe("POST /api/auth/login, base indisponible", { timeout: 60000 }, () => {
   });
 
   it("un mauvais mot de passe reste un 401 compté par le garde", async () => {
-    const before = await failedCount();
+    const before = await settledFailedCount();
     const res = await login("mauvais-mot-de-passe");
     expect(res.status).toBe(401);
     expect(await settledFailedCount()).toBe(before + 1);
   });
 
   it("session.regenerate en échec : 503, et l'échec n'est pas compté", async () => {
-    const before = await failedCount();
+    const before = await settledFailedCount();
     vi.spyOn(session.Session.prototype, "regenerate").mockImplementationOnce(function (this: unknown, callback) {
       callback(new Error("session store down"));
       return this as session.Session;

@@ -462,6 +462,16 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
 - **Preuve** : contrat `operations-driver-scope` (cas id non strict et inconnu) rouge sur l'ancien code, vert après (10/10).
+## 2026-11-05 — Justificatif de renouvellement consultable
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` sert le justificatif déposé au renouvellement rapide. Rôles lecteurs des demandes (`DOCUMENT_RENEWAL_VIEWER_ROLES`), id par `parseRouteId`, cloison `canAccessOwned`, fichier servi depuis le seul dossier `uploads/document-renewals/proofs` (`uploadedFileCandidates` + `isInsideDirectory`), 404 lisible si la demande n'a pas de justificatif ou si le fichier a disparu.
+- **Pourquoi** : décision produit (option A) : le justificatif était écrit sur disque mais jamais consultable.
+- **Preuve** : contrat `document-renewal-proof-download` rouge sans la route (12/13), vert après (13/13) ; contrats renouvellement voisins 28/28 ; unitaires 2524, tsc 0.
+
+
+## 2026-11-05 — Justificatif de renouvellement : toujours en téléchargement
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` répond en `attachment` avec `nosniff`, type tiré d'une liste blanche d'extensions (sinon `application/octet-stream`), chemin résolu contrôlé contre le dossier des justificatifs. Au dépôt, l'extension stockée vient du type accepté (table commune avec le récépissé).
+- **Pourquoi** : relecture de sécurité. Le type servi dépendait de l'extension du nom envoyé, que le filtre de dépôt ne contrôlait pas.
+- **Preuve** : contrats `document-renewal-proof-download` et `document-quick-renew-proof-lifecycle`, nouveaux cas rouges sur la route d'origine, verts après.
 ## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
 - **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
 - **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
@@ -471,3 +481,13 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+
+## 2026-11-05 — Compteur de verrouillage : toutes les écritures sous le verrou de clé
+- **Quoi** : `DbLockoutStore.reset` et `release` passent par `underKeyLock`, la transaction sous verrou consultatif déjà utilisée par `reserve` et `confirmFailure`. Dans `auth-login-unavailable`, l'attente fixe de 500 ms est remplacée par l'attente de l'état stable du garde ; l'import en double est retiré.
+- **Pourquoi** : test instable en CI. Une réservation lue avant le DELETE du succès précédent réécrivait l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store`, nouveaux cas rouges avant le correctif et verts après ; contrats du verrouillage verts sur trois passes.
+
+## 2026-11-05 — Déverrouillage admin sous le verrou de clé
+- **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
+- **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.
