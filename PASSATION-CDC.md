@@ -52,3 +52,7 @@
 
 ## 2026-11-05 04:05 — c7 : PATCH de dates sans affectation vivante prend le verrou et l'empreinte
 - Branche fix/mission-patch-dates-lock (empilée sur #339 non fusionnée à l'heure de la branche) : le PATCH qui change les dates prend aussi le FOR UPDATE de la mission et compare l'empreinte (condition `|| datesChanged`), sinon un POST /:id/assignments concurrent contrôlait sur les anciennes dates. Contrat déterministe ajouté (rouge sans le correctif). waitForBlockedWriter filtre sur pg_blocking_pids du pid qui tient le verrou.
+
+## 2026-11-05 04:40 — c7 : analyse findPlanningClash(db) close, #346 en attente de base
+- Lectures indicatives l.1782 (launch-readiness) et l.3019 (validation de lancement de PUT /status) : lecture seule, aucune écriture, aucun écran ne s'en sert comme garantie (canLaunch colore seulement le panneau). Conclusion transmise à 0a : « rien à faire ».
+- #339 fusionnée (bbdd824). #346 (fix/mission-patch-dates-lock, relue OK par 0a) attend que l'utilisatrice repasse sa base sur main (`gh pr edit 346 --base main`) et la passe en ready ; je ne touche pas à la base. Test DB c7test arrêté. Rien d'autre en cours.
