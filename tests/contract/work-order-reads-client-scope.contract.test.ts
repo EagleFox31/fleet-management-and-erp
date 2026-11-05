@@ -93,9 +93,13 @@ afterAll(async () => {
 describe("GET /api/work-orders/:workOrderId/tire-rotations : cloison entre clients", () => {
   const path = (id: number | string) => `/api/work-orders/${id}/tire-rotations`;
 
-  it("un client est refusé sur l'OT d'un autre client (403, corps sans détail technique)", async () => {
+  it("un client sur l'OT d'un autre client reçoit la même réponse que sur un OT inexistant (404)", async () => {
     const res = await get(path(woA), "clientB");
-    expect(apiErrorProblems(res.status, res.body, 403)).toEqual([]);
+    expect(apiErrorProblems(res.status, res.body, 404)).toEqual([]);
+    const missing = await get(path(MISSING_ID), "clientB");
+    expect(missing.status).toBe(res.status);
+    expect(missing.body.message).toBe(res.body.message);
+    expect(missing.body.code).toBe(res.body.code);
   });
 
   it("le propriétaire du véhicule lit les rotations de son OT", async () => {
