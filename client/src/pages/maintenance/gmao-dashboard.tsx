@@ -178,11 +178,11 @@ export default function GMAODashboard() {
       case "critical":
         return "bg-rose-500 text-white";
       case "high":
-        return "bg-amber-500 text-white";
+        return "bg-warning text-white";
       case "medium":
         return "bg-blue-500 text-white";
       case "low":
-        return "bg-emerald-500 text-white";
+        return "bg-success text-white";
       default:
         return "bg-slate-500 text-white";
     }
@@ -206,11 +206,11 @@ export default function GMAODashboard() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "completed":
-        return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200";
+        return "bg-success/10 text-success dark:bg-success/20 dark:text-success border-success/30";
       case "in_progress":
         return "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200";
       case "awaiting_parts":
-        return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200";
+        return "bg-warning/10 text-warning-text dark:bg-warning/20 dark:text-warning-text border-warning/30";
       case "pending":
         return "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 border-orange-200";
       case "overdue":
@@ -292,7 +292,7 @@ export default function GMAODashboard() {
           <>
             Ordonnancement des réparations, planning atelier et contrôle des échéances
             {lastCheckTime && (
-              <span className="ml-1 font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="ml-1 font-semibold text-success dark:text-success">
                 · Vérifié à {format(lastCheckTime, "HH:mm", { locale: fr })}
               </span>
             )}
@@ -308,7 +308,7 @@ export default function GMAODashboard() {
               size="sm"
               className="rounded-xl border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isChecking ? "animate-spin text-emerald-600" : ""}`} />
+              <RefreshCw className={`h-3.5 w-3.5 ${isChecking ? "animate-spin text-success" : ""}`} />
               {isChecking ? "Synchronisation…" : "Vérifier échéances"}
             </Button>
 
@@ -360,7 +360,7 @@ export default function GMAODashboard() {
             <Button
               size="sm"
               onClick={() => setLocation("/maintenance/work-orders/new")}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer"
+              className="bg-success hover:bg-success text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer"
             >
               <Plus className="h-4 w-4" />
               Créer un OT
@@ -373,15 +373,15 @@ export default function GMAODashboard() {
             label="Total OT atelier"
             value={stats.totalWorkOrders}
             icon={<Wrench className="h-4 w-4" />}
-            iconWrapperClassName="bg-emerald-50 text-emerald-600"
+            iconWrapperClassName="bg-success/10 text-success"
             onClick={() => setLocation("/maintenance/work-orders")}
           />
           <KpiTile
             label="En attente"
             value={stats.pendingWorkOrders}
             icon={<Clock className="h-4 w-4" />}
-            iconWrapperClassName="bg-amber-50 text-amber-600"
-            valueClassName={stats.pendingWorkOrders > 0 ? "text-amber-600" : undefined}
+            iconWrapperClassName="bg-warning/10 text-warning-text"
+            valueClassName={stats.pendingWorkOrders > 0 ? "text-warning-text" : undefined}
             onClick={() => setLocation("/maintenance/work-orders?status=pending")}
           />
           <KpiTile
@@ -419,9 +419,9 @@ export default function GMAODashboard() {
 
       {/* Alertes d'état de synchronisation */}
       {checkAllMaintenanceMutation.isSuccess && checkAllMaintenanceMutation.data && (
-        <div className="p-4 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200">
+        <div className="p-4 rounded-2xl bg-success/10 dark:bg-success/20 border border-success/30 flex items-center justify-between text-xs text-success dark:text-success">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
             <span>{checkAllMaintenanceMutation.data.message}</span>
           </div>
           {checkAllMaintenanceMutation.data.details?.total > 0 && (
@@ -442,9 +442,9 @@ export default function GMAODashboard() {
         <TabsContent value="calendar" className="space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {/* Colonne Gauche : Sélecteur de Calendrier */}
-            <div className="lg:col-span-1 p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="lg:col-span-1 p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2 mb-1">
-                <CalendarDays className="h-4 w-4 text-emerald-600" />
+                <CalendarDays className="h-4 w-4 text-success" />
                 <span className="text-sm font-bold text-foreground">Sélecteur de Date</span>
               </div>
               <p className="text-xs text-muted-foreground">Cliquez sur un jour pour filtrer l'agenda de l'atelier</p>
@@ -458,16 +458,16 @@ export default function GMAODashboard() {
             </div>
 
             {/* Colonne Droite : Interventions du jour sélectionné */}
-            <div className="lg:col-span-2 p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between">
+            <div className="lg:col-span-2 p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between">
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                   <div className="flex items-center gap-2">
-                    <Wrench className="h-4 w-4 text-emerald-600" />
+                    <Wrench className="h-4 w-4 text-success" />
                     <span className="text-sm font-bold text-foreground">
                       {selectedDate ? format(selectedDate, "EEEE dd MMMM yyyy", { locale: fr }) : "Date sélectionnée"}
                     </span>
                   </div>
-                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200">
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-success/10 dark:bg-success/20 text-success dark:text-success border border-success/30">
                     {dayInterventions.length} intervention{dayInterventions.length !== 1 ? "s" : ""}
                   </span>
                 </div>
@@ -494,7 +494,7 @@ export default function GMAODashboard() {
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                                 intervention.isPreventive
                                   ? "text-blue-700 bg-blue-50 border-blue-200"
-                                  : "text-amber-700 bg-amber-50 border-amber-200"
+                                  : "text-warning-text bg-warning/10 border-warning/30"
                               }`}
                             >
                               {intervention.isPreventive ? "Préventive" : "Corrective"}
@@ -548,7 +548,7 @@ export default function GMAODashboard() {
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Cliquez sur un OT pour ouvrir le suivi détaillé d'intervention</span>
                 <Link href="/maintenance/work-orders/new">
-                  <span className="text-emerald-600 font-bold hover:underline cursor-pointer flex items-center gap-1">
+                  <span className="text-success font-bold hover:underline cursor-pointer flex items-center gap-1">
                     <Plus className="h-3.5 w-3.5" /> Ajouter à cette date
                   </span>
                 </Link>
@@ -563,7 +563,7 @@ export default function GMAODashboard() {
         <TabsContent value="overview" className="space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {/* Carte 1 : Urgences */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
@@ -591,13 +591,13 @@ export default function GMAODashboard() {
             </div>
 
             {/* Carte 2 : À Assigner */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 text-amber-600" /> À Assigner
+                  <span className="text-xs font-bold uppercase tracking-wider text-warning-text dark:text-warning-text flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-warning-text" /> À Assigner
                   </span>
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-warning/10 text-warning-text border border-warning/30">
                     {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length}
                   </span>
                 </div>
@@ -607,13 +607,13 @@ export default function GMAODashboard() {
                     .filter((wo: WorkOrder) => !wo.technicianId)
                     .slice(0, 4)
                     .map((wo: WorkOrder) => (
-                      <div key={wo.id} className="p-2.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 flex items-center justify-between">
+                      <div key={wo.id} className="p-2.5 rounded-xl bg-warning/10 dark:bg-warning/20 border border-warning/20 dark:border-warning/30 flex items-center justify-between">
                         <div className="min-w-0 pr-2">
                           <p className="text-xs font-bold text-foreground truncate">{wo.title}</p>
                           <p className="text-[11px] text-muted-foreground">{wo.vehicleRegistrationNumber || `#${wo.vehicleId}`}</p>
                         </div>
                         <Link href="/maintenance/work-orders">
-                          <Button size="sm" className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg">
+                          <Button size="sm" className="h-6 text-[10px] px-2 bg-success hover:bg-success text-white rounded-lg">
                             Assigner
                           </Button>
                         </Link>
@@ -624,7 +624,7 @@ export default function GMAODashboard() {
             </div>
 
             {/* Carte 3 : Maintenances Préventives */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
@@ -656,7 +656,7 @@ export default function GMAODashboard() {
         <TabsContent value="assignments" className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Charge des techniciens */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2 mb-2">
                 <Users className="h-4 w-4 text-purple-600" />
                 <span className="text-sm font-bold text-foreground">Charge de Travail par Technicien</span>
@@ -684,7 +684,7 @@ export default function GMAODashboard() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/30">
                             {tech.role === "workshop_manager" ? "Chef d'atelier" : "Technicien"}
                           </span>
                           {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
@@ -696,7 +696,7 @@ export default function GMAODashboard() {
                             <p className="text-xs text-muted-foreground py-1">Aucune tâche assignée actuellement</p>
                           ) : (
                             techTasks.map((task: WorkOrder) => (
-                              <div key={task.id} className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                              <div key={task.id} className="p-2.5 rounded-xl bg-card dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
                                 <div>
                                   <p className="text-xs font-bold text-foreground">{task.title}</p>
                                   <p className="text-[10px] text-muted-foreground">{task.vehicleRegistration || `#${task.vehicleId}`}</p>
@@ -716,13 +716,13 @@ export default function GMAODashboard() {
             </div>
 
             {/* Interventions à affecter */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <AlertTriangle className="h-4 w-4 text-warning-text" />
                   <span className="text-sm font-bold text-foreground">File d'Attente sans Technicien</span>
                 </div>
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-warning/10 text-warning-text border border-warning/30">
                   {workOrders.filter((wo: WorkOrder) => !wo.technicianId).length}
                 </span>
               </div>
@@ -738,7 +738,7 @@ export default function GMAODashboard() {
                         </p>
                       </div>
                       <Link href={`/maintenance/work-orders`}>
-                        <Button size="sm" className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
+                        <Button size="sm" className="h-7 text-xs px-2.5 bg-success hover:bg-success text-white rounded-xl">
                           Assigner
                         </Button>
                       </Link>
@@ -754,20 +754,20 @@ export default function GMAODashboard() {
         {/* ========================================================================= */}
         <TabsContent value="analytics" className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
               <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-emerald-600" />
+                <TrendingUp className="h-4 w-4 text-success" />
                 <span className="text-sm font-bold text-foreground">Performance de Clôture &amp; Délais</span>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1.5 text-xs">
                   <span className="text-muted-foreground">Taux de résolution globale</span>
-                  <span className="font-extrabold text-emerald-600">{resolutionRate}%</span>
+                  <span className="font-extrabold text-success">{resolutionRate}%</span>
                 </div>
                 <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    className="h-full rounded-full bg-success transition-all"
                     style={{ width: `${resolutionRate}%` }}
                   />
                 </div>
@@ -788,9 +788,9 @@ export default function GMAODashboard() {
               </div>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertTriangle className="h-4 w-4 text-warning-text" />
                 <span className="text-sm font-bold text-foreground">Répartition par Niveau de Priorité</span>
               </div>
 
@@ -800,9 +800,9 @@ export default function GMAODashboard() {
                   const percentage = workOrders.length > 0 ? (count / workOrders.length) * 100 : 0;
                   const colors: Record<string, string> = {
                     critical: "bg-rose-500",
-                    high: "bg-amber-500",
+                    high: "bg-warning",
                     medium: "bg-blue-500",
-                    low: "bg-emerald-500",
+                    low: "bg-success",
                   };
                   return (
                     <div key={priority} className="space-y-1">
