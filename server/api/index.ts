@@ -56,6 +56,7 @@ import missionOperationsRoutes from "./mission-operations.routes";
 import treasuryRoutes from "./treasury.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
+import qhseInspectionsRoutes from "./qhse-inspections.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
 import partScansRoutes from "./part-scans.routes";
@@ -261,6 +262,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(treasuryRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(driverBreakdownsRoutes);
+  apiRouter.use(qhseInspectionsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(userStockPermissionRoutes);
