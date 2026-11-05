@@ -1,8 +1,9 @@
 import { getDriverCpcEligibility, type CpcIneligibleCode } from "@shared/constants/driver-cpc-eligibility";
-import { canManageDrivers } from "@shared/constants/roles";
+import { canManageDrivers, DRIVER_MANAGER_ROLES, type DriverManagerRole } from "@shared/constants/roles";
 
 /** Chauffeur tel que renvoyé par GET /api/drivers. */
 export interface WizardDriver {
+  id?: number;
   cpcStatus?: string | null;
   /** Statut enregistré en base, celui que lit la garde serveur. */
   cpcStatusRecorded?: string | null;
@@ -36,6 +37,15 @@ export function driverCpcStatusOf(driver: WizardDriver | null | undefined): stri
 export const CPC_BLOCK_PREFIX = "Chauffeur non éligible : ";
 
 
+const CPC_REQUESTEE_LABEL: Record<DriverManagerRole, string> = {
+  admin: "à l'administrateur",
+  logistics: "à la logistique",
+  secretary: "au secrétariat",
+};
+
+/** Rôles à solliciter, dérivés de DRIVER_MANAGER_ROLES (aucune liste en dur divergente). */
+export const CPC_UPDATE_REQUESTEE = DRIVER_MANAGER_ROLES.map((r) => CPC_REQUESTEE_LABEL[r]).join(", ").replace(/, ([^,]*)$/, " ou $1");
+
 export interface CpcBlockGuidance {
   title: string;
   /** Pourquoi le chauffeur est bloqué. */
@@ -44,6 +54,8 @@ export interface CpcBlockGuidance {
   action: string;
   /** Vrai quand le rôle peut corriger la fiche chauffeur lui-même. */
   canEditDriver: boolean;
+  /** Lien vers la fiche du chauffeur, seulement pour un rôle qui peut l'ouvrir. */
+  driverHref: string | null;
 }
 
 /**
@@ -68,14 +80,14 @@ export function getCpcBlockGuidance(
     MISSING: "Le statut CPC de ce chauffeur n'est pas renseigné : il ne peut pas être affecté à une mission.",
     FUTURE_DATE: "La date de formation CPC de ce chauffeur est postérieure à aujourd'hui : elle doit être vérifiée avant toute affectation.",
   };
-  // Le formulaire « Mise à jour des certifications CPC » n'est affiché que sur le
-  // tableau de bord du secrétariat : seul ce rôle peut le suivre tel quel. Les autres
-  // rôles autorisés (admin, logistique) y sont renvoyés par le secrétariat, en attendant
-  // que le formulaire soit exposé sur la fiche chauffeur.
-  const action = role === "secretary"
-    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC depuis votre tableau de bord, avec le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation » ; le statut enregistré est alors recalculé)."
-    : "Choisissez un autre chauffeur, ou demandez au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mise à jour des certifications CPC » de son tableau de bord.";
-  return { title: "CPC non à jour", why: why[cpc.code], action, canEditDriver };
+  // Le formulaire « Mise à jour des certifications CPC » est sur la fiche chauffeur
+  // (/drivers/:id), ouverte aux seuls DRIVER_MANAGER_ROLES, comme POST update-cpc :
+  // le lien n'est donné qu'à ces rôles, les autres ne sont jamais renvoyés vers un 403.
+  const driverHref = canEditDriver && typeof driver.id === "number" ? `/drivers/${driver.id}` : null;
+  const action = canEditDriver
+    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, ouvrez la fiche du chauffeur et enregistrez la nouvelle date de formation CPC avec le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation » ; le statut enregistré est alors recalculé)."
+    : `Choisissez un autre chauffeur, ou demandez ${CPC_UPDATE_REQUESTEE} de mettre à jour le CPC depuis la fiche du chauffeur.`;
+  return { title: "CPC non à jour", why: why[cpc.code], action, canEditDriver, driverHref };
 }
 
 /** Raison pour laquelle « Suivant » est bloqué à cette étape, ou null. */
