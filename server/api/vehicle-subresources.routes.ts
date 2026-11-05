@@ -1,12 +1,8 @@
-import { Router, type Request } from "express";
-import { eq } from "drizzle-orm";
-import { vehicles } from "@shared/schema";
-import { db } from "../db";
+import { Router } from "express";
 import { isAnyUser } from "../middleware/auth";
 import { AppError } from "../lib/app-error";
-import { OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
 import { parseRouteId } from "../lib/route-id";
-import { canReadVehicleSubresources } from "../lib/vehicle-retired";
+import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { mileageService } from "../services/mileage-service";
 import { tiresService } from "../services/tires-service-simplified";
@@ -27,14 +23,6 @@ router.use("/check", (_req, _res, next) => next("router"));
 const INVALID_ID = "ID de véhicule invalide";
 const MAX_HISTORY_LIMIT = 500;
 const DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"];
-
-const vehicleRow = (id: number) => async () =>
-  (await db.select({ ownerId: vehicles.ownerId, deletedAt: vehicles.deletedAt }).from(vehicles).where(eq(vehicles.id, id)).limit(1))[0];
-
-/** Cloison client (403 hors périmètre ou véhicule retiré). Lève : reconnue comme garde par `route-guard-scan`. */
-async function assertVehicleSubresourcesReadable(req: Request, vehicleId: number): Promise<void> {
-  if (!(await canReadVehicleSubresources(req.user, vehicleRow(vehicleId)))) throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
-}
 
 const failure = (message: string, error: unknown) =>
   error instanceof AppError ? error : new AppError(500, message, { cause: error });

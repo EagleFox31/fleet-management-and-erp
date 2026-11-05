@@ -1284,6 +1284,47 @@ EXCEPTION WHEN lock_not_available THEN
 END $$;
 `;
 
+// Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.
+// Après TARIFF_GRID_SQL : tariff_grid_id référence tariff_grid. Ni seed ni rétro-remplissage.
+export const MISSION_AGREED_PRICE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'missions' AND column_name = 'agreed_price') THEN
+    ALTER TABLE missions ADD COLUMN agreed_price numeric(15,0);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'missions' AND column_name = 'tariff_grid_id') THEN
+    ALTER TABLE missions ADD COLUMN tariff_grid_id integer;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'missions.agreed_price / tariff_grid_id non ajoutées : verrou indisponible';
+END $$;
+
+DO $$
+BEGIN
+  -- Posée NOT VALID puis validée : un tariff_grid_id orphelin laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'missions'::regclass
+                 AND conname = 'missions_tariff_grid_id_tariff_grid_id_fk') THEN
+    ALTER TABLE missions
+      ADD CONSTRAINT missions_tariff_grid_id_tariff_grid_id_fk
+      FOREIGN KEY (tariff_grid_id) REFERENCES tariff_grid(id) ON DELETE SET NULL NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'missions'::regclass
+             AND conname = 'missions_tariff_grid_id_tariff_grid_id_fk' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE missions VALIDATE CONSTRAINT missions_tariff_grid_id_tariff_grid_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'missions_tariff_grid_id_tariff_grid_id_fk laissée NOT VALID : tariff_grid_id vers un tarif absent';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'missions_tariff_grid_id_tariff_grid_id_fk non posée : verrou indisponible';
+END $$;`;
+
 // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
 // Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
 export const MISSION_DESTINATIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
@@ -1405,6 +1446,57 @@ BEGIN
   END IF;
 EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'lien trésorerie de mission_budgets non réconcilié : verrou de table indisponible';
+END $$;`;
+
+// Dépenses justifiées du budget de mission (L1e) — jumelle de server/db/migrations/20261106_mission_budget_expenses.sql.
+// Après MISSION_BUDGETS_SQL (FK vers mission_budgets).
+export const MISSION_BUDGET_EXPENSES_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS mission_budget_expenses (
+  id serial PRIMARY KEY,
+  budget_id integer NOT NULL
+    CONSTRAINT mission_budget_expenses_budget_id_mission_budgets_id_fk REFERENCES mission_budgets(id),
+  line text NOT NULL,
+  amount integer NOT NULL,
+  label text NOT NULL,
+  expense_date date NOT NULL,
+  created_by integer CONSTRAINT mission_budget_expenses_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_budget_expenses_updated_by_users_id_fk REFERENCES users(id),
+  deleted_by integer CONSTRAINT mission_budget_expenses_deleted_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  deleted_at timestamp,
+  CONSTRAINT mission_budget_expenses_line_check CHECK (line IN ('fdr', 'carburant')),
+  CONSTRAINT mission_budget_expenses_amount_check CHECK (amount > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mission_budget_expenses_budget_id ON mission_budget_expenses (budget_id);
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push) : CHECK posé NOT VALID puis validé ; une ligne
+  -- non conforme laisse un WARNING, relu par reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS).
+  -- Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_budget_expenses_line_check', 'CHECK (line IN (''fdr'', ''carburant''))'),
+    ('mission_budget_expenses_amount_check', 'CHECK (amount > 0)')
+  ) AS t(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budget_expenses'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_budget_expenses ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budget_expenses'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_budget_expenses VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_budget_expenses : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_budget_expenses non réconciliées : verrou de table indisponible';
 END $$;`;
 
 async function applyWorkOrderVehicleStatusTriggers() {
@@ -1615,8 +1707,17 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_destinations_amounts_check',
   'mission_destinations_code_unique',
   'mission_budgets_destination_id_mission_destinations_id_fk',
+  'missions_tariff_grid_id_tariff_grid_id_fk',
   // Posée par MISSION_BUDGETS_TREASURY_SQL (lot L1c).
   'mission_budgets_treasury_entry_id_treasury_entries_id_fk',
+  // Posées par MISSION_BUDGET_EXPENSES_SQL (lot L1e). Les FK ne sont posées qu'à la création de la table :
+  // relues ici pour signaler leur absence si la table préexistait sans elles, pas pour les réparer.
+  'mission_budget_expenses_line_check',
+  'mission_budget_expenses_amount_check',
+  'mission_budget_expenses_budget_id_mission_budgets_id_fk',
+  'mission_budget_expenses_created_by_users_id_fk',
+  'mission_budget_expenses_updated_by_users_id_fk',
+  'mission_budget_expenses_deleted_by_users_id_fk',
   // Posées par TARIFF_GRID_SQL (lot O3).
   'tariff_grid_pricing_unit_check',
   'tariff_grid_unit_price_check',
@@ -2182,12 +2283,16 @@ export async function initializeDatabase() {
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
     // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
     await pool.query(TARIFF_GRID_SQL);
+    // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.
+    await pool.query(MISSION_AGREED_PRICE_SQL);
     // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
     await pool.query(MISSION_BUDGETS_SQL);
     // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
     await pool.query(MISSION_DESTINATIONS_SQL);
     // Lien trésorerie du budget (L1c) — jumelle de server/db/migrations/20261105_mission_budgets_treasury.sql.
     await pool.query(MISSION_BUDGETS_TREASURY_SQL);
+    // Dépenses justifiées (L1e) — jumelle de server/db/migrations/20261106_mission_budget_expenses.sql.
+    await pool.query(MISSION_BUDGET_EXPENSES_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);

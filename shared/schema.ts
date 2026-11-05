@@ -1350,6 +1350,9 @@ export const missions = pgTable("missions", {
   
   // Distance et coûts
   estimatedDistance: integer("estimated_distance"), // km
+  // O3 lot 3 : prix convenu en XAF entier (saisi ou repris d'un tarif) et tarif d'origine, tracé sans l'imposer.
+  agreedPrice: numeric("agreed_price", { precision: 15, scale: 0 }),
+  tariffGridId: integer("tariff_grid_id").references(() => tariffGrid.id, { onDelete: "set null" }),
   actualDistance: integer("actual_distance"), // km réel
   estimatedFuelCost: numeric("estimated_fuel_cost", { precision: 15, scale: 2 }),
   actualFuelCost: numeric("actual_fuel_cost", { precision: 15, scale: 2 }),
@@ -1419,6 +1422,30 @@ export const missionBudgets = pgTable("mission_budgets", {
   index("idx_mission_budgets_budget_date").on(table.budgetDate),
 ]);
 export type MissionBudgetRow = typeof missionBudgets.$inferSelect;
+
+// Dépenses justifiées d'un budget décaissé (L1e). Jumelle SQL : MISSION_BUDGET_EXPENSES_SQL
+// (server/init-database.ts) et server/db/migrations/20261106_mission_budget_expenses.sql.
+// Montant entier en XAF. Suppression douce (deleted_at, deleted_by) : une dépense est une trace financière,
+// jamais effacée ; sommes et reliquat ignorent les lignes supprimées.
+export const missionBudgetExpenses = pgTable("mission_budget_expenses", {
+  id: serial("id").primaryKey(),
+  budgetId: integer("budget_id").notNull().references(() => missionBudgets.id),
+  line: text("line", { enum: ["fdr", "carburant"] }).notNull(),
+  amount: integer("amount").notNull(),
+  label: text("label").notNull(),
+  expenseDate: date("expense_date").notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  deletedBy: integer("deleted_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  check("mission_budget_expenses_line_check", sql`${table.line} IN ('fdr', 'carburant')`),
+  check("mission_budget_expenses_amount_check", sql`${table.amount} > 0`),
+  index("idx_mission_budget_expenses_budget_id").on(table.budgetId),
+]);
+export type MissionBudgetExpenseRow = typeof missionBudgetExpenses.$inferSelect;
 
 // Barème FDR par destination (L1b), liste fermée. Jumelle SQL : MISSION_DESTINATIONS_SQL
 // (server/init-database.ts) et server/db/migrations/20261105_mission_destinations.sql, qui porte le seed.

@@ -139,7 +139,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Quoi** :
   - 6 lectures sont extraites de `server/routes.ts` vers `server/api/vehicle-subresources.routes.ts` : documents, documents par type, kilométrage, historique kilométrique, historique de statut, pneus.
   - Elles sont supprimées de `routes.ts` (130 lignes en moins, rien d'ajouté).
-  - Un client ne les lit que sur son véhicule, et plus du tout une fois le véhicule retiré.
+  - Un client ne lit ces 6 routes que sur son véhicule, et plus du tout une fois le véhicule retiré. Les autres lectures rattachées au véhicule ne sont pas encore toutes cloisonnées : voir la limite de l'entrée L1 ci-dessous.
   - La réponse est 403 avec le même message que pour un tiers : le retrait ne se devine pas.
   - Le personnel lit tout, véhicule retiré compris.
 - **Comment** :
@@ -207,3 +207,20 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - le WARNING du bloc `updated_at` décrit l'effet réel d'un verrou indisponible : lecture et écriture des plans, suppression douce et restauration en échec jusqu'au démarrage suivant ;
   - la phrase « une base convergée n'écrit rien » est nuancée (fonction redéfinie à chaque démarrage) ;
   - la leçon des mutants jumeaux est reportée dans `docs/analysis/LESSONS_LEARNED.md`.
+## 2026-11-05T18:57:43+01:00 — Pleins d'un véhicule : même cloison que les sous-ressources (L1, suite de #490)
+
+- **Quoi** :
+  - `GET /api/fuel-records/vehicle/:vehicleId` sort de `server/routes.ts` vers `server/api/fuel-records.routes.ts` ;
+  - la garde `assertVehicleSubresourcesReadable` passe dans `server/lib/vehicle-subresource-guard.ts`, partagée par les deux routeurs ;
+  - un client propriétaire d'un véhicule retiré reçoit 403 (`canAccessOwned` seul le laissait lire) ;
+  - un client tiers reçoit 403, avec le même message.
+- **Contrat de réponse** : corps 200 inchangé (`pricePerLiter`, `totalCost`). Les 400 et 403 passent par `AppError`.
+- **Pourquoi** : les pleins sont une lecture rattachée au véhicule, comme les documents ou les pneus. Le retrait doit y valoir aussi.
+- **Preuve automatisée** :
+  - `tests/contract/fuel-records-vehicle-client-scope.contract.test.ts`, 8 cas :
+    - propriétaire actif et retiré, tiers, personnel sur le retiré, anonyme, id illisible ;
+    - témoins `/api/fuel-records`, `/statistics`, `/consumption-history` ;
+  - mutant « garde retirée » : 2 rouges au contrat, 1 rouge dans `routes-hygiene` ;
+  - contrats liés (`vehicle-subresources`, `vehicle-reads-client-scope`, `fuel-card-routes`) verts.
+- **Limite connue** : les pleins d'un véhicule retiré restent lisibles par son client propriétaire par le filtre de requête, `GET /api/fuel-records?vehicleId=` et `GET /api/fuel-records/consumption-history?vehicleId=`. Cette route en chemin ne ferme donc pas l'accès à elle seule ; les deux routes par requête relèvent de L1b.
+- **Hors périmètre** : les autres lectures en `canAccessOwned` + `getVehicleOwnerId` ont été recensées pour l'orchestrateur. Elles ne sont pas élargies sans son accord.
