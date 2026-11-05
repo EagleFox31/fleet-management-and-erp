@@ -11,11 +11,12 @@ import { TireMovementsTable } from "@/components/inventory/tire-movements-table"
 import { TimeGrid } from "@/components/time-tracking/time-grid";
 import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
+import { TariffGridTable } from "@/components/operations/tariff-grid-table";
 import { MissionOperationsTable } from "@/components/operations/mission-operations-table";
 import { MISSION_OPERATIONS_WRITE_ROLES } from "@shared/constants/roles";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
-import { canEditTankCapacity, canWriteFinanceReceivable, canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
+import { canEditTankCapacity, canWriteFinanceReceivable, canWriteFuel, canWriteTariffGrid, canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -35,6 +36,12 @@ export function MissionOperationsScreen() {
   const { user } = useAuth();
   const canWrite = !!user?.role && (MISSION_OPERATIONS_WRITE_ROLES as readonly string[]).includes(user.role);
   return <MissionOperationsTable canWrite={canWrite} />;
+}
+
+/** Secrétariat et logistique consultent ; création, modification et désactivation : admin et direction. */
+export function TariffGridScreen() {
+  const { user } = useAuth();
+  return <TariffGridTable readOnly={!canWriteTariffGrid(user?.role)} />;
 }
 
 export function PendingInvoicesScreen() {
