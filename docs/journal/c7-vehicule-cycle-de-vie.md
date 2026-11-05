@@ -91,7 +91,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
     - le personnel lit un véhicule retiré, avec `deletedAt` renseigné ;
     - un client reçoit 403, même message qu'un véhicule absent, même s'il en est propriétaire.
   - **M1, modification** `PATCH /api/vehicles/:id` sur un véhicule retiré : 409 « Véhicule retiré : le restaurer avant de le modifier. ». `deletedAt` et `deletedBy` du corps sont ignorés : retrait et restauration passent uniquement par DELETE et `/restore`.
-  - **M1, immatriculation** : `/api/vehicles/check/:reg` renvoie `retired`. Une immatriculation retirée reste réservée.
+  - **M1, immatriculation** : `/api/vehicles/check/:reg` renvoie `retired` au personnel, pour qui une immatriculation retirée reste réservée. Un client reçoit `exists: false`, comme pour une plaque inconnue (réserve R1 de #484).
   - **M1, import** : une ligne visant un véhicule retiré est refusée avec un message lisible.
     - Une écriture refusée par le serveur compte désormais en erreur, avec le message du serveur.
     - Avant, l'import comptait un succès sans lire la réponse.
@@ -107,9 +107,12 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Pourquoi** :
   - suivi M1 à M3 de la relecture sécurité de #476 ;
   - décision de 0a : personnel en 200 avec `deletedAt`, client en 403.
-- **Limite assumée** : `maintenance_schedules` n'a pas d'horodatage. Un plan désactivé à la main pendant le retrait est réactivé par la restauration.
+- **Limites assumées** :
+  - le refus client porte sur le détail et le contrôle d'immatriculation seulement, pour l'instant. Les sous-ressources d'un véhicule retiré (documents, kilométrage, historique de statut, pneus) répondent encore 200 à son client propriétaire : elles vivent dans `server/routes.ts`, gelé, et seront filtrées à leur extraction vers `server/api` ;
+  - `maintenance_schedules` n'a pas d'horodatage. Un plan désactivé à la main pendant le retrait est réactivé par la restauration ;
+  - M3 : `updated_at` bouge sur toute écriture du renouvellement, pas seulement sur un changement de statut. Un renouvellement rejeté par la suppression puis simplement commenté pendant le retrait reste rejeté à la restauration. Le choix va dans le sens prudent : rouvrir à tort un dossier qu'un humain a touché serait pire que de le laisser rejeté.
 - **Preuve automatisée** :
-  - `tests/contract/vehicle-retired-access.contract.test.ts` : 8 cas (détail personnel et client, PATCH 409, champs de retrait ignorés, `check` avec `retired`, témoins actifs) ;
+  - `tests/contract/vehicle-retired-access.contract.test.ts` : 10 cas (détail personnel et client, PATCH 409, champs de retrait ignorés, `check` : `retired` pour le personnel et `exists: false` pour le client, témoins actifs) ;
   - `tests/contract/vehicle-lifecycle.contract.test.ts` : cloison client sur 2 acteurs, plus le cas M3. Mutant « horodatage ignoré » : 1 rouge ;
   - contrats véhicule et route-id : 35 fichiers, 495 tests verts ; unitaires verts ; `npm run check` sans erreur.
 - **RAIDER** :
@@ -118,3 +121,13 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - I : DDL `IF NOT EXISTS` ;
   - R (rétroactif) : effets journalisés avant M3 (`applied_stamp` NULL) restaurés comme avant, sur la valeur seule ;
   - non applicable : pas de trame temps réel, aucune transition nouvelle.
+
+## 2026-11-05T18:16:34+01:00 — Réserves de relecture #484 (R1 à R4)
+
+- **Agent** : c7 · **Branche** : `c7-vehicle-lifecycle-followups`
+- **Quoi** :
+  - R1 : `check/:reg` passe par `vehicleReadableBy` ; un client sur son véhicule retiré reçoit `exists: false`.
+  - R2 : sous-ressources client inscrites en limite assumée ci-dessus, sans toucher `routes.ts`.
+  - R3 : test unitaire du schéma, recherche indentée rétablie pour les colonnes du `CREATE TABLE`, recherche ciblée de l'`ALTER` pour `applied_stamp`.
+  - R4 : effet de l'horodatage sur toute écriture documenté en limite.
+- **Pourquoi** : cohérence avec le détail (« un client ne le voit plus ») ; un client ne crée pas de véhicule, la réservation de l'immatriculation ne vaut que pour le personnel.

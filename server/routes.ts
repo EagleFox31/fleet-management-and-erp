@@ -997,7 +997,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/vehicles/check/:registrationNumber", isAnyUser, async (req, res) => {
     try {
       const registrationNumber = req.params.registrationNumber;
-      const vehicle = await storage.getVehicleByRegistration(registrationNumber);
+      const vehicle = vehicleReadableBy(req.user?.role, await storage.getVehicleByRegistration(registrationNumber));
       
       if (!vehicle) {
         return res.status(200).json({ exists: false });
@@ -1009,7 +1009,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(200).json({ exists: false });
       }
       
-      // Une immatriculation retirée reste réservée : la recréer ferait échouer la restauration (409).
+      // Pour le personnel, une immatriculation retirée reste réservée : la recréer ferait échouer la restauration (409).
       return res.status(200).json({ 
         exists: true, 
         id: vehicle.id,

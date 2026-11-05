@@ -11,7 +11,8 @@ import { createTestVehicle } from "../support/factories";
  * Véhicule retiré de la flotte (deleted_at renseigné) :
  * - détail : le personnel le lit (deletedAt renseigné), un client reçoit 403 comme pour un véhicule absent ;
  * - PATCH : 409 tant qu'il n'est pas restauré ; deletedAt et deletedBy ne s'écrivent jamais par PATCH ;
- * - /api/vehicles/check/:reg : l'immatriculation reste réservée et la réponse le dit (retired).
+ * - /api/vehicles/check/:reg : pour le personnel, l'immatriculation reste réservée et la réponse le dit (retired) ;
+ *   un client reçoit exists: false, comme pour une plaque inconnue.
  */
 const ids = createIdBag();
 let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "technician" | "owner">>>;
@@ -85,13 +86,27 @@ describe("véhicule retiré : modification", { timeout: 60000 }, () => {
 });
 
 describe("véhicule retiré : immatriculation réservée", { timeout: 60000 }, () => {
-  it("check : exists et retired pour le personnel comme pour le client propriétaire", async () => {
+  it("check : exists et retired pour le personnel", async () => {
     const v = await retiredVehicle();
-    for (const actor of ["admin", "owner"] as const) {
+    for (const actor of ["admin", "technician"] as const) {
       const res = await actors.call("GET", `/api/vehicles/check/${encodeURIComponent(v.registrationNumber)}`, { actor });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ exists: true, id: v.id, registrationNumber: v.registrationNumber, retired: true });
     }
+  });
+
+  it("check : le client propriétaire reçoit exists: false, comme pour une plaque inconnue", async () => {
+    const v = await retiredVehicle();
+    const res = await actors.call("GET", `/api/vehicles/check/${encodeURIComponent(v.registrationNumber)}`, { actor: "owner" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ exists: false });
+  });
+
+  it("témoin : le client propriétaire voit son véhicule actif au check", async () => {
+    const v = await createTestVehicle({ ownerId: actors.userIdOf("owner") });
+    ids.vehicleIds.push(v.id);
+    const res = await actors.call("GET", `/api/vehicles/check/${encodeURIComponent(v.registrationNumber)}`, { actor: "owner" });
+    expect(res.body).toMatchObject({ exists: true, id: v.id, retired: false });
   });
 
   it("témoin : un véhicule actif répond retired: false", async () => {

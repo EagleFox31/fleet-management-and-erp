@@ -43,7 +43,12 @@ describe("cycle de vie véhicule : init-database et migration jumelle", () => {
 
   it("le SQL crée ce que shared/schema.ts déclare", () => {
     const sql = fromMigration();
-    for (const column of getTableConfig(vehicleDeletionEffects).columns) expect(sql).toContain(` ${column.name} `);
+    // Colonnes du CREATE TABLE : recherche indentée, pour ne pas matcher un nom cité ailleurs.
+    // applied_stamp est ajoutée après coup : recherche ciblée sur son ALTER.
+    const added = { applied_stamp: "ALTER TABLE vehicle_deletion_effects ADD COLUMN IF NOT EXISTS applied_stamp timestamp;" };
+    for (const { name } of getTableConfig(vehicleDeletionEffects).columns) {
+      expect(sql).toContain(name in added ? added[name as keyof typeof added] : `    ${name} `);
+    }
     expect(sql).toContain("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id) ON DELETE SET NULL;");
     expect(getTableConfig(vehicles).columns.map((c) => c.name)).toContain("deleted_by");
   });

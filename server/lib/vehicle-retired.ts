@@ -3,7 +3,8 @@ import { AppError } from "./app-error";
 /**
  * Véhicule retiré de la flotte (suppression douce, `deleted_at` renseigné) :
  * - le personnel continue de le lire (liens depuis l'historique, restauration) ;
- * - un client ne le voit plus, même s'il en est propriétaire ;
+ * - un client ne le voit plus en détail ni au contrôle d'immatriculation, même s'il en est propriétaire
+ *   (les sous-ressources documents, kilométrage, historique de statut et pneus ne filtrent pas encore) ;
  * - personne ne le modifie avant de l'avoir restauré (POST /api/vehicles/:id/restore).
  * Le filtre vit ici, pas dans `storage.getVehicle` : la cloison des OT d'un client
  * (work-order-scope.ts) et les contrôles de doublon d'immatriculation doivent voir les véhicules retirés.
