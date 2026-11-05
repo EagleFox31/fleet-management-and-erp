@@ -491,9 +491,12 @@ export function sourceFiles(dir: string): string[] {
  * `authorize(...)`, `sessionGuard(...)` et spreads. Les autres appels (`express.json()`) sont du bruit.
  */
 export function routerLevelGuards(rawSource: string, kinds: GuardKinds, before: number = Number.POSITIVE_INFINITY): Map<string, string[]> {
-  // un identifiant nu n'est lu que s'il est une garde connue : `use(sessionMiddleware)`, `use(unRouteur)` sont du bruit
-  const known = (a: string) => !/^\w+$/.test(a) || kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
   const source = stripComments(rawSource);
+  // échec fermé, comme en en-tête : un identifiant nu inconnu compte comme garde permissive (route retenue).
+  // Seuls les sous-routeurs (`use(unRouteur)`) sont du bruit.
+  const routers = routerVarsOf(source);
+  const known = (a: string) => !/^\w+$/.test(a) || !(routers.has(a) || /Router$/.test(a)) || kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
+  const isGuardArg = (a: string) => /^(\w+|authorize\s*\(.*\)|sessionGuard\s*\(.*\)|\.\.\.\s*\w+)$/s.test(a);
   const out = new Map<string, string[]>();
   for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(/g)) {
     // Express applique les `use` dans l'ordre : un `use` posé après la route ne la couvre pas.
@@ -503,7 +506,7 @@ export function routerLevelGuards(rawSource: string, kinds: GuardKinds, before: 
     if (close === -1) continue;
     const args = splitTopLevel(source.slice(open + 1, close));
     if (args.length === 0 || /^["'`]/.test(args[0])) continue;
-    const guards = args.filter((a) => /^(\w+|authorize\s*\(.*\)|sessionGuard\s*\(.*\)|\.\.\.\s*\w+)$/s.test(a) && known(a));
+    const guards = args.filter((a) => isGuardArg(a) && known(a));
     if (guards.length > 0) out.set(m[1], [...(out.get(m[1]) ?? []), ...guards]);
   }
   return out;

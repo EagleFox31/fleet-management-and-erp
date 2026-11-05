@@ -91,12 +91,14 @@ describe("scan des gardes effectives (arbre synthetique)", () => {
       'import c from "./c.routes";',
       'import d from "./d.routes";',
       'import e from "./e.routes";',
+      'import f from "./f.routes";',
       "const apiRouter = Router();",
       'apiRouter.use("/a", a);',
       'apiRouter.use("/b", b);',
       'apiRouter.use("/c", isStaff, c);',
       'apiRouter.use("/d", d);',
       'apiRouter.use("/e", e);',
+      'apiRouter.use("/f", f);',
       "",
     ].join("\n"),
   );
@@ -105,6 +107,7 @@ describe("scan des gardes effectives (arbre synthetique)", () => {
   write("api/c.routes.ts", routeFile("router.use(authenticate);", "/z/:id"));
   write("api/d.routes.ts", routeFile("", "/w/:id").replace('"/w/:id", async', '"/w/:id", isStaff, async'));
   write("api/e.routes.ts", routeFile("", "/v/:id"));
+  write("api/f.routes.ts", routeFile("router.use(maGardeInconnue);", "/u/:id"));
 
   it("retient router.use(isAnyUser) et authenticate en en-tete", () => {
     const out = scan();
@@ -117,6 +120,10 @@ describe("scan des gardes effectives (arbre synthetique)", () => {
     expect(out).not.toContain("GET /api/c/z/:p");
     expect(out).not.toContain("GET /api/d/w/:p");
     expect(out).not.toContain("GET /api/e/v/:p");
+  });
+
+  it("une garde inconnue dans router.use compte comme permissive (echec ferme)", () => {
+    expect(scan()).toContain("GET /api/f/u/:p");
   });
 
   it("une garde de session ajoutee apres la route ne la couvre pas", () => {
