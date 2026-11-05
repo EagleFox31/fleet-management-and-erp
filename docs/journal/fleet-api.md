@@ -451,3 +451,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
 - **Preuve** : contrat `operations-driver-scope` (cas id non strict et inconnu) rouge sur l'ancien code, vert après (10/10).
+## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
+- **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
+- **Preuve** : contrat `supplier-settlement-proof-path` (5 ids non stricts) rouge sur l'ancien code (200), vert après (15/15).

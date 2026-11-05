@@ -13,6 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
+import { assertValidDbId } from "../lib/work-order-scope";
 import { SETTLEMENT_PROOF_PREFIX, settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
@@ -583,11 +584,11 @@ router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Re
  */
 router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const invoiceId = parseInt(req.params.id);
-    const settlementId = parseInt(req.params.settlementId);
-    if (Number.isNaN(invoiceId) || Number.isNaN(settlementId)) {
-      throw new AppError(400, "Identifiant de facture ou de règlement invalide.");
-    }
+    // Lecture stricte : `parseInt("12abc")` vaudrait 12.
+    const invoiceId = strictRouteId(req.params.id);
+    const settlementId = strictRouteId(req.params.settlementId);
+    assertValidDbId(invoiceId, "Identifiant de facture ou de règlement invalide.");
+    assertValidDbId(settlementId, "Identifiant de facture ou de règlement invalide.");
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     const settlement = settlements.find((item) => item.id === settlementId);
@@ -721,6 +722,11 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
     }
   });
 });
+
+/** Segment d'URL en chiffres seuls, sinon NaN (refusé ensuite par `assertValidDbId`). */
+function strictRouteId(raw: string): number {
+  return /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+}
 
 /** Supprime le justificatif reçu, borné au dossier des justificatifs (liens résolus : settlementProofPath). */
 function removeUploadedProof(req: Request) {
