@@ -144,8 +144,8 @@ function AccessDeniedRoute() {
     <div className="p-6">
       <Card className="border-destructive/40 bg-destructive/5">
         <CardContent className="p-6 text-center space-y-3">
-          <h2 className="text-lg font-semibold text-destructive">Accès refusé</h2>
-          <p className="text-sm text-destructive/90">
+          <h2 className="text-lg font-semibold text-destructive-text">Accès refusé</h2>
+          <p className="text-sm text-destructive-text/90">
             Vous n&apos;avez pas les droits nécessaires pour accéder à cette section.
           </p>
           <Button variant="destructive" onClick={() => setLocation("/dashboard")}>

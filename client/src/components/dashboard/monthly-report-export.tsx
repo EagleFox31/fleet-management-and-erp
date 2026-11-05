@@ -92,7 +92,7 @@ export function MonthlyReportExport() {
         </div>
 
         {error && (
-          <p className="text-xs text-destructive">{error}</p>
+          <p className="text-xs text-destructive-text">{error}</p>
         )}
 
         <Button
