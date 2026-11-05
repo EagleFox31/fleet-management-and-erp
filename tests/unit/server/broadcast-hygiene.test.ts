@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative, sep } from "path";
 import { fileURLToPath } from "url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -54,6 +55,76 @@ function currentBroadcasts(): Record<string, number> {
   return counts;
 }
 
+type ScopeCall = { rel: string; line: number; name: string; kind: "literal" | "forward" | "opaque" | "missing" };
+
+const KINDS = new Set(["roles", "user", "broadcast"]);
+
+/**
+ * Portées calculées, donc non lisibles à la revue (variable ou appel de fonction). Fichier et
+ * nombre ; la liste ne peut que rétrécir. Une portée écrite en clair n'y figure pas.
+ */
+const OPAQUE_SCOPES: Record<string, number> = {};
+
+/** Analyse AST des appels à `broadcastUpdate` et à ses alias locaux (`const broadcast = global.broadcastUpdate`). */
+function scopeScan(): ScopeCall[] {
+  const calls: ScopeCall[] = [];
+  for (const path of serverSources(serverDir)) {
+    const rel = relative(repoDir, path).split(sep).join("/");
+    if (rel === "server/lib/realtime-scope.ts") continue;
+    const text = readFileSync(path, "utf8");
+    if (!/broadcastUpdate/.test(text)) continue;
+    const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const aliases = new Set(["broadcastUpdate"]);
+    const collect = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        if (isGlobalBroadcastRef(node.initializer)) aliases.add(node.name.text);
+      }
+      if (ts.isBindingElement(node) && ts.isIdentifier(node.name) && (node.propertyName ?? node.name).getText(source) === "broadcastUpdate") {
+        aliases.add(node.name.text);
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(source);
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : "";
+        if (aliases.has(name)) {
+          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+          calls.push({ rel, line, name, kind: classify(node, source) });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return calls;
+}
+
+/** `(global as any).broadcastUpdate`, `globalThis.broadcastUpdate` : accès à la propriété, parenthèses et `as` ignorés. */
+function isGlobalBroadcastRef(expr: ts.Expression): boolean {
+  let node = expr;
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
+  return ts.isPropertyAccessExpression(node) && node.name.text === "broadcastUpdate";
+}
+
+function classify(call: ts.CallExpression, source: ts.SourceFile): ScopeCall["kind"] {
+  const [, payload] = call.arguments;
+  // Enveloppe qui relaie telle quelle une trame déjà construite (`broadcastUpdate(event, data)`).
+  if (call.arguments.length === 2 && ts.isIdentifier(call.arguments[0]) && payload && ts.isIdentifier(payload)) return "forward";
+  if (!payload || !ts.isObjectLiteralExpression(payload)) return "missing";
+  const scope = payload.properties.find(
+    (p): p is ts.PropertyAssignment | ts.ShorthandPropertyAssignment =>
+      (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && p.name.getText(source) === "scope",
+  );
+  if (!scope) return payload.properties.some(ts.isSpreadAssignment) ? "opaque" : "missing";
+  if (!ts.isPropertyAssignment(scope) || !ts.isObjectLiteralExpression(scope.initializer)) return "opaque";
+  const type = scope.initializer.properties.find(
+    (p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText(source) === "type",
+  );
+  return type && ts.isStringLiteral(type.initializer) && KINDS.has(type.initializer.text) ? "literal" : "opaque";
+}
+
 const ADVICE =
   "utiliser une portée rôle/user ; un broadcast doit être ajouté à la liste avec justification " +
   "(KNOWN_BROADCASTS dans tests/unit/server/broadcast-hygiene.test.ts)";
@@ -76,34 +147,22 @@ describe("hygiène des broadcasts temps réel", () => {
   });
 
   it("chaque appel de broadcastUpdate (et alias) porte une portée explicite", () => {
-    // Sans portée l'événement est désormais muet (realtime-scope.ts) : il faut le voir à la revue.
-    const callStart = /(?:^|[^\w$])(?:[\w$]+\.)?(broadcastUpdate|broadcast|fn)\(/g;
-    const missing: string[] = [];
-    for (const path of serverSources(serverDir)) {
-      const rel = relative(repoDir, path).split(sep).join("/");
-      if (rel === "server/lib/realtime-scope.ts") continue;
-      const source = readFileSync(path, "utf8");
-      if (!/broadcastUpdate/.test(source)) continue;
-      for (const match of source.matchAll(callStart)) {
-        const open = match.index! + match[0].length - 1;
-        let depth = 0;
-        let end = open;
-        for (; end < source.length; end++) {
-          if (source[end] === "(") depth++;
-          else if (source[end] === ")" && --depth === 0) break;
-        }
-        const args = source.slice(open + 1, end);
-        const line = source.slice(0, open).split("\n").length;
-        const secondArg = args.slice(args.indexOf(",") + 1);
-        const forwarder = /^\s*event\s*,\s*data\s*$/.test(args); // enveloppe qui relaie tel quel
-        const explicit = /\bscope\b/.test(secondArg);
-        const spreadOfScoped = /\.\.\.base\b/.test(secondArg) && /\bscope:\s*\w+/.test(source); // vehicle-documents
-        if (args.includes(",") && (explicit || spreadOfScoped)) continue;
-        if (forwarder) continue;
-        missing.push(`${rel}:${line} ${match[1]}(…)`);
-      }
-    }
-    expect(missing, `Appel sans portée explicite (il ne partirait à personne) : ajouter scope: { type: "roles" | "user" | "broadcast", … }`).toEqual([]);
+    // Sans portée l'événement est muet (realtime-scope.ts) : il faut le voir à la revue.
+    const missing = scopeScan().filter((c) => c.kind === "missing").map((c) => `${c.rel}:${c.line} ${c.name}(…)`);
+    expect(missing, 'Appel sans portée explicite (il ne partirait à personne) : ajouter scope: { type: "roles" | "user" | "broadcast", … }').toEqual([]);
+  });
+
+  it("une portée calculée (variable, appel) ne peut qu'être retirée de la liste gelée", () => {
+    const counts: Record<string, number> = {};
+    for (const c of scopeScan()) if (c.kind === "opaque") counts[c.rel] = (counts[c.rel] ?? 0) + 1;
+    const added = Object.entries(counts)
+      .filter(([file, n]) => n > (OPAQUE_SCOPES[file] ?? 0))
+      .map(([file, n]) => `${file} : ${n} au lieu de ${OPAQUE_SCOPES[file] ?? 0}`);
+    expect(added, "Portée non littérale ajoutée : écrire scope: { type: \"roles\" | \"user\", … } en clair, ou la justifier dans OPAQUE_SCOPES").toEqual([]);
+    const stale = Object.entries(OPAQUE_SCOPES)
+      .filter(([file, n]) => (counts[file] ?? 0) < n)
+      .map(([file, n]) => `${file} : ${counts[file] ?? 0} au lieu de ${n}`);
+    expect(stale, "Portée calculée supprimée ou rendue littérale : diminuer ou retirer l'entrée de OPAQUE_SCOPES").toEqual([]);
   });
 
   it("chaque entrée a une justification", () => {
