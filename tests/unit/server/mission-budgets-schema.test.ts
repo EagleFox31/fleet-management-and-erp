@@ -242,4 +242,12 @@ describe("L1e : dépenses justifiées mission_budget_expenses, init-database, mi
     const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
     for (const name of CHECKS) expect(src.slice(listStart, src.indexOf("];", listStart))).toContain(`'${name}'`);
   });
+
+  it("les 4 FK, posées à la création seulement, sont relues au démarrage sous leur nom Drizzle", () => {
+    const fks = getTableConfig(missionBudgetExpenses).foreignKeys.map((k) => k.getName());
+    expect(fks).toHaveLength(4);
+    const src = initSource();
+    const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
+    for (const fk of fks) expect(src.slice(listStart, src.indexOf("];", listStart)), fk).toContain(`'${fk}'`);
+  });
 });

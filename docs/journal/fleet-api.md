@@ -719,3 +719,17 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
     - mission terminée, mission annulée, reliquat rendu, drapeau coupé ;
   - 9 mutants sur 9 tués (verrou du budget, mission ouverte, budget décaissé, reliquat rendu, plafond, lignes supprimées dans la somme, reliquat, suppression physique, date future) ;
   - test unitaire jumelle et Drizzle.
+
+## 2026-11-05 — Budget de mission (L1e) : réserves de relecture levées
+
+- **Quoi** : une dépense ne peut plus être datée avant le décaissement de son budget. Les quatre FK de `mission_budget_expenses` sont relues au démarrage.
+- **Comment** :
+  - 400 si la date précède le jour du décaissement, au jour de Douala. Un budget hérité, sans date de décaissement, n'a pas de borne ;
+  - les FK `budget_id`, `created_by`, `updated_by` et `deleted_by` rejoignent `CDC_RECONCILED_CONSTRAINTS`. Leur absence est signalée, pas réparée : elles ne sont posées qu'à la création de la table.
+- **Pourquoi** : relecture sécurité de #499 (R2, R3). R1, qui demande si une mission terminée doit encore accepter des dépenses, attend une décision métier : comportement inchangé (409).
+- **Preuve** :
+  - contrat `mission-budget-expenses` 13/13, dont deux cas ajoutés :
+    - date du lendemain à Douala : 400, rien n'est écrit ;
+    - date antérieure au décaissement : 400 ; le jour même passe ; aucune borne sans date de décaissement ;
+  - le mutant qui retire cette borne est tué ;
+  - test unitaire : les 4 FK sont dans la liste relue au démarrage.

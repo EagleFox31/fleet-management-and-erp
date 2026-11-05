@@ -388,6 +388,10 @@ export async function createMissionBudgetExpense(
   if (expenseDate > today) throw new AppError(400, "La date de la dépense ne peut pas être dans le futur.");
   const { budget, row } = await db.transaction(async (tx) => {
     const budget = await lockBudgetForExpenses(tx, budgetId);
+    // Une dépense justifie un décaissement : elle ne le précède pas (jour de Douala ; budget hérité sans date : pas de borne).
+    if (budget.disbursedAt && expenseDate < isoDateInZone(budget.disbursedAt)) {
+      throw new AppError(400, "La date de la dépense ne peut pas précéder le décaissement du budget.");
+    }
     const spent = (await justifiedMissionBudgetExpenses(tx as never, [budgetId])).get(`${budgetId}:${input.line}`) ?? 0;
     const remaining = Math.round((disbursedOf(budget, input.line) - spent) * 100) / 100;
     if (input.amount > remaining) {

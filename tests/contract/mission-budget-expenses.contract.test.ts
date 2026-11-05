@@ -171,6 +171,26 @@ describe("Dépenses justifiées du budget de mission (L1e)", { timeout: 120000 }
     expect(res.body.expenseDate).toBe(TODAY);
   });
 
+  it("date du lendemain à Douala : 400, rien n'est écrit", async () => {
+    const { budgetId } = await disbursedBudget();
+    const tomorrow = addDaysToIsoDate(isoDateInZone(new Date()), 1);
+    const res = await addExpense(budgetId, expense("fdr", 1_000, { expenseDate: tomorrow }));
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(await db.select().from(missionBudgetExpenses).where(eq(missionBudgetExpenses.budgetId, budgetId))).toHaveLength(0);
+  });
+
+  it("date antérieure au jour du décaissement : 400 ; le jour même passe ; budget sans date de décaissement : pas de borne", async () => {
+    const { budgetId } = await disbursedBudget();
+    const [{ disbursedAt }] = await db.select({ disbursedAt: missionBudgets.disbursedAt }).from(missionBudgets).where(eq(missionBudgets.id, budgetId));
+    const day = isoDateInZone(disbursedAt!);
+    const before = await addExpense(budgetId, expense("fdr", 1_000, { expenseDate: addDaysToIsoDate(day, -1) }));
+    expect(before.status, JSON.stringify(before.body)).toBe(400);
+    expect((await addExpense(budgetId, expense("fdr", 1_000, { expenseDate: day }))).status).toBe(201);
+    // Budget décaissé avant que la date ne soit tenue : aucune borne basse.
+    await db.update(missionBudgets).set({ disbursedAt: null }).where(eq(missionBudgets.id, budgetId));
+    expect((await addExpense(budgetId, expense("fdr", 1_000, { expenseDate: addDaysToIsoDate(day, -30) }))).status).toBe(201);
+  });
+
   it("budget non décaissé : 409 ; budget inconnu : 404", async () => {
     const { approved } = await approvedBudget();
     expect((await addExpense(approved.id, expense("fdr", 1_000))).status).toBe(409);

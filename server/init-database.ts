@@ -1624,9 +1624,14 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_budgets_destination_id_mission_destinations_id_fk',
   // Posée par MISSION_BUDGETS_TREASURY_SQL (lot L1c).
   'mission_budgets_treasury_entry_id_treasury_entries_id_fk',
-  // Posées par MISSION_BUDGET_EXPENSES_SQL (lot L1e).
+  // Posées par MISSION_BUDGET_EXPENSES_SQL (lot L1e). Les FK ne sont posées qu'à la création de la table :
+  // relues ici pour signaler leur absence si la table préexistait sans elles, pas pour les réparer.
   'mission_budget_expenses_line_check',
   'mission_budget_expenses_amount_check',
+  'mission_budget_expenses_budget_id_mission_budgets_id_fk',
+  'mission_budget_expenses_created_by_users_id_fk',
+  'mission_budget_expenses_updated_by_users_id_fk',
+  'mission_budget_expenses_deleted_by_users_id_fk',
   // Posées par TARIFF_GRID_SQL (lot O3).
   'tariff_grid_pricing_unit_check',
   'tariff_grid_unit_price_check',
