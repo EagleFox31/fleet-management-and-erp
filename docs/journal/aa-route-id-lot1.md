@@ -92,3 +92,20 @@
   - `route-id-strict-lot7` : 26 cas. Un témoin (le client lit son véhicule avec un id valide), 8 cas côté client et 17 côté personnel.
   - Ancien code : 25 rouges, le témoin reste vert. Correctif : 26 verts.
   - tsc : 0 erreur. Unitaires : 2440 verts. 97 contrats du périmètre : 1115 verts.
+
+## Lot 8 — écritures de `server/api` (factures fournisseur, pièces d'OT, demandes de pièce)
+
+- Quoi : `parseRouteId` (AppError 400) remplace `parseInt` sur 9 lectures d'écriture.
+  - `supplier-invoices` : `PATCH /:id/validate`, `PATCH /:id/approve`, `POST /:id/payment`.
+  - `work-order-parts` : `POST /:workOrderId/awaiting-parts`, `POST /:workOrderId/parts`, `POST /:workOrderId/part-requirements/:requirementId/issue` (2 ids).
+  - `part-requirements` : `PATCH /:id`, `DELETE /:id`.
+- Comment :
+  - `work-order-parts` et `part-requirements` gardent leur message de 400. `supplier-invoices` n'avait aucun 400 sur ces trois routes : « Identifiant de facture invalide. » est un message nouveau, aligné sur celui du fichier.
+  - Les contrôles `isNaN` devenus morts sont retirés.
+  - `issue`, `PATCH` et `DELETE` de demande renvoyaient 500 pour toute erreur : leur catch relaie désormais les AppError (`next(error)`), le reste garde son log et son 500.
+  - FROZEN : `supplier-invoices` 5 → 2, `work-order-parts` 5 → 1, `part-requirements` 3 → 1. Le reste (lectures) est confié au lot 9.
+- Pourquoi : un appel sur `<id>abc` agissait sur l'objet `<id>`.
+- Tester : `route-id-strict-lot8`, 9 cas. Chacun vise `<id>abc` avec `<id>` existant et vérifie le 400, le message, puis que l'objet `<id>` est intact (statut de facture et aucun règlement ; quantité en stock, statut de demande, aucun mouvement ni pièce utilisée ; aucune demande créée ; statut d'OT ; demande ni modifiée ni supprimée).
+  - Ancien code : 9 rouges (200, 201 ou 204 ; `payment` répondait 400 sur un autre motif). Correctif : 9 verts.
+  - tsc : 0 erreur. Unitaires : 2441 verts. 24 contrats du périmètre : 418 verts.
+  - Ménage : sur l'ancien code, les routes écrivent (mouvement lié à l'OT, demande créée) et le mouvement bloquait la suppression de l'OT. Le `afterAll` retrouve désormais les OT par préfixe de titre (`TEST lot 8`) et les demandes par motif, puis supprime des enfants vers les parents. Rejoué : 0 résidu après le vert et après le rouge.

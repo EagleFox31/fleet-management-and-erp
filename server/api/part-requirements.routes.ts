@@ -10,6 +10,8 @@ import { PartRequirementWorkflow } from "../services/part-requirements-workflow"
 import { insertPartRequirementSchema } from "@shared/schema";
 import { ZodError } from "zod";
 import { moduleLogger } from "../lib/logger";
+import { isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("part-requirements-routes");
@@ -127,9 +129,9 @@ router.post("/", isPartRequester, async (req, res, next) => {
   }
 });
 
-router.patch("/:id", isInventoryManager, async (req, res) => {
+router.patch("/:id", isInventoryManager, async (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseRouteId(req.params.id, "ID de demande invalide");
     // Champs tenus par le serveur : jamais repris du corps (T4).
     const {
       emergencyOverrideReason,
@@ -140,10 +142,6 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
       updatedAt: _updatedAt,
       ...requirementPayload
     } = req.body ?? {};
-
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "ID de demande invalide" });
-    }
 
     const requirement = await partRequirementsService.getPartRequirement(id);
 
@@ -189,18 +187,15 @@ router.patch("/:id", isInventoryManager, async (req, res) => {
 
     return res.status(200).json(result.data);
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Update part requirement error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.delete("/:id", isWorkshopManager, async (req, res) => {
+router.delete("/:id", isWorkshopManager, async (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "ID de demande invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID de demande invalide");
 
     const requirement = await partRequirementsService.getPartRequirement(id);
 
@@ -229,6 +224,7 @@ router.delete("/:id", isWorkshopManager, async (req, res) => {
 
     return res.status(204).send();
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Delete part requirement error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
