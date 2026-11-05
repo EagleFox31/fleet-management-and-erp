@@ -34,15 +34,23 @@ export async function listFuelPrices(): Promise<FuelPrice[]> {
  * Lecture unique pour tout le serveur (remplace les 828 en dur). Repli sur le défaut du contrat
  * si la table est vide ou illisible : un calcul de carburant ne doit pas tomber pour un prix.
  */
+/**
+ * Prix en vigueur à `date`, sans repli : `null` si aucun prix n'est posé à cette date ou avant,
+ * et une erreur de lecture remonte. Pour un flux qui fige un montant d'argent (budget de mission).
+ */
+export async function findFuelPriceAt(date: string): Promise<number | null> {
+  const [row] = await db
+    .select()
+    .from(fuelPrices)
+    .where(lte(fuelPrices.effectiveFrom, date))
+    .orderBy(desc(fuelPrices.effectiveFrom))
+    .limit(1);
+  return row ? Number(row.pricePerLiter) : null;
+}
+
 export async function getFuelPriceAt(date: string = todayIsoDate()): Promise<number> {
   try {
-    const [row] = await db
-      .select()
-      .from(fuelPrices)
-      .where(lte(fuelPrices.effectiveFrom, date))
-      .orderBy(desc(fuelPrices.effectiveFrom))
-      .limit(1);
-    return row ? Number(row.pricePerLiter) : DEFAULT_FUEL_PRICE_PER_LITER;
+    return (await findFuelPriceAt(date)) ?? DEFAULT_FUEL_PRICE_PER_LITER;
   } catch (err) {
     log.error({ err, date }, "prix du carburant illisible, prix par défaut utilisé");
     return DEFAULT_FUEL_PRICE_PER_LITER;

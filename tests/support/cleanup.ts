@@ -8,6 +8,7 @@ import {
   documentRenewalCenters,
   documentRenewalRequests,
   fuelPrices,
+  missionBudgets,
   missionOperations,
   missions,
   fuelRecords,
@@ -223,6 +224,16 @@ async function deleteOrphanTestRows(): Promise<void> {
   // missions_created_by_users_id_fk) et faisait échouer le hook global de tous les fichiers.
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
+  // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
+  await db.delete(missionBudgets).where(
+    or(
+      inArray(missionBudgets.missionId, testMissions),
+      inArray(missionBudgets.createdBy, testUsers),
+      inArray(missionBudgets.updatedBy, testUsers),
+      inArray(missionBudgets.approvedBy, testUsers),
+      inArray(missionBudgets.disbursedBy, testUsers),
+    ),
+  );
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
   // Suivi d'opération saisi par un compte de test sur une mission qui ne l'est pas (FK created_by/updated_by).
   await db.delete(missionOperations).where(inArray(missionOperations.createdBy, testUsers));

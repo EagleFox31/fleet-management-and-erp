@@ -522,9 +522,61 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `upload.ts` n'accepte qu'un type MIME déclaré en propre (`Object.hasOwn`). `sendUploadedFile` classe l'échec d'envoi : interruption client (info, sans réponse), introuvable (404), autre (500). Contrat `uploaded-documents-download-headers` : id inconnu, chemin stocké hors de `uploads/`, fichier absent. `partId` du catalogue de pannes et plein de la clé d'anomalie carburant bornés à l'int4. Cliquet `zod-id-range-hygiene` étendu à `shared/schema.ts`, borne exigée `MAX_DB_INTEGER_ID`.
 - **Pourquoi** : `constructor` comme type MIME remontait au prototype. Un fichier disparu entre le contrôle et l'envoi répondait 500, et une interruption côté client était journalisée en erreur. Deux ids hors plage répondaient encore 500.
 - **Preuve** : unitaires rouges sur l'ancien `upload.ts` (2 cas) ; contrats `fault-catalog-lifecycle` et `fuel-anomalies` rouges en 500 sur l'ancien schéma, verts après.
+## 2026-11-05 — Budget de mission (L1, drapeau finance)
+- **Quoi** :
+  - table `mission_budgets`, une par mission (`shared/schema.ts`, `MISSION_BUDGETS_SQL` et la migration jumelle `20261105_mission_budgets.sql`), avec les colonnes d'audit et `treasury_entry_id` nullable, sans effet avant T1 ;
+  - contrat `shared/contracts/mission-budgets.ts` ;
+  - routeur `server/api/mission-budgets.routes.ts`, derrière `requireFeature("finance")` :
+    - saisie : logistique et administrateur ;
+    - approbation et décaissement : direction et administrateur ;
+    - lecture : les trois ;
+    - besoin du jour : `GET /api/mission-budgets/daily-need?date=`, somme en base, au total et par statut.
+- **Comment** :
+  - le prix du litre est celui de la date du budget (`getFuelPriceAt`), figé à la saisie ;
+  - `computeMissionBudget` calcule en centimes entiers ;
+  - le client n'écrit ni le prix, ni les montants calculés, ni le statut (schéma `.strict()`) ;
+  - une transition est un UPDATE conditionnel sur le statut attendu : un rejeu reçoit 409, sans double écriture ;
+  - l'unicité de la mission est tenue par une contrainte, avec 409 en cas de conflit.
+- **Pourquoi** : lot L1 du plan trésorerie et opérations. Le FDR est saisi librement ; le barème par destination fera l'objet d'un lot séparé (L1b).
+- **Preuve** :
+  - contrat `mission-budgets` rouge sur l'ancien code (8/10), vert après (10/10) ;
+  - unitaires de calcul et de saisie (7) ;
+  - test de dérive entre init-database, la migration et Drizzle (4) ;
+  - `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la relecture et de l'audit de sécurité
+- **Quoi** :
+  - approbation et décaissement liés à la version lue : corps strict `{ expectedUpdatedAt }`, 409 si le budget a changé ;
+  - prix carburant exigé à la date du budget : 409 sans prix, plus de prix par défaut sur ce flux (`findFuelPriceAt`) ;
+  - date du budget bornée à 60 jours autour d'aujourd'hui (400) ;
+  - mission terminée ou annulée : 409 à la saisie ;
+  - correction : des notes seules ne re-figent pas le prix ; un corps sans changement n'écrit rien ; `log.info` sur toute correction écrite ;
+  - contraintes `mission_budgets_status_check`, `_amounts_check` et `_mission_id_unique` réconciliées au démarrage (NOT VALID puis VALIDATE, renommage d'une unicité posée sous un autre nom) et relues par `reportCdcConstraintGaps`.
+- **Comment** :
+  - transition : UPDATE conditionnel sur le statut et sur `date_trunc('milliseconds', updated_at)` ;
+  - le relevé des contraintes est déplacé après `MISSION_BUDGETS_SQL`, pour ne pas signaler au premier démarrage une table pas encore créée.
+- **Pourquoi** :
+  - sans version lue, la direction pouvait approuver un montant corrigé entre sa lecture et son clic ;
+  - un prix par défaut silencieux faussait un montant décaissé.
+- **Décision utilisatrice** : aucune contrainte « 4 yeux » entre saisie, approbation et décaissement. La traçabilité `createdBy` / `approvedBy` / `disbursedBy` suffit.
+- **Preuve** :
+  - contrat `mission-budgets` 15/15 (version périmée, course de deux décaissements, chauffeur 403, logistique au décaissement 403, date hors fenêtre, prix absent, mission close, correction sans écriture) ;
+  - test des noms de contraintes Drizzle / SQL / `CDC_RECONCILED_CONSTRAINTS` ;
+  - `tsc` : 0 erreur.
 
 ## 2026-11-05 — Lot Q1 : contrôles inopinés QHSE (serveur)
 - **Quoi** : tables `qhse_inspection_criteria` et `qhse_inspections` (schéma Drizzle, `init-database.ts` idempotent, migration jumelle, CHECK de nature et de forme jsonb). Seize critères semés, tous tirés du document QHSE (10 cabine, 6 arrêt). Routeur `server/api/qhse-inspections.routes.ts` derrière le drapeau `qhse` : critères (lecture admin, management, logistics ; écriture admin, management), contrôles (saisie et lecture admin, management, logistics ; le chauffeur lit les siens, 403 identique pour l'absent et l'interdit). Rôles dans `shared/constants/roles.ts`.
 - **Pourquoi** : le suivi des contrôles inopinés se faisait hors système. Chaque ligne garde code et libellé du critère à la saisie, pour qu'un renommage ne réécrive pas l'historique.
 - **Preuve** : unitaires de validation et de dérive migration/init-database ; contrat 3/3 (drapeau coupé, rôles, cloison chauffeur, validation, second démarrage sans écriture) sur Postgres local sous verrou ; tsc 0 erreur ; unitaires 2723 verts, hors backup-db (script shell, échec propre à ce poste).
 - **Reste en TypeScript** : l'égalité entre la nature du critère et la grille du contrôle (critères dans un jsonb) ; à confier à fleet-db si l'on passe à une table de lignes.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la contre-relecture
+- **Quoi** :
+  - mission terminée ou annulée : correction, approbation et décaissement refusés en 409, comme la saisie ;
+  - libellé du relevé des contraintes rendu générique (« Contraintes de base incomplètes ») ;
+  - fusion de `origin/main` (Q1 #462, #458, F1 #464) : `CDC_RECONCILED_CONSTRAINTS` garde F1, `qhse_*` et `mission_budgets_*`.
+- **Comment** :
+  - la mission est verrouillée `FOR SHARE` dans la transaction qui écrit le budget (saisie, correction, transition), avant le verrou du budget ;
+  - même ordre de verrous partout (mission, puis budget) : une correction et une approbation simultanées ne s'interbloquent pas.
+- **Pourquoi** : on pouvait encore décaisser le budget d'une mission annulée ; une annulation concurrente attend désormais l'écriture du budget, ou la précède et la fait refuser.
+- **Preuve** : contrat `mission-budgets` 16/16, dont « mission close après la saisie » (correction, approbation, décaissement 409, budget intact) ; `tsc` : 0 erreur.
