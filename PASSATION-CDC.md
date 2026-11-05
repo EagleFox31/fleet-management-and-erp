@@ -26,3 +26,7 @@
 - PR #328 (fix/mission-create-assigned) livrée, relue par 0a. Conflit prévu avec #327 (aa) : garde CPC de création remplacée par isCpcStatusValid (shared/constants/driver-cpc-eligibility.ts).
 - Prochaine étape : quand 0a annonce #327 fusionnée, merger origin/main dans fix/mission-create-assigned, GARDER la règle partagée (pas normalizeCpcStatus local à la création), relancer le test mission-create-assigned (fixture CPC FORME sans accent : vérifier qu isCpcStatusValid l accepte, sinon adapter la fixture), push simple.
 - Script #229 : chore/recensement-229 locale, non poussée, en attente de décision utilisatrice.
+
+## 2026-11-05 01:11 — c7 : #328 déclencheur de test ciblé validé, attente de #327
+- Réserves de 0a sur #328 traitées. Déclencheur du test d'échec d'insertion ciblé (WHEN sur le véhicule du test), poussé ; 5/5 verts, aucun déclencheur résiduel. 0a a validé sans db-lock.
+- Prochaine étape inchangée : sur annonce de 0a que #327 est fusionnée, merger origin/main, garder isCpcStatusValid, relancer mission-create-assigned et mission-*, npm run check, push, message « mr 328 » à 0a.
