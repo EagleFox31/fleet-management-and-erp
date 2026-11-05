@@ -172,6 +172,16 @@ export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisf
 export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
 
+/** Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture. */
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary"] as const satisfies readonly AppRole[];
+
+/** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
+export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+
+export function canReadFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /** Suivi des opérations clients (`mission_operations`) : saisie par l'administration et la logistique. */
 export const MISSION_OPERATIONS_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
 /** Lecture du suivi des opérations : + secrétariat et direction. */
@@ -416,3 +426,14 @@ export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"]
  * Toute transition de `STATUS_PERMISSIONS` doit rester dans ce jeu, sinon le droit est mort.
  */
 export const INVENTORY_MANAGER_ROLES = ["admin", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+
+/**
+ * Contrôles inopinés QHSE (lot Q1). Saisie et lecture de tous les contrôles : l'administration, la
+ * direction et la logistique (qui initie les contrôles sur itinéraire). Le chauffeur lit seulement
+ * les siens (cloison `driverScopeOf`), il n'entre pas dans ce groupe.
+ * Doit rester aligné sur les gardes de `server/api/qhse-inspections.routes.ts`.
+ */
+export const QHSE_INSPECTION_ROLES = ["admin", "management", "logistics"] as const satisfies readonly AppRole[];
+
+/** Grille de critères (référentiel configurable) : l'administration et la direction la modifient. */
+export const QHSE_CRITERIA_MANAGER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];

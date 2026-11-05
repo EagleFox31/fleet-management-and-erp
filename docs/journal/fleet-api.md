@@ -563,3 +563,20 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - contrat `mission-budgets` 15/15 (version périmée, course de deux décaissements, chauffeur 403, logistique au décaissement 403, date hors fenêtre, prix absent, mission close, correction sans écriture) ;
   - test des noms de contraintes Drizzle / SQL / `CDC_RECONCILED_CONSTRAINTS` ;
   - `tsc` : 0 erreur.
+
+## 2026-11-05 — Lot Q1 : contrôles inopinés QHSE (serveur)
+- **Quoi** : tables `qhse_inspection_criteria` et `qhse_inspections` (schéma Drizzle, `init-database.ts` idempotent, migration jumelle, CHECK de nature et de forme jsonb). Seize critères semés, tous tirés du document QHSE (10 cabine, 6 arrêt). Routeur `server/api/qhse-inspections.routes.ts` derrière le drapeau `qhse` : critères (lecture admin, management, logistics ; écriture admin, management), contrôles (saisie et lecture admin, management, logistics ; le chauffeur lit les siens, 403 identique pour l'absent et l'interdit). Rôles dans `shared/constants/roles.ts`.
+- **Pourquoi** : le suivi des contrôles inopinés se faisait hors système. Chaque ligne garde code et libellé du critère à la saisie, pour qu'un renommage ne réécrive pas l'historique.
+- **Preuve** : unitaires de validation et de dérive migration/init-database ; contrat 3/3 (drapeau coupé, rôles, cloison chauffeur, validation, second démarrage sans écriture) sur Postgres local sous verrou ; tsc 0 erreur ; unitaires 2723 verts, hors backup-db (script shell, échec propre à ce poste).
+- **Reste en TypeScript** : l'égalité entre la nature du critère et la grille du contrôle (critères dans un jsonb) ; à confier à fleet-db si l'on passe à une table de lignes.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la contre-relecture
+- **Quoi** :
+  - mission terminée ou annulée : correction, approbation et décaissement refusés en 409, comme la saisie ;
+  - libellé du relevé des contraintes rendu générique (« Contraintes de base incomplètes ») ;
+  - fusion de `origin/main` (Q1 #462, #458, F1 #464) : `CDC_RECONCILED_CONSTRAINTS` garde F1, `qhse_*` et `mission_budgets_*`.
+- **Comment** :
+  - la mission est verrouillée `FOR SHARE` dans la transaction qui écrit le budget (saisie, correction, transition), avant le verrou du budget ;
+  - même ordre de verrous partout (mission, puis budget) : une correction et une approbation simultanées ne s'interbloquent pas.
+- **Pourquoi** : on pouvait encore décaisser le budget d'une mission annulée ; une annulation concurrente attend désormais l'écriture du budget, ou la précède et la fait refuser.
+- **Preuve** : contrat `mission-budgets` 16/16, dont « mission close après la saisie » (correction, approbation, décaissement 409, budget intact) ; `tsc` : 0 erreur.

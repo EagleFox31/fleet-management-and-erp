@@ -79,6 +79,24 @@ async function amountColumns(input: { budgetDate: string; fuelLiters: number; fd
   };
 }
 
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+const CLOSED_MISSION = "Cette mission est terminée ou annulée : son budget ne peut plus être saisi, corrigé, approuvé ni décaissé.";
+
+/**
+ * Mission ouverte, verrouillée en partage jusqu'à la fin de la transaction : une annulation ou une
+ * clôture concurrente attend l'écriture du budget, ou la précède et la fait refuser (409).
+ */
+async function lockOpenMission(tx: Executor, missionId: number) {
+  const [mission] = await tx
+    .select({ status: missions.status })
+    .from(missions)
+    .where(eq(missions.id, missionId))
+    .for("share");
+  if (!mission) throw new AppError(404, "Mission introuvable.");
+  if ((MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(mission.status)) throw new AppError(409, CLOSED_MISSION);
+}
+
 function notify(budget: MissionBudget) {
   const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
   broadcast?.("mission_budget_updated", { id: budget.id, missionId: budget.missionId, status: budget.status, budgetDate: budget.budgetDate });
@@ -103,22 +121,21 @@ export async function getMissionBudget(id: number): Promise<MissionBudget> {
 }
 
 export async function createMissionBudget(userId: number, input: CreateMissionBudgetRequest): Promise<MissionBudget> {
-  const [mission] = await db.select({ id: missions.id, status: missions.status }).from(missions).where(eq(missions.id, input.missionId));
-  if (!mission) throw new AppError(404, "Mission introuvable.");
-  if ((MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(mission.status)) {
-    throw new AppError(409, "Cette mission est terminée ou annulée : elle ne reçoit plus de budget.");
-  }
   try {
-    const [row] = await db
-      .insert(missionBudgets)
-      .values({
-        missionId: input.missionId,
-        ...(await amountColumns(input)),
-        notes: input.notes ?? null,
-        createdBy: userId,
-        updatedBy: userId,
-      })
-      .returning();
+    const row = await db.transaction(async (tx) => {
+      await lockOpenMission(tx, input.missionId);
+      const [inserted] = await tx
+        .insert(missionBudgets)
+        .values({
+          missionId: input.missionId,
+          ...(await amountColumns(input)),
+          notes: input.notes ?? null,
+          createdBy: userId,
+          updatedBy: userId,
+        })
+        .returning();
+      return inserted;
+    });
     const budget = toMissionBudget(row);
     log.info({ budgetId: budget.id, missionId: budget.missionId, userId }, "budget de mission saisi");
     notify(budget);
@@ -136,8 +153,11 @@ export async function createMissionBudget(userId: number, input: CreateMissionBu
  */
 export async function updateMissionBudget(id: number, userId: number, input: UpdateMissionBudgetRequest): Promise<MissionBudget> {
   const result = await db.transaction(async (tx) => {
+    // Même ordre de verrous que les transitions (mission, puis budget) : pas d'interblocage entre elles.
+    const [target] = await tx.select({ missionId: missionBudgets.missionId }).from(missionBudgets).where(eq(missionBudgets.id, id));
+    if (!target) throw new AppError(404, "Budget de mission introuvable.");
+    await lockOpenMission(tx, target.missionId);
     const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
-    if (!current) throw new AppError(404, "Budget de mission introuvable.");
     if (current.status !== "requested") throw new AppError(409, "Ce budget n'est plus modifiable : il a déjà été approuvé.");
     const merged = {
       budgetDate: input.budgetDate ?? current.budgetDate,
@@ -197,16 +217,21 @@ export async function transitionMissionBudget(
   const t = TRANSITIONS[action];
   const now = new Date();
   const stamp = action === "approve" ? { approvedBy: userId, approvedAt: now } : { disbursedBy: userId, disbursedAt: now };
-  const [row] = await db
-    .update(missionBudgets)
-    .set({ status: t.to, ...stamp, updatedBy: userId, updatedAt: now })
-    .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from), sameVersion(expectedUpdatedAt)))
-    .returning();
-  if (!row) {
-    const current = await getMissionBudget(id); // 404 si le budget n'existe pas
+  const row = await db.transaction(async (tx) => {
+    // mission_id ne change jamais : lu sans verrou, la mission est verrouillée avant l'UPDATE conditionnel.
+    const [target] = await tx.select({ missionId: missionBudgets.missionId }).from(missionBudgets).where(eq(missionBudgets.id, id));
+    if (!target) throw new AppError(404, "Budget de mission introuvable.");
+    await lockOpenMission(tx, target.missionId);
+    const [updated] = await tx
+      .update(missionBudgets)
+      .set({ status: t.to, ...stamp, updatedBy: userId, updatedAt: now })
+      .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from), sameVersion(expectedUpdatedAt)))
+      .returning();
+    if (updated) return updated;
+    const [current] = await tx.select({ status: missionBudgets.status }).from(missionBudgets).where(eq(missionBudgets.id, id));
     if (current.status !== t.from) throw new AppError(409, t.conflict);
     throw new AppError(409, "Ce budget a changé depuis votre lecture : rechargez-le avant de valider.");
-  }
+  });
   const budget = toMissionBudget(row);
   log.info({ budgetId: id, userId, status: budget.status }, "budget de mission : transition");
   notify(budget);

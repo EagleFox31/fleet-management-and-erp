@@ -9,7 +9,8 @@ import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { STAFF_ROLES } from "@shared/constants/roles";
+import { STAFF_ROLES, canReadFinanceReceivable } from "@shared/constants/roles";
+import { withoutClientFinanceFields } from "../lib/client-public-columns";
 
 const log = moduleLogger("clients");
 const router = Router();
@@ -20,6 +21,11 @@ type ClientRow = typeof clients.$inferSelect;
 type ClientWithCreator = ClientRow & { createdByName: string | null };
 
 const MANAGER_ROLES = ["admin", "secretary", "logistics"] as const;
+
+/** Fiche client telle que la voit l'appelant : taux de retenue réservés aux rôles de lecture finance. */
+function forViewer<T extends Partial<ClientRow>>(client: T, role: string | undefined) {
+  return canReadFinanceReceivable(role) ? client : withoutClientFinanceFields(client);
+}
 
 function parsePositiveInteger(value: unknown): number | null {
   if (typeof value === "number" && Number.isInteger(value) && Number.isFinite(value) && value > 0) {
@@ -73,7 +79,8 @@ function broadcastClientUpdate(
   broadcastUpdate(eventType, {
     entity: "client",
     entityId: client.id,
-    payload: { client },
+    // Diffusé à tout le personnel : sans les taux de retenue.
+    payload: { client: withoutClientFinanceFields(client) },
     // Fiche d'un client de flotte (coordonnées, créateur) : le personnel, jamais un compte client (§11).
     scope: { type: "roles", roles: [...STAFF_ROLES] },
   });
@@ -140,7 +147,7 @@ router.get("/", async (req, res, next) => {
 
     const clientsWithCreator = await withCreatorNames(allClients);
 
-    return res.json(clientsWithCreator);
+    return res.json(clientsWithCreator.map((client) => forViewer(client, req.user?.role)));
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get clients error" }));
   }
@@ -155,7 +162,7 @@ router.get("/all", authorize([...MANAGER_ROLES]), async (req, res, next) => {
       .orderBy(clients.name);
 
     const clientsWithCreator = await withCreatorNames(allClients);
-    return res.json(clientsWithCreator);
+    return res.json(clientsWithCreator.map((client) => forViewer(client, req.user?.role)));
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get all clients error" }));
   }
@@ -171,7 +178,7 @@ router.get("/:id", async (req, res, next) => {
       return res.status(404).json({ message: "Client non trouvé" });
     }
 
-    return res.json(client);
+    return res.json(forViewer(client, req.user?.role));
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "Get client error" }));
   }
@@ -201,7 +208,7 @@ router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res
     }
 
     broadcastClientUpdate("client_created", createdClient);
-    return res.status(201).json(createdClient);
+    return res.status(201).json(forViewer(createdClient, req.user?.role));
   } catch (error) {
     // Corps invalide : 400 avec les champs en cause, via le gestionnaire central.
     if (error instanceof ZodError) return next(error);
@@ -244,7 +251,7 @@ router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
     }
 
     broadcastClientUpdate("client_updated", hydratedClient);
-    return res.json(hydratedClient);
+    return res.json(forViewer(hydratedClient, req.user?.role));
   } catch (error) {
     if (error instanceof ZodError) return next(error);
     if (isUniqueViolation(error)) {
@@ -280,7 +287,7 @@ router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
     }
 
     broadcastClientUpdate("client_deleted", hydratedClient);
-    return res.json(hydratedClient);
+    return res.json(forViewer(hydratedClient, req.user?.role));
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de l'archivage du client", { cause: error }), { event: "Archive client error" }));
   }
@@ -310,7 +317,7 @@ router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res, nex
     }
 
     broadcastClientUpdate("client_updated", hydratedClient);
-    return res.json(hydratedClient);
+    return res.json(forViewer(hydratedClient, req.user?.role));
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la restauration du client", { cause: error }), { event: "Restore client error" }));
   }
