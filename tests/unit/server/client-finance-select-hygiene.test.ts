@@ -30,9 +30,14 @@ const ALLOWED: Record<string, string> = {
   "server/api/clients.routes.ts#clients#returning#2": "modification : forViewer sur la réponse, diffusion sans les taux",
   "server/api/clients.routes.ts#clients#returning#3": "désactivation : forViewer sur la réponse, diffusion sans les taux",
   "server/api/clients.routes.ts#clients#returning#4": "restauration : forViewer sur la réponse, diffusion sans les taux",
+  "server/lib/client-public-columns.ts#clients#getTableColumns#1": "source de publicClientColumns : omitKeys retire les taux",
+  "server/lib/client-public-columns.ts#clientInvoices#getTableColumns#1": "source de publicClientInvoiceColumns : omitKeys retire retenues et net",
 };
 
 const TABLES = ["clients", "clientInvoices"] as const;
+
+/** `clients` ou `schema.clients` (import en espace de noms) : même table. */
+const ref = (table: string) => `(?:[A-Za-z_$][\\w$]*\\.)?${table}`;
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -68,31 +73,35 @@ function selectArgument(source: string, position: number): string | null {
 /** `const c = alias(clients, "c")` : `c` se lit comme la table. */
 function aliasesOf(source: string): [string, string][] {
   const found: [string, string][] = [];
-  const declared = /\b([A-Za-z_$][\w$]*)\s*=\s*alias\(\s*(clients|clientInvoices)\s*,/g;
+  const declared = /\b([A-Za-z_$][\w$]*)\s*=\s*alias\(\s*(?:[A-Za-z_$][\w$]*\.)?(clients|clientInvoices)\s*,/g;
   for (let m = declared.exec(source); m; m = declared.exec(source)) found.push([m[1], `alias:${m[2]}`]);
   return found;
 }
 
 const isWholeRow = (argument: string, table: string) =>
   argument.trim() === "" ||
-  new RegExp(`:\\s*${table}\\s*[,}\\n]`).test(argument) ||
+  new RegExp(`:\\s*${ref(table)}\\s*[,}\\n]`).test(argument) ||
   // Forme abrégée : `{ m: missions, c }` vaut `{ c: c }`.
   new RegExp(`(?:^|[{,])\\s*${table}\\s*(?:[,}]|$)`).test(argument) ||
-  new RegExp(`getTableColumns\\(\\s*${table}\\s*\\)`).test(argument);
+  new RegExp(`getTableColumns\\(\\s*${ref(table)}\\s*\\)`).test(argument);
 
 export function findWholeReads(source: string, key: string): string[] {
   const found: string[] = [];
   const targets: [string, string][] = [...TABLES.map((t): [string, string] => [t, t]), ...aliasesOf(source)];
   for (const [table, label] of targets) {
     let ordinal = 0;
-    const fromTable = new RegExp(`\\.(?:from|leftJoin|innerJoin|rightJoin|fullJoin)\\(\\s*${table}\\s*[,)]`, "g");
+    const fromTable = new RegExp(`\\.(?:from|leftJoin|innerJoin|rightJoin|fullJoin)\\(\\s*${ref(table)}\\s*[,)]`, "g");
     for (let m = fromTable.exec(source); m; m = fromTable.exec(source)) {
       const argument = selectArgument(source, m.index);
       if (argument !== null && isWholeRow(argument, table)) found.push(`${key}#${label}#${++ordinal}`);
     }
+    // Colonnes de la table entière, même hors projection : `const cols = getTableColumns(clients)` relu ailleurs.
+    let columns = 0;
+    const allColumns = new RegExp(`getTableColumns\\(\\s*${ref(table)}\\s*\\)`, "g");
+    for (let m = allColumns.exec(source); m; m = allColumns.exec(source)) found.push(`${key}#${label}#getTableColumns#${++columns}`);
     if (label !== table) continue;
     let returning = 0;
-    const write = new RegExp(`\\.(?:insert|update|delete)\\(\\s*${table}\\s*\\)[^;]*?\\.returning\\(\\s*\\)`, "g");
+    const write = new RegExp(`\\.(?:insert|update|delete)\\(\\s*${ref(table)}\\s*\\)[^;]*?\\.returning\\(\\s*\\)`, "g");
     for (let m = write.exec(source); m; m = write.exec(source)) found.push(`${key}#${table}#returning#${++returning}`);
     // API relationnelle : `db.query.clients` ramène la ligne entière sauf `columns` explicite.
     let query = 0;
@@ -120,7 +129,9 @@ export function findWholeSqlReads(source: string, key: string): string[] {
   const counts: Record<string, number> = {};
   const literals = source.match(/`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g) ?? [];
   for (const raw of literals) {
-    const literal = raw.replace(/\$\{\s*clients\s*\}/g, "clients").replace(/\$\{\s*clientInvoices\s*\}/g, "client_invoices");
+    const literal = raw
+      .replace(/\$\{\s*(?:[A-Za-z_$][\w$]*\.)?clients\s*\}/g, "clients")
+      .replace(/\$\{\s*(?:[A-Za-z_$][\w$]*\.)?clientInvoices\s*\}/g, "client_invoices");
     for (const table of SQL_TABLES) {
       const from = new RegExp(`\\b(?:FROM|JOIN)\\s+"?${table}"?(?:\\s+(?:AS\\s+)?([a-z_][a-z0-9_]*))?`, "gi");
       const names = new Set<string>([table]);
@@ -203,5 +214,24 @@ describe("lectures entières de clients / client_invoices (champs finance)", () 
     expect(findWholeReads("db.selectDistinctOn([clients.name], { id: clients.id }).from(clients)", "a")).toEqual([]);
     expect(findWholeReads("const c = alias(clients, \"c\");\ndb.select({ id: c.id }).from(c)", "a")).toEqual([]);
     expect(findWholeReads("sql`SELECT json_build_object('id', c.id) FROM clients c`", "a")).toEqual([]);
+  });
+
+  it("le détecteur repère getTableColumns hors projection et la table lue par espace de noms", () => {
+    expect(findWholeReads("const cols = getTableColumns(clients);\ndb.select(cols).from(missions)", "a")).toEqual([
+      "a#clients#getTableColumns#1",
+    ]);
+    expect(findWholeReads("db.select({ ...getTableColumns(clients) }).from(clients)", "a")).toEqual([
+      "a#clients#1",
+      "a#clients#getTableColumns#1",
+    ]);
+    expect(findWholeReads("db.select().from(schema.clients)", "a")).toEqual(["a#clients#1"]);
+    expect(findWholeReads("db.select({ c: schema.clients }).from(missions).leftJoin(schema.clients, eq(a, b))", "a")).toEqual([
+      "a#clients#1",
+    ]);
+    expect(findWholeReads("db.update(schema.clientInvoices).set({ x }).returning();", "a")).toEqual(["a#clientInvoices#returning#1"]);
+    expect(findWholeReads("const c = alias(schema.clients, \"c\");\ndb.select().from(c)", "a")).toEqual(["a#alias:clients#1"]);
+    expect(findWholeReads("sql`SELECT * FROM ${schema.clients}`", "a")).toEqual(["a#sql:clients#1"]);
+    // Projections nommées par espace de noms : sans effet.
+    expect(findWholeReads("db.select({ id: schema.clients.id }).from(schema.clients)", "a")).toEqual([]);
   });
 });

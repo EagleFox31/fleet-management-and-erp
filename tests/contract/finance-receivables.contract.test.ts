@@ -310,6 +310,22 @@ describe("fiche client /api/clients : taux de retenue réservés à la lecture f
     expect(one.body).toMatchObject({ withholdingIsBase: "ttc", withholdingUpdatedBy: userIds.get("secretary") });
   });
 
+  it.each(["admin", "secretary", "logistics"])("%s : POST de la fiche ignore les taux envoyés", async (role) => {
+    const rates = (body: Record<string, unknown>) => Object.fromEntries(FINANCE_KEYS.map((k) => [k, body[k]]));
+    const stamp = `${role} ${Date.now()}`;
+    const plain = await call("POST", "/api/clients", role, { name: `Client témoin ${stamp}` });
+    expect(plain.status).toBe(201);
+    ids.clientIds.push(plain.body.id);
+    const forged = { withholdingVatRate: 0, withholdingIsRate: 0, withholdingIsBase: "ttc", withholdingUpdatedBy: userIds.get(role) };
+    const res = await call("POST", "/api/clients", role, { name: `Client forgé ${stamp}`, ...forged });
+    expect(res.status).toBe(201);
+    ids.clientIds.push(res.body.id);
+    const stored = (await call("GET", `/api/clients/${res.body.id}`, "admin")).body;
+    const reference = (await call("GET", `/api/clients/${plain.body.id}`, "admin")).body;
+    expect(rates(stored)).toEqual(rates(reference));
+    expect(stored.withholdingUpdatedBy ?? null).toBeNull();
+  });
+
   // Les taux ne s'écrivent que par PATCH /api/finance/clients/:id/withholding : la fiche les ignore.
   it.each(["admin", "secretary", "logistics"])("%s : PATCH de la fiche ignore les taux envoyés", async (role) => {
     const clientId = await newClient("ttc");
