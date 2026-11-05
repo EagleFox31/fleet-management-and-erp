@@ -353,7 +353,8 @@ Notes :
   (`server/lib/settlement-proof.ts`), validé dès l'écriture. Sinon ils figurent
   dans la liste gelée de `tests/unit/server/stored-path-hygiene.test.ts`, avec la raison
   pour laquelle leur chemin ne vient pas de la base (multer, fichiers livrés, sauvegardes).
-  Revue faite le 3 novembre 2026. Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
+  Revue faite le 3 novembre 2026, reprise le 5 novembre 2026 (`routes.ts`, rapports, preuves de
+  renouvellement : aucun accès non borné ; les rapports n'accèdent pas au disque). Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
   aussi les liens (`realPathStaysInside`) : un lien symbolique ou une jonction sous `uploads/`
   qui mène dehors est refusé, de même qu'un lien pendant ou un fichier absent derrière un lien
   sortant (une écriture le suivrait). `settlementProofPath` et les deux destinations d'écriture

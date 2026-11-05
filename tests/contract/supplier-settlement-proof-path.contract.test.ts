@@ -183,6 +183,21 @@ describe("justificatif de règlement fournisseur : borné à son dossier", { tim
     expect(proof.text).toBe("%PDF-1.4 EXOTIC");
   });
 
+  it("identifiants lus strictement : 400 lisible, aucun fichier servi", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    for (const [inv, set] of [
+      [`${invoice.id}abc`, `${settlement.id}`],
+      [`${invoice.id}`, `${settlement.id}abc`],
+      [`${invoice.id}`, "0"],
+      [`${invoice.id}`, "99999999999"],
+      ["1.5", `${settlement.id}`],
+    ]) {
+      const res = await api("GET", `/api/supplier-invoices/${inv}/settlements/${set}/proof`);
+      expect(res.status).toBe(400);
+      expect(res.text).not.toContain("%PDF");
+    }
+  });
+
   it("non-régression : le justificatif téléversé est servi (200)", async () => {
     const { invoice, settlement } = await uploadedSettlement();
     const proof = await proofOf(invoice.id, settlement.id);
