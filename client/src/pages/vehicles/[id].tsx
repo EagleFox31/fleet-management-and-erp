@@ -247,7 +247,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
     const UnavailableIcon = unavailable.kind === "forbidden" ? Lock : AlertTriangle;
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
-        <UnavailableIcon className="h-10 w-10 text-destructive mb-3" />
+        <UnavailableIcon className="h-10 w-10 text-destructive-text mb-3" />
         <h2 className="text-lg font-semibold text-foreground">{unavailable.title}</h2>
         <p className="text-sm text-muted-foreground mt-1 mb-4">{unavailable.message}</p>
         <div className="flex flex-wrap items-center justify-center gap-2">

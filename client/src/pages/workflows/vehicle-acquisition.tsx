@@ -16,9 +16,10 @@ import { canWriteVehiclePurchasePrice } from '@shared/constants/roles';
 import { apiRequest } from '@/lib/queryClient';
 import { invalidateVehicleDocumentQueries } from '@/lib/vehicle-document-cache';
 import { uploadFile } from '@/lib/api';
+import { userMessageOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
-import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2 } from 'lucide-react';
+import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2, Check } from 'lucide-react';
 
 type DocumentKey = keyof VehicleAcquisitionData['documents'];
 type DocumentUploadStatus = 'idle' | 'uploading' | 'success' | 'error';
@@ -295,7 +296,7 @@ export function VehicleAcquisitionWorkflow() {
         title: 'Document importé',
         description: `${docConfig.label} — ${file.name}`,
       });
-    } catch {
+    } catch (error) {
       setDocUploadStatus((prev) => ({ ...prev, [documentKey]: 'error' }));
       updateData((prev) => ({
         ...prev,
@@ -303,7 +304,7 @@ export function VehicleAcquisitionWorkflow() {
       }));
       toast({
         title: "Erreur d'import",
-        description: `Impossible d'importer ${docConfig.label}. Réessayez.`,
+        description: userMessageOf(error, `Impossible d'importer ${docConfig.label}. Réessayez.`),
         variant: 'destructive',
       });
     } finally {
@@ -773,7 +774,7 @@ export function VehicleAcquisitionWorkflow() {
                         <div className="shrink-0">
                         {status === 'success' && <CheckCircle className="h-5 w-5 text-green-500" />}
                         {status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+                        {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary-text" />}
                         </div>
                       </div>
 
@@ -803,8 +804,8 @@ export function VehicleAcquisitionWorkflow() {
 
                       {isUploading && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-background/80 backdrop-blur-[1px]">
-                          <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                          <p className="text-sm font-medium text-primary">Import en cours…</p>
+                          <Loader2 className="h-8 w-8 animate-spin text-primary-text mb-2" />
+                          <p className="text-sm font-medium text-primary-text">Import en cours…</p>
                           <p className="text-xs text-muted-foreground mt-1">Ne fermez pas cette page</p>
                         </div>
                       )}
@@ -926,10 +927,10 @@ export function VehicleAcquisitionWorkflow() {
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
                   <h4 className="font-semibold text-blue-800 mb-2">Récapitulatif final</h4>
                   <div className="text-sm text-blue-700 space-y-1">
-                    <div>✓ Véhicule: {data.brand} {data.model} ({data.registrationNumber})</div>
-                    <div>✓ VIN validé: {data.vin}</div>
-                    <div>✓ Documents téléchargés</div>
-                    <div>✓ Maintenance programmée le {data.firstMaintenanceDate && new Date(data.firstMaintenanceDate).toLocaleDateString('fr-FR')}</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Véhicule: {data.brand} {data.model} ({data.registrationNumber})</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />VIN validé: {data.vin}</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Documents téléchargés</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Maintenance programmée le {data.firstMaintenanceDate && new Date(data.firstMaintenanceDate).toLocaleDateString('fr-FR')}</div>
                   </div>
                 </div>
 

@@ -864,6 +864,42 @@ WHEN (
 )
 EXECUTE FUNCTION fn_work_orders_hold_vehicle();`;
 
+/**
+ * Au moins un administrateur actif reste en base (trigger BEFORE sur users). Doit rester identique à
+ * server/db/migrations/20261105_users_keep_active_admin.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/users-keep-active-admin-schema.test.ts. Un seul envoi = une transaction.
+ */
+export const USERS_KEEP_ACTIVE_ADMIN_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE OR REPLACE FUNCTION fn_users_keep_active_admin()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Seule la sortie d'un administrateur actif (suppression, changement de rôle, désactivation) compte.
+  IF OLD.role = 'admin' AND OLD.deleted_at IS NULL
+     AND (TG_OP = 'DELETE' OR NEW.role IS DISTINCT FROM 'admin' OR NEW.deleted_at IS NOT NULL) THEN
+    -- Sérialise les sorties concurrentes : la seconde relit l'état validé par la première.
+    PERFORM pg_advisory_xact_lock(hashtext('fleetmaster_last_active_admin'));
+    -- Lecture verrouillante (FOR SHARE) : un autre administrateur ne peut pas sortir avant la fin de cette transaction.
+    PERFORM 1 FROM users u WHERE u.role = 'admin' AND u.deleted_at IS NULL AND u.id <> OLD.id FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Il doit rester au moins un administrateur actif.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'users_keep_one_active_admin';
+    END IF;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_users_keep_active_admin
+BEFORE UPDATE OF role, deleted_at OR DELETE ON users
+FOR EACH ROW
+EXECUTE FUNCTION fn_users_keep_active_admin();`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1372,6 +1408,8 @@ export async function initializeDatabase() {
     // Après toute reprise des PIN en clair : la validation ne réussit que si aucun clair ne reste.
     await pool.query(USERS_PIN_BCRYPT_CHECK_SQL);
     await reportUsersPinBcryptGaps(pool);
+    // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
+    await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

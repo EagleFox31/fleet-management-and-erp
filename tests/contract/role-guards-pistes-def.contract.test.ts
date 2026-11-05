@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { alerts, vehicleAcquisitionWorkflows, workflowDocuments, workOrders } from "../../shared/schema";
 import { createTestVehicle } from "../support/factories";
+import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 
 /**
@@ -134,7 +135,7 @@ describe("POST /api/workflows/:sessionId/documents", { timeout: 60000 }, () => {
       form.append("document", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), "TEST-doc.pdf");
       const res = await session.raw("POST", `/api/workflows/${sessionId}/documents`, actor, form);
       expect(res.status, bad).toBe(400);
-      expect(JSON.stringify(await res.json())).not.toMatch(/sql|syntax|NaN/i);
+      expect(leakText(await res.json())).not.toMatch(/sql|syntax|NaN/i);
     }
     expect(existsSync(join(process.cwd(), "uploads", "workflows", sessionId))).toBe(false);
   });

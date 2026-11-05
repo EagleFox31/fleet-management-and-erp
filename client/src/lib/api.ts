@@ -1,6 +1,8 @@
 /**
  * Utilitaires pour les appels API avec des fichiers
  */
+import { toApiError } from '@/lib/api-error';
+import { clientLogger } from '@/lib/logger';
 
 // Fonction pour télécharger un fichier
 export async function uploadFile(url: string, formData: FormData): Promise<any> {
@@ -13,13 +15,13 @@ export async function uploadFile(url: string, formData: FormData): Promise<any> 
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || response.statusText);
+      // Message normalisé du serveur (shared/errors.ts), jamais le corps brut.
+      throw await toApiError(response);
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Error uploading file:', error);
+    clientLogger.error("Échec de l'envoi du fichier", { url, error });
     throw error;
   }
 }

@@ -633,3 +633,34 @@ export function scanShadowedRoutes(serverDir: string) {
   const shadowed = [...new Set(legacy.filter((signature) => apiSignatures.has(signature)))].sort();
   return { shadowed, apiRouteCount: apiSignatures.size, legacyRouteCount: legacy.length };
 }
+
+/**
+ * Routes (toutes methodes) dont le chemin porte un parametre et dont l'en-tete contient la garde
+ * `isAnyUser` : un client peut y viser un objet. Chaque route doit figurer au balayage de cloison
+ * (`tests/support/client-scope-sweep-table.ts`) ou a sa liste d'exclusions justifiee. Renvoie des
+ * signatures `METHODE /api/chemin/:p` (cf. `routeSignature`). Limite : seule la garde ecrite dans
+ * l'en-tete est vue (pas une garde posee au montage ni un routeur importe par un autre fichier).
+ */
+export function scanClientOpenParamRoutes(serverDir: string, roleConstants: RoleConstants): string[] {
+  const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
+  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+  const mounts = parseMounts(indexSource, extendKinds(baseKinds, indexSource));
+  const found = new Set<string>();
+  for (const path of sourceFiles(serverDir)) {
+    const file = `server/${path.slice(serverDir.length + 1).replace(/\\/g, "/")}`;
+    const source = stripComments(readFileSync(path, "utf8"));
+    const routers = routerVarsOf(source);
+    const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
+    for (const m of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
+      if (!routers.has(m[1]) || (m[3] === "`" && m[4].includes("${")) || !m[4].includes(":")) continue;
+      const open = source.indexOf("(", m.index! + m[1].length);
+      const close = matchingClose(source, open);
+      if (close === -1) continue;
+      const header = splitTopLevel(source.slice(open + 1, close)).slice(1, -1);
+      if (!header.some((arg) => /^isAnyUser$/.test(arg.trim()))) continue;
+      const own = fileMounts.find((x) => x.variable === m[1]) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      found.add(routeSignature(m[2], fullPathOf(file, own?.prefix ?? "", m[4])));
+    }
+  }
+  return [...found].sort();
+}
