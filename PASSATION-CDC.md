@@ -69,3 +69,11 @@
 
 ## 2026-11-05 03:19 — c7 : réserves de #354 (fonction pure du message de lancement)
 - #353 et #354 fusionnées, #358 aussi. Branche fix/launch-message-followup : launchRefusalMessage extraite (continue au lieu de break), test unitaire, cas toast client, entrée LESSONS. PR à ouvrir, « mr » à 0a. Stack c7test à garder jusqu'à la fin de cette PR.
+
+## 2026-11-05 04:50 — c7 : garantie en base « au moins un administrateur actif »
+
+- Branche `fix/last-admin-db-trigger` (depuis main) : trigger BEFORE UPDATE OF role, deleted_at / DELETE sur `users` ; refus (check_violation, contrainte `users_keep_one_active_admin`) si l'opération retire le dernier administrateur actif. Verrou consultatif pour sérialiser les sorties concurrentes.
+- SQL dans `server/init-database.ts` (`USERS_KEEP_ACTIVE_ADMIN_SQL`) et migration jumelle `20261105_users_keep_active_admin.sql`, comparés par un test unitaire de dérive. `CREATE OR REPLACE TRIGGER` (règle d'hygiène de concurrence d'init-database).
+- `toHttpError` : cette violation devient un 400 au message lisible, jamais un 500.
+- Preuves : check 0 erreur TS, unitaires, contrats 2031/2031, intégration 340/340 + 4 cas dédiés.
+- Reste : PR brouillon, puis avis 0a. Sur #381 : neutraliser la ligne « À venir après fusion de #379 » et `close` → `finish` dans booking-guard.ts. Puis complément #375 après #379.

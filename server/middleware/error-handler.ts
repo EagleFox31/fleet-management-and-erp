@@ -13,6 +13,7 @@ import {
 } from "@shared/errors";
 import { AppError } from "../lib/app-error";
 import { logContextOf } from "../lib/error-log-context";
+import { isLastActiveAdminViolation, LAST_ACTIVE_ADMIN_MESSAGE } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
 
 export { AppError } from "../lib/app-error";
@@ -133,6 +134,8 @@ export function toHttpError(err: unknown): {
     return { status: err.status, message: err.message, fieldErrors: err.fieldErrors, details: err.details };
   }
   if (err instanceof ZodError) return { status: 400, fieldErrors: toFieldErrors(err.issues) };
+  // Refus du trigger « au moins un administrateur actif » : message lisible, non un 500.
+  if (isLastActiveAdminViolation(err)) return { status: 400, message: LAST_ACTIVE_ADMIN_MESSAGE };
   const e = err as { status?: number; statusCode?: number; type?: string };
   // express.json() sur un corps mal formé
   if (e?.type === "entity.parse.failed") return { status: 400, message: "Les données envoyées sont illisibles." };

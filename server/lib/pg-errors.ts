@@ -32,3 +32,12 @@ export function isForeignKeyViolation(error: unknown): boolean {
 export function isCheckViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23514";
 }
+
+/** Contrainte portée par le trigger `trg_users_keep_active_admin` (migration 20261105). */
+export const LAST_ACTIVE_ADMIN_CONSTRAINT = "users_keep_one_active_admin";
+export const LAST_ACTIVE_ADMIN_MESSAGE = "Il doit rester au moins un administrateur actif.";
+
+/** Le trigger a refusé de retirer le dernier administrateur actif. */
+export function isLastActiveAdminViolation(error: unknown): boolean {
+  return isCheckViolation(error) && pgConstraintOf(error) === LAST_ACTIVE_ADMIN_CONSTRAINT;
+}
