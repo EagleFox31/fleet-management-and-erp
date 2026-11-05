@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { maskWorkOrderCost, WORK_ORDER_COST_KEYS } from "../../../server/lib/work-order-cost-mask";
+import type { Request, Response } from "express";
+import { describe, expect, it, vi } from "vitest";
+import { maskWorkOrderCost, WORK_ORDER_COST_KEYS, workOrderCostMask } from "../../../server/lib/work-order-cost-mask";
 
 describe("maskWorkOrderCost", () => {
-  it("la liste des clés retirées est fermée : cost, unitPrice, totalCost", () => {
-    expect([...WORK_ORDER_COST_KEYS].sort()).toEqual(["cost", "totalCost", "unitPrice"]);
+  it("la liste des clés retirées est fermée : cost, unitPrice, totalCost, estimatedCost, partUnitPrice", () => {
+    expect([...WORK_ORDER_COST_KEYS].sort()).toEqual(["cost", "estimatedCost", "partUnitPrice", "totalCost", "unitPrice"]);
+  });
+
+  it("retire estimatedCost et partUnitPrice (demandes de pièce en attente)", () => {
+    expect(maskWorkOrderCost([{ id: 1, estimatedCost: 9, partUnitPrice: "5", partName: "Filtre" }])).toEqual([{ id: 1, partName: "Filtre" }]);
   });
 
   it("retire les clés de coût d'un objet et garde les autres", () => {
@@ -51,8 +56,29 @@ describe("maskWorkOrderCost", () => {
     expect("cost" in out).toBe(false);
   });
 
+  it("sans session ni utilisateur, la réponse JSON est masquée (refus par défaut), en GET comme en HEAD", () => {
+    for (const method of ["GET", "HEAD"]) {
+      const sent: unknown[] = [];
+      const res = { json: (body: unknown) => (sent.push(body), res) } as unknown as Response;
+      const next = vi.fn();
+      workOrderCostMask({ method } as Request, res, next);
+      expect(next).toHaveBeenCalledOnce();
+      res.json({ id: 1, cost: "10", parts: [{ unitPrice: "5" }] });
+      expect(sent).toEqual([{ id: 1, parts: [{}] }]);
+    }
+  });
+
+  it("ne touche pas aux méthodes d'écriture", () => {
+    const original = vi.fn();
+    const res = { json: original } as unknown as Response;
+    const next = vi.fn();
+    workOrderCostMask({ method: "POST" } as Request, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.json).toBe(original);
+  });
+
   it("ne confond pas une clé voisine avec une clé de coût", () => {
-    const body = { costCenter: "A", estimatedCost: 3, unit_price: 1, Cost: 2 };
+    const body = { costCenter: "A", estimatedCostNote: 3, unit_price: 1, Cost: 2, partUnitPriceLabel: "x" };
     expect(maskWorkOrderCost(body)).toEqual(body);
   });
 });

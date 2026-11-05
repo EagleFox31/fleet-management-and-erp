@@ -9,3 +9,10 @@ Branche : `fix/work-order-cost-mask`. Modèle d'entrée : `README.md`.
 - **Écran** : `client/src/pages/maintenance/work-orders/[id].tsx` masque, pour les rôles non coût, la carte « Coût total », les colonnes prix et total des pièces, « Total pièces », les montants de la liste des pièces utilisées, le récapitulatif des coûts et les coûts du PDF (`canReadWorkOrderCost`), pour ne pas afficher 0 FCFA.
 - **Preuves** : unitaire du helper (objets imbriqués, tableaux, null, Date, clés voisines) ; contrat par route (liste, détail, pièces posées, historique véhicule, en attente de pièces) : rôle coût voit la sentinelle, chauffeur et client en 200 sans clé ni montant sur le corps entier. Mutants : démontage du middleware (9 échecs) ; suppression de la relecture du compte (liste en échec).
 - **Hors périmètre** : `estimatedCost` des demandes de pièce, OT embarqués dans d'autres réponses (détail véhicule, maintenance), coûts de rotation de pneus.
+
+## 2026-11-05 — Reprise après audit sécurité
+
+- **Quoi** : la liste fermée passe à `cost`, `unitPrice`, `totalCost`, `estimatedCost`, `partUnitPrice` (`GET /:id/pending-part-requirements`, ouverte à `isAnyUser`, renvoyait l'estimation et le prix catalogue). Le masquage couvre aussi HEAD (le `Content-Length` suit le corps masqué) et une réponse JSON sans session (refus par défaut).
+- **Comment** : la relecture du compte est journalisée (`moduleLogger("work-order-cost-mask")`, `{ err, requestId }`) puis masque ; la chaîne de promesses finit par `.catch(next)`. Contrat : ajout de `pending-part-requirements` (deux sentinelles distinctes) et `tire-rotations` (coût de rotation, déjà masqué par la clé `cost`), cas HEAD chauffeur et gestionnaire.
+- **Garde-fou** : `tests/unit/server/work-order-cost-mask-coverage.test.ts` énumère les GET montés sous `/work-orders` (routes.ts, routeurs `server/api/*`) et échoue si l'un n'est ni couvert par le contrat (champ `covers`) ni exempté avec sa raison (statistics, items, labor-rate, technician, export, audit-trail).
+- **Hors périmètre (lot séparé)** : `/api/part-requirements`, maintenance-cost, détail véhicule.
