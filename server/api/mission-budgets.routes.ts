@@ -13,6 +13,7 @@ import {
 } from "@shared/contracts/mission-budgets";
 import {
   MISSION_BUDGET_APPROVE_ROLES,
+  MISSION_BUDGET_DISBURSE_ROLES,
   MISSION_BUDGET_READ_ROLES,
   MISSION_BUDGET_WRITE_ROLES,
 } from "@shared/constants/roles";
@@ -115,6 +116,6 @@ router.get("/mission-budgets/:id", requireFeature("finance"), authorize([...MISS
 router.post("/mission-budgets", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), create);
 router.patch("/mission-budgets/:id", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), update);
 router.post("/mission-budgets/:id/approve", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("approve"));
-router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("disburse"));
+router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), transition("disburse"));
 
 export default router;

@@ -628,3 +628,25 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
     - justifié = 0 tant que le lot justificatifs n'existe pas ;
   - écran : choix du compte au décaissement.
 - **Preuve** : `tsc` : 0 erreur ; unitaires 2865 (2 ignorés) ; contrats complets 2508/2508, dont `mission-budgets` et trésorerie 53/53 ; intégration 351/352. Le seul échec, `lot-recette-schema-idempotence`, compare des compteurs `pg_stat` globaux sur des tables partagées ; rejoué seul avec le code L1c, il passe (2/2) : le second démarrage n'écrit rien.
+
+## 2026-11-05 — Budget de mission (L1c) : suites de la relecture
+
+- **Quoi** : quatre réserves de la relecture levées avant fusion, plus la lecture par le secrétariat.
+  - le décaissement a ses propres rôles, et qui décaisse lit le budget ;
+  - le compte source est obligatoire quand la finance est active ;
+  - les migrations L1b et L1c bornent leur attente de verrou ;
+  - la règle de solde est écrite.
+- **Comment** :
+  - `MISSION_BUDGET_DISBURSE_ROLES` = admin, secrétariat, logistique (`shared/constants/roles.ts`), mêmes rôles que `FUEL_RECHARGE_SOURCE_ROLES` mais déclarés à part. `POST /api/mission-budgets/:id/disburse` passe de `MISSION_BUDGET_APPROVE_ROLES` à cette liste. L'approbation reste admin et direction ;
+  - `MISSION_BUDGET_READ_ROLES` gagne le secrétariat : la lecture (liste, détail, besoin du jour, destinations) couvre exactement saisie ∪ approbation ∪ décaissement, ce que fige un test unitaire ;
+  - `linkMissionBudgetDisbursement` : finance active et aucun compte, 400 « Choisissez le compte de trésorerie… ». L'erreur est levée dans la transaction : le budget reste approuvé. Finance coupée : comportement inchangé (sans compte, simple marquage ; compte demandé, 409) ;
+  - `SET LOCAL lock_timeout = '5s';` après le verrou consultatif, dans `20261105_mission_destinations.sql`, `20261105_mission_budgets_treasury.sql` et leurs jumelles `MISSION_DESTINATIONS_SQL`, `MISSION_BUDGETS_TREASURY_SQL`. C'est la forme de `DOCUMENT_RENEWAL_RECEIPT_SQL` ; même effet que `set_config('lock_timeout','5s',true)`.
+- **Pourquoi** :
+  - la direction, qui approuve, écrivait au journal sans être dans `TREASURY_WRITE_ROLES`, et ceux qui tiennent la caisse étaient refusés. Qui approuve ne décaisse pas ;
+  - sans compte, un décaissement ne laissait aucune trace au journal, donc rien à contre-passer à l'annulation (L1d) ;
+  - un démarrage ne doit pas rester bloqué derrière une transaction longue sur `mission_budgets`.
+- **Règle de solde** : solde négatif autorisé, comme T2/T3. Un décaissement n'est pas refusé parce que le compte source passerait sous zéro. Aucun événement de trésorerie n'est émis pour ce lot : accepté par 0a.
+- **Preuve** :
+  - contrat `mission-budgets` : au décaissement, direction, technicien, chauffeur et client 403 ; secrétariat et logistique 200 ; sans compte (absent ou `null`) 400, budget resté approuvé, journal vide. En lecture, secrétariat 200 (liste, besoin du jour, détail après décaissement) ;
+  - tests unitaires : `lock_timeout` présent dans les SQL L1b et L1c ; lecture = saisie ∪ approbation ∪ décaissement ; seul l'administrateur approuve et décaisse ;
+  - `tsc` : 0 erreur ; unitaires 2880 ; contrats complets 2531/2531 ; intégration 352/352 ; contrats `mission-budgets`, trésorerie et moyens de paiement 71/71 après l'ajout de la lecture.

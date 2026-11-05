@@ -94,6 +94,22 @@ const body = (missionId: number, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+/** Compte de trésorerie de test (L1c), supprimé en fin de fichier. */
+async function newTreasuryAccount(kind: "bank" | "cash" | "fuel_card", isActive = true): Promise<number> {
+  const [row] = await db
+    .insert(treasuryAccounts)
+    .values({
+      code: `${TEST_PREFIX}mb-${kind}-${isActive}-${Date.now()}-${treasuryAccountIds.length}`,
+      label: `${TEST_PREFIX} ${kind}`,
+      kind,
+      isActive,
+      createdBy: userIds.get("admin")!,
+    })
+    .returning({ id: treasuryAccounts.id });
+  treasuryAccountIds.push(row.id);
+  return row.id;
+}
+
 beforeAll(async () => {
   process.env.FEATURE_FLAGS = "finance=on";
   (global as any).broadcastUpdate = (event: string, data: unknown) => events.push({ event, data });
@@ -264,12 +280,12 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     expect(patched.status).toBe(200);
     expect(patched.body).toMatchObject({ fuelAmount: 91_150, totalAmount: 136_150, status: "requested" });
 
-    // La logistique n'approuve pas, la direction ne décaisse pas avant approbation.
+    // La logistique n'approuve pas et ne décaisse pas avant approbation.
     const v1 = seen(patched.body);
     for (const role of ["logistics", "secretary", "driver"]) {
       expect((await call("POST", missionBudgetApprovePath(created.id), role, v1)).status, role).toBe(403);
     }
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "management", v1)).status).toBe(409);
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "logistics", v1)).status).toBe(409);
     // Sans version lue : 400.
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", {})).status).toBe(400);
 
@@ -279,18 +295,19 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", seen(approved.body))).status).toBe(409);
     // Approuvé : plus de correction.
     expect((await call("PATCH", missionBudgetPath(created.id), "logistics", { fdrAmount: 1 })).status).toBe(409);
-    // La logistique ne décaisse pas.
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "logistics", seen(approved.body))).status).toBe(403);
+    // Qui approuve ne décaisse pas ; chauffeur, technicien et client non plus.
+    const bank = await newTreasuryAccount("bank");
+    for (const role of ["management", "technician", "driver", "client"]) {
+      expect((await call("POST", missionBudgetDisbursePath(created.id), role, { ...seen(approved.body), treasuryAccountId: bank })).status, role).toBe(403);
+    }
+    // Finance active : le compte source est obligatoire.
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved.body))).status).toBe(400);
 
-    const disbursed = await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved.body));
+    const disbursed = await call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(approved.body), treasuryAccountId: bank });
     expect(disbursed.status).toBe(200);
-    expect(disbursed.body).toMatchObject({
-      status: "disbursed",
-      disbursedBy: userIds.get("admin"),
-      updatedBy: userIds.get("admin"),
-      treasuryEntryId: null,
-    });
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(disbursed.body))).status).toBe(409);
+    expect(disbursed.body).toMatchObject({ status: "disbursed", disbursedBy: userIds.get("admin"), updatedBy: userIds.get("admin") });
+    expect(disbursed.body.treasuryEntryId).toEqual(expect.any(Number));
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(disbursed.body), treasuryAccountId: bank })).status).toBe(409);
   });
 
   it("approbation liée à la version lue : un budget corrigé depuis répond 409 et reste demandé", async () => {
@@ -310,9 +327,10 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     const approved = missionBudgetSchema.parse(
       (await call("POST", missionBudgetApprovePath(created.id), "management", seen(created))).body,
     );
+    const bank = await newTreasuryAccount("bank");
     const results = await Promise.all([
-      call("POST", missionBudgetDisbursePath(created.id), "management", seen(approved)),
-      call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved)),
+      call("POST", missionBudgetDisbursePath(created.id), "logistics", { ...seen(approved), treasuryAccountId: bank }),
+      call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(approved), treasuryAccountId: bank }),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
@@ -325,11 +343,12 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
 });
 
 describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
-  it("lecture : logistique, direction, administrateur ; 403 pour secrétariat, technicien, client", async () => {
-    for (const role of ["logistics", "management", "admin"]) {
+  it("lecture : logistique, direction, secrétariat (qui décaisse), administrateur ; 403 pour technicien, chauffeur, client", async () => {
+    for (const role of ["logistics", "management", "secretary", "admin"]) {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(200);
+      expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${DAY}`, role)).status, role).toBe(200);
     }
-    for (const role of ["secretary", "technician", "driver", "client"]) {
+    for (const role of ["technician", "driver", "client"]) {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(403);
       expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${DAY}`, role)).status, role).toBe(403);
     }
@@ -379,7 +398,7 @@ describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
       expect(list.map((d) => d.id)).toContain(destinationIds[0]);
       expect(list.map((d) => d.id)).not.toContain(destinationIds[1]);
     }
-    for (const role of ["secretary", "technician", "driver", "client"]) {
+    for (const role of ["technician", "driver", "client"]) {
       expect((await call("GET", MISSION_DESTINATIONS_PATH, role)).status, role).toBe(403);
     }
   });
@@ -423,20 +442,7 @@ describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
 describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, () => {
   const accounts = { bank: 0, cash: 0, inactive: 0, card: 0 };
 
-  async function account(kind: "bank" | "cash" | "fuel_card", isActive = true): Promise<number> {
-    const [row] = await db
-      .insert(treasuryAccounts)
-      .values({
-        code: `${TEST_PREFIX}mb-${kind}-${isActive}-${Date.now()}`,
-        label: `${TEST_PREFIX} ${kind}`,
-        kind,
-        isActive,
-        createdBy: userIds.get("admin")!,
-      })
-      .returning({ id: treasuryAccounts.id });
-    treasuryAccountIds.push(row.id);
-    return row.id;
-  }
+  const account = newTreasuryAccount;
 
   beforeAll(async () => {
     accounts.bank = await account("bank");
@@ -462,7 +468,7 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
 
   it("avec un compte : deux sorties liées à la mission ; le budget retient la ligne FDR ; rejeu sans doublon", async () => {
     const { missionId, approved } = await approvedBudget();
-    const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank });
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank });
     expect(res.status).toBe(200);
     const entries = await entriesOf(approved.id);
     expect(entries).toHaveLength(2);
@@ -470,13 +476,13 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     const fdr = byKey.get(`mission-budget:${approved.id}:fdr`)!;
     const fuel = byKey.get(`mission-budget:${approved.id}:carburant`)!;
     // body() : FDR 40 000 + frais annexes 5 000 ; carburant = fuelAmount calculé par le service.
-    expect(fdr).toMatchObject({ accountId: accounts.bank, direction: "out", amount: "45000.00", category: "fdr", missionId, createdBy: userIds.get("management") });
+    expect(fdr).toMatchObject({ accountId: accounts.bank, direction: "out", amount: "45000.00", category: "fdr", missionId, createdBy: userIds.get("logistics") });
     expect(fuel).toMatchObject({ accountId: accounts.bank, direction: "out", category: "carburant", missionId });
     expect(Number(fuel.amount)).toBe(Number(approved.fuelAmount));
     expect(res.body).toMatchObject({ status: "disbursed", treasuryEntryId: fdr.id });
 
     // Rejeu HTTP : 409, rien de plus au journal.
-    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(res.body), treasuryAccountId: accounts.bank })).status).toBe(409);
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(res.body), treasuryAccountId: accounts.bank })).status).toBe(409);
     // Rejeu du lien seul : clés déjà prises, aucune seconde ligne, même écriture retenue.
     const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
     const again = await db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, accounts.bank, userIds.get("admin")!));
@@ -493,21 +499,34 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     expect(res.body.treasuryEntryId).toBe(entries[0].id);
   });
 
-  it("sans compte (absent ou null) : marquage seul, rien au journal", async () => {
+  it("finance active, sans compte (absent ou null) : 400, budget resté approuvé, journal vide", async () => {
     for (const extra of [{}, { treasuryAccountId: null }]) {
       const { approved } = await approvedBudget();
-      const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), ...extra });
-      expect(res.status, JSON.stringify(extra)).toBe(200);
-      expect(res.body).toMatchObject({ status: "disbursed", treasuryEntryId: null });
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), ...extra });
+      expect(res.status, JSON.stringify(extra)).toBe(400);
+      const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+      expect(row).toMatchObject({ status: "approved", disbursedBy: null, treasuryEntryId: null });
       expect(await entriesOf(approved.id)).toHaveLength(0);
     }
+  });
+
+  it("le secrétariat décaisse aussi ; la direction, qui approuve, est refusée (403)", async () => {
+    const { approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(403);
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "secretary", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "disbursed", disbursedBy: userIds.get("secretary") });
+    // Qui décaisse relit le budget.
+    const detail = await call("GET", `${MISSION_BUDGETS_PATH}/${approved.id}`, "secretary");
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ id: approved.id, status: "disbursed" });
   });
 
   it("carte carburant 400, compte désactivé 409, compte inconnu 404 : budget resté approuvé, journal vide", async () => {
     const cases: Array<[number, number]> = [[accounts.card, 400], [accounts.inactive, 409], [2_000_000_000, 404]];
     for (const [treasuryAccountId, status] of cases) {
       const { approved } = await approvedBudget();
-      const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId });
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId });
       expect(res.status, String(treasuryAccountId)).toBe(status);
       // L'UPDATE conditionnel précède le refus : la transaction l'annule.
       const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
@@ -521,7 +540,7 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", { ...seen(created), treasuryAccountId: accounts.bank })).status).toBe(400);
     const { approved } = await approvedBudget();
-    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: 2_147_483_648 })).status).toBe(400);
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: 2_147_483_648 })).status).toBe(400);
   });
 
   const cancelMission = (missionId: number) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status: "cancelled" });
