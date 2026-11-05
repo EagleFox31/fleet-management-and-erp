@@ -25,7 +25,7 @@ test("démo magasinier : réception d'une commande, entrée en stock, sortie ver
   await page.getByRole("link", { name: "Commandes", exact: true }).first().click();
   await expect(page.getByText(DEMO_RECEPTION.orderNumber).first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
-  await page.getByText(DEMO_RECEPTION.orderNumber).first().click();
+  await page.getByRole("row").filter({ hasText: DEMO_RECEPTION.orderNumber }).locator('[data-testid^="button-view-"]').click();
   await page.getByTestId("button-status-delivered").click();
   await page.getByTestId("input-delivery-code").fill(DEMO_RECEPTION.deliveryCode);
   await beat(page);
@@ -35,18 +35,19 @@ test("démo magasinier : réception d'une commande, entrée en stock, sortie ver
   await expect.poll(stock, { timeout: 20_000 }).toBe(stockBefore + DEMO_RECEPTION.orderedQuantity);
 
   // Sortie de la pièce vers l'atelier.
-  await page.getByRole("link", { name: "Ordres de travail" }).first().click();
-  await beat(page, 1200);
-  const row = page.getByRole("row").filter({ hasText: DEMO_RECEPTION.workOrderTitle });
-  await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByRole("button", { name: "Voir OT" }).click();
+  const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.title, DEMO_RECEPTION.workOrderTitle));
+  await page.getByRole("link", { name: "Demandes de pièces" }).first().click();
+  await beat(page, 1500);
+  const viewWo = page.getByTestId(`btn-view-wo-${wo.id}`);
+  if (await viewWo.isVisible().catch(() => false)) await viewWo.click();
+  else await page.goto(`/maintenance/work-orders/${wo.id}`);
+  await page.getByRole("tab", { name: /Pièces/ }).click();
   await expect(page.getByText("Sortir du stock").first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
   await page.getByRole("button", { name: "Sortir du stock" }).first().click();
   await expect(page.getByText("Pièce sortie du stock").first()).toBeVisible({ timeout: 20_000 });
   await beat(page, 2000);
 
-  const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.title, DEMO_RECEPTION.workOrderTitle));
   const [req] = await db.select({ status: partRequirements.status }).from(partRequirements).where(eq(partRequirements.workOrderId, wo.id));
   expect(req.status).toBe("issued");
   expect(await stock()).toBe(stockBefore + DEMO_RECEPTION.orderedQuantity - DEMO_RECEPTION.requestedQuantity);

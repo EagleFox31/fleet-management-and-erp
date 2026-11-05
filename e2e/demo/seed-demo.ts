@@ -31,6 +31,7 @@ import {
   partsUsed,
   purchaseOrderLines,
   purchaseOrders,
+  supplierInvoices,
   suppliers,
   users,
   vehicleDocuments,
@@ -164,6 +165,7 @@ function writeDemoPdf(name: string): void {
 async function purgeReceptionOrders(): Promise<void> {
   const oldOrders = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.orderNumber, DEMO_RECEPTION.orderNumber));
   if (oldOrders.length > 0) {
+    await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, oldOrders.map((o) => o.id)));
   }
@@ -189,7 +191,7 @@ async function seedWarehouse(): Promise<void> {
   const [supplier] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.name, DEMO_RECEPTION.supplierName));
   const [workOrder] = await db
     .insert(workOrders)
-    .values({ vehicleId, title: DEMO_RECEPTION.workOrderTitle, priority: "medium", status: "in_progress", description: "Remplacement du filtre à huile : pièce commandée, en attente de réception." })
+    .values({ vehicleId, title: DEMO_RECEPTION.workOrderTitle, priority: "medium", status: "awaiting_parts", description: "Remplacement du filtre à huile : pièce commandée, en attente de réception." })
     .returning({ id: workOrders.id });
   const [requirement] = await db
     .insert(partRequirements)
