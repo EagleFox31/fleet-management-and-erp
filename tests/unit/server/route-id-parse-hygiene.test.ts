@@ -27,22 +27,16 @@ const LOOSE_PARAM_READ = /\b(?:Number\.)?parseInt\(\s*req\.params\b|\bNumber\(\s
 /** Occurrences relevées le 5 novembre 2026. Ne peut que rétrécir. */
 const FROZEN: Record<string, number> = {
   "admin-users-guard.routes.ts": 1,
-  "document-renewals.routes.ts": 2,
+  "document-renewals.routes.ts": 1,
   "drivers-management.routes.ts": 1,
   "drivers.routes.ts": 2,
-  "fault-catalog.routes.ts": 1,
   "fuel-card.routes.ts": 2,
-  "missions.routes.ts": 1,
   "part-requirements.routes.ts": 3,
   "parts-catalog.routes.ts": 3,
-  "purchase-orders.routes.ts": 2,
-  "supplier-invoices.routes.ts": 10,
+  "supplier-invoices.routes.ts": 5,
   "suppliers.routes.ts": 8,
-  "vehicle-documents.routes.ts": 3,
   "vehicles.routes.ts": 2,
-  "warehouse.routes.ts": 1,
-  "work-order-items.routes.ts": 5,
-  "work-order-labor-rate.routes.ts": 1,
+  "work-order-items.routes.ts": 4,
   "work-order-parts.routes.ts": 5,
 };
 

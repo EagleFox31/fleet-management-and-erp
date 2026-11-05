@@ -6,6 +6,7 @@ import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocuments, vehicleDocumentTypes } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isWorkshopManager } from "../middleware/auth";
 import { deleteFile, isVehicleIdSegment, uploadVehicleDocument } from "../middleware/upload";
@@ -70,7 +71,7 @@ function emitDocumentDeposited(
 router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next) => {
   // Chiffres seuls : multer fait de ce paramètre un dossier disque, `parseInt` laisserait passer `1../../x` (#130).
   if (!isVehicleIdSegment(req.params.vehicleId)) return next(new AppError(400, "ID de véhicule invalide"));
-  const vehicleId = Number(req.params.vehicleId);
+  const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
 
   uploadVehicleDocument(req, res, async (err: unknown) => {
     // Le fichier n'est gardé qu'une fois référencé par un document enregistré (miroir compris) :
@@ -157,8 +158,7 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
  */
 router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) throw new AppError(400, "ID de document invalide");
+    const id = parseRouteId(req.params.id, "ID de document invalide");
     const document = await storage.getVehicleDocument(id);
     if (!document) throw new AppError(404, "Document non trouvé");
     // Faux si un autre utilisateur l'a supprimé entre la lecture et la suppression.
@@ -207,8 +207,7 @@ router.delete("/documents/:id", isWorkshopManager, async (req, res, next) => {
  */
 router.patch("/documents/:id", isWorkshopManager, async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "ID de document invalide");
+    const id = parseRouteId(req.params.id, "ID de document invalide");
 
     const document = await storage.getVehicleDocument(id);
     if (!document) throw new AppError(404, "Document non trouvé");

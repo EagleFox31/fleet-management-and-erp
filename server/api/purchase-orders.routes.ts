@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
@@ -386,11 +387,8 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
  */
 router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = parseInt(req.params.id);
-    const lineId = parseInt(req.params.lineId);
-    if (Number.isNaN(orderId) || Number.isNaN(lineId)) {
-      throw new AppError(400, "Commande ou ligne invalide.");
-    }
+    const orderId = parseRouteId(req.params.id, "Commande ou ligne invalide.");
+    const lineId = parseRouteId(req.params.lineId, "Commande ou ligne invalide.");
 
     const scope = await getScopeByOrderId(orderId);
     if (!canManageScope(req.user?.role, scope)) {

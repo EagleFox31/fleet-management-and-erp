@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { faultCatalog, insertFaultCatalogPartSchema, updateFaultCatalogPartSchema } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { moduleLogger } from "../lib/logger";
 import { idParam, makeFailWith } from "../lib/route-helpers";
@@ -24,10 +25,7 @@ const failWith = makeFailWith(log);
  */
 router.patch("/fault-catalog/:id", isWorkshopManager, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) {
-      throw new AppError(400, "ID invalide");
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const {
       id: _id,
