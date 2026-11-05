@@ -13,7 +13,7 @@ const router = Router();
  */
 router.patch("/admin/users/:id/toggle", authenticate, isAdmin, (req, _res, next) => {
   // Lecture stricte : `<id>abc` viserait <id> par `parseInt`, et la route de `server/routes.ts` qui prend le relais
-  // lit l'id de façon lâche. Refuser ici évite de désactiver un autre compte que celui visé.
+  // lit l'id de façon lâche. Refuser ici évite d'activer ou de désactiver un autre compte que celui visé.
   const id = parseRouteId(req.params.id, "Identifiant d'utilisateur invalide.");
   const wantsActive = req.body?.isActive;
   if (id === req.session.userId && !wantsActive) {

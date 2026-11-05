@@ -12,8 +12,9 @@ import { uniqueTestToken } from "../support/ids";
  * - Fiche pièce, spécifications, variantes : sans contrainte `([0-9]+)` dans le chemin, `<id>abc` atteint le
  *   handler et répond 400 avec son message, au lieu d'un 404 sans message.
  * - Garde du toggle admin : `<id>abc` répond 400 avant `server/routes.ts`, qui lit l'id de façon lâche et
- *   aurait désactivé le compte `<id>`. Pour le compte d'un autre, `last-admin-guard` refusait déjà (non-régression) ;
- *   sur son propre compte, `admin-users-guard` répondait « désactiver votre propre compte » au lieu de l'id invalide.
+ *   aurait activé ou désactivé le compte `<id>`. Désactivation d'un autre compte : `last-admin-guard` refusait déjà
+ *   (non-régression). Réactivation d'un autre compte : rien ne la gardait. Son propre compte : la réponse portait
+ *   sur l'auto-désactivation au lieu de l'id invalide.
  * - Demandes de pièce : `<id>abc` répond 400, la demande `<id>` reste intacte.
  * Chaque cas vise un id existant suivi de lettres : `parseInt` y lirait cet id.
  */
@@ -31,6 +32,7 @@ let specId = 0;
 let variantId = 0;
 let requirementId = 0;
 let otherUserId = 0;
+let deactivatedUserId = 0;
 
 const call = (actor: Actor, method: string, path: string, body?: unknown) => session.call(method, path, { actor, body });
 
@@ -66,6 +68,11 @@ beforeAll(async () => {
   const other = await createTestUser({ role: "technician" });
   ids.userIds.push(other.id);
   otherUserId = other.id;
+
+  const deactivated = await createTestUser({ role: "technician" });
+  ids.userIds.push(deactivated.id);
+  await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, deactivated.id));
+  deactivatedUserId = deactivated.id;
 }, 120000);
 
 afterAll(async () => {
@@ -135,6 +142,14 @@ describe("toggle admin : <id>abc répond 400 avant la route gelée", { timeout: 
     // La désactivation est une suppression douce : `deletedAt` renseigné.
     const [row] = await db.select({ deletedAt: users.deletedAt }).from(users).where(eq(users.id, otherUserId));
     expect(row.deletedAt).toBeNull();
+  });
+
+  it("réactivation d'un autre compte désactivé : 400, le compte reste désactivé", async () => {
+    const res = await call("admin", "PATCH", `/api/admin/users/${deactivatedUserId}abc/toggle`, { isActive: true });
+    expect(res.status).toBe(400);
+    expect(res.body?.message).toBe("Identifiant d'utilisateur invalide.");
+    const [row] = await db.select({ deletedAt: users.deletedAt }).from(users).where(eq(users.id, deactivatedUserId));
+    expect(row.deletedAt).not.toBeNull();
   });
 
   it("son propre compte : 400 sur l'identifiant, pas sur l'auto-désactivation", async () => {
