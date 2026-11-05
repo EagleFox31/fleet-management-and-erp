@@ -13,4 +13,4 @@
 | muted-foreground sur page | 4,80 / 7,77 | 5,11 / 7,77 |
 
 Mutation : remettre 44.7 % fait echouer le test (4,40 < 4,5). `npm run check` : zero erreur TS ; tests unitaires 2560 verts.
-Hors perimetre : muted-foreground sur `destructive/10` (4,25) n'existe nulle part dans le code ; icones (3:1) non traitees.
+Hors perimetre : muted-foreground sur `destructive/10` (4,33 sur la page, 3,98 sur muted) n'existe nulle part dans le code ; icones (3:1) non traitees.

@@ -44,7 +44,7 @@ const CARTE_CPC = { clair: [0, 0, 100], sombre: [222, 47, 11] }; // bg-white / d
 export const COUPLES = [
   ["fond plein destructive : destructive-foreground sur destructive (bouton, badge, toast)", "destructive-foreground", "destructive", 1, "background", ["client/src/components/ui/button.tsx", "bg-destructive text-destructive-foreground"]],
   ["badge CPC expire apres (destructive-text sur destructive/10)", "destructive-text", "destructive", 0.1, "background", [CPC, "bg-destructive/10 text-destructive-text"]],
-  ["muted-foreground sur muted (badge neutre, secondary, accent)", "muted-foreground", "muted", 1, "background", [CPC, "bg-muted"]],
+  ["muted-foreground sur muted (badge neutre, secondary, accent)", "muted-foreground", "muted", 1, "background", ["client/src/components/ui/tabs.tsx", "bg-muted p-1 text-muted-foreground"]],
   ["muted-foreground sur muted/50 dans une carte destructive/5 (Suggestions)", "muted-foreground", "muted", 0.5, { sous: [["destructive", 0.05]] }, [EB, "bg-muted/50"]],
   ["badge CPC neutre apres (foreground sur muted)", "foreground", "muted", 1, "background", [CPC, "bg-muted text-foreground"]],
   ["badge CPC valide (success sur success/10)", "success", "success", 0.1, "background", [CPC, "bg-success/10 text-success"]],
