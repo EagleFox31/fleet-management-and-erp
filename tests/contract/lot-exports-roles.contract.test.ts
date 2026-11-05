@@ -1,3 +1,4 @@
+import { messageText } from "../support/api-error";
 import { createServer, type Server } from "http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ALL_APP_ROLES, type AppRole } from "../../shared/constants/roles";
@@ -133,7 +134,7 @@ describe("exports : validation et en-tetes (T-11a)", { timeout: 60000 }, () => {
       expect(res.status).toBe(400);
       const body = JSON.parse(res.text());
       expect(body).toMatchObject({ code: expect.any(String), message: expect.any(String) });
-      expect(body.message).not.toMatch(/zod|invalid_type|stack/i);
+      expect(messageText(body)).not.toMatch(/zod|invalid_type|stack/i);
     }
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leakText } from "../support/api-error";
+import { leakText, messageText } from "../support/api-error";
 import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../support/repo-files";
 
 /**
@@ -14,9 +14,12 @@ import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../support/repo-
  * plus de 4 caractères ne tient presque jamais dans un identifiant de 10 caractères.
  * Limite : une aiguille passée par une variable (`.not.toContain(SECRET)`) n'est pas évaluée.
  */
-const BODY_ARG = String.raw`(?:await\s+[\w.]+\.json\(\)|[\w.]*(?:body|json|data))`;
+const BODY_NAME = String.raw`[\w.]*(?:body|json|data|payload|result|answer)`;
+const BODY_ARG = String.raw`(?:await\s+[\w.]+\.json\(\)|${BODY_NAME})`;
+/** `body.message` d'une 5xx : « Référence : <requestId> » y figure, comme dans le corps entier. */
+const MESSAGE_ARG = String.raw`${BODY_NAME}\.message`;
 const TEXT_ARG = String.raw`(?:await\s+[\w.]+\.text\(\)|[\w.]*\.text)`;
-const RAW_SUBJECT = String.raw`(?:JSON\.stringify\(\s*${BODY_ARG}\s*(?:,[^()]*)?\)|String\(\s*${BODY_ARG}\s*\)|${TEXT_ARG})`;
+const RAW_SUBJECT = String.raw`(?:JSON\.stringify\(\s*${BODY_ARG}\s*(?:,[^()]*)?\)|String\(\s*${BODY_ARG}\s*\)|${TEXT_ARG}|${MESSAGE_ARG})`;
 const NEGATION = String.raw`\s*\.\s*not\s*\.\s*(?:toMatch|toContain)\(\s*`;
 const NEEDLE = String.raw`(?:\/(?:[^\/\\\n]|\\.)+\/[a-z]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\x60[^\x60\n]*\x60)`;
 /** Longueur à partir de laquelle une aiguille ne tient pratiquement jamais dans un `requestId` de 10 caractères. */
@@ -37,6 +40,8 @@ function isRiskyNeedle(needle: string): boolean {
         .split("|")
         .map((alt) => alt.replace(/\\b/g, "").replace(/\(\?:|[()^$*+?]/g, "").replace(/\\\w|\./g, "x").replace(/\\./g, "!"))
     : [needle.slice(1, -1)];
+  // classe ou quantificateur (`/\d{4}/`, `/[a-z]+/`) : peut tomber sur un identifiant quelle que soit la longueur écrite
+  if (needle.startsWith("/") && /[\[\]{}+*]|\\[dws]/.test(needle.slice(1, needle.lastIndexOf("/")))) return true;
   return alternatives.some((alt) => alt.length < SAFE_NEEDLE_LENGTH && !/[^A-Za-z0-9_-]/.test(alt));
 }
 
@@ -80,6 +85,23 @@ describe("contrôles de fuite dans les réponses d'erreur", () => {
     expect(flagged("expect(String(res.body)).not.toMatch(/sql/i)")).toBe(true);
     expect(flagged("const raw = JSON.stringify(res.body);\n  expect(res.status).toBe(500);\n  expect(raw).not.toMatch(/sql/i);")).toBe(true);
     expect(flagged("const raw = await res.text();\nexpect(raw).not.toContain('pg');")).toBe(true);
+  });
+
+  it("le motif voit le message seul d'une 5xx, une classe ou un quantificateur, d'autres noms de réponse", () => {
+    const flagged = (code: string) => rawBodyLeakChecks(code).length > 0;
+    expect(flagged("expect(body.message).not.toMatch(/TEST|synchro/)")).toBe(true);
+    expect(flagged("expect(res.body.message).not.toMatch(/sql/i)")).toBe(true);
+    expect(flagged("expect(JSON.stringify(res.body)).not.toMatch(/\\d{4}/)")).toBe(true);
+    expect(flagged("expect(JSON.stringify(res.body)).not.toMatch(/[a-z]+Error/)")).toBe(true);
+    expect(flagged("expect(JSON.stringify(payload)).not.toMatch(/sql/i)")).toBe(true);
+    expect(flagged("expect(messageText(res.body)).not.toMatch(/sql/i)")).toBe(false);
+  });
+
+  it("messageText retire le requestId du message", () => {
+    const body = { message: "Erreur interne. Référence : qrSqlREDR7", requestId: "qrSqlREDR7" };
+    expect(messageText(body)).not.toMatch(/sql/i);
+    expect(messageText({ message: "SQLSTATE 23505", requestId: "abc" })).toMatch(/SQLSTATE/);
+    expect(messageText(undefined)).toBe("");
   });
 
   it("le motif laisse passer les contrôles sûrs, les mots longs et les assertions positives", () => {
