@@ -609,6 +609,9 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
  */
 router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Response, next: NextFunction) => {
   uploadSettlementProof(req, res, async (err) => {
+    // Le justificatif n'est gardé qu'une fois référencé par un règlement enregistré : toute autre
+    // sortie (refus, échec, saisie rejouée) le supprime dans le finally, jamais après le commit.
+    let proofRecorded = false;
     try {
       if (err) {
         const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
@@ -683,24 +686,29 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
       );
 
       // Saisie rejouée : le règlement existe déjà avec son propre justificatif,
-      // le fichier qui vient d'arriver ne sert à rien, et rien n'a changé.
+      // le fichier qui vient d'arriver ne sert à rien (supprimé par le finally), et rien n'a changé.
       if (replayed) {
-        removeUploadedProof(req);
         return res.status(200).json({
           invoice,
           settlement,
           message: "Ce règlement était déjà enregistré.",
         });
       }
+      proofRecorded = true;
 
-      broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_recorded", {
-        invoiceId: invoice.id,
-        purchaseOrderId: invoice.purchaseOrderId ?? null,
-        invoice,
-        settlement,
-        action: "settlement_recorded",
-        triggeredBy: req.user.id,
-      });
+      // Diffusion au mieux : le règlement référence déjà le fichier, un échec ici ne touche ni à l'un ni à l'autre.
+      try {
+        broadcastSupplierInvoiceUpdate("supplier_invoice_settlement_recorded", {
+          invoiceId: invoice.id,
+          purchaseOrderId: invoice.purchaseOrderId ?? null,
+          invoice,
+          settlement,
+          action: "settlement_recorded",
+          triggeredBy: req.user.id,
+        });
+      } catch (broadcastError) {
+        log.error({ err: broadcastError, requestId: req.requestId, invoiceId }, "diffusion du règlement fournisseur");
+      }
 
       return res.status(201).json({
         invoice,
@@ -708,10 +716,11 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         message: "Règlement saisi. En attente de rapprochement bancaire.",
       });
     } catch (error) {
-      removeUploadedProof(req);
       // Le gestionnaire central journalise et rend une erreur lisible :
       // ZodError -> 400 par champ, AppError -> son statut, le reste -> 500 générique.
       return next(error);
+    } finally {
+      if (!proofRecorded) removeUploadedProof(req);
     }
   });
 });

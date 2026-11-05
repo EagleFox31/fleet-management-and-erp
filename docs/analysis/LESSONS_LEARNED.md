@@ -1744,7 +1744,7 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 
 ### Exceptions nommées
 - Une coupure après un COMMIT non acquitté fait supprimer un fichier pourtant référencé. Cas théorique, accepté.
-- Les autres routes multer (récépissé, preuves) n'ont pas encore été revues selon ce patron.
+- Les autres routes multer (récépissé, preuves) : revues le 5 novembre 2026, voir l'entrée « Justificatif de règlement fournisseur supprimé après enregistrement ».
 
 ### Prévention (vérifiable)
 - `tests/contract/document-quick-renew-proof-lifecycle.contract.test.ts`, 8 cas : chaque refus supprime le fichier sans créer de centre ni avancer l'échéance ; un échec en transaction laisse tout inchangé ; un échec de notification conserve le fichier référencé ; une demande close donne 409.
@@ -2943,3 +2943,13 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : fichier supprimé, code mort, non appliqué.
 - **Prévention vérifiable** : `tests/unit/server/bootstrap-sql-files.test.ts` échoue si un `.sql` de `server/db/triggers/` ou `server/db/functions/` n'est ni dans `BOOTSTRAP_SQL_FILES` ni dans la liste gelée `NOT_BOOTSTRAPPED_FROZEN` (avec raison) ; rouge avant la suppression. La liste gelée garde quatre fichiers d'alertes non appliqués, à installer ou supprimer.
 - **Leçon généralisée** : un automatisme en base n'existe que s'il est appliqué au démarrage ; avant de corriger un trigger, vérifier qu'il est installé.
+
+## 2026-11-05 — Justificatif de règlement fournisseur supprimé après enregistrement
+
+- **Contexte** : revue des routes multer selon le patron de #178 (exception nommée de l'entrée sur le renouvellement rapide).
+- **Constat** : `POST /api/supplier-invoices/:id/settlements` supprimait le justificatif dans son `catch`. Une diffusion temps réel qui levait après l'enregistrement donnait une 500 et supprimait le fichier d'un règlement pourtant créé. À l'inverse, les sorties anticipées (identifiant invalide, 401) laissaient le fichier orphelin.
+- **Cause racine** : suppression écrite chemin par chemin au lieu de découler d'un seul fait : « une écriture validée référence-t-elle le fichier ? ».
+- **Classification** : cycle de vie d'une ressource externe non lié au commit (récidive du cas #178 sur une autre route).
+- **Résolution** : drapeau `proofRecorded` posé après l'enregistrement ou le rejeu idempotent, suppression dans le `finally` tant qu'il est faux, diffusion au mieux avec `log.error`. Le récépissé de renouvellement (`POST /requests/:id/receipt`) prend la même forme (`receiptRecorded`) ; sa diffusion était déjà au mieux.
+- **Prévention vérifiable** : `tests/contract/supplier-settlement-proof-lifecycle.contract.test.ts` (identifiant invalide : 400 sans fichier laissé ; diffusion qui lève : 201 et justificatif conservé), 2 cas rouges sur main, verts après.
+- **Leçon généralisée** : toute route multer lie le sort du fichier à l'écriture qui le référence, par un drapeau et un `finally`, jamais par des suppressions dans les branches de refus ; les effets après commit ne lèvent jamais vers ce `finally`.
