@@ -446,3 +446,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : garde `multer-lifecycle-hygiene` (route de `server/api` qui lit `req.file` : drapeau + `finally`, ou exception gelée ; import Excel en mémoire gelé). Dépôt de document véhicule passé au patron, diffusion au mieux. Règlement fournisseur : `removeUploadedProof` par `settlementProofPath`, refus 401/400 en `AppError`.
 - **Pourquoi** : récidive de #178 en #348 ; le dépôt de document véhicule avait le même défaut (diffusion qui lève : 500 et fichier d'un document enregistré supprimé).
 - **Preuve** : contrat `vehicle-documents-upload-errors` (diffusion qui lève → 201, fichier conservé), rouge avant ; contrat `supplier-settlement-proof-lifecycle` (+ 409 facture non approuvée, aucun fichier) ; garde rouge sur l'ancien dépôt de document.
+
+## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
+- **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
+- **Preuve** : contrat `supplier-settlement-proof-path` (5 ids non stricts) rouge sur l'ancien code (200), vert après (15/15).
