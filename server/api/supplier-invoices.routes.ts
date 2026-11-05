@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import {
   SETTLEMENT_PROOF_EXTENSION_BY_MIME,
   SETTLEMENT_PROOF_PREFIX,
@@ -279,7 +279,7 @@ router.get("/", checkReadPermission, async (req: Request, res: Response, next: N
 
     const filters = {
       status: status as string | undefined,
-      supplierId: supplierId ? parseInt(supplierId as string) : undefined,
+      supplierId: parseQueryId(supplierId, "ID fournisseur invalide"),
       hasDiscrepancy: hasDiscrepancy === 'true' ? true : hasDiscrepancy === 'false' ? false : undefined,
       startDate: startDate as string | undefined,
       endDate: endDate as string | undefined,
