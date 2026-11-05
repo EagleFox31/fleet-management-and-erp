@@ -580,3 +580,33 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - même ordre de verrous partout (mission, puis budget) : une correction et une approbation simultanées ne s'interbloquent pas.
 - **Pourquoi** : on pouvait encore décaisser le budget d'une mission annulée ; une annulation concurrente attend désormais l'écriture du budget, ou la précède et la fait refuser.
 - **Preuve** : contrat `mission-budgets` 16/16, dont « mission close après la saisie » (correction, approbation, décaissement 409, budget intact) ; `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1b) : barème par destination
+- **Quoi** :
+  - table `mission_destinations` (code, libellé, litres, FDR, active) : liste fermée, semée avec les cinq destinations relevées ;
+  - `GET /api/mission-budgets/destinations` : destinations actives, mêmes rôles de lecture que les budgets ;
+  - saisie : `destinationId` facultatif ; il pré-remplit litres et FDR absents du corps, une valeur saisie l'emporte ; sans destination, litres et FDR restent requis ;
+  - destination retirée ou inconnue : 400 ; correction : changer ou retirer la destination ne réécrit pas les montants.
+- **Comment** :
+  - migration jumelle de `MISSION_DESTINATIONS_SQL`, appliquée après `MISSION_BUDGETS_SQL` et avant le relevé des contraintes ;
+  - `mission_destinations_amounts_check` (NOT VALID puis VALIDATE) et `mission_destinations_code_unique` réconciliées avant le seed, qui en dépend (`ON CONFLICT (code) DO NOTHING`) ;
+  - le pré-remplissage se fait dans la transaction de saisie, après le verrou de la mission ;
+  - `tests/support/cleanup.ts` supprime les destinations écrites par un compte de test, après avoir détaché les budgets qui les visent.
+- **Pourquoi** : choix à la main dans une liste fermée, sans rapprochement automatique avec l'adresse de la mission ; le seed ne réécrit jamais une valeur corrigée depuis.
+- **Preuve** : contrat `mission-budgets` 20/20 (liste par rôle, retirée absente, pré-remplissage, valeur saisie prioritaire, 400, correction) ; unitaires du schéma et du contrat 22/22 ; `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1b) : suites de la relecture
+
+- **Quoi** : trois réserves de la relecture levées.
+  - la clé étrangère `destination_id` ne bloque plus le démarrage sur une base qui contient des valeurs orphelines ;
+  - la destination est lue dans la transaction de saisie ;
+  - les destinations du test de contrat sont rattrapées par le ménage.
+- **Comment** :
+  - `mission_budgets_destination_id_mission_destinations_id_fk` est posée NOT VALID, puis validée ; une `foreign_key_violation` laisse un WARNING. Le modèle est `document_renewal_requests_receipt_uploaded_by_users_id_fk`. La contrainte est ajoutée à `CDC_RECONCILED_CONSTRAINTS` et au test de dérive ;
+  - `activeDestination(tx, id)` lit en `FOR SHARE` : un retrait concurrent de la destination attend la fin de la saisie ;
+  - les destinations du test portent `createdBy` d'un compte de test.
+- **Pourquoi** : une clé étrangère posée sans repli fait échouer `init-database` dès qu'une seule valeur orpheline existe.
+- **Preuve** :
+  - migration jouée deux fois sur la base locale sans erreur, et contrainte validée ;
+  - avec un budget orphelin, dans une transaction annulée ensuite, la contrainte reste NOT VALID et le démarrage n'est pas bloqué ;
+  - `tsc` : 0 erreur ; unitaires 2860 ; contrat `mission-budgets` 20/20 ; ménage des clés étrangères 3/3.
