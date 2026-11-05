@@ -10,7 +10,7 @@
 |---|---|---|
 | muted-foreground sur muted (= secondary, accent) | 4,40 / 5,81 | 4,69 / 5,81 |
 | muted-foreground sur muted/50 dans carte destructive/5 (error-boundary « Suggestions ») | 4,41 / 6,85 | 4,70 / 6,85 |
-| muted-foreground sur page | 4,80 / 7,77 | 5,12 / 7,77 |
+| muted-foreground sur page | 4,80 / 7,77 | 5,11 / 7,77 |
 
 Mutation : remettre 44.7 % fait echouer le test (4,40 < 4,5). `npm run check` : zero erreur TS ; tests unitaires 2560 verts.
 Hors perimetre : muted-foreground sur `destructive/10` (4,25) n'existe nulle part dans le code ; icones (3:1) non traitees.
