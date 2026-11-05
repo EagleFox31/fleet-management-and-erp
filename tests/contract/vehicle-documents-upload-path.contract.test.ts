@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { inArray } from "drizzle-orm";
@@ -91,6 +92,28 @@ describe("POST /api/vehicles/:vehicleId/documents — identifiant hors chiffres"
     const res = await post(rawId);
     expectApiError400(res);
     for (const dir of rejectedDirs()) expect(fs.existsSync(dir), dir).toBe(false);
+  });
+});
+
+describe("POST /api/vehicles/:vehicleId/documents — dossier du véhicule remplacé par un lien sortant", () => {
+  it("400 « Dossier de destination invalide » (pas « ID de véhicule invalide »), rien écrit dehors", async () => {
+    const vehicleId = "2147480001";
+    const link = path.resolve("uploads/documents", `vehicle-${vehicleId}`);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-upload-out-"));
+    fs.mkdirSync(path.resolve("uploads/documents"), { recursive: true });
+    fs.symlinkSync(outside, link, "junction");
+    try {
+      const res = await post(vehicleId);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("Dossier de destination invalide");
+      expect(leakText(res.body)).not.toMatch(/uploads|vehicle-|fleet-upload-out|stack/i);
+      expect(fs.readdirSync(outside)).toEqual([]);
+    } finally {
+      // Le lien seul, jamais sa cible par récursion : jonction Windows (rmdir), lien symbolique ailleurs (unlink).
+      if (process.platform === "win32") fs.rmdirSync(link);
+      else fs.unlinkSync(link);
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

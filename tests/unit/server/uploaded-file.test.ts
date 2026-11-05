@@ -122,11 +122,35 @@ describe("uploadedFileCandidates : liens résolus", () => {
     expect(uploadedFileCandidates("/uploads/docs/absent.pdf", tmp)).toEqual([join(uploads, "docs", "absent.pdf")]);
   });
 
+  it("fichier absent derrière une jonction qui mène dehors : refusé (une écriture sortirait)", () => {
+    expect(uploadedFileCandidates("/uploads/dir-link/nouveau.pdf", tmp)).toEqual([]);
+  });
+
+  it("lien pendant sous uploads/ : refusé, lui comme ce qui serait écrit dessous", () => {
+    const gone = join(tmp, "gone");
+    fs.mkdirSync(gone);
+    fs.symlinkSync(gone, join(uploads, "dangling"), "junction");
+    fs.rmdirSync(gone);
+    expect(uploadedFileCandidates("/uploads/dangling", tmp)).toEqual([]);
+    expect(uploadedFileCandidates("/uploads/dangling/x.pdf", tmp)).toEqual([]);
+  });
+
+  it("uploads/ absent : la comparaison lexicale suffit", () => {
+    const fresh = join(tmp, "fresh");
+    fs.mkdirSync(fresh);
+    expect(uploadedFileCandidates("/uploads/docs/a.pdf", fresh)).toEqual([join(fresh, "uploads", "docs", "a.pdf")]);
+  });
+
   it("uploads/ lui-même monté par jonction : ses fichiers restent valides", () => {
     const mounted = join(tmp, "mounted");
     fs.mkdirSync(mounted);
     fs.symlinkSync(uploads, join(mounted, "uploads"), "junction");
     expect(realPathStaysInside(join(mounted, "uploads"), join(mounted, "uploads", "docs", "a.pdf"))).toBe(true);
     expect(realPathStaysInside(join(mounted, "uploads"), join(mounted, "uploads", "dir-link", "secret.txt"))).toBe(false);
+    // Par l'entrée publique, racine du projet `mounted` : réel conservé, jonction sortante et absent derrière elle refusés.
+    expect(uploadedFileCandidates("/uploads/docs/a.pdf", mounted)).toEqual([join(mounted, "uploads", "docs", "a.pdf")]);
+    expect(uploadedFileCandidates("/uploads/docs/absent.pdf", mounted)).toEqual([join(mounted, "uploads", "docs", "absent.pdf")]);
+    expect(uploadedFileCandidates("/uploads/dir-link/secret.txt", mounted)).toEqual([]);
+    expect(uploadedFileCandidates("/uploads/dir-link/nouveau.pdf", mounted)).toEqual([]);
   });
 });

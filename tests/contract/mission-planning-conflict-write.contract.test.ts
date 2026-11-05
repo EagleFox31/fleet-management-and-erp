@@ -88,6 +88,8 @@ describe("création de mission avec affectation : conflit de planning", { timeou
     const res = await create({ pickupDate: day(11).toISOString(), deliveryDate: day(13).toISOString(), assignment: { vehicleId: v2, driverId: d } });
     expect(res.status, JSON.stringify(res.body)).toBe(409);
     expect(res.body.message).toContain("Ce chauffeur est déjà affecté");
+    expect(res.body.code, JSON.stringify(res.body)).toBeTruthy();
+    expect(res.body.requestId).toBeTruthy();
     expect(await byOrder(orderNumbers[orderNumbers.length - 1])).toHaveLength(0);
   });
 
