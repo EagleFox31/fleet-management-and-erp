@@ -22,6 +22,7 @@ import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
 import { PURCHASE_ORDER_STATUS_LABELS } from "@shared/constants/purchase-order-statuses";
 import { useRetourArriere } from "@/hooks/useRetourArriere";
+import { canManageOrder, DELIVERY_ACTION_ROLES, orderCommandRoles, orderStatusActions } from "@/lib/purchase-order-actions";
 
 interface PurchaseOrderLine {
   id: number;
@@ -145,9 +146,6 @@ const workflowSteps: Array<{ key: 'draft' | 'sent' | 'confirmed' | 'delivered' |
   { key: 'delivered', title: 'Réception',            subtitle: 'Pièces reçues' },
   { key: 'completed', title: 'Clôturée',             subtitle: 'Dossier terminé' },
 ];
-const PARTS_ORDER_ACTION_ROLES = ["admin", "secretary", "warehouse"] as const;
-const NON_PARTS_ORDER_ACTION_ROLES = ["admin", "secretary", "warehouse", "logistics"] as const;
-const DELIVERY_ACTION_ROLES = ["admin", "warehouse"] as const;
 
 const orderStatusHelp: Record<string, string> = {
   draft:     "La commande est préparée mais pas encore envoyée au fournisseur.",
@@ -316,9 +314,8 @@ export default function PurchaseOrderDetailsPage() {
 
   const currentUserRole       = user?.role || "";
   const isPartsLinkedOrder    = lines.some((line) => Boolean(line.part || line.requirement));
-  const allowedCommandRoles = isPartsLinkedOrder ? PARTS_ORDER_ACTION_ROLES : NON_PARTS_ORDER_ACTION_ROLES;
-  const canManageOrderActions = allowedCommandRoles.includes(currentUserRole as any);
-  const canRecordDelivery = DELIVERY_ACTION_ROLES.includes(currentUserRole as any);
+  const allowedCommandRoles = orderCommandRoles(isPartsLinkedOrder);
+  const canManageOrderActions = canManageOrder(currentUserRole, isPartsLinkedOrder);
   const workflowActionRights: Array<{ action: string; roles: string[] }> = [
     {
       action: "Envoyer au fournisseur",
@@ -353,27 +350,12 @@ export default function PurchaseOrderDetailsPage() {
   const stepperStatus         = order.status === 'cancellation_requested' ? 'confirmed' : order.status;
   const currentStatusProgressIndex = Math.max(statusProgressOrder.indexOf(stepperStatus as any), 0);
 
-  const statusActions: Array<{ status: string; label: string }> = (() => {
-    if (!canManageOrderActions) return [];
-    switch (order.status) {
-      case 'draft':             return [{ status: 'sent',      label: 'Envoyer au fournisseur' }];
-      case 'sent':              return [{ status: 'confirmed', label: 'Confirmer la commande' }];
-      case 'confirmed':
-      case 'partial':           return canRecordDelivery ? [{ status: 'delivered', label: 'Enregistrer la livraison' }] : [];
-      case 'cancellation_requested':
-        return [
-          { status: 'cancelled', label: "Confirmer l'annulation fournisseur" },
-          {
-            status: rollbackStatusAfterCancellationRefusal,
-            label: rollbackStatusAfterCancellationRefusal === 'partial'
-              ? "Refus fournisseur (retour réception partielle)"
-              : "Refus fournisseur (retour confirmée)"
-          },
-        ];
-      case 'delivered':         return [];
-      default:                  return [];
-    }
-  })();
+  const statusActions = orderStatusActions({
+    role: currentUserRole,
+    status: order.status,
+    isPartsLinkedOrder,
+    rollbackStatus: rollbackStatusAfterCancellationRefusal,
+  });
 
   return (
     <div className="space-y-5">
