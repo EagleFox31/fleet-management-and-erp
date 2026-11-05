@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { isCpcStatusValid } from "@shared/constants/driver-cpc-eligibility";
 import { useState } from "react";
 import { Link } from "wouter";
 import {
@@ -62,10 +61,7 @@ function getMissionBlockers(mission: any): string[] {
     if (assignment?.driver) {
       // Verdict calculé par le serveur (statut et expiration) ; absent = non communiqué à ce lecteur.
       if (assignment.driver.cpcEligible === false) {
-        const detail = isCpcStatusValid(assignment.driver.cpcStatus)
-          ? (assignment.driver.cpcIneligibleReason ?? "non valide")
-          : assignment.driver.cpcStatus || "non défini";
-        blockers.push(`CPC chauffeur invalide (${detail})`);
+        blockers.push(`CPC chauffeur invalide (${assignment.driver.cpcIneligibleReason ?? "non valide"})`);
       }
     } else {
       blockers.push("Aucun chauffeur affecté");

@@ -792,8 +792,9 @@ router.post(
   },
   async (req: Request, res: Response, next: NextFunction) => {
     const file = req.file;
-    // Le fichier déjà rangé par multer : retiré si la demande est refusée ou si l'écriture échoue.
-    const discardUpload = () => file && removeUploadedFile(file.path, req.requestId);
+    // Le fichier rangé par multer n'est gardé qu'une fois référencé par la demande enregistrée :
+    // toute autre sortie le supprime dans le finally, jamais après le commit.
+    let receiptRecorded = false;
     try {
       const id = Number.parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de demande invalide.");
@@ -854,6 +855,7 @@ router.post(
       }
       const { updated, previousPath } = outcome;
       if (!updated) throw new AppError(409, "Cette demande vient d'être modifiée. Rechargez la page.");
+      receiptRecorded = true;
 
       // Remplacement : l'ancien fichier part une fois le nouveau enregistré.
       if (previousPath && previousPath !== updated.receiptFilePath) {
@@ -879,8 +881,9 @@ router.post(
       }
       return res.status(201).json(request);
     } catch (error) {
-      discardUpload();
       next(withLogContext(error, { event: "dépôt du récépissé d'une demande de renouvellement" }));
+    } finally {
+      if (!receiptRecorded && file) removeUploadedFile(file.path, req.requestId);
     }
   },
 );

@@ -34,7 +34,7 @@ function formatFr(dateOnly: string): string {
   return `${d}/${m}/${y}`;
 }
 
-/** Motif de refus, stable : les écrans et les contrats le lisent, jamais le libellé. */
+/** Motif de refus, stable : les contrats et les écrans (logique) lisent le code ; l'écran affiche le libellé fixe. */
 export type CpcIneligibleCode = "EXPIRED" | "NOT_VALID" | "MISSING" | "FUTURE_DATE";
 
 /**
@@ -73,6 +73,26 @@ export function normalizeCpcStatus(value: string | null | undefined): string {
 
 export function isCpcStatusValid(value: string | null | undefined): boolean {
   return normalizeCpcStatus(value) === "FORME";
+}
+
+export type CpcStatusTone = "success" | "warning" | "danger" | "neutral";
+
+/**
+ * Ton d'affichage d'un statut CPC enregistré. Insensible à la casse et aux accents
+ * (« FORME », « Formé », « a former »). Statut inconnu ou absent : neutre. Les classes CSS
+ * restent dans chaque écran, mappées depuis ce ton.
+ */
+export function cpcStatusTone(value: string | null | undefined): CpcStatusTone {
+  switch (normalizeCpcStatus(value).trim()) {
+    case "FORME":
+      return "success";
+    case "A FORMER":
+      return "warning";
+    case "NON FORME":
+      return "danger";
+    default:
+      return "neutral";
+  }
 }
 
 export function getDriverCpcEligibility(
