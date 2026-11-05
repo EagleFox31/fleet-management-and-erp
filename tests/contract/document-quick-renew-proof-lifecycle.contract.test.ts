@@ -97,10 +97,10 @@ async function setup(type: "assurance" | "visite_technique" = "assurance") {
   return { vehicle, document, prefix };
 }
 
-async function quickRenew(fields: Record<string, string>, prefix: string) {
+async function quickRenew(fields: Record<string, string>, prefix: string, extension = ".pdf") {
   const form = new FormData();
   for (const [key, value] of Object.entries(fields)) form.append(key, value);
-  form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), `${prefix}.pdf`);
+  form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), `${prefix}${extension}`);
   return fetch(`${baseUrl}/api/document-renewals/quick-renew`, { method: "POST", headers: { Cookie: cookie }, body: form });
 }
 
@@ -219,6 +219,14 @@ describe("renouvellement rapide : cycle de vie du justificatif", { timeout: 1800
     expect(await expiryOf(document.id)).toBe("2026-11-20");
     const [row] = await db.select({ proofFilePath: documentRenewalRequests.proofFilePath }).from(documentRenewalRequests).where(eq(documentRenewalRequests.id, closed.id));
     expect(row.proofFilePath).toBe("/uploads/document-renewals/proofs/TEST-preuve-origine.pdf");
+  });
+
+  it("extension stockée déduite du type accepté, jamais du nom envoyé", async () => {
+    const { vehicle, document, prefix } = await setup();
+    const response = await quickRenew(baseFields(vehicle.id, document.id), prefix, ".html");
+    expect(response.status).toBe(200);
+    expect(proofFiles(prefix)).toHaveLength(1);
+    expect(proofFiles(prefix)[0]).toMatch(/\.pdf$/);
   });
 
   it("format refusé : 400 avec un message lisible, sans détail technique", async () => {
