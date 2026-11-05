@@ -5,7 +5,11 @@ import {
   clientWithholdingRequestSchema,
   invoiceDepositRequestSchema,
 } from "@shared/contracts/invoices-awaiting-payment";
+import { financeWithholdingsQuerySchema } from "@shared/contracts/finance-withholdings";
+import { isoDateInZone } from "@shared/contracts/kpi-period";
+import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
+import { withholdingsSummary } from "../services/finance-withholdings-service";
 import { moduleLogger } from "../lib/logger";
 import { parseRouteId } from "../lib/route-id";
 import { authorize } from "../middleware/auth";
@@ -34,6 +38,29 @@ function emit(event: "client_invoice_deposited" | "client_withholding_updated", 
 router.get("/finance/invoices-awaiting-payment", finance, authorize([...FINANCE_RECEIVABLE_READ_ROLES]), async (_req, res, next) => {
   try {
     res.json(await listInvoicesAwaitingPayment());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Retenues subies sur une période (dépôt entre `from` et `to` inclus). Défauts : `to` = aujourd'hui
+ * à Africa/Douala, `from` = premier jour du mois de `to`. Montants figés au dépôt, jamais recalculés.
+ */
+router.get("/finance/withholdings", finance, authorize([...FINANCE_RECEIVABLE_READ_ROLES]), async (req, res, next) => {
+  try {
+    const parsed = financeWithholdingsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      // Valeur répétée ou tableau (`?from[]=x`), paramètre inconnu : le message de zod est technique.
+      const issue = parsed.error.issues[0];
+      const readable = issue && issue.code !== "invalid_type" && issue.code !== "unrecognized_keys";
+      throw new AppError(400, readable ? issue.message : "Période invalide.");
+    }
+    const to = parsed.data.to ?? isoDateInZone(new Date());
+    const from = parsed.data.from ?? `${to.slice(0, 8)}01`;
+    if (from > to) throw new AppError(400, "La date de début doit précéder la date de fin.");
+    const clientId = parsed.data.clientId === undefined ? null : parseRouteId(parsed.data.clientId, "Identifiant de client invalide.");
+    res.json(await withholdingsSummary(from, to, clientId));
   } catch (err) {
     next(err);
   }
