@@ -129,7 +129,7 @@ export function TankCapacityPanel({ canEdit }: { canEdit: boolean }) {
               aria-invalid={error !== null}
               data-testid="tank-capacity-input"
             />
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-sm text-destructive-text">{error}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTarget(null)}>Annuler</Button>

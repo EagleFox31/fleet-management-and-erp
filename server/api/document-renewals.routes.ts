@@ -23,11 +23,13 @@ import {
 } from "@shared/constants/document-renewal-statuses";
 import { REALTIME_EVENTS, type RealtimeScope } from "@shared/contracts/realtime-events";
 import { todayUtcDateOnly } from "@shared/lib/utc-day";
-import { isInsideDirectory, uploadedFileCandidates } from "../lib/uploaded-file";
+import { isInsideDirectory, realPathStaysInside, uploadedFileCandidates } from "../lib/uploaded-file";
+import { contentDisposition } from "../lib/content-disposition";
 import { renewalReceiptErrorOf, withoutDiskPaths } from "../lib/renewal-receipts";
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated as broadcastSharedAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
@@ -41,6 +43,7 @@ import {
   vehicles,
 } from "@shared/schema";
 import { withLogContext } from "../lib/error-log-context";
+import { canAccessOwned, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
 
 const log = moduleLogger("document-renewals");
 const router = Router();
@@ -165,6 +168,24 @@ const renewalProofUploadDir = path.join(
   "proofs",
 );
 
+// Extension déduite du type MIME autorisé, jamais du nom envoyé par le client (justificatif et récépissé).
+const RENEWAL_FILE_EXTENSION_BY_MIME: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+};
+
+// Type servi d'après l'extension stockée ; toute autre extension (fichier antérieur) part en octet-stream.
+const RENEWAL_FILE_CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
 if (!fs.existsSync(renewalProofUploadDir)) {
   fs.mkdirSync(renewalProofUploadDir, { recursive: true });
 }
@@ -173,24 +194,17 @@ const uploadRenewalProof = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, renewalProofUploadDir),
     filename: (_req, file, cb) => {
-      const extension = path.extname(file.originalname || "").toLowerCase();
+      const extension = RENEWAL_FILE_EXTENSION_BY_MIME[file.mimetype] ?? ".bin";
       const baseName = (file.originalname || "proof")
-        .replace(/[^a-zA-Z0-9._-]/g, "_")
-        .replace(/\.[^.]+$/, "")
+        .replace(/\.[^.]*$/, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
         .slice(0, 40);
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
       cb(null, `${baseName || "proof"}-${uniqueSuffix}${extension}`);
     },
   }),
   fileFilter: (_req, file, cb) => {
-    const allowedMimeTypes = [
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "image/jpg",
-      "image/webp",
-    ];
-    if (allowedMimeTypes.includes(file.mimetype)) {
+    if (Object.hasOwn(RENEWAL_FILE_EXTENSION_BY_MIME, file.mimetype)) {
       cb(null, true);
       return;
     }
@@ -209,14 +223,6 @@ const receiptDepositSchema = z.object({
 });
 const RECEIPT_STORED_PREFIX ="uploads/document-renewals/receipts";
 
-// Extension déduite du type MIME autorisé, jamais du nom envoyé par le client.
-const RECEIPT_EXTENSION_BY_MIME: Record<string, string> = {
-  "application/pdf": ".pdf",
-  "image/jpeg": ".jpg",
-  "image/jpg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-};
 
 const uploadRenewalReceipt = multer({
   storage: multer.diskStorage({
@@ -225,7 +231,7 @@ const uploadRenewalReceipt = multer({
       cb(null, renewalReceiptUploadDir);
     },
     filename: (_req, file, cb) => {
-      const extension = RECEIPT_EXTENSION_BY_MIME[file.mimetype] ?? ".bin";
+      const extension = RENEWAL_FILE_EXTENSION_BY_MIME[file.mimetype] ?? ".bin";
       const baseName = (file.originalname || "recepisse")
         .replace(/\.[^.]*$/, "")
         .replace(/[^a-zA-Z0-9_-]/g, "_")
@@ -234,7 +240,7 @@ const uploadRenewalReceipt = multer({
     },
   }),
   fileFilter: (_req, file, cb) => {
-    cb(null, Object.hasOwn(RECEIPT_EXTENSION_BY_MIME, file.mimetype));
+    cb(null, Object.hasOwn(RENEWAL_FILE_EXTENSION_BY_MIME, file.mimetype));
   },
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
 }).single("receiptFile");
@@ -368,6 +374,61 @@ router.get("/requests", async (req, res, next) => {
     return res.status(200).json(rows);
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des demandes de renouvellement" }));
+  }
+});
+
+/**
+ * Justificatif déposé au renouvellement rapide. Lecture réservée aux rôles qui lisent les demandes ;
+ * servi depuis le seul dossier des justificatifs (uploadedFileCandidates, AGENTS.md §9) ;
+ * 404 si la demande n'en a pas ou si le fichier a disparu.
+ */
+router.get("/requests/:id/proof", async (req, res, next) => {
+  try {
+    if (!hasRole(req.user?.role, VIEW_ROLES)) {
+      throw new AppError(403, "Accès non autorisé");
+    }
+    const requestId = parseRouteId(req.params.id, "Identifiant de demande invalide.");
+
+    const [row] = await db
+      .select({
+        proofFilePath: documentRenewalRequests.proofFilePath,
+        proofFileName: documentRenewalRequests.proofFileName,
+        ownerId: vehicles.ownerId,
+      })
+      .from(documentRenewalRequests)
+      .leftJoin(vehicles, eq(vehicles.id, documentRenewalRequests.vehicleId))
+      .where(eq(documentRenewalRequests.id, requestId))
+      .limit(1);
+    if (!row) {
+      throw new AppError(404, "Demande introuvable");
+    }
+    // Cloison client (AGENTS.md §11) : sans effet tant que le client n'est pas lecteur, garde si la liste s'ouvre.
+    if (!(await canAccessOwned(req.user, async () => row.ownerId))) {
+      throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
+    }
+
+    const proofPath = uploadedFileCandidates(row.proofFilePath).find(
+      (candidate) =>
+        isInsideDirectory(renewalProofUploadDir, candidate) &&
+        realPathStaysInside(renewalProofUploadDir, candidate) &&
+        fs.existsSync(candidate),
+    );
+    if (!proofPath) {
+      throw new AppError(404, "Justificatif introuvable");
+    }
+
+    // Téléchargement, jamais rendu par le navigateur : type d'après l'extension stockée, sans détection.
+    const contentType = RENEWAL_FILE_CONTENT_TYPE_BY_EXTENSION[path.extname(proofPath).toLowerCase()] ?? "application/octet-stream";
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const headers = {
+      "Content-Type": contentType,
+      "Content-Disposition": contentDisposition("attachment", row.proofFileName || path.basename(proofPath)),
+    };
+    return res.sendFile(proofPath, { headers }, (err) => {
+      if (err && !res.headersSent) next(new AppError(404, "Justificatif introuvable", { cause: err }));
+    });
+  } catch (error) {
+    return next(error);
   }
 });
 
@@ -796,8 +857,7 @@ router.post(
     // toute autre sortie le supprime dans le finally, jamais après le commit.
     let receiptRecorded = false;
     try {
-      const id = Number.parseInt(req.params.id, 10);
-      if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de demande invalide.");
+      const id = parseRouteId(req.params.id, "Identifiant de demande invalide.");
       if (!file) throw new AppError(400, "Le fichier du récépissé est obligatoire (PDF, JPG, PNG ou WEBP).");
       if (!isInsideDirectory(renewalReceiptUploadDir, file.path)) {
         throw new AppError(400, "Fichier du récépissé invalide.");

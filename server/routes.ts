@@ -46,6 +46,7 @@ import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
+import { routeIdOrNaN } from "./lib/route-id";
 import { AppError, isAppError } from "./lib/app-error";
 import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
@@ -684,7 +685,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Supprimer un utilisateur (soft delete) - Réservé aux administrateurs
   app.delete("/api/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID d'utilisateur invalide" });
@@ -850,7 +851,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/admin/users/:id - Supprimer définitivement un utilisateur
   app.delete("/api/admin/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
 
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID invalide" });
@@ -1044,10 +1045,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicle = await storage.getVehicleByRegistration(idOrRegistration);
       }
       
+      // Un client reçoit la même réponse (403, même message) pour un véhicule absent et pour celui d'un
+      // autre : il ne peut pas deviner quels identifiants existent. Le personnel garde le 404.
       if (!vehicle) {
+        if (user.role === 'client') return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
         return res.status(404).json({ message: "Véhicule non trouvé" });
       }
-      
+
       // Vérifier les permissions : les clients ne peuvent voir que leurs véhicules
       if (user.role === 'client' && vehicle.ownerId !== user.id) {
         return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
@@ -1232,7 +1236,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/vehicles/:id", isAdmin, async (req, res, next) => {
     try {
       const { VehicleDeletionService } = await import('./services/vehicle-deletion-service-trigger');
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
@@ -1352,6 +1356,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await storage.getVehicleDocument(id);
       
       if (!document) {
+        // Même réponse qu'un document d'un autre client : l'existence d'un identifiant ne se devine pas.
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 
@@ -1556,7 +1562,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de planification invalide" });
@@ -1821,15 +1827,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/work-orders/vehicle/:vehicleId", isAnyUser, async (req, res) => {
     try {
-      const vehicleId = parseInt(req.params.vehicleId);
-      
+      const vehicleId = routeIdOrNaN(req.params.vehicleId);
+
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
         return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
       }
-      
+
       const orders = await storage.getWorkOrdersByVehicleId(vehicleId);
       
       return res.status(200).json(orders);
@@ -1841,8 +1847,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/work-orders/technician/:technicianId", isTechnician, async (req, res) => {
     try {
-      const technicianId = parseInt(req.params.technicianId);
-      
+      const technicianId = routeIdOrNaN(req.params.technicianId);
+
       if (isNaN(technicianId)) {
         return res.status(400).json({ message: "ID de technicien invalide" });
       }
@@ -2206,7 +2212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/work-orders/:id", isWorkshopManager, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
 
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID d'ordre de travail invalide." });
@@ -2444,7 +2450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/parts-used/:id", isTechnician, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pièce utilisée invalide" });
@@ -3860,7 +3866,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/fault-catalog/:id", isAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID invalide" });
       }
@@ -3994,7 +4000,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/tires/:id", isAdmin, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       const userId = req.user?.id;
       
       if (isNaN(id)) {
@@ -4232,6 +4238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
       
       if (!document) {
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 
@@ -4363,7 +4370,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/workflows/documents/:documentId", isWorkflowDocumentWriter, async (req, res, next) => {
     try {
       const { WorkflowDocumentService } = await import('./services/workflow-document-service');
-      const documentId = parseInt(req.params.documentId);
+      const documentId = routeIdOrNaN(req.params.documentId);
       
       if (isNaN(documentId)) {
         return res.status(400).json({ message: "ID de document invalide" });
@@ -4371,6 +4378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
       if (!document) {
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 

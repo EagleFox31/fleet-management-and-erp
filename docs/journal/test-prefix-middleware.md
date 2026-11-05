@@ -29,3 +29,18 @@ Comment : chaque point a un test sur source synthetique et, quand le code reel l
 - R6 receveurs : decouverts par leur declaration (`Router()`, `express.Router()`, `express()`), en plus des trois noms connus.
 Pourquoi : une liste blanche qui survit au code, un nom qui sert de preuve ou un receveur oublie laissent passer un middleware avant les gardes de role. Lecture des reserves faite a partir de leur resume (texte exact non disponible) : interpretation a confirmer en relecture.
 Ajout lie : `/health/details` (route de main, `isAdmin` en tete de chaine) inscrit comme gestionnaire final.
+
+## Lot de suivi : imports transitifs, routeIdRangeGuard, routeurs importes, receveurs types
+
+- **Quoi** : le scanner `tests/support/prefix-middleware-scan.ts` lit les modules relatifs (`ReadModule`) et la garde ne repose plus sur le seul texte du fichier de montage.
+- **R2** : `forbiddenImportsDeep` suit les imports relatifs (chaine `a.ts > b.ts > ../db`, cycles surs) ; `forbiddenInAnonymousMounts` analyse le corps des fonctions anonymes montees via leurs identifiants importes ; `importSourceOf` verifie que la `source` inscrite est le module reellement importe (ou la fabrique importee dont la constante locale est issue).
+- **R3** : `routeIdRangeGuard` est accepte dans `server/api/index.ts` (apiRouter, sans prefixe) ou `server/app.ts` (app, sans prefixe ou `/api`), avant le premier routeur ; tout autre fichier, receveur ou prefixe echoue. `firstRouterMountLine` compte aussi `apiRouter`, les imports nommes et `registerRoutes(app)`.
+- **R4** : un import nomme depuis un module `*.routes` n'est un routeur que si ce module l'exporte comme tel ; sinon il est recense comme middleware.
+- **R6** : un receveur se decouvre aussi par son type declare (`Router`, `Express`, `Application`, `IRouter`) et par une fabrique typee.
+- **Mineur** : `ATTENDUS_TOLERES_ABSENTS` porte un `file` optionnel ; la tolerance est propre a son fichier.
+- **Pourquoi** : reserves de relecture de #384 ; chaque cas est couvert par un test sur source synthetique, plus un controle sur le code reel.
+
+## Reserves de relecture du lot de suivi (#402)
+
+- **Quoi** : la verification sur code reel de `routeIdRangeGuard` lit maintenant les modules importes (`fsModuleReader`) et compare la garde au premier routeur de `server/api/index.ts` ET de `server/app.ts` ; `forbiddenInAnonymousMounts` suit aussi `import()` et `require()` dans le corps d'une fonction anonyme montee ; la `source` des entrees `ecrit-apres-reponse` (accessLog, auditWrites) est verifiee comme celle des `sans-base`.
+- **Pourquoi** : trois mutations restaient vertes. Chacune est maintenant rouge sur le code reel : garde apres un routeur importe par nom (index.ts), garde apres `app.use("/api", apiRouter)` (app.ts), `await import("./db")` dans une fonction anonyme (app.ts), `source` fausse sur accessLog.

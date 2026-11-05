@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import { firstRouterMountLine, forbiddenImports, routeIdGuardIssues, scanFiles, scanMountedMiddlewares, staleDerogations, type MountedMiddleware } from "../../support/prefix-middleware-scan";
+import { firstRouterMountLine, forbiddenImports, forbiddenImportsDeep, forbiddenInAnonymousMounts, fsModuleReader, importSourceOf, routeIdGuardIssues, scanFiles, scanMountedMiddlewares, staleDerogations, type MountedMiddleware, type ReadModule } from "../../support/prefix-middleware-scan";
 import { sourceFiles } from "../../support/route-guard-scan";
 
 /**
@@ -101,7 +101,7 @@ const DEROGATIONS_CONNUES: Array<{ name: string; file: string; raison: string }>
 ];
 
 /** Middlewares annonces par d'autres lots : tolerés absents, inscrits des maintenant pour ne pas bloquer leur arrivee. */
-const ATTENDUS_TOLERES_ABSENTS: Array<{ name: string; raison: string }> = [
+const ATTENDUS_TOLERES_ABSENTS: Array<{ name: string; file?: string; raison: string }> = [
 ];
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -110,7 +110,8 @@ const SERVER_DIR = join(ROOT, "server");
 const occurrences = (): MountedMiddleware[] => scanFiles(sourceFiles(SERVER_DIR), ROOT);
 const entriesFor = (o: MountedMiddleware) => MIDDLEWARES_JUSTIFIES.filter((e) => e.name === o.name && (!e.file || e.file === o.file));
 const isDerogation = (o: MountedMiddleware) => DEROGATIONS_CONNUES.some((d) => d.name === o.name && d.file === o.file);
-const isExpected = (o: MountedMiddleware) => ATTENDUS_TOLERES_ABSENTS.some((a) => a.name === o.name);
+const isExpectedIn = (list: typeof ATTENDUS_TOLERES_ABSENTS, o: MountedMiddleware) => list.some((a) => a.name === o.name && (!a.file || a.file === o.file));
+const isExpected = (o: MountedMiddleware) => isExpectedIn(ATTENDUS_TOLERES_ABSENTS, o);
 const describeMount = (o: MountedMiddleware) => `${o.file}:${o.line}  ${o.receiver}.${o.method}(${o.prefix ? JSON.stringify(o.prefix) + ", " : ""}${o.name})`;
 
 describe("middlewares montes sur un prefixe : recensement et liste blanche", () => {
@@ -156,7 +157,7 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
 
   it("les middlewares « sans-base » n'importent pas la base dans leur fichier source", () => {
     const offenders = MIDDLEWARES_JUSTIFIES.filter((e) => e.type === "sans-base" && e.source).flatMap((e) =>
-      forbiddenImports(readFileSync(join(ROOT, e.source!), "utf8"), e.source!).map((spec) => `${e.name} (${e.source}) importe ${spec}`),
+      forbiddenImportsDeep(readFileSync(join(ROOT, e.source!), "utf8"), e.source!, fsModuleReader(ROOT)).map((chain) => `${e.name} : ${chain}`),
     );
     expect(offenders, "Un middleware declare sans-base importe la base ou un service : reclasser l'entree apres lecture.").toEqual([]);
   });
@@ -195,9 +196,13 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
   });
 
   it("R3 : s'il est monte dans le code reel, il respecte la regle", () => {
-    const text = readFileSync(join(ROOT, INDEX), "utf8");
-    const first = firstRouterMountLine(text, INDEX);
-    expect(routeIdGuardIssues(occurrences(), first === undefined ? {} : { [INDEX]: first })).toEqual([]);
+    const read = fsModuleReader(ROOT);
+    const firsts: Record<string, number> = {};
+    for (const f of [INDEX, APP]) {
+      const first = firstRouterMountLine(readFileSync(join(ROOT, f), "utf8"), f, read);
+      if (first !== undefined) firsts[f] = first;
+    }
+    expect(routeIdGuardIssues(occurrences(), firsts)).toEqual([]);
   });
 
   it("R4 : un routeur se reconnait a sa declaration ou a son import, pas a son nom", () => {
@@ -239,5 +244,132 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
       "server/api/index.ts",
     ).map((m) => `${m.prefix ?? "*"}:${m.name}`);
     expect(seen).toEqual(["/x:requireFeature", "/x:gardes", "/x:fooMiddleware", "*:authenticate", "/auth/login:(anonyme)@/auth/login", "/auth/login:lockout"]);
+  });
+});
+
+const mem =
+  (files: Record<string, string>): ReadModule =>
+  (spec, from) => {
+    if (!spec.startsWith(".")) return undefined;
+    const dir = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : ".";
+    const out: string[] = [];
+    for (const x of `${dir}/${spec}`.split("/")) {
+      if (x === "..") out.pop();
+      else if (x !== ".") out.push(x);
+    }
+    const file = `${out.join("/")}.ts`;
+    return files[file] === undefined ? undefined : { file, source: files[file] };
+  };
+
+describe("lot de suivi : R2 imports transitifs et fonctions anonymes", () => {
+  const files = {
+    "server/middleware/a.ts": 'import { helper } from "../lib/h";',
+    "server/lib/h.ts": 'import { db } from "../db";',
+  };
+  it("R2 : un import interdit atteint par un module relatif est refuse, avec sa chaine", () => {
+    expect(forbiddenImportsDeep(files["server/middleware/a.ts"], "server/middleware/a.ts", mem(files))).toEqual(["server/middleware/a.ts > server/lib/h.ts > ../db"]);
+  });
+  it("R2 : une chaine saine ou cyclique ne produit aucun ecart", () => {
+    const ok = { "a/x.ts": 'import "./y";', "a/y.ts": 'import "./x";' };
+    expect(forbiddenImportsDeep(ok["a/x.ts"], "a/x.ts", mem(ok))).toEqual([]);
+  });
+  it("R2 : le corps d'une fonction anonyme montee est analyse via ses identifiants importes", () => {
+    const src = [
+      'import { helper } from "../lib/h";',
+      'import { clean } from "../lib/clean";',
+      "apiRouter.use((req, res, next) => { helper(); next(); });",
+      "apiRouter.use((req, res, next) => { clean(); next(); });",
+    ].join("\n");
+    const all = { ...files, "server/lib/clean.ts": "export const clean = () => 1;" };
+    const out = forbiddenInAnonymousMounts(src, "server/api/index.ts", mem(all));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("server/api/index.ts:3");
+    expect(out[0]).toContain("../db");
+  });
+  it("R2e : un import() ou require() dans le corps d'une fonction anonyme montee est suivi", () => {
+    const dyn = 'app.use(async (req, res, next) => { const m = await import("./lib/h"); next(); });';
+    const req = 'app.use((req, res, next) => { require("./lib/h"); next(); });';
+    const sane = 'app.use(async (req, res, next) => { await import("./lib/clean"); next(); });';
+    const all = { ...files, "server/lib/clean.ts": "export const clean = () => 1;" };
+    expect(forbiddenInAnonymousMounts(dyn, "server/app.ts", mem(all))).toHaveLength(1);
+    expect(forbiddenInAnonymousMounts(req, "server/app.ts", mem(all))).toHaveLength(1);
+    expect(forbiddenInAnonymousMounts(sane, "server/app.ts", mem(all))).toEqual([]);
+    expect(forbiddenInAnonymousMounts('app.use(async () => { await import("./db"); });', "server/app.ts", mem(all))).toHaveLength(1);
+  });
+  it("R3b : la garde est comparee au premier routeur de son propre fichier, routeur importe par nom compris", () => {
+    const named = ['import { workOrderLaborRateRoutes } from "./wo.routes";', 'apiRouter.use("/lr", workOrderLaborRateRoutes);', "apiRouter.use(routeIdRangeGuard);"].join("\n");
+    const files2 = { "server/api/wo.routes.ts": "export const workOrderLaborRateRoutes = Router();" };
+    const first = firstRouterMountLine(named, INDEX, mem(files2));
+    expect(first).toBe(2);
+    const guard = (file: string, line: number): MountedMiddleware => ({ file, line, receiver: file === APP ? "app" : "apiRouter", method: "use", prefix: null, name: "routeIdRangeGuard" });
+    expect(routeIdGuardIssues([guard(INDEX, 3)], { [INDEX]: first! })).toHaveLength(1);
+    const app = ['app.use("/api", apiRouter);', "app.use(routeIdRangeGuard);"].join("\n");
+    const firstApp = firstRouterMountLine(app, APP);
+    expect(firstApp).toBe(1);
+    expect(routeIdGuardIssues([guard(APP, 2)], { [APP]: firstApp! })).toHaveLength(1);
+  });
+  it("R2 : la source d'une entree est celle que le fichier de montage importe reellement", () => {
+    const src = 'import { guard } from "../middleware/a";\nrouter.use(guard);';
+    expect(importSourceOf(src, "server/api/index.ts", "guard", mem(files))).toBe("server/middleware/a.ts");
+    expect(importSourceOf(src, "server/api/index.ts", "autre", mem(files))).toBeUndefined();
+  });
+  it("R2 : dans le code reel, la source inscrite est le module importe (ou le fichier lui-meme)", () => {
+    const read = fsModuleReader(ROOT);
+    const wrong = MIDDLEWARES_JUSTIFIES.filter((e) => (e.type === "sans-base" || e.type === "ecrit-apres-reponse") && e.source && e.file).flatMap((e) => {
+      const real = importSourceOf(readFileSync(join(ROOT, e.file!), "utf8"), e.file!, e.name, read);
+      return real === e.source || (real === undefined && e.source === e.file) ? [] : [`${e.name} : inscrit ${e.source}, importe ${real ?? "(non importe)"}`];
+    });
+    expect(wrong).toEqual([]);
+  });
+  it("R2 : aucune fonction anonyme montee du code reel n'atteint la base", () => {
+    const read = fsModuleReader(ROOT);
+    const out = [INDEX, APP].flatMap((f) => forbiddenInAnonymousMounts(readFileSync(join(ROOT, f), "utf8"), f, read));
+    expect(out).toEqual([]);
+  });
+});
+
+describe("lot de suivi : R3, R4, R6 et fichier des attendus", () => {
+  const m = (over: Partial<MountedMiddleware>): MountedMiddleware => ({ file: INDEX, line: 5, receiver: "apiRouter", method: "use", prefix: null, name: "routeIdRangeGuard", ...over });
+  it("R3 : le montage dans app.ts (sans prefixe ou sur /api, avant le routeur) est accepte", () => {
+    expect(routeIdGuardIssues([m({ file: APP, receiver: "app", prefix: "/api" })], { [APP]: 10 })).toEqual([]);
+    expect(routeIdGuardIssues([m({ file: APP, receiver: "app" })], { [APP]: 10 })).toEqual([]);
+  });
+  it("R3 : un montage ailleurs, sur un autre receveur ou apres le routeur est refuse", () => {
+    expect(routeIdGuardIssues([m({ file: "server/api/vehicles.routes.ts" })], {})).toHaveLength(1);
+    expect(routeIdGuardIssues([m({ file: APP, receiver: "apiRouter" })], { [APP]: 10 })).toHaveLength(1);
+    expect(routeIdGuardIssues([m({ file: APP, receiver: "app", prefix: "/api/x" })], { [APP]: 10 })).toHaveLength(1);
+    expect(routeIdGuardIssues([m({ file: APP, receiver: "app", line: 20 })], { [APP]: 10 })).toHaveLength(1);
+  });
+  it("R3 : le premier montage compte un routeur importe par nom, apiRouter et registerRoutes(app)", () => {
+    const files = { "server/api/x.routes.ts": "export const xRoutes = Router();" };
+    const named = ['import { xRoutes } from "./x.routes";', "const a = 1;", 'apiRouter.use("/x", xRoutes);'].join("\n");
+    expect(firstRouterMountLine(named, INDEX, mem(files))).toBe(3);
+    expect(firstRouterMountLine(["const a = 1;", 'app.use("/api", apiRouter);'].join("\n"), APP)).toBe(2);
+    expect(firstRouterMountLine(["const a = 1;", "registerRoutes(app);"].join("\n"), APP)).toBe(2);
+  });
+  it("R4 : un import nomme n'est un routeur que si le module l'exporte comme tel", () => {
+    const files = { "server/api/x.routes.ts": "export const xRoutes = Router();\nexport const guard = (req, res, next) => next();" };
+    const src = ['import { xRoutes, guard } from "./x.routes";', 'apiRouter.use("/x", xRoutes, guard);'].join("\n");
+    expect(scanMountedMiddlewares(src, INDEX, mem(files)).map((x) => x.name)).toEqual(["guard"]);
+  });
+  it("R6 : un receveur se decouvre aussi par son type declare et par une fabrique typee", () => {
+    const typed = [
+      "function mount(r: Router, e: Express) {",
+      '  r.use("/a", leakA);',
+      '  e.use("/b", leakB);',
+      "}",
+      "const build = (): express.Router => Router();",
+      "const made = build();",
+      'made.use("/c", leakC);',
+      "const t: Application = make();",
+      't.use("/d", leakD);',
+    ].join("\n");
+    expect(scanMountedMiddlewares(typed, INDEX).map((x) => x.name)).toEqual(["leakA", "leakB", "leakC", "leakD"]);
+  });
+  it("attendus : la tolerance d'absence est propre a son fichier", () => {
+    // Liste d'exemple : la liste reelle est vide depuis le montage de routeIdRangeGuard.
+    const list = [{ name: "routeIdRangeGuard", file: INDEX, raison: "exemple" }];
+    expect(isExpectedIn(list, m({ file: INDEX }))).toBe(true);
+    expect(isExpectedIn(list, m({ file: "server/api/autre.ts" }))).toBe(false);
   });
 });

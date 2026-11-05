@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
@@ -131,11 +132,7 @@ const checkApprovalPermission = (req: Request, res: Response, next: NextFunction
 
 /** Identifiant d'URL : entier positif, sinon 400 lisible (avant : NaN jusqu'à la base, 500). */
 const parseIdParam = (value: string, label: string): number => {
-  const id = Number(value);
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(id) || id <= 0) {
-    throw new AppError(400, `${label} invalide.`);
-  }
-  return id;
+  return parseRouteId(value, `${label} invalide.`);
 };
 
 /**
@@ -386,11 +383,8 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
  */
 router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = parseInt(req.params.id);
-    const lineId = parseInt(req.params.lineId);
-    if (Number.isNaN(orderId) || Number.isNaN(lineId)) {
-      throw new AppError(400, "Commande ou ligne invalide.");
-    }
+    const orderId = parseRouteId(req.params.id, "Commande ou ligne invalide.");
+    const lineId = parseRouteId(req.params.lineId, "Commande ou ligne invalide.");
 
     const scope = await getScopeByOrderId(orderId);
     if (!canManageScope(req.user?.role, scope)) {
