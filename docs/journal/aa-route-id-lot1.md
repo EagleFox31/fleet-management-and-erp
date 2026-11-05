@@ -75,4 +75,5 @@
 - Tester : `route-id-strict-lot6` couvre 14 cas, dont 3 vérifient que l'objet reste intact (véhicule modifié, véhicule restauré, plein modifié).
   - Ancien code : 14 rouges. Correctif : 14 verts.
   - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
+- Effet de bord assumé : un id `0` répondait 404 (objet absent), il répond désormais 400 (id invalide).
 - Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
