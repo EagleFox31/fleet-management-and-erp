@@ -17,3 +17,5 @@ Les hôtes et ports ci-dessus sont ceux du compose de test du dépôt ; avec un 
 Vidéos : `test-results/recordings/<test>/video.webm`.
 
 Résidu connu : le justificatif téléversé par la démo du secrétariat reste dans `uploads/` (hors base).
+
+Parcours magasinier : pas de lien « Ordres de travail » dans son menu ; l'OT s'ouvre depuis la carte « en attente de pièces » de Demandes de pièces (repli par URL directe dans la spec 06).

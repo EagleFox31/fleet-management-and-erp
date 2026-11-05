@@ -25,7 +25,7 @@ test("démo magasinier : réception d'une commande, entrée en stock, sortie ver
   await page.getByRole("link", { name: "Commandes", exact: true }).first().click();
   await expect(page.getByText(DEMO_RECEPTION.orderNumber).first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
-  await page.getByRole("row").filter({ hasText: DEMO_RECEPTION.orderNumber }).locator('[data-testid^="button-view-"]').click();
+  await page.getByRole("link", { name: new RegExp(DEMO_RECEPTION.orderNumber) }).first().click();
   await page.getByTestId("button-status-delivered").click();
   await page.getByTestId("input-delivery-code").fill(DEMO_RECEPTION.deliveryCode);
   await beat(page);
@@ -45,7 +45,7 @@ test("démo magasinier : réception d'une commande, entrée en stock, sortie ver
   await expect(page.getByText("Sortir du stock").first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
   await page.getByRole("button", { name: "Sortir du stock" }).first().click();
-  await expect(page.getByText("Pièce sortie du stock").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Pièce sortie du stock", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await beat(page, 2000);
 
   const [req] = await db.select({ status: partRequirements.status }).from(partRequirements).where(eq(partRequirements.workOrderId, wo.id));
