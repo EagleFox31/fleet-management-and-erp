@@ -54,6 +54,7 @@ import missionBudgetsRoutes from "./mission-budgets.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import financeReceivablesRoutes from "./finance-receivables.routes";
+import clientStatementRoutes from "./client-statement.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
 import tariffGridRoutes from "./tariff-grid.routes";
 import treasuryRoutes from "./treasury.routes";
@@ -169,6 +170,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
+  // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
+  apiRouter.use(clientStatementRoutes);
   apiRouter.use("/clients", isStaff, clientsRoutes);
   apiRouter.use("/operations", isStaff, operationsRoutes);
   apiRouter.use("/billing", billingRoutes);
