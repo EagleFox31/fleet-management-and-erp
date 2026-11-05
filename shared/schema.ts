@@ -417,7 +417,7 @@ export const parts = pgTable("parts", {
   minQuantity: integer("min_quantity").notNull().default(5),
   unit: text("unit").notNull().default("pièce"),
   location: text("location"),
-  unitPrice: numeric("unit_price", { precision: 15, scale: 0 }).notNull().default("0"),
+  unitPrice: numeric("unit_price", { precision: 15, scale: 2 }).notNull().default("0"),
   // Rattachement fournisseur: `supplierId` est la vérité. `supplier` (nom en clair)
   // est conservé en transition pour l'affichage des pièces non encore rattachées
   // et pour la reprise historique. Ne plus l'utiliser comme clé de regroupement.
@@ -1644,7 +1644,7 @@ export const tariffGrid = pgTable("tariff_grid", {
   destination: text("destination").notNull(),
   cargoType: text("cargo_type").notNull().default(""),
   pricingUnit: text("pricing_unit").notNull(),
-  unitPrice: numeric("unit_price", { precision: 15, scale: 2 }).notNull(),
+  unitPrice: numeric("unit_price", { precision: 15, scale: 0 }).notNull(),
   validFrom: date("valid_from").notNull(),
   validTo: date("valid_to"),
   active: boolean("active").notNull().default(true),

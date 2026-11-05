@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { tariffGrid } from "../../../shared/schema";
+import { parts, tariffGrid } from "../../../shared/schema";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
 const initSource = () => norm(readFileSync("server/init-database.ts", "utf8"));
@@ -72,5 +72,12 @@ describe("O3 : tariff_grid, init-database, migration jumelle et Drizzle", () => 
     const src = initSource();
     expect(src.indexOf("await pool.query(TARIFF_GRID_SQL);")).toBeGreaterThan(-1);
     expect(src.indexOf("await pool.query(TARIFF_GRID_SQL);")).toBeLessThan(src.indexOf("await reportCdcConstraintGaps(pool);"));
+  });
+
+  it("échelle des prix : XAF entier pour la grille, centimes inchangés pour les pièces (confusion de table déjà survenue)", () => {
+    const scaleOf = (table: Parameters<typeof getTableConfig>[0], name: string) =>
+      (getTableConfig(table).columns.find((c) => c.name === name) as unknown as { scale: number }).scale;
+    expect(scaleOf(tariffGrid, "unit_price")).toBe(0);
+    expect(scaleOf(parts, "unit_price")).toBe(2);
   });
 });
