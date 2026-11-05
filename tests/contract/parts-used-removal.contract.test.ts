@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { parts, partsStockMovements, partsUsed, workOrders } from "../../shared/schema";
@@ -18,6 +18,7 @@ let baseUrl = "";
 const ids = createIdBag();
 const workOrderIds: number[] = [];
 const previousBroadcast = (global as any).broadcastUpdate;
+const broadcasts: Array<{ type: string; data: any }> = [];
 
 async function sessionOf(role: TestUserRole) {
   const user = await createTestUser({ role });
@@ -57,7 +58,9 @@ async function stockOf(partId: number) {
 }
 
 beforeAll(async () => {
-  (global as any).broadcastUpdate = () => {};
+  (global as any).broadcastUpdate = (type: string, data: unknown) => {
+    broadcasts.push({ type, data });
+  };
   server = createServer(await getContractApp());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -122,6 +125,120 @@ describe("DELETE /api/parts-used/:id : retrait d'une pièce posée", () => {
     const res = await fetch(`${baseUrl}/api/parts-used/${used.id}`, { method: "DELETE" });
 
     expect(res.status).toBe(401);
+    expect(await stockOf(part.id)).toBe(5);
+  });
+});
+
+async function creditsOf(partId: number) {
+  return db
+    .select()
+    .from(partsStockMovements)
+    .where(and(eq(partsStockMovements.partId, partId), eq(partsStockMovements.movementType, "in")));
+}
+
+describe("DELETE /api/parts-used/:id : atomicité, rôles, statut de l'OT", () => {
+  it("dix retraits simultanés : un 204, neuf 404, stock crédité une seule fois", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { part, used } = await partUsedOnWorkOrder();
+
+    const responses = await Promise.all(Array.from({ length: 10 }, () => remove(used.id, chef.cookie)));
+
+    expect(responses.filter((r) => r.status === 204)).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 404)).toHaveLength(9);
+    expect(await stockOf(part.id)).toBe(7);
+    expect(await creditsOf(part.id)).toHaveLength(1);
+  });
+
+  it("id inconnu : 404 avec message utilisateur", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const res = await remove(999999999, chef.cookie);
+    expect(res.status).toBe(404);
+    expect((await res.json()).message).toMatch(/introuvable/);
+  });
+
+  it("id invalide : 400 ; sans session : 401", async () => {
+    const chef = await sessionOf("workshop_manager");
+    expect((await fetch(`${baseUrl}/api/parts-used/12abc`, { method: "DELETE", headers: { Cookie: chef.cookie } })).status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/parts-used/1`, { method: "DELETE" })).status).toBe(401);
+  });
+
+  it("le technicien ne remet pas en stock : 403, ligne et stock intacts", async () => {
+    const technician = await sessionOf("technician");
+    const { part, used } = await partUsedOnWorkOrder();
+    const res = await remove(used.id, technician.cookie);
+    expect(res.status).toBe(403);
+    expect(await stockOf(part.id)).toBe(5);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
+  });
+
+  it.each(["warehouse", "workshop_manager", "admin"] as const)("%s retire la pièce : 204, stock remonté, mouvement attribué", async (role) => {
+    const actor = await sessionOf(role);
+    const { part, workOrder, used } = await partUsedOnWorkOrder();
+    const res = await remove(used.id, actor.cookie);
+    expect(res.status).toBe(204);
+    expect(await stockOf(part.id)).toBe(7);
+    const [movement] = await creditsOf(part.id);
+    expect(movement).toMatchObject({ quantity: 2, workOrderId: workOrder.id, createdBy: actor.user.id });
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(0);
+  });
+
+  it.each(["completed", "cancelled"] as const)("OT %s : retrait refusé (409), ligne et stock intacts", async (status) => {
+    const chef = await sessionOf("workshop_manager");
+    const { part, workOrder, used } = await partUsedOnWorkOrder();
+    await db.update(workOrders).set({ status }).where(eq(workOrders.id, workOrder.id));
+    const res = await remove(used.id, chef.cookie);
+    expect(res.status).toBe(409);
+    expect((await res.json()).message).toMatch(/ajustement de stock/);
+    expect(await stockOf(part.id)).toBe(5);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
+  });
+
+  it.each(["client", "driver"] as const)("%s : 403, ligne et stock intacts", async (role) => {
+    const actor = await sessionOf(role);
+    const { part, used } = await partUsedOnWorkOrder();
+    const res = await remove(used.id, actor.cookie);
+    expect(res.status).toBe(403);
+    expect(await stockOf(part.id)).toBe(5);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
+  });
+
+  it("la trame part_used_removed vise le personnel hors chauffeur et client, sans montant", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { workOrder, used } = await partUsedOnWorkOrder();
+    broadcasts.length = 0;
+    expect((await remove(used.id, chef.cookie)).status).toBe(204);
+    const frames = broadcasts.filter((b) => b.type === "part_used_removed" && b.data?.workOrderId === workOrder.id);
+    expect(frames).toHaveLength(1);
+    const { scope } = frames[0].data;
+    expect(scope.type).toBe("roles");
+    expect(scope.roles).toContain("warehouse");
+    expect(scope.roles).not.toContain("client");
+    expect(scope.roles).not.toContain("driver");
+    expect(JSON.stringify(frames[0].data)).not.toMatch(/unitPrice/i);
+  });
+
+  it("crédit en échec : tout est annulé (la ligne reste), réponse 500 sans détail technique", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { part, workOrder, used } = await partUsedOnWorkOrder();
+    // Déclencheur local au test, nommé d'après l'OT : refuse tout mouvement d'entrée de cet OT.
+    const trigger = `test_refuse_credit_${workOrder.id}`;
+    await db.execute(sql.raw(`
+      CREATE OR REPLACE FUNCTION ${trigger}() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.work_order_id = ${workOrder.id} THEN RAISE EXCEPTION 'TEST refus du credit'; END IF;
+        RETURN NEW;
+      END $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS ${trigger} ON parts_stock_movements;
+      CREATE TRIGGER ${trigger} BEFORE INSERT ON parts_stock_movements
+        FOR EACH ROW EXECUTE FUNCTION ${trigger}();`));
+    try {
+      const res = await remove(used.id, chef.cookie);
+      expect(res.status).toBe(500);
+      expect(JSON.stringify(await res.json())).not.toMatch(/TEST refus|trigger|parts_stock_movements/i);
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger} ON parts_stock_movements; DROP FUNCTION IF EXISTS ${trigger}();`));
+    }
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
     expect(await stockOf(part.id)).toBe(5);
   });
 });

@@ -18,6 +18,7 @@ import suppliersRoutes from "./suppliers.routes";
 import purchaseOrdersRoutes from "./purchase-orders.routes";
 import supplierInvoicesRoutes from "./supplier-invoices.routes";
 import workOrderPartsRoutes from "./work-order-parts.routes";
+import partsUsedRoutes from "./parts-used.routes";
 import {
   laborCatalogRoutes,
   laborCatalogWriteRoutes,
@@ -202,6 +203,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
   apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
+  // Pièces posées : liste (rôles coût) et retrait (magasin, atelier).
+  apiRouter.use("/parts-used", partsUsedRoutes);
   apiRouter.use("/work-orders", workOrderItemsRoutes);
   apiRouter.use("/work-orders", workOrderLaborRateRoutes);
   // Lignes de travail: préfixes dédiés, donc garde au montage — toute route
