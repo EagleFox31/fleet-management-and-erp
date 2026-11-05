@@ -93,3 +93,6 @@
 - Règle : la garde lit l'identifiant comme la route qu'elle protège (`parseRouteId`).
 - Preuve : contrat `admin-users-guard-strict-id` (3 cas) vert ; non-régression : un autre utilisateur se désactive et se réactive.
 - DETTE (routes.ts gelé) : `GET /api/parts/:id(\d+)` garde sa contrainte (la retirer masquerait `/api/parts/stock-movements`) ; la route aval `toggle` n'est pas migrée.
+## 2026-11-05 — #373 : précision et mineurs de relecture
+- Rectificatif : dans supplier-invoices, 4 lectures `parseInt` passées à `parseRouteId` + 1 garde `isNaN` remplacée par la validation du parseur (et non 4 lectures seules).
+- vehicles.routes.ts : lignes vides résiduelles retirées, message d'identifiant en constante `VEHICLE_ID_INVALID_MESSAGE`.
