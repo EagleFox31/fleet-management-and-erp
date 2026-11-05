@@ -1044,10 +1044,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicle = await storage.getVehicleByRegistration(idOrRegistration);
       }
       
+      // Un client reçoit la même réponse (403, même message) pour un véhicule absent et pour celui d'un
+      // autre : il ne peut pas deviner quels identifiants existent. Le personnel garde le 404.
       if (!vehicle) {
+        if (user.role === 'client') return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
         return res.status(404).json({ message: "Véhicule non trouvé" });
       }
-      
+
       // Vérifier les permissions : les clients ne peuvent voir que leurs véhicules
       if (user.role === 'client' && vehicle.ownerId !== user.id) {
         return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
@@ -1352,6 +1355,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await storage.getVehicleDocument(id);
       
       if (!document) {
+        // Même réponse qu'un document d'un autre client : l'existence d'un identifiant ne se devine pas.
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 
