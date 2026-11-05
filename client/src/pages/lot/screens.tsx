@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BackupsPanel } from "@/components/admin/backups-panel";
 import { PendingInvoicesTable } from "@/components/billing/pending-invoices-table";
+import { InvoicesAwaitingPaymentTable } from "@/components/finance/invoices-awaiting-payment-table";
 import { FuelAnomaliesTable } from "@/components/fuel/fuel-anomalies-table";
 import { FuelVouchersTable } from "@/components/fuel/fuel-vouchers-table";
 import { IncidentForm } from "@/components/incidents/incident-form";
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
 import { useAuth } from "@/hooks/useAuth";
 import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
-import { canEditTankCapacity, canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
+import { canEditTankCapacity, canWriteFinanceReceivable, canWriteFuel, canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
 
@@ -30,6 +31,12 @@ export function TireMovementsScreen() {
 
 export function PendingInvoicesScreen() {
   return <PendingInvoicesTable />;
+}
+
+/** La direction consulte sans déposer (hors FINANCE_RECEIVABLE_WRITE_ROLES). */
+export function InvoicesAwaitingPaymentScreen() {
+  const { user } = useAuth();
+  return <InvoicesAwaitingPaymentTable readOnly={!canWriteFinanceReceivable(user?.role)} />;
 }
 
 /** Chef d'atelier et direction consultent les bons sans les valider (hors FUEL_WRITE_ROLES). */

@@ -173,6 +173,10 @@ export function canReadFinanceReceivable(role: string | null | undefined): boole
   return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
+export function canWriteFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
  * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
