@@ -56,7 +56,7 @@ async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedL
 }
 
 async function activeFuelCardAccountId(tx: DbExecutor): Promise<number | null> {
-  const res = await tx.execute(sql`SELECT id FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active LIMIT 1`);
+  const res = await tx.execute(sql`SELECT id FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active ORDER BY id LIMIT 1`);
   const row = res.rows[0] as { id: number } | undefined;
   // Drapeau actif sans compte carte : les mouvements de la carte échappent au journal.
   if (!row) log.warn("Drapeau finance actif sans compte carte carburant actif : mouvement de carte non écrit au journal");

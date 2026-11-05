@@ -110,6 +110,18 @@ const SCREEN_APIS: Record<string, Declaration> = {
   },
   "mission-operations": { apis: [{ file: "mission-operations.routes.ts", path: "/mission-operations" }] },
   "pending-invoices": { apis: [{ file: "pending-invoices.routes.ts", path: "/billing/pending-invoices" }] },
+  // Direction en lecture seule ; dépôt réservé à admin et secrétariat.
+  "invoices-awaiting-payment": {
+    apis: [{ file: "finance-receivables.routes.ts", path: "/finance/invoices-awaiting-payment" }],
+    writes: [
+      {
+        api: { file: "finance-receivables.routes.ts", method: "patch", path: "/finance/invoices-awaiting-payment/:id/deposit" },
+        roles: "FINANCE_RECEIVABLE_WRITE_ROLES",
+        gate: "canWriteFinanceReceivable",
+        component: "InvoicesAwaitingPaymentScreen",
+      },
+    ],
+  },
 };
 
 const ROOT = path.resolve(__dirname, "../../..");

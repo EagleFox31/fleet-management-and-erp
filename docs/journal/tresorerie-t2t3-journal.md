@@ -57,3 +57,23 @@
 ### Pourquoi
 - La logistique recharge la carte et sait d'où part l'argent. L'utilisatrice a préféré cette dérogation explicite et nommée à un circuit par le secrétariat.
 - Une suppression douce garde la ligne de plein. Sans contre-passation, le solde de la carte au journal divergeait de son solde réel.
+
+## 5 novembre 2026, réserves du contre-audit de #469
+
+### Quoi
+- Les blocs `DO` qui remplacent les FK véhicule et mission et posent l'index de la carte unique portent un `lock_timeout` de 5 s. Si le verrou n'est pas obtenu, le démarrage émet un WARNING et retente au démarrage suivant ; il ne bloque plus.
+- `POST /api/fuel-card/recharge` valide le corps entier avec un schéma Zod strict (`rechargeBodySchema`). Une clé inconnue, `date: {}`, un montant `"100abc"` ou une origine de prix inconnue donnent 400, jamais 500.
+- `activeFuelCardAccountId` lit la carte en `ORDER BY id`, ce qui la rend déterministe même avec deux cartes avant que l'index soit posé.
+
+### Comment
+- Le `set_config('lock_timeout', '5s', true)` est local à l'instruction. L'erreur `lock_not_available` est attrapée dans le bloc, qui est alors annulé en entier : rien n'est remplacé à moitié.
+- Test d'intégration : une seconde session tient la table, le bloc rend la main sous 5 s avec le WARNING. Une fois le verrou libéré, le passage suivant répare.
+- `sourceAccountId` reste brut dans le schéma : le rôle est contrôlé avant de lire l'identifiant. `fuel-recharge-source-roles.test.ts` fige cet ordre et la liste de la dérogation.
+
+### Pourquoi
+- Un `ALTER TABLE` qui attend un verrou sans limite gèle le démarrage derrière une simple lecture longue.
+- Le corps était lu champ par champ, avec `parseFloat` : un type inattendu remontait jusqu'au service.
+
+### Suites connues
+- `server/storage.ts` (`deleteVehicle`) supprime les pleins du véhicule sans `reverseFuelLink`. Les écritures de trésorerie restent, avec un lien `fuel_record_id` à NULL. Hors de cette PR.
+- Les FK `client_id` et `supplier_id` de `treasury_entries` restent sans `ON DELETE` : aucune suppression ne les vise (avis de l'audit).

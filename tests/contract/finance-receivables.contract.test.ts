@@ -90,7 +90,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const a = server.address();
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
-  for (const role of ["admin", "management", "secretary", "technician", "client", "logistics"] as const) await login(role);
+  for (const role of ["admin", "management", "secretary", "technician", "client", "logistics", "driver"] as const) await login(role);
 }, 180000);
 
 afterAll(async () => {
@@ -104,7 +104,7 @@ describe("droits", () => {
     expect((await call("PATCH", depositPath(1), undefined, { depositedAt: "2026-02-01" })).status).toBe(401);
   });
 
-  it.each(["technician", "client", "logistics"])("%s : 403 en lecture comme en écriture", async (role) => {
+  it.each(["technician", "client"])("%s : 403 en lecture comme en écriture", async (role) => {
     expect((await call("GET", INVOICES_AWAITING_PAYMENT_PATH, role)).status).toBe(403);
     expect((await call("PATCH", depositPath(1), role, { depositedAt: "2026-02-01" })).status).toBe(403);
     expect((await call("PATCH", withholdingPath(1), role, { ...CNPCC, isBase: "ht" })).status).toBe(403);
@@ -120,6 +120,14 @@ describe("droits", () => {
     } finally {
       process.env.FEATURE_FLAGS = flags;
     }
+  });
+
+  it("logistique : lit, n'écrit pas (décision du 2026-11-05)", async () => {
+    const r = await call("GET", INVOICES_AWAITING_PAYMENT_PATH, "logistics");
+    expect(r.status).toBe(200);
+    expect(invoicesAwaitingPaymentResponseSchema.safeParse(r.body).success).toBe(true);
+    expect((await call("PATCH", depositPath(1), "logistics", { depositedAt: "2026-02-01" })).status).toBe(403);
+    expect((await call("PATCH", withholdingPath(1), "logistics", { ...CNPCC, isBase: "ht" })).status).toBe(403);
   });
 
   it("direction : lit, n'écrit pas", async () => {
@@ -281,7 +289,7 @@ describe("taux de retenue du client", () => {
 describe("fiche client /api/clients : taux de retenue réservés à la lecture finance", () => {
   const FINANCE_KEYS = ["withholdingVatRate", "withholdingIsRate", "withholdingIsBase", "withholdingUpdatedBy"];
 
-  it.each(["technician", "logistics"])("%s : liste et fiche sans les taux", async (role) => {
+  it.each(["technician", "driver"])("%s : liste et fiche sans les taux", async (role) => {
     const clientId = await newClient("ttc");
     const list = await call("GET", "/api/clients", role);
     expect(list.status).toBe(200);
@@ -295,7 +303,7 @@ describe("fiche client /api/clients : taux de retenue réservés à la lecture f
     }
   });
 
-  it.each(["admin", "secretary", "management"])("%s : fiche avec les taux", async (role) => {
+  it.each(["admin", "secretary", "management", "logistics"])("%s : fiche avec les taux", async (role) => {
     const clientId = await newClient("ttc");
     const one = await call("GET", `/api/clients/${clientId}`, role);
     expect(one.status).toBe(200);
