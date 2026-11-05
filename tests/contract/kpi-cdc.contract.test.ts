@@ -1,3 +1,4 @@
+import { messageText } from "../support/api-error";
 import { createServer, type Server } from "http";
 import { eq } from "drizzle-orm";
 import * as XLSX from "xlsx";
@@ -210,7 +211,7 @@ describe("/api/kpi/* : formes et erreurs", { timeout: 120000 }, () => {
       const res = await call("GET", path, "management");
       expect(res.status, path).toBe(400);
       expect(res.body).toMatchObject({ code: expect.any(String), message: expect.any(String) });
-      expect(res.body.message).not.toMatch(/zod|invalid_type|stack|select /i);
+      expect(messageText(res.body)).not.toMatch(/zod|invalid_type|stack|select /i);
     }
   });
 });
@@ -245,7 +246,7 @@ describe("/api/workshop-labor-rates", { timeout: 120000 }, () => {
     const dup = await call("POST", WORKSHOP_LABOR_RATES_PATH, "admin", { effectiveFrom: RATE_DATE, hourlyRateHt: 6000 });
     expect(dup.status).toBe(409);
     expect(dup.body.message).toMatch(/date d'effet/);
-    expect(dup.body.message).not.toMatch(/constraint|workshop_labor_rates|duplicate key/i);
+    expect(messageText(dup.body)).not.toMatch(/constraint|workshop_labor_rates|duplicate key/i);
   });
 
   it("taux négatif, date absente ou mal formée : 400", async () => {
