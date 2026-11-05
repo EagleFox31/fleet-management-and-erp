@@ -1305,9 +1305,21 @@ export const clients = pgTable("clients", {
   isActive: boolean("is_active").default(true),
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche client
   notes: text("notes"),
+  // Retenues à la source (lot F1) : taux en %, NULL = pas de retenue. Écrits par
+  // PATCH /api/finance/clients/:id/withholding, jamais par la fiche client.
+  withholdingVatRate: numeric("withholding_vat_rate", { precision: 5, scale: 2 }),
+  withholdingIsRate: numeric("withholding_is_rate", { precision: 5, scale: 2 }),
+  // Base de la retenue IS : 'ht' (feuille CNPCC) ou 'ttc' (feuille OPERATION). Repli 'ht' en attente
+  // de la question client n°2 ; réglable par client.
+  withholdingIsBase: text("withholding_is_base", { enum: ["ht", "ttc"] }).notNull().default("ht"),
+  withholdingUpdatedBy: integer("withholding_updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  check("clients_withholding_vat_rate_check", sql`${table.withholdingVatRate} IS NULL OR (${table.withholdingVatRate} >= 0 AND ${table.withholdingVatRate} <= 100)`),
+  check("clients_withholding_is_rate_check", sql`${table.withholdingIsRate} IS NULL OR (${table.withholdingIsRate} >= 0 AND ${table.withholdingIsRate} <= 100)`),
+  check("clients_withholding_is_base_check", sql`${table.withholdingIsBase} IN ('ht', 'ttc')`),
+]);
 
 // Table missions - Missions de transport (livraisons, récupérations)
 export const missions = pgTable("missions", {
@@ -1450,7 +1462,14 @@ export const clientInvoices = pgTable("client_invoices", {
   // Paiement
   balance: numeric("balance", { precision: 15, scale: 2 }).notNull(), // Solde restant
   status: text("status", { enum: ["pending", "partial", "paid", "overdue", "cancelled"] }).notNull().default("pending"),
-  
+
+  // Dépôt chez le client (lot F1) : date de dépôt et retenues figées à cet instant.
+  depositedAt: date("deposited_at"),
+  withholdingVatAmount: numeric("withholding_vat_amount", { precision: 15, scale: 2 }),
+  withholdingIsAmount: numeric("withholding_is_amount", { precision: 15, scale: 2 }),
+  netPayable: numeric("net_payable", { precision: 15, scale: 2 }),
+  depositedBy: integer("deposited_by").references(() => users.id, { onDelete: "set null" }),
+
   // Items facture (détails lignes)
   items: jsonb("items"), // [{description, quantity, unitPrice, total}]
   
@@ -1546,6 +1565,10 @@ export const fuelRecordsRelations = relations(fuelRecords, ({ one }) => ({
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdBy: true,
+  withholdingVatRate: true,
+  withholdingIsRate: true,
+  withholdingIsBase: true,
+  withholdingUpdatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -1591,6 +1614,11 @@ export const insertMissionStepSchema = createInsertSchema(missionSteps).omit({
 
 export const insertClientInvoiceSchema = createInsertSchema(clientInvoices).omit({
   id: true,
+  depositedAt: true,
+  withholdingVatAmount: true,
+  withholdingIsAmount: true,
+  netPayable: true,
+  depositedBy: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
