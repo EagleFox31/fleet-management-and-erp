@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BackupsPanel } from "@/components/admin/backups-panel";
 import { PendingInvoicesTable } from "@/components/billing/pending-invoices-table";
 import { InvoicesAwaitingPaymentTable } from "@/components/finance/invoices-awaiting-payment-table";
+import { WithholdingsSummary } from "@/components/finance/withholdings-summary";
 import { FuelAnomaliesTable } from "@/components/fuel/fuel-anomalies-table";
 import { FuelVouchersTable } from "@/components/fuel/fuel-vouchers-table";
 import { IncidentForm } from "@/components/incidents/incident-form";
@@ -52,6 +53,11 @@ export function PendingInvoicesScreen() {
 export function InvoicesAwaitingPaymentScreen() {
   const { user } = useAuth();
   return <InvoicesAwaitingPaymentTable readOnly={!canWriteFinanceReceivable(user?.role)} />;
+}
+
+/** Lecture seule pour tous les rôles de FINANCE_RECEIVABLE_READ_ROLES : aucune action. */
+export function WithholdingsScreen() {
+  return <WithholdingsSummary />;
 }
 
 /** Chef d'atelier et direction consultent les bons sans les valider (hors FUEL_WRITE_ROLES). */
