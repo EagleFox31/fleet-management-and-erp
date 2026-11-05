@@ -155,3 +155,4 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Preuve automatisée** : `tests/contract/drivers-sync-cpc-role.contract.test.ts` (401, 403 x2, 200 x3), `tests/unit/client/driver-cpc-update-visibility.test.ts`.
 - **RAIDER** : couvert non-régression, moindre privilège, pas de liste de rôles dupliquée ; sans objet : migration.
 - **Reste / risques** : aucun.
+- **Cycle rouge/vert (statuts CPC)** : garde `isDriverManager` retirée temporairement, contrat `drivers-sync-cpc-role` : 2 échecs sur 6 (`workshop_manager` et `technician` reçoivent 200 au lieu de 403 ; 401, admin, logistics, secretary passent). Garde restaurée : 6/6 verts.
