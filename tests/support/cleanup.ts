@@ -9,6 +9,7 @@ import {
   documentRenewalRequests,
   fuelPrices,
   missionBudgets,
+  missionDestinations,
   missionOperations,
   missions,
   fuelRecords,
@@ -270,6 +271,15 @@ async function deleteOrphanTestRows(): Promise<void> {
       inArray(missionBudgets.disbursedBy, testUsers),
     ),
   );
+  // Destination du barème (L1b) écrite par un compte de test : un budget hors test qui la vise la
+  // perd (destination_id nullable), il n'est pas supprimé.
+  const testDestinations = db
+    .select({ id: missionDestinations.id })
+    .from(missionDestinations)
+    .where(or(inArray(missionDestinations.createdBy, testUsers), inArray(missionDestinations.updatedBy, testUsers)));
+  await db.update(missionBudgets).set({ destinationId: null }).where(inArray(missionBudgets.destinationId, testDestinations));
+  await db.delete(missionDestinations).where(inArray(missionDestinations.createdBy, testUsers));
+  await db.delete(missionDestinations).where(inArray(missionDestinations.updatedBy, testUsers));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
   // Suivi d'opération saisi par un compte de test sur une mission qui ne l'est pas (FK created_by/updated_by).
   await db.delete(missionOperations).where(inArray(missionOperations.createdBy, testUsers));

@@ -7,6 +7,7 @@ import {
   missionBudgetTransitionRequestSchema,
   missionBudgetsQuerySchema,
   missionBudgetsResponseSchema,
+  missionDestinationsResponseSchema,
   updateMissionBudgetRequestSchema,
 } from "@shared/contracts/mission-budgets";
 import {
@@ -22,6 +23,7 @@ import {
   dailyNeed,
   getMissionBudget,
   listMissionBudgets,
+  listMissionDestinations,
   transitionMissionBudget,
   updateMissionBudget,
 } from "../services/mission-budgets-service";
@@ -45,6 +47,15 @@ const need: RequestHandler = async (req, res, next) => {
   try {
     const { date } = dailyNeedQuerySchema.parse(req.query);
     res.json(dailyNeedResponseSchema.parse(await dailyNeed(date)));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Barème FDR (L1b) : liste fermée des destinations, pour pré-remplir la saisie. */
+const destinations: RequestHandler = async (_req, res, next) => {
+  try {
+    res.json(missionDestinationsResponseSchema.parse(await listMissionDestinations()));
   } catch (error) {
     next(error);
   }
@@ -93,6 +104,7 @@ const router = Router();
 // Gardes en ligne : le cliquet des routes d'écriture les lit sur la déclaration.
 // /daily-need avant /:id : Express sert la première déclaration qui correspond.
 router.get("/mission-budgets/daily-need", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), need);
+router.get("/mission-budgets/destinations", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), destinations);
 router.get("/mission-budgets", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), list);
 router.get("/mission-budgets/:id", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), detail);
 router.post("/mission-budgets", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), create);
