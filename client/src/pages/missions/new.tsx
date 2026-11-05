@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Stepper } from "@/components/workflow/stepper";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
@@ -365,8 +365,8 @@ export default function NewMission() {
               </div>
 
               {/* Delivery */}
-              <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-                <h3 className="font-semibold mb-4 text-green-700 dark:text-green-300">Destination</h3>
+              <div className="bg-success/10 p-4 rounded-lg">
+                <h3 className="font-semibold mb-4 text-success">Destination</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="md:col-span-3 space-y-2">
                     <Label htmlFor="deliveryAddress">Adresse Livraison *</Label>
@@ -484,7 +484,7 @@ export default function NewMission() {
                         >
                           {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model} ({vehicle.tonnage}T)
                           {!vehicle.eligibilite.eligible && (
-                            <span className="ml-2 text-xs text-amber-700">
+                            <span className="ml-2 text-xs text-warning-text">
                               — {vehicle.eligibilite.blockers.map((b: any) => b.reason).join(" ; ")}
                             </span>
                           )}
@@ -542,9 +542,9 @@ export default function NewMission() {
                         <div>
                           <span className="text-muted-foreground">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
-                            driverCpc.eligible ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
+                            driverCpc.eligible ? 'border border-success/30 bg-background text-success' :
                             normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-warning/10 text-warning-text' :
-                            'bg-destructive/10 text-destructive'
+                            'bg-destructive/10 text-destructive-text'
                           }`}>
                             {driverCpcStatus ?? "Non défini"}
                           </p>
@@ -570,8 +570,8 @@ export default function NewMission() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className={`rounded-lg border p-4 ${
                   isWeightCompatible
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    ? "bg-success/10 text-success border-success/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle tonnage</p>
                   {!formData.vehicleId ? (
@@ -588,8 +588,8 @@ export default function NewMission() {
 
                 <div className={`rounded-lg border p-4 ${
                   isDriverCpcCompatible
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    ? "bg-success/10 text-success border-success/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle CPC</p>
                   {!formData.driverId ? (
@@ -656,7 +656,7 @@ export default function NewMission() {
                     </div>
                     <div className="ml-4 border-l-2 border-dashed border-gray-300 h-8"></div>
                     <div className="flex items-start gap-4">
-                      <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">B</div>
+                      <div className="w-8 h-8 bg-success rounded-full flex items-center justify-center text-success-foreground font-bold">B</div>
                       <div className="flex-1">
                         <p className="font-medium">{formData.deliveryAddress}</p>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -717,7 +717,7 @@ export default function NewMission() {
                 </div>
 
                 {formData.specialInstructions && (
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
+                  <div className="bg-warning/10 p-4 rounded-lg">
                     <h4 className="font-medium mb-2">Instructions Spéciales:</h4>
                     <p className="text-sm">{formData.specialInstructions}</p>
                   </div>
@@ -730,13 +730,20 @@ export default function NewMission() {
             <div
               role="alert"
               data-testid="cpc-block-guidance"
-              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive-text"
             >
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <div className="space-y-1">
                 <p className="font-semibold">{cpcGuidance.title}</p>
                 <p>{cpcGuidance.why}</p>
                 <p>{cpcGuidance.action}</p>
+                {cpcGuidance.driverHref && (
+                  <p>
+                    <Link href={cpcGuidance.driverHref} className="font-medium underline" data-testid="cpc-driver-sheet-link">
+                      Ouvrir la fiche du chauffeur
+                    </Link>
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -745,7 +752,7 @@ export default function NewMission() {
             <div
               role="alert"
               data-testid="step-block-reason"
-              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive-text"
             >
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <p>{stepBlockReason}</p>
@@ -789,7 +796,7 @@ export default function NewMission() {
                   onClick={handleSubmit}
                   disabled={createMission.isPending}
                   data-testid="btn-submit"
-                  className="bg-green-600 hover:bg-green-700"
+                  className="bg-success text-success-foreground hover:bg-success/90"
                 >
                   {createMission.isPending ? (
                     "Création..."
