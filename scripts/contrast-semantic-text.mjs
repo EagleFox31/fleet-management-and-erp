@@ -1,6 +1,6 @@
 // Contraste WCAG des jetons de texte semantiques sur fond compose (couleur/10 sur surface).
 // Usage : node scripts/contrast-semantic-text.mjs
-function hsl([h, s, l]) {
+export function hsl([h, s, l]) {
   s /= 100; l /= 100;
   const k = (n) => (n + h / 30) % 12;
   const a = s * Math.min(l, 1 - l);
@@ -10,8 +10,8 @@ const lum = (rgb) => {
   const [r, g, b] = rgb.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
-const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-const over = (fg, bg, alpha) => fg.map((v, i) => v * alpha + bg[i] * (1 - alpha));
+export const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+export const over = (fg, bg, alpha) => fg.map((v, i) => v * alpha + bg[i] * (1 - alpha));
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -41,11 +41,12 @@ export const COUPLES = [
   ["badge CPC neutre avant (muted-foreground sur muted)", "muted-foreground", "muted", 1, "background"],
   ["badge CPC neutre apres (foreground sur muted)", "foreground", "muted", 1, "background"],
   ["success sur success/10 (page)", "success", "success", 0.1, "background"],
-  ["success sur success/10 (carte muted)", "success", "success", 0.1, "muted"],
+  ["success sur success/10 (carte muted, ancien)", "success", "success", 0.1, "muted"],
   ["warning-text sur warning/10 (page)", "warning-text", "warning", 0.1, "background"],
   ["warning-text sur warning/10 (carte muted)", "warning-text", "warning", 0.1, "muted"],
   ["destructive-text sur destructive/10 (page)", "destructive-text", "destructive", 0.1, "background"],
   ["destructive sur destructive/10 (page, ancien)", "destructive", "destructive", 0.1, "background"],
+  ["badge CPC valide mission L.547 (success sur page)", "success", "background", 0, "background"],
   ["success-foreground sur success", "success-foreground", "success", 1, "background"],
   ["muted-foreground sur page", "muted-foreground", "background", 1, "background"],
 ];

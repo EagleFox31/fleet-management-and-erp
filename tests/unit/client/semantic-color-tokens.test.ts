@@ -35,3 +35,29 @@ describe("contraste du formulaire CPC", () => {
     expect(bad).toEqual([]);
   });
 });
+
+describe("contraste WCAG des couples employes", () => {
+  it("tous les couples calcules (hors lignes avant/ancien) atteignent 4,5 en clair et en sombre", async () => {
+    const modulePath = resolve(process.cwd(), "scripts/contrast-semantic-text.mjs");
+    const { computeCouples } = (await import(/* @vite-ignore */ modulePath)) as {
+      computeCouples: () => { label: string; clair: number; sombre: number }[];
+    };
+    const couples = computeCouples().filter((c) => !/\b(avant|ancien)\b/.test(c.label));
+    expect(couples.length).toBeGreaterThan(5);
+    for (const c of couples) {
+      expect(c.clair, `${c.label} clair`).toBeGreaterThanOrEqual(4.5);
+      expect(c.sombre, `${c.label} sombre`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+describe("texte destructif sur fond teinte", () => {
+  for (const file of FILES) {
+    it(`${file} : aucun text-destructive sur une ligne portant bg-destructive/10`, () => {
+      const lines = readFileSync(resolve(process.cwd(), file), "utf8").split(/\r?\n/);
+      const teinte = lines.filter((l) => l.includes("bg-destructive/10"));
+      expect(teinte.length).toBeGreaterThan(0);
+      for (const l of teinte) expect(l).not.toMatch(/text-destructive(?!-)/);
+    });
+  }
+});
