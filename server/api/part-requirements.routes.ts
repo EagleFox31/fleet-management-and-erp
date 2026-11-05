@@ -143,10 +143,6 @@ router.patch("/:id", isInventoryManager, async (req, res, next) => {
       ...requirementPayload
     } = req.body ?? {};
 
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "ID de demande invalide" });
-    }
-
     const requirement = await partRequirementsService.getPartRequirement(id);
 
     if (!requirement) {

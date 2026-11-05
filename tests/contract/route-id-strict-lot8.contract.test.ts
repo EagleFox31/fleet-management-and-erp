@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import {
@@ -34,7 +34,6 @@ let baseUrl = "";
 let cookie = "";
 const ids = createIdBag();
 const workOrderIds: number[] = [];
-const requirementIds: number[] = [];
 
 async function call(method: string, path: string, body: unknown = {}) {
   const response = await fetch(baseUrl + path, {
@@ -65,9 +64,8 @@ async function createWorkOrder(technicianId: number, title: string) {
 async function createRequirement(values: { partId: number; workOrderId?: number; status: "pending" | "received"; requestedBy: number }) {
   const [row] = await db
     .insert(partRequirements)
-    .values({ ...values, quantityNeeded: 2, reason: "TEST lot 8" })
+    .values({ ...values, quantityNeeded: 2, reason: REASON })
     .returning();
-  requirementIds.push(row.id);
   return row;
 }
 
@@ -89,19 +87,36 @@ beforeAll(async () => {
   cookie = login.headers.get("set-cookie")!.split(";")[0];
 });
 
+/** Préfixe des OT de ce contrat : le ménage les retrouve même après un lancement interrompu ou un rouge. */
+const TITLE_PREFIX = "TEST lot 8";
+const REASON = "TEST lot 8";
+
 afterAll(async () => {
-  if (workOrderIds.length > 0) {
-    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, workOrderIds));
+  // Sur l'ancien code (rouge), les routes écrivent : mouvements liés à l'OT, pièces utilisées, demandes.
+  // Tout est retrouvé par préfixe, puis supprimé des enfants vers les parents.
+  const leftovers = await db
+    .select({ id: workOrders.id, vehicleId: workOrders.vehicleId })
+    .from(workOrders)
+    .where(like(workOrders.title, `${TITLE_PREFIX}%`));
+  const woIds = [...new Set([...workOrderIds, ...leftovers.map((w) => w.id)])];
+  const requirementFilter =
+    woIds.length > 0
+      ? or(eq(partRequirements.reason, REASON), inArray(partRequirements.workOrderId, woIds))
+      : eq(partRequirements.reason, REASON);
+  const linked = await db.select({ partId: partRequirements.partId }).from(partRequirements).where(requirementFilter);
+  ids.partIds = [...new Set([...ids.partIds, ...linked.map((r) => r.partId).filter((id): id is number => id !== null)])];
+  ids.vehicleIds = [...new Set([...ids.vehicleIds, ...leftovers.map((w) => w.vehicleId).filter((id): id is number => id !== null)])];
+  if (woIds.length > 0) {
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, woIds));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, woIds));
   }
   if (ids.partIds.length > 0) {
-    // Inclut une demande qu'aurait créée l'ancien code (rouge).
+    await db.delete(partsUsed).where(inArray(partsUsed.partId, ids.partIds));
     await db.delete(partRequirements).where(inArray(partRequirements.partId, ids.partIds));
   }
-  if (requirementIds.length > 0) {
-    await db.delete(partRequirements).where(inArray(partRequirements.id, requirementIds));
-  }
-  if (workOrderIds.length > 0) {
-    await db.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
+  await db.delete(partRequirements).where(requirementFilter);
+  if (woIds.length > 0) {
+    await db.delete(workOrders).where(inArray(workOrders.id, woIds));
   }
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -141,7 +156,7 @@ describe("ids de route (lot 8) : écritures strictes, objet <id> intact", { time
     ids.userIds.push(technician.id);
     const part = await createTestPart({ quantity: 5 });
     ids.partIds.push(part.id);
-    const workOrder = await createWorkOrder(technician.id, "TEST lot 8 sortie");
+    const workOrder = await createWorkOrder(technician.id, `${TITLE_PREFIX} sortie`);
     const requirement = await createRequirement({ partId: part.id, workOrderId: workOrder.id, status: "received", requestedBy: technician.id });
 
     const res = await call("POST", path(workOrder.id, requirement.id));
@@ -161,7 +176,7 @@ describe("ids de route (lot 8) : écritures strictes, objet <id> intact", { time
     ids.userIds.push(technician.id);
     const part = await createTestPart({ quantity: 5 });
     ids.partIds.push(part.id);
-    const workOrder = await createWorkOrder(technician.id, "TEST lot 8 demande");
+    const workOrder = await createWorkOrder(technician.id, `${TITLE_PREFIX} demande`);
 
     const res = await call("POST", `/api/work-orders/${workOrder.id}abc/parts`, { partId: part.id, quantity: 1 });
     expect(res.status).toBe(400);
@@ -174,7 +189,7 @@ describe("ids de route (lot 8) : écritures strictes, objet <id> intact", { time
   it("POST /api/work-orders/<id>abc/awaiting-parts : 400, statut d'OT inchangé", async () => {
     const technician = await createTestUser({ role: "technician" });
     ids.userIds.push(technician.id);
-    const workOrder = await createWorkOrder(technician.id, "TEST lot 8 attente");
+    const workOrder = await createWorkOrder(technician.id, `${TITLE_PREFIX} attente`);
 
     const res = await call("POST", `/api/work-orders/${workOrder.id}abc/awaiting-parts`, { reason: "TEST lot 8" });
     expect(res.status).toBe(400);
