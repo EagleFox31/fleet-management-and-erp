@@ -9,6 +9,7 @@ import { AppError } from "../lib/app-error";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
 
 const log = moduleLogger("fuel-card");
 
@@ -128,7 +129,7 @@ const QUANTITY_MESSAGE = "La quantité doit être un nombre positif.";
 const VEHICLE_MESSAGE = "Identifiant de véhicule invalide.";
 const requiredText = z.string({ required_error: INCOMPLETE, invalid_type_error: INCOMPLETE }).trim().min(1, INCOMPLETE);
 const consumptionBodySchema = z.object({
-  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE),
+  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE).max(MAX_DB_INTEGER_ID, VEHICLE_MESSAGE),
   quantity: z.coerce.number({ invalid_type_error: QUANTITY_MESSAGE }).positive(QUANTITY_MESSAGE).finite(QUANTITY_MESSAGE),
   // Présent seulement : la lecture du prix (« Prix du litre invalide. ») reste à resolveFuelUnitPrice.
   unitPrice: z.any().refine((v) => typeof v === "number" || (typeof v === "string" && v.trim() !== ""), INCOMPLETE),

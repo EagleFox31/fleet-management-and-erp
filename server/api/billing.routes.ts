@@ -8,6 +8,7 @@ import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 import { AppError, isAppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
 
 const router = Router();
 
@@ -30,7 +31,8 @@ const MAX_INVOICE_AMOUNT_HT = 1_000_000_000_000;
 const generateInvoiceSchema = z.object({
   missionId: z.coerce.number({ invalid_type_error: "Mission invalide." })
     .int("Mission invalide.")
-    .positive("Mission invalide."),
+    .positive("Mission invalide.")
+    .max(MAX_DB_INTEGER_ID, "Mission invalide."),
   amount: z.coerce.number({ invalid_type_error: "Le montant doit être un nombre." })
     .positive("Le montant doit être supérieur à 0.")
     .max(MAX_INVOICE_AMOUNT_HT, "Le montant dépasse le plafond autorisé."),

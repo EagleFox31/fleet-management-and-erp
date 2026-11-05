@@ -55,7 +55,8 @@ describe("balayage de cloison : aucune route ouverte a un client ne manque", () 
       expect(existsSync(`${root}${c.file}`), c.file).toBe(true);
       // chemin exact : le fragment doit se terminer sur le delimiteur du litteral, pas sur un chemin plus long
       const source = readFileSync(`${root}${c.file}`, "utf8");
-      expect(["`", '"', "'"].some((q) => source.includes(`${c.fragment}${q}`)), signatureOf(c)).toBe(true);
+      const found = c.exact ? source.includes(c.fragment) : ["`", '"', "'"].some((q) => source.includes(`${c.fragment}${q}`));
+      expect(found, signatureOf(c)).toBe(true);
     }
   });
 
@@ -129,6 +130,36 @@ describe("scan des gardes effectives (arbre synthetique)", () => {
   it("une garde de session ajoutee apres la route ne la couvre pas", () => {
     write("api/e.routes.ts", routeFile("", "/v/:id").replace("export default", "router.use(isAnyUser);\nexport default"));
     expect(scan()).not.toContain("GET /api/e/v/:p");
+  });
+
+  const NL = "\n";
+  const USE_ANY = `router.use(isAnyUser);${NL}`;
+  const SECOND = (guards: string) =>
+    `import { Router } from "express";${NL}const router = Router();${NL}const autre = Router();${NL}${guards}autre.use(isAnyUser);${NL}autre.get("/s/:id", async (req, res) => { res.json({}); });${NL}export default router;${NL}`;
+
+  it("un router.use(isStaff) conditionnel ne couvre pas la route (il n'est pas toujours posé)", () => {
+    write("api/index.ts", readFileSync(join(dir, "api/index.ts"), "utf8").replace('apiRouter.use("/f", f);', `apiRouter.use("/f", f);${NL}apiRouter.use("/g", g);`).replace("import f from", `import g from "./g.routes";${NL}import f from`));
+    write("api/g.routes.ts", routeFile(`${USE_ANY}if (process.env.X) {${NL}  router.use(isStaff);${NL}}`, "/t/:id"));
+    expect(scan()).toContain("GET /api/g/t/:p");
+    write("api/g.routes.ts", routeFile(`${USE_ANY}router.use(isStaff);`, "/t/:id"));
+    expect(scan()).not.toContain("GET /api/g/t/:p");
+  });
+
+  it("un chemin en gabarit ou illisible est retenu, jamais ignoré", () => {
+    const withPath = (head: string, call: string) => routeFile(head, "/t/:id").replace('router.get("/t/:id"', call);
+    write("api/g.routes.ts", withPath(USE_ANY, "router.get(`/t/${SEG}`"));
+    expect(scan()).toContain("GET /api/g/t/:p");
+    write("api/g.routes.ts", withPath(USE_ANY, "router.get(construire(SEG)"));
+    expect(scan().some((s) => s.startsWith("GET /api/g/") && s.includes("construire"))).toBe(true);
+    write("api/g.routes.ts", withPath(`${USE_ANY}router.use(isStaff);`, "router.get(construire(SEG)"));
+    expect(scan().some((s) => s.includes("construire"))).toBe(false);
+  });
+
+  it("un second routeur du fichier, jamais monté, est retenu sans hériter des gardes du routeur monté (échec fermé)", () => {
+    write("api/g.routes.ts", SECOND(`${USE_ANY}router.use(isStaff);${NL}`));
+    expect(scan().some((s) => s.endsWith("/s/:p"))).toBe(true);
+    write("api/g.routes.ts", SECOND(USE_ANY));
+    expect(scan().some((s) => s.endsWith("/s/:p"))).toBe(true);
   });
 
   it("nettoyage", () => {

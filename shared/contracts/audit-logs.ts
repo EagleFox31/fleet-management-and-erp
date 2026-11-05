@@ -6,7 +6,7 @@
  * travail (P-13) en est une vue filtrée.
  */
 import { z } from "zod";
-import { dateRangeQuerySchema, isoDateTimeSchema, pagedResponseSchema, pageQuerySchema } from "./common";
+import { dateRangeQuerySchema, idSchema, isoDateTimeSchema, pagedResponseSchema, pageQuerySchema } from "./common";
 
 export const AUDIT_LOGS_PATH = "/api/audit-logs";
 
@@ -18,7 +18,7 @@ export const AUDIT_MASK = "***";
 
 export const auditLogsQuerySchema = dateRangeQuerySchema.and(
   pageQuerySchema.extend({
-    userId: z.coerce.number().int().positive().optional(),
+    userId: idSchema.optional(),
     entityType: z.string().trim().min(1).max(60).optional(),
     entityId: z.string().trim().min(1).max(60).optional(),
   }),

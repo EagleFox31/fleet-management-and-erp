@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { bodyIdSchema, idSchema } from "@shared/contracts/common";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -433,8 +434,8 @@ router.get("/requests/:id/proof", async (req, res, next) => {
 });
 
 const createRequestPayloadSchema = z.object({
-  vehicleId: z.number().int().positive(),
-  vehicleDocumentId: z.number().int().positive(),
+  vehicleId: bodyIdSchema,
+  vehicleDocumentId: bodyIdSchema,
   comment: z
     .string()
     .trim()
@@ -452,13 +453,13 @@ const createRequestPayloadSchema = z.object({
     .refine((value) => value === null || /^\d{4}-\d{2}-\d{2}$/.test(value), {
       message: "Date cible invalide (YYYY-MM-DD).",
     }),
-  centerId: z.number().int().positive().optional().nullable(),
+  centerId: bodyIdSchema.optional().nullable(),
   centerName: centerNameField,
   centerAddress: optionalText(300),
   centerContact: optionalText(200),
   centerAccreditationNumber: optionalText(80),
   escortRole: z.enum(ESCORT_ROLES).optional().nullable(),
-  escortUserId: z.number().int().positive().optional().nullable(),
+  escortUserId: bodyIdSchema.optional().nullable(),
   inspectorName: z
     .string()
     .optional()
@@ -482,10 +483,10 @@ const createRequestPayloadSchema = z.object({
 const quickRenewPayloadSchema = z.object({
   requestId: z.preprocess(
     (value) => (value === undefined || value === null || value === "" ? null : value),
-    z.coerce.number().int().positive().nullable().optional(),
+    idSchema.nullable().optional(),
   ),
-  vehicleId: z.coerce.number().int().positive(),
-  vehicleDocumentId: z.coerce.number().int().positive(),
+  vehicleId: idSchema,
+  vehicleDocumentId: idSchema,
   comment: z
     .string()
     .trim()
@@ -500,7 +501,7 @@ const quickRenewPayloadSchema = z.object({
   ),
   centerId: z.preprocess(
     (value) => (value === undefined || value === null || value === "" ? null : value),
-    z.coerce.number().int().positive().nullable().optional(),
+    idSchema.nullable().optional(),
   ),
   centerName: centerNameField,
   centerAddress: optionalText(300),
