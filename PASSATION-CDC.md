@@ -49,3 +49,12 @@
 
 ## 2026-11-05 03:30 — c7 : #339 poussée par merge de main (sans réécriture)
 - Branche distante fix/mission-status-planning-clash : merge de origin/main + commit des réserves (lecture périmée, 409 de POST / par next). Base de #339 = main. Contrats mission 222 / npm test 2413 / check 0 vérifiés sur l'arbre rebasé identique. En attente de relecture de 0a.
+
+## 2026-11-05 04:05 — c7 : PATCH de dates sans affectation vivante prend le verrou et l'empreinte
+- Branche fix/mission-patch-dates-lock (empilée sur #339 non fusionnée à l'heure de la branche) : le PATCH qui change les dates prend aussi le FOR UPDATE de la mission et compare l'empreinte (condition `|| datesChanged`), sinon un POST /:id/assignments concurrent contrôlait sur les anciennes dates. Contrat déterministe ajouté (rouge sans le correctif). waitForBlockedWriter filtre sur pg_blocking_pids du pid qui tient le verrou.
+
+## 2026-11-05 04:40 — c7 : analyse findPlanningClash(db) close, #346 en attente de base
+- Lectures indicatives l.1782 (launch-readiness) et l.3019 (validation de lancement de PUT /status) : lecture seule, aucune écriture, aucun écran ne s'en sert comme garantie (canLaunch colore seulement le panneau). Conclusion transmise à 0a : « rien à faire ».
+- #339 fusionnée (bbdd824). #346 (fix/mission-patch-dates-lock, relue OK par 0a) attend que l'utilisatrice repasse sa base sur main (`gh pr edit 346 --base main`) et la passe en ready ; je ne touche pas à la base. Test DB c7test arrêté. Rien d'autre en cours.
+## 2026-11-05 05:10 — c7 : entrée LESSONS « ordre de verrouillage unique des missions »
+- Branche docs/lessons-ordre-verrous-missions (depuis origin/main) : nouvelle entrée en fin de LESSONS_LEARNED (ligne mission FOR UPDATE, empreinte, advisory triés). Petite PR doc ; « mr » à 0a ensuite. #346 reste en attente de la décision de l'utilisatrice sur sa base.

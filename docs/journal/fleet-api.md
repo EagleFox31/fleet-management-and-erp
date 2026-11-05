@@ -432,3 +432,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : la copie des documents de workflow contrôle `vehicle-<id>` contre `uploads/documents` avant tout `mkdir` (dossier refusé : rien transféré, `log.warn` sans chemin). Multer distingue id invalide (« ID de véhicule invalide ») et dossier sortant (« Dossier de destination invalide », `log.warn`).
 - **Pourquoi** : relecture de #340. La référence était `vehicle-<id>` lui-même : remplacé par une jonction, il se résolvait dehors avec le candidat et le contrôle passait.
 - **Preuve** : intégration `workflow-document-transfer` (jonction `vehicle-<id>` : rien copié dehors, document non transféré) et contrat `vehicle-documents-upload-path` (400 « Dossier de destination invalide »), rouges sur la version précédente, verts après.
+
+## 2026-11-05 — Justificatifs téléversés liés à l'écriture
+- **Quoi** : règlement fournisseur (`POST /:id/settlements`) et récépissé de renouvellement (`POST /requests/:id/receipt`) suppriment le fichier dans le `finally` tant qu'aucune écriture validée ne le référence (`proofRecorded`, `receiptRecorded`). Diffusion du règlement au mieux (`log.error`).
+- **Pourquoi** : une diffusion qui levait rendait 500 et supprimait le justificatif d'un règlement créé ; un identifiant invalide laissait un fichier orphelin.
+- **Preuve** : contrat `supplier-settlement-proof-lifecycle` (3 cas, 2 rouges sur main) ; contrats `supplier-settlement*` et `document-renewal*` verts (64) ; tsc 0 ; unitaires 2417 verts.
