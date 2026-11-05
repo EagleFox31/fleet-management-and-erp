@@ -175,3 +175,7 @@
 - Tester : `route-id-strict-lot11`, 13 filtres × 3 cas (`12abc` → 400 et son message, hors int4 → 400, id bien formé → 200).
   - Ancien code : 24 rouges sur 39 (les 2 cas hors int4 de `fuel-records` étaient déjà refusés). Correctif : 39 verts, aucune donnée créée hors du compte admin.
   - tsc : 0 erreur. Unitaires : 2448 verts. 64 contrats du périmètre (facturation, achats, carburant, pneus, missions, renouvellements, ids) : 825 verts.
+### Lot 9 — complément : lecture des profils par la direction et le secrétariat
+
+- Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
+- Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
