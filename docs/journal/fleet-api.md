@@ -811,3 +811,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : l'ancien chemin lisait, créditait puis supprimait sans transaction, avalait l'erreur et répondait 204 dans tous les cas.
 - **Comment tester (QA)** : `tests/contract/parts-used-removal-defects.contract.test.ts` (10 passés) sur Postgres local ; mutants : sans garde de statut 2 échecs, sans transaction 1 échec.
 - **Reste / risques** : l'écran OT affiche encore la corbeille au technicien (403 à l'usage) et seulement hors `completed` (pas `cancelled`) : à aligner côté front.
+## 2026-11-05T23:45:00+01:00 — Approbation d'une facture fournisseur (PATCH /api/supplier-invoices/:id/approve)
+- **Statut** : fait
+- **Quoi** : l'approbation n'accepte que `received` et `validated`. Facture inconnue : 404 ; déjà approuvée : 200 sans écriture (approbateur et date conservés) ; payée : 409 ; en litige : 409 « Lever le litige avant d'approuver » ; autre statut : 409.
+- **Comment** : `approveInvoice` (three-way-matching-service) fait `UPDATE ... WHERE id AND status IN (...) RETURNING`, puis relit la facture si aucune ligne n'est écrite. `autoApproveMatches` porte la même condition (`status = 'received'`) et ne compte que les lignes réellement écrites. La route était déjà dans `server/api/supplier-invoices.routes.ts`, rôles inchangés.
+- **Pourquoi** : l'UPDATE sans condition ramenait une facture payée à `approved`, écrasait l'approbateur et renvoyait 500 sur un id inconnu.
+- **Comment tester (QA)** : `tests/contract/supplier-invoice-approve-status-guard.contract.test.ts` (8 cas dont deux approbations simultanées et auto-approve) ; sans le filtre de statut, 4 échecs.
+- **Reste / risques** : aucun changement de contrat partagé ; événement `supplier_invoice_updated` toujours émis sur un rappel idempotent.
