@@ -159,3 +159,15 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - D : réponses 200 inchangées, routes voisines prouvées intactes ;
   - E : `routes.ts` allégé, erreurs par `AppError`, logs par le gestionnaire central ;
   - non applicable : pas de schéma, pas de temps réel, pas d'écriture.
+
+## 2026-11-05T18:50:35+01:00 — Audit sécurité #490 : réserves levées
+
+- **Quoi** :
+  - Scan de cloison : une garde qui lève (`assertWorkOrderReadable`, `assertVehicleSubresourcesReadable`) ne compte que si elle est attendue (`await` ou `return`). Une promesse flottante rejette après l'envoi de la donnée.
+  - `/api/vehicles/check/<mot>` : le routeur renvoie `/check/*` au contrôle d'immatriculation (`next("router")`). Avant ce renvoi, `/check/documents` ou `/check/tires` répondaient 400.
+  - Historique kilométrique : `limit` ramené dans [1, 500]. Une valeur négative donnait un 500, une valeur énorme lisait tout l'historique.
+- **Preuve automatisée** :
+  - `routes-hygiene` : « sans await ne vaut pas contrôle », sur les deux gardes ;
+  - contrat : `/check/{documents,tires,mileage,status-history}` en 200, `limit` -5, 0 et 999999 en 200 ;
+  - `prefix-middleware-guardrail` : le renvoi `/check` est inscrit, de type sans base.
+- **Leçon** : une garde async reconnue par son nom doit être exigée attendue. Le test le vérifie désormais.

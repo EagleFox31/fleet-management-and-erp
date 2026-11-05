@@ -87,6 +87,19 @@ describe("montage du routeur : routes littérales voisines intactes", { timeout:
     expect(res.body).toMatchObject({ exists: true, id: retired, retired: true });
   });
 
+  it.each(["documents", "tires", "mileage", "status-history"])("GET /api/vehicles/check/%s reste le contrôle d'immatriculation", async (word) => {
+    const res = await actors.call("GET", `/api/vehicles/check/${word}`, { actor: "admin" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toHaveProperty("exists");
+  });
+
+  it("historique kilométrique : limit hors bornes ramenée dans [1, 500], pas de 500", async () => {
+    for (const limit of ["-5", "0", "999999"]) {
+      const res = await actors.call("GET", `/api/vehicles/${active}/mileage/history?limit=${limit}`, { actor: "admin" });
+      expect(res.status, `${limit} ${JSON.stringify(res.body)}`).toBe(200);
+    }
+  });
+
   it("GET /api/vehicles/documents/all répond toujours (liste)", async () => {
     const res = await actors.call("GET", "/api/vehicles/documents/all", { actor: "owner" });
     expect(res.status, JSON.stringify(res.body)).toBe(200);

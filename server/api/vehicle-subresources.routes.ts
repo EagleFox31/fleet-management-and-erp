@@ -16,12 +16,16 @@ import { storage } from "../storage";
 /**
  * Lectures rattachées à un véhicule, extraites de `server/routes.ts` (gelé). Même cloison
  * que le détail : un client ne lit que son véhicule, et plus du tout une fois retiré.
- * Monté avant `registerRoutes` : les routes littérales `/api/vehicles/<mot>` à un segment
- * (`/check/:reg`, `/documents/all`) ne sont pas concernées, chaque chemin ici en a deux.
+ * Monté avant `registerRoutes`. `/documents/all` est servi plus tôt par `vehicles.routes.ts`.
+ * `/check/<immatriculation>` appartient au contrôle d'immatriculation de `routes.ts` : sans le
+ * renvoi ci-dessous, `/check/documents` ou `/check/tires` tomberaient ici en 400.
  */
 const router = Router();
 
+router.use("/check", (_req, _res, next) => next("router"));
+
 const INVALID_ID = "ID de véhicule invalide";
+const MAX_HISTORY_LIMIT = 500;
 const DOCUMENT_TYPES = ["carte_grise", "assurance", "visite_technique", "taxe", "autre"];
 
 const vehicleRow = (id: number) => async () =>
@@ -71,7 +75,7 @@ router.get("/:id/mileage/history", isAnyUser, async (req, res, next) => {
   try {
     const vehicleId = parseRouteId(req.params.id, INVALID_ID);
     await assertVehicleSubresourcesReadable(req, vehicleId);
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), MAX_HISTORY_LIMIT);
     return res.json(await mileageService.getMileageHistory(vehicleId, limit));
   } catch (error) {
     return next(failure("Erreur lors de la récupération de l'historique", error));
