@@ -2999,6 +2999,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, `tests/unit/server/launch-refusal-message.test.ts`, cas toast dans `tests/unit/client/api-error.test.ts`.
 - **Leçon généralisée** : un `onError` affiche `userMessageOf`, jamais un texte fixe ; tout message métier qui peut dépasser 300 caractères se borne à la source ; un test d'erreur vérifie le contenu du message, pas seulement le statut.
 
+## 2026-11-05 — Verrou de garde tenu jusqu'à la fin de la réponse
+
+- **Contexte** : une garde sérialise une vérification et l'écriture qui suit par un verrou consultatif Postgres pris sur une connexion dédiée, rendu à la fin de la réponse HTTP.
+- **Cause racine** : les écouteurs de fin de réponse étaient posés après les attentes (connexion, prise du verrou). Un client coupé pendant l'attente avait déjà émis son événement de fermeture : rien ne libérait plus ni la connexion ni le verrou, et les gardes suivantes expiraient. S'y ajoutaient une connexion rendue au pool après un déverrouillage en échec et une libération sur fermeture avant la fin de l'écriture aval.
+- **Classification** : fuite de ressource, concurrence, cas limite de cycle de vie de la requête.
+- **Résolution** : état de la réponse contrôlé juste après la prise du verrou (terminée ou détruite), libération sur `finish`, libération à l'appel de `res.end` (après l'écriture aval), minuteur réduit à un filet long de 30 s, connexion détruite si le déverrouillage échoue, expiration traduite en 409 lisible.
+- **Prévention vérifiable** : `tests/unit/server/last-admin-lock.test.ts` (client factice, une entrée par cas) et le cas de contrat « déconnexion pendant l'attente du verrou » dans `tests/contract/last-active-admin-guard.contract.test.ts`.
+- **Leçon généralisée** : toute ressource liée à la durée d'une requête s'enregistre avant le premier `await`, ou contrôle l'état déjà terminé juste après ; elle n'est rendue qu'à la fin de la réponse, et une connexion dont l'état de session est incertain est détruite, jamais rendue au pool. Un minuteur lié à la socket libère selon l'état du réseau, pas selon la fin du traitement.
 ## 2026-11-05 — Un middleware monté sur un préfixe contrôle le rôle avant sa première lecture
 
 - **Contexte** : la garde de réservation des OT, montée sur `/work-orders`, lisait la base et répondait avant les gardes de rôle des routes.
