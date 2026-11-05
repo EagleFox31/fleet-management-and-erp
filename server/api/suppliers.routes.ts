@@ -13,7 +13,7 @@ import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
-import type { AppRole } from "@shared/constants/roles";
+import { SUPPLIER_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { withLogContext } from "../lib/error-log-context";
 import { vatBillingService } from "../services/vat-billing-service";
 
@@ -156,7 +156,7 @@ const broadcastSupplierUpdate = (
     entity: "supplier",
     entityId: options?.supplierId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...SUPPLIER_READ_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
