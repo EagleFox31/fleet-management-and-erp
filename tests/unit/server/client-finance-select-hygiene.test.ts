@@ -13,7 +13,8 @@ import {
  * Champs finance (lot F1) : taux de retenue de `clients`, retenues et net figés de `client_invoices`.
  *
  * Une lecture entière de ces tables (`select()` vide, `{ client: clients }`, `getTableColumns(...)`,
- * `returning()` vide) ramène ces colonnes ; si le résultat atteint une réponse ou une trame, elles
+ * `returning()` vide après insert, update ou delete, `db.query.clients`, `with: { client: true }`,
+ * `SELECT *` / `c.*` en SQL brut) ramène ces colonnes ; si le résultat atteint une réponse ou une trame, elles
  * fuient vers des rôles sans lecture finance. Passer par `publicClientColumns` /
  * `publicClientInvoiceColumns` (`server/lib/client-public-columns.ts`).
  *
@@ -72,8 +73,43 @@ export function findWholeReads(source: string, key: string): string[] {
       if (argument !== null && isWholeRow(argument, table)) found.push(`${key}#${table}#${++ordinal}`);
     }
     let returning = 0;
-    const write = new RegExp(`\\.(?:insert|update)\\(\\s*${table}\\s*\\)[^;]*?\\.returning\\(\\s*\\)`, "g");
+    const write = new RegExp(`\\.(?:insert|update|delete)\\(\\s*${table}\\s*\\)[^;]*?\\.returning\\(\\s*\\)`, "g");
     for (let m = write.exec(source); m; m = write.exec(source)) found.push(`${key}#${table}#returning#${++returning}`);
+    // API relationnelle : `db.query.clients` ramène la ligne entière sauf `columns` explicite.
+    let query = 0;
+    const relational = new RegExp(`\\.query\\.${table}\\b`, "g");
+    for (let m = relational.exec(source); m; m = relational.exec(source)) found.push(`${key}#${table}#query#${++query}`);
+  }
+  // Relation chargée entière : `with: { client: true }` (ou `clients`, `clientInvoice(s)`).
+  let relation = 0;
+  const withWhole = /\bwith\s*:\s*\{[^}]*\b(?:clients?|clientInvoices?)\s*:\s*true\b/g;
+  for (let m = withWhole.exec(source); m; m = withWhole.exec(source)) found.push(`${key}#with#${++relation}`);
+  found.push(...findWholeSqlReads(source, key));
+  return found;
+}
+
+const SQL_TABLES = ["clients", "client_invoices"] as const;
+const NOT_ALIAS = new Set(["where", "on", "join", "left", "right", "inner", "full", "cross", "group", "order", "limit", "for", "as", "using"]);
+
+/** SQL brut (`sql\`...\``, `pool.query("...")`) : `SELECT *`, `c.*` ou `clients.*` sur ces tables. */
+export function findWholeSqlReads(source: string, key: string): string[] {
+  const found: string[] = [];
+  const counts: Record<string, number> = {};
+  const literals = source.match(/`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g) ?? [];
+  for (const literal of literals) {
+    for (const table of SQL_TABLES) {
+      const from = new RegExp(`\\b(?:FROM|JOIN)\\s+"?${table}"?(?:\\s+(?:AS\\s+)?([a-z_][a-z0-9_]*))?`, "gi");
+      const names = new Set<string>([table]);
+      let mentioned = false;
+      for (let m = from.exec(literal); m; m = from.exec(literal)) {
+        mentioned = true;
+        if (m[1] && !NOT_ALIAS.has(m[1].toLowerCase())) names.add(m[1]);
+      }
+      if (!mentioned) continue;
+      const star = /\bSELECT\s+(?:DISTINCT\s+)?\*/i.test(literal) ||
+        [...names].some((n) => new RegExp(`(?:^|[^\\w.])"?${n}"?\\.\\*`).test(literal));
+      if (star) found.push(`${key}#sql:${table}#${(counts[table] = (counts[table] ?? 0) + 1)}`);
+    }
   }
   return found;
 }
@@ -102,5 +138,20 @@ describe("lectures entières de clients / client_invoices (champs finance)", () 
     expect(findWholeReads("db.select(publicClientColumns).from(clients)", "a")).toEqual([]);
     expect(findWholeReads("db.insert(clients).values({ name }).returning(publicClientColumns);", "a")).toEqual([]);
     expect(findWholeReads("db.select({ id: clientInvoices.id }).from(clientInvoices)", "a")).toEqual([]);
+  });
+
+  it("le détecteur repère SQL brut, API relationnelle et suppression renvoyée", () => {
+    expect(findWholeReads("db.execute(sql`SELECT * FROM clients WHERE id = ${id}`)", "a")).toEqual(["a#sql:clients#1"]);
+    expect(findWholeReads("sql`SELECT c.*, m.id FROM missions m JOIN clients c ON c.id = m.client_id`", "a")).toEqual(["a#sql:clients#1"]);
+    expect(findWholeReads("sql`SELECT client_invoices.* FROM client_invoices`", "a")).toEqual(["a#sql:client_invoices#1"]);
+    expect(findWholeReads("pool.query('SELECT * FROM client_invoices i WHERE i.id = $1')", "a")).toEqual(["a#sql:client_invoices#1"]);
+    expect(findWholeReads("db.query.clients.findFirst({ where: eq(clients.id, id) })", "a")).toEqual(["a#clients#query#1"]);
+    expect(findWholeReads("db.query.missions.findMany({ with: { client: true } })", "a")).toEqual(["a#with#1"]);
+    expect(findWholeReads("db.delete(clients).where(eq(clients.id, id)).returning();", "a")).toEqual(["a#clients#returning#1"]);
+    // Projections nommées : sans effet.
+    expect(findWholeReads("sql`SELECT c.id, c.name FROM clients c`", "a")).toEqual([]);
+    expect(findWholeReads("sql`SELECT count(*) FROM client_invoices i`", "a")).toEqual([]);
+    expect(findWholeReads("sql`SELECT m.* FROM missions m JOIN clients c ON c.id = m.client_id`", "a")).toEqual([]);
+    expect(findWholeReads("db.query.missions.findMany({ with: { client: { columns: { id: true } } } })", "a")).toEqual([]);
   });
 });
