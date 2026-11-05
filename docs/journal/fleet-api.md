@@ -733,3 +733,20 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
     - date antérieure au décaissement : 400 ; le jour même passe ; aucune borne sans date de décaissement ;
   - le mutant qui retire cette borne est tué ;
   - test unitaire : les 4 FK sont dans la liste relue au démarrage.
+
+## 2026-11-05 — Budget de mission (L1f-1) : panneau sur la fiche mission
+
+- **Quoi** : onglet « Budget » de la fiche mission, visible par la logistique, la direction, le secrétariat et l'administrateur (drapeau finance). Chaque rôle n'y voit que son étape : la logistique saisit et corrige, la direction approuve, le secrétariat décaisse depuis une banque ou une caisse puis saisit les dépenses justifiées.
+- **Comment** :
+  - `GET /api/mission-budgets?missionId=` : filtre additif, au plus un élément ;
+  - `client/src/lib/mission-budget-ui.ts` : actions par rôle et par statut, dérivées des constantes de rôles partagées avec les gardes serveur ; aucune action sur une mission terminée ou annulée ;
+  - `client/src/components/missions/mission-budget-panel.tsx` : saisie (barème ou saisie libre), approbation, décaissement avec compte source (liste `/api/fuel-card/source-accounts`, déjà ouverte aux rôles qui décaissent), dépenses et suppression ;
+  - trois couches : mise à jour du cache après succès, événement `mission_budget_updated` écouté par la table des satellites, invalidation de la liste et du besoin du jour ;
+  - envoi par `useSingleFlightMutate`, id passé dans les variables, erreurs par `userMessageOf`.
+- **Correctif** : `mission_budget_updated` partait sans portée depuis L1. `broadcastUpdate` étant fermé par défaut, l'événement n'atteignait personne. La portée est désormais les rôles qui lisent le budget. Leçon dans `docs/analysis/LESSONS_LEARNED.md`.
+- **Pourquoi** : lot L1f validé par l'orchestrateur. L'ancien bloc budget de la fiche reste en place ; son retrait relève d'un lot ultérieur.
+- **Preuve** :
+  - contrat `mission-budgets` : filtre `missionId` (rôles, mission sans budget, id illisible) et portée de l'événement lue par `normalizeScope` ; contrats budgets et dépenses 53/53 ;
+  - unitaires 2954/2954, dont `mission-budget-ui` 6/6 et le garde-fou des satellites, qui voit maintenant les appels `broadcast?.(` ;
+  - e2e `26-mission-budget-panel` 2/2 sur la base locale : trame reçue par un second compte de rôle différent à chaque étape, technicien sans onglet ;
+  - 3 mutants sur 3 tués (portée retirée, filtre retiré, satellite retiré) ; typage 0 erreur.

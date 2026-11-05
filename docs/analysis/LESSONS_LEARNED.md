@@ -3203,3 +3203,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
   - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
 - **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
+
+## 2026-11-05 — Événement temps réel émis sans portée : diffusé à personne (L1 à L1e)
+
+- **Contexte** : en branchant l'écran du budget de mission (L1f), la trame `mission_budget_updated` n'arrivait à aucun compte.
+- **Cause racine** : `broadcastUpdate` est fermé par défaut. Sans `scope` dans les données, `normalizeScope` renvoie `null` et l'événement est jeté, avec un simple avertissement au journal. Le service l'émettait sans portée depuis L1. Le contrat vérifiait seulement l'appel, pas la portée. Le garde-fou des satellites cherchait `broadcastUpdate(` et ne voyait pas l'appel `broadcast?.(`.
+- **Classification** : défaut latent de la couche 2 (temps réel), masqué par l'absence d'écran consommateur. Near miss : trouvé avant toute mise en service de l'écran.
+- **Résolution** : portée par rôles (`MISSION_BUDGET_READ_ROLES`, montants d'argent), assertion de contrat sur la portée telle que le serveur la lit, regex du garde-fou élargie à `?.(`, e2e qui lit la trame chez un second compte.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-budgets.contract.test.ts` : `normalizeScope(emitted.data.scope)` égal à la portée attendue (rouge sans portée) ;
+  - `tests/unit/client/realtime-satellites.test.ts` : les émetteurs `broadcast?.(` sont recensés ;
+  - `e2e/26-mission-budget-panel.spec.ts` : trame reçue par l'autre rôle à chaque étape.
+- **Leçon généralisée** : un test d'événement temps réel vérifie la portée comme le serveur la lit, ou la trame chez un destinataire, jamais le seul appel de l'émetteur. Les autres appels de diffusion sans portée n'ont pas été recensés ici : audit à mener dans un lot dédié.

@@ -24,12 +24,13 @@ function sourceFiles(dir: string): string[] {
 
 /**
  * Événements émis par le serveur : premier argument littéral d'une fonction d'émission
- * (`broadcastUpdate`, `broadcastPurchaseOrderUpdate`, `emitMissionEvent`, `diffuser`…), et
+ * (`broadcastUpdate`, `broadcastPurchaseOrderUpdate`, `emitMissionEvent`, `diffuser`…), appel optionnel
+ * compris (`broadcast?.("…")`, invisible avant L1f : `mission_budget_updated` échappait au garde-fou), et
  * `'eventType', '…'` des déclencheurs SQL de `init-database.ts`.
  */
 function emittedEvents(): Set<string> {
   const names = new Set<string>();
-  const call = /\b\w*(?:broadcast|emit|diffuser)\w*\(\s*["'`]([a-z]+(?:_[a-z]+)+)["'`]/gi;
+  const call = /\b\w*(?:broadcast|emit|diffuser)\w*(?:\?\.)?\(\s*["'`]([a-z]+(?:_[a-z]+)+)["'`]/gi;
   const sql = /'eventType',\s*'([a-z]+(?:_[a-z]+)+)'/g;
   for (const file of sourceFiles(join(ROOT, "server"))) {
     const text = readFileSync(file, "utf8");
@@ -60,7 +61,7 @@ function clientQueryKeys(): { exact: Set<string>; templates: Set<string> } {
 /** Faits métier suivis par le garde-fou : un événement de ces familles doit être à la table. */
 const TRACKED_FAMILIES: Array<[family: string, pattern: RegExp]> = [
   ["stock", /^(part_used|part_requirement|purchase_order|parts_delivered|part_received|warehouse_stock|part_catalog)/],
-  ["argent", /^(fuel_card|fuel_record|client_invoice|supplier_invoice)/],
+  ["argent", /^(fuel_card|fuel_record|client_invoice|supplier_invoice|mission_budget)/],
   // Heures d'une tâche d'OT : main-d'oeuvre valorisée dans les KPI de coût (`kpi-service`, `loadCostRows`).
   ["coût OT", /^work_order_item/],
   ["statut", /^(work_order_(created|updated|status_changed|deleted|awaiting_parts)|vehicle_(updated|status_changed|mileage_updated|maintenance_position_updated)|mission_|document_renewal_request|document_renewal_quick|vehicle_document_updated|alert_)/],
@@ -126,7 +127,7 @@ describe("couche 3 : table des écrans satellites", () => {
   it("un événement de stock porte un groupe de stock, un événement d'argent un groupe d'argent", () => {
     const required: Array<[family: string, groups: readonly SatelliteGroupName[]]> = [
       ["stock", ["stock", "partRequirements"]],
-      ["argent", ["fuel", "clientMoney", "supplierMoney"]],
+      ["argent", ["fuel", "clientMoney", "supplierMoney", "missionBudgets"]],
       ["coût OT", ["workOrderCost"]],
     ];
     const wrong = required.flatMap(([family, groups]) => {
