@@ -14,6 +14,8 @@ import {
   parts,
   partsStockMovements,
   partsUsed,
+  qhseInspectionCriteria,
+  qhseInspections,
   statusHistory,
   supplierInvoices,
   suppliers,
@@ -67,6 +69,8 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(parts).where(inArray(parts.id, ids.partIds));
   }
   if (ids.vehicleIds.length > 0) {
+    // Contrôles QHSE sur un véhicule de test : qhse_inspections_vehicle_id_fkey bloquerait la suppression.
+    await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, ids.vehicleIds));
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
@@ -90,6 +94,12 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       // Un changement de statut tracé par un compte de test sur un véhicule hors du lot
       // survit à la cascade vehicle_id : status_history_updated_by_id_users_id_fk bloque.
       await db.delete(statusHistory).where(inArray(statusHistory.updatedById, ids.userIds));
+      // Contrôles et critères QHSE tracés par un compte de test (inspecteur ou audit).
+      await db.delete(qhseInspections).where(inArray(qhseInspections.inspectorId, ids.userIds));
+      await db.delete(qhseInspections).where(inArray(qhseInspections.createdBy, ids.userIds));
+      await db.delete(qhseInspections).where(inArray(qhseInspections.updatedBy, ids.userIds));
+      await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, ids.userIds));
+      await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, ids.userIds));
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -168,6 +178,7 @@ async function deleteOrphanTestRows(): Promise<void> {
   // bloquait la suppression du véhicule et faisait échouer le hook global de chaque fichier de contrat.
   await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, orphanVehicles));
   await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, orphanVehicles));
   await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, orphanWorkOrders));
   // Pneus montés, inspections et rotations d'un véhicule orphelin (client-read-scope-tires) : FK vers le véhicule.
@@ -212,6 +223,11 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.inspectorId, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.createdBy, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.updatedBy, testUsers));
+  await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, testUsers));
+  await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));

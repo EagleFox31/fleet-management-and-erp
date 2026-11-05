@@ -624,6 +624,65 @@ EXCEPTION WHEN lock_not_available OR unique_violation THEN
 END $$;`;
 
 /**
+ * Lot Q1 (drapeau qhse) : contrôles inopinés QHSE. Doit rester identique à
+ * server/db/migrations/20261105_qhse_inspections.sql : tests/unit/server/qhse-inspections-schema.test.ts
+ * compare les deux. Semis des critères cités par le document QHSE, par code, sans jamais réécrire un critère
+ * existant.
+ */
+export const QHSE_INSPECTIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS qhse_inspection_criteria (
+  id serial PRIMARY KEY,
+  code text NOT NULL UNIQUE,
+  label text NOT NULL CHECK (length(btrim(label)) > 0),
+  category text NOT NULL CHECK (category IN ('cabin', 'stop')),
+  active boolean NOT NULL DEFAULT true,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS qhse_inspections (
+  id serial PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('cabin', 'stop')),
+  inspected_at timestamp NOT NULL DEFAULT now(),
+  location text NOT NULL CHECK (length(btrim(location)) > 0),
+  vehicle_id integer NOT NULL REFERENCES vehicles(id),
+  driver_id integer NOT NULL REFERENCES drivers(id),
+  inspector_id integer NOT NULL REFERENCES users(id),
+  items jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(items) = 'array'),
+  general_observation text,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_driver ON qhse_inspections (driver_id, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_vehicle ON qhse_inspections (vehicle_id);
+
+INSERT INTO qhse_inspection_criteria (code, label, category, sort_order) VALUES
+  ('cabin_epi', 'Port des EPI', 'cabin', 10),
+  ('cabin_tenue_de_route', 'Tenue de route', 'cabin', 20),
+  ('cabin_telephone', 'Téléphone au volant', 'cabin', 30),
+  ('cabin_ceinture', 'Port de la ceinture', 'cabin', 40),
+  ('cabin_fumer_manger', 'Fumer ou manger au volant', 'cabin', 50),
+  ('cabin_cession_conduite', 'Cession de la conduite', 'cabin', 60),
+  ('cabin_passager', 'Passager à bord', 'cabin', 70),
+  ('cabin_exces_vitesse', 'Excès de vitesse', 'cabin', 80),
+  ('cabin_signalisation_verticale', 'Respect de la signalisation verticale', 'cabin', 90),
+  ('cabin_heures_conduite', 'Heures de conduite', 'cabin', 100),
+  ('stop_epi', 'Port des EPI', 'stop', 10),
+  ('stop_stationnement', 'Stationnement sur emplacement dédié', 'stop', 20),
+  ('stop_cales', 'Utilisation des cales', 'stop', 30),
+  ('stop_portieres', 'Fermeture des portières', 'stop', 40),
+  ('stop_signalisation_vehicule', 'Signalisation du véhicule', 'stop', 50),
+  ('stop_gardien', 'Présence d''un gardien', 'stop', 60)
+ON CONFLICT (code) DO NOTHING;`;
+
+/**
  * Clé de requête d'un plein de mission (rejeu sans second débit). Doit rester identique à
  * server/db/migrations/20261103_fuel_records_request_key.sql : tests/unit/server/fuel-records-request-key-schema.test.ts
  * compare les deux.
@@ -1155,6 +1214,8 @@ export async function initializeDatabase() {
     // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
+    // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
+    await pool.query(QHSE_INSPECTIONS_SQL);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).

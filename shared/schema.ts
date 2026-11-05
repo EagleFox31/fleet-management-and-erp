@@ -1997,3 +1997,63 @@ export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
 export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
 export type VehicleImportRow = typeof vehicleImports.$inferSelect;
+
+// Contrôles inopinés QHSE (lot Q1, drapeau `qhse`). Jumelle SQL : QHSE_INSPECTIONS_SQL dans
+// server/init-database.ts et server/db/migrations/20261105_qhse_inspections.sql (AGENTS.md §5).
+export const QHSE_CRITERION_CATEGORIES = ["cabin", "stop"] as const;
+
+export const qhseInspectionCriteria = pgTable("qhse_inspection_criteria", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  category: text("category", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const qhseInspections = pgTable("qhse_inspections", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  inspectedAt: timestamp("inspected_at").defaultNow().notNull(),
+  location: text("location").notNull(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id),
+  driverId: integer("driver_id").notNull().references(() => drivers.id),
+  inspectorId: integer("inspector_id").notNull().references(() => users.id),
+  items: jsonb("items").$type<Array<{
+    criterionId: number;
+    code: string;
+    label: string;
+    conform: boolean;
+    observation?: string;
+  }>>().notNull().default(sql`'[]'::jsonb`),
+  generalObservation: text("general_observation"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_qhse_inspections_driver").on(table.driverId, table.inspectedAt),
+  index("idx_qhse_inspections_vehicle").on(table.vehicleId),
+]);
+
+export const insertQhseInspectionCriterionSchema = createInsertSchema(qhseInspectionCriteria).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).omit({
+  id: true,
+  inspectorId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
+export type QhseInspectionRow = typeof qhseInspections.$inferSelect;
