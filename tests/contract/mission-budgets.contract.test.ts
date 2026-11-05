@@ -17,6 +17,7 @@ import { fuelPrices, missionBudgets, missionDestinations, missions, treasuryAcco
 import { db } from "../../server/db";
 import { resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
 import { linkMissionBudgetDisbursement } from "../../server/services/treasury-links";
+import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -390,6 +391,73 @@ describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
   it("date absente ou illisible : 400", async () => {
     expect((await call("GET", MISSION_BUDGETS_DAILY_NEED_PATH, "management")).status).toBe(400);
     expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=demain`, "management")).status).toBe(400);
+  });
+});
+
+describe("Besoin du jour : agrégation", { timeout: 120000 }, () => {
+  // Date propre à ce bloc : aucun autre cas n'y saisit de budget. `budget_date` est une date sans heure,
+  // comparée telle quelle : ni le fuseau du serveur ni celui d'Africa/Douala n'entrent dans le filtre.
+  const NEED_DAY = addDaysToIsoDate(TODAY, 41);
+  const needPath = (date: string) => `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${date}`;
+  const zero = { count: 0, fuelAmount: 0, fdrAmount: 0, extrasAmount: 0, totalAmount: 0 };
+
+  async function seed(budgetDate: string, status: "requested" | "approved" | "disbursed", fuel: string, fdr: string, extras: string, total: string) {
+    await db.insert(missionBudgets).values({
+      missionId: await newMission(),
+      budgetDate,
+      fuelLiters: "1",
+      fuelUnitPrice: fuel,
+      fuelAmount: fuel,
+      fdrAmount: fdr,
+      extrasAmount: extras,
+      totalAmount: total,
+      status,
+      createdBy: userIds.get("logistics")!,
+    });
+  }
+
+  beforeAll(async () => {
+    // Centimes qui dérivent en flottant (0,10 + 0,20) : la somme doit rester exacte.
+    await seed(NEED_DAY, "requested", "100.10", "0.20", "0.00", "100.30");
+    await seed(NEED_DAY, "requested", "0.20", "0.10", "0.05", "0.35");
+    await seed(NEED_DAY, "approved", "50000.00", "40000.00", "5000.00", "95000.00");
+    // Veille et lendemain : hors du besoin du jour.
+    await seed(addDaysToIsoDate(NEED_DAY, -1), "disbursed", "1000.00", "0.00", "0.00", "1000.00");
+    await seed(addDaysToIsoDate(NEED_DAY, 1), "requested", "1000.00", "0.00", "0.00", "1000.00");
+  }, 120000);
+
+  it("totaux exacts au centime, par statut ; statut sans budget à zéro ; veille et lendemain exclus", async () => {
+    const res = await call("GET", needPath(NEED_DAY), "logistics");
+    expect(res.status).toBe(200);
+    expect(dailyNeedResponseSchema.parse(res.body)).toEqual({
+      date: NEED_DAY,
+      count: 3,
+      fuelAmount: 50100.3,
+      fdrAmount: 40000.3,
+      extrasAmount: 5000.05,
+      totalAmount: 95100.65,
+      byStatus: {
+        requested: { count: 2, fuelAmount: 100.3, fdrAmount: 0.3, extrasAmount: 0.05, totalAmount: 100.65 },
+        approved: { count: 1, fuelAmount: 50000, fdrAmount: 40000, extrasAmount: 5000, totalAmount: 95000 },
+        disbursed: zero,
+      },
+    });
+  });
+
+  it("date sans budget : tous les statuts présents, à zéro", async () => {
+    const empty = addDaysToIsoDate(NEED_DAY, 3);
+    const res = await call("GET", needPath(empty), "admin");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ date: empty, ...zero, byStatus: { requested: zero, approved: zero, disbursed: zero } });
+  });
+
+  it.each([
+    ["date inexistante", "date=2026-02-30"],
+    ["date répétée", "date=2026-03-01&date=2026-03-02"],
+    ["paramètre inconnu", `date=2026-03-01&status=approved`],
+  ])("%s : 400 au format ApiErrorBody", async (_label, query) => {
+    const res = await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?${query}`, "management");
+    expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
   });
 });
 
