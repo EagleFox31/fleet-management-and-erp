@@ -115,6 +115,8 @@ export const vehicles = pgTable("vehicles", {
   lastMaintenanceDate: date("last_maintenance_date"), // Date dernière maintenance pour calculs
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
+  // Auteur de la suppression douce, remis à NULL par la restauration (server/services/vehicle-lifecycle-service.ts).
+  deletedBy: integer("deleted_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 // Table pour persister l'état des workflows d'acquisition de véhicules
@@ -174,6 +176,7 @@ export const vehicleTankCapacitySchema = z
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   id: true,
   createdBy: true,
+  deletedBy: true,
   createdAt: true,
 }).extend({
   purchaseDate: z.string().optional().transform((val) => val ? val : undefined),
@@ -1636,6 +1639,38 @@ export const insertMissionOperationSchema = createInsertSchema(missionOperations
   updatedAt: true,
 });
 export type MissionOperation = typeof missionOperations.$inferSelect;
+
+// Grille tarifaire (O3) : prix suggéré, jamais appliqué seul. `client_id` NULL = tarif générique.
+export const tariffGrid = pgTable("tariff_grid", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").references(() => clients.id),
+  origin: text("origin").notNull(),
+  destination: text("destination").notNull(),
+  cargoType: text("cargo_type").notNull().default(""),
+  pricingUnit: text("pricing_unit").notNull(),
+  unitPrice: numeric("unit_price", { precision: 15, scale: 0 }).notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("tariff_grid_pricing_unit_check", sql`${table.pricingUnit} IN ('ton', 'container', 'trip')`),
+  check("tariff_grid_unit_price_check", sql`${table.unitPrice} >= 0`),
+  check("tariff_grid_period_check", sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`),
+  uniqueIndex("tariff_grid_key_unique").on(
+    // Sans virgule ni mélange colonne/expression : relisible par drizzle-kit push (voir schema-index-introspection).
+    sql`(CASE WHEN ${table.clientId} IS NULL THEN 0 ELSE ${table.clientId} END)`,
+    sql`(lower(${table.origin}))`,
+    sql`(lower(${table.destination}))`,
+    sql`(lower(${table.cargoType}))`,
+    sql`(${table.validFrom})`,
+  ).where(sql`${table.active}`),
+]);
+export type TariffGridRow = typeof tariffGrid.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
@@ -2309,3 +2344,23 @@ export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).om
 });
 export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
 export type QhseInspectionRow = typeof qhseInspections.$inferSelect;
+
+/**
+ * Journal des désactivations posées par la suppression douce d'un véhicule : une ligne par élément
+ * désactivé, avec l'état d'avant. La restauration ne rejoue que ces lignes, et seulement si
+ * l'élément est encore dans l'état posé par la suppression (une modification ultérieure prime).
+ */
+export const vehicleDeletionEffects = pgTable("vehicle_deletion_effects", {
+  id: serial("id").primaryKey(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  tableName: text("table_name").notNull(),
+  rowId: integer("row_id").notNull(),
+  columnName: text("column_name").notNull(),
+  previousValue: jsonb("previous_value").notNull(),
+  appliedValue: jsonb("applied_value").notNull(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("vehicle_deletion_effects_row_key").on(table.vehicleId, table.tableName, table.rowId, table.columnName),
+]);
+export type VehicleDeletionEffect = typeof vehicleDeletionEffects.$inferSelect;

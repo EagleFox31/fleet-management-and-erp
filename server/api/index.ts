@@ -2,6 +2,7 @@ import { Router, RequestHandler, type Request, type Response, type NextFunction 
 import warehouseRoutes from "./warehouse.routes";
 import fuelCardRoutes from "./fuel-card.routes";
 import vehiclesRoutes from "./vehicles.routes";
+import vehicleLifecycleRoutes from "./vehicle-lifecycle.routes";
 import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
@@ -53,7 +54,9 @@ import missionBudgetsRoutes from "./mission-budgets.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import financeReceivablesRoutes from "./finance-receivables.routes";
+import clientStatementRoutes from "./client-statement.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
+import tariffGridRoutes from "./tariff-grid.routes";
 import treasuryRoutes from "./treasury.routes";
 import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
@@ -162,10 +165,13 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/warehouse", isStaff, warehouseRoutes);
   apiRouter.use("/fuel-card", isStaff, fuelCardRoutes);
   apiRouter.use("/vehicles", vehiclesRoutes);
+  apiRouter.use("/vehicles", vehicleLifecycleRoutes);
   apiRouter.use("/drivers", isStaff, driversRoutes);
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
+  // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
+  apiRouter.use(clientStatementRoutes);
   apiRouter.use("/clients", isStaff, clientsRoutes);
   apiRouter.use("/operations", isStaff, operationsRoutes);
   apiRouter.use("/billing", billingRoutes);
@@ -263,6 +269,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(financeReceivablesRoutes);
   apiRouter.use(missionOperationsRoutes);
+  apiRouter.use(tariffGridRoutes);
   apiRouter.use(treasuryRoutes);
   apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);

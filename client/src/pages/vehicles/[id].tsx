@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateVehicleLifecycleQueries } from "@/lib/vehicle-lifecycle-cache";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -164,7 +165,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
     mutationFn: async () => apiRequest("DELETE", `/api/vehicles/${vehicleId}`),
     onSuccess: () => {
       toast({ title: "Véhicule supprimé", description: "Le véhicule a été supprimé avec succès." });
-      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      invalidateVehicleLifecycleQueries(queryClient, "vehicle_deleted", vehicleId);
       setLocation("/vehicles");
     },
     onError: (error) => {

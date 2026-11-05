@@ -11,6 +11,7 @@ import {
   missionBudgets,
   missionDestinations,
   missionOperations,
+  tariffGrid,
   missions,
   fuelRecords,
   partRequirements,
@@ -91,6 +92,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(suppliers).where(inArray(suppliers.id, ids.supplierIds));
   }
   if (ids.clientIds.length > 0) {
+    await db.delete(tariffGrid).where(inArray(tariffGrid.clientId, ids.clientIds));
     await db.delete(paymentInstruments).where(inArray(paymentInstruments.clientId, ids.clientIds));
     await db.delete(clients).where(inArray(clients.id, ids.clientIds));
   }
@@ -294,6 +296,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   // Suivi d'opération saisi par un compte de test sur une mission qui ne l'est pas (FK created_by/updated_by).
   await db.delete(missionOperations).where(inArray(missionOperations.createdBy, testUsers));
   await db.delete(missionOperations).where(inArray(missionOperations.updatedBy, testUsers));
+  // Tarif saisi par un compte de test (FK created_by/updated_by).
+  await db.delete(tariffGrid).where(or(inArray(tariffGrid.createdBy, testUsers), inArray(tariffGrid.updatedBy, testUsers)));
   // Journal de trésorerie saisi par un compte de test : écritures d'abord (elles référencent les
   // comptes), y compris celles posées sur un compte créé par un compte de test, puis les comptes.
   const testTreasuryAccounts = db

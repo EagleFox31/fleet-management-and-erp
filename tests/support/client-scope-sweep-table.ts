@@ -65,6 +65,7 @@ export const COVERED_ELSEWHERE: CoveredElsewhere[] = [
   { method: "PATCH", template: "/api/workflows/vehicle-acquisition/:id/abandon", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "${URL}/${s}/abandon" },
   { method: "PATCH", template: "/api/workflows/active/:id/abandon", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "/api/workflows/active/${s}/abandon" },
   { method: "POST", template: "/api/workflows/:id/documents", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "/api/workflows/${s}/documents" },
+  { method: "GET", template: "/api/clients/:id/statement", file: "tests/contract/client-statement.contract.test.ts", fragment: 'get(clientStatementPath(MAX_DB_INTEGER_ID), "client")', exact: true },
 ];
 
 /** Exclusions : la raison est obligatoire, la liste ne peut que rétrécir (la garde en fige la taille). */

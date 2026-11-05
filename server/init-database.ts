@@ -427,6 +427,40 @@ END $$;
 DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
 
 /**
+ * Cycle de vie du véhicule : journal des désactivations de la suppression douce (vehicle_deletion_effects)
+ * et auteur de la suppression (vehicles.deleted_by). Doit rester identique à
+ * server/db/migrations/20261105_vehicle_lifecycle.sql : tests/unit/server/vehicle-lifecycle-schema.test.ts
+ * compare les deux. Verrou indisponible sous 5 s : WARNING, réessayé au démarrage suivant.
+ */
+export const VEHICLE_LIFECYCLE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS vehicle_deletion_effects (
+    id serial PRIMARY KEY,
+    vehicle_id integer NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    table_name text NOT NULL,
+    row_id integer NOT NULL,
+    column_name text NOT NULL,
+    previous_value jsonb NOT NULL,
+    applied_value jsonb NOT NULL,
+    created_by integer REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
+  );
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'vehicle_deletion_effects non créée, verrou indisponible sous 5 s : suppression douce et restauration en échec jusqu''au prochain démarrage';
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id) ON DELETE SET NULL;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'vehicles.deleted_by non ajoutée, verrou de table indisponible sous 5 s : suppression douce en échec jusqu''au prochain démarrage';
+END $$;`;
+
+/**
  * P3-2 : récépissé provisoire d'une demande de renouvellement (date de validité, fichier, qui et quand).
  * Rend le véhicule éligible jusqu'à receipt_valid_until inclus ; distinct de proof_file_*, preuve de clôture.
  * CHECK document_renewal_requests_receipt_complete : date, chemin, nom et date de dépôt tous NULL ou tous
@@ -1144,6 +1178,62 @@ EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'contraintes mission_budgets non réconciliées : verrou de table indisponible';
 END $$;`;
 
+// Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
+export const TARIFF_GRID_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS tariff_grid (
+  id serial PRIMARY KEY,
+  client_id integer CONSTRAINT tariff_grid_client_id_clients_id_fk REFERENCES clients(id),
+  origin text NOT NULL,
+  destination text NOT NULL,
+  cargo_type text NOT NULL DEFAULT '',
+  pricing_unit text NOT NULL,
+  unit_price numeric(15,0) NOT NULL,
+  valid_from date NOT NULL,
+  valid_to date,
+  active boolean NOT NULL DEFAULT true,
+  notes text,
+  created_by integer CONSTRAINT tariff_grid_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT tariff_grid_updated_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT tariff_grid_pricing_unit_check CHECK (pricing_unit IN ('ton', 'container', 'trip')),
+  CONSTRAINT tariff_grid_unit_price_check CHECK (unit_price >= 0),
+  CONSTRAINT tariff_grid_period_check CHECK (valid_to IS NULL OR valid_to >= valid_from)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS tariff_grid_key_unique
+  ON tariff_grid ((CASE WHEN client_id IS NULL THEN 0 ELSE client_id END), (lower(origin)), (lower(destination)), (lower(cargo_type)), (valid_from))
+  WHERE active;
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Table déjà créée sans ces contraintes : CHECK posé NOT VALID puis validé ; une ligne non conforme
+  -- laisse un WARNING, relu par reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS). Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('tariff_grid_pricing_unit_check', 'CHECK (pricing_unit IN (''ton'', ''container'', ''trip''))'),
+    ('tariff_grid_unit_price_check', 'CHECK (unit_price >= 0)'),
+    ('tariff_grid_period_check', 'CHECK (valid_to IS NULL OR valid_to >= valid_from)')
+  ) AS t(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'tariff_grid'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE tariff_grid ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'tariff_grid'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE tariff_grid VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'tariff_grid : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes tariff_grid non réconciliées : verrou de table indisponible';
+END $$;
+`;
+
 // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
 // Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
 export const MISSION_DESTINATIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
@@ -1477,6 +1567,10 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_budgets_destination_id_mission_destinations_id_fk',
   // Posée par MISSION_BUDGETS_TREASURY_SQL (lot L1c).
   'mission_budgets_treasury_entry_id_treasury_entries_id_fk',
+  // Posées par TARIFF_GRID_SQL (lot O3).
+  'tariff_grid_pricing_unit_check',
+  'tariff_grid_unit_price_check',
+  'tariff_grid_period_check',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -1755,6 +1849,8 @@ export async function initializeDatabase() {
     await reportDriverUserIdUniqueGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
+    // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.
+    await pool.query(VEHICLE_LIFECYCLE_SQL);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
@@ -2034,6 +2130,8 @@ export async function initializeDatabase() {
     await reportUsersPinBcryptGaps(pool);
     // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
+    await pool.query(TARIFF_GRID_SQL);
     // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
     await pool.query(MISSION_BUDGETS_SQL);
     // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
