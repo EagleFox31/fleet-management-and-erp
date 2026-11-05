@@ -27,8 +27,9 @@ describe("launchRefusalMessage", () => {
 
   it("un motif trop long est sauté sans vider le message", () => {
     const long = `Affectation incomplète ${"x".repeat(400)}.`;
-    const message = launchRefusalMessage([long, "Budget carburant non renseigné."], { forDriver: false });
-    expect(message).toContain("Budget carburant non renseigné.");
+    const message = launchRefusalMessage([long, "Assurance manquante ou expirée."], { forDriver: false });
+    // Aucun motif urgent : le long passe en premier, `break` viderait le message, `continue` garde le suivant.
+    expect(message).toContain("Assurance manquante ou expirée.");
     expect(message).toContain("(et 1 autre point à corriger)");
   });
 
