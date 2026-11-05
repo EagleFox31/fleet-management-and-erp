@@ -216,6 +216,26 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
     expect(notes.map((r) => r.n)).toEqual(expect.arrayContaining(["Retiré de la flotte (suppression douce)", "Remis dans la flotte (restauration)"]));
   });
 
+  it("renouvellement rejeté à la main pendant le retrait : même valeur, mais pas rouvert (updated_at a bougé)", async () => {
+    const v = await vehicle();
+    const doc = await addDocument(v.id);
+    const byDeletion = await addRenewal(v.id, doc.id, "pending");
+    const byHand = await addRenewal(v.id, doc.id, "pending");
+    expect((await asAdmin("DELETE", `/api/vehicles/${v.id}`)).status).toBe(200);
+    expect(await renewalStatus(byHand.id)).toBe("rejected");
+    const stamped = await db.execute(sql`SELECT count(*)::int AS n FROM vehicle_deletion_effects WHERE vehicle_id = ${v.id} AND applied_stamp IS NOT NULL`);
+    expect((stamped.rows[0] as { n: number }).n).toBe(2);
+
+    // Rejet confirmé à la main pendant le retrait : tout écrivain renouvelle updated_at.
+    await db.execute(sql`UPDATE document_renewal_requests SET status = 'rejected', updated_at = now() + interval '1 second' WHERE id = ${byHand.id}`);
+
+    const res = await asAdmin("POST", `/api/vehicles/${v.id}/restore`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toEqual({ vehicleId: v.id, restored: true, reactivated: 1 });
+    expect(await renewalStatus(byDeletion.id)).toBe("pending");
+    expect(await renewalStatus(byHand.id)).toBe("rejected");
+  });
+
   it("un second appel sur un véhicule actif ne change rien (200, restored: false, aucune trame)", async () => {
     const v = await vehicle();
     const plan = await addSchedule(v.id, false);
@@ -271,6 +291,7 @@ describe("cloison client : ni retrait ni remise en service, même de son propre 
       expect(captured.filter((c) => c.eventType === "vehicle_deleted" || c.eventType === "vehicle_restored")).toHaveLength(0);
     });
   }
+});
 
 describe("POST /api/vehicles/:id/restore : repli sur l'ancienne table vehicle_archived", { timeout: 60000 }, () => {
   // Aucune migration ne crée vehicle_archived : le test la crée, puis la supprime.
