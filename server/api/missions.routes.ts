@@ -21,7 +21,7 @@ import {
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
-import { assertPlanningStateUnchanged, findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
+import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
@@ -1570,7 +1570,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
 });
 
 // GET /api/missions/:id/launch-readiness - Checklist métier de lancement mission
-router.get("/:id/launch-readiness", async (req, res) => {
+router.get("/:id/launch-readiness", async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
@@ -1602,7 +1602,8 @@ router.get("/:id/launch-readiness", async (req, res) => {
     // checklist (verdict CPC compris) se calcule sur SA fiche, jamais sur celle d'un collègue.
     const readinessScope = await driverScopeOf(req.user);
     if (readinessScope !== undefined && !(await canAccessMissionAsDriver(req.user, missionId))) {
-      return res.status(403).json({ message: OUT_OF_DRIVER_SCOPE_MESSAGE });
+      // Défense en profondeur : router.param("id") a déjà refusé ce chauffeur.
+      throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
     }
 
     const [missionAssignment] = await db
@@ -1629,7 +1630,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(
         readinessScope === undefined
-          ? eq(assignments.missionId, missionId)
+          ? and(eq(assignments.missionId, missionId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES]))
           : and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(readinessScope)),
       )
       .orderBy(asc(assignments.id))
@@ -2013,8 +2014,9 @@ router.get("/:id/launch-readiness", async (req, res) => {
       openRenewalRequests,
     });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Get mission launch readiness error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de calculer la check-list de lancement. Réessayez.", { cause: error }));
   }
 });
 
@@ -3070,25 +3072,8 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
 
       if (launchErrors.length > 0) {
-        // Les motifs vont dans le message (le gestionnaire central réduit un `details` de chaînes à
-        // « Ce champ n'est pas valide. »). Un chauffeur ne peut pas corriger un budget : on lui dit à qui s'adresser.
-        const suffix = statusDriverScope !== undefined ? " Contactez l'exploitation." : "";
-        // Pas de `fieldErrors` : le gestionnaire central remplacerait alors le message par un libellé générique.
-        // Le contrat d'erreur écarte tout message de plus de 300 caractères (looksTechnical) : on garde les
-        // premiers motifs qui tiennent et on compte les autres.
-        const head = "Impossible de lancer la mission : ";
-        const room = 240 - head.length - suffix.length;
-        const kept: string[] = [];
-        // Conflit et budget d'abord : ce sont les motifs que le message doit toujours nommer.
-        const urgent = (motif: string) => /Conflit|Budget|Solde/.test(motif);
-        const ordered = [...launchErrors.filter(urgent), ...launchErrors.filter((m) => !urgent(m))];
-        for (const motif of ordered) {
-          if ([...kept, motif].join(" ").length > room) break;
-          kept.push(motif);
-        }
-        const hidden = launchErrors.length - kept.length;
-        const more = hidden > 0 ? ` (et ${hidden} autre${hidden > 1 ? "s" : ""} point${hidden > 1 ? "s" : ""} à corriger)` : "";
-        throw new AppError(400, `${head}${kept.join(" ")}${more}${suffix}`);
+        // Les motifs vont dans le message, sans `fieldErrors` (le gestionnaire central remplacerait alors le message).
+        throw new AppError(400, launchRefusalMessage(launchErrors, { forDriver: statusDriverScope !== undefined }));
       }
     }
 
@@ -3292,6 +3277,12 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
+    const renewalScope = await driverScopeOf(req.user);
+    const liveAssignmentOn =
+      renewalScope === undefined
+        ? notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])
+        : driverLiveAssignmentFilter(renewalScope);
+
     // Fetch mission + vehicle to scope requests
     const [mission] = await db
       .select({
@@ -3300,7 +3291,7 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
         vehicleId: assignments.vehicleId,
       })
       .from(missions)
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
+      .leftJoin(assignments, and(eq(assignments.missionId, missions.id), liveAssignmentOn))
       .where(eq(missions.id, missionId))
       .orderBy(asc(assignments.id))
       .limit(1);
@@ -3438,6 +3429,12 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       throw new AppError(403, "Accès refusé: seuls Admin, Secrétaire, Logisticien et Chef d'atelier peuvent créer cette demande.");
     }
 
+    const renewalScope = await driverScopeOf(req.user);
+    const liveAssignmentOn =
+      renewalScope === undefined
+        ? notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])
+        : driverLiveAssignmentFilter(renewalScope);
+
     const payloadSchema = z.object({
       documentTypes: z.array(z.enum(["carte_grise", "assurance", "visite_technique"])).optional().default([]),
       note: z.string().optional(),
@@ -3460,7 +3457,7 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
         vehicleRegistration: vehicles.registrationNumber,
       })
       .from(missions)
-      .leftJoin(assignments, eq(assignments.missionId, missions.id))
+      .leftJoin(assignments, and(eq(assignments.missionId, missions.id), liveAssignmentOn))
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
       .where(eq(missions.id, missionId))
       .orderBy(asc(assignments.id))

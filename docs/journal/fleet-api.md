@@ -450,6 +450,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : récidive de #178 en #348 ; le dépôt de document véhicule avait le même défaut (diffusion qui lève : 500 et fichier d'un document enregistré supprimé).
 - **Preuve** : contrat `vehicle-documents-upload-errors` (diffusion qui lève → 201, fichier conservé), rouge avant ; contrat `supplier-settlement-proof-lifecycle` (+ 409 facture non approuvée, aucun fichier) ; garde rouge sur l'ancien dépôt de document.
 
+## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
+- **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
+- **Preuve** : contrat `supplier-settlement-proof-path` (5 ids non stricts) rouge sur l'ancien code (200), vert après (15/15).
 ## 2026-11-05 — Gardes fichiers téléversés : mineurs de l'audit de #350
 - **Quoi** : `multer-lifecycle-hygiene` parcourt `server/api` (sous-dossiers) et `server/routes.ts`, suit les handlers nommés du fichier, `upload.single()` et `const { file } = req` ; le drapeau doit suivre une écriture (`await` avant, `await` après seulement dans un `try`/`catch`) et le `finally` doit appeler une suppression. `upload-delete-hygiene` couvre tout `server/` (`deleteFile` du middleware compris ; job et stockage de sauvegarde, service workflow gelés avec raison). Dépôt de document véhicule : si la synchro du miroir puis le retrait de la ligne échouent, la ligne et son fichier restent. `ownedBy` supprimé (aucun consommateur ; garde et handler y lisaient l'id séparément).
 - **Pourquoi** : réserves de la relecture et de l'audit sécurité de #350.
