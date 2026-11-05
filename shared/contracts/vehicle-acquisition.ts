@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_DB_INTEGER_ID } from "./common";
 
 /**
  * Corps des écritures du parcours d'acquisition d'un véhicule (brouillon serveur et documents).
@@ -28,5 +29,6 @@ export const workflowDocumentUploadRequestSchema = z.object({
   workflowId: z.coerce
     .number({ invalid_type_error: "L'identifiant de workflow est invalide." })
     .int("L'identifiant de workflow est invalide.")
-    .positive("L'identifiant de workflow est invalide."),
+    .positive("L'identifiant de workflow est invalide.")
+    .max(MAX_DB_INTEGER_ID, "L'identifiant de workflow est invalide."),
 });

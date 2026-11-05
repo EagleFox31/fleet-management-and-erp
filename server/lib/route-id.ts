@@ -1,7 +1,8 @@
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
 import { AppError } from "./app-error";
 
-/** Plus grand id d'une colonne `integer` Postgres : au-delà, la base répondrait 500. */
-export const MAX_DB_INTEGER_ID = 2147483647;
+/** Source unique : `shared/contracts/common.ts` (aussi borne des schémas de query et de corps). */
+export { MAX_DB_INTEGER_ID };
 
 /**
  * Identifiant lu dans l'URL (`req.params`) : chiffres seuls, entier de 1 à `MAX_DB_INTEGER_ID`,

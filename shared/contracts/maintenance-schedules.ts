@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { bodyIdSchema } from "./common";
 
 /**
  * Corps de POST /api/maintenance-schedules. Aucun champ serveur (`id`, `createdAt`, ...) : la base
  * les pose, `validateBody` retire ceux que le client enverrait.
  */
 export const createMaintenanceScheduleRequestSchema = z.object({
-  vehicleId: z.number().int().positive(),
+  vehicleId: bodyIdSchema,
   title: z.string().min(1, "Le titre est requis."),
   description: z.string().optional(),
   frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "yearly", "mileage"]),
@@ -20,7 +21,7 @@ export const createMaintenanceScheduleRequestSchema = z.object({
 
 /** Corps de POST /api/test-date-maintenance (déclenchement manuel d'une alerte à date). */
 export const dateMaintenanceTriggerRequestSchema = z.object({
-  vehicleId: z.number().int().positive(),
+  vehicleId: bodyIdSchema,
   alertType: z.enum(["maintenance", "insurance", "inspection", "license"]),
 });
 
