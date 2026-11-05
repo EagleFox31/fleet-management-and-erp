@@ -10,10 +10,10 @@ const SIZE_CLASS: Record<IconSquareSize, string> = {
 };
 
 const TONE_CLASS: Record<IconSquareTone, string> = {
-  green: "bg-green-50 border-green-100 text-green-600",
+  green: "bg-primary/10 border-primary/20 text-primary-text",
   blue: "bg-blue-50 border-blue-100 text-blue-600",
-  amber: "bg-amber-50 border-amber-100 text-amber-600",
-  red: "bg-red-50 border-red-100 text-red-600",
+  amber: "bg-warning/10 border-warning/30 text-warning-text",
+  red: "bg-destructive/10 border-destructive/20 text-destructive-text",
   gray: "bg-gray-100 border-gray-200 text-gray-600",
 };
 
