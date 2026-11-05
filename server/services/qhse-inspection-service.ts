@@ -26,6 +26,7 @@ import type {
   UpdateQhseCriterionRequest,
 } from "@shared/contracts/qhse-inspections";
 import { QHSE_INSPECTION_KIND_LABELS } from "@shared/contracts/qhse-inspections";
+import { KPI_TIME_ZONE } from "@shared/contracts/kpi-period";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { driverScopeOf } from "../lib/driver-scope";
@@ -37,6 +38,11 @@ const log = moduleLogger("qhse-inspections");
 export type QhseActor = { id: number; role: string };
 
 export const QHSE_OUT_OF_SCOPE_MESSAGE = "Accès refusé : ce contrôle ne concerne pas votre fiche chauffeur.";
+
+/** Minuit du jour `day` (expression SQL de type date) en Africa/Douala, exprimé en heure UTC sans fuseau. */
+function localMidnightUtc(day: SQL): SQL {
+  return sql`((${day})::timestamp AT TIME ZONE ${KPI_TIME_ZONE}) AT TIME ZONE 'UTC'`;
+}
 
 function toCriterion(row: QhseInspectionCriterionRow): QhseCriterion {
   return {
@@ -194,12 +200,10 @@ export async function listInspections(
   if (query.kind) conditions.push(eq(qhseInspections.kind, query.kind));
   if (query.driverId) conditions.push(eq(qhseInspections.driverId, query.driverId));
   if (query.vehicleId) conditions.push(eq(qhseInspections.vehicleId, query.vehicleId));
-  if (query.from) conditions.push(gte(qhseInspections.inspectedAt, new Date(`${query.from}T00:00:00.000Z`)));
-  if (query.to) {
-    const end = new Date(`${query.to}T00:00:00.000Z`);
-    end.setUTCDate(end.getUTCDate() + 1);
-    conditions.push(lt(qhseInspections.inspectedAt, end));
-  }
+  // Jours `from` / `to` lus en Africa/Douala, pas en UTC : un contrôle à 00 h 30 heure locale appartient à
+  // ce jour-là. inspected_at stocke l'heure UTC (Drizzle écrit toISOString) : minuit local ramené en UTC.
+  if (query.from) conditions.push(gte(qhseInspections.inspectedAt, localMidnightUtc(sql`${query.from}::date`)));
+  if (query.to) conditions.push(lt(qhseInspections.inspectedAt, localMidnightUtc(sql`${query.to}::date + 1`)));
   const where = conditions.length ? and(...conditions) : undefined;
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(qhseInspections).where(where);
   const rows = await db
@@ -213,12 +217,18 @@ export async function listInspections(
 }
 
 export async function getInspection(actor: QhseActor, id: number): Promise<QhseInspection> {
-  const [row] = await db.select().from(qhseInspections).where(eq(qhseInspections.id, id)).limit(1);
   const scope = await driverScopeOf(actor);
-  // Chauffeur : l'identifiant absent et le contrôle d'un autre reçoivent la même réponse (403).
-  if (scope !== undefined && (!row || !scope.includes(row.driverId))) {
-    throw new AppError(403, QHSE_OUT_OF_SCOPE_MESSAGE);
+  // Chauffeur : la portée est dans le WHERE, aucune ligne hors fiche n'est lue. L'identifiant absent et le
+  // contrôle d'un autre reçoivent la même réponse (403).
+  if (scope !== undefined && scope.length === 0) throw new AppError(403, QHSE_OUT_OF_SCOPE_MESSAGE);
+  const [row] = await db
+    .select()
+    .from(qhseInspections)
+    .where(and(eq(qhseInspections.id, id), scope !== undefined ? inArray(qhseInspections.driverId, scope) : undefined))
+    .limit(1);
+  if (!row) {
+    if (scope !== undefined) throw new AppError(403, QHSE_OUT_OF_SCOPE_MESSAGE);
+    throw new AppError(404, "Contrôle introuvable.");
   }
-  if (!row) throw new AppError(404, "Contrôle introuvable.");
   return toInspection(row);
 }

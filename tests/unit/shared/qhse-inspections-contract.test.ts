@@ -4,6 +4,7 @@ import {
   createQhseInspectionRequestSchema,
   qhseCriteriaQuerySchema,
   qhseInspectionsQuerySchema,
+  QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS,
   updateQhseCriterionRequestSchema,
 } from "../../../shared/contracts/qhse-inspections";
 import { MAX_DB_INTEGER_ID } from "../../../shared/contracts/common";
@@ -35,6 +36,16 @@ describe("contrôles inopinés QHSE : validation des corps", () => {
       expect(createQhseInspectionRequestSchema.safeParse({ ...valid, items: [{ criterionId: bad, conform: true }] }).success).toBe(false);
     }
     expect(qhseInspectionsQuerySchema.safeParse({ driverId: String(MAX_DB_INTEGER_ID + 1) }).success).toBe(false);
+  });
+
+  it("date du contrôle : refusée au-delà de 5 min dans le futur, tolérée en deçà", () => {
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+    expect(createQhseInspectionRequestSchema.safeParse({ ...valid, inspectedAt: at(-86_400_000) }).success).toBe(true);
+    expect(createQhseInspectionRequestSchema.safeParse({ ...valid, inspectedAt: at(QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS - 60_000) }).success).toBe(true);
+    const future = createQhseInspectionRequestSchema.safeParse({ ...valid, inspectedAt: at(QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS + 60_000) });
+    expect(future.success).toBe(false);
+    expect(future.error?.issues[0].message).toBe("La date du contrôle ne peut pas être dans le futur.");
+    expect(QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS).toBe(5 * 60_000);
   });
 
   it("n'accepte pas de conformité en texte ni les champs d'audit du client", () => {

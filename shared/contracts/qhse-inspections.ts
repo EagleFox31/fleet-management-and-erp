@@ -54,9 +54,18 @@ export const qhseInspectionItemInputSchema = z.object({
   observation: textSchema(1000).optional(),
 });
 
+/** Écart d'horloge toléré entre le poste du contrôleur et le serveur pour `inspectedAt`. */
+export const QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS = 5 * 60_000;
+
 export const createQhseInspectionRequestSchema = z.object({
   kind: qhseInspectionKindSchema,
-  inspectedAt: z.string().datetime({ offset: true }).optional(),
+  inspectedAt: z
+    .string()
+    .datetime({ offset: true })
+    .refine((v) => Date.parse(v) <= Date.now() + QHSE_INSPECTED_AT_FUTURE_TOLERANCE_MS, {
+      message: "La date du contrôle ne peut pas être dans le futur.",
+    })
+    .optional(),
   location: textSchema(200).min(2, "Le lieu du contrôle est obligatoire."),
   vehicleId: bodyIdSchema,
   driverId: bodyIdSchema,

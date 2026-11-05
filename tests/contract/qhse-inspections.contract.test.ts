@@ -1,8 +1,9 @@
 import { createServer, type Server } from "http";
 import { inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { PoolClient } from "pg";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../server/db";
-import { initializeDatabase } from "../../server/init-database";
+import { initializeDatabase, QHSE_INSPECTIONS_SQL, reportCdcConstraintGaps } from "../../server/init-database";
 import { drivers, qhseInspectionCriteria, qhseInspections } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -146,6 +147,22 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
     expect(byManagement.status).toBe(201);
     expect((await call("POST", cookie.logistics, "/api/qhse/inspections", payload(otherDriver.id))).status).toBe(201);
 
+    // Date du contrôle dans le futur (au-delà de la tolérance de 5 min) : 400.
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    expect((await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), inspectedAt: tomorrow })).status).toBe(400);
+
+    // Filtres from/to sur le jour Africa/Douala (UTC+1) : 2026-01-14T23:30Z est le 15 janvier à 00 h 30 locale.
+    const lateNight = await call("POST", cookie.admin, "/api/qhse/inspections", {
+      ...payload(otherDriver.id), inspectedAt: "2026-01-14T23:30:00.000Z",
+    });
+    expect(lateNight.status).toBe(201);
+    const onDay = async (from: string, to: string) =>
+      (await call("GET", cookie.admin, `/api/qhse/inspections?driverId=${otherDriver.id}&from=${from}&to=${to}`)).body.items
+        .map((i: { id: number }) => i.id);
+    expect(await onDay("2026-01-15", "2026-01-15")).toEqual([lateNight.body.id]);
+    expect(await onDay("2026-01-14", "2026-01-14")).toEqual([]);
+    await db.delete(qhseInspections).where(inArray(qhseInspections.id, [lateNight.body.id]));
+
     // Le client ne peut pas écrire l'inspecteur ni l'audit.
     const forged = await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), inspectorId: workshop.id });
     expect(forged.status).toBe(201);
@@ -220,7 +237,87 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
     expect(before).toHaveLength(2);
     await initializeDatabase();
     expect(await counters()).toEqual(before);
-    // Les contraintes de base refusent une nature inconnue.
-    await expect(pool.query(`INSERT INTO qhse_inspection_criteria (code, label, category) VALUES ('zz_test_${Date.now()}', 'x', 'road')`)).rejects.toThrow();
+    // Les contraintes de base refusent une nature inconnue, sous le nom déclaré dans shared/schema.ts.
+    await expect(pool.query(`INSERT INTO qhse_inspection_criteria (code, label, category) VALUES ('zz_test_${Date.now()}', 'x', 'road')`))
+      .rejects.toMatchObject({ code: "23514", constraint: "qhse_inspection_criteria_category_check" });
+  });
+
+  const QHSE_CONSTRAINTS: ReadonlyArray<readonly [string, string]> = [
+    ["qhse_inspection_criteria", "qhse_inspection_criteria_code_key"],
+    ["qhse_inspection_criteria", "qhse_inspection_criteria_label_check"],
+    ["qhse_inspection_criteria", "qhse_inspection_criteria_category_check"],
+    ["qhse_inspections", "qhse_inspections_kind_check"],
+    ["qhse_inspections", "qhse_inspections_location_check"],
+    ["qhse_inspections", "qhse_inspections_items_check"],
+  ];
+
+  async function inTransaction(run: (client: PoolClient) => Promise<void>) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await run(client);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
+  }
+
+  const definitions = async (client: PoolClient) =>
+    (await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS def, convalidated FROM pg_constraint WHERE conname = ANY($1) ORDER BY conname`,
+      [QHSE_CONSTRAINTS.map(([, name]) => name)],
+    )).rows.map((r) => `${r.conname} ${r.def} ${r.convalidated}`);
+
+  it("contraintes nommées : présentes et validées, reposées si un push les a retirées", async () => {
+    await inTransaction(async (client) => {
+      const fresh = await definitions(client);
+      expect(fresh).toHaveLength(QHSE_CONSTRAINTS.length);
+      expect(fresh.every((d) => d.endsWith(" true"))).toBe(true);
+      for (const [table, name] of QHSE_CONSTRAINTS) await client.query(`ALTER TABLE ${table} DROP CONSTRAINT ${name}`);
+      expect(await definitions(client)).toEqual([]);
+      await client.query(QHSE_INSPECTIONS_SQL);
+      expect(await definitions(client)).toEqual(fresh);
+      // Rejeu : aucun changement.
+      await client.query(QHSE_INSPECTIONS_SQL);
+      expect(await definitions(client)).toEqual(fresh);
+      const warn = vi.fn();
+      const gaps = await reportCdcConstraintGaps(client, { warn });
+      expect(gaps.missing.filter((n) => n.startsWith("qhse_"))).toEqual([]);
+      expect(gaps.notValidated.filter((n) => n.startsWith("qhse_"))).toEqual([]);
+    });
+  });
+
+  it("unicité du code posée par un ancien push sous un autre nom : renommée", async () => {
+    await inTransaction(async (client) => {
+      await client.query(`ALTER TABLE qhse_inspection_criteria DROP CONSTRAINT qhse_inspection_criteria_code_key`);
+      await client.query(`ALTER TABLE qhse_inspection_criteria ADD CONSTRAINT qhse_inspection_criteria_code_unique UNIQUE (code)`);
+      await client.query(QHSE_INSPECTIONS_SQL);
+      const { rows } = await client.query(
+        `SELECT conname FROM pg_constraint WHERE conrelid = 'qhse_inspection_criteria'::regclass AND contype = 'u'`,
+      );
+      expect(rows.map((r) => r.conname)).toEqual(["qhse_inspection_criteria_code_key"]);
+    });
+  });
+
+  it("ligne existante hors CHECK : contrainte laissée NOT VALID sans bloquer, signalée, écritures suivantes refusées", async () => {
+    await inTransaction(async (client) => {
+      await client.query(`ALTER TABLE qhse_inspection_criteria DROP CONSTRAINT qhse_inspection_criteria_category_check`);
+      await client.query(
+        `INSERT INTO qhse_inspection_criteria (code, label, category) VALUES ('${criterionCodes[0]}_bad', 'Hors grille', 'road')`,
+      );
+      await client.query(QHSE_INSPECTIONS_SQL);
+      const { rows } = await client.query(
+        `SELECT convalidated FROM pg_constraint WHERE conname = 'qhse_inspection_criteria_category_check'`,
+      );
+      expect(rows).toEqual([{ convalidated: false }]);
+      const warn = vi.fn();
+      expect((await reportCdcConstraintGaps(client, { warn })).notValidated).toContain("qhse_inspection_criteria_category_check");
+      expect(warn).toHaveBeenCalledOnce();
+      await client.query("SAVEPOINT refused");
+      await expect(client.query(
+        `INSERT INTO qhse_inspection_criteria (code, label, category) VALUES ('${criterionCodes[0]}_bad2', 'x', 'road')`,
+      )).rejects.toMatchObject({ code: "23514", constraint: "qhse_inspection_criteria_category_check" });
+      await client.query("ROLLBACK TO SAVEPOINT refused");
+    });
   });
 });

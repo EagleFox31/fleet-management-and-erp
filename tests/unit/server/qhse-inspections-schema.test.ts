@@ -68,4 +68,37 @@ describe("lot Q1 : contrôles inopinés QHSE, init-database et migration jumelle
     const indexes = getTableConfig(qhseInspections).indexes.map((i) => i.config.name).sort();
     expect(indexes).toEqual(["idx_qhse_inspections_driver", "idx_qhse_inspections_vehicle"]);
   });
+
+  // Un CHECK écrit seulement dans CREATE TABLE IF NOT EXISTS n'est jamais posé sur une base poussée par
+  // drizzle-kit, et un push --force le retire : chaque contrainte est déclarée dans Drizzle, posée sous le
+  // même nom par le SQL (création et réconciliation) et relue par reportCdcConstraintGaps.
+  it("contraintes : mêmes noms dans Drizzle, dans le SQL et dans CDC_RECONCILED_CONSTRAINTS", () => {
+    const criteria = getTableConfig(qhseInspectionCriteria);
+    const inspections = getTableConfig(qhseInspections);
+    const declared = [
+      ...criteria.checks.map((c) => c.name),
+      ...criteria.uniqueConstraints.map((u) => u.name),
+      ...inspections.checks.map((c) => c.name),
+    ].sort();
+    expect(declared).toEqual([
+      "qhse_inspection_criteria_category_check",
+      "qhse_inspection_criteria_code_key",
+      "qhse_inspection_criteria_label_check",
+      "qhse_inspections_items_check",
+      "qhse_inspections_kind_check",
+      "qhse_inspections_location_check",
+    ]);
+    const sql = fromMigration();
+    const src = initSource();
+    const reconciled = src.slice(src.indexOf("export const CDC_RECONCILED_CONSTRAINTS"), src.indexOf("];", src.indexOf("export const CDC_RECONCILED_CONSTRAINTS")));
+    for (const name of declared) {
+      expect(sql).toContain(`CONSTRAINT ${name} `);
+      expect(reconciled).toContain(`'${name}'`);
+    }
+    for (const name of declared.filter((n) => n.endsWith("_check"))) {
+      expect(sql).toMatch(new RegExp(`'${name}', 'CHECK \\(`));
+    }
+    expect(sql).toContain("ADD CONSTRAINT %I %s NOT VALID");
+    expect(sql).toContain("VALIDATE CONSTRAINT %I");
+  });
 });

@@ -77,3 +77,11 @@ Règles : `docs/journal/README.md`.
 - **Reste / risques** : `POST /api/users` et `POST /api/auth/register` (`server/routes.ts`, gelé) acceptent encore `pin` via `insertUserSchema` sans le hacher : avec la contrainte, un PIN fourni y donne une erreur 500 au lieu d'un stockage en clair ; correction côté fleet-api.
 
 - 2026-11-04 18:40 : branche poussée, PR #320 ouverte (la mention « sans push ni PR » ci-dessus est périmée). Correctifs de relecture : PIN haché dans les deux routes de création, err.detail masqué dans le logger, préfixe $2 non conforme exclu de la reprise et compté.
+
+## 2026-11-05T15:24:00+01:00 — QHSE lot Q1 : contraintes nommées déclarées dans Drizzle (bloquant de relecture #462)
+
+- **Quoi** : les CHECK de `qhse_inspection_criteria` (label, category) et `qhse_inspections` (kind, location, items), plus l'unicité du code, sont déclarés nommés dans `shared/schema.ts` et posés sous les mêmes noms par `QHSE_INSPECTIONS_SQL` et sa migration jumelle ; les six noms entrent dans `CDC_RECONCILED_CONSTRAINTS`.
+- **Comment** : patron PR #122 : contrainte nommée dans le CREATE TABLE, puis bloc DO qui pose NOT VALID la contrainte absente et la valide (check_violation piégée : WARNING, démarrage non bloqué). Unicité posée par un ancien push (`qhse_inspection_criteria_code_unique`) renommée en `_code_key`. Mineurs : filtres from/to au jour Africa/Douala en SQL, `inspectedAt` refusé au-delà de 5 min dans le futur, portée chauffeur dans le WHERE de `getInspection` (403 identique absent/interdit).
+- **Pourquoi** : un CHECK écrit seulement dans CREATE TABLE IF NOT EXISTS n'existe pas sur une base poussée par drizzle-kit et un push --force le retire.
+- **Preuves** : Postgres local jetable (ports 62432/62433), schéma par drizzle-kit push --force : les six contraintes présentes et validées avant tout init-database, INSERT category='road' rejeté (qhse_inspection_criteria_category_check). Contrat qhse-inspections 6/6, intégration cdc-schema-idempotence 13/13, unitaires 2726 verts, tsc 0 erreur. Filtre Douala : rouge avec l'ancien calcul UTC, vert après.
+- **Reste / risques** : aucune donnée réécrite ; une base où des lignes violent un CHECK garde la contrainte NOT VALID, signalée au démarrage.
