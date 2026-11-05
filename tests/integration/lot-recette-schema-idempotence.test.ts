@@ -8,13 +8,26 @@ const TABLES = [
   "activity_logs", "part_requirements", "fuel_records",
 ];
 
-async function counters() {
-  await pool.query("SELECT pg_stat_force_next_flush()").catch(() => undefined);
-  const { rows } = await pool.query(
-    `SELECT relname, n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables WHERE relname = ANY($1) ORDER BY relname`,
-    [TABLES],
-  );
-  return rows.map((r) => `${r.relname}:${r.n_tup_ins}/${r.n_tup_upd}/${r.n_tup_del}`);
+/**
+ * Instantané déterministe, table par table : nombre de lignes et empreinte des `xmin`.
+ * Toute écriture validée (INSERT, UPDATE même à valeur égale, DELETE) change le `xmin` ou le nombre
+ * de lignes, quelle que soit la connexion du pool qui l'a faite. Les compteurs `pg_stat_user_tables`
+ * ne conviennent pas : `pg_stat_force_next_flush()` ne vide que les statistiques de la connexion
+ * appelante, celles des autres connexions arrivent en différé et rendaient le test instable.
+ * Limite voulue : une écriture annulée (ROLLBACK) ne laisse aucune version visible et n'est pas vue.
+ * Tri par `xmin::text` puis `ctid` : l'empreinte ne dépend que des versions visibles, pas d'un
+ * ordre de parcours que le planificateur peut changer.
+ */
+async function snapshot() {
+  const parts: string[] = [];
+  for (const table of TABLES) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::text AS n, coalesce(md5(string_agg(xmin::text, ',' ORDER BY xmin::text, ctid)), '-') AS h
+       FROM "${table}"`,
+    );
+    parts.push(`${table}:${rows[0].n}:${rows[0].h}`);
+  }
+  return parts;
 }
 
 describe("schéma du lot recette : idempotence", { timeout: 120_000 }, () => {
@@ -34,9 +47,21 @@ describe("schéma du lot recette : idempotence", { timeout: 120_000 }, () => {
 
   it("un second démarrage n'écrit aucune ligne", async () => {
     await initializeDatabase();
-    const before = await counters();
+    const before = await snapshot();
     await initializeDatabase();
-    const after = await counters();
+    const after = await snapshot();
     expect(after).toEqual(before);
+  });
+
+  it("garde-fou : l'instantané détecte une écriture validée, même à valeur égale", async () => {
+    await initializeDatabase();
+    const before = await snapshot();
+    const { rowCount } = await pool.query(
+      `UPDATE vehicle_document_types SET label = label WHERE ctid = (SELECT ctid FROM vehicle_document_types LIMIT 1)`,
+    );
+    expect(rowCount).toBe(1);
+    const after = await snapshot();
+    expect(after).not.toEqual(before);
+    expect(after.filter((p, i) => p !== before[i]).map((p) => p.split(":")[0])).toEqual(["vehicle_document_types"]);
   });
 });
