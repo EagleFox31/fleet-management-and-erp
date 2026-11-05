@@ -4232,6 +4232,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
       
       if (!document) {
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 
@@ -4371,6 +4372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
       if (!document) {
+        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
         return res.status(404).json({ message: "Document non trouvé" });
       }
 
