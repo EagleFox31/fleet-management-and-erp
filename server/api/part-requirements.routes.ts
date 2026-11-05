@@ -42,15 +42,13 @@ router.get("/active-by-part", authenticate, async (req, res) => {
   }
 });
 
-router.get("/by-part/:partId", authenticate, async (req, res) => {
+router.get("/by-part/:partId", authenticate, async (req, res, next) => {
   try {
-    const partId = parseInt(req.params.partId);
-    if (isNaN(partId)) {
-      return res.status(400).json({ message: "ID de pièce invalide" });
-    }
+    const partId = parseRouteId(req.params.partId, "ID de pièce invalide");
     const requirements = await partRequirementsService.getRequirementsByPartId(partId);
     return res.status(200).json(requirements);
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Get requirements by part error");
     return res.status(500).json({ message: "Erreur serveur" });
   }

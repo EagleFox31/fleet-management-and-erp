@@ -12,6 +12,7 @@ import { PART_UNITS } from "@shared/constants/parts";
 import { REALTIME_EVENTS, type RealtimeEventPayload } from "@shared/contracts/realtime-events";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { idParam, makeFailWith } from "../lib/route-helpers";
 import { isUniqueViolation } from "../lib/pg-errors";
@@ -70,7 +71,7 @@ router.post("/parts", authenticate, isPartsCatalogManager, async (req, res, next
 
 router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
+    const id = parseRouteId(req.params.id, "ID de pièce invalide");
     await partsService.deletePart(id);
     broadcastPartCatalogChanged({ id, action: "deleted" }, req.user?.id);
     return res.status(204).send();
@@ -82,7 +83,7 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
 
 router.patch("/parts/:id([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
+    const id = parseRouteId(req.params.id, "ID de pièce invalide");
     // Le stock ne change que par `update-stock`, qui trace le mouvement et son motif : une
     // quantité dans le PATCH modifierait le stock sans aucune trace. Même refus côté service.
     assertNoStockFields(req.body);
@@ -137,7 +138,7 @@ const stockAdjustmentSchema = z.object({
 
 router.post("/parts/:id([0-9]+)/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
   try {
-    const partId = Number.parseInt(req.params.id, 10);
+    const partId = parseRouteId(req.params.id, "ID de pièce invalide");
     const { adjustment, reason } = stockAdjustmentSchema.parse(req.body);
     const updatedPart = await partsService.updateStock(partId, adjustment, reason, req.user?.id);
     broadcastPartCatalogChanged({ id: partId, action: "stock_adjusted" }, req.user?.id);

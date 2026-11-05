@@ -36,14 +36,8 @@ const LOOSE_PARAM_READ = /\b(?:Number\.)?parseInt\(\s*req\.params\b|\bNumber\(\s
 
 /** Occurrences relevées le 5 novembre 2026. Ne peut que rétrécir. */
 const FROZEN: Record<string, number> = {
+  // Garde du toggle admin, traitée par #375.
   "admin-users-guard.routes.ts": 1,
-  "document-renewals.routes.ts": 1,
-  "part-requirements.routes.ts": 1,
-  "parts-catalog.routes.ts": 3,
-  "supplier-invoices.routes.ts": 2,
-  "vehicles.routes.ts": 2,
-  "work-order-items.routes.ts": 4,
-  "work-order-parts.routes.ts": 1,
 };
 
 /** Lectures lâches restantes dans `server/routes.ts` (gelé) : PATCH users et toggle admin-users, traités ailleurs. Ne peut que baisser. */

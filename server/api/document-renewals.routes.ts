@@ -763,10 +763,7 @@ router.patch("/requests/:id/status", isDocumentRenewalWriter, async (req, res, n
   try {
     const role = normalizeRole(req.user?.role);
 
-    const id = Number.parseInt(req.params.id, 10);
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ message: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const { status, comment, newExpiryDate } = req.body ?? {};
     if (!isDocumentRenewalRequestStatus(status)) {
