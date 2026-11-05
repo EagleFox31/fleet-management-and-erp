@@ -3056,6 +3056,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
 - **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
 - **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
+## 2026-11-05 — Documents téléversés : téléchargement en pièce jointe (clôt le reste ouvert ci-dessus)
+
+- **Contexte** : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` servaient le fichier sans `nosniff`, le second en ligne avec le type enregistré au dépôt.
+- **Cause racine** : chaque route fixait ses en-têtes elle-même ; rien ne liait le type servi à la liste blanche du téléversement.
+- **Classification** : sécurité, fichiers téléversés.
+- **Résolution** : les deux routes quittent `server/routes.ts` pour `server/api/uploaded-documents.routes.ts`, monté avant `registerRoutes`. Elles passent par `sendUploadedFile` (`server/lib/uploaded-file-response.ts`) : chemin résolu par `uploadedFileCandidates`, pièce jointe, `nosniff`, type gardé seulement s'il est dans la liste blanche du téléversement et cohérent avec l'extension, sinon `application/octet-stream`. Côté écran, le bouton d'aperçu des documents d'acquisition (doublon du téléchargement) et les onglets vides sont retirés.
+- **Prévention** : contrat `uploaded-documents-download-headers` (rouge sur l'ancien code, mutation du filtre de type tuée) ; `server/routes.ts` sort de la liste gelée de `file-serving-nosniff`.
+- **Leçon** : un fichier fourni par un utilisateur se sert par un seul helper qui fixe les en-têtes ; une route n'écrit pas ses propres `Content-Type` / `Content-Disposition`.
+
 ## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
 
 - **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
@@ -3122,3 +3131,16 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - Cliquet `tests/unit/server/zod-id-range-hygiene.test.ts` : une propriété nommée comme un id déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`, dans `server/api` ou `shared/contracts`. La liste gelée ne contient que des schémas de réponse. Le test passe au rouge si l'on retire la borne de `fuel-card`.
 - **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
 - **Leçon généralisée** : un filet posé sur un seul canal (le chemin) ne couvre pas la même valeur reçue par un autre canal (query, corps). La borne appartient au type partagé (`idSchema`), pas à chaque route.
+## 2026-11-05 — Modifications non commitées perdues : `cd` en échec suivi d'un `git checkout -- .` dans le dépôt principal
+
+- **Contexte** : plusieurs sessions travaillent en parallèle, chacune dans son worktree (`.claude/worktrees/<nom>`), autour d'un même dépôt principal. Un agent de relecture a lancé une commande de la forme `cd <worktree>; ...; git checkout -q -- .`. Le `cd` a échoué (chemin absent) sans arrêter la commande, si bien que le `checkout` s'est exécuté dans le dépôt principal. Il a écrasé environ 60 fichiers `client/src/components/**`, `client/src/assets/logo-icon.svg` et `.claude/agents/fleet-manager.md`, modifiés et non commités. Aucune copie n'a été retrouvée : ni blob orphelin (`git fsck`), ni `git stash`, ni historique local de l'éditeur.
+- **Cause racine** : deux défauts combinés.
+  1. Une commande chaînée sans garde : l'échec du `cd` n'interrompt pas la suite, et une commande destructive s'exécute dans le répertoire courant, quel qu'il soit.
+  2. Du travail non commité laissé dans le dépôt principal, que toutes les sessions partagent comme répertoire de départ.
+- **Classification** : perte de données locale (travail en cours), opération destructive hors de son périmètre. Sans effet sur `main` ni sur la production.
+- **Résolution** : pas de restauration possible. Le travail perdu est à refaire depuis sa source.
+- **Prévention vérifiable** : règles ajoutées à `AGENTS.md` §8, contrôlées en relecture des commandes d'agents.
+  - Tout `cd` suivi d'une autre commande s'écrit `cd <chemin> || exit 1` (ou `cd <chemin> && ...`), jamais `cd <chemin>; ...`.
+  - Aucune commande qui jette du travail (`git checkout -- <chemins>`, `git reset --hard`, `git clean`, `git restore`) dans le dépôt principal.
+  - Aucun travail non commité dans le dépôt principal : toute modification se fait dans un worktree et se met à l'abri par un commit, même temporaire.
+- **Leçon généralisée** : une commande destructive ne doit dépendre d'aucune hypothèse sur le répertoire courant. Si son préalable peut échouer, l'échec doit arrêter la chaîne. Et un répertoire partagé par plusieurs sessions ne doit porter aucun état non commité, car il n'a pas de propriétaire unique qui le protège.

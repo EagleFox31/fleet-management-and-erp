@@ -36,6 +36,7 @@ export const SWEEP_ROUTES: SweepRoute[] = [
   { label: "document de workflow (suppression)", kind: "wfDocument", method: "DELETE", template: "/api/workflows/documents/:id", attendu: 403, lecturePropre: false },
   { label: "documents d'une session de workflow", kind: "wfSession", method: "GET", template: "/api/workflows/:id/documents", attendu: 200, comparerCorps: true, corpsPropre: "propre.pdf" },
   { label: "etat d'un brouillon d'acquisition", kind: "wfSession", method: "GET", template: "/api/workflows/vehicle-acquisition/:id", attendu: 200, comparerCorps: true, corpsPropre: "-s-propre" },
+  { label: "couts de maintenance (role, le parametre est une periode)", kind: "user", method: "GET", template: "/api/statistics/maintenance-cost/:id", attendu: 403, lecturePropre: false },
   { label: "profil d'un utilisateur", kind: "user", method: "GET", template: "/api/users/:id", attendu: 403 },
   { label: "ordre de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id", attendu: 404 },
   { label: "lignes de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id/items", attendu: 404 },
@@ -45,7 +46,7 @@ export const SWEEP_ROUTES: SweepRoute[] = [
 ];
 
 /** Routes deja balayees par un autre contrat : `fragment` doit y figurer (la garde le verifie). */
-export type CoveredElsewhere = { method: SweepMethod; template: string; file: string; fragment: string };
+export type CoveredElsewhere = { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; template: string; file: string; fragment: string };
 export const COVERED_ELSEWHERE: CoveredElsewhere[] = [
   { method: "GET", template: "/api/vehicles/:id", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${foreignVehicle}" },
   { method: "GET", template: "/api/vehicles/:id/documents/:type", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${id}/documents/autre" },
@@ -54,10 +55,16 @@ export const COVERED_ELSEWHERE: CoveredElsewhere[] = [
   { method: "GET", template: "/api/vehicles/:id/mileage", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${id}/mileage" },
   { method: "GET", template: "/api/vehicles/:id/tires", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${id}/tires" },
   { method: "GET", template: "/api/documents/:id/download", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/documents/${foreignDocument}/download" },
+  { method: "GET", template: "/api/document-renewals/requests/:id/proof", file: "tests/contract/document-renewal-proof-download.contract.test.ts", fragment: "/api/document-renewals/requests/${id}/proof" },
+  { method: "PATCH", template: "/api/workflows/vehicle-acquisition/:id", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "${URL}/${s}" },
+  { method: "PATCH", template: "/api/workflows/vehicle-acquisition/:id/complete", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "${URL}/${s}/complete" },
+  { method: "PATCH", template: "/api/workflows/vehicle-acquisition/:id/abandon", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "${URL}/${s}/abandon" },
+  { method: "PATCH", template: "/api/workflows/active/:id/abandon", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "/api/workflows/active/${s}/abandon" },
+  { method: "POST", template: "/api/workflows/:id/documents", file: "tests/contract/r2-vehicle-acquisition-guards.contract.test.ts", fragment: "/api/workflows/${s}/documents" },
 ];
 
 /** Exclusions : la raison est obligatoire, la liste ne peut que rétrécir (la garde en fige la taille). */
-export type Exclusion = { method: SweepMethod; template: string; raison: string };
+export type Exclusion = { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; template: string; raison: string };
 export const EXCLUSIONS: Exclusion[] = [
   {
     method: "GET",
@@ -68,6 +75,12 @@ export const EXCLUSIONS: Exclusion[] = [
 export const MAX_EXCLUSIONS = 1;
 
 export const signatureOf = (route: { method: string; template: string }) => routeSignature(route.method, route.template);
+
+/** Lignes de la table qui ne correspondent plus a aucune route ouverte au client (route supprimee, renommee ou desormais restreinte). */
+export function staleRows(found: string[]): string[] {
+  const seen = new Set(found);
+  return [...SWEEP_ROUTES, ...COVERED_ELSEWHERE, ...EXCLUSIONS].map(signatureOf).filter((signature) => !seen.has(signature));
+}
 
 /** Signatures ouvertes a un client qui ne figurent ni au balayage, ni ailleurs, ni aux exclusions. */
 export function missingFromSweep(found: string[]): string[] {

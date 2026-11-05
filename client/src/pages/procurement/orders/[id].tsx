@@ -3,7 +3,7 @@ import { useLocation, useParams } from "wouter";
 import {
   ArrowLeft, ArrowRight, Package, Calendar, Truck, CheckCircle,
   FileText, XCircle, Building2, User, ShoppingCart, History,
-  ClipboardList, AlertTriangle, Send, CheckCircle2, Clock,
+  ClipboardList, AlertTriangle, Send, CheckCircle2, Clock, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -686,7 +686,7 @@ export default function PurchaseOrderDetailsPage() {
                               isCompletedStep ? { background: "#16a34a", color: "white" } :
                                                { background: "#e5e7eb", color: "#9ca3af" }
                             }>
-                            {isCompletedStep ? "✓" : index + 1}
+                            {isCompletedStep ? <Check className="h-4 w-4" aria-hidden /> : index + 1}
                           </span>
                           <p className="text-[11px] font-bold" style={{ color: isCurrentStep ? cfg.accent : isCompletedStep ? "#16a34a" : "#9ca3af" }}>
                             {step.title}

@@ -69,3 +69,9 @@ export function apiErrorProblems(
   if (TECHNICAL.test(leakText(body))) problems.push(`détail technique dans la réponse : ${text}`);
   return problems;
 }
+
+/** `message` d'une réponse d'erreur sans le `requestId` (« Référence : … » des 5xx) : base des contrôles de fuite sur le message seul. */
+export function messageText(body: { message?: unknown; requestId?: unknown } | null | undefined): string {
+  const message = typeof body?.message === "string" ? body.message : "";
+  return typeof body?.requestId === "string" && body.requestId.length > 0 ? message.split(body.requestId).join("") : message;
+}

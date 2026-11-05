@@ -1,3 +1,4 @@
+import { messageText } from "../support/api-error";
 import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
@@ -60,7 +61,7 @@ function expectForbiddenBody(res: { status: number; body: any }) {
   expect(res.body.code).toBe("FORBIDDEN");
   expect(typeof res.body.message).toBe("string");
   expect(res.body.message.length).toBeGreaterThan(0);
-  expect(res.body.message).not.toMatch(/error|stack|select |insert |update |at \w+ \(/i);
+  expect(messageText(res.body)).not.toMatch(/error|stack|select |insert |update |at \w+ \(/i);
   expect(res.body.requestId).toBeTruthy();
 }
 

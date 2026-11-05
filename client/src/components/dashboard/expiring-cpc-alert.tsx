@@ -56,7 +56,7 @@ export function ExpiringCPCAlert() {
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Toutes les certifications sont valides ✓</p>
+          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Toutes les certifications sont valides</p>
         </CardContent>
       </Card>
     );

@@ -56,7 +56,7 @@ export function OverdueOrdersAlert() {
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Toutes les livraisons sont dans les délais ✓</p>
+          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Toutes les livraisons sont dans les délais</p>
         </CardContent>
       </Card>
     );
