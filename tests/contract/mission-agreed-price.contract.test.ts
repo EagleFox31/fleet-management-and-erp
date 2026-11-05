@@ -32,13 +32,15 @@ async function login(role: TestUserRole) {
   return user;
 }
 async function post(role: string, body: Record<string, unknown>) {
+  // Le trajet de la mission est celui du tarif cité, sauf si le test le fixe lui-même.
+  const cited = typeof body.tariffGridId === "number" ? (await db.select().from(tariffGrid).where(eq(tariffGrid.id, body.tariffGridId)))[0] : undefined;
   const res = await fetch(`${baseUrl}/api/missions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookies.get(role)! },
     body: JSON.stringify({
       orderNumber: uniqueTestToken("MIS"),
-      pickupAddress: "TEST A",
-      deliveryAddress: "TEST B",
+      pickupAddress: cited?.origin ?? "TEST A",
+      deliveryAddress: cited?.destination ?? "TEST B",
       status: "planned",
       ...body,
     }),
@@ -116,6 +118,29 @@ describe("prix convenu d'une mission", { timeout: 120000 }, () => {
     expect((await post("admin", { agreedPrice: 5, tariffGridId: expired.id, pickupDate: "2026-06-01T08:00:00Z" })).status).toBe(400);
     expect((await post("admin", { agreedPrice: 5, tariffGridId: own.id, clientId: ownClientId })).status).toBe(201);
     expect((await post("admin", { agreedPrice: 5, tariffGridId: tariffId, clientId: ownClientId })).status).toBe(201);
+  });
+
+  it("tarif d'un autre trajet ou d'une autre marchandise : 400 ; ville seule ou tarif générique : accepté", async () => {
+    const [t] = await db.insert(tariffGrid).values({ origin, destination: "Kribi", cargoType: "Coton", pricingUnit: "trip", unitPrice: "5", validFrom: "2026-01-01" }).returning();
+    const ok = { agreedPrice: 5, tariffGridId: t.id, pickupAddress: `${origin.toUpperCase()}, zone 1`, deliveryAddress: "kribi", cargo: { description: "coton" } };
+    expect((await post("admin", { ...ok, deliveryAddress: "Garoua" })).status).toBe(400);
+    expect((await post("admin", { ...ok, pickupAddress: "Ailleurs" })).status).toBe(400);
+    expect((await post("admin", { ...ok, cargo: { description: "Ciment" } })).status).toBe(400);
+    expect((await post("admin", ok)).status).toBe(201);
+  });
+
+  it("PATCH qui change la date, un lieu ou la marchandise détache le tarif et garde le prix ; une valeur inchangée le garde", async () => {
+    const created = await post("admin", { agreedPrice: 100, tariffGridId: tariffId, pickupDate: "2026-06-01T08:00:00Z" });
+    expect(created.status).toBe(201);
+    const patch = (body: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/missions/${created.body.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Cookie: cookies.get("admin")! }, body: JSON.stringify(body) });
+    const read = async () => (await db.select().from(missions).where(eq(missions.id, created.body.id)))[0];
+    expect((await patch({ pickupDate: "2026-06-01T08:00:00Z", pickupAddress: origin })).status).toBe(200);
+    expect((await read()).tariffGridId).toBe(tariffId);
+    expect((await patch({ pickupDate: "2026-12-31T08:00:00Z" })).status).toBe(200);
+    const after = await read();
+    expect(after.tariffGridId).toBeNull();
+    expect(after.agreedPrice).toBe("100");
   });
 
   it("tarif supprimé : la mission garde son prix, le lien passe à NULL", async () => {
