@@ -2969,3 +2969,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   Les créations (mission pas encore verrouillable) prennent seulement les consultatifs triés. Les lectures indicatives hors verrou (`launch-readiness`, validation de lancement) n'écrivent pas et ne servent pas de garantie : l'invariant est tenu à l'entrée dans l'état actif.
 - **Prévention vérifiable** : `tests/contract/mission-planning-conflict-write` (rafale PATCH de dates + ajout d'affectation sur le même véhicule : rouge 3/3 sans le verrou de ligne du PATCH), `tests/contract/mission-planning-stale-read` (déterministe : une connexion tient la ligne, la paire est remplacée, le verrou est libéré ; filtre des attentes sur `pg_blocking_pids`), `tests/contract/mission-planning-conflict-status`. Le cas « dates seules sans affectation vivante » est couvert par #346.
 - **Leçon généralisée** : dès qu'une ressource se protège par deux familles de verrous, l'ordre d'acquisition est un contrat unique, écrit à un seul endroit et suivi par tous les appelants ; toute décision prise sur une lecture antérieure se revalide sous le verrou. Un test d'interblocage doit faire partager la même clé aux deux requêtes et, pour la lecture périmée, tenir le verrou depuis le test plutôt que compter sur un rythme.
+
+## 2026-11-05 — Une garde refuse ce qu'elle ne sait pas lire
+
+- **Contexte** : la garde `router.param("id")` des missions (cloison chauffeur) contrôlait l'accès seulement si l'identifiant était un entier, et laissait passer le reste sans contrôle ; les handlers relisaient ensuite l'identifiant par une autre fonction de lecture.
+- **Cause racine** : deux lectures différentes du même paramètre (garde stricte, handlers tolérants) et un repli permissif de la garde sur une valeur illisible. Là où les deux lectures divergent, la garde ne protège pas.
+- **Classification** : sécurité, contrôle d'accès, garde permissive par défaut.
+- **Résolution** : `parseMissionId` est la seule lecture de `:id` (chiffres seuls, entier sûr, positif, sinon 400 via `AppError`) ; la garde l'appelle et tous les handlers l'utilisent.
+- **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` échoue si un `router.param` fait un `return next()` nu.
+- **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.

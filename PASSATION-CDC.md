@@ -59,6 +59,10 @@
 ## 2026-11-05 05:10 — c7 : entrée LESSONS « ordre de verrouillage unique des missions »
 - Branche docs/lessons-ordre-verrous-missions (depuis origin/main) : nouvelle entrée en fin de LESSONS_LEARNED (ligne mission FOR UPDATE, empreinte, advisory triés). Petite PR doc ; « mr » à 0a ensuite. #346 reste en attente de la décision de l'utilisatrice sur sa base.
 
+## 2026-11-05 03:20 — c7 : #346 mis à jour, message de lancement chauffeur, validation stricte de l'identifiant de mission
+- #346 : origin/main fusionné dans fix/mission-patch-dates-lock (f555fcba), poussé sans force ; contrats mission verts.
+- fix/driver-status-error-message : AppError sans fieldErrors, message borné à 300 caractères (looksTechnical), conflit et budget en tête, consigne « Contactez l'exploitation » pour le chauffeur, toast via userMessageOf. Poussée, PR à ouvrir.
+- fix/mission-id-strict : parseMissionId unique (garde et handlers), contrat + garde unitaire + entrée LESSONS.
 ## 2026-11-05 03:03 — c7 : PR doc « Suivis » (doublons LESSONS)
 - docs/lessons-suivis-doublon : la ligne « Suivis » du conflit de planning figurait deux fois dans son entrée et en copies dans deux entrées sans rapport (trigger SQL, justificatif fournisseur). Il n'en reste qu'une, la plus récente, dans l'entrée du conflit de planning.
 - PR ouvertes : #353 (id strict, relue par 0a), #354 (message de lancement chauffeur, relue). Stack de test c7test à arrêter en fin de session.
