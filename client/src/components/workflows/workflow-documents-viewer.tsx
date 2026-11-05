@@ -17,7 +17,7 @@ import {
   File
 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
-import { userMessageOf } from '@/lib/api-error';
+import { toApiError, userMessageOf } from '@/lib/api-error';
 
 interface WorkflowDocument {
   id: number;
@@ -95,7 +95,7 @@ export function WorkflowDocumentsViewer({
       });
 
       if (!response.ok) {
-        throw new Error('Erreur lors de l\'upload');
+        throw await toApiError(response);
       }
 
       return response.json();
@@ -112,7 +112,7 @@ export function WorkflowDocumentsViewer({
       setUploadingType(null);
       toast({
         title: "Erreur",
-        description: "Erreur lors de l'upload du document.",
+        description: userMessageOf(error, "Erreur lors de l'upload du document."),
         variant: "destructive",
       });
     }
