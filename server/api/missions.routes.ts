@@ -22,6 +22,7 @@ import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOn
 import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
+import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { toFieldErrors } from "@shared/errors";
 import {
   activeDriverAssignmentsOnMission,
@@ -341,13 +342,6 @@ const MISSION_FUEL_MANAGERS = MISSION_MANAGER_ROLES;
 const ALERT_TITLE_TO_DOCUMENT_TYPE = Object.fromEntries(
   Object.entries(DOCUMENT_ALERT_TITLES).map(([documentType, alertTitle]) => [alertTitle, documentType]),
 ) as Record<string, VehicleDocumentRequirementType>;
-
-function normalizeCpcStatus(value: string | null | undefined): string {
-  return (value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-}
 
 /**
  * Permis chauffeur : même règle que les papiers véhicule (jour UTC, valable le jour J,
@@ -1628,6 +1622,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
         driverLastName: drivers.lastName,
         driverIsActive: drivers.isActive,
         driverCpcStatus: drivers.cpcStatus,
+        driverCpcTrainingDate: drivers.cpcTrainingDate,
         driverLicenseExpiry: drivers.licenseExpiry,
       })
       .from(assignments)
@@ -1703,7 +1698,11 @@ router.get("/:id/launch-readiness", async (req, res) => {
     const carteGriseParRecepisse = carteGriseValid && !isDocumentTypeValid("carte_grise", carteGriseDocs);
     const visiteParRecepisse = visiteTechniqueValid && !isDocumentTypeValid("visite_technique", visiteDocs);
     const permisValid = hasDriver && Boolean(missionAssignment?.driverLicenseExpiry) && !isDriverLicenseExpired(missionAssignment?.driverLicenseExpiry);
-    const cpcValid = hasDriver && normalizeCpcStatus(missionAssignment?.driverCpcStatus) === "FORME";
+    const cpcCheck = getDriverCpcEligibility({
+      cpcStatus: missionAssignment?.driverCpcStatus,
+      cpcTrainingDate: missionAssignment?.driverCpcTrainingDate,
+    });
+    const cpcValid = hasDriver && cpcCheck.eligible;
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
     const vehicleOperational = hasVehicle && missionAssignment?.vehicleStatus === "operational";
 
@@ -1874,7 +1873,7 @@ router.get("/:id/launch-readiness", async (req, res) => {
         detail: hasDriver
           ? cpcValid
             ? "CPC conforme."
-            : `CPC non valide (${missionAssignment?.driverCpcStatus || "non défini"}).`
+            : (cpcCheck.reason ?? "CPC non valide.")
           : "Assignez d'abord un chauffeur.",
       },
       {
@@ -2141,6 +2140,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
           firstName: drivers.firstName,
           lastName: drivers.lastName,
           cpcStatus: drivers.cpcStatus,
+          cpcTrainingDate: drivers.cpcTrainingDate,
           isActive: drivers.isActive,
         })
         .from(drivers)
@@ -2175,9 +2175,10 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
         });
       }
 
-      if (normalizeCpcStatus(selectedDriver.cpcStatus) !== "FORME") {
+      const cpcCheck = getDriverCpcEligibility(selectedDriver);
+      if (!cpcCheck.eligible) {
         return res.status(400).json({
-          message: `CPC invalide pour ${selectedDriver.firstName} ${selectedDriver.lastName}: statut ${selectedDriver.cpcStatus || "non défini"}.`,
+          message: `CPC invalide pour ${selectedDriver.firstName} ${selectedDriver.lastName} : ${cpcCheck.reason}`,
         });
       }
     }
@@ -2515,6 +2516,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
             firstName: drivers.firstName,
             lastName: drivers.lastName,
             cpcStatus: drivers.cpcStatus,
+            cpcTrainingDate: drivers.cpcTrainingDate,
             isActive: drivers.isActive,
           })
           .from(drivers)
@@ -2544,9 +2546,10 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           });
         }
 
-        if (normalizeCpcStatus(selectedDriver.cpcStatus) !== "FORME") {
+        const cpcCheck = getDriverCpcEligibility(selectedDriver);
+        if (!cpcCheck.eligible) {
           return res.status(400).json({
-            message: `CPC invalide pour ${selectedDriver.firstName} ${selectedDriver.lastName}: statut ${selectedDriver.cpcStatus || "non défini"}.`,
+            message: `CPC invalide pour ${selectedDriver.firstName} ${selectedDriver.lastName} : ${cpcCheck.reason}`,
           });
         }
 
@@ -2657,14 +2660,15 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
       }
 
       const [driver] = await tx
-        .select({ id: drivers.id, firstName: drivers.firstName, lastName: drivers.lastName, cpcStatus: drivers.cpcStatus, isActive: drivers.isActive })
+        .select({ id: drivers.id, firstName: drivers.firstName, lastName: drivers.lastName, cpcStatus: drivers.cpcStatus, cpcTrainingDate: drivers.cpcTrainingDate, isActive: drivers.isActive })
         .from(drivers)
         .where(eq(drivers.id, driverId))
         .limit(1);
       if (!driver) throw new AppError(400, "Chauffeur introuvable pour l'affectation.");
       if (driver.isActive === false) throw new AppError(400, "Ce chauffeur est désactivé, il ne peut pas être affecté.");
-      if (normalizeCpcStatus(driver.cpcStatus) !== "FORME") {
-        throw new AppError(400, `CPC invalide pour ${driver.firstName} ${driver.lastName} : statut ${driver.cpcStatus || "non défini"}.`);
+      const cpcCheck = getDriverCpcEligibility(driver);
+      if (!cpcCheck.eligible) {
+        throw new AppError(400, `CPC invalide pour ${driver.firstName} ${driver.lastName} : ${cpcCheck.reason}`);
       }
 
       const missionWeight = mission.weight !== null && mission.weight !== undefined ? Number(mission.weight) : null;
@@ -2854,6 +2858,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         driverLastName: drivers.lastName,
         driverIsActive: drivers.isActive,
         driverCpcStatus: drivers.cpcStatus,
+        driverCpcTrainingDate: drivers.cpcTrainingDate,
         driverLicenseExpiry: drivers.licenseExpiry,
       })
       .from(assignments)
@@ -2910,10 +2915,12 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             rowErrors.push("Chauffeur inactif.");
           }
 
-          if (normalizeCpcStatus(row.driverCpcStatus) !== "FORME") {
-            rowErrors.push(
-              `CPC chauffeur non valide (${row.driverCpcStatus || "non défini"}).`,
-            );
+          const rowCpc = getDriverCpcEligibility({
+            cpcStatus: row.driverCpcStatus,
+            cpcTrainingDate: row.driverCpcTrainingDate,
+          });
+          if (!rowCpc.eligible) {
+            rowErrors.push(rowCpc.reason ?? "CPC chauffeur non valide.");
           }
 
           if (row.driverLicenseExpiry && isDriverLicenseExpired(row.driverLicenseExpiry)) {

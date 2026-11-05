@@ -49,3 +49,10 @@ export function isExpiredOn(expiry: string | Date | null | undefined, today: str
 export function isDriverLicenseExpiredOn(expiry: string | Date | null | undefined, today: string): boolean {
   return toExpiryDateOnly(expiry) === null || isExpiredOn(expiry, today);
 }
+
+/** Jour `YYYY-MM-DD` situé `days` jours calendaires après `dateOnly` (jour UTC), `null` si illisible. */
+export function addDaysToDateOnly(dateOnly: string | Date | null | undefined, days: number): string | null {
+  const base = toExpiryDateOnly(dateOnly);
+  if (base === null) return null;
+  return utcDateOnly(new Date(Date.parse(`${base}T00:00:00Z`) + days * MS_PER_DAY));
+}
