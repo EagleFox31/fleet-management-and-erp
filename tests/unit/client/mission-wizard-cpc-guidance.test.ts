@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getCpcBlockGuidance } from "@/lib/mission-wizard-rules";
-import { DRIVER_MANAGER_ROLES } from "@shared/constants/roles";
+import { CPC_UPDATE_REQUESTEE, getCpcBlockGuidance } from "@/lib/mission-wizard-rules";
+import { ALL_APP_ROLES, canManageDrivers, DRIVER_MANAGER_ROLES } from "@shared/constants/roles";
 
 const nonForme = { cpcStatus: "NON FORMÉ", cpcStatusRecorded: "NON FORMÉ" };
 
@@ -23,24 +23,35 @@ describe("explication du blocage CPC (étape 3)", () => {
     }
   });
 
-  it("secrétariat : suit le formulaire depuis son tableau de bord", () => {
-    const g = getCpcBlockGuidance(nonForme, "secretary");
-    expect(g?.action).toContain("enregistrez la nouvelle date de formation CPC depuis votre tableau de bord");
-  });
-
-  it("admin et logistique n'ont pas le formulaire : consigne suivable, renvoi au secrétariat", () => {
-    for (const role of ["admin", "logistics"]) {
-      const g = getCpcBlockGuidance(nonForme, role);
-      expect(g?.action).toContain("demandez au secrétariat");
-      expect(g?.action).not.toContain("votre tableau de bord");
+  it("rôles autorisés : ouvrir la fiche du chauffeur, plus le tableau de bord du secrétariat", () => {
+    for (const role of DRIVER_MANAGER_ROLES) {
+      const g = getCpcBlockGuidance({ ...nonForme, id: 42 }, role);
+      expect(g?.action).toContain("ouvrez la fiche du chauffeur");
+      expect(g?.action).not.toContain("tableau de bord");
+      expect(g?.driverHref).toBe("/drivers/42");
     }
   });
 
-  it("autres rôles : renvoie vers le secrétariat, sans action de correction", () => {
-    const g = getCpcBlockGuidance(nonForme, "workshop_manager");
-    expect(g?.canEditDriver).toBe(false);
-    expect(g?.action).toContain("demandez au secrétariat");
-    expect(getCpcBlockGuidance(nonForme, undefined)?.canEditDriver).toBe(false);
+  it("rôle autorisé sans identifiant : texte seul, pas de lien", () => {
+    expect(getCpcBlockGuidance(nonForme, "admin")?.driverHref).toBeNull();
+  });
+
+  it("rôles refusés : demander à admin, logistique ou secrétariat, sans lien", () => {
+    for (const role of ["management", "workshop_manager", "driver", "client", undefined]) {
+      const g = getCpcBlockGuidance({ ...nonForme, id: 42 }, role);
+      expect(g?.action).toContain("demandez à l'administrateur, à la logistique ou au secrétariat");
+      expect(g?.action).toContain("depuis la fiche du chauffeur");
+      expect(g?.driverHref).toBeNull();
+    }
+  });
+
+  it("la liste de rôles du message et le lien suivent canManageDrivers / DRIVER_MANAGER_ROLES", () => {
+    expect(CPC_UPDATE_REQUESTEE.split(/, | ou /)).toHaveLength(DRIVER_MANAGER_ROLES.length);
+    for (const role of ALL_APP_ROLES) {
+      const g = getCpcBlockGuidance({ ...nonForme, id: 1 }, role);
+      expect(g?.canEditDriver).toBe(canManageDrivers(role));
+      expect(g?.driverHref !== null).toBe(canManageDrivers(role));
+    }
   });
 
   it("formation expirée et date future ont chacune leur explication", () => {

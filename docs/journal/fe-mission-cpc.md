@@ -19,3 +19,13 @@
 ## Consigne suivable par rôle
 
 Le formulaire « Mise à jour des certifications CPC » n'est rendu que sur le tableau de bord du secrétariat (App.tsx : un tableau de bord par rôle ; admin et logistique ont le leur, sans ce formulaire). La consigne dit donc au secrétariat de l'utiliser depuis son tableau de bord ; admin, logistique et les autres rôles sont renvoyés vers le secrétariat. POST update-cpc autorise toujours admin et logistique : exposer le formulaire sur la fiche chauffeur (drivers/[id].tsx) est le suivi prévu, la consigne pourra alors pointer vers la fiche.
+
+## 2026-11-05 — La consigne CPC pointe vers la fiche chauffeur
+
+**Quoi.** `getCpcBlockGuidance` renvoie désormais vers la fiche du chauffeur (formulaire « Mise à jour des certifications CPC », ajouté par #380) et non plus vers le tableau de bord du secrétariat. Le retour gagne `driverHref` (`/drivers/<id>`), affiché en lien « Ouvrir la fiche du chauffeur » à l'étape 3.
+
+**Comment.** Les rôles qui voient le lien sont ceux de `canManageDrivers` (admin, logistique, secrétariat), identiques à la garde de la route `/drivers/:id` (`RoleRoute allowedRoles={DRIVER_MANAGER_ROLES}`) et à `isDriverManager` sur `POST /api/drivers/:id/update-cpc`. Les autres rôles lisent « demandez à l'administrateur, à la logistique ou au secrétariat… » sans lien ; la phrase est dérivée de `DRIVER_MANAGER_ROLES` (table typée `Record<DriverManagerRole, string>`). Sans identifiant de chauffeur, texte seul.
+
+**Pourquoi.** Admin et logistique étaient renvoyés vers le secrétariat faute de formulaire sur leur écran ; depuis #380 ils peuvent corriger eux-mêmes, et aucun rôle n'est envoyé vers un écran qui répond 403.
+
+**Tester.** `node node_modules/vitest/vitest.mjs run tests/unit/client/mission-wizard-cpc-guidance.test.ts` (rouge avant correctif : 4 échecs ; vert après : 10).
