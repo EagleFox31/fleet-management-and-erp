@@ -42,3 +42,42 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - E : `AppError`, `moduleLogger`, transaction ;
   - R (rétroactif) : véhicules déjà retirés inchangés, aucune ligne existante réécrite ;
   - non applicable : pas d'écran de restauration côté client (aucun n'existait).
+
+## 2026-11-05T17:49:58+01:00 — Journal de suppression : auteur en ON DELETE SET NULL (feaa632e)
+
+- **Agent** : c7 · **Branche** : `c7-vehicle-soft-delete` · **Commit** : feaa632e
+- **Statut** : fait
+- **Quoi** : `vehicle_deletion_effects.created_by` passe en `ON DELETE SET NULL` ; le `CREATE TABLE` sort de `QHSE_INSPECTIONS_SQL`.
+- **Pourquoi** :
+  - `tests/integration/cleanup-users-fk-coverage.test.ts` refuse toute nouvelle clé vers `users` en NO ACTION non traitée par le nettoyage (CI 42063355295 rouge, 37 contre 36) ;
+  - supprimer un utilisateur ne doit pas être bloqué par le journal d'un retrait de véhicule qu'il a fait ;
+  - le SQL QHSE doit rester identique à sa migration jumelle.
+- **Preuve** : CI 42064192865 verte, 8 jobs sur 8.
+
+## 2026-11-05T17:49:58+01:00 — Réserves de relecture #476 : auteur du retrait, repli d'archive, verrous, DDL borné
+
+- **Agent** : c7 · **Branche** : `c7-vehicle-soft-delete` · **Commit** : voir `git log` de la branche
+- **Statut** : fait, en relecture
+- **Quoi** :
+  - `vehicles.deleted_by` (FK `users`, `ON DELETE SET NULL`) : renseigné par la suppression douce, remis à NULL par la restauration, omis du schéma d'insertion (le client ne l'écrit pas).
+  - Restauration d'un id absent de `vehicles` :
+    - si la table `vehicle_archived` existe (`to_regclass`), la fiche archivée est restaurée **sous son identifiant d'origine** ;
+    - colonnes absentes de l'archive : valeurs par défaut de `vehicles` ; statut `operational` ; archive vidée ;
+    - immatriculation déjà reprise : 409 ;
+    - table absente ou fiche absente : 404 (comportement actuel).
+  - Contrôle des OT et missions ouverts : **toutes** les lignes du véhicule sont verrouillées (`FOR UPDATE`), ouvertes ou non (OT, affectations, opérations de remorque, missions).
+  - DDL (`vehicle_deletion_effects`, `vehicles.deleted_by`) : `VEHICLE_LIFECYCLE_SQL` dans `init-database.ts`, jumelle de `server/db/migrations/20261105_vehicle_lifecycle.sql`. Verrou consultatif des migrations, `lock_timeout` 5 s, `lock_not_available` → WARNING.
+- **Pourquoi** : réserves 1, 2, 4, 6 et 7 de la relecture de #476.
+- **Limites assumées** :
+  - mission `delivered` non comptée ouverte : le camion est libéré, la facturation lit l'historique (réserve 3, acceptée) ;
+  - un OT ou une mission rouvert **après** la suppression passe : le verrou sérialise le contrôle, mais les écrivains ne relisent pas `deleted_at` ;
+  - restauration à valeur égale (réserve 5) : un élément remis à la main, pendant le retrait, dans la valeur que la suppression avait posée (renouvellement rejeté, plan désactivé) est rouvert par la restauration. Le suivi M3 le distingue par `updated_at` pour les renouvellements ; `maintenance_schedules` n'a pas d'horodatage.
+- **Preuve automatisée** :
+  - `tests/unit/server/vehicle-lifecycle-schema.test.ts` : init-database = migration, DDL bornés et en WARNING, colonnes du schéma créées, `deletedBy` hors schéma d'insertion ;
+  - `tests/contract/vehicle-lifecycle.contract.test.ts` : 13 cas, dont `deletedBy` posé puis effacé et le repli `vehicle_archived` (fiche absente 404, conflit 409, restauration sous l'id d'origine puis appel idempotent) ;
+  - contrats véhicule et route-id : 34 fichiers, 484 tests verts ; unitaires 2885 verts ; `npm run check` sans erreur.
+- **RAIDER** :
+  - I : DDL `IF NOT EXISTS`, un second démarrage n'écrit rien ;
+  - D : réponses 404 inchangées sans archive ;
+  - R (rétroactif) : véhicules déjà retirés intacts (`deleted_by` NULL) ;
+  - E : DDL borné, aucun blocage du démarrage.

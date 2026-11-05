@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import {
@@ -17,7 +17,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
-import { VEHICLE_OPEN_WORK_MESSAGE } from "../../server/services/vehicle-lifecycle-service";
+import { VEHICLE_ARCHIVE_CONFLICT_MESSAGE, VEHICLE_OPEN_WORK_MESSAGE } from "../../server/services/vehicle-lifecycle-service";
 
 /**
  * Retrait d'un véhicule de la flotte (DELETE /api/vehicles/:id) et remise en service
@@ -120,7 +120,9 @@ describe("DELETE /api/vehicles/:id : physique sans action, douce avec", { timeou
     const res = await asAdmin("DELETE", `/api/vehicles/${v.id}`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.result).toMatchObject({ mode: "soft", vehicleId: v.id, activity: ["documents"], deactivated: 0 });
-    expect((await vehicleRow(v.id))?.deletedAt).not.toBeNull();
+    const row = await vehicleRow(v.id);
+    expect(row?.deletedAt).not.toBeNull();
+    expect(row?.deletedBy).toBe(actors.userIdOf("admin"));
     expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.id, doc.id))).toHaveLength(1);
   });
 
@@ -202,7 +204,7 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
     const res = await asAdmin("POST", `/api/vehicles/${v.id}/restore`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.result).toEqual({ vehicleId: v.id, restored: true, reactivated: 2 });
-    expect((await vehicleRow(v.id))?.deletedAt).toBeNull();
+    expect(await vehicleRow(v.id)).toMatchObject({ deletedAt: null, deletedBy: null });
     expect(await scheduleActive(active.id)).toBe(true);
     expect(await scheduleActive(inactive.id)).toBe(false);
     expect(await renewalStatus(open.id)).toBe("pending");
@@ -269,4 +271,51 @@ describe("cloison client : ni retrait ni remise en service, même de son propre 
       expect(captured.filter((c) => c.eventType === "vehicle_deleted" || c.eventType === "vehicle_restored")).toHaveLength(0);
     });
   }
+
+describe("POST /api/vehicles/:id/restore : repli sur l'ancienne table vehicle_archived", { timeout: 60000 }, () => {
+  // Aucune migration ne crée vehicle_archived : le test la crée, puis la supprime.
+  const archivedId = 2_100_000_000 + Math.floor(Math.random() * 1_000_000);
+
+  beforeAll(async () => {
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS vehicle_archived (
+      original_vehicle_id integer NOT NULL, registration_number text NOT NULL, brand text NOT NULL,
+      model text NOT NULL, year integer NOT NULL, notes text, archived_at timestamp DEFAULT now())`);
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DROP TABLE IF EXISTS vehicle_archived`);
+    await db.delete(statusHistory).where(eq(statusHistory.vehicleId, archivedId));
+    await db.delete(vehicles).where(eq(vehicles.id, archivedId));
+  });
+
+  it("table présente, fiche absente : 404 comme sans table", async () => {
+    expect((await asAdmin("POST", `/api/vehicles/${archivedId}/restore`)).status).toBe(404);
+  });
+
+  it("immatriculation reprise par un véhicule actif : 409, l'archive est conservée", async () => {
+    const v = await vehicle();
+    await db.execute(sql`INSERT INTO vehicle_archived (original_vehicle_id, registration_number, brand, model, year)
+      VALUES (${archivedId}, ${v.registrationNumber}, 'TEST', 'Archive', 2015)`);
+    const res = await asAdmin("POST", `/api/vehicles/${archivedId}/restore`);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toBe(VEHICLE_ARCHIVE_CONFLICT_MESSAGE);
+    expect(await vehicleRow(archivedId)).toBeUndefined();
+    await db.execute(sql`DELETE FROM vehicle_archived WHERE original_vehicle_id = ${archivedId}`);
+  });
+
+  it("fiche archivée : restaurée sous son identifiant d'origine, opérationnelle, archive vidée", async () => {
+    const registration = uniqueTestToken("ARC").slice(0, 40);
+    await db.execute(sql`INSERT INTO vehicle_archived (original_vehicle_id, registration_number, brand, model, year)
+      VALUES (${archivedId}, ${registration}, 'TEST', 'Archive', 2015)`);
+    captured.length = 0;
+    const res = await asAdmin("POST", `/api/vehicles/${archivedId}/restore`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toEqual({ vehicleId: archivedId, restored: true, reactivated: 0, source: "archive" });
+    expect(await vehicleRow(archivedId)).toMatchObject({ registrationNumber: registration, status: "operational", mileage: 0, deletedAt: null });
+    const left = await db.execute(sql`SELECT 1 FROM vehicle_archived WHERE original_vehicle_id = ${archivedId}`);
+    expect(left.rows).toHaveLength(0);
+    expect(captured.find((c) => c.eventType === "vehicle_restored")?.data).toMatchObject({ vehicleId: archivedId });
+    // Second appel : véhicule actif, rien ne change.
+    expect((await asAdmin("POST", `/api/vehicles/${archivedId}/restore`)).body.result).toEqual({ vehicleId: archivedId, restored: false, reactivated: 0 });
+  });
 });

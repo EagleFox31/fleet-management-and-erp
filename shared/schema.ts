@@ -115,6 +115,8 @@ export const vehicles = pgTable("vehicles", {
   lastMaintenanceDate: date("last_maintenance_date"), // Date dernière maintenance pour calculs
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
+  // Auteur de la suppression douce, remis à NULL par la restauration (server/services/vehicle-lifecycle-service.ts).
+  deletedBy: integer("deleted_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 // Table pour persister l'état des workflows d'acquisition de véhicules
@@ -174,6 +176,7 @@ export const vehicleTankCapacitySchema = z
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   id: true,
   createdBy: true,
+  deletedBy: true,
   createdAt: true,
 }).extend({
   purchaseDate: z.string().optional().transform((val) => val ? val : undefined),

@@ -3,7 +3,7 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import type { DbExecutor } from "../lib/fuel-card-lock";
 import { moduleLogger } from "../lib/logger";
-import { isForeignKeyViolation } from "../lib/pg-errors";
+import { isForeignKeyViolation, isUniqueViolation } from "../lib/pg-errors";
 import { VEHICLE_ACTIVITY_SOURCES, VEHICLE_DEACTIVATIONS } from "./vehicle-lifecycle-sources";
 
 const log = moduleLogger("vehicle-lifecycle");
@@ -19,7 +19,10 @@ export type VehicleDeletionOutcome =
   | { mode: "hard"; vehicleId: number }
   | { mode: "soft"; vehicleId: number; activity: string[]; deactivated: number };
 
-export type VehicleRestoreOutcome = { vehicleId: number; restored: boolean; reactivated: number };
+export type VehicleRestoreOutcome = { vehicleId: number; restored: boolean; reactivated: number; source?: "archive" };
+
+export const VEHICLE_ARCHIVE_CONFLICT_MESSAGE =
+  "Un véhicule de la flotte porte déjà cette immatriculation : impossible de restaurer la fiche archivée.";
 
 const list = (values: readonly (string | boolean)[]): SQL => sql.join(values.map((v) => sql`${v}`), sql`, `);
 
@@ -48,10 +51,26 @@ export async function vehicleActivity(tx: DbExecutor, vehicleId: number): Promis
   return found;
 }
 
+/**
+ * OT et missions ouverts du véhicule. Toutes les lignes lues sont verrouillées (FOR UPDATE), ouvertes
+ * ou non : un OT ou une mission ne peut pas être rouvert entre ce contrôle et la fin de la transaction.
+ * Une écriture qui attend ce verrou passe après la suppression ; elle ne relit pas `deleted_at`.
+ */
 async function openWork(tx: DbExecutor, vehicleId: number) {
-  const workOrders = await tx.execute(
-    sql`SELECT id, title FROM work_orders WHERE vehicle_id = ${vehicleId} AND status IN (${list(OPEN_WORK_ORDER_STATUSES)}) ORDER BY id`,
+  const allWorkOrders = await tx.execute(
+    sql`SELECT id, title, status FROM work_orders WHERE vehicle_id = ${vehicleId} ORDER BY id FOR UPDATE`,
   );
+  const open = new Set<string>(OPEN_WORK_ORDER_STATUSES);
+  const workOrders = (allWorkOrders.rows as { id: number; title: string | null; status: string }[])
+    .filter((w) => open.has(w.status))
+    .map(({ id, title }) => ({ id, title }));
+  await tx.execute(sql`SELECT id FROM assignments WHERE vehicle_id = ${vehicleId} ORDER BY id FOR UPDATE`);
+  await tx.execute(sql`SELECT id FROM mission_operations WHERE trailer_vehicle_id = ${vehicleId} ORDER BY id FOR UPDATE`);
+  await tx.execute(sql`
+    SELECT m.id FROM missions m
+    WHERE EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id = m.id AND a.vehicle_id = ${vehicleId})
+       OR EXISTS (SELECT 1 FROM mission_operations o WHERE o.mission_id = m.id AND o.trailer_vehicle_id = ${vehicleId})
+    ORDER BY m.id FOR UPDATE OF m`);
   const missions = await tx.execute(sql`
     SELECT m.id, m.order_number FROM missions m
     WHERE m.status IN (${list(OPEN_MISSION_STATUSES)})
@@ -60,7 +79,7 @@ async function openWork(tx: DbExecutor, vehicleId: number) {
            OR EXISTS (SELECT 1 FROM mission_operations o WHERE o.mission_id = m.id AND o.trailer_vehicle_id = ${vehicleId}))
     ORDER BY m.id`);
   return {
-    workOrders: workOrders.rows as { id: number; title: string | null }[],
+    workOrders,
     missions: (missions.rows as { id: number; order_number: string }[]).map((m) => ({ id: m.id, orderNumber: m.order_number })),
   };
 }
@@ -120,7 +139,7 @@ export async function deleteVehicle(vehicleId: number, actorUserId: number | nul
       deactivated += res.rowCount ?? 0;
     }
 
-    await tx.execute(sql`UPDATE vehicles SET deleted_at = now() WHERE id = ${vehicleId}`);
+    await tx.execute(sql`UPDATE vehicles SET deleted_at = now(), deleted_by = ${actorUserId}::int WHERE id = ${vehicleId}`);
     await statusNote(tx, vehicleId, actorUserId, "Retiré de la flotte (suppression douce)");
     log.info({ vehicleId, actorUserId, activity, deactivated }, "véhicule retiré de la flotte (suppression douce)");
     return { mode: "soft", vehicleId, activity, deactivated };
@@ -135,7 +154,7 @@ export async function deleteVehicle(vehicleId: number, actorUserId: number | nul
 export async function restoreVehicle(vehicleId: number, actorUserId: number | null): Promise<VehicleRestoreOutcome | null> {
   return db.transaction(async (tx) => {
     const current = await lockVehicle(tx, vehicleId);
-    if (!current) return null;
+    if (!current) return restoreFromLegacyArchive(tx, vehicleId, actorUserId);
     if (!current.deleted) return { vehicleId, restored: false, reactivated: 0 };
 
     let reactivated = 0;
@@ -161,9 +180,43 @@ export async function restoreVehicle(vehicleId: number, actorUserId: number | nu
       reactivated += res.rowCount ?? 0;
     }
     await tx.execute(sql`DELETE FROM vehicle_deletion_effects WHERE vehicle_id = ${vehicleId}`);
-    await tx.execute(sql`UPDATE vehicles SET deleted_at = NULL WHERE id = ${vehicleId}`);
+    await tx.execute(sql`UPDATE vehicles SET deleted_at = NULL, deleted_by = NULL WHERE id = ${vehicleId}`);
     await statusNote(tx, vehicleId, actorUserId, "Remis dans la flotte (restauration)");
     log.info({ vehicleId, actorUserId, reactivated }, "véhicule restauré");
     return { vehicleId, restored: true, reactivated };
   });
 }
+
+/**
+ * Repli : fiche retirée par l'ancien mécanisme d'archivage (table `vehicle_archived`, créée par
+ * aucune migration). Table absente : null (404, comportement actuel). Présente : la fiche reprend son
+ * identifiant d'origine, pour que l'historique qui la référence la retrouve. Les colonnes absentes de
+ * l'archive prennent la valeur par défaut de `vehicles` ; la fiche revient opérationnelle.
+ */
+async function restoreFromLegacyArchive(tx: DbExecutor, vehicleId: number, actorUserId: number | null): Promise<VehicleRestoreOutcome | null> {
+  const table = await tx.execute(sql`SELECT to_regclass('public.vehicle_archived') IS NOT NULL AS present`);
+  if (!(table.rows[0] as { present: boolean } | undefined)?.present) return null;
+  try {
+    await tx.transaction(async (sp) => {
+      const inserted = await sp.execute(sql`
+        INSERT INTO vehicles
+        SELECT (jsonb_populate_record(NULL::vehicles,
+          jsonb_build_object('mileage', 0, 'last_mileage', 0, 'vehicle_type', 'tracteur', 'fuel_type', 'diesel', 'created_at', now())
+          || jsonb_strip_nulls(to_jsonb(a))
+          || jsonb_build_object('id', a.original_vehicle_id, 'status', 'operational', 'deleted_at', NULL, 'deleted_by', NULL))).*
+        FROM (SELECT * FROM vehicle_archived WHERE original_vehicle_id = ${vehicleId} LIMIT 1) AS a
+        RETURNING id`);
+      if ((inserted.rowCount ?? 0) === 0) throw new LegacyArchiveMissing();
+      await sp.execute(sql`DELETE FROM vehicle_archived WHERE original_vehicle_id = ${vehicleId}`);
+    });
+  } catch (error) {
+    if (error instanceof LegacyArchiveMissing) return null;
+    if (isUniqueViolation(error)) throw new AppError(409, VEHICLE_ARCHIVE_CONFLICT_MESSAGE, { cause: error });
+    throw error;
+  }
+  await statusNote(tx, vehicleId, actorUserId, "Remis dans la flotte (restauration depuis l'archive)");
+  log.info({ vehicleId, actorUserId }, "véhicule restauré depuis vehicle_archived");
+  return { vehicleId, restored: true, reactivated: 0, source: "archive" };
+}
+
+class LegacyArchiveMissing extends Error {}
