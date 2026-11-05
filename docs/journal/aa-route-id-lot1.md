@@ -162,3 +162,7 @@
   - Les 3 GET sur `<id>abc` : 400.
   - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
   - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
+### Lot 9 — complément : lecture des profils par la direction et le secrétariat
+
+- Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
+- Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
