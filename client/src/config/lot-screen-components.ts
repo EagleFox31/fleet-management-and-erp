@@ -16,6 +16,7 @@ import {
   FuelVouchersScreen,
   IncidentDeclareScreen,
   IncidentsListScreen,
+  InvoicesAwaitingPaymentScreen,
   MissionOperationsScreen,
   PendingInvoicesScreen,
   TimeTrackingScreen,
@@ -40,5 +41,6 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "fuel-anomalies": FuelAnomaliesScreen,
   "time-tracking": TimeTrackingScreen,
   "pending-invoices": PendingInvoicesScreen,
+  "invoices-awaiting-payment": InvoicesAwaitingPaymentScreen,
   "mission-operations": MissionOperationsScreen,
 };
