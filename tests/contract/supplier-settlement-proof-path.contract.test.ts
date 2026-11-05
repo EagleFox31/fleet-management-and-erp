@@ -1,16 +1,20 @@
 import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { supplierInvoiceSettlements } from "@shared/schema";
+import { db } from "../../server/db";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestSupplier, createTestSupplierInvoice, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
 /**
- * Sécurité : le justificatif d'un règlement fournisseur n'est servi que s'il est sous `uploads/`.
- * `proofReference` est libre via `POST /:id/payment` (endpoint legacy) ; l'ancien contrôle
- * `startsWith(<cwd>/uploads)` laissait passer un dossier voisin (`uploads-old/…`).
+ * Le justificatif d'un règlement fournisseur est le fichier téléversé, sous
+ * `/uploads/supplier-invoices/settlements/`. À l'écriture, toute autre référence est refusée
+ * (400), y compris par l'endpoint legacy `POST /:id/payment`. À la lecture, seul ce dossier
+ * est servi : une ligne écrite avant cette règle avec une autre référence donne 404.
  */
 
 const PROOF_DIR = path.join(process.cwd(), "uploads", "supplier-invoices", "settlements");
@@ -18,6 +22,10 @@ const PROOF_NAME = uniqueTestToken("proofpath");
 // Dossier voisin de uploads/ dont le nom commence par « uploads » : hors périmètre.
 const SIBLING_DIR = path.join(process.cwd(), `uploads-${uniqueTestToken("sibling")}`);
 const SECRET = "TEST-secret-hors-uploads";
+// Fichier existant d'un autre dossier de uploads/ : servi par main, hors périmètre du justificatif.
+const OTHER_UPLOAD_DIR = path.join(process.cwd(), "uploads", "documents");
+const OTHER_UPLOAD_NAME = `${uniqueTestToken("otherdoc")}.pdf`;
+const OTHER_UPLOAD_CONTENT = "TEST-document-autre-dossier";
 
 let server: Server;
 let baseUrl = "";
@@ -48,20 +56,38 @@ async function approvedInvoice() {
   return invoice;
 }
 
-/** Règlement legacy avec un `proofReference` libre, puis lecture de son justificatif. */
-async function proofOfLegacyPayment(proofReference: string) {
+async function legacyPayment(proofReference: string) {
   const invoice = await approvedInvoice();
   const paid = await api("POST", `/api/supplier-invoices/${invoice.id}/payment`, {
     paymentDate: "2026-10-29",
     paymentMethod: "virement",
     proofReference,
   });
-  expect(paid.status).toBe(200);
   const settlements = await api("GET", `/api/supplier-invoices/${invoice.id}/settlements`);
-  const settlement = settlements.body.find((item: any) => item.proofReference === proofReference);
-  expect(settlement).toBeDefined();
-  return api("GET", `/api/supplier-invoices/${invoice.id}/settlements/${settlement.id}/proof`);
+  return { paid, settlements: settlements.body as any[] };
 }
+
+/** Règlement avec justificatif téléversé ; renvoie la facture et le règlement créé. */
+async function uploadedSettlement(content = "%PDF-1.4 TEST", fileName = `${PROOF_NAME}.pdf`) {
+  const invoice = await approvedInvoice();
+  const form = new FormData();
+  form.append("amount", "1000");
+  form.append("paymentMethod", "virement");
+  form.append("paymentReference", uniqueTestToken("ref"));
+  form.append("paymentDate", "2026-10-29");
+  form.append("proofFile", new Blob([content], { type: "application/pdf" }), fileName);
+  const created = await fetch(`${baseUrl}/api/supplier-invoices/${invoice.id}/settlements`, {
+    method: "POST",
+    headers: { Cookie: cookie },
+    body: form,
+  });
+  expect(created.status).toBe(201);
+  const settlements = await api("GET", `/api/supplier-invoices/${invoice.id}/settlements`);
+  return { invoice, settlement: settlements.body[0] };
+}
+
+const proofOf = (invoiceId: number, settlementId: number) =>
+  api("GET", `/api/supplier-invoices/${invoiceId}/settlements/${settlementId}/proof`);
 
 beforeAll(async () => {
   const app = await getContractApp();
@@ -82,10 +108,13 @@ beforeAll(async () => {
 
   fs.mkdirSync(SIBLING_DIR, { recursive: true });
   fs.writeFileSync(path.join(SIBLING_DIR, "secret.txt"), SECRET);
+  fs.mkdirSync(OTHER_UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(OTHER_UPLOAD_DIR, OTHER_UPLOAD_NAME), OTHER_UPLOAD_CONTENT);
 }, 120000);
 
 afterAll(async () => {
   fs.rmSync(SIBLING_DIR, { recursive: true, force: true });
+  fs.rmSync(path.join(OTHER_UPLOAD_DIR, OTHER_UPLOAD_NAME), { force: true });
   if (fs.existsSync(PROOF_DIR)) {
     for (const name of fs.readdirSync(PROOF_DIR).filter((n) => n.startsWith(PROOF_NAME))) {
       fs.unlinkSync(path.join(PROOF_DIR, name));
@@ -95,38 +124,77 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
-describe("justificatif de règlement fournisseur : jamais hors de uploads/", { timeout: 120000 }, () => {
-  it("un dossier voisin dont le nom commence par « uploads » n'est pas servi (avant : 200 + contenu)", async () => {
-    const proof = await proofOfLegacyPayment(`/${path.basename(SIBLING_DIR)}/secret.txt`);
+describe("justificatif de règlement fournisseur : borné à son dossier", { timeout: 120000 }, () => {
+  it.each([
+    ["un dossier voisin dont le nom commence par « uploads »", () => `/${path.basename(SIBLING_DIR)}/secret.txt`],
+    ["une remontée `..`", () => "/uploads/../package.json"],
+    ["un autre dossier de uploads/", () => "/uploads/documents/carte-grise.pdf"],
+    ["une remontée depuis le dossier des justificatifs", () => "/uploads/supplier-invoices/settlements/../../documents/a.pdf"],
+    ["une référence libre", () => "VIR-2026-001"],
+  ])("écriture legacy refusée (400) : %s, aucun règlement créé", async (_label, ref) => {
+    const { paid, settlements } = await legacyPayment(ref());
+    expect(paid.status).toBe(400);
+    expect(paid.body.message).toBe("Justificatif de règlement invalide : téléversez une image ou un PDF.");
+    expect(settlements).toEqual([]);
+  });
+
+  it("ligne déjà en base hors du dossier : 404 lisible, contenu non servi", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    await db
+      .update(supplierInvoiceSettlements)
+      .set({ proofReference: `/${path.basename(SIBLING_DIR)}/secret.txt` })
+      .where(eq(supplierInvoiceSettlements.id, settlement.id));
+    const sibling = await proofOf(invoice.id, settlement.id);
+    expect(sibling.status).toBe(404);
+    expect(sibling.text).not.toContain(SECRET);
+    expect(sibling.body.message).toBe("Justificatif introuvable");
+
+    await db
+      .update(supplierInvoiceSettlements)
+      .set({ proofReference: "/uploads/../package.json" })
+      .where(eq(supplierInvoiceSettlements.id, settlement.id));
+    const parent = await proofOf(invoice.id, settlement.id);
+    expect(parent.status).toBe(404);
+    expect(parent.text).not.toContain("dependencies");
+  });
+
+  it("ligne déjà en base vers un fichier existant d'un autre dossier de uploads/ : 404 (avant : 200)", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    await db
+      .update(supplierInvoiceSettlements)
+      .set({ proofReference: `/uploads/documents/${OTHER_UPLOAD_NAME}` })
+      .where(eq(supplierInvoiceSettlements.id, settlement.id));
+    const proof = await proofOf(invoice.id, settlement.id);
     expect(proof.status).toBe(404);
-    expect(proof.text).not.toContain(SECRET);
+    expect(proof.text).not.toContain(OTHER_UPLOAD_CONTENT);
     expect(proof.body.message).toBe("Justificatif introuvable");
   });
 
-  it("une remontée `..` hors de uploads/ donne 404 lisible, sans détail technique", async () => {
-    const proof = await proofOfLegacyPayment("/uploads/../package.json");
-    expect(proof.status).toBe(404);
-    expect(proof.body.message).toBe("Justificatif introuvable");
-    expect(proof.text).not.toContain("dependencies");
+  it.each([
+    ["espace dans l'extension", "scan.p f"],
+    ["espace final", "Facture.PDF "],
+    ["copie numérotée", "scan.pdf(1)"],
+    ["accent dans l'extension", "reçu.pdé"],
+    ["extension longue", "justificatif.extensiontreslongue"],
+  ])("téléversement avec un nom inhabituel (%s) : 201 puis servi (200)", async (_label, original) => {
+    const { invoice, settlement } = await uploadedSettlement("%PDF-1.4 EXOTIC", `${PROOF_NAME}-${original}`);
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(200);
+    expect(proof.text).toBe("%PDF-1.4 EXOTIC");
   });
 
-  it("non-régression : le justificatif téléversé est servi", async () => {
-    const invoice = await approvedInvoice();
-    const form = new FormData();
-    form.append("amount", "1000");
-    form.append("paymentMethod", "virement");
-    form.append("paymentReference", uniqueTestToken("ref"));
-    form.append("paymentDate", "2026-10-29");
-    form.append("proofFile", new Blob(["%PDF-1.4 TEST"], { type: "application/pdf" }), `${PROOF_NAME}.pdf`);
-    const created = await fetch(`${baseUrl}/api/supplier-invoices/${invoice.id}/settlements`, {
-      method: "POST",
-      headers: { Cookie: cookie },
-      body: form,
-    });
-    expect(created.status).toBe(201);
-    const settlements = await api("GET", `/api/supplier-invoices/${invoice.id}/settlements`);
-    const proof = await api("GET", `/api/supplier-invoices/${invoice.id}/settlements/${settlements.body[0].id}/proof`);
+  it("non-régression : le justificatif téléversé est servi (200)", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    const proof = await proofOf(invoice.id, settlement.id);
     expect(proof.status).toBe(200);
     expect(proof.text).toBe("%PDF-1.4 TEST");
+  });
+
+  it("non-régression : endpoint legacy avec un justificatif du dossier (200)", async () => {
+    const { settlement: uploaded } = await uploadedSettlement();
+    const { paid, settlements } = await legacyPayment(uploaded.proofReference);
+    expect(paid.status).toBe(200);
+    expect(settlements).toHaveLength(1);
+    expect(settlements[0].proofReference).toBe(uploaded.proofReference);
   });
 });
