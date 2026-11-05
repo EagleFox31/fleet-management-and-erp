@@ -14,7 +14,7 @@ import { prepareColumnUpdate } from "../lib/column-validation";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
-import { idParam, makeFailWith } from "../lib/route-helpers";
+import { makeFailWith } from "../lib/route-helpers";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { authenticate, isAdmin, isInventoryManager, isPartsCatalogManager, isStaff } from "../middleware/auth";
 import { partCatalogChildrenService } from "../services/part-catalog-children-service";
@@ -28,6 +28,8 @@ const failWith = makeFailWith(log);
 
 // Sans contrainte `([0-9]+)` dans le chemin : un id illisible (« 1abc ») doit recevoir un 400, pas tomber dans le 404 du routeur.
 const PART_ID_INVALID_MESSAGE = "Identifiant de pièce invalide.";
+const SPEC_ID_INVALID_MESSAGE = "Identifiant de spécification invalide.";
+const VARIANT_ID_INVALID_MESSAGE = "Identifiant de variante invalide.";
 /**
  * Couche 2 (AGENTS.md §2) : toute écriture sur une fiche pièce prévient le personnel, qui
  * ré-interroge liste, détail et écrans du magasin. Portée PART_CATALOG_EVENT_ROLES : ni
@@ -156,30 +158,30 @@ router.post("/parts/:id/update-stock", authenticate, isInventoryManager, async (
  * l'atelier choisissent une variante dans une demande) ; écriture : admin et magasin (isPartsCatalogManager).
  * Référentiel : pas d'événement temps réel, la liste se relit à l'ouverture de la fiche.
  */
-router.get("/parts/:id([0-9]+)/specifications", isStaff, async (req, res, next) => {
+router.get("/parts/:id/specifications", isStaff, async (req, res, next) => {
   try {
-    return res.json(await partCatalogChildrenService.listSpecifications(idParam(req.params.id, "Identifiant de pièce")));
+    return res.json(await partCatalogChildrenService.listSpecifications(parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE)));
   } catch (err) {
     return failWith(err, req, next, "Échec de la lecture des spécifications de la pièce");
   }
 });
 
-router.post("/parts/:id([0-9]+)/specifications", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.post("/parts/:id/specifications", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = insertPartSpecificationSchema.parse(req.body ?? {});
-    const created = await partCatalogChildrenService.createSpecification(idParam(req.params.id, "Identifiant de pièce"), data);
+    const created = await partCatalogChildrenService.createSpecification(parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE), data);
     return res.status(201).json(created);
   } catch (err) {
     return failWith(err, req, next, "Échec de la création de la spécification");
   }
 });
 
-router.patch("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.patch("/parts/:id/specifications/:specId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = updatePartSpecificationSchema.parse(req.body ?? {});
     const updated = await partCatalogChildrenService.updateSpecification(
-      idParam(req.params.id, "Identifiant de pièce"),
-      idParam(req.params.specId, "Identifiant de spécification"),
+      parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE),
+      parseRouteId(req.params.specId, SPEC_ID_INVALID_MESSAGE),
       data,
     );
     return res.json(updated);
@@ -188,11 +190,11 @@ router.patch("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, 
   }
 });
 
-router.delete("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.delete("/parts/:id/specifications/:specId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     await partCatalogChildrenService.deleteSpecification(
-      idParam(req.params.id, "Identifiant de pièce"),
-      idParam(req.params.specId, "Identifiant de spécification"),
+      parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE),
+      parseRouteId(req.params.specId, SPEC_ID_INVALID_MESSAGE),
     );
     return res.status(204).send();
   } catch (err) {
@@ -200,30 +202,30 @@ router.delete("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate,
   }
 });
 
-router.get("/parts/:id([0-9]+)/variants", isStaff, async (req, res, next) => {
+router.get("/parts/:id/variants", isStaff, async (req, res, next) => {
   try {
-    return res.json(await partCatalogChildrenService.listVariants(idParam(req.params.id, "Identifiant de pièce")));
+    return res.json(await partCatalogChildrenService.listVariants(parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE)));
   } catch (err) {
     return failWith(err, req, next, "Échec de la lecture des variantes de la pièce");
   }
 });
 
-router.post("/parts/:id([0-9]+)/variants", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.post("/parts/:id/variants", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = insertPartVariantSchema.parse(req.body ?? {});
-    const created = await partCatalogChildrenService.createVariant(idParam(req.params.id, "Identifiant de pièce"), data);
+    const created = await partCatalogChildrenService.createVariant(parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE), data);
     return res.status(201).json(created);
   } catch (err) {
     return failWith(err, req, next, "Échec de la création de la variante");
   }
 });
 
-router.patch("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.patch("/parts/:id/variants/:variantId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = updatePartVariantSchema.parse(req.body ?? {});
     const updated = await partCatalogChildrenService.updateVariant(
-      idParam(req.params.id, "Identifiant de pièce"),
-      idParam(req.params.variantId, "Identifiant de variante"),
+      parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE),
+      parseRouteId(req.params.variantId, VARIANT_ID_INVALID_MESSAGE),
       data,
     );
     return res.json(updated);
@@ -232,11 +234,11 @@ router.patch("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isP
   }
 });
 
-router.delete("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.delete("/parts/:id/variants/:variantId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     await partCatalogChildrenService.deleteVariant(
-      idParam(req.params.id, "Identifiant de pièce"),
-      idParam(req.params.variantId, "Identifiant de variante"),
+      parseRouteId(req.params.id, PART_ID_INVALID_MESSAGE),
+      parseRouteId(req.params.variantId, VARIANT_ID_INVALID_MESSAGE),
     );
     return res.status(204).send();
   } catch (err) {
