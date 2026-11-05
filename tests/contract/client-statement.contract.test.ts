@@ -5,6 +5,7 @@ import { clientPayments } from "../../shared/schema";
 import { MAX_DB_INTEGER_ID } from "../../shared/contracts/common";
 import { clientStatementPath, clientStatementResponseSchema } from "../../shared/contracts/client-statement";
 import { OUT_OF_SCOPE_MESSAGE } from "../../server/lib/client-scope";
+import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import {
@@ -138,10 +139,8 @@ describe("paramètres", () => {
     ["from[]=2026-01-01", "Période invalide."],
   ])("période invalide (%s) : 400, message lisible, aucun détail technique", async (query, message) => {
     const r = await get(`${clientStatementPath(clientId)}?${query}`, "admin");
-    expect(r.status).toBe(400);
+    expect(apiErrorProblems(r.status, r.body, 400)).toEqual([]);
     expect(r.body.message).toBe(message);
-    expect(typeof r.body.requestId).toBe("string");
-    expect(JSON.stringify(r.body)).not.toMatch(/Expected|received|zod|stack|issues/i);
   });
 });
 
