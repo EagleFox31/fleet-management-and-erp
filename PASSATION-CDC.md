@@ -66,3 +66,6 @@
 ## 2026-11-05 03:03 — c7 : PR doc « Suivis » (doublons LESSONS)
 - docs/lessons-suivis-doublon : la ligne « Suivis » du conflit de planning figurait deux fois dans son entrée et en copies dans deux entrées sans rapport (trigger SQL, justificatif fournisseur). Il n'en reste qu'une, la plus récente, dans l'entrée du conflit de planning.
 - PR ouvertes : #353 (id strict, relue par 0a), #354 (message de lancement chauffeur, relue). Stack de test c7test à arrêter en fin de session.
+
+## 2026-11-05 03:19 — c7 : réserves de #354 (fonction pure du message de lancement)
+- #353 et #354 fusionnées, #358 aussi. Branche fix/launch-message-followup : launchRefusalMessage extraite (continue au lieu de break), test unitaire, cas toast client, entrée LESSONS. PR à ouvrir, « mr » à 0a. Stack c7test à garder jusqu'à la fin de cette PR.

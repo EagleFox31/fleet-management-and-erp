@@ -2977,3 +2977,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : `parseMissionId` est la seule lecture de `:id` (chiffres seuls, entier sûr, positif, sinon 400 via `AppError`) ; la garde l'appelle et tous les handlers l'utilisent.
 - **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` échoue si un `router.param` fait un `return next()` nu.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
+
+## 2026-11-05 — Toast à message fixe qui masque la raison serveur
+
+- **Contexte** : le refus de lancement d'une mission disait pourquoi (budget, conflit), mais le toast du chauffeur affichait un texte fixe, et le message serveur de plus de 300 caractères était remplacé par un libellé générique.
+- **Cause racine** : deux masques empilés, un `onError` à texte codé en dur et la règle `looksTechnical` du contrat d'erreur ; chacun cachait la raison, et le test de contrat ne vérifiait que le statut.
+- **Classification** : message d'erreur inutile à l'utilisateur, non détecté par les tests.
+- **Résolution** : `userMessageOf(error, repli)` dans le toast ; `launchRefusalMessage` borne le message (conflit et budget d'abord, motifs en trop comptés).
+- **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, `tests/unit/server/launch-refusal-message.test.ts`, cas toast dans `tests/unit/client/api-error.test.ts`.
+- **Leçon généralisée** : un `onError` affiche `userMessageOf`, jamais un texte fixe ; tout message métier qui peut dépasser 300 caractères se borne à la source ; un test d'erreur vérifie le contenu du message, pas seulement le statut.
