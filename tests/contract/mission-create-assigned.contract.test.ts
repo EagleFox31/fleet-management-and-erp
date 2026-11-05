@@ -114,10 +114,11 @@ describe("création de mission avec affectation", { timeout: 120000 }, () => {
     const vehicleId = await vehicle();
     const driverId = await driver();
     const trigger = `c7_fail_${vehicleId}`;
-    // Échec réel côté base, après l'INSERT de la mission : un déclencheur refuse cette affectation-là.
+    // Échec réel côté base, après l'INSERT de la mission. Ciblé : WHEN (véhicule créé par ce test) et garde dans
+    // le corps ; l'insertion d'une affectation d'une autre session ne déclenche rien.
     await pool.query(`CREATE OR REPLACE FUNCTION ${trigger}() RETURNS trigger AS $$ BEGIN
       IF NEW.vehicle_id = ${vehicleId} THEN RAISE EXCEPTION 'affectation refusée par le test'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
-    await pool.query(`CREATE TRIGGER ${trigger} BEFORE INSERT ON assignments FOR EACH ROW EXECUTE FUNCTION ${trigger}()`);
+    await pool.query(`CREATE TRIGGER ${trigger} BEFORE INSERT ON assignments FOR EACH ROW WHEN (NEW.vehicle_id = ${vehicleId}) EXECUTE FUNCTION ${trigger}()`);
     try {
       const res = await create({ status: "planned", assignment: { vehicleId, driverId } });
       expect(res.status).toBe(500);
