@@ -41,10 +41,10 @@ async function postSettlement(invoiceRef: string | number, label: string) {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-async function approvedInvoice() {
+async function approvedInvoice(status = "approved") {
   const supplier = await createTestSupplier();
   ids.supplierIds.push(supplier.id);
-  const invoice = await createTestSupplierInvoice({ supplierId: supplier.id, status: "approved" });
+  const invoice = await createTestSupplierInvoice({ supplierId: supplier.id, status });
   ids.invoiceIds.push(invoice.id);
   return invoice;
 }
@@ -79,7 +79,16 @@ describe("POST /api/supplier-invoices/:id/settlements : cycle de vie du justific
   it("identifiant de facture invalide : 400, aucun fichier laissé sur le disque", async () => {
     const res = await postSettlement("abc", "badid");
     expect(res.status).toBe(400);
+    expect(res.body.message).toBe("ID facture invalide");
+    expect(res.body.requestId).toEqual(expect.any(String));
     expect(markedFiles("badid")).toEqual([]);
+  });
+
+  it("facture non approuvée : 409, aucun fichier laissé sur le disque", async () => {
+    const invoice = await approvedInvoice("pending");
+    const res = await postSettlement(invoice.id, "pending");
+    expect(res.status).toBe(409);
+    expect(markedFiles("pending")).toEqual([]);
   });
 
   it("diffusion qui lève après l'enregistrement : 201, le justificatif référencé reste sur le disque", async () => {

@@ -19,10 +19,6 @@ const DELETE_FROZEN: Record<string, { reason: string; unfreezeWhen: string }> = 
     reason: "req.file.path, chemin écrit par multer dans le dossier des preuves de la requête en cours, jamais lu en base",
     unfreezeWhen: "la suppression passe par une borne qui résout les liens sur le dossier des preuves (uploadedFileCandidates ou équivalent)",
   },
-  "server/api/supplier-invoices.routes.ts:removeUploadedProof:unlinkSync": {
-    reason: "req.file.path, chemin écrit par multer dans uploads/supplier-invoices/settlements pour la requête en cours, jamais lu en base",
-    unfreezeWhen: "la suppression passe par settlementProofPath (nom du fichier multer) ou une autre borne qui résout les liens",
-  },
 };
 
 const root = process.cwd();
@@ -42,6 +38,7 @@ describe("suppression de fichier dans server/api : borne qui résout les liens (
   it("le scan voit les suppressions connues (il n'est pas aveugle)", () => {
     const bounded = new Set(deletions.filter((s) => s.bounded).map(fileAccessKey));
     expect(bounded).toContain("server/api/document-renewals.routes.ts:removeUploadedFile:unlink");
+    expect(bounded).toContain("server/api/supplier-invoices.routes.ts:removeUploadedProof:unlinkSync");
   });
 
   it("toute suppression non bornée par une borne qui résout les liens figure dans la liste gelée", () => {
