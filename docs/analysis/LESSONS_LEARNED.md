@@ -2885,3 +2885,13 @@ Les `console.error("Error creating user:", error)` de `storage.createUser` et de
 
 ### Complément (2026-11-04) — l'import valide le PIN comme les routes
 L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `restoreBackup` passe par `pinForRestore` (`server/lib/user-pin.ts`) : vide → NULL, nombre → haché, non conforme (hors 4 chiffres et hors `$2a/b/y`) → NULL + `warn` avec le seul nom d'utilisateur, hash repris tel quel. Hachage fait avant `db.transaction` (pas de N bcrypt sous verrous après les DELETE), un PIN exotique n'annule plus toute la restauration. Prévention : `tests/unit/server/user-pin.test.ts` et `backup-import-service.test.ts`.
+
+## 2026-11-05 — Éligibilité CPC : une troisième copie locale de la règle avait dérivé
+
+- **Contexte** : à l'étape 3 de l'assistant de mission, un chauffeur au CPC valide apparaissait « NON FORMÉ » et « Suivant » restait muet (#327).
+- **Cause racine** : la règle existait en trois copies. `GET /api/drivers` recalculait `cpcStatus` depuis `cpcTrainingDate` (`cpc-training-service.ts`), les gardes de `missions.routes.ts` lisaient le statut enregistré (`drivers.cpc_status`), l'assistant relisait le statut recalculé. Date absente et statut enregistré valide : l'écran bloquait ce que le serveur acceptait. Le correctif naïf (ne lire que le statut enregistré) aurait ouvert l'inverse : aucune tâche planifiée ne remet `cpc_status` à jour, un chauffeur « FORMÉ » dont la formation a plus de 731 jours passait les quatre gardes (détecté en relecture sécurité avant fusion).
+- **Classification** : divergence de règle entre affichage et garde ; near miss de régression réglementaire (détecté avant déploiement).
+- **Résolution** : module unique `shared/constants/driver-cpc-eligibility.ts` (statut enregistré valide ET formation non expirée si la date existe, durée `CPC_VALIDITY_DAYS` partagée avec le service, jour d'expiration via `shared/constants/expiry-day.ts`), utilisé par les quatre gardes serveur et par l'assistant, qui affiche la raison du blocage.
+- **Prévention vérifiable** : `tests/unit/shared/driver-cpc-eligibility.test.ts` (date absente, récente, expirée, jour J) ; `tests/unit/client/mission-wizard-rules.test.ts` ; `tests/contract/mission-driver-cpc-status.contract.test.ts` (400 sur création, PATCH, ajout d'affectation et lancement pour un chauffeur « FORMÉ » à J-800 ; FORME sans accent accepté ; `cpcStatusRecorded` exposé), vu rouge sans le correctif (6 échecs sur 7) puis vert.
+- **Leçon généralisée** : un statut dérivé que l'on stocke sans recalcul planifié devient périmé en silence ; une garde réglementaire avec expiration juge la date, pas le statut. Une règle métier a un seul module partagé : toute copie locale finit par diverger.
+
