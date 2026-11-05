@@ -48,6 +48,7 @@ import {
   getRequirementUrgencyBorderColor,
 } from "@/lib/part-requirement-status";
 import { PartRequirementStatusHelp } from "@/components/inventory/part-requirement-status-help";
+import { XCircle } from "lucide-react";
 
 interface Part {
   id: number;
@@ -738,9 +739,9 @@ export function PartTable({ onRowClick }: PartTableProps) {
 
                     {isFinalStatus && (
                       <div className="px-3 py-2 rounded-xl bg-white border border-gray-100 text-sm text-gray-600">
-                        {req.status === 'issued' && '✓ Demande terminée — pièce sortie du stock'}
-                        {req.status === 'cancelled' && '✗ Demande annulée'}
-                        {req.status === 'rejected' && '✗ Demande rejetée'}
+                        {req.status === 'issued' && <><CheckCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande terminée — pièce sortie du stock</>}
+                        {req.status === 'cancelled' && <><XCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande annulée</>}
+                        {req.status === 'rejected' && <><XCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande rejetée</>}
                       </div>
                     )}
                   </div>

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { FlaskConical, Lock, Lightbulb } from "lucide-react";
 import { 
   User, 
   Wrench, 
@@ -137,7 +138,7 @@ export default function ProfilesDevPage() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-8 text-center">
           <h1 className="text-4xl font-bold text-slate-900 dark:text-white mb-2">
-            🧪 Interface de Test - Profils
+            <FlaskConical className="inline h-8 w-8 mr-2 align-text-bottom" aria-hidden />Interface de Test - Profils
           </h1>
           <p className="text-slate-600 dark:text-slate-400">
             Sélectionnez un profil pour vous connecter instantanément
@@ -181,7 +182,7 @@ export default function ProfilesDevPage() {
                         Username: <span className="text-slate-900 dark:text-white">{profile.username}</span>
                       </div>
                       <div className="text-slate-600 dark:text-slate-400 text-[10px] mt-1">
-                        🔒 Auto-login configuré
+                        <Lock className="inline h-3 w-3 mr-1" aria-hidden />Auto-login configuré
                       </div>
                     </div>
                     <Button 
@@ -211,7 +212,7 @@ export default function ProfilesDevPage() {
 
         <div className="mt-8 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
           <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
-            💡 Instructions
+            <Lightbulb className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Instructions
           </h3>
           <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
             <li>• Cliquez sur un profil pour vous connecter automatiquement</li>

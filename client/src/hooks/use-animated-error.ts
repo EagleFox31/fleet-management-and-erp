@@ -80,34 +80,34 @@ export function useAnimatedError() {
   const getErrorMessages = useCallback(() => {
     const messages = {
       network: [
-        "Oups ! Il semble que la connexion joue à cache-cache 🙈",
-        "Le serveur fait une petite pause café ☕",
-        "Houston, nous avons un problème de connexion 🚀"
+        "Oups ! Il semble que la connexion joue à cache-cache",
+        "Le serveur fait une petite pause café",
+        "Houston, nous avons un problème de connexion"
       ],
       auth: [
-        "Votre session a pris des vacances ! 🏖️",
-        "Il est temps de se reconnecter 🔑",
-        "Votre ticket d'entrée a expiré 🎫"
+        "Votre session a pris des vacances !",
+        "Il est temps de se reconnecter",
+        "Votre ticket d'entrée a expiré"
       ],
       validation: [
-        "Quelques détails manquent à l'appel 📝",
-        "Les données font la grève ! ✊",
-        "Il faut remplir tous les champs obligatoires 📋"
+        "Quelques détails manquent à l'appel",
+        "Les données font la grève !",
+        "Il faut remplir tous les champs obligatoires"
       ],
       server: [
-        "Le serveur a besoin d'une petite sieste 😴",
-        "Nos hamsters font une pause dans leur roue ⚙️",
-        "Le serveur jongle avec trop de demandes 🤹"
+        "Le serveur a besoin d'une petite sieste",
+        "Nos hamsters font une pause dans leur roue",
+        "Le serveur jongle avec trop de demandes"
       ],
       timeout: [
         "L'opération prend son temps... ⏰",
-        "Patience, ça charge ! 🐌",
-        "Le temps file mais pas assez vite 🕰️"
+        "Patience, ça charge !",
+        "Le temps file mais pas assez vite"
       ],
       general: [
-        "Quelque chose ne va pas comme prévu 🤔",
-        "Une petite erreur s'est glissée quelque part 🐛",
-        "Ce n'était pas dans le script ! 📜"
+        "Quelque chose ne va pas comme prévu",
+        "Une petite erreur s'est glissée quelque part",
+        "Ce n'était pas dans le script !"
       ]
     };
 

@@ -9,6 +9,7 @@ import { useLocation } from 'wouter';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Check } from "lucide-react";
 
 interface VehicleData {
   registrationNumber: string;
@@ -228,12 +229,12 @@ export function VehicleAcquisitionWorkflow({ vehicleData, onComplete, onCancel }
                 disabled={workflowData.vinValidated}
                 className="w-full"
               >
-                {workflowData.vinValidated ? 'VIN Validé ✓' : 'Valider le VIN'}
+                {workflowData.vinValidated ? <>VIN Validé <Check className="inline h-4 w-4 ml-1" aria-hidden /></> : 'Valider le VIN'}
               </Button>
               
               {workflowData.vinValidated && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <p className="text-sm text-green-700">✓ VIN validé avec succès</p>
+                  <p className="text-sm text-green-700"><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />VIN validé avec succès</p>
                 </div>
               )}
             </div>
@@ -272,7 +273,7 @@ export function VehicleAcquisitionWorkflow({ vehicleData, onComplete, onCancel }
                     className="text-sm"
                   />
                   {workflowData.documents[doc.key as keyof typeof workflowData.documents] && (
-                    <p className="text-xs text-green-600 mt-1">✓ Fichier téléchargé</p>
+                    <p className="text-xs text-green-600 mt-1"><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Fichier téléchargé</p>
                   )}
                 </div>
               ))}
@@ -307,7 +308,7 @@ export function VehicleAcquisitionWorkflow({ vehicleData, onComplete, onCancel }
               
               {workflowData.maintenanceScheduled && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <p className="text-sm text-green-700">✓ Maintenance planifiée</p>
+                  <p className="text-sm text-green-700"><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Maintenance planifiée</p>
                 </div>
               )}
             </div>

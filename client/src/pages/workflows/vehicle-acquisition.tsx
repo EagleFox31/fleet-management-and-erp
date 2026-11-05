@@ -20,6 +20,7 @@ import { userMessageOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
 import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2 } from 'lucide-react';
+import { Check } from "lucide-react";
 
 type DocumentKey = keyof VehicleAcquisitionData['documents'];
 type DocumentUploadStatus = 'idle' | 'uploading' | 'success' | 'error';
@@ -927,10 +928,10 @@ export function VehicleAcquisitionWorkflow() {
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
                   <h4 className="font-semibold text-blue-800 mb-2">Récapitulatif final</h4>
                   <div className="text-sm text-blue-700 space-y-1">
-                    <div>✓ Véhicule: {data.brand} {data.model} ({data.registrationNumber})</div>
-                    <div>✓ VIN validé: {data.vin}</div>
-                    <div>✓ Documents téléchargés</div>
-                    <div>✓ Maintenance programmée le {data.firstMaintenanceDate && new Date(data.firstMaintenanceDate).toLocaleDateString('fr-FR')}</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Véhicule: {data.brand} {data.model} ({data.registrationNumber})</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />VIN validé: {data.vin}</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Documents téléchargés</div>
+                    <div><Check className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Maintenance programmée le {data.firstMaintenanceDate && new Date(data.firstMaintenanceDate).toLocaleDateString('fr-FR')}</div>
                   </div>
                 </div>
 

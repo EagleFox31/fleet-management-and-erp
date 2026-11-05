@@ -403,7 +403,7 @@ export default function NewMission() {
 
               {/* Cargo */}
               <div className="border-t pt-6">
-                <h3 className="font-semibold mb-4">📦 Détails Cargo</h3>
+                <h3 className="font-semibold mb-4"><Package className="inline h-5 w-5 mr-2 align-text-bottom" aria-hidden />Détails Cargo</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2 space-y-2">
                     <Label htmlFor="cargoDescription">Description Cargo</Label>
