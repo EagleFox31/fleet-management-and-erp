@@ -3119,3 +3119,17 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : les contrats lot 9 et lot 10 importent `ROUTE_ID_OUT_OF_RANGE_MESSAGE` depuis `server/middleware/route-id-range-guard.ts` au lieu de recopier un texte.
 - **Prévention vérifiable** : les cas hors plage de `route-id-strict-lot9` et `route-id-strict-lot10` lisent la constante de la garde. Un changement de texte de la garde ne peut donc plus faire diverger ces contrats. Reste ouvert, à trancher par le circuit de fusion : exiger une branche à jour avec main avant fusion (protection « require branches to be up to date »), ou rejouer la CI après tout merge qui touche une surface partagée (middlewares montés sur `/api`, cliquets).
 - **Leçon généralisée** : une CI verte ne prouve que l'état « PR + main au moment du run ». Quand deux PR touchent le même comportement (ici la réponse à un id hors plage), la seconde à fusionner doit être rejouée contre un main qui contient la première. Un message d'erreur produit par une garde partagée se teste par sa constante, jamais par son texte recopié.
+
+## 2026-11-05 — Modifications non commitées perdues : `cd` en échec suivi d'un `git checkout -- .` dans le dépôt principal
+
+- **Contexte** : plusieurs sessions travaillent en parallèle, chacune dans son worktree (`.claude/worktrees/<nom>`), autour d'un même dépôt principal. Un agent de relecture a lancé une commande de la forme `cd <worktree>; ...; git checkout -q -- .`. Le `cd` a échoué (chemin absent) sans arrêter la commande, si bien que le `checkout` s'est exécuté dans le dépôt principal. Il a écrasé environ 60 fichiers `client/src/components/**`, `client/src/assets/logo-icon.svg` et `.claude/agents/fleet-manager.md`, modifiés et non commités. Aucune copie n'a été retrouvée : ni blob orphelin (`git fsck`), ni `git stash`, ni historique local de l'éditeur.
+- **Cause racine** : deux défauts combinés.
+  1. Une commande chaînée sans garde : l'échec du `cd` n'interrompt pas la suite, et une commande destructive s'exécute dans le répertoire courant, quel qu'il soit.
+  2. Du travail non commité laissé dans le dépôt principal, que toutes les sessions partagent comme répertoire de départ.
+- **Classification** : perte de données locale (travail en cours), opération destructive hors de son périmètre. Sans effet sur `main` ni sur la production.
+- **Résolution** : pas de restauration possible. Le travail perdu est à refaire depuis sa source.
+- **Prévention vérifiable** : règles ajoutées à `AGENTS.md` §8, contrôlées en relecture des commandes d'agents.
+  - Tout `cd` suivi d'une autre commande s'écrit `cd <chemin> || exit 1` (ou `cd <chemin> && ...`), jamais `cd <chemin>; ...`.
+  - Aucune commande qui jette du travail (`git checkout -- <chemins>`, `git reset --hard`, `git clean`, `git restore`) dans le dépôt principal.
+  - Aucun travail non commité dans le dépôt principal : toute modification se fait dans un worktree et se met à l'abri par un commit, même temporaire.
+- **Leçon généralisée** : une commande destructive ne doit dépendre d'aucune hypothèse sur le répertoire courant. Si son préalable peut échouer, l'échec doit arrêter la chaîne. Et un répertoire partagé par plusieurs sessions ne doit porter aucun état non commité, car il n'a pas de propriétaire unique qui le protège.
