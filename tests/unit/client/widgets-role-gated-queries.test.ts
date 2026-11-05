@@ -6,10 +6,11 @@ import { ALL_APP_ROLES, canReadClientBilling, canReadDocumentation } from "@shar
 const read = (path: string) => readFileSync(resolve(__dirname, "../../..", path), "utf8");
 
 describe("widgets : requêtes limitées aux rôles admis par la route serveur", () => {
-  it("statistiques de facturation : admin, secrétaire, logistique seulement", () => {
+  it("statistiques de facturation : admin, secrétaire, logistique et direction", () => {
     const admitted = ALL_APP_ROLES.filter((r) => canReadClientBilling(r));
-    expect([...admitted].sort()).toEqual(["admin", "logistics", "secretary"]);
-    expect(canReadClientBilling("management")).toBe(false);
+    expect([...admitted].sort()).toEqual(["admin", "logistics", "management", "secretary"]);
+    expect(canReadClientBilling("client")).toBe(false);
+    expect(canReadClientBilling("technician")).toBe(false);
     expect(canReadClientBilling(undefined)).toBe(false);
   });
 
@@ -23,6 +24,12 @@ describe("widgets : requêtes limitées aux rôles admis par la route serveur", 
     expect(src).toMatch(/enabled:\s*allowed/);
     expect(src).toMatch(/allowed\s*=\s*canReadClientBilling\(/);
     expect(src).toMatch(/if \(!allowed\) return null/);
+  });
+
+  it("le tableau de bord de facturation et le hook n'émettent la requête que pour un rôle admis", () => {
+    for (const file of ["client/src/components/operations/invoicing-dashboard.tsx", "client/src/hooks/useClientBilling.ts"]) {
+      expect(read(file)).toMatch(/enabled:\s*canReadClientBilling\(/);
+    }
   });
 
   it("la page rapports garde /api/documentation derrière canReadDocumentation", () => {

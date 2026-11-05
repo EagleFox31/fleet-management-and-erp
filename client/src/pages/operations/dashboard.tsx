@@ -51,10 +51,13 @@ export default function OperationsDashboard() {
       ? "Aucun client actif"
       : `${activeClientNames.slice(0, 4).join(", ")}${activeClientNames.length > 4 ? ` +${activeClientNames.length - 4}` : ""}`;
 
-  const missionsStatus = statusWhenLowerIsBetter(activeMissionsCount, {
-    warningAbove: 0,
-    criticalAbove: 5,
-  });
+  // Une erreur sur les missions actives ne vaut pas « 0 en cours » : pas de statut coloré.
+  const missionsStatus = activeMissions.isError
+    ? undefined
+    : statusWhenLowerIsBetter(activeMissionsCount, {
+        warningAbove: 0,
+        criticalAbove: 5,
+      });
   const revenueStatus = statusWhenHigherIsBetter(totalRevenue, {
     warningBelow: 1,
     criticalBelow: 0,
@@ -109,7 +112,7 @@ export default function OperationsDashboard() {
               label="Missions actives"
               featured // le pouls de l'exploitation
               value={formatNumber(totalMissions)}
-              subValue={`${activeMissionsCount} en cours`}
+              subValue={activeMissions.isError ? "En cours : indisponible" : `${activeMissionsCount} en cours`}
               icon={<ClipboardList className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
               valueClassName={missionsStatus === "critical" ? "text-red-600" : missionsStatus === "warning" ? "text-amber-600" : undefined}

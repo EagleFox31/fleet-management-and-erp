@@ -43,7 +43,7 @@ export function FuelConsumptionChart() {
   }
 
   const chartData = consumption.map(item => ({
-    date: new Date(item.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
+    date: new Date(item.date).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
     fullDate: new Date(item.date).toLocaleDateString('fr-FR'),
     litres: Math.round(item.totalLiters),
     montant: Math.round(item.totalAmount / 1000),
