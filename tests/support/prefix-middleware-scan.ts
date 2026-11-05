@@ -332,6 +332,14 @@ export function forbiddenInAnonymousMounts(source: string, file: string, read: R
           ts.forEachChild(x, walk);
         };
         walk(arg);
+        // import() et require() dans le corps echappent aux imports de tete : memes specificateurs que pour un module.
+        for (const spec of allSpecifiers(arg.getText(), file)) {
+          if (FORBIDDEN_IMPORT.test(spec)) out.push(`${file}:${line} fonction anonyme charge ${spec}`);
+          else {
+            const mod = read(spec, file);
+            if (mod) for (const chain of forbiddenImportsDeep(mod.source, mod.file, read)) out.push(`${file}:${line} fonction anonyme charge ${spec} > ${chain}`);
+          }
+        }
         for (const id of used) {
           const spec = importOf.get(id)!;
           if (FORBIDDEN_IMPORT.test(spec)) out.push(`${file}:${line} fonction anonyme utilise ${id} (${spec})`);

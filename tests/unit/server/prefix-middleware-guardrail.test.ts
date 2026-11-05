@@ -195,9 +195,13 @@ describe("middlewares montes sur un prefixe : recensement et liste blanche", () 
   });
 
   it("R3 : s'il est monte dans le code reel, il respecte la regle", () => {
-    const text = readFileSync(join(ROOT, INDEX), "utf8");
-    const first = firstRouterMountLine(text, INDEX);
-    expect(routeIdGuardIssues(occurrences(), first === undefined ? {} : { [INDEX]: first })).toEqual([]);
+    const read = fsModuleReader(ROOT);
+    const firsts: Record<string, number> = {};
+    for (const f of [INDEX, APP]) {
+      const first = firstRouterMountLine(readFileSync(join(ROOT, f), "utf8"), f, read);
+      if (first !== undefined) firsts[f] = first;
+    }
+    expect(routeIdGuardIssues(occurrences(), firsts)).toEqual([]);
   });
 
   it("R4 : un routeur se reconnait a sa declaration ou a son import, pas a son nom", () => {
@@ -281,6 +285,28 @@ describe("lot de suivi : R2 imports transitifs et fonctions anonymes", () => {
     expect(out[0]).toContain("server/api/index.ts:3");
     expect(out[0]).toContain("../db");
   });
+  it("R2e : un import() ou require() dans le corps d'une fonction anonyme montee est suivi", () => {
+    const dyn = 'app.use(async (req, res, next) => { const m = await import("./lib/h"); next(); });';
+    const req = 'app.use((req, res, next) => { require("./lib/h"); next(); });';
+    const sane = 'app.use(async (req, res, next) => { await import("./lib/clean"); next(); });';
+    const all = { ...files, "server/lib/clean.ts": "export const clean = () => 1;" };
+    expect(forbiddenInAnonymousMounts(dyn, "server/app.ts", mem(all))).toHaveLength(1);
+    expect(forbiddenInAnonymousMounts(req, "server/app.ts", mem(all))).toHaveLength(1);
+    expect(forbiddenInAnonymousMounts(sane, "server/app.ts", mem(all))).toEqual([]);
+    expect(forbiddenInAnonymousMounts('app.use(async () => { await import("./db"); });', "server/app.ts", mem(all))).toHaveLength(1);
+  });
+  it("R3b : la garde est comparee au premier routeur de son propre fichier, routeur importe par nom compris", () => {
+    const named = ['import { workOrderLaborRateRoutes } from "./wo.routes";', 'apiRouter.use("/lr", workOrderLaborRateRoutes);', "apiRouter.use(routeIdRangeGuard);"].join("\n");
+    const files2 = { "server/api/wo.routes.ts": "export const workOrderLaborRateRoutes = Router();" };
+    const first = firstRouterMountLine(named, INDEX, mem(files2));
+    expect(first).toBe(2);
+    const guard = (file: string, line: number): MountedMiddleware => ({ file, line, receiver: file === APP ? "app" : "apiRouter", method: "use", prefix: null, name: "routeIdRangeGuard" });
+    expect(routeIdGuardIssues([guard(INDEX, 3)], { [INDEX]: first! })).toHaveLength(1);
+    const app = ['app.use("/api", apiRouter);', "app.use(routeIdRangeGuard);"].join("\n");
+    const firstApp = firstRouterMountLine(app, APP);
+    expect(firstApp).toBe(1);
+    expect(routeIdGuardIssues([guard(APP, 2)], { [APP]: firstApp! })).toHaveLength(1);
+  });
   it("R2 : la source d'une entree est celle que le fichier de montage importe reellement", () => {
     const src = 'import { guard } from "../middleware/a";\nrouter.use(guard);';
     expect(importSourceOf(src, "server/api/index.ts", "guard", mem(files))).toBe("server/middleware/a.ts");
@@ -288,7 +314,7 @@ describe("lot de suivi : R2 imports transitifs et fonctions anonymes", () => {
   });
   it("R2 : dans le code reel, la source inscrite est le module importe (ou le fichier lui-meme)", () => {
     const read = fsModuleReader(ROOT);
-    const wrong = MIDDLEWARES_JUSTIFIES.filter((e) => e.type === "sans-base" && e.source && e.file).flatMap((e) => {
+    const wrong = MIDDLEWARES_JUSTIFIES.filter((e) => (e.type === "sans-base" || e.type === "ecrit-apres-reponse") && e.source && e.file).flatMap((e) => {
       const real = importSourceOf(readFileSync(join(ROOT, e.file!), "utf8"), e.file!, e.name, read);
       return real === e.source || (real === undefined && e.source === e.file) ? [] : [`${e.name} : inscrit ${e.source}, importe ${real ?? "(non importe)"}`];
     });
