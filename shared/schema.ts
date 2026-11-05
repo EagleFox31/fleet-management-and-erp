@@ -1170,7 +1170,9 @@ export const supplierInvoiceSettlements = pgTable("supplier_invoice_settlements"
   paymentReference: text("payment_reference").notNull(), // Référence bancaire/chèque/MM
   paymentDate: date("payment_date").notNull(),
   valueDate: date("value_date"), // Date de valeur (optionnel)
-  treasuryAccount: text("treasury_account"), // Compte/caisse de sortie
+  treasuryAccount: text("treasury_account"), // Compte/caisse de sortie (texte libre, gardé en repli)
+  // Compte du journal de trésorerie (lot T3) : le règlement y écrit sa sortie, dans la même transaction.
+  treasuryAccountId: integer("treasury_account_id").references(() => treasuryAccounts.id),
   proofReference: text("proof_reference"), // URL/ID justificatif externe
   status: text("status", { enum: ["recorded", "reconciled", "rejected"] }).notNull().default("recorded"),
   recordedBy: integer("recorded_by").references(() => users.id),
@@ -2114,7 +2116,7 @@ export type VehicleImportRow = typeof vehicleImports.$inferSelect;
 // Le solde courant n'est jamais stocké : il se calcule par fonction fenêtre sur (entry_date, id).
 export const treasuryAccounts = pgTable("treasury_accounts", {
   id: serial("id").primaryKey(),
-  code: text("code").notNull().unique(),
+  code: text("code").notNull().unique("treasury_accounts_code_key"),
   label: text("label").notNull(),
   kind: text("kind", { enum: TREASURY_ACCOUNT_KINDS }).notNull(),
   bankName: text("bank_name"),
@@ -2127,6 +2129,8 @@ export const treasuryAccounts = pgTable("treasury_accounts", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   check("treasury_accounts_kind_check", sql`${table.kind} IN ('bank', 'cash', 'fuel_card')`),
+  // Une seule carte carburant active : les pleins et recharges y écrivent sans ambiguïté (lot T2).
+  uniqueIndex("uq_treasury_accounts_active_fuel_card").on(table.kind).where(sql`${table.kind} = 'fuel_card' AND ${table.isActive}`),
 ]);
 
 export const treasuryEntries = pgTable("treasury_entries", {
@@ -2141,12 +2145,15 @@ export const treasuryEntries = pgTable("treasury_entries", {
   counterpartyLabel: text("counterparty_label"),
   transferGroup: text("transfer_group"),
   notes: text("notes"),
-  vehicleId: integer("vehicle_id").references(() => vehicles.id),
-  missionId: integer("mission_id").references(() => missions.id),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id, { onDelete: "set null" }),
+  missionId: integer("mission_id").references(() => missions.id, { onDelete: "set null" }),
   clientId: integer("client_id").references(() => clients.id),
   supplierId: integer("supplier_id").references(() => suppliers.id),
+  // Liens posés par le serveur seul (T2 plein ou recharge, T3 règlement). SET NULL : supprimer la source ne bloque rien.
+  fuelRecordId: integer("fuel_record_id").references(() => fuelRecords.id, { onDelete: "set null" }),
+  supplierSettlementId: integer("supplier_settlement_id").references(() => supplierInvoiceSettlements.id, { onDelete: "set null" }),
   // Clé de rejeu choisie par l'appelant : une même clé ne crée jamais deux lignes.
-  requestKey: text("request_key").unique(),
+  requestKey: text("request_key").unique("treasury_entries_request_key_key"),
   createdBy: integer("created_by").references(() => users.id),
   updatedBy: integer("updated_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -2156,6 +2163,7 @@ export const treasuryEntries = pgTable("treasury_entries", {
   index("idx_treasury_entries_transfer_group").on(table.transferGroup),
   check("treasury_entries_amount_check", sql`${table.amount} > 0`),
   check("treasury_entries_direction_check", sql`${table.direction} IN ('in', 'out')`),
+  check("treasury_entries_category_check", sql.raw(`category IN (${TREASURY_CATEGORIES.map((c) => `'${c}'`).join(", ")})`)),
 ]);
 
 export const insertTreasuryAccountSchema = createInsertSchema(treasuryAccounts).omit({
@@ -2168,6 +2176,8 @@ export const insertTreasuryAccountSchema = createInsertSchema(treasuryAccounts).
 export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omit({
   id: true,
   transferGroup: true,
+  fuelRecordId: true,
+  supplierSettlementId: true,
   createdBy: true,
   updatedBy: true,
   createdAt: true,

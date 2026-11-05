@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { PageLayout } from "@/components/layout/page-layout";
 import { useAuth } from "@/hooks/useAuth";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
+import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -48,6 +50,21 @@ import {
 type FuelPriceMode = "real" | "fallback" | "manual";
 type FuelPageTab = "records" | "consumption" | "recharges";
 
+/** Valeur du Select « Compte source » quand la recharge n'est pas suivie en trésorerie. */
+const NO_SOURCE_ACCOUNT = "none";
+
+type RechargePayload = {
+  amount: number;
+  quantity: number;
+  unitPrice: number;
+  priceSource: FuelPriceMode;
+  date: string;
+  paymentMode: string;
+  orderNumber?: string;
+  notes?: string;
+  sourceAccountId?: number;
+};
+
 interface FuelCardHistoryRecord {
   id: number;
   date: string | null;
@@ -82,6 +99,7 @@ export default function FuelPage() {
     manualUnitPrice: "",
     orderNumber: "",
     notes: "",
+    sourceAccountId: NO_SOURCE_ACCOUNT,
   });
   const canManageFuelCard = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
@@ -125,6 +143,16 @@ export default function FuelPage() {
   });
   const fuelCardRechargeHistory = fuelCardRechargeHistoryData || [];
 
+  // Banque ou caisse qui paie la recharge (lot T2). Liste vide (drapeau finance coupé, aucun compte)
+  // ou en erreur : le champ n'apparaît pas et la recharge part sans compte source, comme avant.
+  const canChooseSourceAccount = (FUEL_RECHARGE_SOURCE_ROLES as readonly string[]).includes(String(user?.role || ""));
+  const { data: sourceAccountsData } = useQuery<FuelRechargeSourceAccount[]>({
+    queryKey: ["/api/fuel-card/source-accounts"],
+    enabled: canChooseSourceAccount && isRechargeDialogOpen,
+    retry: false,
+  });
+  const sourceAccounts = sourceAccountsData ?? [];
+
   const realUnitPrice = Number(fuelCardBalance?.averagePricePerLiterReal || 0);
   const fallbackUnitPrice = Number(fuelCardBalance?.averagePricePerLiterFallback || 828);
 
@@ -165,34 +193,9 @@ export default function FuelPage() {
     Boolean(rechargeForm.paymentMode);
 
   const rechargeCardMutation = useMutation({
-    mutationFn: async () => {
-      const amount = Number(rechargeForm.amount);
-      const quantity = computedQuantity;
-      const unitPrice = selectedUnitPrice;
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new Error("Montant invalide");
-      }
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error("Quantité calculée invalide. Vérifiez le prix/litre.");
-      }
-      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-        throw new Error("Prix par litre invalide");
-      }
-      if (!rechargeForm.date || !rechargeForm.paymentMode) {
-        throw new Error("Date et mode de paiement obligatoires");
-      }
-
-      const response = await apiRequest("POST", "/api/fuel-card/recharge", {
-        amount,
-        quantity,
-        unitPrice,
-        priceSource: rechargeForm.priceMode,
-        date: rechargeForm.date,
-        paymentMode: rechargeForm.paymentMode,
-        orderNumber: rechargeForm.orderNumber || undefined,
-        notes: rechargeForm.notes || undefined,
-      });
-
+    // Corps figé au clic et passé en variables : la mutation ne relit pas l'état du formulaire.
+    mutationFn: async (payload: RechargePayload) => {
+      const response = await apiRequest("POST", "/api/fuel-card/recharge", payload);
       return response.json();
     },
     onSuccess: () => {
@@ -209,6 +212,7 @@ export default function FuelPage() {
         manualUnitPrice: String(realUnitPrice > 0 ? realUnitPrice : fallbackUnitPrice),
         orderNumber: "",
         notes: "",
+        sourceAccountId: NO_SOURCE_ACCOUNT,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/balance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/fuel-card/history"] });
@@ -224,6 +228,40 @@ export default function FuelPage() {
       });
     },
   });
+
+  const submitRecharge = useSingleFlightMutate(rechargeCardMutation.mutate);
+
+  const handleSubmitRecharge = () => {
+    const amount = Number(rechargeForm.amount);
+    const quantity = computedQuantity;
+    const unitPrice = selectedUnitPrice;
+    const invalid =
+      !Number.isFinite(amount) || amount <= 0
+        ? "Montant invalide."
+        : !Number.isFinite(unitPrice) || unitPrice <= 0
+          ? "Prix par litre invalide."
+          : !Number.isFinite(quantity) || quantity <= 0
+            ? "Quantité calculée invalide. Vérifiez le prix par litre."
+            : !rechargeForm.date || !rechargeForm.paymentMode
+              ? "Date et mode de paiement obligatoires."
+              : null;
+    if (invalid) {
+      toast({ title: "Erreur recharge", description: invalid, variant: "destructive" });
+      return;
+    }
+    const source = Number(rechargeForm.sourceAccountId);
+    submitRecharge({
+      amount,
+      quantity,
+      unitPrice,
+      priceSource: rechargeForm.priceMode,
+      date: rechargeForm.date,
+      paymentMode: rechargeForm.paymentMode,
+      orderNumber: rechargeForm.orderNumber || undefined,
+      notes: rechargeForm.notes || undefined,
+      sourceAccountId: Number.isInteger(source) && sourceAccounts.some((a) => a.id === source) ? source : undefined,
+    });
+  };
 
   const deleteFuelRecordMutation = useMutation({
     mutationFn: async (recordId: number) => {
@@ -929,6 +967,31 @@ export default function FuelPage() {
               </div>
             </div>
 
+            {sourceAccounts.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1">Compte qui paie la recharge (optionnel)</p>
+                <Select
+                  value={rechargeForm.sourceAccountId}
+                  onValueChange={(value) => setRechargeForm((prev) => ({ ...prev, sourceAccountId: value }))}
+                >
+                  <SelectTrigger data-testid="select-fuel-card-recharge-source">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_SOURCE_ACCOUNT}>Non précisé (entrée sur la carte seule)</SelectItem>
+                    {sourceAccounts.map((account) => (
+                      <SelectItem key={account.id} value={String(account.id)}>
+                        {account.label} ({account.kind === "bank" ? "banque" : "caisse"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Le compte choisi est débité du même montant au journal de trésorerie.
+                </p>
+              </div>
+            )}
+
             <div>
               <p className="text-xs font-medium text-gray-500 mb-1">N° commande / Référence (optionnel)</p>
               <Input
@@ -960,7 +1023,7 @@ export default function FuelPage() {
                 Annuler
               </Button>
               <Button
-                onClick={() => rechargeCardMutation.mutate()}
+                onClick={handleSubmitRecharge}
                 disabled={rechargeCardMutation.isPending || !canSubmitRecharge}
                 data-testid="button-submit-fuel-card-recharge"
               >

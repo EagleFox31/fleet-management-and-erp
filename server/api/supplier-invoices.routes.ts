@@ -14,6 +14,7 @@ import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
 import {
   SETTLEMENT_PROOF_EXTENSION_BY_MIME,
   SETTLEMENT_PROOF_PREFIX,
@@ -653,6 +654,8 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         paymentDate: readField(req.body?.paymentDate),
         valueDate: readField(req.body?.valueDate),
         treasuryAccount: readField(req.body?.treasuryAccount),
+        // Compte du journal de trésorerie (lot T3, facultatif) : vide = pas d'écriture au journal.
+        treasuryAccountId: readField(req.body?.treasuryAccountId) || undefined,
         notes: readField(req.body?.notes),
       };
 
@@ -663,6 +666,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         paymentDate: z.string().trim().min(1),
         valueDate: z.string().trim().optional(),
         treasuryAccount: z.string().trim().optional(),
+        treasuryAccountId: z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID).optional(),
         notes: z.string().trim().optional(),
       }).parse(normalizedPayload);
 
@@ -678,6 +682,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
           paymentDate: payload.paymentDate,
           valueDate: payload.valueDate || undefined,
           treasuryAccount: payload.treasuryAccount || undefined,
+          treasuryAccountId: payload.treasuryAccountId,
           proofReference,
           notes: payload.notes || undefined,
         }

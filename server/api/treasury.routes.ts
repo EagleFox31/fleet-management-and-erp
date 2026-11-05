@@ -6,7 +6,8 @@ import {
   currentTreasuryMonth,
   treasuryLedgerQuerySchema,
 } from "@shared/contracts/treasury";
-import { TREASURY_READ_ROLES, TREASURY_WRITE_ROLES } from "@shared/constants/roles";
+import { TREASURY_FUEL_CARD_READ_ROLES, TREASURY_READ_ROLES, TREASURY_WRITE_ROLES } from "@shared/constants/roles";
+import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
 import { parseRouteId } from "../lib/route-id";
 import { authorize } from "../middleware/auth";
@@ -14,11 +15,12 @@ import { ledgerToCsv, treasuryService } from "../services/treasury-service";
 
 /**
  * Journal de trésorerie (lot T1), derrière le drapeau `finance`. Saisie : administrateur et secrétariat ;
- * lecture : + direction. Contrat : shared/contracts/treasury.ts.
+ * lecture : + direction ; logistique : compte carte carburant seul (lot T2). Contrat : shared/contracts/treasury.ts.
  */
 const router = Router();
 const finance = requireFeature("finance");
-const canRead = authorize([...TREASURY_READ_ROLES]);
+/** Logistique (lot T2) : lecture du seul compte carte carburant, pas des banques ni des caisses. */
+const fuelCardOnly = (req: Request) => !(TREASURY_READ_ROLES as readonly string[]).includes(String(req.user?.role ?? ""));
 
 const handle =
   (fn: (req: Request, res: Response) => Promise<void>) =>
@@ -35,9 +37,10 @@ const currentMonth = () => currentTreasuryMonth();
 router.get(
   "/treasury/accounts",
   finance,
-  canRead,
-  handle(async (_req, res) => {
-    res.json(await treasuryService.listAccounts());
+  authorize([...TREASURY_FUEL_CARD_READ_ROLES]),
+  handle(async (req, res) => {
+    const accounts = await treasuryService.listAccounts();
+    res.json(fuelCardOnly(req) ? accounts.filter((a) => a.kind === "fuel_card") : accounts);
   }),
 );
 
@@ -55,11 +58,15 @@ router.post(
 router.get(
   "/treasury/accounts/:id/entries",
   finance,
-  canRead,
+  authorize([...TREASURY_FUEL_CARD_READ_ROLES]),
   handle(async (req, res) => {
     const accountId = parseRouteId(req.params.id, "Identifiant de compte invalide.");
     const query = treasuryLedgerQuerySchema.parse(req.query);
     const month = query.month ?? currentMonth();
+    // Hors carte : 403 avant la lecture du livre, et même réponse pour un compte absent (rien à sonder).
+    if (fuelCardOnly(req) && (await treasuryService.accountKind(accountId)) !== "fuel_card") {
+      throw new AppError(403, "Accès réservé au compte carte carburant.");
+    }
     const ledger = await treasuryService.ledger(accountId, month);
     if (query.format === "csv") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");

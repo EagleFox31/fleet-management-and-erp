@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { db, pool } from './db';
 import { users } from '../shared/schema';
+import { TREASURY_CATEGORIES } from '../shared/contracts/treasury';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
@@ -1436,14 +1437,18 @@ type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: 
 type WarnLogger = { warn: (obj: object, msg: string) => void };
 
 /** Contraintes absentes ou laissées NOT VALID (lignes non conformes ou doublons), journalisées en warn. */
-export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger = initLog) {
+export async function reportCdcConstraintGaps(
+  client: Queryable,
+  log: WarnLogger = initLog,
+  names: readonly string[] = CDC_RECONCILED_CONSTRAINTS,
+) {
   const { rows } = await client.query(
     `SELECT conname, convalidated FROM pg_constraint WHERE conname = ANY($1)`,
-    [CDC_RECONCILED_CONSTRAINTS],
+    [names],
   );
   const found = new Map(rows.map((r) => [r.conname as string, r.convalidated as boolean]));
-  const missing = CDC_RECONCILED_CONSTRAINTS.filter((name) => !found.has(name));
-  const notValidated = CDC_RECONCILED_CONSTRAINTS.filter((name) => found.get(name) === false);
+  const missing = names.filter((name) => !found.has(name));
+  const notValidated = names.filter((name) => found.get(name) === false);
   if (missing.length || notValidated.length) {
     log.warn(
       { missing, notValidated },
@@ -1457,11 +1462,14 @@ async function applyCdcSchema() {
   await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
 }
 
+/** Liste SQL des catégories, tirée du contrat partagé : la CHECK suit TREASURY_CATEGORIES sans copie à tenir. */
+const TREASURY_CATEGORY_CHECK = `category IN (${TREASURY_CATEGORIES.map((c) => `'${c}'`).join(', ')})`;
+
 /** Journal de trésorerie (lot T1) : tables et index, idempotents. Jumelle de shared/schema.ts (treasuryAccounts, treasuryEntries). */
 export const TREASURY_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS treasury_accounts (
     id serial PRIMARY KEY,
-    code text NOT NULL UNIQUE,
+    code text NOT NULL CONSTRAINT treasury_accounts_code_key UNIQUE,
     label text NOT NULL,
     kind text NOT NULL,
     bank_name text,
@@ -1486,24 +1494,131 @@ export const TREASURY_SCHEMA_STATEMENTS = [
     counterparty_label text,
     transfer_group text,
     notes text,
-    vehicle_id integer REFERENCES vehicles(id),
-    mission_id integer REFERENCES missions(id),
+    vehicle_id integer REFERENCES vehicles(id) ON DELETE SET NULL,
+    mission_id integer REFERENCES missions(id) ON DELETE SET NULL,
     client_id integer REFERENCES clients(id),
     supplier_id integer REFERENCES suppliers(id),
-    request_key text UNIQUE,
+    request_key text CONSTRAINT treasury_entries_request_key_key UNIQUE,
     created_by integer REFERENCES users(id),
     updated_by integer REFERENCES users(id),
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now(),
     CONSTRAINT treasury_entries_amount_check CHECK (amount > 0),
-    CONSTRAINT treasury_entries_direction_check CHECK (direction IN ('in', 'out'))
+    CONSTRAINT treasury_entries_direction_check CHECK (direction IN ('in', 'out')),
+    CONSTRAINT treasury_entries_category_check CHECK (${TREASURY_CATEGORY_CHECK})
   )`,
   `CREATE INDEX IF NOT EXISTS idx_treasury_entries_account_date ON treasury_entries (account_id, entry_date, id)`,
   `CREATE INDEX IF NOT EXISTS idx_treasury_entries_transfer_group ON treasury_entries (transfer_group)`,
+  // Lots T2 et T3 : liens plein/recharge et règlement fournisseur, carte carburant active unique.
+  `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS fuel_record_id integer REFERENCES fuel_records(id) ON DELETE SET NULL`,
+  `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS supplier_settlement_id integer REFERENCES supplier_invoice_settlements(id) ON DELETE SET NULL`,
+  `ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS treasury_account_id integer REFERENCES treasury_accounts(id)`,
+  // Deux cartes actives déjà en base : WARNING, l'index attend qu'on en désactive une (démarrage non bloqué).
+  // Verrou de table indisponible sous 5 s : WARNING aussi, l'index est retenté au démarrage suivant.
+  `DO $$
+BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
+  IF to_regclass('uq_treasury_accounts_active_fuel_card') IS NOT NULL THEN
+    RETURN;
+  END IF;
+  IF (SELECT count(*) FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active) > 1 THEN
+    RAISE WARNING 'treasury_accounts : plusieurs cartes carburant actives, index uq_treasury_accounts_active_fuel_card non posé';
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_accounts : index uq_treasury_accounts_active_fuel_card non posé, verrou de table indisponible sous 5 s';
+END $$`,
+  // Véhicule ou mission supprimés (restauration de sauvegarde, purge) : l'écriture reste, son lien passe à NULL.
+  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction. Verrou
+  // indisponible sous 5 s : WARNING, rien n'est remplacé (bloc annulé en entier), retenté au démarrage suivant.
+  `DO $$
+DECLARE
+  c record;
+  fk record;
+BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
+  FOR c IN SELECT * FROM (VALUES ('vehicle_id', 'vehicles'), ('mission_id', 'missions')) AS v(col, ref) LOOP
+    FOR fk IN
+      SELECT k.conname FROM pg_constraint k
+      JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+      WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = c.col AND k.confdeltype <> 'n'
+    LOOP
+      EXECUTE format('ALTER TABLE treasury_entries DROP CONSTRAINT %I, ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE SET NULL',
+        fk.conname, fk.conname, c.col, c.ref);
+    END LOOP;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_entries : FK vehicle_id et mission_id non passées en ON DELETE SET NULL, verrou de table indisponible sous 5 s';
+END $$`,
+  // Tables créées par drizzle-kit push, ou avant qu'une contrainte soit déclarée : CREATE TABLE IF NOT EXISTS
+  // a été sauté. Même réconciliation que le schéma CDC : CHECK en NOT VALID puis VALIDATE, UNIQUE renommé
+  // s'il existe sous un autre nom, WARNING plutôt que démarrage bloqué si des lignes existantes dérogent.
+  `DO $$
+DECLARE
+  c record;
+  existing text;
+  duplicates integer;
+BEGIN
+  FOR c IN SELECT * FROM (VALUES
+    ('treasury_accounts', 'treasury_accounts_kind_check', 'CHECK (kind IN (''bank'', ''cash'', ''fuel_card''))'),
+    ('treasury_entries', 'treasury_entries_amount_check', 'CHECK (amount > 0)'),
+    ('treasury_entries', 'treasury_entries_direction_check', 'CHECK (direction IN (''in'', ''out''))'),
+    ('treasury_entries', 'treasury_entries_category_check', 'CHECK (${TREASURY_CATEGORY_CHECK.replace(/'/g, "''")})')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  FOR c IN SELECT * FROM (VALUES
+    ('treasury_accounts', 'treasury_accounts_code_key', ARRAY['code']),
+    ('treasury_entries', 'treasury_entries_request_key_key', ARRAY['request_key'])
+  ) AS v(tbl, name, cols) LOOP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      CONTINUE;
+    END IF;
+    existing := NULL;
+    SELECT k.conname INTO existing FROM pg_constraint k
+    WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
+      AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey))
+        = (SELECT array_agg(x ORDER BY x) FROM unnest(c.cols) AS x)
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
+      CONTINUE;
+    END IF;
+    EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM %I WHERE %I IS NOT NULL GROUP BY %s HAVING count(*) > 1) d',
+      c.tbl, c.cols[1], array_to_string(c.cols, ', ')) INTO duplicates;
+    IF duplicates > 0 THEN
+      RAISE WARNING '% : % doublon(s), contrainte % non posée', c.tbl, duplicates, c.name;
+    ELSE
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I UNIQUE (%s)', c.tbl, c.name, array_to_string(c.cols, ', '));
+    END IF;
+  END LOOP;
+END $$`,
+];
+
+// Contraintes de trésorerie réconciliées au démarrage, relues et journalisées comme celles du CDC.
+export const TREASURY_RECONCILED_CONSTRAINTS: readonly string[] = [
+  'treasury_accounts_kind_check',
+  'treasury_entries_amount_check',
+  'treasury_entries_direction_check',
+  'treasury_entries_category_check',
+  'treasury_accounts_code_key',
+  'treasury_entries_request_key_key',
 ];
 
 async function applyTreasurySchema() {
   for (const statement of TREASURY_SCHEMA_STATEMENTS) await pool.query(statement);
+  await reportCdcConstraintGaps(pool, initLog, TREASURY_RECONCILED_CONSTRAINTS);
 }
 
 export async function initializeDatabase() {
