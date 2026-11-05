@@ -62,7 +62,7 @@ import {
 } from "../lib/mission-fuel-regularization";
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
-import { redactMissionPrice } from "../lib/mission-price-scope"; import { omitMissionBudget, redactMissionBudget } from "../lib/mission-budget-scope";
+import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
 
 const log = moduleLogger("missions");
 

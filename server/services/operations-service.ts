@@ -101,7 +101,7 @@ export class OperationsService {
     roadExpenses?: number;
     userId: number;
   }) {
-    console.log(`Creating mission from fuel record ${fuelRecordId}...`);
+    log.debug({ fuelRecordId }, "Création de mission depuis un plein");
     
     // Récupérer l'enregistrement carburant
     const [fuelRecord] = await db
@@ -132,7 +132,7 @@ export class OperationsService {
         })
         .returning(publicClientColumns);
       
-      console.log(`Client ${additionalData.clientName} créé automatiquement`);
+      log.info({ clientName: additionalData.clientName }, "Client créé automatiquement");
     }
 
     // Générer numéro de commande automatique si non fourni
@@ -168,10 +168,10 @@ export class OperationsService {
           completedAt: fuelRecord.date ? new Date(fuelRecord.date) : undefined,
         });
       
-      console.log(`Assignment créé: véhicule ${fuelRecord.vehicleId} → mission ${mission.id}`);
+      log.info({ vehicleId: fuelRecord.vehicleId, missionId: mission.id }, "Affectation créée");
     }
 
-    console.log(`Mission ${mission.id} créée depuis fuel record ${fuelRecordId}`);
+    log.info({ missionId: mission.id, fuelRecordId }, "Mission créée depuis un plein");
     
     return {
       mission,
@@ -189,7 +189,7 @@ export class OperationsService {
     endDate?: Date;
     status?: string;
   }) {
-    console.log(`Fetching missions for client: ${clientName}`);
+    log.debug({ clientName }, "Lecture des missions d'un client");
 
     // Récupérer le client
     const [client] = await db
@@ -252,7 +252,7 @@ export class OperationsService {
     const margin = totalRevenue - totalFuelCost;
     const marginPercentage = totalRevenue > 0 ? (margin / totalRevenue * 100) : 0;
 
-    console.log(`Found ${missionsList.length} missions for ${clientName}`);
+    log.debug({ clientName, count: missionsList.length }, "Missions d'un client lues");
 
     return {
       missions: missionsList,
@@ -272,7 +272,7 @@ export class OperationsService {
    * Destinations réelles: NDJAMENA, DLA-NDERE, TOUBORO
    */
   async getStatsByDestination() {
-    console.log("Calculating stats by destination...");
+    log.debug("Calcul des statistiques par destination");
 
     const allMissions = await db
       .select()
@@ -298,7 +298,7 @@ export class OperationsService {
     }, {} as Record<string, any>);
 
     const results = Object.values(byDestination);
-    console.log(`Stats calculated for ${results.length} destinations`);
+    log.debug({ count: results.length }, "Statistiques par destination calculées");
 
     return results;
   }
@@ -307,7 +307,7 @@ export class OperationsService {
    * Statistiques globales par client
    */
   async getStatsByClient() {
-    console.log("Calculating global stats by client...");
+    log.debug("Calcul des statistiques par client");
 
     const results = await db
       .select({
@@ -338,7 +338,7 @@ export class OperationsService {
       };
     });
 
-    console.log(`Stats calculated for ${stats.length} clients`);
+    log.debug({ count: stats.length }, "Statistiques par client calculées");
     return stats;
   }
 
@@ -351,7 +351,7 @@ export class OperationsService {
     startDate?: Date;
     endDate?: Date;
   }, driverScope?: number[]) {
-    console.log("Fetching all missions with filters:", filters);
+    log.debug({ filters }, "Lecture des missions filtrées");
 
     const conditions: any[] = [];
 
@@ -402,7 +402,7 @@ export class OperationsService {
       assignment: r.assignment,
     }));
 
-    console.log(`Fetched ${missionsList.length} missions`);
+    log.debug({ count: missionsList.length }, "Missions lues");
     return missionsList;
   }
 

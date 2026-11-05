@@ -1701,7 +1701,7 @@ export default function MissionDetailsPage() {
       `;
 
     const generatedAt = safeFormat(new Date().toISOString(), "dd/MM/yyyy HH:mm");
-    const budgetTotal = missionBudgetTotal > 0 ? formatPrice(missionBudgetTotal) : "Non renseigné";
+    const budgetTotal = budgetAmountsHidden ? "—" : missionBudgetTotal > 0 ? formatPrice(missionBudgetTotal) : "Non renseigné";
 
     return `
       <!doctype html>

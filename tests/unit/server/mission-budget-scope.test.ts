@@ -47,4 +47,24 @@ describe("redactMissionBudget (Q19)", () => {
     expect("budgetPlan" in out.workflowData).toBe(false);
     expect(out.workflowData.execution).toEqual({ startedAt: null });
   });
+
+  it("statistiques d'opérations : revenu et marge à null hors lecteurs, compteurs conservés", () => {
+    const stats = () => [
+      { clientName: "C", missionCount: 1, totalDistance: 120, totalRevenue: 987654, totalFuelCost: 1000, margin: 986654, marginPercentage: 99.9 },
+    ];
+    const hidden = redactMissionBudget({ role: "technician" }, stats()) as Record<string, any>[];
+    expect(hidden[0]).toEqual({ clientName: "C", missionCount: 1, totalDistance: 120, totalRevenue: null, totalFuelCost: 1000, margin: null, marginPercentage: null });
+
+    const reader = stats();
+    expect(redactMissionBudget({ role: "logistics" }, reader)).toBe(reader);
+
+    const omitted = (omitMissionBudget(stats()) as Record<string, any>[])[0];
+    for (const key of ["totalRevenue", "margin", "marginPercentage"]) expect(key in omitted).toBe(false);
+    expect(omitted.missionCount).toBe(1);
+  });
+
+  it("une marge hors statistique d'opérations n'est pas touchée", () => {
+    const value = { margin: 12, label: "x" };
+    expect(redactMissionBudget({ role: "technician" }, value)).toEqual({ margin: 12, label: "x" });
+  });
 });

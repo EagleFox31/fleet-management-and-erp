@@ -7,7 +7,10 @@ import { MISSION_BUDGET_READ_ROLES } from "@shared/constants/roles";
  *
  * Champs concernés :
  * - ligne mission : `estimatedFuelCost` et `workflowData.budgetPlan` (ancien budget de la fiche) ;
- * - totaux carburant d'une mission : `estimatedBudget` et `budgetDelta`.
+ * - totaux carburant d'une mission : `estimatedBudget` et `budgetDelta` ;
+ * - statistiques d'opérations (`/api/operations/stats/*`, `missions/by-client`) : `totalRevenue`, somme
+ *   d'`estimatedFuelCost`, et ce qui s'en déduit (`margin`, `marginPercentage`). Une seule mission dans le
+ *   groupe donnerait son montant exact ; les compteurs restent.
  *
  * Même forme que `mission-price-scope` : la clé reste présente et vaut `null`. Un lecteur absent est traité
  * comme non autorisé : échec fermé.
@@ -25,6 +28,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 type Mode = "null" | "omit";
+
+const REVENUE_KEYS = ["totalRevenue", "margin", "marginPercentage"] as const;
 
 function walk(value: unknown, mode: Mode): unknown {
   if (Array.isArray(value)) return value.map((item) => walk(item, mode));
@@ -46,6 +51,13 @@ function walk(value: unknown, mode: Mode): unknown {
     } else {
       next.estimatedBudget = null;
       next.budgetDelta = null;
+    }
+  }
+  if ("totalRevenue" in next) {
+    for (const key of REVENUE_KEYS) {
+      if (!(key in next)) continue;
+      if (mode === "omit") delete next[key];
+      else next[key] = null;
     }
   }
   return next;
