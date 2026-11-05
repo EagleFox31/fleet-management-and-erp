@@ -1,7 +1,7 @@
 ---
 name: fleet-manager
 description: Manager des agents FleetMaster, pour l'utilisateur non technique du moment. Utiliser pour savoir en termes clairs ce que les agents ont fait, où en est le chantier, ce qui bloque, quels risques courent, et quelles décisions l'utilisateur doit prendre, avec options, recommandation et conséquences. Lecture seule, ne lance aucun agent, ne modifie rien.
-model: opus
+model: sonnet
 effort: high
 skills: pmo-governance, evidence-based-engineering
 tools: Read, Grep, Glob, Bash
