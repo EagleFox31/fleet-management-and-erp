@@ -2981,7 +2981,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 
 ## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
 
-- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` supprimait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 21 appels).
+- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 19 appels).
 - **Cause racine** : le garde-fou cherchait une forme textuelle de l'appel, pas le comportement. Une fonction intermédiaire suffisait à le rendre aveugle.
 - **Classification** : garde-fou incomplet, faux négatif structurel ; sécurité et intégrité (mauvais objet visé).
 - **Résolution** : tous ces parseurs délèguent à `parseRouteId`. Le service CPC répond 404 au lieu de 500 pour un chauffeur absent.
