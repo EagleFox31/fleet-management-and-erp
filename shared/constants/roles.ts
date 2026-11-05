@@ -169,6 +169,10 @@ export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary"
 /** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
 export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
 
+export function canReadFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
  * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et

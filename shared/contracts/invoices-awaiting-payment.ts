@@ -15,8 +15,9 @@ const fcfa = z.number().min(0);
 export const invoiceAwaitingPaymentSchema = z.object({
   invoiceId: z.number().int().positive().max(MAX_DB_INTEGER_ID),
   invoiceNumber: z.string(),
-  clientId: z.number().int().positive().max(MAX_DB_INTEGER_ID),
-  clientName: z.string(),
+  /** `null` : facture sans client rattaché (colonne nullable), listée sans retenue. */
+  clientId: z.number().int().positive().max(MAX_DB_INTEGER_ID).nullable(),
+  clientName: z.string().nullable(),
   amountHt: fcfa,
   amountTtc: fcfa,
   withholdingVatAmount: fcfa,
@@ -66,6 +67,6 @@ export const clientWithholdingRequestSchema = z.object({
 
 export type InvoiceDepositRequest = z.infer<typeof invoiceDepositRequestSchema>;
 export type ClientWithholdingRequest = z.infer<typeof clientWithholdingRequestSchema>;
-export type InvoiceAwaitingPayment =z.infer<typeof invoiceAwaitingPaymentSchema>;
+export type InvoiceAwaitingPayment = z.infer<typeof invoiceAwaitingPaymentSchema>;
 export type InvoicesAwaitingPaymentTotals = z.infer<typeof invoicesAwaitingPaymentTotalsSchema>;
 export type InvoicesAwaitingPaymentResponse = z.infer<typeof invoicesAwaitingPaymentResponseSchema>;

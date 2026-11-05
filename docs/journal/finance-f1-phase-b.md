@@ -49,5 +49,19 @@
 ## Restes
 
 - Écran F1c : tableau `PremiumDataTable`, compteur de jours, totaux et bouton « Déposée le ».
-- Le cas du drapeau `finance` éteint n'est pas testé ici : le drapeau est lu au chargement de l'application de contrat.
 - Hors F1, renvoyés à O1 et O2 : `advance_rate`, `sector`, `invoice_kind`, `parent_invoice_id`, `paid_at`, `filed_at`.
+
+## Réserves de relecture et d'audit (2026-11-05)
+
+Quoi, comment, pourquoi, point par point :
+
+1. **Drapeau coupé** : le test de contrat vérifie le 404 sur les trois routes. Le drapeau est relu à chaque requête, il n'est pas figé au chargement.
+2. **Concurrence** : deux dépôts simultanés à la même date renvoient deux 200 identiques ; à deux dates différentes, ils renvoient un 200 et un 409. C'est le `FOR UPDATE` qui sérialise. Un taux envoyé en chaîne (`"19.25"`) donne 400.
+3. **Auteurs** : `client_invoices.deposited_by` et `clients.withholding_updated_by` prennent le compte connecté, avec une FK `users` en `ON DELETE SET NULL`. Une FK non bloquante n'entre pas dans `cleanup-users-fk-coverage`, qui ne recense que `NO ACTION` et `RESTRICT` ; la suppression d'un compte ne bloque donc pas et ne détruit aucune donnée finance. Ces colonnes sont omises des schémas d'insertion.
+4. **Fuite des taux** : `/api/clients` renvoyait les taux de retenue à tout le personnel. La liste, la fiche, la création, la modification et la restauration les retirent désormais pour les rôles sans lecture finance (`canReadFinanceReceivable`). La diffusion WebSocket, qui part à tout le personnel, les retire toujours.
+5. **CHECK** : ils sont posés `NOT VALID` puis passent par `VALIDATE CONSTRAINT`. Sur `check_violation`, un `WARNING` est émis et la contrainte reste `NOT VALID`, comme dans #122. Les trois CHECK sont ajoutés à `CDC_RECONCILED_CONSTRAINTS`.
+6. **Totaux HT/TTC** : ils sont sommés en SQL `numeric` par une fenêtre `sum() OVER ()`, et non plus avec `Number()` en JS. Les retenues et le net restent des FCFA entiers.
+7. **Facture sans client** : la liste passe en `LEFT JOIN`, donc une facture sans `client_id` est listée sans retenue (base `ht` par défaut). `clientId` et `clientName` deviennent nullables dans le contrat.
+8. Espace manquant dans `= z.infer`.
+
+Preuves : `finance-receivables.contract.test.ts` (32 tests), `finance-withholding-schema.test.ts`, `cdc-schema-idempotence` et `cleanup-users-fk-coverage` sont verts, plus les 5 contrats qui touchent `/api/clients` ; 2755 tests unitaires passent et tsc renvoie 0 erreur.

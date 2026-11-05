@@ -44,7 +44,7 @@ router.patch("/finance/invoices-awaiting-payment/:id/deposit", finance, authoriz
   try {
     const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     const { depositedAt } = invoiceDepositRequestSchema.parse(req.body);
-    const { item, changed } = await depositInvoice(id, depositedAt);
+    const { item, changed } = await depositInvoice(id, depositedAt, req.user!.id);
     if (changed) emit("client_invoice_deposited", id, req.requestId);
     res.json(item);
   } catch (err) {
@@ -57,7 +57,7 @@ router.patch("/finance/clients/:id/withholding", finance, authorize([...FINANCE_
   try {
     const id = parseRouteId(req.params.id, "Identifiant de client invalide.");
     const input = clientWithholdingRequestSchema.parse(req.body);
-    const { withholding, changed } = await updateClientWithholding(id, input);
+    const { withholding, changed } = await updateClientWithholding(id, input, req.user!.id);
     if (changed) emit("client_withholding_updated", id, req.requestId);
     res.json(withholding);
   } catch (err) {

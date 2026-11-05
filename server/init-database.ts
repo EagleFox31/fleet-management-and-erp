@@ -638,10 +638,22 @@ ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS deposited_at date;
 ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS withholding_vat_amount numeric(15,2);
 ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS withholding_is_amount numeric(15,2);
 ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS net_payable numeric(15,2);
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS deposited_by integer;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS withholding_updated_by integer;
 DO $$
 DECLARE
   c record;
+  f record;
 BEGIN
+  -- Auteur du dépôt et des taux : ON DELETE SET NULL, la trace ne bloque pas la suppression d'un compte.
+  FOR f IN SELECT * FROM (VALUES
+    ('client_invoices', 'client_invoices_deposited_by_users_id_fk', 'deposited_by'),
+    ('clients', 'clients_withholding_updated_by_users_id_fk', 'withholding_updated_by')
+  ) AS v(tbl, name, col) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = f.tbl::regclass AND conname = f.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES users(id) ON DELETE SET NULL', f.tbl, f.name, f.col);
+    END IF;
+  END LOOP;
   FOR c IN SELECT * FROM (VALUES
     ('clients_withholding_vat_rate_check', 'CHECK (withholding_vat_rate IS NULL OR (withholding_vat_rate >= 0 AND withholding_vat_rate <= 100))'),
     ('clients_withholding_is_rate_check', 'CHECK (withholding_is_rate IS NULL OR (withholding_is_rate >= 0 AND withholding_is_rate <= 100))'),
@@ -649,6 +661,13 @@ BEGIN
   ) AS v(name, def) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'clients'::regclass AND conname = c.name) THEN
       EXECUTE format('ALTER TABLE clients ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'clients'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE clients VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'clients : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
     END IF;
   END LOOP;
 EXCEPTION WHEN lock_not_available THEN
@@ -1121,6 +1140,10 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'idempotency_keys_state_check',
   'workshop_labor_rates_effective_from_key',
   'idempotency_keys_user_id_key_key',
+  // Retenues à la source (F1) : posées et validées par FINANCE_WITHHOLDING_SQL, avant ce relevé.
+  'clients_withholding_vat_rate_check',
+  'clients_withholding_is_rate_check',
+  'clients_withholding_is_base_check',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };

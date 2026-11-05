@@ -27,8 +27,8 @@ interface InvoiceRow {
   invoice_number: string;
   invoice_date: string;
   status: string;
-  client_id: number;
-  client_name: string;
+  client_id: number | null;
+  client_name: string | null;
   amount_ht: string;
   amount_ttc: string;
   deposited_at: string | null;
@@ -38,6 +38,9 @@ interface InvoiceRow {
   withholding_vat_rate: string | null;
   withholding_is_rate: string | null;
   withholding_is_base: WithholdingBase;
+  /** Totaux de la liste, sommés en numeric par Postgres (fenêtre sur toute la sélection). */
+  total_ht?: string;
+  total_ttc?: string;
 }
 
 function rowsOf<T>(result: unknown): T[] {
@@ -81,14 +84,15 @@ function toItem(row: InvoiceRow, today: string): InvoiceAwaitingPayment {
   };
 }
 
+// LEFT JOIN : une facture sans client (client_id nullable) reste listée, sans retenue (taux NULL, base HT).
 const SELECT_INVOICES = sql`
   SELECT i.id, i.invoice_number, i.invoice_date::text AS invoice_date, i.status,
          c.id AS client_id, c.name AS client_name,
          i.amount_ht, i.amount_ttc, i.deposited_at::text AS deposited_at,
          i.withholding_vat_amount, i.withholding_is_amount, i.net_payable,
-         c.withholding_vat_rate, c.withholding_is_rate, c.withholding_is_base
+         c.withholding_vat_rate, c.withholding_is_rate, COALESCE(c.withholding_is_base, 'ht') AS withholding_is_base
   FROM client_invoices i
-  JOIN clients c ON c.id = i.client_id`;
+  LEFT JOIN clients c ON c.id = i.client_id`;
 
 type Executor = Pick<typeof db, "execute">;
 
@@ -101,18 +105,21 @@ async function invoiceRow(executor: Executor, id: number, lock: boolean): Promis
 
 export async function listInvoicesAwaitingPayment(now: Date = new Date()): Promise<InvoicesAwaitingPaymentResponse> {
   const today = isoDateInZone(now);
-  const result = await db.execute(sql`${SELECT_INVOICES}
-    WHERE i.status IN ('pending', 'partial', 'overdue')
-    ORDER BY i.deposited_at ASC NULLS LAST, i.invoice_date ASC, i.id ASC`);
-  const items = rowsOf<InvoiceRow>(result).map((row) => toItem(row, today));
-  const sum = (key: "amountHt" | "amountTtc" | "withholdingVatAmount" | "withholdingIsAmount" | "netPayable") =>
+  const result = await db.execute(sql`
+    SELECT s.*, sum(s.amount_ht) OVER ()::text AS total_ht, sum(s.amount_ttc) OVER ()::text AS total_ttc
+    FROM (${SELECT_INVOICES} WHERE i.status IN ('pending', 'partial', 'overdue')) s
+    ORDER BY s.deposited_at ASC NULLS LAST, s.invoice_date ASC, s.id ASC`);
+  const rows = rowsOf<InvoiceRow>(result);
+  const items = rows.map((row) => toItem(row, today));
+  // Retenues et net : entiers FCFA arrondis par le module de calcul, la somme JS est exacte.
+  const sum = (key: "withholdingVatAmount" | "withholdingIsAmount" | "netPayable") =>
     items.reduce((total, item) => total + item[key], 0);
   return {
     items,
     totals: {
       count: items.length,
-      amountHt: sum("amountHt"),
-      amountTtc: sum("amountTtc"),
+      amountHt: num(rows[0]?.total_ht ?? null),
+      amountTtc: num(rows[0]?.total_ttc ?? null),
       withholdingVatAmount: sum("withholdingVatAmount"),
       withholdingIsAmount: sum("withholdingIsAmount"),
       netPayable: sum("netPayable"),
@@ -127,6 +134,7 @@ export async function listInvoicesAwaitingPayment(now: Date = new Date()): Promi
 export async function depositInvoice(
   id: number,
   depositedAt: string,
+  userId: number,
   now: Date = new Date(),
 ): Promise<{ item: InvoiceAwaitingPayment; changed: boolean }> {
   const today = isoDateInZone(now);
@@ -152,6 +160,7 @@ export async function depositInvoice(
           withholding_vat_amount = ${amounts.withholdingVatAmount},
           withholding_is_amount = ${amounts.withholdingIsAmount},
           net_payable = ${amounts.netPayable},
+          deposited_by = ${userId},
           updated_at = now()
       WHERE id = ${id}`);
     const updated = await invoiceRow(tx, id, false);
@@ -170,6 +179,7 @@ export interface ClientWithholding {
 export async function updateClientWithholding(
   clientId: number,
   input: ClientWithholdingRequest,
+  userId: number,
 ): Promise<{ withholding: ClientWithholding; changed: boolean }> {
   return db.transaction(async (tx) => {
     const current = rowsOf<{ withholding_vat_rate: string | null; withholding_is_rate: string | null; withholding_is_base: WithholdingBase }>(
@@ -195,6 +205,7 @@ export async function updateClientWithholding(
       SET withholding_vat_rate = ${input.vatWithholdingRate},
           withholding_is_rate = ${input.isWithholdingRate},
           withholding_is_base = ${input.isBase},
+          withholding_updated_by = ${userId},
           updated_at = now()
       WHERE id = ${clientId}`);
     return { withholding, changed: true };

@@ -37,16 +37,24 @@ describe("Retenues à la source (F1) : init-database et migration jumelle", () =
 
   it("colonnes et CHECK idempotents, sans rien supprimer ni réécrire", () => {
     const sql = fromMigration();
-    for (const col of ["withholding_vat_rate", "withholding_is_rate", "withholding_is_base"]) {
+    for (const col of ["withholding_vat_rate", "withholding_is_rate", "withholding_is_base", "withholding_updated_by"]) {
       expect(sql).toContain(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS ${col} `);
     }
-    for (const col of ["deposited_at", "withholding_vat_amount", "withholding_is_amount", "net_payable"]) {
+    for (const col of ["deposited_at", "deposited_by", "withholding_vat_amount", "withholding_is_amount", "net_payable"]) {
       expect(sql).toContain(`ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS ${col} `);
     }
     expect(sql).toContain("NOT VALID");
     expect(sql).toContain("IF NOT EXISTS (SELECT 1 FROM pg_constraint");
     expect(sql).toContain("pg_advisory_xact_lock(hashtext('fleetmaster_migrations'))");
-    expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
+    // CHECK posés NOT VALID puis validés ; une ligne hors contrainte laisse un WARNING, pas un échec.
+    expect(sql).toContain("VALIDATE CONSTRAINT");
+    expect(sql).toContain("EXCEPTION WHEN check_violation THEN");
+    // Auteurs : FK non bloquantes, la suppression d'un compte ne bloque ni n'efface la donnée finance.
+    for (const fk of ["client_invoices_deposited_by_users_id_fk", "clients_withholding_updated_by_users_id_fk"]) {
+      expect(sql).toContain(`'${fk}'`);
+    }
+    expect(sql).toContain("REFERENCES users(id) ON DELETE SET NULL");
+    expect(sql).not.toMatch(/DELETE FROM|^s*UPDATE |DROP |TRUNCATE /m);
   });
 
   it("le schéma Drizzle déclare les mêmes colonnes et CHECK", () => {
@@ -61,8 +69,8 @@ describe("Retenues à la source (F1) : init-database et migration jumelle", () =
 
   it("la fiche client et la création de facture ne peuvent pas écrire ces champs", () => {
     const clientKeys = Object.keys(insertClientSchema.shape);
-    for (const k of ["withholdingVatRate", "withholdingIsRate", "withholdingIsBase"]) expect(clientKeys).not.toContain(k);
+    for (const k of ["withholdingVatRate", "withholdingIsRate", "withholdingIsBase", "withholdingUpdatedBy"]) expect(clientKeys).not.toContain(k);
     const invoiceKeys = Object.keys(insertClientInvoiceSchema.shape);
-    for (const k of ["depositedAt", "withholdingVatAmount", "withholdingIsAmount", "netPayable"]) expect(invoiceKeys).not.toContain(k);
+    for (const k of ["depositedAt", "depositedBy", "withholdingVatAmount", "withholdingIsAmount", "netPayable"]) expect(invoiceKeys).not.toContain(k);
   });
 });

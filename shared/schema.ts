@@ -1309,6 +1309,7 @@ export const clients = pgTable("clients", {
   // Base de la retenue IS : 'ht' (feuille CNPCC) ou 'ttc' (feuille OPERATION). Repli 'ht' en attente
   // de la question client n°2 ; réglable par client.
   withholdingIsBase: text("withholding_is_base", { enum: ["ht", "ttc"] }).notNull().default("ht"),
+  withholdingUpdatedBy: integer("withholding_updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -1444,6 +1445,7 @@ export const clientInvoices = pgTable("client_invoices", {
   withholdingVatAmount: numeric("withholding_vat_amount", { precision: 15, scale: 2 }),
   withholdingIsAmount: numeric("withholding_is_amount", { precision: 15, scale: 2 }),
   netPayable: numeric("net_payable", { precision: 15, scale: 2 }),
+  depositedBy: integer("deposited_by").references(() => users.id, { onDelete: "set null" }),
 
   // Items facture (détails lignes)
   items: jsonb("items"), // [{description, quantity, unitPrice, total}]
@@ -1543,6 +1545,7 @@ export const insertClientSchema = createInsertSchema(clients).omit({
   withholdingVatRate: true,
   withholdingIsRate: true,
   withholdingIsBase: true,
+  withholdingUpdatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -1581,6 +1584,7 @@ export const insertClientInvoiceSchema = createInsertSchema(clientInvoices).omit
   withholdingVatAmount: true,
   withholdingIsAmount: true,
   netPayable: true,
+  depositedBy: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
