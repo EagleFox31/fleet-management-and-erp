@@ -675,3 +675,17 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
     - avant décaissement, et budget décaissé avant L1c : aucun mouvement ;
     - les autres statuts ne contre-passent rien ;
   - `tsc` 0 ; contrats `mission-budgets`, trésorerie, moyens de paiement et missions 76/76.
+
+## 2026-11-05 — Budget de mission (L1d) : réserves de relecture levées
+
+- **Quoi** : clôture et annulation concurrentes ne passent plus toutes les deux ; un rejeu ne réécrit ni la date d'annulation ni le journal applicatif.
+- **Comment** :
+  - `PUT /api/missions/:id/status` : UPDATE conditionné au statut lu, 409 sur 0 ligne, avant `onMissionStatusChange`. `cancelledAt` et `completedAt` ne sont écrits qu'au premier passage. Le fichier gelé ne reçoit que ces deux lignes ;
+  - `insertLinked` renvoie vrai si la ligne est écrite. `reverseMissionBudgetDisbursements` compte les lignes écrites, donc 0 sur un rejeu ;
+  - la docstring « Besoin du jour » est remise au-dessus de `dailyNeed`.
+- **Pourquoi** : relecture sécurité de #491. Statut lu hors verrou et effet argent sur la transition, voir `docs/analysis/LESSONS_LEARNED.md` (near miss du 2026-11-05).
+- **Preuve** : 3 contrats de plus :
+  - cas déterministe 409, rouge sans le correctif ;
+  - `Promise.all` clôture + annulation ;
+  - drapeau finance coupé après un décaissement au journal : contre-passation quand même.
+  - Le rejeu de l'annulation garde `cancelledAt` ; `mission-budgets` 34/34.

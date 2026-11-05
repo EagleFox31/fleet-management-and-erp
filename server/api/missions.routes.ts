@@ -3165,12 +3165,14 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           currentStep: targetStatus === "in_progress"
             ? Math.max(Number(mission.currentStep || 1), 3)
             : mission.currentStep,
-          completedAt: targetStatus === "completed" ? now : undefined,
-          cancelledAt: targetStatus === "cancelled" ? now : undefined,
+          completedAt: targetStatus === "completed" && currentStatus !== "completed" ? now : undefined,
+          cancelledAt: targetStatus === "cancelled" && currentStatus !== "cancelled" ? now : undefined,
           workflowData: nextWorkflowData,
         })
-        .where(eq(missions.id, missionId))
+        // Conditionné au statut lu : une transition concurrente passée entre-temps fait refuser celle-ci.
+        .where(and(eq(missions.id, missionId), eq(missions.status, currentStatus)))
         .returning();
+      if (!row) throw new AppError(409, "Le statut de cette mission a changé entre-temps : rechargez-la.");
       await onMissionStatusChange(tx, missionId, targetStatus, req.user?.id ?? null);
       // Une écriture par affectation visée, conditionnée au statut lu : une ligne annulée entre-temps
       // (DELETE concurrent) n'est pas ressuscitée.

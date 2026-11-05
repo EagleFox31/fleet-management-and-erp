@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   dailyNeedResponseSchema,
@@ -570,6 +570,8 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     expect(res.status).toBe(200);
     const cancelled = await cancelMission(missionId);
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const [{ cancelledAt }] = await db.select({ cancelledAt: missions.cancelledAt }).from(missions).where(eq(missions.id, missionId));
+    expect(cancelledAt).not.toBeNull();
 
     const entries = await entriesOf(approved.id);
     expect(entries).toHaveLength(4);
@@ -584,10 +586,68 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
     expect(row.status).toBe("disbursed");
 
-    // Rejeu de l'annulation (route rejouable) puis du service : rien de plus au journal.
-    await cancelMission(missionId);
+    // Rejeu de l'annulation (route rejouable) puis du service : rien de plus au journal, date d'annulation inchangée.
+    expect((await cancelMission(missionId)).status).toBe(200);
     await db.transaction((tx) => onMissionStatusChange(tx, missionId, "cancelled", userIds.get("admin")!));
     expect(await entriesOf(approved.id)).toHaveLength(4);
+    const [replayed] = await db.select({ cancelledAt: missions.cancelledAt }).from(missions).where(eq(missions.id, missionId));
+    expect(replayed.cancelledAt).toEqual(cancelledAt);
+  });
+
+  /** Mission livrée, budget décaissé au journal : le cas où clôture et annulation se disputent l'argent. */
+  async function deliveredDisbursed() {
+    const { missionId, approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(200);
+    await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, missionId));
+    return { missionId, approved };
+  }
+  const reversalsOf = async (budgetId: number) => (await entriesOf(budgetId)).filter((e) => e.requestKey.endsWith(":reverse"));
+  const statusOf = async (missionId: number) =>
+    (await db.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId)))[0].status;
+
+  it("L1d — clôture et annulation simultanées d'une mission livrée : une seule passe, l'argent suit le gagnant", async () => {
+    const { missionId, approved } = await deliveredDisbursed();
+    const results = await Promise.all(
+      ["completed", "cancelled"].map((status) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status })),
+    );
+    expect(results.filter((r) => r.status === 200), JSON.stringify(results)).toHaveLength(1);
+    const final = await statusOf(missionId);
+    expect(["completed", "cancelled"]).toContain(final);
+    expect(await reversalsOf(approved.id)).toHaveLength(final === "cancelled" ? 2 : 0);
+  });
+
+  it("L1d — clôture passée entre la lecture et l'écriture de l'annulation : 409, rien n'est contre-passé", async () => {
+    const { missionId, approved } = await deliveredDisbursed();
+    let pending!: ReturnType<typeof cancelMission>;
+    await db.transaction(async (tx) => {
+      // La clôture concurrente tient la ligne : l'annulation a lu « delivered » et attend son UPDATE.
+      await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+      pending = cancelMission(missionId);
+      let waiting = 0;
+      for (let i = 0; i < 200 && waiting === 0; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        const res = await db.execute(sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE 'update "missions"%'`);
+        waiting = Number((res.rows[0] as { n: number }).n);
+      }
+      expect(waiting, "l'annulation n'a pas atteint son UPDATE").toBeGreaterThan(0);
+      await tx.update(missions).set({ status: "completed", completedAt: new Date() }).where(eq(missions.id, missionId));
+    });
+    const res = await pending;
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(await statusOf(missionId)).toBe("completed");
+    expect(await reversalsOf(approved.id)).toHaveLength(0);
+  });
+
+  it("L1d — drapeau finance coupé après un décaissement au journal : l'annulation contre-passe quand même", async () => {
+    const { missionId, approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(200);
+    process.env.FEATURE_FLAGS = "finance=off";
+    try {
+      expect((await cancelMission(missionId)).status).toBe(200);
+    } finally {
+      process.env.FEATURE_FLAGS = "finance=on";
+    }
+    expect(await reversalsOf(approved.id)).toHaveLength(2);
   });
 
   it("L1d — annulation avant décaissement, ou budget décaissé avant L1c (sans écriture) : aucun mouvement", async () => {

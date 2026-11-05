@@ -284,7 +284,6 @@ export async function transitionMissionBudget(
   return budget;
 }
 
-/** Besoin du jour : somme en base des budgets de la date, au total et par statut. */
 /**
  * Changement de statut d'une mission, appelé dans sa transaction (PUT /api/missions/:id/status).
  * Seule l'annulation agit : budget non décaissé, aucun mouvement (il reste figé, cf. lockOpenMission) ;
@@ -300,6 +299,7 @@ export async function onMissionStatusChange(tx: Executor, missionId: number, nex
   if (reversed > 0) log.info({ missionId, budgetIds: disbursed.map((b) => b.id), reversed }, "budget de mission contre-passé (mission annulée)");
 }
 
+/** Besoin du jour : somme en base des budgets de la date, au total et par statut. */
 export async function dailyNeed(date: string): Promise<DailyNeed> {
   const rows = await db
     .select({

@@ -49,11 +49,14 @@ type LinkedLine = {
   supplierSettlementId?: number | null;
 };
 
-async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedLine): Promise<void> {
-  await tx
+/** Vrai si la ligne est écrite, faux si sa clé était déjà prise (rejeu). */
+async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedLine): Promise<boolean> {
+  const inserted = await tx
     .insert(treasuryEntries)
     .values({ ...line, createdBy: userId, updatedBy: userId })
-    .onConflictDoNothing({ target: treasuryEntries.requestKey });
+    .onConflictDoNothing({ target: treasuryEntries.requestKey })
+    .returning({ id: treasuryEntries.id });
+  return inserted.length > 0;
 }
 
 async function activeFuelCardAccountId(tx: DbExecutor): Promise<number | null> {
@@ -265,7 +268,7 @@ export async function linkMissionBudgetDisbursement(
  * au compte d'où il est sorti, par une entrée « in » de clé `<clé>:reverse`. Rejouable : une clé déjà
  * prise n'écrit rien. Sans ligne au journal (décaissement sans compte, ou budget non décaissé) : rien.
  * Comme `reverseFuelLink`, indépendant du drapeau : une sortie déjà écrite se contre-passe toujours.
- * Renvoie le nombre de lignes de contre-passation visées.
+ * Renvoie le nombre de lignes de contre-passation écrites : 0 sur un rejeu.
  */
 export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetIds: number[], userId: number | null): Promise<number> {
   if (budgetIds.length === 0) return 0;
@@ -284,7 +287,7 @@ export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetId
     const justified = 0;
     const amount = toTreasuryAmount(Number(line.amount) - justified);
     if (!amount) continue;
-    await insertLinked(tx, userId, {
+    const written = await insertLinked(tx, userId, {
       accountId: Number(line.account_id),
       direction: "in",
       amount,
@@ -294,7 +297,7 @@ export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetId
       missionId: line.mission_id,
       requestKey: `${line.request_key}:reverse`,
     });
-    reversed += 1;
+    if (written) reversed += 1;
   }
   return reversed;
 }
