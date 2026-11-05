@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { assignments, drivers, missions } from "../../shared/schema";
+import { assignments, drivers, missions, vehicleDocuments } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { apiErrorProblems } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
@@ -71,5 +71,38 @@ describe("PUT /api/missions/:id/status vers in_progress sans budget", { timeout:
     expect(res.body.message).toContain("Budget carburant non renseigné");
     expect(res.body.message).not.toContain("Contactez l'exploitation");
     expect(res.body.message.length).toBeLessThanOrEqual(300);
+  });
+});
+
+/**
+ * Garde-fou #354 / #466 : le message est borné et tait les motifs en trop, or l'écran tire de la
+ * liste complète l'action « Créer demande de renouvellement » (document manquant ou expiré). La liste
+ * complète voyage dans `motifs`, à la racine du corps (AppError details fusionnés par le gestionnaire central).
+ * Retirer `details` de la levée dans missions.routes.ts rend ce test rouge.
+ */
+describe("PUT /api/missions/:id/status : liste complète des motifs de refus", { timeout: 60000 }, () => {
+  it("un motif de document tu par la borne du message reste dans body.motifs", async () => {
+    const id = await launchableMissionWithoutBudget();
+    const [assignment] = await db.select().from(assignments).where(inArray(assignments.missionId, [id]));
+    await db.insert(vehicleDocuments).values({
+      vehicleId: assignment.vehicleId,
+      name: "Assurance périmée",
+      type: "assurance",
+      filename: "assurance.pdf",
+      filesize: 1,
+      fileType: "application/pdf",
+      filePath: "uploads/test-assurance.pdf",
+      expiryDate: new Date("2020-01-01T00:00:00Z"),
+    } as any);
+
+    const res = await session.call("PUT", `/api/missions/${id}/status`, { actor: "logistics", body: { status: "in_progress" } });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    // Borne du contrat d'erreur : 300 (la borne de 240 des motifs exclut le suffixe « et N autres points »).
+    expect(res.body.message.length).toBeLessThanOrEqual(300);
+    expect(Array.isArray(res.body.motifs), JSON.stringify(res.body)).toBe(true);
+    expect(res.body.motifs).toContain("Assurance manquante ou expirée.");
+    // Le scénario ne prouve rien si le message contient déjà le motif : il doit avoir été tu.
+    expect(res.body.message).not.toContain("Assurance manquante ou expirée.");
+    expect(res.body.motifs.length).toBeGreaterThan(1);
   });
 });

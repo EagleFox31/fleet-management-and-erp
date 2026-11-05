@@ -85,7 +85,6 @@ const CRITICAL_RESYNC_KEYS: string[] = [
   "/api/clients/all",
   "/api/operations/stats/by-client",
   "/api/operations/stats/by-destination",
-  "/api/operations/stats/summary",
   "/api/operations/missions/by-client",
   "/api/operations/missions/active",
   "/api/operations/missions/upcoming",
@@ -1098,7 +1097,6 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/clients/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/missions/by-client"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/missions"] });
       break;
 
@@ -1148,7 +1146,6 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       queryClient.invalidateQueries({ queryKey: ["/api/operations/missions/upcoming"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-destination"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
       break;
 
     case "purchase_order_created":
@@ -1255,7 +1252,6 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
       }
       queryClient.invalidateQueries({ queryKey: ["/api/operations/missions/by-client"] });
       queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
       break;
 
     case "driver_cpc_updated":
@@ -1549,7 +1545,6 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
         queryClient.invalidateQueries({ queryKey: ["/api/clients/all"] });
         queryClient.invalidateQueries({ queryKey: ["/api/operations/missions/by-client"] });
         queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
       } else if (update.entity === "mission") {
         const missionFromPayload = extractMissionFromPayload(payload);
         if (missionFromPayload) {
@@ -1578,7 +1573,6 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
         queryClient.invalidateQueries({ queryKey: ["/api/operations/missions/upcoming"] });
         queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-client"] });
         queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/by-destination"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/operations/stats/summary"] });
       } else if (update.entity === "driver") {
         const driverId = toNumericId(update.entityId);
         if (driverId) {

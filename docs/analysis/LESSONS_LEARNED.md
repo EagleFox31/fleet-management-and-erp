@@ -3171,3 +3171,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - Après une édition par script, si `git diff --stat` montre un fichier réécrit en entier, ramener ses fins de ligne à celles du blob HEAD avant de commiter.
   - `.gitattributes` : déjà `eol=lf` sur `deploy/*.sh` et `.claude/hooks/*.mjs`, là où un CR casse l'exécution. Pas de `* text=auto` global : le dépôt contient encore un blob CRLF (`tests/support/file-access-scan.ts`, relevé `git ls-files --eol`). Une règle globale le ferait apparaître modifié dans tous les worktrees et imposerait une renormalisation du dépôt, ce qui est hors périmètre ici.
 - **Leçon généralisée** : un diff qui couvre tout un fichier sans raison est d'abord un soupçon de fins de ligne. Il se vérifie en une commande avant toute restauration ou toute alerte de perte.
+
+## 2026-11-05 — Champ d'erreur retiré (#354) : l'écran de lancement de mission perdait sa liste de motifs
+
+- **Contexte** : #354 a retiré `errors[]` du refus de lancement de mission (`PUT /api/missions/:id/status`) pour que le message central ne soit pas remplacé. Le message est borné et taisait des motifs ; or l'écran tire de la liste complète la proposition « Créer demande de renouvellement » (document manquant ou expiré). L'action disparaissait dès que le motif document n'entrait pas dans le message. Seul l'e2e `17:379` le voyait.
+- **Cause racine** : le retrait d'un champ de réponse a été jugé sans chercher ses consommateurs côté client, et aucun test de contrat ne figeait ce champ.
+- **Classification** : régression de contrat HTTP, consommateur client cassé en silence.
+- **Résolution** : #466 remonte la liste complète en `motifs` à la racine du corps (`AppError` `details`, fusionnés par `mergeErrorDetails`).
+- **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, cas « un motif de document tu par la borne du message reste dans body.motifs ». Rouge si `details` est retiré de la levée dans `server/api/missions.routes.ts`.
+- **Leçon généralisée** : retirer ou renommer un champ de réponse exige de chercher ses lecteurs (client, e2e) et de figer le champ conservé par un test de contrat, pas seulement par un e2e.

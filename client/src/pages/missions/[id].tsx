@@ -97,6 +97,8 @@ interface ApiErrorInfo {
   title: string;
   description?: string;
   details?: string[];
+  /** Motifs complets d'un refus de lancement (`motifs` du corps), absents du message qui est borné. */
+  motifs?: string[];
 }
 
 type MissionDocumentType = "carte_grise" | "assurance" | "visite_technique";
@@ -134,6 +136,11 @@ function extractApiError(error: unknown): ApiErrorInfo {
   if (!(error instanceof Error)) return { title: "Erreur inconnue" };
   // Contrat shared/errors.ts : motifs dans `errors[{ field, message }]`, repris
   // dans `message`. On garde les motifs en liste et on retire leur doublon du titre.
+  if (isApiError(error) && !error.fieldErrors?.length) {
+    const body = error.body as { motifs?: unknown } | null;
+    const motifs = Array.isArray(body?.motifs) ? body.motifs.filter((m): m is string => typeof m === "string") : [];
+    if (motifs.length > 0) return { title: userMessageOf(error), motifs };
+  }
   if (isApiError(error) && error.fieldErrors?.length) {
     const motifs = error.fieldErrors.map((item) => item.message).filter(Boolean);
     const separator = error.message.indexOf(" : ");
@@ -823,7 +830,7 @@ export default function MissionDetailsPage() {
     onError: (error: unknown, nextStatus) => {
       const apiError = extractApiError(error);
       if (nextStatus === "in_progress") {
-        const detectedDocumentTypes = extractDocumentIssueTypes(apiError.details);
+        const detectedDocumentTypes = extractDocumentIssueTypes([...(apiError.details ?? []), ...(apiError.motifs ?? [])]);
         setLaunchBlockedDocumentTypes(detectedDocumentTypes);
       } else {
         setLaunchBlockedDocumentTypes([]);

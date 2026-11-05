@@ -175,7 +175,7 @@ const GELES: Record<string, number> = {
   "client/src/pages/procurement/suppliers/index.tsx": 36,
   "client/src/pages/procurement/suppliers/new.tsx": 30,
   "client/src/pages/profile.tsx": 48,
-  "client/src/pages/reports/index.tsx": 53,
+  "client/src/pages/reports/index.tsx": 51,
   "client/src/pages/secretary/dashboard.tsx": 47,
   "client/src/pages/settings.tsx": 40,
   "client/src/pages/technician/dashboard.tsx": 30,

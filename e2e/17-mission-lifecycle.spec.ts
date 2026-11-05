@@ -249,7 +249,7 @@ test.describe("MIS1 : lancement refusé pour une raison métier", () => {
     },
     {
       name: "CPC du chauffeur devenu invalide après l'affectation",
-      expected: "CPC chauffeur non valide (NON FORMÉ).",
+      expected: "CPC non valide (statut : NON FORMÉ). Un chauffeur au statut FORMÉ est requis.",
       setup: async () => ({ vehicle: await createVehicle(), driver: await createDriver() }),
       afterAssign: async (driverId: number) => {
         await db.update(drivers).set({ cpcStatus: "NON FORMÉ" }).where(eq(drivers.id, driverId));

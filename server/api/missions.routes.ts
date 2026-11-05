@@ -3066,7 +3066,11 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
 
       if (launchErrors.length > 0) {
         // Les motifs vont dans le message, sans `fieldErrors` (le gestionnaire central remplacerait alors le message).
-        throw new AppError(400, launchRefusalMessage(launchErrors, { forDriver: statusDriverScope !== undefined }));
+        // `details.motifs` garde la liste complète : le message est borné et peut taire un motif, or l'écran
+        // en tire l'action « Créer demande de renouvellement » (document manquant ou expiré).
+        throw new AppError(400, launchRefusalMessage(launchErrors, { forDriver: statusDriverScope !== undefined }), {
+          details: { motifs: launchErrors },
+        });
       }
     }
 
