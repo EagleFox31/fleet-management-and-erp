@@ -1,7 +1,8 @@
-import { createServer, type Server } from "http";
+import { createServer, request as httpRequest, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import type { PoolClient } from "@neondatabase/serverless";
+import { db, pool } from "../../server/db";
 import { listActiveAdminIds } from "../../server/lib/last-admin";
 import { users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
@@ -132,9 +133,32 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     for (const id of active) if (!ids.userIds.includes(id)) preexisting.add(id);
     if (active.length > 0) await db.update(users).set({ deletedAt: new Date() }).where(inArray(users.id, active));
   }
+  // Restauration en finally. Si le processus meurt en plein bloc, les admins préexistants restent
+  // désactivés : la base de test locale se répare par `UPDATE users SET deleted_at = NULL WHERE role = 'admin'`.
   afterAll(async () => {
-    if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
+    try {
+      if (lockHolder) await lockHolder.query("SELECT pg_advisory_unlock_all()").catch(() => undefined);
+    } finally {
+      lockHolder?.release(true);
+      if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
+    }
   });
+
+  // Connexion du test qui tient elle-même le verrou de la garde pour forcer l'entrelacement.
+  let lockHolder: PoolClient | undefined;
+  const LOCK = "SELECT pg_advisory_lock(hashtext('fleetmaster_last_admin'))";
+  const UNLOCK = "SELECT pg_advisory_unlock(hashtext('fleetmaster_last_admin'))";
+  async function takeLock() {
+    lockHolder = await pool.connect();
+    await lockHolder.query(LOCK);
+  }
+  async function dropLock() {
+    if (!lockHolder) return;
+    await lockHolder.query(UNLOCK);
+    lockHolder.release();
+    lockHolder = undefined;
+  }
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function onlyTheseAreActiveAdmins(a: number, b: number) {
     const active = await listActiveAdminIds();
@@ -158,6 +182,82 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     expect(statuses.filter((s) => s === 200)).toHaveLength(1);
     expect(statuses.filter((s) => REFUSALS.includes(s))).toHaveLength(1);
     expect(await listActiveAdminIds()).toHaveLength(1);
+  });
+
+  it("la garde attend le verrou (entrelacement forcé) : rien n'est supprimé tant qu'il est tenu", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    await takeLock();
+    let answered = false;
+    const pending = call("DELETE", `/api/users/${b.id}`, { cookie: a.cookie }).then((r) => {
+      answered = true;
+      return r;
+    });
+    await sleep(800);
+    expect(answered).toBe(false);
+    expect((await rowOf(b.id)).deletedAt).toBeNull();
+    await dropLock();
+    expect((await pending).status).toBe(204);
+    expect((await rowOf(b.id)).deletedAt).not.toBeNull();
+    expect(await listActiveAdminIds()).toEqual([a.id]);
+  });
+
+  it("déconnexion du client pendant l'attente du verrou : connexion et verrou rendus, un admin reste actif", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    await takeLock();
+    const port = Number(new URL(baseUrl).port);
+    const req = httpRequest({ host: "127.0.0.1", port, path: `/api/users/${b.id}`, method: "DELETE", headers: { Cookie: a.cookie } });
+    req.on("error", () => undefined);
+    req.end();
+    await sleep(600); // la requête attend le verrou côté serveur
+    req.destroy();
+    await sleep(300);
+    await dropLock();
+    // le serveur obtient le verrou, constate la coupure et le rend au plus tard au délai de secours
+    const probe = await pool.connect();
+    try {
+      let free = false;
+      for (let i = 0; i < 40 && !free; i++) {
+        const { rows } = await probe.query("SELECT pg_try_advisory_lock(hashtext('fleetmaster_last_admin')) AS ok");
+        free = rows[0].ok === true;
+        if (!free) await sleep(250);
+      }
+      expect(free).toBe(true);
+      await probe.query(UNLOCK);
+    } finally {
+      probe.release();
+    }
+    expect((await listActiveAdminIds()).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("le détenteur coupe sa connexion en cours de traitement : il reste un admin actif, le verrou est rendu", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    const port = Number(new URL(baseUrl).port);
+    // A envoie sa suppression de B puis ferme aussitôt la socket, sans lire la réponse.
+    const aborted = new Promise<void>((resolve) => {
+      const req = httpRequest({ host: "127.0.0.1", port, path: `/api/users/${b.id}`, method: "DELETE", headers: { Cookie: a.cookie } });
+      req.on("error", () => resolve());
+      req.on("close", () => resolve());
+      req.end();
+      setTimeout(() => req.destroy(), 5);
+    });
+    const [, rb] = await Promise.all([aborted, call("DELETE", `/api/users/${a.id}`, { cookie: b.cookie })]);
+    expect([204, 400, 401, 403]).toContain(rb.status);
+    // la garde reste cohérente et le verrou est rendu : une nouvelle requête aboutit sans attendre 15 s
+    expect((await listActiveAdminIds()).length).toBeGreaterThanOrEqual(1);
+    // une opération qui prend le verrou aboutit (au plus après le délai de secours, si finish n'est pas venu)
+    const probe = await newAdmin();
+    const victim = await newAdmin();
+    const res = await call("PATCH", `/api/users/${victim.id}`, { cookie: probe.cookie, body: { role: "warehouse" } });
+    expect(res.status).toBe(200);
   });
 
   for (const path of ["/api/users", "/api/admin/users"]) {
