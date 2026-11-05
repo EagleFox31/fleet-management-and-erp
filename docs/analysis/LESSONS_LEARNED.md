@@ -3056,6 +3056,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
 - **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
 - **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
+## 2026-11-05 — Documents téléversés : téléchargement en pièce jointe (clôt le reste ouvert ci-dessus)
+
+- **Contexte** : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` servaient le fichier sans `nosniff`, le second en ligne avec le type enregistré au dépôt.
+- **Cause racine** : chaque route fixait ses en-têtes elle-même ; rien ne liait le type servi à la liste blanche du téléversement.
+- **Classification** : sécurité, fichiers téléversés.
+- **Résolution** : les deux routes quittent `server/routes.ts` pour `server/api/uploaded-documents.routes.ts`, monté avant `registerRoutes`. Elles passent par `sendUploadedFile` (`server/lib/uploaded-file-response.ts`) : chemin résolu par `uploadedFileCandidates`, pièce jointe, `nosniff`, type gardé seulement s'il est dans la liste blanche du téléversement et cohérent avec l'extension, sinon `application/octet-stream`. Côté écran, le bouton d'aperçu des documents d'acquisition (doublon du téléchargement) et les onglets vides sont retirés.
+- **Prévention** : contrat `uploaded-documents-download-headers` (rouge sur l'ancien code, mutation du filtre de type tuée) ; `server/routes.ts` sort de la liste gelée de `file-serving-nosniff`.
+- **Leçon** : un fichier fourni par un utilisateur se sert par un seul helper qui fixe les en-têtes ; une route n'écrit pas ses propres `Content-Type` / `Content-Disposition`.
+
 ## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
 
 - **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
