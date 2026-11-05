@@ -4,7 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
-import { isCheckViolation } from "./lib/pg-errors";
+import { isAdminGuardDbRefusal, isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
@@ -671,6 +671,7 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updatedUser;
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) throw error;
       storageLog.error({ err: error, userId: id }, "Error updating user");
       return undefined;
     }
@@ -700,6 +701,7 @@ export class DatabaseStorage implements IStorage {
         .returning({ id: users.id });
       return Boolean(deletedUser);
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) throw error;
       storageLog.error({ err: error, userId: id }, "Error deleting user");
       return false;
     }
