@@ -161,7 +161,7 @@ export default function ManagementReportsPage() {
               size="sm"
               disabled={!data || isLoading}
               onClick={() => data && exportManagementBoardPackPdf(data)}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-md shadow-emerald-900/30 cursor-pointer"
+              className="bg-success hover:bg-success text-white font-semibold rounded-xl shadow-md shadow-emerald-900/30 cursor-pointer"
             >
               <Download className="mr-2 h-4 w-4" />
               Télécharger le PDF
@@ -175,7 +175,7 @@ export default function ManagementReportsPage() {
               onClick={() => data && exportCsvData(data, currentTab)}
               className="rounded-xl"
             >
-              <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" />
+              <FileSpreadsheet className="mr-2 h-4 w-4 text-success" />
               Export CSV
             </Button>
           </div>
@@ -199,7 +199,7 @@ export default function ManagementReportsPage() {
                   <h3 className="text-base font-bold text-foreground">Board Pack Direction Générale (Complet)</h3>
                   <p className="text-xs text-muted-foreground">Document officiel 4 pages pour le Conseil d'Administration et le Comité de Direction</p>
                 </div>
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-success/15 text-success dark:text-success border border-success">
                   Document Stratégique 4 Pages
                 </span>
               </div>
@@ -222,12 +222,12 @@ export default function ManagementReportsPage() {
                   <span className="text-[11px] text-muted-foreground block">Carburant + Fournisseurs + Atelier + FDR</span>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-1">
-                  <span className="text-xs font-medium text-emerald-800 dark:text-emerald-300 block">Résultat Brut d'Exploitation (HT)</span>
-                  <span className="text-2xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
+                <div className="p-4 rounded-2xl bg-success/10 border border-success space-y-1">
+                  <span className="text-xs font-medium text-success dark:text-success block">Résultat Brut d'Exploitation (HT)</span>
+                  <span className="text-2xl font-black text-success dark:text-success tabular-nums">
                     {formatPrice(data.result.grossHT)}
                   </span>
-                  <span className="text-[11px] font-bold text-emerald-600 block">Marge : {data.result.marginPercent.toFixed(1)}% du CA HT</span>
+                  <span className="text-[11px] font-bold text-success block">Marge : {data.result.marginPercent.toFixed(1)}% du CA HT</span>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-900/40 space-y-1">
@@ -286,22 +286,22 @@ export default function ManagementReportsPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 rounded-3xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Encaissé (factures clients réglées)</span>
-                  <div className="text-3xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
+                <div className="p-5 rounded-3xl bg-success/10 dark:bg-success/20 border border-success/30 space-y-2">
+                  <span className="text-xs font-semibold text-success dark:text-success">Encaissé (factures clients réglées)</span>
+                  <div className="text-3xl font-black text-success dark:text-success tabular-nums">
                     {formatPrice(data.revenue.collectedTTC)}
                   </div>
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                  <p className="text-xs text-success dark:text-success font-medium">
                     Taux de recouvrement : {((data.revenue.collectedTTC / Math.max(data.revenue.invoicedTTC, 1)) * 100).toFixed(0)}%
                   </p>
                 </div>
 
-                <div className="p-5 rounded-3xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Créances Clients à Recouvrer</span>
-                  <div className="text-3xl font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                <div className="p-5 rounded-3xl bg-warning/10 dark:bg-warning/20 border border-warning/30 space-y-2">
+                  <span className="text-xs font-semibold text-warning-text dark:text-warning-text">Créances Clients à Recouvrer</span>
+                  <div className="text-3xl font-black text-warning-text dark:text-warning-text tabular-nums">
                     {formatPrice(data.revenue.outstandingTTC)}
                   </div>
-                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                  <p className="text-xs text-warning-text dark:text-warning-text font-medium">
                     Factures émises non encore réglées
                   </p>
                 </div>
@@ -333,7 +333,7 @@ export default function ManagementReportsPage() {
                   <h3 className="text-base font-bold text-foreground">Audit Technique &amp; TCO du Parc Roulant</h3>
                   <p className="text-xs text-muted-foreground">Performance financière par tracteur, coût kilométrique d'usure et aide au renouvellement</p>
                 </div>
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-warning/15 text-warning-text dark:text-warning-text border border-warning">
                   Usage Exploitation / Atelier
                 </span>
               </div>
@@ -349,9 +349,9 @@ export default function ManagementReportsPage() {
                   </p>
                 </div>
 
-                <div className="p-5 rounded-3xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">CPK Usure Mécanique</span>
-                  <div className="text-3xl font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                <div className="p-5 rounded-3xl bg-warning/10 dark:bg-warning/20 border border-warning/30 space-y-2">
+                  <span className="text-xs font-semibold text-warning-text dark:text-warning-text">CPK Usure Mécanique</span>
+                  <div className="text-3xl font-black text-warning-text dark:text-warning-text tabular-nums">
                     {data.executiveKpis.cpkMaintenance.fcfPerKm != null ? `${formatPrice(Math.round(data.executiveKpis.cpkMaintenance.fcfPerKm))}` : "—"}
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -392,12 +392,12 @@ export default function ManagementReportsPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 rounded-3xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Note Moyenne Flotte</span>
-                  <div className="text-3xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
+                <div className="p-5 rounded-3xl bg-success/10 dark:bg-success/20 border border-success/30 space-y-2">
+                  <span className="text-xs font-semibold text-success dark:text-success">Note Moyenne Flotte</span>
+                  <div className="text-3xl font-black text-success dark:text-success tabular-nums">
                     {data.driverScorecard.summary.averageOverallScore ? `${Math.round(data.driverScorecard.summary.averageOverallScore)}/100` : "—"}
                   </div>
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                  <p className="text-xs text-success dark:text-success font-medium">
                     {data.driverScorecard.summary.driverCount} conducteurs évalués
                   </p>
                 </div>
@@ -412,12 +412,12 @@ export default function ManagementReportsPage() {
                   </p>
                 </div>
 
-                <div className="p-5 rounded-3xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 space-y-2">
-                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Frais de Route (FDR Réels)</span>
-                  <div className="text-3xl font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                <div className="p-5 rounded-3xl bg-warning/10 dark:bg-warning/20 border border-warning/30 space-y-2">
+                  <span className="text-xs font-semibold text-warning-text dark:text-warning-text">Frais de Route (FDR Réels)</span>
+                  <div className="text-3xl font-black text-warning-text dark:text-warning-text tabular-nums">
                     {formatPrice(data.expenses.roadExpenses)}
                   </div>
-                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                  <p className="text-xs text-warning-text dark:text-warning-text font-medium">
                     Indemnités per diem versées sur missions
                   </p>
                 </div>

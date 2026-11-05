@@ -463,7 +463,7 @@ export default function PartRequestsIndex() {
     low: "bg-gray-100 text-gray-500",
     medium: "bg-yellow-100 text-yellow-700",
     high: "bg-orange-100 text-orange-700",
-    critical: "bg-red-100 text-red-700",
+    critical: "bg-destructive/15 text-destructive-text",
   };
   const urgencyLabels: Record<string, string> = { low: "Faible", medium: "Moyen", high: "Élevé", critical: "Critique" };
   const reqStatusStyles: Record<string, string> = {
@@ -473,9 +473,9 @@ export default function PartRequestsIndex() {
     partially_received: "bg-orange-100 text-orange-700",
     received: "bg-sky-100 text-sky-700",
     delivered: "bg-teal-100 text-teal-700",
-    rejected: "bg-red-100 text-red-700",
-    cancel_requested: "bg-amber-100 text-amber-700",
-    cancelled: "bg-red-100 text-red-600",
+    rejected: "bg-destructive/15 text-destructive-text",
+    cancel_requested: "bg-warning/15 text-warning-text",
+    cancelled: "bg-destructive/15 text-destructive-text",
     issued: "bg-teal-100 text-teal-700",
   };
   const reqStatusLabels: Record<string, string> = {
@@ -495,22 +495,22 @@ export default function PartRequestsIndex() {
     <div className="space-y-5">
 
       {/* ── Header card ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center shrink-0">
-                <Package className="h-5 w-5 text-green-600" />
+              <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
+                <Package className="h-5 w-5 text-success" />
               </div>
               <div>
-                <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Stock / Inventaire</span>
+                <span className="text-xs font-semibold uppercase tracking-widest text-success">Stock / Inventaire</span>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">Demandes de pièces</h1>
                 <p className="text-sm text-gray-400 mt-0.5">Suivi et validation des demandes de réapprovisionnement</p>
               </div>
             </div>
             <Button size="sm" onClick={() => setLocation('/inventory')} data-testid="btn-new-request"
-              className="bg-green-600 hover:bg-green-700 text-white gap-1.5 shrink-0">
+              className="bg-success hover:brightness-90 text-white gap-1.5 shrink-0">
               <Package className="h-3.5 w-3.5" />Nouvelle demande
             </Button>
           </div>
@@ -519,7 +519,7 @@ export default function PartRequestsIndex() {
             {[
               { icon: <Package className="h-4 w-4 text-blue-500" />, iconBg: "bg-blue-50", label: "Total", value: stats.total },
               { icon: <Clock className="h-4 w-4 text-orange-500" />, iconBg: "bg-orange-50", label: "En attente", value: stats.pending, alert: stats.pending > 0 },
-              { icon: <CheckCircle className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50", label: "Approuvées", value: stats.approved },
+              { icon: <CheckCircle className="h-4 w-4 text-success" />, iconBg: "bg-success/10", label: "Approuvées", value: stats.approved },
               { icon: <ShoppingCart className="h-4 w-4 text-purple-500" />, iconBg: "bg-purple-50", label: "Commandées", value: stats.ordered },
               { icon: <Truck className="h-4 w-4 text-teal-500" />, iconBg: "bg-teal-50", label: "Livrées", value: stats.delivered },
             ].map((kpi) => (
@@ -556,10 +556,10 @@ export default function PartRequestsIndex() {
         {showProcessHelp && (
           <div className="px-5 pb-5 space-y-4">
             {/* Stepper */}
-            <div className="flex items-center justify-between bg-white rounded-xl border border-blue-100 p-4 overflow-x-auto gap-2">
+            <div className="flex items-center justify-between bg-card rounded-xl border border-blue-100 p-4 overflow-x-auto gap-2">
               {[
                 { icon: <Clock className="h-4 w-4 text-orange-600" />, bg: "bg-orange-100", label: getPartRequirementStatusLabel("pending"), sub: "Atelier valide" },
-                { icon: <ThumbsUp className="h-4 w-4 text-green-600" />, bg: "bg-green-100", label: getPartRequirementStatusLabel("approved"), sub: "Magasin commande" },
+                { icon: <ThumbsUp className="h-4 w-4 text-success" />, bg: "bg-success/15", label: getPartRequirementStatusLabel("approved"), sub: "Magasin commande" },
                 { icon: <ShoppingCart className="h-4 w-4 text-purple-600" />, bg: "bg-purple-100", label: getPartRequirementStatusLabel("ordered"), sub: "En transit" },
                 { icon: <PackageCheck className="h-4 w-4 text-teal-600" />, bg: "bg-teal-100", label: getPartRequirementStatusLabel("received"), sub: "Stock crédité" },
                 { icon: <Truck className="h-4 w-4 text-cyan-600" />, bg: "bg-cyan-100", label: getPartRequirementStatusLabel("issued"), sub: "Remise à l'atelier" },
@@ -576,10 +576,10 @@ export default function PartRequestsIndex() {
             </div>
             {/* Roles */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className={`rounded-xl border px-4 py-3 ${isRequestApprover ? 'border-green-200 bg-green-50' : 'border-gray-100 bg-gray-50'}`}>
+              <div className={`rounded-xl border px-4 py-3 ${isRequestApprover ? 'border-success/30 bg-success/10' : 'border-gray-100 bg-gray-50'}`}>
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">
                   Validation (Atelier / Admin / Secrétariat)
-                  {isRequestApprover && <span className="ml-2 rounded-full bg-green-100 text-green-700 px-2 py-0.5 font-semibold normal-case tracking-normal">Vous</span>}
+                  {isRequestApprover && <span className="ml-2 rounded-full bg-success/15 text-success px-2 py-0.5 font-semibold normal-case tracking-normal">Vous</span>}
                 </p>
                 <ul className="text-xs space-y-1 text-gray-500">
                   <li>• Valider ou refuser les demandes en attente</li>
@@ -587,10 +587,10 @@ export default function PartRequestsIndex() {
                   <li>• Suivre l'avancement des livraisons</li>
                 </ul>
               </div>
-              <div className={`rounded-xl border px-4 py-3 ${isSupplyOperator ? 'border-green-200 bg-green-50' : 'border-gray-100 bg-gray-50'}`}>
+              <div className={`rounded-xl border px-4 py-3 ${isSupplyOperator ? 'border-success/30 bg-success/10' : 'border-gray-100 bg-gray-50'}`}>
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">
                   Magasin / Secrétariat
-                  {isSupplyOperator && <span className="ml-2 rounded-full bg-green-100 text-green-700 px-2 py-0.5 font-semibold normal-case tracking-normal">Vous</span>}
+                  {isSupplyOperator && <span className="ml-2 rounded-full bg-success/15 text-success px-2 py-0.5 font-semibold normal-case tracking-normal">Vous</span>}
                 </p>
                 <ul className="text-xs space-y-1 text-gray-500">
                   <li>• Créer des demandes proactives (stock bas / rupture)</li>
@@ -606,16 +606,16 @@ export default function PartRequestsIndex() {
 
       {/* ── Awaiting parts WOs (warehouse only) ── */}
       {isSupplyOperator && awaitingPartsWorkOrders.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/30 overflow-hidden">
-          <div className="px-5 py-4 border-b border-amber-100 flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+        <div className="rounded-2xl border border-warning/30 bg-warning/10 overflow-hidden">
+          <div className="px-5 py-4 border-b border-warning/20 flex items-center gap-3">
+            <div className="w-7 h-7 rounded-lg bg-warning/15 flex items-center justify-center">
+              <AlertTriangle className="h-3.5 w-3.5 text-warning-text" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-800">Ordres de travail bloqués</p>
-              <p className="text-xs text-amber-600 mt-0.5">Ces OTs ne peuvent pas avancer — pièces en rupture de stock</p>
+              <p className="text-sm font-semibold text-warning-text">Ordres de travail bloqués</p>
+              <p className="text-xs text-warning-text mt-0.5">Ces OTs ne peuvent pas avancer — pièces en rupture de stock</p>
             </div>
-            <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-600">
+            <span className="rounded-full bg-destructive/15 px-2.5 py-1 text-xs font-bold text-destructive-text">
               {awaitingPartsWorkOrders.length} OT
             </span>
           </div>
@@ -623,7 +623,7 @@ export default function PartRequestsIndex() {
             {isLoadingAwaitingParts ? (
               <div className="text-center py-4 text-gray-400 text-sm">Chargement...</div>
             ) : awaitingPartsWorkOrders.map((wo) => (
-              <div key={wo.id} className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm" data-testid={`awaiting-parts-wo-${wo.id}`}>
+              <div key={wo.id} className="rounded-xl border border-warning/30 bg-card p-4 shadow-sm" data-testid={`awaiting-parts-wo-${wo.id}`}>
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center">
@@ -632,7 +632,7 @@ export default function PartRequestsIndex() {
                     <div>
                       <p className="text-sm font-semibold text-gray-800">
                         OT #{wo.id} — {wo.title}
-                        <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${wo.priority === 'critical' ? 'bg-red-100 text-red-700' : wo.priority === 'high' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                        <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${wo.priority === 'critical' ? 'bg-destructive/15 text-destructive-text' : wo.priority === 'high' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
                           {wo.priority === 'critical' ? 'Critique' : wo.priority === 'high' ? 'Urgent' : wo.priority === 'medium' ? 'Normal' : 'Faible'}
                         </span>
                       </p>
@@ -646,13 +646,13 @@ export default function PartRequestsIndex() {
                     <Eye className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-2 flex items-center gap-1">
+                <div className="rounded-xl bg-warning/10 border border-warning/20 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-warning-text mb-2 flex items-center gap-1">
                     <Package className="h-3 w-3" />Pièces en attente ({wo.pendingPartsCount})
                   </p>
                   <div className="space-y-1.5">
                     {wo.pendingParts.map((part) => (
-                      <div key={part.requestId} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-sm">
+                      <div key={part.requestId} className="flex items-center justify-between bg-card rounded-lg px-3 py-2 text-sm">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-gray-800">{part.partName}</span>
                           <span className="text-[11px] font-mono text-gray-400">({part.partReference})</span>
@@ -668,7 +668,7 @@ export default function PartRequestsIndex() {
                             </span>
                           )}
                           <button
-                            className="rounded-lg bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-200 transition-colors"
+                            className="rounded-lg bg-warning/15 px-2 py-1 text-[10px] font-semibold text-warning-text hover:bg-warning/20 transition-colors"
                             onClick={() => {
                               const req = requests.find(r => r.id === part.requestId);
                               if (req) {
@@ -700,11 +700,11 @@ export default function PartRequestsIndex() {
       )}
 
       {/* ── Requests table card ── */}
-      <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
         {/* Toolbar */}
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-          <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center shrink-0">
-            <Package className="h-3.5 w-3.5 text-green-600" />
+          <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center shrink-0">
+            <Package className="h-3.5 w-3.5 text-success" />
           </div>
           <p className="text-sm font-semibold text-gray-800">Liste des demandes</p>
           <div className="flex items-center gap-2 ml-auto flex-wrap">
@@ -769,7 +769,7 @@ export default function PartRequestsIndex() {
                       <p className="text-sm font-medium">
                         {statusFilter !== "all" || urgencyFilter !== "all" ? "Aucune demande ne correspond aux filtres" : "Aucune demande pour le moment"}
                       </p>
-                      <button className="mt-1 text-xs text-green-600 underline" onClick={() => setLocation('/inventory')}>
+                      <button className="mt-1 text-xs text-success underline" onClick={() => setLocation('/inventory')}>
                         Aller à l'inventaire pour créer une demande
                       </button>
                     </div>
@@ -846,10 +846,10 @@ export default function PartRequestsIndex() {
                           )}
                           {permissions.canApproveReject && (
                             <>
-                              <button className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'approved' } }); }} disabled={updateRequestMutation.isPending} title="Valider" data-testid={`btn-approve-${request.id}`}>
+                              <button className="p-1.5 rounded-lg hover:bg-success/10 text-success transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'approved' } }); }} disabled={updateRequestMutation.isPending} title="Valider" data-testid={`btn-approve-${request.id}`}>
                                 <ThumbsUp className="h-3.5 w-3.5" />
                               </button>
-                              <button className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'cancelled' } }); }} disabled={updateRequestMutation.isPending} title="Refuser" data-testid={`btn-reject-${request.id}`}>
+                              <button className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive-text transition-colors" onClick={() => { setSelectedRequest(request); submitRequestUpdate({ id: request.id, data: { status: 'cancelled' } }); }} disabled={updateRequestMutation.isPending} title="Refuser" data-testid={`btn-reject-${request.id}`}>
                                 <ThumbsDown className="h-3.5 w-3.5" />
                               </button>
                             </>
@@ -900,10 +900,10 @@ export default function PartRequestsIndex() {
                 <div className="absolute inset-0 pointer-events-none"
                   style={{ backgroundImage: "radial-gradient(rgba(22,163,74,0.10) 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
                 <div className="relative z-10">
-                  <p className="text-[10px] font-bold tracking-widest uppercase text-green-600 mb-1">Demande de pièce</p>
-                  <h2 className="font-black text-green-900 text-lg leading-tight">{selectedRequest.partName}</h2>
+                  <p className="text-[10px] font-bold tracking-widest uppercase text-success mb-1">Demande de pièce</p>
+                  <h2 className="font-black text-success text-lg leading-tight">{selectedRequest.partName}</h2>
                   {selectedRequest.partReference && (
-                    <p className="text-[11px] font-mono text-green-700/60 mt-0.5">{selectedRequest.partReference}</p>
+                    <p className="text-[11px] font-mono text-success/60 mt-0.5">{selectedRequest.partReference}</p>
                   )}
                   <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                     {getStatusBadge(selectedRequest.status)}
@@ -952,10 +952,10 @@ export default function PartRequestsIndex() {
                     {selectedRequest.actualDeliveryDate && (
                       <div className="rounded-xl p-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
                         <div className="flex items-center gap-1 mb-0.5">
-                          <CheckCircle2 className="w-3 h-3 text-green-600" />
-                          <p className="text-[10px] font-bold tracking-widest uppercase text-green-600">Livraison réelle</p>
+                          <CheckCircle2 className="w-3 h-3 text-success" />
+                          <p className="text-[10px] font-bold tracking-widest uppercase text-success">Livraison réelle</p>
                         </div>
-                        <p className="text-sm font-semibold text-green-800">
+                        <p className="text-sm font-semibold text-success">
                           {new Date(selectedRequest.actualDeliveryDate).toLocaleDateString('fr-FR')}
                         </p>
                       </div>
@@ -976,10 +976,10 @@ export default function PartRequestsIndex() {
                 {selectedRequest.notes && (
                   <div className="rounded-xl p-3" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
                     <div className="flex items-center gap-1 mb-1">
-                      <StickyNote className="w-3 h-3 text-amber-600" />
-                      <p className="text-[10px] font-bold tracking-widest uppercase text-amber-600">Notes</p>
+                      <StickyNote className="w-3 h-3 text-warning-text" />
+                      <p className="text-[10px] font-bold tracking-widest uppercase text-warning-text">Notes</p>
                     </div>
-                    <p className="text-sm text-amber-900">{selectedRequest.notes}</p>
+                    <p className="text-sm text-warning-text">{selectedRequest.notes}</p>
                   </div>
                 )}
 
