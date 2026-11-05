@@ -171,3 +171,28 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - contrat : `/check/{documents,tires,mileage,status-history}` en 200, `limit` -5, 0 et 999999 en 200 ;
   - `prefix-middleware-guardrail` : le renvoi `/check` est inscrit, de type sans base.
 - **Leçon** : une garde async reconnue par son nom doit être exigée attendue. Le test le vérifie désormais.
+
+## 2026-11-05T19:20:11+01:00 — Plans de maintenance : restauration fidèle par updated_at (L2)
+
+- **Quoi** :
+  - `maintenance_schedules.updated_at` est ajoutée sans défaut, puis `SET DEFAULT now()` : les plans existants restent à NULL, aucune ligne n'est réécrite ;
+  - déclencheur `trg_maintenance_schedules_touch` (BEFORE UPDATE) : tout écrivain renouvelle l'horodatage ;
+  - `stampColumn: "updated_at"` dans `VEHICLE_DEACTIVATIONS` : un plan désactivé à la main pendant le retrait n'est plus réactivé par la restauration (la limite assumée disparaît) ;
+  - SQL dans `VEHICLE_LIFECYCLE_SQL` et sa jumelle `20261105_vehicle_lifecycle.sql`, avec deux blocs DO bornés.
+- **Idempotence** :
+  - colonne posée sous garde `information_schema` ;
+  - `CREATE OR REPLACE TRIGGER` (garde-fou `init-database-concurrency`), seulement s'il est absent de `pg_trigger`, au lieu d'un DROP/CREATE à chaque démarrage : une base convergée ne reprend aucun verrou de table ;
+  - déclencheur posé seulement si la colonne existe : sinon, tout UPDATE de plan échouerait.
+- **Preuve automatisée** :
+  - `vehicle-lifecycle.contract` :
+    - « plan désactivé à la main pendant le retrait » : reste désactivé ;
+    - « SQL rejoué deux fois » : plan antérieur toujours à NULL, un seul déclencheur ;
+  - mutants :
+    - `stampColumn` retiré : 1 rouge ;
+    - corps du déclencheur vidé : 1 rouge ;
+  - `vehicle-lifecycle-schema` (unitaire) : jumeaux identiques, 5 blocs DO, pas d'`ADD COLUMN ... DEFAULT`, pas d'`UPDATE`, pas de `DROP TRIGGER`.
+- **Near miss (mutant)** : un premier mutant du déclencheur avait survécu, pour deux raisons :
+  - l'écriture Drizzle du test renouvelait déjà `updated_at` ;
+  - la migration jumelle, rejouée au démarrage, restaurait la fonction.
+  - Correctif : le cas écrit en SQL brut, et le mutant porte sur les deux jumeaux.
+  - Leçon : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise.
