@@ -69,8 +69,8 @@ export function getCpcBlockGuidance(
     FUTURE_DATE: "La date de formation CPC de ce chauffeur est postérieure à aujourd'hui : elle doit être vérifiée avant toute affectation.",
   };
   const action = canEditDriver
-    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC avec le formulaire « Mettre à jour le CPC » (le statut enregistré est alors recalculé)."
-    : "Choisissez un autre chauffeur, ou demandez à la logistique ou au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mettre à jour le CPC ».";
+    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC avec le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation » ; le statut enregistré est alors recalculé)."
+    : "Choisissez un autre chauffeur, ou demandez à la logistique ou au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mise à jour des certifications CPC ».";
   return { title: "CPC non à jour", why: why[cpc.code], action, canEditDriver };
 }
 

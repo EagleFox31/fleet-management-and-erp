@@ -20,6 +20,7 @@ describe("explication du blocage CPC (étape 3)", () => {
       expect(g?.why).toContain("pas à jour de sa formation CPC");
       expect(g?.canEditDriver).toBe(true);
       expect(g?.action).toContain("enregistrez la nouvelle date de formation CPC");
+      expect(g?.action).toContain("Mise à jour des certifications CPC");
     }
   });
 

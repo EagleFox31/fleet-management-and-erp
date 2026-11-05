@@ -8,7 +8,7 @@
 
 **Pourquoi.** Le blocage existait et la garde serveur est la même, mais le retour se limitait à une ligne sans consigne. Ce n'est pas un bug de règle : la garde lit le statut enregistré (`cpcStatusRecorded`), la liste recalcule l'affichage depuis `cpcTrainingDate`.
 
-**Correctifs de relecture.** Les rôles viennent de `DRIVER_MANAGER_ROLES` (`shared/constants/roles.ts`), lue par `isDriverManager` côté serveur et par `canManageDrivers` côté client. La consigne cite le formulaire « Mettre à jour le CPC », qui recalcule toujours le statut : `buildDriverPatchPayload` n'envoie pas une date inchangée, donc ressaisir la même date dans la fiche ne débloque rien.
+**Correctifs de relecture.** Les rôles viennent de `DRIVER_MANAGER_ROLES` (`shared/constants/roles.ts`), lue par `isDriverManager` côté serveur et par `canManageDrivers` côté client. La consigne cite le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation »), qui recalcule toujours le statut : `buildDriverPatchPayload` n'envoie pas une date inchangée, donc ressaisir la même date dans la fiche ne débloque rien.
 
 **Deux cas de divergence connus (règle inchangée, question posée à l'utilisatrice).**
 - (a) Affiché « formé » mais bloqué : le statut enregistré n'a jamais été recalculé, la garde lit lui et non l'affichage.
