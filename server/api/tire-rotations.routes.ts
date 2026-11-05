@@ -4,12 +4,10 @@ import { z } from "zod";
 import { insertTireRotationSchema, users } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
-import { moduleLogger } from "../lib/logger";
 import { MAX_DB_INTEGER_ID } from "../lib/route-id";
 import { isWorkshopManager } from "../middleware/auth";
 import { tiresService } from "../services/tires-service-simplified";
 
-const log = moduleLogger("tire-rotations");
 const router = Router();
 
 const TECHNICIAN_NOT_FOUND = "Technicien introuvable : choisissez un technicien de la liste.";
@@ -41,9 +39,7 @@ router.post("/tire-rotations", isWorkshopManager, async (req, res, next) => {
     const result = await tiresService.createTireRotation({ ...input, performedBy: req.user?.id });
     return res.status(201).json(result);
   } catch (error) {
-    if (error instanceof z.ZodError || error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Create tire rotation error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(error);
   }
 });
 

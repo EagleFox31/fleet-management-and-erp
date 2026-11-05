@@ -105,7 +105,7 @@ describe("PartRequirementWorkflow — RBAC par rôle", () => {
     { from: "pending", to: "approved", role: "warehouse", allowed: false },
     { from: "pending", to: "approved", role: "technician", allowed: false },
 
-    { from: "pending", to: "cancelled", role: "technician", allowed: true },
+    { from: "pending", to: "cancelled", role: "technician", allowed: false },
     { from: "pending", to: "cancelled", role: "secretary", allowed: false },
 
     { from: "approved", to: "ordered", role: "warehouse", allowed: true },
@@ -190,8 +190,8 @@ describe("PartRequirementWorkflow — identité et séparation des tâches", () 
     expect(validate("pending", "approved", "secretary", OTHER_USER).valid).toBe(true);
   });
 
-  it("autorise le demandeur technicien à annuler tant que c'est encore pending", () => {
-    expect(validate("pending", "cancelled", "technician", SAME_USER).valid).toBe(true);
+  it("refuse l'annulation au technicien demandeur, même en pending (PATCH réservé à isInventoryManager)", () => {
+    expect(validate("pending", "cancelled", "technician", SAME_USER).valid).toBe(false);
   });
 
   it("l'admin peut confirmer l'annulation même s'il était le demandeur", () => {
