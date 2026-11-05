@@ -97,3 +97,10 @@ Preuves : `finance-receivables.contract.test.ts` (32 tests), `finance-withholdin
 - **Pourquoi** : la relecture sécurité de #472 a relevé ces formes. Chacune contournait le détecteur sans que la fuite change.
 - **Limite connue** : un nom passé par paramètre de fonction (`function f(t = clients)`) ou par déstructuration n'est pas suivi. La relecture reste le filet.
 - **Preuves** : cas de détecteur positifs et négatifs dans le test unitaire. `finance-receivables.contract.test.ts` vérifie le POST pour l'administration, le secrétariat et la logistique.
+
+## 2026-11-05 — Relevé de compte client (GET /api/clients/:id/statement)
+- **Quoi** : relevé d'un donneur d'ordre. Les factures TTC sont au débit et les paiements au crédit, avec un solde courant calculé en SQL par une fonction fenêtre. Le solde d'ouverture est celui de la veille de `from`. Les factures annulées sont exclues avec leurs paiements. Contrat : `shared/contracts/client-statement.ts`.
+- **Droits** : la route est derrière `isAnyUser`, puis `canAccessOwned` (cloison §11), puis les rôles de lecture finance. Un compte client reçoit 403 hors périmètre, avec le même message pour un id absent : aucun compte utilisateur n'est rattaché à une fiche `clients`. Le routeur est monté avant `/clients` (`isStaff`) pour que cette cloison s'applique.
+- **Champs finance** : la réponse ne porte que `client.id` et `client.name`, sans aucun taux de retenue. Les retenues restent sur l'écran des factures en attente.
+- **Limite connue** : le jour où une fiche client sera rattachée à un compte, il faudra brancher `statementOwner` sur ce lien.
+- **Preuves** : `client-statement.contract.test.ts` (15 cas : droits par rôle, 401/403/404/400, solde courant, période, annulation). La route est inscrite à `COVERED_ELSEWHERE` du balayage de cloison.
