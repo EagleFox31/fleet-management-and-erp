@@ -30,6 +30,8 @@ const lockoutKeys = () => [`pin:${UNKNOWN_ID}`, ...session.ids.userIds.map((id) 
 const resetLockout = () => pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [lockoutKeys()]);
 
 beforeAll(async () => {
+  // Compteur laissé par un passage interrompu sur une base locale réutilisée.
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [`pin:${UNKNOWN_ID}`]);
   session = await startContractSession({ admin: "admin", workshop: "workshop_manager", technician: "technician", secretary: "secretary" });
 }, 120000);
 
