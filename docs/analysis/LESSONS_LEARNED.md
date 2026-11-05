@@ -3203,3 +3203,13 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
   - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
 - **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
+
+## 2026-11-05 — Test d'idempotence instable : les statistiques Postgres ne sont pas un témoin d'écriture
+
+- **Contexte** : `tests/integration/lot-recette-schema-idempotence.test.ts` vérifie qu'un second `initializeDatabase()` n'écrit aucune ligne. Il a échoué en CI sur #496, sans lien avec la PR, puis est repassé sans changement.
+- **Cause racine** : le test comparait `n_tup_ins/upd/del` de `pg_stat_user_tables` avant et après. `pg_stat_force_next_flush()` ne vide que les statistiques de la connexion appelante. Les écritures faites par les autres connexions du pool pendant le premier démarrage arrivaient en différé, parfois entre les deux lectures : l'écart venait du premier démarrage, pas du second.
+- **Classification** : test instable, témoin asynchrone pris pour un état. Aucune régression produit.
+- **Résolution** : instantané déterministe par table, `count(*)` et `md5(string_agg(xmin::text ORDER BY xmin::text, ctid))`. Toute écriture validée (INSERT, UPDATE même à valeur égale, DELETE) change le nombre de lignes ou un `xmin`, quelle que soit la connexion. Le tri par `xmin::text` puis `ctid` rend l'empreinte indépendante de l'ordre de parcours.
+- **Limite assumée** : une écriture annulée (ROLLBACK) ne laisse aucune version visible et n'est pas détectée. C'est voulu : le contrat porte sur l'état validé.
+- **Prévention vérifiable** : garde-fou négatif dans le même fichier. Un `UPDATE … SET label = label` validé entre deux instantanés doit être détecté, sur `vehicle_document_types` seulement. Si l'instantané cessait de voir les écritures, ce cas passerait au rouge. Le test a passé 30 exécutions locales consécutives.
+- **Leçon généralisée** : pour prouver l'absence d'écriture, comparer l'état (lignes, `xmin`), jamais des compteurs statistiques. Ceux-ci sont asynchrones et propres à chaque connexion. Un témoin d'absence doit toujours avoir son cas négatif : un instantané qui ne voit rien passe tous les tests d'idempotence.
