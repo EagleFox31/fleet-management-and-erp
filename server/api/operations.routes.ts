@@ -6,7 +6,7 @@ import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
@@ -46,7 +46,8 @@ const broadcastOperationMissionUpdate = (
     entity: "mission",
     entityId: options?.missionId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    // Missions, clients et pleins : données internes, jamais diffusées aux comptes client.
+    scope: { type: "roles", roles: [...STAFF_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,

@@ -1,3 +1,4 @@
+import { publicClientColumns, publicClientInvoiceColumns } from "../lib/client-public-columns";
 import { db } from "../db";
 import {
   supplierInvoices,
@@ -181,7 +182,7 @@ export class ExcelExportService {
     let query = db
       .select({
         mission: missions,
-        client: clients,
+        client: publicClientColumns,
         vehicle: vehicles,
       })
       .from(missions)
@@ -229,8 +230,8 @@ export class ExcelExportService {
 
     let query = db
       .select({
-        invoice: clientInvoices,
-        client: clients,
+        invoice: publicClientInvoiceColumns,
+        client: publicClientColumns,
         mission: missions,
       })
       .from(clientInvoices)
@@ -353,8 +354,8 @@ export class ExcelExportService {
   private async getMonthlyClientInvoices(year: number, month: number) {
     const invoices = await db
       .select({
-        invoice: clientInvoices,
-        client: clients,
+        invoice: publicClientInvoiceColumns,
+        client: publicClientColumns,
       })
       .from(clientInvoices)
       .leftJoin(clients, eq(clientInvoices.clientId, clients.id));

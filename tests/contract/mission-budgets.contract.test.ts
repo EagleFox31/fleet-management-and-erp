@@ -199,6 +199,28 @@ describe("POST /api/mission-budgets", { timeout: 120000 }, () => {
     }
   });
 
+  it("mission close après la saisie : correction, approbation et décaissement refusés (409), budget intact", async () => {
+    for (const status of ["cancelled", "completed"] as const) {
+      // Demandé : correction et approbation refusées.
+      const requested = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(await newMission()))).body);
+      await db.update(missions).set({ status }).where(eq(missions.id, requested.missionId));
+      expect((await call("PATCH", missionBudgetPath(requested.id), "logistics", { fdrAmount: 1 })).status, status).toBe(409);
+      expect((await call("POST", missionBudgetApprovePath(requested.id), "management", seen(requested))).status, status).toBe(409);
+
+      // Approuvé puis mission close : décaissement refusé.
+      const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(await newMission()))).body);
+      const approved = missionBudgetSchema.parse(
+        (await call("POST", missionBudgetApprovePath(created.id), "management", seen(created))).body,
+      );
+      await db.update(missions).set({ status }).where(eq(missions.id, created.missionId));
+      expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved))).status, status).toBe(409);
+
+      const rows = await db.select().from(missionBudgets).where(inArray(missionBudgets.id, [requested.id, created.id]));
+      expect(rows.find((r) => r.id === requested.id)).toMatchObject({ status: "requested", fdrAmount: "40000.00", approvedBy: null });
+      expect(rows.find((r) => r.id === created.id)).toMatchObject({ status: "approved", disbursedBy: null });
+    }
+  });
+
   it("correction : notes seules sans re-figer le prix ; corps identique sans écriture", async () => {
     const missionId = await newMission();
     const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);

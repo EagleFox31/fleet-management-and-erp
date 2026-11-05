@@ -21,13 +21,15 @@ DB_NAME="${DB_NAME:-fleet}"
 # Commande compose complète (profil inclus). Surchargée par les tests.
 COMPOSE_CMD="${COMPOSE_CMD:-sudo -n docker compose --profile vps}"
 
-log() { printf '%s [backup-db] %s\n' "$(date '+%F %T')" "$*"; }
+# Dates par le printf intégré (bash >= 4.2) : pas de sous-processus `date` à chaque ligne.
+log() { printf '%(%F %T)T [backup-db] %s\n' -1 "$*"; }
 fail() { log "ERREUR : $*"; exit 1; }
 
 [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "RETENTION_DAYS doit être un entier (reçu : $RETENTION_DAYS)"
 
 # docker compose lit docker-compose.yml et .env du dossier du script.
-cd "$(dirname "$(readlink -f "$0")")"
+script_path="$(readlink -f "$0")"
+cd "${script_path%/*}"
 mkdir -p "$BACKUP_DIR"
 
 # Deux exécutions simultanées (cron + lancement manuel) ne se marchent pas dessus.
@@ -36,7 +38,7 @@ if command -v flock >/dev/null; then
   flock -n 9 || fail "une sauvegarde est déjà en cours"
 fi
 
-day="$(date +%Y%m%d)"
+printf -v day '%(%Y%m%d)T' -1
 target="$BACKUP_DIR/$PREFIX-$day.dump"
 tmp="$target.partial"
 trap 'rm -f "$tmp"' EXIT

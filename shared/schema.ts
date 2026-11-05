@@ -1303,9 +1303,21 @@ export const clients = pgTable("clients", {
   isActive: boolean("is_active").default(true),
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche client
   notes: text("notes"),
+  // Retenues à la source (lot F1) : taux en %, NULL = pas de retenue. Écrits par
+  // PATCH /api/finance/clients/:id/withholding, jamais par la fiche client.
+  withholdingVatRate: numeric("withholding_vat_rate", { precision: 5, scale: 2 }),
+  withholdingIsRate: numeric("withholding_is_rate", { precision: 5, scale: 2 }),
+  // Base de la retenue IS : 'ht' (feuille CNPCC) ou 'ttc' (feuille OPERATION). Repli 'ht' en attente
+  // de la question client n°2 ; réglable par client.
+  withholdingIsBase: text("withholding_is_base", { enum: ["ht", "ttc"] }).notNull().default("ht"),
+  withholdingUpdatedBy: integer("withholding_updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  check("clients_withholding_vat_rate_check", sql`${table.withholdingVatRate} IS NULL OR (${table.withholdingVatRate} >= 0 AND ${table.withholdingVatRate} <= 100)`),
+  check("clients_withholding_is_rate_check", sql`${table.withholdingIsRate} IS NULL OR (${table.withholdingIsRate} >= 0 AND ${table.withholdingIsRate} <= 100)`),
+  check("clients_withholding_is_base_check", sql`${table.withholdingIsBase} IN ('ht', 'ttc')`),
+]);
 
 // Table missions - Missions de transport (livraisons, récupérations)
 export const missions = pgTable("missions", {
@@ -1500,7 +1512,14 @@ export const clientInvoices = pgTable("client_invoices", {
   // Paiement
   balance: numeric("balance", { precision: 15, scale: 2 }).notNull(), // Solde restant
   status: text("status", { enum: ["pending", "partial", "paid", "overdue", "cancelled"] }).notNull().default("pending"),
-  
+
+  // Dépôt chez le client (lot F1) : date de dépôt et retenues figées à cet instant.
+  depositedAt: date("deposited_at"),
+  withholdingVatAmount: numeric("withholding_vat_amount", { precision: 15, scale: 2 }),
+  withholdingIsAmount: numeric("withholding_is_amount", { precision: 15, scale: 2 }),
+  netPayable: numeric("net_payable", { precision: 15, scale: 2 }),
+  depositedBy: integer("deposited_by").references(() => users.id, { onDelete: "set null" }),
+
   // Items facture (détails lignes)
   items: jsonb("items"), // [{description, quantity, unitPrice, total}]
   
@@ -1596,6 +1615,10 @@ export const fuelRecordsRelations = relations(fuelRecords, ({ one }) => ({
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdBy: true,
+  withholdingVatRate: true,
+  withholdingIsRate: true,
+  withholdingIsBase: true,
+  withholdingUpdatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -1641,6 +1664,11 @@ export const insertMissionStepSchema = createInsertSchema(missionSteps).omit({
 
 export const insertClientInvoiceSchema = createInsertSchema(clientInvoices).omit({
   id: true,
+  depositedAt: true,
+  withholdingVatAmount: true,
+  withholdingIsAmount: true,
+  netPayable: true,
+  depositedBy: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
@@ -2147,3 +2175,72 @@ export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omi
 });
 export type TreasuryAccountRow = typeof treasuryAccounts.$inferSelect;
 export type TreasuryEntryRow = typeof treasuryEntries.$inferSelect;
+
+// Contrôles inopinés QHSE (lot Q1, drapeau `qhse`). Jumelle SQL : QHSE_INSPECTIONS_SQL dans
+// server/init-database.ts et server/db/migrations/20261105_qhse_inspections.sql (AGENTS.md §5).
+export const QHSE_CRITERION_CATEGORIES = ["cabin", "stop"] as const;
+
+export const qhseInspectionCriteria = pgTable("qhse_inspection_criteria", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  label: text("label").notNull(),
+  category: text("category", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  // Noms identiques à ceux posés par QHSE_INSPECTIONS_SQL (CDC_RECONCILED_CONSTRAINTS) : un push Drizzle
+  // les pose aussi, et un push --force ne les retire plus.
+  unique("qhse_inspection_criteria_code_key").on(table.code),
+  check("qhse_inspection_criteria_label_check", sql`length(btrim(${table.label})) > 0`),
+  check("qhse_inspection_criteria_category_check", sql`${table.category} IN ('cabin', 'stop')`),
+]);
+
+export const qhseInspections = pgTable("qhse_inspections", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  inspectedAt: timestamp("inspected_at").defaultNow().notNull(),
+  location: text("location").notNull(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id),
+  driverId: integer("driver_id").notNull().references(() => drivers.id),
+  inspectorId: integer("inspector_id").notNull().references(() => users.id),
+  items: jsonb("items").$type<Array<{
+    criterionId: number;
+    code: string;
+    label: string;
+    conform: boolean;
+    observation?: string;
+  }>>().notNull().default(sql`'[]'::jsonb`),
+  generalObservation: text("general_observation"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_qhse_inspections_driver").on(table.driverId, table.inspectedAt),
+  index("idx_qhse_inspections_vehicle").on(table.vehicleId),
+  check("qhse_inspections_kind_check", sql`${table.kind} IN ('cabin', 'stop')`),
+  check("qhse_inspections_location_check", sql`length(btrim(${table.location})) > 0`),
+  check("qhse_inspections_items_check", sql`jsonb_typeof(${table.items}) = 'array'`),
+]);
+
+export const insertQhseInspectionCriterionSchema = createInsertSchema(qhseInspectionCriteria).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).omit({
+  id: true,
+  inspectorId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
+export type QhseInspectionRow = typeof qhseInspections.$inferSelect;
