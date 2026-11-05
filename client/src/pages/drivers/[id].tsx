@@ -1,4 +1,7 @@
 import { useParams, useLocation } from "wouter";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
+import { buildDriverPatchPayload } from "@/lib/driver-patch-payload";
+import { userMessageOf } from "@/lib/api-error";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -107,14 +110,14 @@ export default function DriverDetail() {
 
   const editMutation = useMutation({
     mutationFn: (data: Partial<DriverDetail>) =>
-      apiRequest("PATCH", `/api/drivers/${id}`, data),
+      apiRequest("PATCH", `/api/drivers/${id}`, buildDriverPatchPayload(data, driver?.cpcTrainingDate)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/drivers/${id}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      invalidateDriverCpcDependents(queryClient, id);
       setEditOpen(false);
       toast({ title: "Chauffeur mis à jour" });
     },
-    onError: () => toast({ title: "Erreur lors de la mise à jour", variant: "destructive" }),
+    onError: (error) =>
+      toast({ title: userMessageOf(error, "Erreur lors de la mise à jour"), variant: "destructive" }),
   });
 
   const openEdit = () => {

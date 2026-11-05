@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -29,10 +30,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       return await res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/expiring-cpc"] });
+      invalidateDriverCpcDependents(queryClient, driverId);
       toast({
         title: "Formation CPC mise à jour",
         description: `La certification CPC de ${driverName} a été enregistrée avec succès.`,

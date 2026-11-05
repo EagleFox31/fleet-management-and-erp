@@ -1,4 +1,6 @@
 import { userMessageOf } from "@/lib/api-error";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
+import { buildDriverPatchPayload } from "@/lib/driver-patch-payload";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -139,17 +141,14 @@ export function DriverForm({ initialData, isEdit = false, onSuccess, onCancel }:
       };
 
       if (isEdit && driverId) {
-        return apiRequest("PATCH", `/api/drivers/${driverId}`, payload);
+        return apiRequest("PATCH", `/api/drivers/${driverId}`, buildDriverPatchPayload(payload, initialData?.cpcTrainingDate));
       }
 
       return apiRequest("POST", "/api/drivers", payload);
     },
     onSuccess: () => {
       clearDraft();
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-statistics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers/cpc-status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
+      invalidateDriverCpcDependents(queryClient, driverId);
       toast({
         title: isEdit ? "Chauffeur mis à jour" : "Chauffeur créé",
         description: isEdit
