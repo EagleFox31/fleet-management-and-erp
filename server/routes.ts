@@ -62,8 +62,7 @@ import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
 import { isAdminGuardDbRefusal, isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { closeOtherUserConnections, deleteOtherUserSessions, revokeUserAccess } from "./lib/user-sessions";
-import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
-import { contentDisposition } from "./lib/content-disposition";
+import { isSafePathSegment } from "./lib/uploaded-file";
 import { workOrderCostScope, workOrderStaffScope } from "./lib/work-order-realtime-scope";
 import { loginLockoutGuard } from "./middleware/login-lockout-guard";
 import { CHANGE_PASSWORD_KEY_PREFIX, DbLockoutStore } from "./services/login-lockout-db-store";
@@ -1344,55 +1343,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(documents);
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "lecture des documents du véhicule par type en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.get("/api/documents/:id/download", isAnyUser, async (req, res) => {
-    try {
-      const id = routeIdOrNaN(req.params.id);
-      
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "ID de document invalide" });
-      }
-      
-      const document = await storage.getVehicleDocument(id);
-      
-      if (!document) {
-        // Même réponse qu'un document d'un autre client : l'existence d'un identifiant ne se devine pas.
-        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-        return res.status(404).json({ message: "Document non trouvé" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(document.vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-
-      const fs = await import("fs");
-
-      // Chemin stocké en base : on ne sert qu'un fichier situé sous uploads/.
-      const candidatePaths = uploadedFileCandidates(document.filePath);
-
-      const existingPath = candidatePaths.find((candidatePath) =>
-        fs.existsSync(candidatePath),
-      );
-
-      if (!existingPath) {
-        return res.status(404).json({
-          message: "Fichier introuvable sur le serveur",
-        });
-      }
-
-      res.download(existingPath, document.filename, (err) => {
-        if (err) {
-          log.error({ err, requestId: req.requestId }, "envoi du document en échec");
-          if (!res.headersSent) {
-            return res.status(500).json({ message: "Erreur lors du téléchargement" });
-          }
-        }
-      });
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "téléchargement du document en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -4229,47 +4179,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof AppError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "lecture des documents workflow en échec");
       return res.status(500).json({ message: "Erreur lors de la récupération des documents" });
-    }
-  });
-
-  app.get("/api/workflows/documents/:documentId", isAnyUser, async (req, res) => {
-    try {
-      const { WorkflowDocumentService } = await import('./services/workflow-document-service');
-      const documentId = routeIdOrNaN(req.params.documentId);
-      
-      if (isNaN(documentId)) {
-        return res.status(400).json({ message: "ID de document invalide" });
-      }
-
-      const document = await WorkflowDocumentService.getWorkflowDocument(documentId);
-      
-      if (!document) {
-        if (ownerScopeOf(req.user) !== null) return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-        return res.status(404).json({ message: "Document non trouvé" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => WorkflowDocumentService.getWorkflowOwnerId(document.workflowId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-
-      const fs = await import('fs');
-      
-      // Chemin stocké en base : on ne sert qu'un fichier situé sous uploads/.
-      const filePath = uploadedFileCandidates(document.filePath).find((candidate) => fs.existsSync(candidate));
-
-      if (!filePath) {
-        return res.status(404).json({ message: "Fichier non trouvé" });
-      }
-
-      res.setHeader('Content-Type', document.mimeType);
-      res.setHeader('Content-Disposition', contentDisposition('inline', document.originalName));
-      
-      const fileStream = fs.createReadStream(filePath);
-      fileStream.pipe(res);
-      
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "téléchargement du document workflow en échec");
-      return res.status(500).json({ message: "Erreur lors du téléchargement du document" });
     }
   });
 

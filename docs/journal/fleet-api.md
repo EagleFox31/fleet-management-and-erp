@@ -499,3 +499,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
 - **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
 - **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.
+
+## 2026-11-05 — Documents téléversés servis en pièce jointe
+- **Quoi** : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` déplacés de `routes.ts` vers `server/api/uploaded-documents.routes.ts` (mêmes gardes, même cloison, mêmes messages). Envoi par `sendUploadedFile` : `uploadedFileCandidates`, pièce jointe, `nosniff`, type en liste blanche cohérent avec l'extension. `routes.ts` retiré de la liste gelée `file-serving-nosniff` ; clé de contrôle de `stored-path-hygiene` déplacée vers le helper.
+- **Pourquoi** : reste ouvert de l'entrée LESSONS du justificatif de règlement fournisseur.
+- **Preuve** : nouveau contrat rouge sur l'ancien code (7/8), vert après ; mutation du filtre de type tuée (4 rouges) ; contrats existants des deux routes verts, attendus `inline` passés à `attachment`.

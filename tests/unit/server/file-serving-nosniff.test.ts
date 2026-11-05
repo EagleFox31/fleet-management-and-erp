@@ -17,8 +17,6 @@ const SERVER = join(ROOT, "server");
 
 /** Non revus (AGENTS.md §9). Retirer une entrée dès que le fichier pose `nosniff`. */
 const FROZEN_WITHOUT_NOSNIFF = new Set<string>([
-  // GET /api/documents/:id/download et GET /api/workflows/documents/:documentId
-  "server/routes.ts",
   // index.html de l'application compilée, pas un fichier téléversé
   "server/vite.ts",
 ]);
