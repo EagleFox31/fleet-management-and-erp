@@ -2227,16 +2227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // POST, PATCH, DELETE /api/parts et POST /api/parts/:id/update-stock : server/api/parts-catalog.routes.ts
 
-  // Parts Used Routes
-  app.get("/api/parts-used", isStaff, async (req, res) => {
-    try {
-      const partsUsed = await storage.getAllPartsUsed();
-      return res.status(200).json(partsUsed);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Get all parts used error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET et DELETE /api/parts-used : server/api/parts-used.routes.ts.
 
   app.get("/api/work-orders/:workOrderId/parts", isAnyUser, async (req, res, next) => {
     try {
