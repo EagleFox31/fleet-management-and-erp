@@ -3022,3 +3022,22 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
+
+## 2026-11-05 — Cloison client : l'étranger et l'inexistant se répondent à l'identique (complète #255)
+
+### Contexte
+- Un client qui ouvre le véhicule d'un autre reçoit 403. Sur deux routes seulement (`GET /api/vehicles/:id`, téléchargement d'un document), un identifiant absent répondait 404 avec un autre message : le client pouvait distinguer « existe chez un autre » de « n'existe pas » et parcourir les identifiants séquentiels.
+- Les dix autres routes passent par `canAccessOwned`, qui refuse déjà un propriétaire absent : même 403, même message.
+
+### Cause racine
+- Classification : cohérence manquante entre routes d'une même cloison. Les routes plus anciennes avaient leur propre contrôle d'existence avant la cloison, et aucun test ne comparait les deux cas.
+
+### Résolution
+- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner).
+- Ne renverse pas #255 : le 403 reste celui que l'écran lit comme « Accès refusé ». Un client qui saisit un identifiant absent lit donc aussi « Accès refusé », par choix assumé pour ne rien révéler.
+
+### Prévention (vérifiable)
+- `tests/contract/client-unknown-vs-foreign.contract.test.ts` : pour huit routes véhicule et le téléchargement de document, compare statut, message et code de la réponse « autre client » et de la réponse « identifiant absent ». Rouge sur main pour les deux routes concernées.
+
+### Règle Projet (obligatoire)
+- Toute route ouverte à un client se teste en comparant l'objet d'un autre client et un identifiant absent : les deux réponses doivent être identiques.

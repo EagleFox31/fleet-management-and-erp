@@ -8,13 +8,10 @@ import { AppError } from "./app-error";
  * véhicules dont il est propriétaire (`vehicles.ownerId`) et aux sessions
  * d'acquisition qu'il a créées (`vehicle_acquisition_workflows.user_id`).
  *
- * Véhicule hors périmètre : même réponse qu'un véhicule inexistant (404, même corps), pour qu'un
- * client ne distingue pas les deux. Liste : filtrée sur le propriétaire.
+ * Objet isolé hors périmètre : 403. Liste : filtrée sur le propriétaire.
  */
 
 export type ScopeReader = { id: number; role: string };
-
-export const VEHICLE_NOT_FOUND_MESSAGE = "Véhicule non trouvé";
 
 export const OUT_OF_SCOPE_MESSAGE = "Accès refusé : ce véhicule n'appartient pas à votre compte.";
 
@@ -37,9 +34,4 @@ export async function canAccessOwned(
   if (!reader) return false;
   const scope = ownerScopeOf(reader);
   return scope === null || (await ownerOf()) === scope;
-}
-
-/** Réponse unique pour un véhicule absent ou hors du périmètre du client. */
-export function refuseOutOfScopeVehicle(res: { status(code: number): { json(body: unknown): unknown } }): unknown {
-  return res.status(404).json({ message: VEHICLE_NOT_FOUND_MESSAGE });
 }

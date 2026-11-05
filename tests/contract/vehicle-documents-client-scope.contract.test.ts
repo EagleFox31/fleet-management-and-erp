@@ -57,12 +57,6 @@ async function call(method: string, path: string, options: { body?: unknown; act
   return { status: response.status, body, headers: response.headers };
 }
 
-function expectNotFound(res: { status: number; body: any; headers: Headers }) {
-  expect(res.status).toBe(404);
-  expect(res.body).toMatchObject({ code: "NOT_FOUND" });
-  expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
-}
-
 function expectForbidden(res: { status: number; body: any; headers: Headers }) {
   expect(res.status).toBe(403);
   expect(res.body).toMatchObject({ code: "FORBIDDEN" });
@@ -168,10 +162,10 @@ afterAll(async () => {
 });
 
 describe("documents d'un véhicule : cloison entre clients", { timeout: 60000 }, () => {
-  it("un client reçoit 404 sur le véhicule d'un autre client (liste, par type, téléchargement)", async () => {
-    expectNotFound(await call("GET", `/api/vehicles/${fixture.B.vehicleId}/documents`, { actor: "clientA" }));
-    expectNotFound(await call("GET", `/api/vehicles/${fixture.B.vehicleId}/documents/autre`, { actor: "clientA" }));
-    expectNotFound(await call("GET", `/api/documents/${fixture.B.documentId}/download`, { actor: "clientA" }));
+  it("un client est refusé sur le véhicule d'un autre client (liste, par type, téléchargement)", async () => {
+    expectForbidden(await call("GET", `/api/vehicles/${fixture.B.vehicleId}/documents`, { actor: "clientA" }));
+    expectForbidden(await call("GET", `/api/vehicles/${fixture.B.vehicleId}/documents/autre`, { actor: "clientA" }));
+    expectForbidden(await call("GET", `/api/documents/${fixture.B.documentId}/download`, { actor: "clientA" }));
   });
 
   it("un client lit et télécharge les documents de son véhicule", async () => {

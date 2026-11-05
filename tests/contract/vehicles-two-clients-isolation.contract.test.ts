@@ -118,10 +118,10 @@ describe("cloison entre deux clients : lectures de véhicule", { timeout: 60000 
     expect((await session.call("GET", `/api/vehicles/${b.plate}`, { actor: "admin" })).status).toBe(200);
   });
 
-  it("GET /api/vehicles/:id : identifiant inconnu, 404 (jamais 500) pour un client comme pour le personnel", async () => {
-    for (const actor of ["clientA", "admin"] as const) {
-      expect((await session.call("GET", `/api/vehicles/${token}-inconnu`, { actor })).status).toBe(404);
-      expect((await session.call("GET", "/api/vehicles/2147483000", { actor })).status).toBe(404);
+  it("GET /api/vehicles/:id : identifiant inconnu, jamais 500 ; 404 pour le personnel, 403 pour un client (comme un véhicule étranger)", async () => {
+    for (const [actor, status] of [["clientA", 403], ["admin", 404]] as const) {
+      expect((await session.call("GET", `/api/vehicles/${token}-inconnu`, { actor })).status).toBe(status);
+      expect((await session.call("GET", "/api/vehicles/2147483000", { actor })).status).toBe(status);
     }
   });
 });
