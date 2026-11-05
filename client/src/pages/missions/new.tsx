@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Stepper } from "@/components/workflow/stepper";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
@@ -737,6 +737,13 @@ export default function NewMission() {
                 <p className="font-semibold">{cpcGuidance.title}</p>
                 <p>{cpcGuidance.why}</p>
                 <p>{cpcGuidance.action}</p>
+                {cpcGuidance.driverHref && (
+                  <p>
+                    <Link href={cpcGuidance.driverHref} className="font-medium underline" data-testid="cpc-driver-sheet-link">
+                      Ouvrir la fiche du chauffeur
+                    </Link>
+                  </p>
+                )}
               </div>
             </div>
           )}
