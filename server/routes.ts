@@ -54,7 +54,7 @@ import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./l
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { isRetiredVehicle, vehicleEditRefusal, vehicleReadableBy } from "./lib/vehicle-retired";
-import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
+import { redactVehiclePrice } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
