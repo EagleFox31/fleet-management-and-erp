@@ -5,6 +5,7 @@ import { assignments, drivers, missions } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestClient, createTestVehicle } from "../support/factories";
+import { leakText } from "../support/api-error";
 import { uniqueTestToken } from "../support/ids";
 
 /**
@@ -294,7 +295,7 @@ describe("CPC chauffeur : date de formation future refusée à la saisie", () =>
     expect(res.body.message).toBe("Données chauffeur invalides");
     expect(Array.isArray(res.body.errors)).toBe(true);
     expect(res.body.errors.some((e: any) => e.field === "lastName")).toBe(true);
-    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+    expect(leakText(res.body)).not.toMatch(/Expected|Required/);
   }, 60000);
 
   it("POST /api/drivers : champ obligatoire absent, aucun texte Zod anglais", async () => {
@@ -302,7 +303,7 @@ describe("CPC chauffeur : date de formation future refusée à la saisie", () =>
     if (res.body?.id) driverIds.push(res.body.id);
     expect(res.status).toBe(400);
     expect(res.body.message).toBe("Données chauffeur invalides");
-    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+    expect(leakText(res.body)).not.toMatch(/Expected|Required/);
   }, 60000);
 
   it("PATCH /api/drivers/:id : message personnalisé du schéma repris dans message", async () => {
@@ -318,7 +319,7 @@ describe("CPC chauffeur : date de formation future refusée à la saisie", () =>
     const res = await call("PATCH", `/api/drivers/${d.id}`, { actor: "logistics", body: { firstName: 42 } });
     expect(res.status).toBe(400);
     expect(res.body.message).toBe("Données chauffeur invalides");
-    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+    expect(leakText(res.body)).not.toMatch(/Expected|Required/);
   }, 60000);
 
   it("POST /api/drivers/:id/update-cpc avec une date future : 400 lisible, date inchangée", async () => {
