@@ -17,9 +17,11 @@ interface CPCUpdateFormProps {
   driverName: string;
   currentCPCDate?: string | null;
   currentStatus?: string;
+  /** Dans une carte existante (fiche chauffeur) : ni cadre, ni nom, ni badge répétés. */
+  embedded?: boolean;
 }
 
-export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentStatus }: CPCUpdateFormProps) {
+export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentStatus, embedded = false }: CPCUpdateFormProps) {
   const [cpcDate, setCpcDate] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -86,8 +88,15 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
   const getStatusBadge = (status?: string) => TONE_CLASSES[cpcStatusTone(status)];
 
   return (
-    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
-      <div className="space-y-2">
+    <div
+      className={
+        embedded
+          ? "space-y-3"
+          : "p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between"
+      }
+      data-testid={`cpc-update-form-${driverId}`}
+    >
+      {!embedded && (<div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-300 shrink-0">
@@ -115,7 +124,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
             <span className="font-bold text-foreground">{formatDate(currentCPCDate)}</span>
           </div>
         )}
-      </div>
+      </div>)}
 
       <form onSubmit={handleSubmit} className="space-y-2.5 pt-1">
         <div className="space-y-1">

@@ -20,3 +20,9 @@
 ## Hors périmètre vu
 
 `client/src/pages/workshop-manager/dashboard.tsx:666` rend `CPCUpdateForm` alors que la route refuse `workshop_manager` (403 à l'enregistrement). À masquer ou à confier à un autre rôle ; non traité ici.
+
+## Réserves de relecture (0a)
+
+- **E2E** : `e2e/19-driver-space.spec.ts`, bloc DRV2-6. Session logistique sur `/drivers/:id`, onglet Informations, saisie d'une date, POST `update-cpc` 200, badge « FORMÉ » rafraîchi ; un observateur atelier reçoit la trame `driver_cpc_updated` (deux rôles, pas le polling). Second test : la direction (`management`) est refusée par la route `/drivers/:id` (`RoleRoute` sur `DRIVER_MANAGER_ROLES`) : « Accès refusé », aucun bouton. Tout visiteur de la fiche est donc déjà gestionnaire ; la garde `canManageDrivers` dans la page est une défense en profondeur. Lancé uniquement sur le Postgres local `fm-b7demo` (`DATABASE_URL=postgres://fleet:fleet@postgres:5432/fleet_test`, proxy `localhost:58433/v1`, serveur sur le port 5078).
+- **Carte dans une carte** : prop `embedded` sur `CPCUpdateForm` (sans cadre, nom ni badge), utilisée sur la fiche ; dashboards inchangés. Ajout de `data-testid="cpc-update-form-<id>"`.
+- **Suivi, non traité** : couleurs en dur (`bg-white`, `slate-*`, `emerald-*`, `purple-*`) dans `cpc-update-form.tsx`, à passer aux tokens du design system.

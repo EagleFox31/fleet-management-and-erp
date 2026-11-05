@@ -321,6 +321,7 @@ export default function DriverDetail() {
                     driverName={`${driver.firstName} ${driver.lastName}`}
                     currentCPCDate={driver.cpcTrainingDate}
                     currentStatus={driver.cpcStatus}
+                    embedded
                   />
                 )}
               </div>
