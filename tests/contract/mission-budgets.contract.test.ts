@@ -175,6 +175,42 @@ describe("POST /api/mission-budgets", { timeout: 120000 }, () => {
     expect((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId, { fuelUnitPrice: 1 }))).status).toBe(400);
     expect((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId, { fdrAmount: -5 }))).status).toBe(400);
   });
+
+  it("mission terminée ou annulée : 409, aucun budget écrit", async () => {
+    for (const status of ["completed", "cancelled"] as const) {
+      const missionId = await newMission();
+      await db.update(missions).set({ status }).where(eq(missions.id, missionId));
+      expect((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).status, status).toBe(409);
+      expect(await db.select().from(missionBudgets).where(eq(missionBudgets.missionId, missionId))).toHaveLength(0);
+    }
+  });
+
+  it("correction : notes seules sans re-figer le prix ; corps identique sans écriture", async () => {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
+    // Le prix du jour change après la saisie : seule une correction de montant ou de date le reprend.
+    await db.update(fuelPrices).set({ pricePerLiter: String(PRICE + 100) }).where(eq(fuelPrices.effectiveFrom, DAY));
+    try {
+      const noted = await call("PATCH", missionBudgetPath(created.id), "logistics", { notes: "Convoi de nuit" });
+      expect(noted.status).toBe(200);
+      expect(noted.body).toMatchObject({ notes: "Convoi de nuit", fuelUnitPrice: created.fuelUnitPrice, totalAmount: created.totalAmount });
+      expect(noted.body.updatedAt).not.toBe(created.updatedAt);
+
+      const before = events.length;
+      for (const same of [{ notes: "Convoi de nuit" }, { fuelLiters: created.fuelLiters, budgetDate: created.budgetDate }]) {
+        const res = await call("PATCH", missionBudgetPath(created.id), "logistics", same);
+        expect(res.status).toBe(200);
+        expect(res.body.updatedAt, JSON.stringify(same)).toBe(noted.body.updatedAt);
+      }
+      expect(events.length).toBe(before);
+
+      const repriced = await call("PATCH", missionBudgetPath(created.id), "logistics", { fuelLiters: created.fuelLiters + 1 });
+      expect(repriced.status).toBe(200);
+      expect(repriced.body.fuelUnitPrice).toBe(PRICE + 100);
+    } finally {
+      await db.update(fuelPrices).set({ pricePerLiter: String(PRICE) }).where(eq(fuelPrices.effectiveFrom, DAY));
+    }
+  });
 });
 
 describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, () => {

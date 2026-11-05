@@ -543,3 +543,23 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - unitaires de calcul et de saisie (7) ;
   - test de dérive entre init-database, la migration et Drizzle (4) ;
   - `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la relecture et de l'audit de sécurité
+- **Quoi** :
+  - approbation et décaissement liés à la version lue : corps strict `{ expectedUpdatedAt }`, 409 si le budget a changé ;
+  - prix carburant exigé à la date du budget : 409 sans prix, plus de prix par défaut sur ce flux (`findFuelPriceAt`) ;
+  - date du budget bornée à 60 jours autour d'aujourd'hui (400) ;
+  - mission terminée ou annulée : 409 à la saisie ;
+  - correction : des notes seules ne re-figent pas le prix ; un corps sans changement n'écrit rien ; `log.info` sur toute correction écrite ;
+  - contraintes `mission_budgets_status_check`, `_amounts_check` et `_mission_id_unique` réconciliées au démarrage (NOT VALID puis VALIDATE, renommage d'une unicité posée sous un autre nom) et relues par `reportCdcConstraintGaps`.
+- **Comment** :
+  - transition : UPDATE conditionnel sur le statut et sur `date_trunc('milliseconds', updated_at)` ;
+  - le relevé des contraintes est déplacé après `MISSION_BUDGETS_SQL`, pour ne pas signaler au premier démarrage une table pas encore créée.
+- **Pourquoi** :
+  - sans version lue, la direction pouvait approuver un montant corrigé entre sa lecture et son clic ;
+  - un prix par défaut silencieux faussait un montant décaissé.
+- **Décision utilisatrice** : aucune contrainte « 4 yeux » entre saisie, approbation et décaissement. La traçabilité `createdBy` / `approvedBy` / `disbursedBy` suffit.
+- **Preuve** :
+  - contrat `mission-budgets` 15/15 (version périmée, course de deux décaissements, chauffeur 403, logistique au décaissement 403, date hors fenêtre, prix absent, mission close, correction sans écriture) ;
+  - test des noms de contraintes Drizzle / SQL / `CDC_RECONCILED_CONSTRAINTS` ;
+  - `tsc` : 0 erreur.

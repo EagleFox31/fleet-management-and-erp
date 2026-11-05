@@ -27,6 +27,9 @@ export const MISSION_BUDGET_STATUS_LABELS: Record<MissionBudgetStatus, string> =
   disbursed: "Décaissé",
 };
 
+/** Mission close : plus de budget à saisir pour elle (409). */
+export const MISSION_STATUSES_WITHOUT_BUDGET = ["completed", "cancelled"] as const;
+
 /** Plafond d'un montant saisi : numeric(15,2) en base. */
 export const MISSION_BUDGET_MAX_AMOUNT = 1_000_000_000;
 /** Plafond des litres d'un budget : numeric(12,2) en base, très au-delà d'un plein de convoi. */
