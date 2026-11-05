@@ -35,7 +35,7 @@ export function LoadingError({
             animate={{ rotate: 360 }}
             transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
           >
-            <Loader2 className="h-8 w-8 text-primary mx-auto" />
+            <Loader2 className="h-8 w-8 text-primary-text mx-auto" />
           </motion.div>
           <motion.p
             initial={{ opacity: 0, y: 10 }}

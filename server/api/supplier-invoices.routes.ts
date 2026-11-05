@@ -14,7 +14,14 @@ import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { parseRouteId } from "../lib/route-id";
-import { SETTLEMENT_PROOF_PREFIX, settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
+import {
+  SETTLEMENT_PROOF_EXTENSION_BY_MIME,
+  SETTLEMENT_PROOF_PREFIX,
+  settlementProofContentType,
+  settlementProofFileName,
+  settlementProofPath,
+} from "../lib/settlement-proof";
+import { contentDisposition } from "../lib/content-disposition";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
@@ -247,18 +254,11 @@ const uploadSettlementProof = multer({
     destination: (_req, _file, cb) => cb(null, settlementProofUploadDir),
     filename: (_req, file, cb) => {
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, settlementProofFileName(file.originalname, uniqueSuffix));
+      cb(null, settlementProofFileName(file.originalname, uniqueSuffix, file.mimetype));
     },
   }),
   fileFilter: (_req, file, cb) => {
-    const allowedMimeTypes = [
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "image/jpg",
-      "image/webp",
-    ];
-    if (allowedMimeTypes.includes(file.mimetype)) {
+    if (Object.hasOwn(SETTLEMENT_PROOF_EXTENSION_BY_MIME, file.mimetype)) {
       cb(null, true);
       return;
     }
@@ -592,7 +592,16 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
       throw new AppError(404, "Justificatif introuvable");
     }
 
-    return res.sendFile(proofPath);
+    // Toujours en téléchargement, type tiré de l'extension en liste blanche : une ligne ancienne en .html
+    // ou .svg n'est pas rendue par le navigateur sur l'origine de l'application.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const headers = {
+      "Content-Type": settlementProofContentType(proofPath),
+      "Content-Disposition": contentDisposition("attachment", path.basename(proofPath)),
+    };
+    return res.sendFile(proofPath, { headers }, (err) => {
+      if (err && !res.headersSent) next(new AppError(404, "Justificatif introuvable", { cause: err }));
+    });
   } catch (error) {
     next(error);
   }

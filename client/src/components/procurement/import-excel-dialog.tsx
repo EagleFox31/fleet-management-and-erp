@@ -195,7 +195,7 @@ export function ImportExcelDialog({ open, onOpenChange }: ImportExcelDialogProps
           <div className="border-2 border-dashed rounded-lg p-8 text-center">
             <div className="flex flex-col items-center gap-4">
               <div className="rounded-full bg-primary/10 p-4">
-                <Upload className="h-8 w-8 text-primary" />
+                <Upload className="h-8 w-8 text-primary-text" />
               </div>
               
               {selectedFile ? (

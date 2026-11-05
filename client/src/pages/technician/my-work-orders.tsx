@@ -483,7 +483,7 @@ export default function MyWorkOrdersPage() {
                 {selectedWorkOrder && (
                   <Link
                     href={`/maintenance/work-orders/${selectedWorkOrder.id}`}
-                    className="inline-block font-medium text-primary underline-offset-4 hover:underline"
+                    className="inline-block font-medium text-primary-text underline-offset-4 hover:underline"
                   >
                     Ouvrir la fiche de l'OT
                   </Link>

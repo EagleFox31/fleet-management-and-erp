@@ -167,11 +167,64 @@ export function countLooseParserCalls(file: string, source: string, readModule: 
   return count;
 }
 
+/** `x`, `(x)`, `x as string`, `x!` : l'identifiant converti, sinon `null`. */
+function bareIdentifier(node: ts.Expression): string | null {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isNonNullExpression(current)) {
+    current = current.expression;
+  }
+  return ts.isIdentifier(current) ? current.text : null;
+}
+
+/** Noms liés par `const { id, a: b } = req.params` ou `const id = req.params.id`. */
+function namesBoundFromParams(decl: ts.VariableDeclaration): string[] {
+  const init = decl.initializer;
+  if (!init) return [];
+  const isParams =
+    ts.isPropertyAccessExpression(init) && init.name.text === "params" && ts.isIdentifier(init.expression) && init.expression.text === "req";
+  if (isParams && ts.isObjectBindingPattern(decl.name)) {
+    return decl.name.elements.flatMap((el) => (ts.isIdentifier(el.name) ? [el.name.text] : []));
+  }
+  if (!isParams && ts.isIdentifier(decl.name) && readsRouteParam(init)) return [decl.name.text];
+  return [];
+}
+
+/**
+ * Lecture lâche passée par une variable : `const { id } = req.params; parseInt(id)` (billing, 5 novembre 2026).
+ * Compte chaque conversion lâche (`parseInt`, `Number`, parseur lâche du fichier) d'un nom lié depuis
+ * `req.params`, dans le bloc qui déclare ce nom. Le masquage par une déclaration interne n'est pas suivi.
+ */
+export function countLooseBoundParamReads(file: string, source: string, readModule: ReadModule = readTs): number {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const loose = looseParsers(file, sf, readModule);
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node)) {
+      const names = new Set(namesBoundFromParams(node));
+      const scope = node.parent?.parent?.parent;
+      if (names.size > 0 && scope) {
+        const countIn = (inner: ts.Node): void => {
+          if (ts.isCallExpression(inner) && inner.arguments.length > 0) {
+            const arg = bareIdentifier(inner.arguments[0]);
+            const converts = isLooseConversion(inner) || (ts.isIdentifier(inner.expression) && loose.has(inner.expression.text));
+            if (converts && arg !== null && names.has(arg)) count += 1;
+          }
+          ts.forEachChild(inner, countIn);
+        };
+        countIn(scope);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return count;
+}
+
 function actualCounts(): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const file of sourceFiles(API_DIR)) {
     const source = readFileSync(file, "utf8");
-    const n = countLooseParamReads(source) + countLooseParserCalls(file, source);
+    const n = countLooseParamReads(source) + countLooseParserCalls(file, source) + countLooseBoundParamReads(file, source);
     if (n > 0) counts[relative(API_DIR, file).replace(/\\/g, "/")] = n;
   }
   return counts;
@@ -216,6 +269,22 @@ describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâc
     const ref = "export function parseRouteId(v: unknown, m: string) { return Number(v); }";
     const importingRef = 'import { parseRouteId } from "../lib/route-id";\nconst a = parseRouteId(req.params.id, "m");';
     expect(countLooseParserCalls("/s/api/a.ts", importingRef, () => ref)).toBe(0);
+  });
+
+  it("une lecture lâche passée par une variable liée depuis req.params est comptée", () => {
+    const none: ReadModule = () => null;
+    const handler = (body: string) => `router.get("/:id", async (req, res) => {\n${body}\n});`;
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const { id } = req.params;\nconst a = parseInt(id);\nf(Number(id as string));"), none)).toBe(2);
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const { id: raw } = req.params;\nconst a = Number.parseInt(raw, 10);"), none)).toBe(1);
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const raw = req.params.id;\nconst a = Number(raw);"), none)).toBe(1);
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const raw = req.params[\"id\"];\nconst a = parseInt(raw);"), none)).toBe(1);
+    const viaParser = `function parseX(v: string) { return parseInt(v); }\n${handler("const { id } = req.params;\nconst a = parseX(id);")}`;
+    expect(countLooseBoundParamReads("/x/a.ts", viaParser, none)).toBe(1);
+    // Pas une lecture lâche : lecture stricte, nom non converti, nom homonyme d'un autre handler.
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const { id } = req.params;\nconst a = parseRouteId(id, 'm');"), none)).toBe(0);
+    expect(countLooseBoundParamReads("/x/a.ts", handler("const { clientName } = req.params;\nconst a = clientName.trim();"), none)).toBe(0);
+    const other = `${handler("const { id } = req.params;\nconst a = parseRouteId(id, 'm');")}\n${handler("const id = body.id;\nconst a = Number(id);")}`;
+    expect(countLooseBoundParamReads("/x/a.ts", other, none)).toBe(0);
   });
 
   it("server/routes.ts (gelé) : le nombre de lectures lâches ne peut que baisser", () => {

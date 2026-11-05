@@ -1698,6 +1698,13 @@ Test non déterministe (flake), sans défaut produit.
 ### Leçon généralisée
 Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
 
+### Récurrence (5 novembre 2026) : le garde-fou ne couvrait qu'une forme
+- Faux rouge en CI sur #405 (contract 4) : `role-guards-pistes-def.contract.test.ts:137` contrôlait `/sql|syntax|NaN/i` sur `JSON.stringify(await res.json())`, et un `requestId` « lMjhMsQlWe » contient « sQl ». `vehicle-documents-upload-errors` (`/form/`) avait le même risque.
+- Cause : le motif du garde-fou se limitait à `…body)).not.toMatch`. Les contrôles écrits sur `await res.json()` ou sur une variable `json` lui échappaient.
+- Prévention : motif élargi à `await x.json()` et aux variables `…json`, avec des cas positifs et un cas négatif (`data.payload`) dans `leak-check-hygiene.test.ts` ; les deux contrats passent par `leakText`.
+- Angles morts restants (hors motif) : `expect` sur plusieurs lignes, `res.text()`, `.not.toContain` sur un mot court. À traiter si un faux rouge en montre un.
+- Règle : un garde-fou par motif doit être éprouvé contre toutes les formes d'écriture du même contrôle, pas seulement celle qui a échoué la première fois.
+
 ## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
 
 ### Contexte
@@ -3040,6 +3047,24 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
 
+## 2026-11-05 — Justificatif de règlement fournisseur servi en ligne
+
+- **Contexte** : le justificatif d'un règlement fournisseur était ouvert dans un onglet et servi en ligne sur l'origine de l'application. L'extension écrite sur disque venait du nom d'origine.
+- **Cause racine** : le type servi dépendait du nom fourni au dépôt, pas d'une décision du serveur. Ni `Content-Disposition: attachment` ni `X-Content-Type-Options: nosniff` n'étaient posés.
+- **Classification** : sécurité (fichier téléversé). Near miss : relevé en revue, avant tout signalement.
+- **Résolution** : l'extension disque vient du type déclaré, pris dans une liste blanche (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`) ; le type est obligatoire dans `settlementProofFileName`. La route sert en `attachment` avec `nosniff`, et un type tiré de l'extension en liste blanche, sinon `application/octet-stream`. Le lien de l'écran devient « Télécharger la preuve ».
+- **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
+- **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
+- **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
+## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
+
+- **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
+- **Cause racine** : lecture par `parseInt`/`Number` sans borne haute dans les routes pas encore passées à `parseRouteId` ; la base lève 22003 (valeur hors plage).
+- **Classification** : validation d'entrée manquante.
+- **Résolution** : `routeIdRangeGuard` (`server/middleware/route-id-range-guard.ts`), monté en tête de `apiRouter` (`server/api/index.ts`), donc avant les routeurs de `server/api` et ceux de `routes.ts` : un segment entièrement numérique au-delà de `MAX_DB_INTEGER_ID` (`server/lib/route-id.ts`) répond 400 sans toucher à la base. Le segment est décodé, puis son entier de tête est comparé à la borne : `parseInt` lit aussi une forme encodée, signée, décimale ou suivie de lettres, et une première version qui n'examinait que les segments entièrement numériques laissait ces formes en 500.
+- **Reste ouvert** : un id hors plage passé en paramètre de requête ou dans le corps n'est pas couvert par ce filet, qui ne lit que le chemin ; ces lectures passent à `parseRouteId` au fil des routes (cliquet `route-id-parse-hygiene`).
+- **Prévention vérifiable** : `tests/contract/route-id-range-guard.contract.test.ts` (rouge sans le montage, puis rouge sur les formes lues par `parseInt` avant leur prise en compte), `tests/unit/server/route-id-range-guard.test.ts`, règle R3 de `tests/unit/server/prefix-middleware-guardrail.test.ts` (montage sans préfixe, avant le premier routeur).
+- **Leçon généralisée** : une entrée qui provoque à coup sûr une erreur base se refuse avant la base, par un filet commun plutôt que route par route. Ce filet reproduit la lecture la plus permissive de l'entrée (ici `parseInt`), pas sa forme attendue.
 ## 2026-11-05 — Compteur de verrouillage : écriture hors du verrou de clé, mise à jour perdue
 
 - **Contexte** : `tests/contract/auth-login-unavailable.contract.test.ts` échouait par intermittence en CI (« expected 2 to be 1 ») : un seul mauvais mot de passe, juste après une connexion réussie, comptait deux échecs.
@@ -3076,3 +3101,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Reste ouvert** : le miroir `users` écrit par `confirmFailure`, et par `recordLock` quand `reserve` ou `confirmFailure` pose le verrou, part encore après la transaction. Seul l'affichage admin est concerné, le compteur qui décide du blocage ne l'est pas. Le rentrer dans la transaction changerait le comportement en cas de panne : un miroir en échec annulerait la tentative comptée.
 - **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts`, cas « déverrouillage admin ». Il échoue sur le store d'origine et passe après le correctif.
 - **Leçon généralisée** : quand on corrige une écriture hors verrou, recenser tous les écrivains du même état (`grep` de la table), pas seulement celui qui a déclenché l'incident.
+
+## 2026-11-05 — Main rouge : deux PR vertes chacune contre un main différent (#405 × #389)
+
+- **Contexte** : #405 ajoute une garde qui refuse en 400 « Identifiant invalide. » tout segment numérique de route au-delà de l'int4. #389 (lot 9 des ids stricts) ajoute un contrat qui attend, pour `99999999999`, le message propre à chaque route (« ID de pièce invalide », « ID de véhicule invalide »). Chacune a eu une CI verte, puis les deux ont été fusionnées : main est devenu rouge sur 2 cas de `route-id-strict-lot9.contract.test.ts`.
+- **Cause racine** : la CI de chaque PR a tourné contre un main qui ne contenait pas l'autre. Aucune des deux n'a été rejouée contre le main qui contenait déjà la seconde au moment de sa fusion. Le contrat lot 10 (#391) se trouvait dans le même cas.
+- **Classification** : intégration (fusions croisées), faux vert de CI. Main a été cassé, sans effet en production.
+- **Résolution** : les contrats lot 9 et lot 10 importent `ROUTE_ID_OUT_OF_RANGE_MESSAGE` depuis `server/middleware/route-id-range-guard.ts` au lieu de recopier un texte.
+- **Prévention vérifiable** : les cas hors plage de `route-id-strict-lot9` et `route-id-strict-lot10` lisent la constante de la garde. Un changement de texte de la garde ne peut donc plus faire diverger ces contrats. Reste ouvert, à trancher par le circuit de fusion : exiger une branche à jour avec main avant fusion (protection « require branches to be up to date »), ou rejouer la CI après tout merge qui touche une surface partagée (middlewares montés sur `/api`, cliquets).
+- **Leçon généralisée** : une CI verte ne prouve que l'état « PR + main au moment du run ». Quand deux PR touchent le même comportement (ici la réponse à un id hors plage), la seconde à fusionner doit être rejouée contre un main qui contient la première. Un message d'erreur produit par une garde partagée se teste par sa constante, jamais par son texte recopié.

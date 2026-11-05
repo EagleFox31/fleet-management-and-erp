@@ -156,7 +156,7 @@ export function DataTable<T = any>({
                   <div className="flex items-center">
                     {column.header}
                     {column.sortable && sortConfig.key === String(column.accessorKey) && (
-                      <i className={`fas fa-sort-${sortConfig.direction === "asc" ? "down" : "up"} ml-1 text-primary`}></i>
+                      <i className={`fas fa-sort-${sortConfig.direction === "asc" ? "down" : "up"} ml-1 text-primary-text`}></i>
                     )}
                   </div>
                 </TableHead>
