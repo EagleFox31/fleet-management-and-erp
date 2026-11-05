@@ -2212,7 +2212,7 @@ export default function MissionDetailsPage() {
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5">{mission.assignment.driver.employeeNumber}</p>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block ${
-                            normalizeCpcStatus(mission.assignment.driver.cpcStatus) === "FORME"
+                            mission.assignment.driver.cpcEligible ?? normalizeCpcStatus(mission.assignment.driver.cpcStatus) === "FORME"
                               ? "bg-green-100 text-green-700"
                               : "bg-orange-100 text-orange-700"
                           }`}>

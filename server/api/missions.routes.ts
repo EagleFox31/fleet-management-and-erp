@@ -23,6 +23,7 @@ import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
+import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
 import { toFieldErrors } from "@shared/errors";
 import {
   activeDriverAssignmentsOnMission,
@@ -842,7 +843,7 @@ router.get("/", async (req, res) => {
     // Get assignments for each mission
     const missionsWithAssignments = await Promise.all(
       allMissions.map(async (mission) => {
-        const assignmentRows = await db
+        const rawAssignmentRows = await db
           .select({
             id: assignments.id,
             missionId: assignments.missionId,
@@ -865,6 +866,7 @@ router.get("/", async (req, res) => {
               lastName: drivers.lastName,
               employeeNumber: drivers.employeeNumber,
               cpcStatus: drivers.cpcStatus,
+              cpcTrainingDate: drivers.cpcTrainingDate,
             },
           })
           .from(assignments)
@@ -872,6 +874,8 @@ router.get("/", async (req, res) => {
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
           .orderBy(asc(assignments.id));
+        // Verdict CPC calculé ici, date de formation retirée (cloison de #127).
+        const assignmentRows = withAssignmentsCpcVerdict(rawAssignmentRows, req.user, driverScope);
         // Plusieurs chauffeurs possibles : `assignment` reste la valeur unique historique (celle du chauffeur
         // lecteur, sinon la plus ancienne active), `assignments` liste toutes celles qu'il a le droit de voir.
         const visibleAssignments = driverScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && driverScope.includes(a.driverId));
@@ -957,7 +961,7 @@ router.get("/:id", async (req, res) => {
     }
 
     // Get assignment
-    const assignmentRows = await db
+    const rawAssignmentRows = await db
       .select({
         id: assignments.id,
         missionId: assignments.missionId,
@@ -984,6 +988,7 @@ router.get("/:id", async (req, res) => {
           // Pas de donnée personnelle ici (permis, CNI...) : le détail mission est lu par tout le
           // personnel. La fiche complète passe par /api/drivers/:id, qui applique la rédaction.
           cpcStatus: drivers.cpcStatus,
+          cpcTrainingDate: drivers.cpcTrainingDate,
         },
       })
       .from(assignments)
@@ -993,6 +998,8 @@ router.get("/:id", async (req, res) => {
       .orderBy(asc(assignments.id));
     // Plusieurs chauffeurs possibles (voir la liste) : un chauffeur ne lit que ses propres affectations.
     const detailScope = await driverScopeOf(req.user);
+    // Verdict CPC calculé ici, date de formation retirée (cloison de #127).
+    const assignmentRows = withAssignmentsCpcVerdict(rawAssignmentRows, req.user, detailScope);
     const visibleAssignments = detailScope === undefined ? assignmentRows : assignmentRows.filter((a) => a.driverId !== null && detailScope.includes(a.driverId));
     const assignment = pickMissionAssignment(assignmentRows, detailScope);
 
