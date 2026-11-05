@@ -23,3 +23,8 @@
 ## Reste (lot 3b)
 Modification du prix sur `[id].tsx` : `updateMissionSchema` est une liste blanche, `agreedPrice` n'y est pas
 inscriptible aujourd'hui. PR séparée.
+
+## Revue #487 : réserves R1 / R2 levées
+- R1 : `server/lib/mission-price-scope.ts` expurge `agreedPrice` / `tariffGridId` (clés à null) pour les non-lecteurs de la grille ; appliqué aux routes operations, au PUT status et à la trame WS (jamais de prix en diffusion).
+- R2 : le tarif cité à la création doit être actif, du client (ou générique) et couvrir la date de prise en charge ; l'écran détache le tarif repris si client, trajet, marchandise ou date changent.
+- Mineurs : `AppError` au lieu de `res.status(400)`, `useSingleFlightMutate` sur la création, `ADD COLUMN` testé via `information_schema` avant de verrouiller.

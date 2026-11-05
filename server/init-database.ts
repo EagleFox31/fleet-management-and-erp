@@ -1245,8 +1245,19 @@ END $$;
 export const MISSION_AGREED_PRICE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE missions ADD COLUMN IF NOT EXISTS agreed_price numeric(15,0);
-ALTER TABLE missions ADD COLUMN IF NOT EXISTS tariff_grid_id integer;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'missions' AND column_name = 'agreed_price') THEN
+    ALTER TABLE missions ADD COLUMN agreed_price numeric(15,0);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'missions' AND column_name = 'tariff_grid_id') THEN
+    ALTER TABLE missions ADD COLUMN tariff_grid_id integer;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'missions.agreed_price / tariff_grid_id non ajoutées : verrou indisponible';
+END $$;
 
 DO $$
 BEGIN

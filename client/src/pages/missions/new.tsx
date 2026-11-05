@@ -18,6 +18,7 @@ import { formatPrice } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
 import { TariffSuggestionPanel } from "@/components/missions/tariff-suggestion-panel";
 import { parseAgreedPrice } from "@/lib/tariff-suggestion";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { canSetMissionPrice } from "@shared/constants/roles";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 import { getDriverCpcEligibility, normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
@@ -29,6 +30,9 @@ const WORKFLOW_STEPS = [
   { number: 3, title: "Affectation", description: "Véhicule & Chauffeur" },
   { number: 4, title: "Validation", description: "Récapitulatif" },
 ];
+
+// Champs dont dépend la recherche de tarif : les modifier détache le prix du tarif repris.
+const TARIFF_KEY_FIELDS = ["clientId", "pickupAddress", "deliveryAddress", "cargoDescription", "pickupDate"];
 
 export default function NewMission() {
   const [, setLocation] = useLocation();
@@ -106,8 +110,12 @@ export default function NewMission() {
     },
   });
 
+  const submitMission = useSingleFlightMutate(createMission.mutate);
+
   const updateFormData = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    // Le tarif repris n'est valable que pour le client, le trajet, la marchandise et la date qui l'ont fait choisir.
+    const changesTariff = TARIFF_KEY_FIELDS.includes(field);
+    setFormData(prev => ({ ...prev, [field]: value, ...(changesTariff ? { tariffGridId: null } : {}) }));
   };
 
   const handleNext = () => {
@@ -187,7 +195,7 @@ export default function NewMission() {
       } : null,
     };
 
-    createMission.mutate(missionData);
+    submitMission(missionData);
   };
 
   const selectedClient = (clients as any)?.find((c: any) => c.id === parseInt(formData.clientId));

@@ -31,8 +31,9 @@ describe("O3 lot 3 : missions.agreed_price et tariff_grid_id", () => {
     const sql = migration();
     expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
     expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
-    expect(sql).toContain("ADD COLUMN IF NOT EXISTS agreed_price numeric(15,0);");
-    expect(sql).toContain("ADD COLUMN IF NOT EXISTS tariff_grid_id integer;");
+    expect(sql).toContain("ADD COLUMN agreed_price numeric(15,0);");
+    expect(sql).toContain("ADD COLUMN tariff_grid_id integer;");
+    expect(sql).toContain("information_schema.columns");
     expect(sql).toContain("FOREIGN KEY (tariff_grid_id) REFERENCES tariff_grid(id) ON DELETE SET NULL NOT VALID");
     expect(sql).toContain("VALIDATE CONSTRAINT missions_tariff_grid_id_tariff_grid_id_fk");
     expect(sql.replace("ON DELETE SET NULL", "")).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE |INSERT /);

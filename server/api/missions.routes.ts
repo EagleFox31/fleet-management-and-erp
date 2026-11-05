@@ -61,6 +61,7 @@ import {
 } from "../lib/mission-fuel-regularization";
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
+import { redactMissionPrice } from "../lib/mission-price-scope";
 
 const log = moduleLogger("missions");
 
@@ -226,7 +227,8 @@ async function broadcastMissionUpdate(
       entity: "mission",
       entityId: missionId,
       payload: {
-        mission,
+        // Trame diffusée à tout le personnel (technicien compris) : jamais de prix convenu.
+        mission: redactMissionPrice(null, mission),
         missionId,
         ...extraPayload,
       },
@@ -2070,8 +2072,21 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     const validatedData = parsed.data;
 
     if (validatedData.tariffGridId != null) {
-      const [tariff] = await db.select({ id: tariffGrid.id }).from(tariffGrid).where(eq(tariffGrid.id, validatedData.tariffGridId)).limit(1);
-      if (!tariff) return res.status(400).json({ message: "Tarif d'origine introuvable." });
+      const [tariff] = await db
+        .select({ id: tariffGrid.id, clientId: tariffGrid.clientId, active: tariffGrid.active, validFrom: tariffGrid.validFrom, validTo: tariffGrid.validTo })
+        .from(tariffGrid)
+        .where(eq(tariffGrid.id, validatedData.tariffGridId))
+        .limit(1);
+      if (!tariff) throw new AppError(400, "Tarif d'origine introuvable.");
+      // Le tarif cité doit être celui que la suggestion aurait pu proposer : actif, du client (ou générique), valide ce jour-là.
+      const douala = new Date((validatedData.pickupDate ?? new Date()).getTime() + 3_600_000).toISOString().slice(0, 10);
+      if (!tariff.active) throw new AppError(400, "Ce tarif n'est plus actif.");
+      if (tariff.clientId !== null && tariff.clientId !== (validatedData.clientId ?? null)) {
+        throw new AppError(400, "Ce tarif appartient à un autre client.");
+      }
+      if (tariff.validFrom > douala || (tariff.validTo !== null && tariff.validTo < douala)) {
+        throw new AppError(400, "Ce tarif ne couvre pas la date de la mission.");
+      }
     }
 
     const hasAssignment =
@@ -2219,7 +2234,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     return res.status(201).json(newMission);
   } catch (error) {
     // Conflit de planning : AppError traité par le gestionnaire central (code et requestId).
-    if (error instanceof AppError && error.status === 409) return next(error);
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
@@ -3258,7 +3273,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           })()
         : [];
 
-    return res.json({
+    return res.json(redactMissionPrice(req.user, {
       ...updatedMission,
       ...extractMissionExecutionDates({
         workflowData: (updatedMission as any)?.workflowData,
@@ -3275,7 +3290,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             : missionAssignment?.completedAt,
       }),
       warnings,
-    });
+    }));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Update mission status error");
