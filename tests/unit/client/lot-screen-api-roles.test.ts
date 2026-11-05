@@ -108,6 +108,7 @@ const SCREEN_APIS: Record<string, Declaration> = {
       { file: "time-tracking.routes.ts", path: "/time-tracking/monthly-stats" },
     ],
   },
+  "mission-operations": { apis: [{ file: "mission-operations.routes.ts", path: "/mission-operations" }] },
   "pending-invoices": { apis: [{ file: "pending-invoices.routes.ts", path: "/billing/pending-invoices" }] },
 };
 
