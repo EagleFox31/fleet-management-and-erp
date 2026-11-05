@@ -208,6 +208,13 @@ describe("garde de cloison des lectures : le scan ne se laisse pas tromper", () 
     expect(verdictOf(before)).toBe(true);
   });
 
+  it("assertVehicleSubresourcesReadable lève : en instruction seule, il protège ; après l'envoi, non", () => {
+    const before = 'router.get("/:vehicleId/tires", isAnyUser, async (req, res) => { await assertVehicleSubresourcesReadable(req, 1); res.json(1); });';
+    const after = 'router.get("/:vehicleId/tires", isAnyUser, async (req, res) => { res.json(1); await assertVehicleSubresourcesReadable(req, 1); });';
+    expect(verdictOf(before)).toBe(true);
+    expect(verdictOf(after)).toBe(false);
+  });
+
   it("une réponse d'erreur 4xx avant le contrôle n'est pas un envoi de donnée", () => {
     const src =
       'router.get("/x", isAnyUser, async (req, res) => { if (!id) return res.status(400).json({ message: "id" }); if (!(await canAccessOwned(req.user, owner))) return res.status(403).json({}); res.json(1); });';

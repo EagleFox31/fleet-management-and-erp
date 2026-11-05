@@ -131,3 +131,31 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R3 : test unitaire du schéma, recherche indentée rétablie pour les colonnes du `CREATE TABLE`, recherche ciblée de l'`ALTER` pour `applied_stamp`.
   - R4 : effet de l'horodatage sur toute écriture documenté en limite.
 - **Pourquoi** : cohérence avec le détail (« un client ne le voit plus ») ; un client ne crée pas de véhicule, la réservation de l'immatriculation ne vaut que pour le personnel.
+
+## 2026-11-05T18:37:41+01:00 — Sous-ressources d'un véhicule retiré : extraction de routes.ts et cloison client
+
+- **Agent** : c7 · **Branche** : `c7-vehicle-subresources`
+- **Statut** : fait, en relecture. Lève la première limite assumée de l'entrée « Suivi de #476 ».
+- **Quoi** :
+  - 6 lectures sont extraites de `server/routes.ts` vers `server/api/vehicle-subresources.routes.ts` : documents, documents par type, kilométrage, historique kilométrique, historique de statut, pneus.
+  - Elles sont supprimées de `routes.ts` (130 lignes en moins, rien d'ajouté).
+  - Un client ne les lit que sur son véhicule, et plus du tout une fois le véhicule retiré.
+  - La réponse est 403 avec le même message que pour un tiers : le retrait ne se devine pas.
+  - Le personnel lit tout, véhicule retiré compris.
+- **Comment** :
+  - décision pure `canReadVehicleSubresources` (`server/lib/vehicle-retired.ts`), qui ne lit le véhicule que pour un client ;
+  - garde qui lève `assertVehicleSubresourcesReadable` dans le routeur ;
+  - `tests/support/route-guard-scan.ts` la reconnaît comme cloison, comme `assertWorkOrderReadable` (garde qui lève, valable en instruction seule) ;
+  - montage sur `/vehicles` après `vehicleLifecycleRoutes`. Chaque chemin a deux segments, donc `/check/:reg` et `/documents/all` ne sont pas masqués (témoins au contrat).
+- **Contrat de réponse** : corps 200 inchangés. Les 400 et 403 passent par `AppError` : même `message`, plus `code` et `requestId`. Les 500 suivent le gestionnaire central.
+- **Pourquoi** : réserve R2 de la relecture de #484 ; `routes.ts` est gelé, d'où l'extraction plutôt qu'un filtre en place.
+- **Preuve automatisée** :
+  - `tests/contract/vehicle-subresources-client-scope.contract.test.ts` : 9 cas (6 routes × propriétaire actif, propriétaire retiré, tiers, personnel, anonyme ; id et type invalides ; témoins `/check/:reg` et `/documents/all`) ;
+  - mutants « garde du retrait retirée » et « garde tiers retirée » : 6 rouges chacun ;
+  - `tests/unit/server/vehicle-subresources-guard.test.ts`, plus un cas du scan dans `routes-hygiene` ;
+  - unitaires 2919 verts, contrats liés (véhicule, cloison, gardes, route-id, pneus, kilométrage) 45 fichiers / 670 verts, `npm run check` sans erreur.
+- **RAIDER** :
+  - R : décision pure réutilisable, garde unique pour les 6 routes ;
+  - D : réponses 200 inchangées, routes voisines prouvées intactes ;
+  - E : `routes.ts` allégé, erreurs par `AppError`, logs par le gestionnaire central ;
+  - non applicable : pas de schéma, pas de temps réel, pas d'écriture.

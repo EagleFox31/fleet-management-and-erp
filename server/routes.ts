@@ -1245,53 +1245,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/vehicles/:id et POST /api/vehicles/:id/restore : server/api/vehicle-lifecycle.routes.ts
 
   // Vehicle Documents Routes
-  app.get("/api/vehicles/:vehicleId/documents", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const documents = await storage.getVehicleDocuments(vehicleId);
-      
-      return res.status(200).json(documents);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture des documents du véhicule en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
-  app.get("/api/vehicles/:vehicleId/documents/:type", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      const type = req.params.type;
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      
-      if (!['carte_grise', 'assurance', 'visite_technique', 'taxe', 'autre'].includes(type)) {
-        return res.status(400).json({ message: "Type de document invalide" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const documents = await storage.getVehicleDocumentsByType(vehicleId, type);
-      
-      return res.status(200).json(documents);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture des documents du véhicule par type en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Maintenance Schedule Routes
   app.get("/api/maintenance-schedules", authenticate, async (req, res) => {
     try {
@@ -2903,48 +2856,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Statistiques de consommation de carburant
   // Routes pour la gestion du kilométrage
-  app.get("/api/vehicles/:id/mileage", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.id);
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      const currentMileage = await mileageService.getCurrentMileage(vehicleId);
-      
-      return res.json({ 
-        vehicleId, 
-        currentMileage,
-        lastMileage: currentMileage 
-      });
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture du kilométrage en échec");
-      return res.status(500).json({ message: "Erreur lors de la récupération du kilométrage" });
-    }
-  });
-
-  app.get("/api/vehicles/:id/mileage/history", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.id);
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      const limit = parseInt(req.query.limit as string) || 50;
-      
-      const history = await mileageService.getMileageHistory(vehicleId, limit);
-      
-      return res.json(history);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture de l'historique kilométrique en échec");
-      return res.status(500).json({ message: "Erreur lors de la récupération de l'historique" });
-    }
-  });
-
   app.post("/api/vehicles/:id/mileage/sync", isStaff, async (req, res) => {
     try {
       const vehicleId = routeIdOrNaN(req.params.id);
@@ -3541,26 +3452,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Vehicle status history endpoint - utilise le service de statut dédié
-  app.get("/api/vehicles/:vehicleId/status-history", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const history = await vehicleStatusService.getVehicleStatusHistory(vehicleId);
-      return res.status(200).json(history);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture de l'historique de statut en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   app.get("/api/statistics/maintenance-cost/:period", authenticate, async (req: Request, res) => {
     try {
       // Vérifier les permissions utilisateur - DONNÉES FINANCIÈRES SENSIBLES
@@ -3922,27 +3813,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle tire tracking routes
-  app.get("/api/vehicles/:vehicleId/tires", isAnyUser, async (req, res, next) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
-      assertValidDbId(vehicleId, "ID de véhicule invalide");
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const vehicleTires = await tiresService.getVehicleTires(vehicleId);
-      // La jointure renvoie le véhicule entier : le prix d'achat en est retiré
-      // pour les rôles non autorisés.
-      return res.status(200).json(redactVehiclePriceDeep(req.user, vehicleTires));
-    } catch (error) {
-      if (isAppError(error)) return next(error);
-      log.error({ err: error, requestId: req.requestId }, "lecture des pneus du véhicule en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Route pour vérifier toutes les maintenances (kilométrage + dates)
   app.post("/api/check-all-maintenance", isWorkshopManager, async (req, res) => {
     try {
