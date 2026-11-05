@@ -69,3 +69,8 @@
 
 ## 2026-11-05 03:19 — c7 : réserves de #354 (fonction pure du message de lancement)
 - #353 et #354 fusionnées, #358 aussi. Branche fix/launch-message-followup : launchRefusalMessage extraite (continue au lieu de break), test unitaire, cas toast client, entrée LESSONS. PR à ouvrir, « mr » à 0a. Stack c7test à garder jusqu'à la fin de cette PR.
+
+## 2026-11-05 — assertWorkOrderReadable : même réponse hors périmètre et inexistant (fix/work-order-scope-uniform-404, base main)
+- Un client sur l'OT d'un autre client recevait 403, sur un OT inexistant 404 : l'écart permettait d'énumérer les OT. Désormais 404, même message, dans les deux cas ; le personnel est inchangé.
+- Convention retenue : 404 pour les OT (écart assumé avec le 403 de `canAccessOwned` ailleurs), noté dans AGENTS §11 et dans le JSDoc du helper.
+- Contrats adaptés (a5-role-guards, work-order-detail-client-scope, work-order-reads-client-scope) : comparaison explicite statut, message et code avec un OT inexistant.
