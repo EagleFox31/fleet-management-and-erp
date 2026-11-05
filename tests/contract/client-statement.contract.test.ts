@@ -131,10 +131,17 @@ describe("paramètres", () => {
     expect((await get(clientStatementPath(MAX_DB_INTEGER_ID), "admin")).status).toBe(404);
   });
 
-  it("période invalide : 400", async () => {
-    expect((await get(`${clientStatementPath(clientId)}?from=2026-03-01&to=2026-02-01`, "admin")).status).toBe(400);
-    expect((await get(`${clientStatementPath(clientId)}?from=2026-02-30`, "admin")).status).toBe(400);
-    expect((await get(`${clientStatementPath(clientId)}?to=demain`, "admin")).status).toBe(400);
+  it.each([
+    ["from=2026-03-01&to=2026-02-01", "La date de début doit précéder la date de fin."],
+    ["from=2026-02-30", "Cette date n'existe pas au calendrier."],
+    ["to=demain", "Date attendue au format AAAA-MM-JJ."],
+    ["from[]=2026-01-01", "Période invalide."],
+  ])("période invalide (%s) : 400, message lisible, aucun détail technique", async (query, message) => {
+    const r = await get(`${clientStatementPath(clientId)}?${query}`, "admin");
+    expect(r.status).toBe(400);
+    expect(r.body.message).toBe(message);
+    expect(typeof r.body.requestId).toBe("string");
+    expect(JSON.stringify(r.body)).not.toMatch(/Expected|received|zod|stack|issues/i);
   });
 });
 
@@ -164,6 +171,18 @@ describe("calcul", () => {
     expect(s.lines[0]).toMatchObject({ kind: "payment", credit: 40000, balance: 60000 });
     expect(s.totals).toEqual({ debit: 0, credit: 40000 });
     expect(s.closingBalance).toBe(60000);
+  });
+
+  it("bornes inclusives : un mouvement le jour de from et un le jour de to", async () => {
+    const r = await get(`${clientStatementPath(clientId)}?from=2026-02-05&to=2026-03-01`, "admin");
+    const s = clientStatementResponseSchema.parse(r.body);
+    expect(s.openingBalance).toBe(100000);
+    expect(s.lines.map((l) => [l.date, l.kind, l.balance])).toEqual([
+      ["2026-02-05", "payment", 60000],
+      ["2026-03-01", "invoice", 110000],
+      ["2026-03-01", "payment", 50000],
+    ]);
+    expect(s.closingBalance).toBe(50000);
   });
 
   it("période sans mouvement : solde de clôture = ouverture", async () => {

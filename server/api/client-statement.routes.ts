@@ -29,7 +29,9 @@ router.get("/clients/:id/statement", requireFeature("finance"), isAnyUser, async
     }
     const parsed = clientStatementQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      throw new AppError(400, parsed.error.issues[0]?.message ?? "Période invalide.");
+      // Valeur non textuelle (`?from[]=x`) : le message de zod est technique et en anglais.
+      const issue = parsed.error.issues[0];
+      throw new AppError(400, issue && issue.code !== "invalid_type" ? issue.message : "Période invalide.");
     }
     const to = parsed.data.to ?? isoDateInZone(new Date());
     const from = parsed.data.from ?? null;
