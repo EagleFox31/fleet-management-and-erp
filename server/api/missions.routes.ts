@@ -2,7 +2,7 @@ import { getFuelPriceAt } from "../services/fuel-price-service";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
-import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
+import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords, tariffGrid } from "@shared/schema";
 import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
@@ -2033,7 +2033,16 @@ const createMissionSchema = insertMissionSchema
     actualFuelQuantity: true,
     currentStep: true,
   })
-  .extend({ status: z.enum(["draft", "planned"]).optional() });
+  .extend({
+    status: z.enum(["draft", "planned"]).optional(),
+    // O3 lot 3 : prix convenu en XAF entier ; le tarif d'origine n'a de sens qu'avec un prix.
+    agreedPrice: z.number().int().min(0).max(999_999_999_999_999).nullable().optional().transform((v) => (v == null ? null : String(v))),
+    tariffGridId: idSchema.nullable().optional(),
+  })
+  .refine((m) => m.tariffGridId == null || m.agreedPrice != null, {
+    message: "Un tarif d'origine suppose un prix convenu.",
+    path: ["tariffGridId"],
+  });
 
 // POST /api/missions - Créer une nouvelle mission
 router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
@@ -2059,6 +2068,11 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       });
     }
     const validatedData = parsed.data;
+
+    if (validatedData.tariffGridId != null) {
+      const [tariff] = await db.select({ id: tariffGrid.id }).from(tariffGrid).where(eq(tariffGrid.id, validatedData.tariffGridId)).limit(1);
+      if (!tariff) return res.status(400).json({ message: "Tarif d'origine introuvable." });
+    }
 
     const hasAssignment =
       missionData.assignment &&

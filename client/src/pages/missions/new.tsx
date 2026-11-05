@@ -16,6 +16,9 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save, AlertTriangle } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
+import { TariffSuggestionPanel } from "@/components/missions/tariff-suggestion-panel";
+import { parseAgreedPrice } from "@/lib/tariff-suggestion";
+import { canSetMissionPrice } from "@shared/constants/roles";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 import { getDriverCpcEligibility, normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { CPC_BLOCK_PREFIX, driverCpcStatusOf, getCpcBlockGuidance, getStepBlockReason } from "@/lib/mission-wizard-rules";
@@ -52,6 +55,8 @@ export default function NewMission() {
     weight: "",
     volume: "",
     estimatedDistance: "",
+    agreedPrice: "",
+    tariffGridId: null as number | null,
     
     // Step 3: Affectation
     vehicleId: "",
@@ -127,6 +132,11 @@ export default function NewMission() {
   };
 
   const handleSubmit = () => {
+    const agreedPrice = parseAgreedPrice(formData.agreedPrice);
+    if (agreedPrice === "invalid") {
+      toast({ title: "Prix invalide", description: "Saisissez un montant entier en XAF, sans décimale.", variant: "destructive" });
+      return;
+    }
     if (formData.vehicleId && !isWeightCompatible) {
       toast({
         title: "Véhicule incompatible",
@@ -167,6 +177,8 @@ export default function NewMission() {
       volume: formData.volume ? parseFloat(formData.volume) : null,
       estimatedDistance: formData.estimatedDistance ? parseInt(formData.estimatedDistance) : null,
       specialInstructions: formData.specialInstructions,
+      // Prix enregistré seulement s'il a été saisi ou repris par « Utiliser ».
+      ...(typeof agreedPrice === "number" ? { agreedPrice, tariffGridId: formData.tariffGridId } : {}),
       status: "planned",
       currentStep: 4,
       assignment: formData.vehicleId && formData.driverId ? {
@@ -453,6 +465,14 @@ export default function NewMission() {
                   </div>
                 </div>
               </div>
+              {canSetMissionPrice(user?.role) && (
+                <TariffSuggestionPanel
+                  input={formData}
+                  weight={formData.weight}
+                  value={{ agreedPrice: formData.agreedPrice, tariffGridId: formData.tariffGridId }}
+                  onChange={(next) => setFormData((prev) => ({ ...prev, ...next }))}
+                />
+              )}
             </div>
           )}
 
