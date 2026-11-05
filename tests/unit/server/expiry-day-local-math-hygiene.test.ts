@@ -76,3 +76,58 @@ describe("échéances : pas de calcul de jour local hors expiry-day.ts", () => {
     }
   });
 });
+
+/**
+ * Extension #342 : même règle pour les échéances d'entretien (`scheduledDate`, `frequencyValue`,
+ * `nextDueDate`, `nextMaintenanceDate`). Le jour d'échéance d'un plan passe par
+ * `shared/constants/maintenance-due-day.ts`. Liste gelée : dette au 5 novembre 2026.
+ */
+const MAINTENANCE_FIELD = /\b(scheduledDate|frequencyValue|nextDueDate|nextMaintenanceDate)\b/;
+
+/** Le calcul d'échéance d'un plan ajoute aussi sa période par `setDate(` / `setMonth(` (heure locale). */
+const MAINTENANCE_LOCAL_DAY = new RegExp(String.raw`${LOCAL_DAY.source}|\bsetDate\(|\bsetMonth\(`);
+
+/**
+ * `client/src/pages/technician/fleet-status.tsx:188` divise des millisecondes pour une durée
+ * (createdAt -> endDate d'un ordre de travail), pas pour une échéance ; le fichier reste pourtant
+ * fautif ailleurs (`setDate` aux lignes 226 et 247, `24 * 60 * 60 * 1000` ligne 426 sur
+ * `scheduledDate`). Il n'est donc pas exclu : il reste gelé jusqu'à correction complète.
+ * `maintenanceService.ts:161` n'est pas un calcul local (il appelle `maintenanceElapsedDays`).
+ */
+const FROZEN_MAINTENANCE = new Set<string>([
+  "client/src/components/vehicles/vehicle-health-score.tsx",
+  "client/src/pages/technician/fleet-status.tsx",
+  "server/api/vehicles.routes.ts",
+  "server/routes.ts",
+  "server/services/alert-service.ts",
+  // Nouveaux avec `setDate(` / `setMonth(` : dates d'alerte et fenêtres en heure locale du serveur.
+  "server/services/preventive-maintenance-service.ts",
+  "server/storage.ts",
+]);
+
+function maintenanceOffenders(): string[] {
+  return SCANNED.flatMap((d) => walk(join(root, d)))
+    .filter((rel) => {
+      const src = stripComments(readFileSync(join(root, rel), "utf8"));
+      return MAINTENANCE_FIELD.test(src) && MAINTENANCE_LOCAL_DAY.test(src);
+    })
+    .sort();
+}
+
+describe("échéances d'entretien : pas de calcul de jour local hors maintenance-due-day.ts", () => {
+  const found = maintenanceOffenders();
+
+  it("aucun nouveau fichier ne recopie le calcul du jour d'échéance d'entretien", () => {
+    expect(found.filter((f) => !FROZEN_MAINTENANCE.has(f))).toEqual([]);
+  });
+
+  it("la liste gelée ne garde que des fichiers encore fautifs", () => {
+    expect([...FROZEN_MAINTENANCE].filter((f) => !found.includes(f))).toEqual([]);
+  });
+
+  it("les trois écrans d'entretien corrigés (#342) restent hors de la liste", () => {
+    for (const rel of ["client/src/pages/maintenance-schedules.tsx", "client/src/pages/maintenance-planner.tsx", "client/src/pages/maintenance-simple.tsx"]) {
+      expect(found, rel).not.toContain(rel);
+    }
+  });
+});
