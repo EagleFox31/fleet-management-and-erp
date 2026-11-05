@@ -112,7 +112,7 @@ export function OverdueOrdersAlert({ userRole }: OverdueOrdersAlertProps) {
             </div>
             <div>
               <DialogTitle className="text-xl">
-                🚨 Alerte : Commandes en Retard de Livraison
+                Alerte : Commandes en Retard de Livraison
               </DialogTitle>
               <DialogDescription>
                 {overdueOrders.length} commande{overdueOrders.length > 1 ? 's' : ''} n'ont pas été livrée{overdueOrders.length > 1 ? 's' : ''} à temps
