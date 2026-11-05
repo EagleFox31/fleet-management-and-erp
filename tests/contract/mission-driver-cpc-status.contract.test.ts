@@ -283,4 +283,62 @@ describe("CPC chauffeur : date de formation future refusée à la saisie", () =>
     const [row] = await db.select().from(drivers).where(eq(drivers.id, d.id));
     expect(row.cpcTrainingDate).toBe(daysFromNow(30));
   }, 60000);
+
+  it("POST /api/drivers : champ au mauvais type sans message personnalisé, message générique et détail en français", async () => {
+    const res = await call("POST", "/api/drivers", {
+      actor: "logistics",
+      body: { firstName: "TEST", lastName: 123 },
+    });
+    if (res.body?.id) driverIds.push(res.body.id);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Données chauffeur invalides");
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === "lastName")).toBe(true);
+    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+  }, 60000);
+
+  it("POST /api/drivers : champ obligatoire absent, aucun texte Zod anglais", async () => {
+    const res = await call("POST", "/api/drivers", { actor: "logistics", body: { firstName: "TEST" } });
+    if (res.body?.id) driverIds.push(res.body.id);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Données chauffeur invalides");
+    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+  }, 60000);
+
+  it("PATCH /api/drivers/:id : message personnalisé du schéma repris dans message", async () => {
+    const d = await driver("FORMÉ", daysAgo(10));
+    const res = await call("PATCH", `/api/drivers/${d.id}`, { actor: "logistics", body: { firstName: "" } });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Le prénom est requis");
+    expect(res.body.errors[0].field).toBe("firstName");
+  }, 60000);
+
+  it("PATCH /api/drivers/:id : mauvais type, message générique", async () => {
+    const d = await driver("FORMÉ", daysAgo(10));
+    const res = await call("PATCH", `/api/drivers/${d.id}`, { actor: "logistics", body: { firstName: 42 } });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Données chauffeur invalides");
+    expect(JSON.stringify(res.body)).not.toMatch(/Expected|Required/);
+  }, 60000);
+
+  it("POST /api/drivers/:id/update-cpc avec une date future : 400 lisible, date inchangée", async () => {
+    const d = await driver("FORMÉ", daysAgo(10));
+    const res = await call("POST", `/api/drivers/${d.id}/update-cpc`, {
+      actor: "logistics",
+      body: { cpcDate: daysFromNow(10) },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(FUTURE_MESSAGE);
+    const [row] = await db.select().from(drivers).where(eq(drivers.id, d.id));
+    expect(row.cpcTrainingDate).toBe(daysAgo(10));
+  }, 60000);
+
+  it("POST /api/drivers/:id/update-cpc avec la date du jour : 200", async () => {
+    const d = await driver("FORMÉ", daysAgo(10));
+    const res = await call("POST", `/api/drivers/${d.id}/update-cpc`, {
+      actor: "logistics",
+      body: { cpcDate: daysFromNow(0) },
+    });
+    expect(res.status).toBe(200);
+  }, 60000);
 });

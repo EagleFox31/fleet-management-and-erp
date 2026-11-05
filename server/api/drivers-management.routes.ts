@@ -7,7 +7,8 @@ import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { todayUtcDateOnly } from "@shared/constants/expiry-day";
+import { toFieldErrors } from "@shared/errors";
+import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
 import { randomPasswordHash } from "../lib/dummy-hash";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
@@ -43,9 +44,31 @@ const optionalDateField = z
 // Une formation ne peut pas avoir eu lieu dans le futur (jour UTC). Controle de saisie seulement :
 // les imports (scripts/) et les donnees deja en base ne passent pas par ce schema.
 const pastOrTodayDateField = optionalDateField.refine(
-  (value) => value === null || value <= todayUtcDateOnly(),
-  { message: "La date de formation CPC ne peut pas être dans le futur." },
+  (value) => !isCpcTrainingDateInFuture(value),
+  { message: CPC_TRAINING_DATE_FUTURE_MESSAGE },
 );
+
+const DRIVER_INVALID_MESSAGE = "Données chauffeur invalides";
+
+// Messages ecrits dans les schemas ci-dessous : seuls ceux-la remontent tels quels dans `message`.
+// Toute autre issue Zod (type, requis...) garde le message generique.
+const SCHEMA_MESSAGES: ReadonlySet<string> = new Set([
+  "Le prénom est requis",
+  "Le nom est requis",
+  "Format de date invalide (YYYY-MM-DD)",
+  "Aucune donnée de mise à jour fournie",
+  CPC_TRAINING_DATE_FUTURE_MESSAGE,
+]);
+
+/** Corps 400 au contrat ApiErrorBody : détail par champ en français, jamais de texte Zod par défaut. */
+function driverValidationBody(error: z.ZodError) {
+  const custom = error.issues.find((issue) => SCHEMA_MESSAGES.has(issue.message));
+  return {
+    message: custom ? custom.message : DRIVER_INVALID_MESSAGE,
+    code: "VALIDATION" as const,
+    errors: toFieldErrors(error.issues),
+  };
+}
 
 const createDriverSchema = z.object({
   firstName: z.string().trim().min(1, "Le prénom est requis"),
@@ -252,10 +275,7 @@ router.post("/", isDriverManager, async (req, res) => {
     }
 
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        message: error.errors[0]?.message ?? "Données chauffeur invalides",
-        errors: error.errors,
-      });
+      return res.status(400).json(driverValidationBody(error));
     }
 
     console.error("Create driver error:", error);
@@ -341,10 +361,7 @@ router.patch("/:id", isDriverManager, async (req, res) => {
     }
 
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        message: error.errors[0]?.message ?? "Données chauffeur invalides",
-        errors: error.errors,
-      });
+      return res.status(400).json(driverValidationBody(error));
     }
 
     console.error("Update driver error:", error);
