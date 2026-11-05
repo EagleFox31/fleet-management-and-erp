@@ -403,3 +403,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `LockoutStore.reserve` (magasin Postgres et mémoire) renvoie un refus sans rien écrire quand le verrou est actif ; une fenêtre expirée repart de zéro. La transaction et le verrou consultatif restent pris, seule l'écriture (upsert, audit) est évitée.
 - **Pourquoi** : sous attaque, chaque 429 coûtait un upsert et un verrou de ligne sur un compteur sans effet tant que le verrou dure.
 - **Preuve** : contrat `login-lockout-no-write-when-locked` (50 réservations sur compte verrouillé : `xmin` et `failed_count` inchangés, un seul audit `lock`) et unitaire du magasin mémoire.
+
+## 2026-11-05 — Import de sauvegarde : mot de passe validé (#323)
+- **Quoi** : `usersWithSafeSecrets` (ex-`usersWithSafePins`) prépare PIN et mot de passe hors transaction ; `passwordForRestore` reprend bcrypt strict et SHA-256 hérité, hache un clair conforme, remplace le reste par un hash inutilisable avec `warn` (username seul).
+- **Pourquoi** : un mot de passe clair restauré était stocké en clair et le compte ne pouvait plus se connecter.
+- **Preuve** : contrat `backup-import-password` (clair → 200 au login, SHA-256 → 200 puis migré, trop court → 401), rouge sur le comportement de main (2 échecs, valeur stockée en clair) ; unitaire `user-password`.
