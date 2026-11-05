@@ -1,3 +1,4 @@
+import type { PoolClient } from "@neondatabase/serverless";
 import type { LockoutConfig } from "@shared/contracts/auth-lockout";
 import { pool } from "../db";
 import { recordAudit } from "../lib/audit";
@@ -127,11 +128,7 @@ export class DbLockoutStore implements LockoutStore {
     key: string,
     apply: (before: LockState | null) => LockState | null,
   ): Promise<{ before: LockState | null; after: LockState | null }> {
-    const client = await pool.connect();
-    let broken: Error | undefined;
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + key]);
+    return this.underKeyLock(key, async (client) => {
       const { rows } = await client.query(
         "SELECT failed_count, locked_until, last_failed_at FROM login_attempts_by_username WHERE username_normalized = $1",
         [key],
@@ -147,8 +144,24 @@ export class DbLockoutStore implements LockoutStore {
           [key, after.failedCount, after.lockedUntil, after.lastFailedAt],
         );
       }
-      await client.query("COMMIT");
       return { before, after };
+    });
+  }
+
+  /**
+   * Transaction sous le verrou consultatif de la cle. Toute ecriture du compteur d'une cle passe par ici :
+   * un DELETE ou un UPDATE hors verrou s'intercalait entre la lecture et l'ecriture d'une reservation,
+   * qui reecrivait alors l'ancienne valeur (remise a zero ou tentative rendue perdue).
+   */
+  private async underKeyLock<T>(key: string, work: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    let broken: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + key]);
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
     } catch (err) {
       // Connexion dont le ROLLBACK echoue : detruite plutot que rendue au pool.
       await client.query("ROLLBACK").catch((rollbackErr: Error) => {
@@ -201,10 +214,13 @@ export class DbLockoutStore implements LockoutStore {
   }
 
   async release(username: string, now: Date): Promise<void> {
-    await pool.query(
-      `UPDATE login_attempts_by_username SET failed_count = GREATEST(failed_count - 1, 0), updated_at = $2::timestamp
-       WHERE username_normalized = $1`,
-      [storedLockoutKey(username), now],
+    const key = storedLockoutKey(username);
+    await this.underKeyLock(key, (client) =>
+      client.query(
+        `UPDATE login_attempts_by_username SET failed_count = GREATEST(failed_count - 1, 0), updated_at = $2::timestamp
+         WHERE username_normalized = $1`,
+        [key, now],
+      ),
     );
   }
 
@@ -234,7 +250,8 @@ export class DbLockoutStore implements LockoutStore {
   }
 
   async reset(username: string): Promise<void> {
-    await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [storedLockoutKey(username)]);
+    const key = storedLockoutKey(username);
+    await this.underKeyLock(key, (client) => client.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [key]));
     const target = mirrorTarget(username);
     await pool.query(
       `UPDATE users SET failed_login_count = 0, locked_until = NULL
