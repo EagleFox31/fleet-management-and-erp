@@ -39,10 +39,7 @@ const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 const API_DIR = join(ROOT, "server/api");
 
 /** Occurrences relevées le 5 novembre 2026. Ne peut que rétrécir. */
-const FROZEN: Record<string, number> = {
-  // Garde du toggle admin, traitée par #375.
-  "admin-users-guard.routes.ts": 1,
-};
+const FROZEN: Record<string, number> = {};
 
 /** Lectures lâches restantes dans `server/routes.ts` (gelé) : PATCH users et toggle admin-users, traités ailleurs. Ne peut que baisser. */
 const ROUTES_TS_FROZEN = 2;
