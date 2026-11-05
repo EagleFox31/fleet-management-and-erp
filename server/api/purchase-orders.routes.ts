@@ -7,6 +7,7 @@ import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 import { withLogContext } from "../lib/error-log-context";
+import { bodyIdSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("purchase-orders");
 
@@ -256,10 +257,10 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
   try {
     // Valider les données de base
     const schema = z.object({
-      supplierId: z.number(),
-      requirementIds: z.array(z.number()).optional().default([]),
+      supplierId: bodyIdSchema,
+      requirementIds: z.array(bodyIdSchema).optional().default([]),
       requirementQuantities: z.array(z.object({
-        requirementId: z.number(),
+        requirementId: bodyIdSchema,
         quantityOrdered: z.number().int().positive(),
       })).optional().default([]),
       manualLines: z.array(z.object({

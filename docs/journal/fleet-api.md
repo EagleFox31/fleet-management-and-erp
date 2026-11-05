@@ -512,3 +512,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : le test `tests/unit/server/lockout-key-lock-hygiene.test.ts` vérifie deux choses. La clé `fleet-lockout:` n'est verrouillée qu'à un seul endroit de `server/`, dans `underKeyLock`. Et seul le store écrit `login_attempts_by_username`, à une exception près, nommée : la reprise M3 au démarrage.
 - **Pourquoi** : les deux corrections du compteur (5 novembre) venaient d'écritures faites hors du verrou de clé. Un second endroit qui prendrait ce verrou pourrait l'appliquer dans un autre ordre, ou sur une autre forme de clé.
 - **Preuve** : vert sur main. Il passe au rouge si l'on ajoute une deuxième occurrence de la clé, ou un écrivain de la table hors du store. Unitaires 2612.
+
+## 2026-11-05 — Ids hors plage int4 dans la query et le corps
+- **Quoi** : `bodyIdSchema` et `MAX_DB_INTEGER_ID` dans `shared/contracts/common.ts` ; `idSchema` borné. Les ids d'entrée de quinze routes de `server/api` passent par ces schémas. Nouveau cliquet `zod-id-range-hygiene`.
+- **Pourquoi** : un id au-delà de l'int4 reçu dans la query ou le corps répondait 500. Le filet `routeIdRangeGuard` ne lit que le chemin.
+- **Preuve** : contrat `id-range-query-body` rouge 12/12 sur l'ancien code, vert 15/15 après. Le cliquet passe au rouge si l'on retire une borne.
