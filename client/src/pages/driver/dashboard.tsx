@@ -107,9 +107,9 @@ interface DriverMe {
 // ─── Problem types ────────────────────────────────────────────────────────────
 
 const PROBLEM_TYPES: Array<{ id: DriverReportType; label: string; color: string; textColor: string; Icon: typeof Wrench }> = [
-  { id: "breakdown", label: "Panne véhicule", color: "bg-red-500", textColor: "text-white", Icon: Wrench },
+  { id: "breakdown", label: "Panne véhicule", color: "bg-destructive", textColor: "text-white", Icon: Wrench },
   { id: "accident", label: "Accident", color: "bg-orange-500", textColor: "text-white", Icon: AlertTriangle },
-  { id: "delay", label: "Retard prévu", color: "bg-amber-400", textColor: "text-gray-900", Icon: Clock },
+  { id: "delay", label: "Retard prévu", color: "bg-warning", textColor: "text-gray-900", Icon: Clock },
   { id: "other", label: "Autre", color: "bg-gray-600", textColor: "text-white", Icon: MessageSquare },
 ];
 
@@ -221,10 +221,10 @@ function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     assigned:   "bg-purple-100 text-purple-800 border border-purple-200",
     in_progress:"bg-yellow-100 text-yellow-800 border border-yellow-200",
-    delivered:  "bg-green-100  text-green-700  border border-green-200",
-    completed:  "bg-green-100  text-green-700  border border-green-200",
+    delivered:  "bg-success/15  text-success  border border-success/30",
+    completed:  "bg-success/15  text-success  border border-success/30",
     closed:     "bg-gray-100   text-gray-600   border border-gray-200",
-    cancelled:  "bg-red-50     text-red-600    border border-red-200",
+    cancelled:  "bg-destructive/10     text-destructive-text    border border-destructive/30",
     draft:      "bg-gray-100   text-gray-500   border border-gray-200",
     planned:    "bg-blue-50    text-blue-600   border border-blue-200",
   };
@@ -297,7 +297,7 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-t-3xl shadow-xl p-6 z-10 space-y-4">
+      <div className="relative bg-card rounded-t-3xl shadow-xl p-6 z-10 space-y-4">
         <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-2" />
         <h2 className="text-lg font-bold text-gray-900 text-center">Signaler un problème</h2>
         <p className="text-sm text-gray-500 text-center">Mission {mission.orderNumber}</p>
@@ -334,7 +334,7 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
         </div>
         {selectedId === "other" && (
           <textarea
-            className="w-full rounded-xl border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="w-full rounded-xl border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-success"
             rows={3}
             placeholder="Décrivez le problème..."
             value={otherText}
@@ -349,7 +349,7 @@ function ProblemSheet({ mission, onClose }: { mission: Mission; onClose: () => v
         <Button
           onClick={handleSubmit}
           disabled={!selectedId || !vehicleId || reportMutation.isPending || (selectedId === "other" && otherText.trim().length < MIN_DESCRIPTION_LENGTH)}
-          className="w-full h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-base"
+          className="w-full h-14 rounded-2xl bg-destructive hover:brightness-90 text-white font-bold text-base"
         >
           {reportMutation.isPending ? "Envoi..." : "Envoyer le signalement"}
         </Button>
@@ -479,11 +479,11 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" onClick={cancel} />
-      <div className="relative z-10 rounded-t-[28px] border border-white/70 bg-white px-5 pb-6 pt-4 shadow-2xl">
+      <div className="relative z-10 rounded-t-[28px] border border-white/70 bg-card px-5 pb-6 pt-4 shadow-2xl">
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-600">Mission active</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-success">Mission active</p>
             <h2 className="mt-1 text-lg font-bold text-slate-950">Enregistrer un plein</h2>
             <p className="text-sm text-slate-500">Mission {mission.orderNumber}</p>
           </div>
@@ -497,9 +497,9 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
           </button>
         </div>
 
-        <div className="mb-4 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-cyan-50 p-4">
+        <div className="mb-4 rounded-2xl border border-success/30 bg-gradient-to-br from-success/10 via-card to-cyan-50 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-success/15 text-success">
               <Fuel className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -512,7 +512,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
               <button
                 type="button"
                 onClick={() => setUnitPrice(String(Math.round(suggestedPrice)))}
-                className="ml-auto rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                className="ml-auto rounded-xl bg-success px-3 py-2 text-xs font-semibold text-white transition hover:bg-success"
               >
                 Utiliser
               </button>
@@ -531,7 +531,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
                 inputMode="decimal"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-card px-4 text-base font-semibold text-slate-950 outline-none transition focus:border-success focus:ring-2 focus:ring-success/20"
               />
             </label>
             <label className="block">
@@ -544,7 +544,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
                 value={effectiveUnitPrice}
                 readOnly={!canEditFuelPrice}
                 onChange={(e) => canEditFuelPrice && setUnitPrice(e.target.value)}
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-card px-4 text-base font-semibold text-slate-950 outline-none transition focus:border-success focus:ring-2 focus:ring-success/20"
               />
             </label>
           </div>
@@ -561,7 +561,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
               value={stationName}
               onChange={(e) => setStationName(e.target.value)}
               placeholder="Ex: Total Bonabéri"
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-card px-4 text-sm text-slate-950 outline-none transition focus:border-success focus:ring-2 focus:ring-success/20"
             />
           </label>
 
@@ -571,7 +571,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
               type="datetime-local"
               value={dateTime}
               onChange={(e) => setDateTime(e.target.value)}
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-card px-4 text-sm text-slate-950 outline-none transition focus:border-success focus:ring-2 focus:ring-success/20"
             />
           </label>
 
@@ -582,7 +582,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Commentaire libre si besoin"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-2xl border border-slate-200 bg-card px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-success focus:ring-2 focus:ring-success/20"
             />
           </label>
         </div>
@@ -600,7 +600,7 @@ function FuelSheet({ mission, onClose }: { mission: Mission; onClose: () => void
             type="button"
             disabled={isFormInvalid || createFuelMutation.isPending}
             onClick={() => submitFuel()}
-            className="h-12 rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700"
+            className="h-12 rounded-2xl bg-success text-white hover:bg-success"
           >
             {createFuelMutation.isPending ? "Enregistrement..." : "Valider le plein"}
           </Button>
@@ -621,8 +621,8 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
 
   const kpis = [
     { label: "Missions totales", value: completed.length, icon: <Package className="h-4 w-4" />, color: "text-blue-600", bg: "bg-blue-50" },
-    { label: "Ce mois-ci", value: thisMonth.length, icon: <Calendar className="h-4 w-4" />, color: "text-green-600", bg: "bg-green-50" },
-    { label: "À l'heure", value: `${onTimePct}%`, icon: <Star className="h-4 w-4" />, color: "text-amber-600", bg: "bg-amber-50" },
+    { label: "Ce mois-ci", value: thisMonth.length, icon: <Calendar className="h-4 w-4" />, color: "text-success", bg: "bg-success/10" },
+    { label: "À l'heure", value: `${onTimePct}%`, icon: <Star className="h-4 w-4" />, color: "text-warning-text", bg: "bg-warning/10" },
     { label: "Km parcourus", value: totalKm > 0 ? `${totalKm.toLocaleString()} km` : "—", icon: <Gauge className="h-4 w-4" />, color: "text-purple-600", bg: "bg-purple-50" },
   ];
 
@@ -631,7 +631,7 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
       {/* KPI grid */}
       <div className="grid grid-cols-2 gap-3">
         {kpis.map((k) => (
-          <div key={k.label} className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4 flex flex-col gap-2">
+          <div key={k.label} className="rounded-2xl bg-card border border-gray-100 shadow-sm p-4 flex flex-col gap-2">
             <div className={`w-8 h-8 rounded-xl ${k.bg} flex items-center justify-center ${k.color}`}>
               {k.icon}
             </div>
@@ -642,10 +642,10 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
       </div>
 
       {/* History list */}
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+      <div className="rounded-2xl bg-card border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-green-50 flex items-center justify-center">
-            <BarChart2 className="h-3.5 w-3.5 text-green-600" />
+          <div className="w-6 h-6 rounded-lg bg-success/10 flex items-center justify-center">
+            <BarChart2 className="h-3.5 w-3.5 text-success" />
           </div>
           <span className="text-sm font-semibold text-gray-800">Historique des missions</span>
         </div>
@@ -662,7 +662,7 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
               const ontime = !departLate && !arrivalLate;
               return (
                 <div key={m.id} className="px-4 py-3.5 flex items-start gap-3">
-                  <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${ontime ? "bg-green-400" : "bg-red-400"}`} />
+                  <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${ontime ? "bg-success" : "bg-destructive"}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                       <span className="text-xs font-semibold text-gray-800">{missionLabel(m)}</span>
@@ -676,7 +676,7 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
                     {(departLate || arrivalLate) && (
                       <div className="flex gap-2 mt-1 flex-wrap">
                         {departLate && <span className="text-[10px] font-bold text-orange-500">Départ en retard</span>}
-                        {arrivalLate && <span className="text-[10px] font-bold text-red-500">Livraison en retard</span>}
+                        {arrivalLate && <span className="text-[10px] font-bold text-destructive-text">Livraison en retard</span>}
                       </div>
                     )}
                   </div>
@@ -773,7 +773,7 @@ export default function DriverDashboard() {
         <div className="flex items-center gap-3">
           <ContextualHelpButton />
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-green-700 flex items-center justify-center text-white text-xs font-bold">
+            <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center text-white text-xs font-bold">
               {initials}
             </div>
             <p className="text-white text-sm font-medium hidden sm:block">{driverName}</p>
@@ -785,24 +785,24 @@ export default function DriverDashboard() {
       </header>
 
       {/* ── Tab bar ─────────────────────────────────────────────── */}
-      <div className="sticky top-[56px] z-30 bg-white border-b border-gray-100 flex" style={{ boxShadow: "0 1px 0 #f0f0f0" }}>
+      <div className="sticky top-[56px] z-30 bg-card border-b border-gray-100 flex" style={{ boxShadow: "0 1px 0 #f0f0f0" }}>
         <button
           onClick={() => setActiveTab("mission")}
           data-help-target="driver-mission-tab"
           className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors border-b-2 ${
-            activeTab === "mission" ? "border-green-600 text-green-700" : "border-transparent text-gray-400"
+            activeTab === "mission" ? "border-success text-success" : "border-transparent text-gray-400"
           }`}
         >
           <Truck className="h-4 w-4" />
           Ma mission
           {activeMission && (
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
           )}
         </button>
         <button
           onClick={() => setActiveTab("perf")}
           className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors border-b-2 ${
-            activeTab === "perf" ? "border-green-600 text-green-700" : "border-transparent text-gray-400"
+            activeTab === "perf" ? "border-success text-success" : "border-transparent text-gray-400"
           }`}
         >
           <BarChart2 className="h-4 w-4" />
@@ -820,14 +820,14 @@ export default function DriverDashboard() {
         {activeTab === "mission" && (
           <>
             {isLoading && (
-              <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-3">
-                <div className="w-10 h-10 rounded-full border-4 border-green-200 border-t-green-600 animate-spin" />
+              <div className="rounded-2xl bg-card border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-3">
+                <div className="w-10 h-10 rounded-full border-4 border-success/30 border-t-green-600 animate-spin" />
                 <p className="text-sm text-gray-500">Chargement de votre mission…</p>
               </div>
             )}
 
             {!isLoading && !activeMission && (
-              <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-4 text-center">
+              <div className="rounded-2xl bg-card border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-4 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center">
                   <Truck className="h-8 w-8 text-gray-400" />
                 </div>
@@ -837,7 +837,7 @@ export default function DriverDashboard() {
                 </div>
                 <button
                   onClick={() => setActiveTab("perf")}
-                  className="text-xs text-green-600 font-semibold underline underline-offset-2"
+                  className="text-xs text-success font-semibold underline underline-offset-2"
                 >
                   Voir mes performances →
                 </button>
@@ -846,8 +846,8 @@ export default function DriverDashboard() {
 
             {!isLoading && activeMission && (
               <>
-                <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="h-1 bg-gradient-to-r from-green-500 to-emerald-400" />
+                <div className="rounded-2xl bg-card border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="h-1 bg-gradient-to-r from-success to-success" />
                   <div className="p-5 space-y-4">
                     <div className="flex items-start justify-between gap-2">
                       <StatusBadge status={activeMission.status} />
@@ -864,8 +864,8 @@ export default function DriverDashboard() {
                     {/* Pickup */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-1.5">
-                        <MapPin className="h-4 w-4 text-green-600 flex-shrink-0" />
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-green-700">Départ</p>
+                        <MapPin className="h-4 w-4 text-success flex-shrink-0" />
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-success">Départ</p>
                       </div>
                       <div className="pl-5 space-y-1">
                         <p className="text-base font-medium text-gray-800 leading-snug">{activeMission.pickupAddress}</p>
@@ -933,9 +933,9 @@ export default function DriverDashboard() {
                     {activeMission.specialInstructions && (
                       <>
                         <hr className="border-gray-100" />
-                        <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
-                          <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700 mb-1">Instructions</p>
-                          <p className="text-sm text-amber-900 leading-relaxed">{activeMission.specialInstructions}</p>
+                        <div className="rounded-xl bg-warning/10 border border-warning/20 p-3">
+                          <p className="text-[11px] font-bold uppercase tracking-widest text-warning-text mb-1">Instructions</p>
+                          <p className="text-sm text-warning-text leading-relaxed">{activeMission.specialInstructions}</p>
                         </div>
                       </>
                     )}
@@ -947,7 +947,7 @@ export default function DriverDashboard() {
                   onClick={handleStatusAction}
                   data-help-target="driver-status-action"
                   disabled={statusMutation.isPending}
-                  className="w-full h-16 text-lg font-bold bg-green-600 hover:bg-green-700 rounded-2xl text-white shadow-md active:scale-95 transition-transform"
+                  className="w-full h-16 text-lg font-bold bg-success hover:brightness-90 rounded-2xl text-white shadow-md active:scale-95 transition-transform"
                 >
                   {statusMutation.isPending ? (
                     <span className="flex items-center gap-2">
@@ -967,29 +967,29 @@ export default function DriverDashboard() {
                     href={mapsUrl(`${activeMission.pickupAddress} to ${activeMission.deliveryAddress}`)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
                   >
                     <Navigation className="h-5 w-5 text-blue-500" />
                     Feuille de route
                   </a>
                   <button
                     onClick={() => setShowFuelSheet(true)}
-                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
                   >
-                    <Droplets className="h-5 w-5 text-emerald-500" />
+                    <Droplets className="h-5 w-5 text-success" />
                     Enregistrer un plein
                   </button>
                   <button
                     onClick={() => setShowProblemSheet(true)}
-                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
                   >
-                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                    <AlertTriangle className="h-5 w-5 text-destructive-text" />
                     Signaler un problème
                   </button>
                 </div>
 
                 {upcomingMissions.length > 0 && (
-                  <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4 space-y-3" data-testid="driver-upcoming-missions">
+                  <div className="rounded-2xl bg-card border border-gray-100 shadow-sm p-4 space-y-3" data-testid="driver-upcoming-missions">
                     <p className="text-sm font-semibold text-gray-700">
                       Ensuite ({upcomingMissions.length} mission{upcomingMissions.length > 1 ? "s" : ""})
                     </p>
@@ -1020,8 +1020,8 @@ export default function DriverDashboard() {
         {/* ── ONGLET PERFORMANCES ──────────────────────────────────── */}
         {activeTab === "perf" && (
           isLoading ? (
-            <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-3">
-              <div className="w-10 h-10 rounded-full border-4 border-green-200 border-t-green-600 animate-spin" />
+            <div className="rounded-2xl bg-card border border-gray-100 shadow-sm p-8 flex flex-col items-center gap-3">
+              <div className="w-10 h-10 rounded-full border-4 border-success/30 border-t-green-600 animate-spin" />
               <p className="text-sm text-gray-500">Chargement…</p>
             </div>
           ) : (
