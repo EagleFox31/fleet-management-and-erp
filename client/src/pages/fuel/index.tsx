@@ -257,7 +257,10 @@ export default function FuelPage() {
       setRechargeForm((prev) => ({ ...prev, sourceAccountId: NO_SOURCE_ACCOUNT }));
       toast({
         title: "Compte source indisponible",
-        description: "Le compte choisi n'est plus proposé. Choisissez un autre compte ou « Non précisé », puis validez.",
+        description:
+          sourceAccounts.length > 0
+            ? "Le compte choisi n'est plus proposé. Choisissez un autre compte, ou laissez le compte non précisé, puis validez."
+            : "Le compte choisi n'est plus proposé. Validez à nouveau pour enregistrer la recharge sans compte source.",
         variant: "destructive",
       });
       return;

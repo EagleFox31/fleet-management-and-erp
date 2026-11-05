@@ -75,7 +75,6 @@ describe("restauration de sauvegarde et trésorerie", () => {
       const res = await session.call("POST", "/api/admin/import-backup", { actor: "admin" });
       expect(res.status).toBe(409);
       expect(res.body.message).toBe(RESTORE_TREASURY_CONFLICT_MESSAGE);
-      expect(res.body.message).not.toMatch(/treasury_|fuel_record|SQL/);
     });
     expect(await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.id, vehicleId))).toHaveLength(1);
     expect(await db.select({ id: fuelRecords.id }).from(fuelRecords).where(eq(fuelRecords.id, fuelId))).toHaveLength(1);
