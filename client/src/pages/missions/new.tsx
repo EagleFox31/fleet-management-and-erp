@@ -571,7 +571,7 @@ export default function NewMission() {
                 <div className={`rounded-lg border p-4 ${
                   isWeightCompatible
                     ? "bg-success/10 text-success border-success/30"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle tonnage</p>
                   {!formData.vehicleId ? (
@@ -589,7 +589,7 @@ export default function NewMission() {
                 <div className={`rounded-lg border p-4 ${
                   isDriverCpcCompatible
                     ? "bg-success/10 text-success border-success/30"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle CPC</p>
                   {!formData.driverId ? (

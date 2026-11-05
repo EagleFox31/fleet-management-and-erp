@@ -48,3 +48,8 @@ export const LAST_ACTIVE_ADMIN_CONSTRAINT = "users_keep_one_active_admin";
 export function isLastActiveAdminViolation(error: unknown): boolean {
   return isCheckViolation(error) && pgConstraintOf(error) === LAST_ACTIVE_ADMIN_CONSTRAINT;
 }
+
+/** Refus de base à laisser remonter à `toHttpError` (400 / 409 lisibles) plutôt que d'être avalé ou converti en 500. */
+export function isAdminGuardDbRefusal(error: unknown): boolean {
+  return isLastActiveAdminViolation(error) || isTransactionConflict(error);
+}
