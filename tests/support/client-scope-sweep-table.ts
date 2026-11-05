@@ -46,8 +46,12 @@ export const SWEEP_ROUTES: SweepRoute[] = [
 ];
 
 /** Routes deja balayees par un autre contrat : `fragment` doit y figurer (la garde le verifie). */
-export type CoveredElsewhere = { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; template: string; file: string; fragment: string };
+export type CoveredElsewhere = { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; template: string; file: string; fragment: string; exact?: boolean };
 export const COVERED_ELSEWHERE: CoveredElsewhere[] = [
+  // Chemins construits par appel (`relative(alertPath(":id"))`) : le scan les retient sous leur texte illisible (échec fermé).
+  { method: "POST", template: '/api/:illisible(relative(ALERT_READ_ALL_PATH))', file: "tests/contract/alerts-inbox.contract.test.ts", fragment: '"POST", ALERT_READ_ALL_PATH', exact: true },
+  { method: "PATCH", template: '/api/:p(`${relative(alertPath(":p"))}/read`)', file: "tests/contract/alerts-inbox.contract.test.ts", fragment: '"PATCH", `${alertPath(foreign)}/read`', exact: true },
+  { method: "DELETE", template: '/api/:p(relative(alertPath(":p")))', file: "tests/contract/alerts-inbox.contract.test.ts", fragment: '"DELETE", alertPath(foreign)', exact: true },
   { method: "GET", template: "/api/vehicles/:id", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${foreignVehicle}" },
   { method: "GET", template: "/api/vehicles/:id/documents/:type", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/vehicles/${id}/documents/autre" },
   { method: "GET", template: "/api/maintenance-schedules/vehicle/:id", file: "tests/contract/client-unknown-vs-foreign.contract.test.ts", fragment: "/api/maintenance-schedules/vehicle/${id}" },
