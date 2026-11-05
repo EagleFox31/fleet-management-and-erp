@@ -173,7 +173,7 @@ router.get("/:id/cpc-status", async (req, res, next) => {
  * POST /api/drivers/sync-cpc-statuses
  * Synchronise tous les statuts CPC (maintenance)
  */
-router.post("/sync-cpc-statuses", async (req, res, next) => {
+router.post("/sync-cpc-statuses", isDriverManager, async (req, res, next) => {
   try {
     const result = await cpcTrainingService.syncAllCPCStatuses();
 

@@ -3,6 +3,7 @@ import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type Mai
 import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
+import { maintenancePriorityOf } from "../lib/maintenance-priority";
 import { stampPreventiveDue } from "../lib/preventive-due";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
@@ -499,18 +500,7 @@ export class PreventiveMaintenanceService {
    * Calculer la priorité selon la proximité de l'échéance
    */
   private calculatePriority(dueDate: string | Date | null | undefined): 'low' | 'medium' | 'high' {
-    const parsedDueDate = dueDate instanceof Date
-      ? dueDate
-      : dueDate
-      ? new Date(dueDate)
-      : new Date();
-
-    const now = new Date();
-    const diffDays = Math.ceil((parsedDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (diffDays <= 7) return 'high';
-    if (diffDays <= 14) return 'medium';
-    return 'low';
+    return maintenancePriorityOf(dueDate);
   }
 
   /**
