@@ -1,7 +1,7 @@
 /**
  * Seed des démos par profil (e2e/demo/*.spec.ts). Base locale jetable uniquement.
  *
- * Usage : node --env-file=.env --import tsx e2e/demo/seed-demo.ts
+ * Usage : node --import tsx e2e/demo/seed-demo.ts (DATABASE_URL local, voir e2e/demo/README.md)
  *
  * Idempotent : les comptes, véhicules et la pièce sont posés par clé naturelle
  * (ON CONFLICT DO NOTHING) ; l'état des scénarios (OT du technicien, échéance du
@@ -12,6 +12,8 @@
  * Choix reuse-first : scripts/recette-seed.ts exige un environnement de recette et
  * un mot de passe de 12 caractères ; il n'est pas adapté à une base Docker jetable.
  */
+import fs from "node:fs";
+import path from "node:path";
 import bcrypt from "bcryptjs";
 import { and, eq, inArray, like, ne } from "drizzle-orm";
 import { db, pool } from "../../server/db";
@@ -27,6 +29,10 @@ import {
   parts,
   partsStockMovements,
   partsUsed,
+  purchaseOrderLines,
+  purchaseOrders,
+  supplierInvoices,
+  suppliers,
   users,
   vehicleDocuments,
   vehicles,
@@ -66,6 +72,14 @@ export const DEMO_MISSION = {
 export const DEMO_OT_PREFIX = "Démo atelier - ";
 
 export const DEMO_PART = { reference: "DEMO-FILTRE-HUILE", name: "Filtre à huile démo" } as const;
+export const DEMO_RECEPTION = {
+  supplierName: "Pièces Douala (démo)",
+  orderNumber: "DEMO-BC-001",
+  deliveryCode: "BL-DEMO-001",
+  workOrderTitle: `${DEMO_OT_PREFIX}Entretien magasin`,
+  orderedQuantity: 5,
+  requestedQuantity: 2,
+} as const;
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
 export const DEMO_DOCUMENT_NAME = "Assurance DEMO-SEC-001";
 
@@ -137,13 +151,95 @@ async function seedWorkshop(): Promise<void> {
   }
 }
 
+/** PDF minimal mais valide, pour que l'ouverture d'un document de démo ne donne pas 404. */
+function writeDemoPdf(name: string): void {
+  const dir = path.join(process.cwd(), "uploads", "demo");
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, name);
+  if (fs.existsSync(target)) return;
+  const body = ["%PDF-1.1", "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj", "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj", "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj", "trailer<</Root 1 0 R>>", "%%EOF", ""].join("\n");
+  fs.writeFileSync(target, body);
+}
+
+/** Les lignes de commande référencent les demandes de pièce : à purger avant les OT de démo. */
+async function purgeReceptionOrders(): Promise<void> {
+  const oldOrders = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.orderNumber, DEMO_RECEPTION.orderNumber));
+  if (oldOrders.length > 0) {
+    await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, oldOrders.map((o) => o.id)));
+    await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, oldOrders.map((o) => o.id)));
+    await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, oldOrders.map((o) => o.id)));
+  }
+}
+
+/** Magasinier : une commande fournisseur confirmée à réceptionner, et la demande de pièce d'un OT qui l'attend. */
+async function seedWarehouse(): Promise<void> {
+  const warehouseId = await ensureUser(DEMO_ACCOUNTS.warehouse);
+  const managerId = await ensureUser(DEMO_ACCOUNTS.workshopManager);
+  const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
+  const [part] = await db.select({ id: parts.id }).from(parts).where(eq(parts.reference, DEMO_PART.reference));
+
+  const oldOts = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.title, DEMO_RECEPTION.workOrderTitle));
+  if (oldOts.length > 0) {
+    const ids = oldOts.map((o) => o.id);
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, ids));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, ids));
+    await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, ids));
+    await db.delete(workOrders).where(inArray(workOrders.id, ids));
+  }
+
+  await db.insert(suppliers).values({ name: DEMO_RECEPTION.supplierName, category: "Pièces", isActive: true }).onConflictDoNothing();
+  const [supplier] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.name, DEMO_RECEPTION.supplierName));
+  const [workOrder] = await db
+    .insert(workOrders)
+    .values({ vehicleId, title: DEMO_RECEPTION.workOrderTitle, priority: "medium", status: "awaiting_parts", description: "Remplacement du filtre à huile : pièce commandée, en attente de réception." })
+    .returning({ id: workOrders.id });
+  const [requirement] = await db
+    .insert(partRequirements)
+    .values({
+      partId: part.id,
+      vehicleId,
+      workOrderId: workOrder.id,
+      quantityNeeded: DEMO_RECEPTION.requestedQuantity,
+      reason: "Remplacement du filtre à huile",
+      status: "ordered",
+      requestedBy: managerId,
+    })
+    .returning({ id: partRequirements.id });
+  const [order] = await db
+    .insert(purchaseOrders)
+    .values({
+      orderNumber: DEMO_RECEPTION.orderNumber,
+      supplierId: supplier.id,
+      orderDate: isoDayFromNow(-3),
+      expectedDeliveryDate: isoDayFromNow(0),
+      status: "confirmed",
+      totalAmountHT: "62500",
+      totalAmountTTC: "74528.13",
+      createdBy: warehouseId,
+    })
+    .returning({ id: purchaseOrders.id });
+  await db.insert(purchaseOrderLines).values({
+    purchaseOrderId: order.id,
+    partRequirementId: requirement.id,
+    partId: part.id,
+    quantityOrdered: DEMO_RECEPTION.orderedQuantity,
+    unitPrice: "12500",
+    totalPrice: "62500",
+  });
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
   const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
   const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
-    if (docs.some((d) => d.type === type)) continue;
+    writeDemoPdf(`${DEMO_MISSION.vehicle}-${type}.pdf`);
+    const existing = docs.find((d) => d.type === type);
+    if (existing) {
+      await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      continue;
+    }
     await db.insert(vehicleDocuments).values({
       vehicleId,
       name: `${DEMO_MISSION.vehicle} ${type}`,
@@ -186,6 +282,7 @@ async function seedLogistics(): Promise<void> {
 
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
+  await purgeReceptionOrders();
   await seedLogistics();
   await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
@@ -193,6 +290,7 @@ export async function seedDemo(): Promise<void> {
   const clientAId = await ensureUser(DEMO_ACCOUNTS.clientA);
   const clientBId = await ensureUser(DEMO_ACCOUNTS.clientB);
   await ensureUser(DEMO_ACCOUNTS.warehouse);
+  await ensureUser(DEMO_ACCOUNTS.management);
 
   await ensureVehicle(DEMO_VEHICLES.clientA1, "T480", clientAId);
   await ensureVehicle(DEMO_VEHICLES.clientA2, "Master", clientAId);
@@ -205,6 +303,7 @@ export async function seedDemo(): Promise<void> {
     .values({ reference: DEMO_PART.reference, name: DEMO_PART.name, quantity: 20, minQuantity: 2, unitPrice: "12500", location: "Rayon A1" })
     .onConflictDoNothing();
   await db.update(parts).set({ quantity: 20 }).where(and(eq(parts.reference, DEMO_PART.reference), ne(parts.quantity, 20)));
+  await seedWarehouse();
 
   // Intervention du technicien : ramenée à « en cours », sans demande de pièce.
   const existing = await db
@@ -235,6 +334,7 @@ export async function seedDemo(): Promise<void> {
     // Demandes de renouvellement créées par la démo précédente (périmètre : ce document seul).
     await db.delete(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleDocumentId, documents.map((d) => d.id)));
   }
+  writeDemoPdf("assurance-demo.pdf");
   if (documents.length === 0) {
     await db.insert(vehicleDocuments).values({
       vehicleId: secretaryVehicleId,

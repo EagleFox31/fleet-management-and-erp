@@ -3,7 +3,7 @@ import { eq, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import { users, workOrders } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_OT_PREFIX, DEMO_VEHICLES } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_OT_PREFIX, DEMO_VEHICLES, seedDemo } from "./seed-demo";
 
 /**
  * Démo « chef d'atelier » : créer un ordre de travail (assistant), l'assigner à un
@@ -16,7 +16,10 @@ async function workOrder() {
   return row;
 }
 
-test.beforeAll(() => assertLocalDatabase());
+test.beforeAll(async () => {
+  assertLocalDatabase();
+  await seedDemo();
+});
 
 test("démo chef d'atelier : créer, assigner, suivre un OT jusqu'à sa clôture", async ({ page }) => {
   test.setTimeout(120_000);

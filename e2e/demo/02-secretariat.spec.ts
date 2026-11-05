@@ -4,13 +4,16 @@ import { join } from "path";
 import { db } from "../../server/db";
 import { vehicleDocuments } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_DOCUMENT_NAME, DEMO_VEHICLES } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_DOCUMENT_NAME, DEMO_VEHICLES, seedDemo } from "./seed-demo";
 
 /**
  * Démo « secrétariat » : documents et conformité, renouvellement de l'assurance d'un
  * véhicule qui expire dans 10 jours, l'échéance proche disparaît. Un seul navigateur.
  */
-test.beforeAll(() => assertLocalDatabase());
+test.beforeAll(async () => {
+  assertLocalDatabase();
+  await seedDemo();
+});
 
 test("démo secrétariat : renouveler une assurance proche de l'échéance", async ({ page }) => {
   test.setTimeout(180_000);
