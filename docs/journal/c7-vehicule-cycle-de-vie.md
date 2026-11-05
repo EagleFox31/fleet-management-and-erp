@@ -355,6 +355,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
     - une session d'utilisateur désactivé reçoit 409 : négligeable ;
     - le rejeu idempotent d'un 409 n'a pas d'effet.
 - **Leçon (near miss)** : une garde montée en amont doit utiliser le même moteur de correspondance que le routeur, et lire les ids au moins aussi largement que la route. Sinon, chaque écart d'analyse devient un contournement. Cette leçon est figée par les cas de contournement du contrat et par le test d'accord `asVehicleRef` / `z.coerce`.
+- **CI rouge au premier passage** : `api-auth-guard` recense les routes de la pile Express et descend dans tout routeur imbriqué. Les 44 couches de la garde y apparaissaient comme des routes `/api` sans session. Ce sont des couches de passage, qui ne répondent pas. Le `Router` est désormais enveloppé dans une fonction : correspondance inchangée, recensement juste. Cause : la sélection locale des contrats « voisins » partait des domaines touchés et a manqué les contrats transversaux. Prévention : pour un middleware monté en préfixe, lancer toute la suite de contrats, pas une sélection.
 - **Limites connues** :
   - une route qui n'atteint le véhicule que par `workOrderId`, ou qui passe le corps entier à Zod sans nommer le véhicule, échappe au marqueur d'hygiène. Le plancher de la table compense en partie ;
   - les sous-routeurs montés dans un routeur ne sont pas balayés.

@@ -104,8 +104,12 @@ const refuseIfRetired = (vehicle: VehicleSource[]): RequestHandler => async (req
  * routes servies. N'agit que pour le personnel connecté, qui lit déjà les véhicules retirés : le 409
  * ne lui apprend rien. Sans session ou pour un client, la route répond elle-même (401, 403), comme avant.
  */
-export const retiredVehicleWriteGuard = Router();
+const matcher = Router();
 for (const entry of RETIRED_VEHICLE_WRITE_ROUTES) {
   const { method, path } = routeParts(entry.route);
-  retiredVehicleWriteGuard[method](path, refuseIfRetired(entry.vehicle));
+  matcher[method](path, refuseIfRetired(entry.vehicle));
 }
+
+// Enveloppé dans une fonction : ces couches ne servent aucune réponse (elles appellent `next()`), le
+// recensement des routes de `api-auth-guard` ne doit pas les prendre pour des points d'entrée ouverts.
+export const retiredVehicleWriteGuard: RequestHandler = (req, res, next) => matcher(req, res, next);
