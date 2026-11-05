@@ -811,3 +811,11 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : l'ancien chemin lisait, créditait puis supprimait sans transaction, avalait l'erreur et répondait 204 dans tous les cas.
 - **Comment tester (QA)** : `tests/contract/parts-used-removal-defects.contract.test.ts` (10 passés) sur Postgres local ; mutants : sans garde de statut 2 échecs, sans transaction 1 échec.
 - **Reste / risques** : l'écran OT affiche encore la corbeille au technicien (403 à l'usage) et seulement hors `completed` (pas `cancelled`) : à aligner côté front.
+
+## 2026-11-05 23:41 — Montants du budget de mission réservés à leurs lecteurs, partout (Q19)
+- **Statut** : fait
+- **Quoi** : technicien, chauffeur et client ne reçoivent plus aucun montant du budget d'une mission, drapeau `finance` actif comme coupé : `estimatedFuelCost`, ancien budget `workflowData.budgetPlan`, budget de mission, totaux carburant (`estimatedBudget`, `budgetDelta`), suggestion de budget, solde de la carte carburant. Verdicts de la check-list conservés (« Budget approuvé. », « Budget renseigné. », « Solde suffisant. »). Motif de refus du PUT de statut sans montant.
+- **Comment** : `server/lib/mission-budget-scope.ts` (`redactMissionBudget` : clés à null ; `omitMissionBudget` : clés retirées pour la trame WS). `mission-launch-budget.ts` : présentateur à deux droits (budget : `MISSION_BUDGET_READ_ROLES`, solde : `TREASURY_FUEL_CARD_READ_ROLES`). `missions.routes.ts` (gelé) : 10 lignes modifiées en place, aucune ajoutée. Client : `mergeMissionPatch` garde le budget en cache d'un lecteur quand la trame n'en porte pas, puis relecture détail et liste ; fiche mission affiche « — » au lieu de « Non renseigné » ou 0.
+- **Pourquoi** : les routes renvoyaient la ligne entière de `missions` ; le budget était lisible par tout le personnel.
+- **Comment tester (QA)** : `tests/contract/mission-budget-amounts-scope.contract.test.ts` (sentinelles sur `JSON.stringify(body)`, deux drapeaux, trame WS) ; `mission-launch-budget.contract.test.ts` ; unitaires `mission-budget-scope`, `mission-budget-realtime`, `mission-launch-budget`. Mutants 6/6 tués.
+- **Reste / risques** : `operations-service` additionne `estimatedFuelCost` comme un revenu (hors périmètre, à reprendre).

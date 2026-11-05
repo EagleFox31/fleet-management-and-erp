@@ -1595,7 +1595,12 @@ export default function MissionDetailsPage() {
       ? missingBudgetFields.map((field) => MISSION_BUDGET_LABELS[field])
       : [];
 
-  const launchFuelBalance = Number(launchReadiness?.fuel?.balance || 0);
+  // Q19 : montant retiré par le serveur hors des rôles qui le lisent : afficher « — », jamais 0 ni « Non renseigné ».
+  const budgetAmountsHidden = !canReadMissionBudget(user?.role);
+  const budgetAmountText = (value: number | null) =>
+    budgetAmountsHidden ? "—" : value !== null ? formatPrice(value) : "Non renseigné";
+  const launchFuelBalanceRaw = launchReadiness?.fuel?.balance;
+  const launchFuelBalance = Number(launchFuelBalanceRaw || 0);
   const launchFuelUnitPriceUsedRaw = Number(launchReadiness?.fuel?.fuelUnitPriceUsed || 0);
   const launchFuelUnitPriceFallbackRaw = Number(launchReadiness?.fuel?.fuelUnitPriceFallback || 0);
   const launchFuelUnitPriceRealRaw = Number(launchReadiness?.fuel?.fuelUnitPriceReal || 0);
@@ -1896,9 +1901,9 @@ export default function MissionDetailsPage() {
               <div class="section-title">Budget mission</div>
               <div class="section-content">
                 <div class="kv">
-                  <span>Carburant</span><span>${escapeHtml(missionBudgetValues.fuelBudget !== null ? formatPrice(missionBudgetValues.fuelBudget) : "Non renseigné")}</span>
-                  <span>Frais de route</span><span>${escapeHtml(missionBudgetValues.roadExpensesBudget !== null ? formatPrice(missionBudgetValues.roadExpensesBudget) : "Non renseigné")}</span>
-                  <span>Imprévus</span><span>${escapeHtml(missionBudgetValues.contingencyBudget !== null ? formatPrice(missionBudgetValues.contingencyBudget) : "Non renseigné")}</span>
+                  <span>Carburant</span><span>${escapeHtml(budgetAmountText(missionBudgetValues.fuelBudget))}</span>
+                  <span>Frais de route</span><span>${escapeHtml(budgetAmountText(missionBudgetValues.roadExpensesBudget))}</span>
+                  <span>Imprévus</span><span>${escapeHtml(budgetAmountText(missionBudgetValues.contingencyBudget))}</span>
                   <span>Total budget</span><span>${escapeHtml(budgetTotal)}</span>
                 </div>
               </div>
@@ -2742,7 +2747,7 @@ export default function MissionDetailsPage() {
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Budget estimé</p>
                 <p className="mt-2 text-2xl font-bold text-gray-900">
-                  {missionBudgetValues.fuelBudget !== null ? formatPrice(missionBudgetValues.fuelBudget) : "Non renseigné"}
+                  {budgetAmountText(missionBudgetValues.fuelBudget)}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">Prévision carburant mission</p>
               </div>
@@ -3127,7 +3132,7 @@ export default function MissionDetailsPage() {
                 <div className="text-right">
                   <p className="text-[11px] uppercase tracking-widest font-semibold text-success">Budget carburant</p>
                   <p className="mt-1 text-base font-bold text-success">
-                    {missionBudgetValues.fuelBudget !== null ? formatPrice(missionBudgetValues.fuelBudget) : "Non renseigné"}
+                    {budgetAmountText(missionBudgetValues.fuelBudget)}
                   </p>
                   <p className="text-xs text-success">{fuelUnitPriceSuggestion}</p>
                 </div>
@@ -3614,7 +3619,7 @@ export default function MissionDetailsPage() {
             <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
               <div className="space-y-1">
                 <p className="text-xs font-medium text-warning-text">
-                  Solde carte carburant actuel: {formatPrice(launchFuelBalance)}
+                  Solde carte carburant actuel: {launchFuelBalanceRaw === null || launchFuelBalanceRaw === undefined ? "—" : formatPrice(launchFuelBalance)}
                 </p>
                 <p className="text-xs text-warning-text">
                   Prix utilisé: <span className="font-semibold">{formatPrice(launchFuelUnitPriceUsed).replace(" FCFA", "")} FCFA/L</span>
