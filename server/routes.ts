@@ -1167,7 +1167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const refusal = vehiclePatchRefusal(req.user?.role, req.body) ?? vehiclePriceWriteRefusal(req.user?.role, req.body);
     if (refusal) return next(refusal);
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
@@ -1277,7 +1277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/vehicles/:id/restore", isAdmin, async (req, res) => {
     try {
       const { VehicleDeletionService } = await import('./services/vehicle-deletion-service-trigger');
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
@@ -1470,7 +1470,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Générer un ordre de travail depuis une planification
   app.post("/api/maintenance-schedules/:id/generate-work-order", isWorkshopManager, async (req, res, next) => {
     try {
-      const id = Number(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       if (!Number.isInteger(id) || id <= 0) {
         return next(new AppError(400, "Identifiant de planification invalide."));
       }
@@ -1504,7 +1504,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // celle-ci : toute édition depuis le formulaire était perdue en silence.
   app.patch("/api/maintenance-schedules/:id", isWorkshopManager, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
 
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de planification invalide" });
@@ -1960,7 +1960,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/work-orders/:id", isTechnician, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID d'ordre de travail invalide." });
@@ -2872,7 +2872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/fuel-records/:id", isFuelRecordWriter, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID d'enregistrement de carburant invalide" });
@@ -3051,7 +3051,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/vehicles/:id/mileage/sync", isStaff, async (req, res) => {
     try {
-      const vehicleId = parseInt(req.params.id);
+      const vehicleId = routeIdOrNaN(req.params.id);
+      if (isNaN(vehicleId)) {
+        return res.status(400).json({ message: "ID de véhicule invalide" });
+      }
       
       const updatedVehicle = await mileageService.synchronizeVehicleMileage(vehicleId);
       
@@ -3977,7 +3980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/tires/:id", isTireCatalogManager, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pneu invalide" });
@@ -4399,7 +4402,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/vehicles/:vehicleId/tires", isWorkshopManager, async (req, res, next) => {
     try {
-      const vehicleId = parseInt(req.params.vehicleId);
+      const vehicleId = routeIdOrNaN(req.params.vehicleId);
       
       if (isNaN(vehicleId)) {
         return res.status(400).json({ message: "ID de véhicule invalide" });
@@ -4440,7 +4443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/vehicle-tires/:id", isWorkshopManager, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pneu véhicule invalide" });
@@ -4470,7 +4473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/vehicle-tires/:id/remove", isWorkshopManager, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
 
       if (isNaN(id)) {
         return res.status(400).json({ message: "ID de pneu véhicule invalide" });
