@@ -24,6 +24,7 @@ import {
   TireMovementsScreen,
   WithholdingsScreen,
 } from "@/pages/lot/screens";
+import { MissionBudgetsDailyNeed } from "@/components/finance/mission-budgets-daily-need";
 
 export type LotScreenComponentProps = {
   screen: LotScreen;
@@ -47,4 +48,5 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "finance-withholdings": WithholdingsScreen,
   "mission-operations": MissionOperationsScreen,
   "tariff-grid": TariffGridScreen,
+  "mission-budgets-daily-need": MissionBudgetsDailyNeed,
 };

@@ -56,7 +56,6 @@ import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client
 import { isRetiredVehicle, vehicleEditRefusal, vehicleReadableBy } from "./lib/vehicle-retired";
 import { redactVehiclePrice } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
-import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
 import { broadcastAlertCreated } from "./lib/alert-broadcast";
@@ -1280,27 +1279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/maintenance-schedules/vehicle/:vehicleId", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      
-      // Un client ne voit que les planifications de ses véhicules (AGENTS.md §11)
-      if (!(await canAccessOwned(req.user, async () => (await storage.getVehicle(vehicleId))?.ownerId))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-      
-      const schedules = await preventiveMaintenanceService.getVehicleMaintenanceSchedules(vehicleId);
-      
-      return res.status(200).json(schedules);
-    } catch (error) {
-      console.error("Get maintenance schedules error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/maintenance-schedules/vehicle/:vehicleId : server/api/vehicle-history.routes.ts (cloison véhicule retiré).
 
   app.post("/api/maintenance-schedules", isWorkshopManager, validateBody(createMaintenanceScheduleRequestSchema), async (req, res, next) => {
     try {
@@ -1367,8 +1346,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Planification non trouvée" });
       }
 
-      // Le formulaire renvoie la fiche entière : id et createdAt sont ignorés.
-      const { id: _id, createdAt: _createdAt, ...schedulePayload } = req.body ?? {};
+      // Fiche entière renvoyée par le formulaire : id, createdAt et updatedAt (posé par trg_maintenance_schedules_touch) sont ignorés.
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...schedulePayload } = req.body ?? {};
       const { data, errors } = prepareColumnUpdate(maintenanceSchedules, schedulePayload);
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations de la planification sont invalides.", { fieldErrors: errors }));
@@ -1676,25 +1655,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-orders/vehicle/:vehicleId", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-
-      const orders = await storage.getWorkOrdersByVehicleId(vehicleId);
-      
-      return res.status(200).json(orders);
-    } catch (error) {
-      console.error("Get vehicle work orders error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/work-orders/vehicle/:vehicleId : server/api/vehicle-history.routes.ts (cloison véhicule retiré).
 
   app.get("/api/work-orders/technician/:technicianId", isTechnician, async (req, res) => {
     try {
@@ -2615,36 +2576,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   
   // Fuel Records Routes
-  app.get("/api/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-
-      
-      // Récupérer les enregistrements de carburant depuis le service
-      const fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
-      
-      // Enrichir les données avec le prix par litre calculé
-      const enrichedFuelRecords = fuelRecords.map((record: any) => ({
-        ...record,
-        pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
-        totalCost: Number(record.cost)
-      }));
-      
-      return res.status(200).json(enrichedFuelRecords);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture des pleins du véhicule en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Nombre saisi dans un formulaire : "12" accepté, "12abc" refusé (parseFloat
   // le tronquait en 12, et "abc" donnait NaN, stocké tel quel en colonne real).
   const formNumber = (schema: z.ZodNumber) =>
@@ -2804,55 +2735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // DELETE /api/fuel-records/:id : server/api/fuel-records.routes.ts (verrou carte carburant).
 
-  // Récupérer tous les enregistrements de carburant
-  app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
-    try {
-      const vehicleId = queryIdOrNaN(req.query.vehicleId);
-      if (Number.isNaN(vehicleId)) return res.status(400).json({ message: "ID de véhicule invalide." });
-      // Lecture par le service : les pleins supprimés (deleted_at) en sont exclus.
-      let fuelRecords: Awaited<ReturnType<typeof fuelService.getFuelRecordsByVehicleId>> = [];
-
-      if (vehicleId && !isNaN(vehicleId)) {
-        assertValidDbId(vehicleId, "ID de véhicule invalide.");
-        if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-        }
-        fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
-      } else {
-        // Récupérer tous les enregistrements de carburant
-        // Note: Dans une application réelle, il faudrait paginer les résultats
-        // Cloison client : un client ne lit que les pleins de ses propres véhicules.
-        const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
-        
-        // Pour chaque véhicule, récupérer ses enregistrements de carburant
-        for (const vehicle of vehicles.vehicles) {
-          const records = await fuelService.getFuelRecordsByVehicleId(vehicle.id);
-          fuelRecords = [...fuelRecords, ...records];
-        }
-        
-        // Trier par date (plus récent en premier)
-        fuelRecords.sort((a, b) => {
-          const bTime = b.date ? new Date(b.date).getTime() : 0;
-          const aTime = a.date ? new Date(a.date).getTime() : 0;
-          return bTime - aTime;
-        });
-      }
-      
-      // Enrichir les données avec le prix par litre calculé
-      const enrichedFuelRecords = fuelRecords.map((record) => ({
-        ...record,
-        pricePerLiter: record.quantity > 0 ? Number(record.cost ?? 0) / record.quantity : 0,
-        totalCost: Number(record.cost ?? 0)
-      }));
-      
-      return res.status(200).json(enrichedFuelRecords);
-    } catch (error) {
-      if (error instanceof AppError) return next(error);
-      log.error({ err: error, requestId: req.requestId }, "lecture des pleins en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/fuel-records : server/api/fuel-records.routes.ts (filtre ?vehicleId= cloisonné).
   
   // Statistiques de consommation de carburant
   // Routes pour la gestion du kilométrage
@@ -2969,106 +2852,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Historique de consommation pour le graphique
-  app.get("/api/fuel-records/consumption-history", isAnyUser, async (req, res, next) => {
-    try {
-      const period = req.query.period as string || 'month';
-      const vehicleId = queryIdOrNaN(req.query.vehicleId);
-      if (Number.isNaN(vehicleId)) return res.status(400).json({ message: "ID de véhicule invalide." });
-      
-      // Date limite pour la période
-      const now = new Date();
-      let limitDate = new Date();
-      let periodFormat: 'day' | 'month' = 'day';
-      
-      switch (period) {
-        case 'week':
-          limitDate.setDate(now.getDate() - 7);
-          periodFormat = 'day';
-          break;
-        case 'month':
-          limitDate.setMonth(now.getMonth() - 1);
-          periodFormat = 'day';
-          break;
-        case 'quarter':
-          limitDate.setMonth(now.getMonth() - 3);
-          periodFormat = 'month';
-          break;
-        case 'year':
-          limitDate.setFullYear(now.getFullYear() - 1);
-          periodFormat = 'month';
-          break;
-        default:
-          limitDate.setMonth(now.getMonth() - 1);
-          periodFormat = 'day';
-      }
-      
-      // Récupérer les enregistrements de carburant
-      type FuelRecordWithDate = Awaited<ReturnType<typeof storage.getFuelRecordsByVehicleId>>[number] & { date: string };
-      let allRecords: FuelRecordWithDate[] = [];
-      
-      if (vehicleId && !isNaN(vehicleId)) {
-        assertValidDbId(vehicleId, "ID de véhicule invalide.");
-        if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-        }
-        const records = await storage.getFuelRecordsByVehicleId(vehicleId);
-        allRecords = records.filter(
-          (record): record is FuelRecordWithDate =>
-            typeof record.date === "string" && new Date(record.date) >= limitDate
-        );
-      } else {
-        // Récupérer pour tous les véhicules (un client : les siens seulement)
-        const ownerScope = ownerScopeOf(req.user);
-        const vehicles = ownerScope === null ? await storage.listAllVehicles() : await storage.getVehiclesByOwner(ownerScope);
-        
-        for (const vehicle of vehicles.vehicles) {
-          const records = await storage.getFuelRecordsByVehicleId(vehicle.id);
-          const filteredRecords = records.filter(
-            (record): record is FuelRecordWithDate =>
-              typeof record.date === "string" && new Date(record.date) >= limitDate
-          );
-          allRecords = [...allRecords, ...filteredRecords];
-        }
-      }
-      
-      // Grouper par période (jour ou mois)
-      const historyData: Record<string, { date: string, quantity: number, cost: number, count: number }> = {};
-      
-      allRecords.forEach(record => {
-        const recordDate = new Date(record.date);
-        let periodKey: string;
-        
-        if (periodFormat === 'day') {
-          periodKey = `${recordDate.getFullYear()}-${String(recordDate.getMonth() + 1).padStart(2, '0')}-${String(recordDate.getDate()).padStart(2, '0')}`;
-        } else {
-          periodKey = `${recordDate.getFullYear()}-${String(recordDate.getMonth() + 1).padStart(2, '0')}`;
-        }
-        
-        if (!historyData[periodKey]) {
-          historyData[periodKey] = {
-            date: periodKey,
-            quantity: 0,
-            cost: 0,
-            count: 0
-          };
-        }
-        
-        historyData[periodKey].quantity += record.quantity;
-        historyData[periodKey].cost += Number(record.cost ?? 0);
-        historyData[periodKey].count += 1;
-      });
-      
-      // Convertir en tableau et trier par date
-      const result = Object.values(historyData).sort((a, b) => a.date.localeCompare(b.date));
-      
-      return res.status(200).json(result);
-    } catch (error) {
-      if (error instanceof AppError) return next(error);
-      log.error({ err: error, requestId: req.requestId }, "historique de consommation carburant en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/fuel-records/consumption-history : server/api/fuel-records.routes.ts (filtre ?vehicleId= cloisonné).
   
   // === FUEL CARD SERVICE ROUTES (Sprint 1 - Phase 2) ===
   

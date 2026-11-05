@@ -6,6 +6,7 @@ import {
   periodsOverlap,
   pickTariff,
   type PricingUnit,
+  TARIFF_PAGE_SIZE_DEFAULT,
   type TariffBody,
   type TariffRow,
   type TariffSuggestion,
@@ -30,18 +31,56 @@ const toRow = (t: Stored, clientName: string | null): TariffRow => ({
   notes: t.notes,
 });
 
-export async function listTariffs(filter: { clientId?: number; activeOnly?: boolean }): Promise<TariffRow[]> {
+type TariffFilter = { clientId?: number; activeOnly?: boolean };
+
+const whereOf = (filter: TariffFilter) => {
   const conditions = [
     filter.clientId ? eq(tariffGrid.clientId, filter.clientId) : undefined,
     filter.activeOnly ? eq(tariffGrid.active, true) : undefined,
   ].filter((c) => c !== undefined);
+  return conditions.length ? and(...conditions) : undefined;
+};
+
+/** Ordre total (id en dernier départage) : deux pages ne se chevauchent ni ne sautent de ligne. */
+const orderOf = () => [tariffGrid.origin, tariffGrid.destination, tariffGrid.cargoType, sql`${tariffGrid.validFrom} DESC`, tariffGrid.id] as const;
+
+/** Toutes les lignes du filtre : réservé à la suggestion, qui doit voir toute la grille active. */
+export async function listTariffs(filter: TariffFilter): Promise<TariffRow[]> {
   const rows = await db
     .select({ t: tariffGrid, clientName: clients.name })
     .from(tariffGrid)
     .leftJoin(clients, eq(clients.id, tariffGrid.clientId))
-    .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(tariffGrid.origin, tariffGrid.destination, tariffGrid.cargoType, sql`${tariffGrid.validFrom} DESC`);
+    .where(whereOf(filter))
+    .orderBy(...orderOf());
   return rows.map((r) => toRow(r.t, r.clientName));
+}
+
+/** Une page de la liste, avec le total du filtre. */
+export async function listTariffPage(
+  filter: TariffFilter,
+  page: { limit?: number; offset?: number },
+): Promise<{ rows: TariffRow[]; total: number; limit: number; offset: number }> {
+  const limit = page.limit ?? TARIFF_PAGE_SIZE_DEFAULT;
+  const offset = page.offset ?? 0;
+  const [rows, [count]] = await Promise.all([
+    db
+      .select({ t: tariffGrid, clientName: clients.name })
+      .from(tariffGrid)
+      .leftJoin(clients, eq(clients.id, tariffGrid.clientId))
+      .where(whereOf(filter))
+      .orderBy(...orderOf())
+      .limit(limit)
+      .offset(offset),
+    db.select({ n: sql<number>`count(*)::int` }).from(tariffGrid).where(whereOf(filter)),
+  ]);
+  return { rows: rows.map((r) => toRow(r.t, r.clientName)), total: count?.n ?? 0, limit, offset };
+}
+
+/** Nom du client d'un tarif (null pour un tarif générique) : les réponses d'écriture le portent comme la liste. */
+async function clientNameOf(clientId: number | null): Promise<string | null> {
+  if (!clientId) return null;
+  const [c] = await db.select({ name: clients.name }).from(clients).where(eq(clients.id, clientId));
+  return c?.name ?? null;
 }
 
 async function assertClientExists(clientId: number | null | undefined) {
@@ -97,7 +136,7 @@ export async function createTariff(body: TariffBody, userId: number): Promise<Ta
     await lockGrid(tx);
     await assertNoOverlap(tx, body);
     const [row] = await tx.insert(tariffGrid).values({ ...valuesOf(body), createdBy: userId, updatedBy: userId }).returning();
-    return toRow(row, null);
+    return toRow(row, await clientNameOf(row.clientId));
   });
 }
 
@@ -114,7 +153,7 @@ export async function updateTariff(id: number, body: TariffBody, userId: number)
       .set({ ...valuesOf(body), updatedBy: userId, updatedAt: new Date() })
       .where(eq(tariffGrid.id, id))
       .returning();
-    return toRow(row, null);
+    return toRow(row, await clientNameOf(row.clientId));
   });
 }
 
@@ -126,7 +165,7 @@ export async function deactivateTariff(id: number, userId: number): Promise<Tari
     .where(eq(tariffGrid.id, id))
     .returning();
   if (!row) throw new AppError(404, "Tarif introuvable.");
-  return toRow(row, null);
+  return toRow(row, await clientNameOf(row.clientId));
 }
 
 /** Lecture seule : propose un prix, n'écrit rien. */

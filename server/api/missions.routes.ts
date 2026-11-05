@@ -3,7 +3,7 @@ import { onMissionStatusChange } from "../services/mission-budgets-service";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
-import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords } from "@shared/schema";
+import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords, tariffGrid } from "@shared/schema";
 import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
@@ -62,6 +62,7 @@ import {
 } from "../lib/mission-fuel-regularization";
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
+import { redactMissionPrice } from "../lib/mission-price-scope";
 
 const log = moduleLogger("missions");
 
@@ -209,12 +210,18 @@ async function emitMissionEvent(
   }
 }
 
-async function broadcastMissionUpdate(
+/**
+ * Diffusion temps réel d'une mission. Le prix convenu et son tarif d'origine ne voyagent jamais dans
+ * l'événement : il part vers tout le personnel hors chauffeur (techniciens compris), qui n'a pas droit au prix.
+ * L'écran qui le lit rafraîchit sa requête sur l'événement.
+ */
+export async function broadcastMissionUpdate(
   eventType: MissionRealtimeEvent,
-  mission: Record<string, unknown>,
+  missionWithPrice: Record<string, unknown>,
   extraPayload: Record<string, unknown> = {},
   requestId?: string,
 ): Promise<void> {
+  const { agreedPrice: _price, tariffGridId: _tariff, ...mission } = missionWithPrice;
   const missionId =
     typeof mission.id === "number"
       ? mission.id
@@ -227,7 +234,8 @@ async function broadcastMissionUpdate(
       entity: "mission",
       entityId: missionId,
       payload: {
-        mission,
+        // Trame diffusée à tout le personnel (technicien compris) : jamais de prix convenu.
+        mission: redactMissionPrice(null, mission),
         missionId,
         ...extraPayload,
       },
@@ -2034,7 +2042,16 @@ const createMissionSchema = insertMissionSchema
     actualFuelQuantity: true,
     currentStep: true,
   })
-  .extend({ status: z.enum(["draft", "planned"]).optional() });
+  .extend({
+    status: z.enum(["draft", "planned"]).optional(),
+    // O3 lot 3 : prix convenu en XAF entier ; le tarif d'origine n'a de sens qu'avec un prix.
+    agreedPrice: z.number().int().min(0).max(999_999_999_999_999).nullable().optional().transform((v) => (v == null ? null : String(v))),
+    tariffGridId: idSchema.nullable().optional(),
+  })
+  .refine((m) => m.tariffGridId == null || m.agreedPrice != null, {
+    message: "Un tarif d'origine suppose un prix convenu.",
+    path: ["tariffGridId"],
+  });
 
 // POST /api/missions - Créer une nouvelle mission
 router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
@@ -2060,6 +2077,33 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       });
     }
     const validatedData = parsed.data;
+
+    if (validatedData.tariffGridId != null) {
+      const [tariff] = await db
+        .select({ id: tariffGrid.id, clientId: tariffGrid.clientId, active: tariffGrid.active, validFrom: tariffGrid.validFrom, validTo: tariffGrid.validTo, origin: tariffGrid.origin, destination: tariffGrid.destination, cargoType: tariffGrid.cargoType })
+        .from(tariffGrid)
+        .where(eq(tariffGrid.id, validatedData.tariffGridId))
+        .limit(1);
+      if (!tariff) throw new AppError(400, "Tarif d'origine introuvable.");
+      // Le tarif cité doit être celui que la suggestion aurait pu proposer : actif, du client (ou générique), valide ce jour-là.
+      const douala = new Date((validatedData.pickupDate ?? new Date()).getTime() + 3_600_000).toISOString().slice(0, 10);
+      if (!tariff.active) throw new AppError(400, "Ce tarif n'est plus actif.");
+      if (tariff.clientId !== null && tariff.clientId !== (validatedData.clientId ?? null)) {
+        throw new AppError(400, "Ce tarif appartient à un autre client.");
+      }
+      if (tariff.validFrom > douala || (tariff.validTo !== null && tariff.validTo < douala)) {
+        throw new AppError(400, "Ce tarif ne couvre pas la date de la mission.");
+      }
+      // Même rapprochement que la suggestion : lieu entier ou ville (texte avant la première virgule), marchandise exacte ou tarif générique.
+      const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+      const matchesPlace = (tariffPlace: string, address: string) => same(tariffPlace, address) || same(tariffPlace, address.split(",")[0]);
+      if (!matchesPlace(tariff.origin, validatedData.pickupAddress) || !matchesPlace(tariff.destination, validatedData.deliveryAddress)) {
+        throw new AppError(400, "Ce tarif ne correspond pas au trajet de la mission.");
+      }
+      if (tariff.cargoType !== "" && !same(tariff.cargoType, String((validatedData.cargo as { description?: string } | null | undefined)?.description ?? ""))) {
+        throw new AppError(400, "Ce tarif ne correspond pas à la marchandise de la mission.");
+      }
+    }
 
     const hasAssignment =
       missionData.assignment &&
@@ -2206,7 +2250,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     return res.status(201).json(newMission);
   } catch (error) {
     // Conflit de planning : AppError traité par le gestionnaire central (code et requestId).
-    if (error instanceof AppError && error.status === 409) return next(error);
+    if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
@@ -2255,6 +2299,9 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         orderNumber: missions.orderNumber,
         weight: missions.weight,
         pickupDate: missions.pickupDate,
+        pickupAddress: missions.pickupAddress,
+        deliveryAddress: missions.deliveryAddress,
+        cargo: missions.cargo,
         deliveryDate: missions.deliveryDate,
         estimatedFuelCost: missions.estimatedFuelCost,
         workflowData: missions.workflowData,
@@ -2288,6 +2335,16 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
     const missionUpdates: Record<string, any> = {
       updatedAt: new Date(),
     };
+    // Le tarif repris ne vaut que pour le trajet, la marchandise et la date qui l'ont fait choisir : le prix reste, le lien tombe.
+    const nextPickup = payload.pickupDate ? new Date(payload.pickupDate).getTime() : null;
+    const tariffKeyChanged =
+      (payload.pickupDate !== undefined && nextPickup !== (existingMission.pickupDate ? new Date(existingMission.pickupDate).getTime() : null)) ||
+      (payload.pickupAddress !== undefined && payload.pickupAddress !== existingMission.pickupAddress) ||
+      (payload.deliveryAddress !== undefined && payload.deliveryAddress !== existingMission.deliveryAddress) ||
+      (payload.cargoDescription !== undefined && (payload.cargoDescription ?? null) !== ((existingMission.cargo as { description?: string } | null)?.description ?? null));
+    if (tariffKeyChanged) {
+      missionUpdates.tariffGridId = null;
+    }
 
     if (payload.orderNumber !== undefined) missionUpdates.orderNumber = payload.orderNumber;
     if (payload.missionType !== undefined) missionUpdates.missionType = payload.missionType;
@@ -3248,7 +3305,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           })()
         : [];
 
-    return res.json({
+    return res.json(redactMissionPrice(req.user, {
       ...updatedMission,
       ...extractMissionExecutionDates({
         workflowData: (updatedMission as any)?.workflowData,
@@ -3265,7 +3322,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             : missionAssignment?.completedAt,
       }),
       warnings,
-    });
+    }));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Update mission status error");

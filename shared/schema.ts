@@ -308,11 +308,14 @@ export const maintenanceSchedules = pgTable("maintenance_schedules", {
   frequencyValue: integer("frequency_value").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Renouvelé par le déclencheur trg_maintenance_schedules_touch (init-database) ; NULL sur les plans antérieurs.
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const insertMaintenanceScheduleSchema = createInsertSchema(maintenanceSchedules).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 // Work orders (interventions)
@@ -1347,6 +1350,9 @@ export const missions = pgTable("missions", {
   
   // Distance et coûts
   estimatedDistance: integer("estimated_distance"), // km
+  // O3 lot 3 : prix convenu en XAF entier (saisi ou repris d'un tarif) et tarif d'origine, tracé sans l'imposer.
+  agreedPrice: numeric("agreed_price", { precision: 15, scale: 0 }),
+  tariffGridId: integer("tariff_grid_id").references(() => tariffGrid.id, { onDelete: "set null" }),
   actualDistance: integer("actual_distance"), // km réel
   estimatedFuelCost: numeric("estimated_fuel_cost", { precision: 15, scale: 2 }),
   actualFuelCost: numeric("actual_fuel_cost", { precision: 15, scale: 2 }),
@@ -1416,6 +1422,30 @@ export const missionBudgets = pgTable("mission_budgets", {
   index("idx_mission_budgets_budget_date").on(table.budgetDate),
 ]);
 export type MissionBudgetRow = typeof missionBudgets.$inferSelect;
+
+// Dépenses justifiées d'un budget décaissé (L1e). Jumelle SQL : MISSION_BUDGET_EXPENSES_SQL
+// (server/init-database.ts) et server/db/migrations/20261106_mission_budget_expenses.sql.
+// Montant entier en XAF. Suppression douce (deleted_at, deleted_by) : une dépense est une trace financière,
+// jamais effacée ; sommes et reliquat ignorent les lignes supprimées.
+export const missionBudgetExpenses = pgTable("mission_budget_expenses", {
+  id: serial("id").primaryKey(),
+  budgetId: integer("budget_id").notNull().references(() => missionBudgets.id),
+  line: text("line", { enum: ["fdr", "carburant"] }).notNull(),
+  amount: integer("amount").notNull(),
+  label: text("label").notNull(),
+  expenseDate: date("expense_date").notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  deletedBy: integer("deleted_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  check("mission_budget_expenses_line_check", sql`${table.line} IN ('fdr', 'carburant')`),
+  check("mission_budget_expenses_amount_check", sql`${table.amount} > 0`),
+  index("idx_mission_budget_expenses_budget_id").on(table.budgetId),
+]);
+export type MissionBudgetExpenseRow = typeof missionBudgetExpenses.$inferSelect;
 
 // Barème FDR par destination (L1b), liste fermée. Jumelle SQL : MISSION_DESTINATIONS_SQL
 // (server/init-database.ts) et server/db/migrations/20261105_mission_destinations.sql, qui porte le seed.
@@ -1671,6 +1701,24 @@ export const tariffGrid = pgTable("tariff_grid", {
   ).where(sql`${table.active}`),
 ]);
 export type TariffGridRow = typeof tariffGrid.$inferSelect;
+
+// Historique du prix convenu d'une mission (O3 lot 3b) : une ligne par changement, écrite dans la même transaction que l'UPDATE.
+// Les tarifs d'avant/après sont des instantanés d'identifiants, sans clé étrangère : l'historique survit à la suppression d'un tarif.
+export const missionPriceHistory = pgTable("mission_price_history", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  oldPrice: numeric("old_price", { precision: 15, scale: 0 }),
+  newPrice: numeric("new_price", { precision: 15, scale: 0 }),
+  oldTariffGridId: integer("old_tariff_grid_id"),
+  newTariffGridId: integer("new_tariff_grid_id"),
+  reason: text("reason"),
+  changedBy: integer("changed_by").references(() => users.id),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_price_history_price_check", sql`(${table.oldPrice} IS NULL OR ${table.oldPrice} >= 0) AND (${table.newPrice} IS NULL OR ${table.newPrice} >= 0)`),
+  index("mission_price_history_mission_idx").on(table.missionId, table.changedAt),
+]);
+export type MissionPriceHistoryRow = typeof missionPriceHistory.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({

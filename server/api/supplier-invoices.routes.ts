@@ -8,6 +8,7 @@ import { AppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { storage } from "../storage";
 import { supplierManagementService } from "../services/supplier-management-service";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
@@ -15,6 +16,9 @@ import path from "path";
 import { moduleLogger } from "../lib/logger";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
+import { isoDateInZone } from "@shared/contracts/kpi-period";
+import { supplierAnnualRecapQuerySchema } from "@shared/contracts/supplier-annual-recap";
+import { supplierAnnualRecap } from "../services/supplier-annual-recap-service";
 import {
   SETTLEMENT_PROOF_EXTENSION_BY_MIME,
   SETTLEMENT_PROOF_PREFIX,
@@ -39,7 +43,7 @@ type InvoiceWorkflowScope = "parts" | "non_parts" | "none";
 type UserRole = "admin" | "secretary" | "warehouse" | "logistics" | "workshop_manager" | "technician" | string;
 
 // Aligné sur la garde de montage (PROCUREMENT_ROLES) : le chef d'atelier ne voit pas les factures fournisseur.
-const INVOICE_READ_ROLES: readonly UserRole[] = ["admin", "secretary", "warehouse", "logistics"];
+const INVOICE_READ_ROLES: readonly UserRole[] = PROCUREMENT_ROLES;
 const INVOICE_CREATE_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_APPROVAL_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_PAYMENT_ROLES: readonly UserRole[] = ["admin", "secretary"];
@@ -86,7 +90,14 @@ function broadcastSupplierInvoiceUpdate(
       action: data.action,
       triggeredBy: data.triggeredBy ?? null,
     },
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...INVOICE_READ_ROLES] },
+  });
+  // La direction ne lit pas la facture : trame réduite aux identifiants, qui suffit à rafraîchir son tableau de bord.
+  broadcastUpdate(eventType, {
+    entity: "supplier_invoice",
+    entityId: invoiceId,
+    payload: { invoiceId, purchaseOrderId },
+    scope: { type: "roles", roles: ["management"] },
   });
 }
 
@@ -414,6 +425,30 @@ router.get("/statistics", checkReadPermission, async (req: Request, res: Respons
     res.json(stats);
   } catch (error) {
     next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur lors de la récupération des statistiques.", { cause: error }), { event: "Erreur lors de la récupération des statistiques" }));
+  }
+});
+
+/**
+ * GET /api/supplier-invoices/annual-recap?year=AAAA[&supplierId=N]
+ * HT, TVA, TTC et reste dû actuel par fournisseur et par mois. Déclarée avant `/:id`.
+ */
+router.get("/annual-recap", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = supplierAnnualRecapQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      // Paramètre inconnu, valeur répétée ou tableau : le message de zod est technique.
+      const issue = parsed.error.issues[0];
+      if (issue?.code === "unrecognized_keys") throw new AppError(400, "Paramètre non reconnu.");
+      if (issue?.code === "invalid_type") {
+        throw new AppError(400, issue.path[0] === "supplierId" ? "Identifiant de fournisseur invalide." : "Année invalide.");
+      }
+      throw new AppError(400, issue?.message ?? "Année invalide.");
+    }
+    const year = Number(parsed.data.year ?? isoDateInZone(new Date()).slice(0, 4));
+    const supplierId = parseQueryId(parsed.data.supplierId, "Identifiant de fournisseur invalide.") ?? null;
+    res.json(await supplierAnnualRecap(year, supplierId));
+  } catch (error) {
+    next(error);
   }
 });
 

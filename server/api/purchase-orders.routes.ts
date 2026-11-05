@@ -7,6 +7,7 @@ import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 import { withLogContext } from "../lib/error-log-context";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { bodyIdSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("purchase-orders");
@@ -16,7 +17,7 @@ type PurchaseOrderScope = "parts" | "non_parts";
 
 const PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary"] as const;
 const NON_PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary", "logistics"] as const;
-const ANY_PROCUREMENT_ROLES = ["admin", "warehouse", "secretary", "logistics"] as const;
+const ANY_PROCUREMENT_ROLES = PROCUREMENT_ROLES;
 const DELIVERY_RECORD_ROLES = ["admin", "warehouse"] as const;
 
 const SCOPE_LABELS: Record<PurchaseOrderScope, string> = {
@@ -81,7 +82,7 @@ const broadcastPurchaseOrderUpdate = (
     entity: "purchase_order",
     entityId: options?.entityId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...PROCUREMENT_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,

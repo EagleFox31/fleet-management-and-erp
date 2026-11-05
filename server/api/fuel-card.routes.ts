@@ -12,7 +12,7 @@ import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
-import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import { FUEL_RECHARGE_SOURCE_ROLES, STAFF_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("fuel-card");
 
@@ -65,7 +65,7 @@ const broadcastFuelCardUpdate = (
     entity: "fuel_card",
     entityId: options?.entityId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...STAFF_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,

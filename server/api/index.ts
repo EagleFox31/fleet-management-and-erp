@@ -7,7 +7,9 @@ import vehicleSubresourcesRoutes from "./vehicle-subresources.routes";
 import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
+import missionPriceRoutes from "./mission-price.routes";
 import fuelRecordsRoutes from "./fuel-records.routes";
+import vehicleHistoryRoutes from "./vehicle-history.routes";
 import clientsRoutes from "./clients.routes";
 import operationsRoutes from "./operations.routes";
 import billingRoutes from "./billing.routes";
@@ -160,6 +162,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(workflowsRoutes);
   // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
   apiRouter.use(fuelRecordsRoutes);
+  apiRouter.use(vehicleHistoryRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes
@@ -171,6 +174,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/drivers", isStaff, driversRoutes);
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
+  apiRouter.use("/missions", authenticate, isStaff, missionPriceRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
   // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
   apiRouter.use(clientStatementRoutes);

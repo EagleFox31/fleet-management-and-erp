@@ -147,6 +147,13 @@ const SCREEN_APIS: Record<string, Declaration> = {
       },
     ],
   },
+  // Lecture seule : les actions sur un budget restent sur la fiche mission.
+  "mission-budgets-daily-need": {
+    apis: [
+      { file: "mission-budgets.routes.ts", path: "/mission-budgets/daily-need" },
+      { file: "mission-budgets.routes.ts", path: "/mission-budgets" },
+    ],
+  },
 };
 
 const ROOT = path.resolve(__dirname, "../../..");

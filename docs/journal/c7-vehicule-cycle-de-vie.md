@@ -139,7 +139,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Quoi** :
   - 6 lectures sont extraites de `server/routes.ts` vers `server/api/vehicle-subresources.routes.ts` : documents, documents par type, kilométrage, historique kilométrique, historique de statut, pneus.
   - Elles sont supprimées de `routes.ts` (130 lignes en moins, rien d'ajouté).
-  - Un client ne les lit que sur son véhicule, et plus du tout une fois le véhicule retiré.
+  - Un client ne lit ces 6 routes que sur son véhicule, et plus du tout une fois le véhicule retiré. Les autres lectures rattachées au véhicule ne sont pas encore toutes cloisonnées : voir la limite de l'entrée L1 ci-dessous.
   - La réponse est 403 avec le même message que pour un tiers : le retrait ne se devine pas.
   - Le personnel lit tout, véhicule retiré compris.
 - **Comment** :
@@ -171,3 +171,90 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - contrat : `/check/{documents,tires,mileage,status-history}` en 200, `limit` -5, 0 et 999999 en 200 ;
   - `prefix-middleware-guardrail` : le renvoi `/check` est inscrit, de type sans base.
 - **Leçon** : une garde async reconnue par son nom doit être exigée attendue. Le test le vérifie désormais.
+
+## 2026-11-05T19:20:11+01:00 — Plans de maintenance : restauration fidèle par updated_at (L2)
+
+- **Quoi** :
+  - `maintenance_schedules.updated_at` est ajoutée sans défaut, puis `SET DEFAULT now()` : les plans existants restent à NULL, aucune ligne n'est réécrite ;
+  - déclencheur `trg_maintenance_schedules_touch` (BEFORE UPDATE) : tout écrivain renouvelle l'horodatage ;
+  - `stampColumn: "updated_at"` dans `VEHICLE_DEACTIVATIONS` : un plan désactivé à la main pendant le retrait n'est plus réactivé par la restauration (la limite assumée disparaît) ;
+  - SQL dans `VEHICLE_LIFECYCLE_SQL` et sa jumelle `20261105_vehicle_lifecycle.sql`, avec deux blocs DO bornés.
+- **Idempotence** :
+  - colonne posée sous garde `information_schema` ;
+  - `CREATE OR REPLACE TRIGGER` (garde-fou `init-database-concurrency`), seulement s'il est absent de `pg_trigger`, au lieu d'un DROP/CREATE à chaque démarrage : une base convergée ne reprend aucun verrou de table. Seule la fonction `fn_maintenance_schedules_touch` est redéfinie à chaque démarrage (`CREATE OR REPLACE FUNCTION`, écriture de catalogue, ni ligne ni verrou de table), comme les autres fonctions de l'init ;
+  - déclencheur posé seulement si la colonne existe : sinon, tout UPDATE de plan échouerait.
+- **Preuve automatisée** :
+  - `vehicle-lifecycle.contract` :
+    - « plan désactivé à la main pendant le retrait » : reste désactivé ;
+    - « SQL rejoué deux fois » : plan antérieur toujours à NULL, un seul déclencheur ;
+  - mutants :
+    - `stampColumn` retiré : 1 rouge ;
+    - corps du déclencheur vidé : 1 rouge ;
+  - `vehicle-lifecycle-schema` (unitaire) : jumeaux identiques, 5 blocs DO, pas d'`ADD COLUMN ... DEFAULT`, pas d'`UPDATE`, pas de `DROP TRIGGER`.
+- **Near miss (mutant)** : un premier mutant du déclencheur avait survécu, pour deux raisons :
+  - l'écriture Drizzle du test renouvelait déjà `updated_at` ;
+  - la migration jumelle, rejouée au démarrage, restaurait la fonction.
+  - Correctif : le cas écrit en SQL brut, et le mutant porte sur les deux jumeaux.
+  - Leçon : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise.
+- **Régression rattrapée par la CI (19:33)** :
+  - `PATCH /api/maintenance-schedules/:id` répondait 500 sur la fiche entière renvoyée par le formulaire : `updatedAt` revenait en chaîne et Drizzle attend une date (`value.toISOString is not a function`).
+  - Cause : la nouvelle colonne apparaît dans les lectures, donc dans le corps renvoyé tel quel. La route n'ignorait que `id` et `createdAt`.
+  - Correctif : `updatedAt` est ignoré comme `createdAt` (ligne modifiée en place dans `routes.ts`, aucune ajoutée). Le déclencheur reste seul à poser l'horodatage.
+  - Preuve : `secondary-routes-validation.contract` envoie un `updatedAt` périmé en chaîne ; le PATCH répond 200 et l'horodatage est renouvelé.
+  - Leçon : seuls les contrats « liés » avaient tourné en local. Une colonne ajoutée à une table modifiable par fiche entière impose la suite de contrats complète avant de livrer, pas un filtre.
+- **Dérogation `server/storage.ts`** : une ligne ajoutée (`updatedAt: maintenanceSchedules.updatedAt` dans la sélection des plans avec véhicule). Elle est imposée par le type `MaintenanceScheduleWithVehicle`, dérivé de la table : sans elle, `npm run check` échoue. Aucune méthode nouvelle, aucun bouchon touché.
+- **Réserves de relecture de #497 (R1 à R4)** :
+  - le WARNING du bloc `updated_at` décrit l'effet réel d'un verrou indisponible : lecture et écriture des plans, suppression douce et restauration en échec jusqu'au démarrage suivant ;
+  - la phrase « une base convergée n'écrit rien » est nuancée (fonction redéfinie à chaque démarrage) ;
+  - la leçon des mutants jumeaux est reportée dans `docs/analysis/LESSONS_LEARNED.md`.
+## 2026-11-05T18:57:43+01:00 — Pleins d'un véhicule : même cloison que les sous-ressources (L1, suite de #490)
+
+- **Quoi** :
+  - `GET /api/fuel-records/vehicle/:vehicleId` sort de `server/routes.ts` vers `server/api/fuel-records.routes.ts` ;
+  - la garde `assertVehicleSubresourcesReadable` passe dans `server/lib/vehicle-subresource-guard.ts`, partagée par les deux routeurs ;
+  - un client propriétaire d'un véhicule retiré reçoit 403 (`canAccessOwned` seul le laissait lire) ;
+  - un client tiers reçoit 403, avec le même message.
+- **Contrat de réponse** : corps 200 inchangé (`pricePerLiter`, `totalCost`). Les 400 et 403 passent par `AppError`.
+- **Pourquoi** : les pleins sont une lecture rattachée au véhicule, comme les documents ou les pneus. Le retrait doit y valoir aussi.
+- **Preuve automatisée** :
+  - `tests/contract/fuel-records-vehicle-client-scope.contract.test.ts`, 8 cas :
+    - propriétaire actif et retiré, tiers, personnel sur le retiré, anonyme, id illisible ;
+    - témoins `/api/fuel-records`, `/statistics`, `/consumption-history` ;
+  - mutant « garde retirée » : 2 rouges au contrat, 1 rouge dans `routes-hygiene` ;
+  - contrats liés (`vehicle-subresources`, `vehicle-reads-client-scope`, `fuel-card-routes`) verts.
+- **Limite connue** : les pleins d'un véhicule retiré restent lisibles par son client propriétaire par le filtre de requête, `GET /api/fuel-records?vehicleId=` et `GET /api/fuel-records/consumption-history?vehicleId=`. Cette route en chemin ne ferme donc pas l'accès à elle seule ; les deux routes par requête relèvent de L1b.
+- **Hors périmètre** : les autres lectures en `canAccessOwned` + `getVehicleOwnerId` ont été recensées pour l'orchestrateur. Elles ne sont pas élargies sans son accord.
+
+## 2026-11-05T20:25:21+01:00 — Lectures rattachées au véhicule : filtres, historique, fichiers (L1b)
+
+- **Quoi** :
+  - Ces routes sortent de `server/routes.ts` (gelé) avec la garde `assertVehicleSubresourcesReadable` :
+    - `GET /api/work-orders/vehicle/:vehicleId` et `GET /api/maintenance-schedules/vehicle/:vehicleId`, vers `server/api/vehicle-history.routes.ts` ;
+    - `GET /api/fuel-records` et `GET /api/fuel-records/consumption-history`, vers `server/api/fuel-records.routes.ts`, avec la garde quand `?vehicleId=` est présent.
+  - B5 : `GET /api/documents/:id/download` répond 403 au client propriétaire si le véhicule est retiré.
+  - B7 : la preuve d'une demande de renouvellement ajoute la condition « véhicule non retiré » à `canAccessOwned`. Ce contrôle est sans effet aujourd'hui, puisque `VIEW_ROLES` refuse le client avant. Aucun contrat ne peut donc le distinguer pour un client.
+  - B6 : `/api/fuel-records/statistics` excluait déjà les véhicules retirés de l'agrégat client, car `getVehiclesByOwner` filtre `deleted_at`. Un cas de contrat le fige désormais.
+  - C : `assertWorkOrderReadable` est inchangé, le détail d'un OT reste lisible.
+- **Contrat de réponse** : les corps 200 sont inchangés. Une période inconnue de l'historique retombe sur le mois. Les 400 et 403 passent par `AppError`.
+- **Pourquoi** : c'est le near miss de L1. La route en chemin était fermée, mais le filtre de requête restait ouvert. Voir `docs/analysis/LESSONS_LEARNED.md`.
+- **Correction de mon hypothèse précédente** : `/api/work-orders/vehicle/:id` n'était pas masquée par `/:id`. Le contrat l'a montré : elle répondait 200 au propriétaire sur le véhicule retiré.
+- **Preuve automatisée** :
+  - `tests/contract/vehicle-history-retired-scope.contract.test.ts`, écrit d'abord. Il échouait avec 6 rouges sur le code d'origine. Il couvre :
+    - par lecture : propriétaire actif et retiré, tiers, personnel sur le retiré, anonyme, id illisible ;
+    - le balayage « toutes les entrées d'un plein » : chemin, filtre, liste, statistiques, historique, et les périodes `constructor`, `__proto__`, etc. ;
+    - B5.
+  - Mutants « garde retirée » : les 6 sont détectés.
+
+    | Mutant | Rouges |
+    |---|---|
+    | OT | 1 |
+    | Plans | 1 |
+    | Filtre des pleins | 2 |
+    | Filtre de l'historique | 2 |
+    | Téléchargement | 1 |
+    | Cloison de la liste sans filtre | 1 |
+
+  - `routes-hygiene` : 30/30. La liste gelée n'a pas été modifiée.
+- **Audit sécurité** : rien de bloquant.
+  - Mineur corrigé : `?period=constructor` répondait 500, parce qu'une clé héritée d'`Object.prototype` était lue. Les périodes passent désormais par une `Map`.
+  - Hors périmètre : quatre listes restent ouvertes au propriétaire d'un véhicule retiré. Elles sont détaillées dans la leçon et proposées en L1c.

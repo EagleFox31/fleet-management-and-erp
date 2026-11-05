@@ -30,6 +30,8 @@ export const invoiceAwaitingPaymentSchema = z.object({
   /** Date de dépôt chez le client ; `null` tant que la facture n'est pas déposée. */
   depositedAt: isoDateSchema.nullable(),
   daysSinceDeposit: z.number().int().min(0).nullable(),
+  /** Reste dû : TTC moins les règlements enregistrés (`client_invoices.balance`). */
+  balanceDue: z.number(),
 });
 
 export const invoicesAwaitingPaymentTotalsSchema = z.object({

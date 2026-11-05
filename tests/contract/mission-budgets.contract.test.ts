@@ -9,6 +9,7 @@ import {
   missionBudgetDisbursePath,
   missionBudgetPath,
   missionBudgetSchema,
+  missionBudgetsResponseSchema,
   MISSION_DESTINATIONS_PATH,
   missionDestinationsResponseSchema,
 } from "../../shared/contracts/mission-budgets";
@@ -17,6 +18,8 @@ import { fuelPrices, missionBudgets, missionDestinations, missions, treasuryAcco
 import { db } from "../../server/db";
 import { onMissionStatusChange, resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
 import { linkMissionBudgetDisbursement } from "../../server/services/treasury-links";
+import { normalizeScope } from "../../server/lib/realtime-scope";
+import { MISSION_BUDGET_READ_ROLES } from "../../shared/constants/roles";
 import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -175,7 +178,10 @@ describe("POST /api/mission-budgets", { timeout: 120000 }, () => {
       createdBy: userIds.get("logistics"),
       updatedBy: userIds.get("logistics"),
     });
-    expect(events.some((e) => e.event === "mission_budget_updated" && e.data?.id === b.id)).toBe(true);
+    const emitted = events.find((e) => e.event === "mission_budget_updated" && e.data?.id === b.id);
+    expect(emitted).toBeDefined();
+    // Portée lue comme le serveur la lit : sans elle, l'événement ne partirait à personne (L1 à L1e).
+    expect(normalizeScope(emitted!.data?.scope, null)).toEqual({ type: "roles", roles: [...MISSION_BUDGET_READ_ROLES] });
   });
 
   it("l'administrateur saisit aussi ; direction, secrétariat, technicien et client : 403 ; anonyme : 401", async () => {
@@ -372,6 +378,28 @@ describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(403);
       expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${DAY}`, role)).status, role).toBe(403);
     }
+  });
+
+  it("filtre missionId (fiche mission, L1f) : le seul budget de la mission ; mission sans budget : liste vide ; id illisible : 400", async () => {
+    const withBudget = await newMission();
+    const without = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(withBudget))).body);
+    const res = await call("GET", `${MISSION_BUDGETS_PATH}?missionId=${withBudget}`, "secretary");
+    expect(res.status).toBe(200);
+    expect((res.body as unknown[]).map((r) => missionBudgetSchema.parse(r))).toEqual([created]);
+    expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=${without}`, "management")).body).toEqual([]);
+    expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=abc`, "management")).status).toBe(400);
+    expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=${withBudget}`, "technician")).status).toBe(403);
+  });
+
+  it("liste (page Besoin du jour, L1f-2) : chaque budget porte le numéro de commande de sa mission ; champs du budget inchangés", async () => {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
+    const [mission] = await db.select({ orderNumber: missions.orderNumber }).from(missions).where(eq(missions.id, missionId));
+    const res = await call("GET", `${MISSION_BUDGETS_PATH}?date=${created.budgetDate}`, "management");
+    expect(res.status).toBe(200);
+    const row = missionBudgetsResponseSchema.parse(res.body).find((r) => r.id === created.id);
+    expect(row).toEqual({ ...created, missionOrderNumber: mission.orderNumber });
   });
 
   it("le besoin du jour somme les budgets de la date, au total et par statut", async () => {

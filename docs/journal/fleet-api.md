@@ -689,3 +689,91 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - `Promise.all` clôture + annulation ;
   - drapeau finance coupé après un décaissement au journal : contre-passation quand même.
   - Le rejeu de l'annulation garde `cancelledAt` ; `mission-budgets` 34/34.
+
+## 2026-11-05 — Budget de mission (L1e) : dépenses justifiées
+
+- **Quoi** : sur un budget décaissé, la logistique, le secrétariat et l'administrateur saisissent les dépenses justifiées, ligne FDR et frais annexes ou ligne carburant. L'annulation de la mission ne rend plus au compte source que le reliquat.
+- **Comment** :
+  - table `mission_budget_expenses` : montant entier en XAF, libellé, date au jour de Douala, auteurs et horodatages. Migration `20261106_mission_budget_expenses.sql` et sa jumelle dans `init-database.ts`. Les deux CHECK sont réconciliés et relus au démarrage ;
+  - `GET`, `POST` et `DELETE /api/mission-budgets/:id/expenses`, sous le drapeau finance :
+    - lecture par les rôles qui lisent le budget ;
+    - saisie et suppression par ceux qui décaissent ;
+  - suppression douce (`deleted_at`, `deleted_by`), rejouable. Les sommes ignorent les lignes supprimées ;
+  - même ordre de verrous que les transitions : mission `FOR SHARE`, puis budget `FOR UPDATE` pendant le contrôle de somme ;
+  - 409 dans quatre cas :
+    - mission annulée ou terminée ;
+    - reliquat déjà contre-passé ;
+    - budget non décaissé ;
+    - somme d'une ligne au-delà de son décaissé ;
+  - `reverseMissionBudgetDisbursements` lit la somme justifiée de chaque ligne. Une ligne entièrement justifiée n'écrit aucune contre-passation.
+- **Pourquoi** : lot L1e validé par l'orchestrateur. Une dépense est une trace financière : elle ne s'efface jamais.
+- **Limites connues** : un dépassement (avance complémentaire) relève d'un lot ultérieur ; il est refusé aujourd'hui. Pas encore d'écran ni de pièce jointe.
+- **Preuve** :
+  - contrat `mission-budget-expenses` 11/11 :
+    - rôles ;
+    - corps invalides et date future ;
+    - plafond par ligne ;
+    - trois saisies simultanées, et une saisie qui attend le verrou d'une autre non validée ;
+    - suppression douce ;
+    - reliquat partiel ;
+    - mission terminée, mission annulée, reliquat rendu, drapeau coupé ;
+  - 9 mutants sur 9 tués (verrou du budget, mission ouverte, budget décaissé, reliquat rendu, plafond, lignes supprimées dans la somme, reliquat, suppression physique, date future) ;
+  - test unitaire jumelle et Drizzle.
+
+## 2026-11-05 — Budget de mission (L1e) : réserves de relecture levées
+
+- **Quoi** : une dépense ne peut plus être datée avant le décaissement de son budget. Les quatre FK de `mission_budget_expenses` sont relues au démarrage.
+- **Comment** :
+  - 400 si la date précède le jour du décaissement, au jour de Douala. Un budget hérité, sans date de décaissement, n'a pas de borne ;
+  - les FK `budget_id`, `created_by`, `updated_by` et `deleted_by` rejoignent `CDC_RECONCILED_CONSTRAINTS`. Leur absence est signalée, pas réparée : elles ne sont posées qu'à la création de la table.
+- **Pourquoi** : relecture sécurité de #499 (R2, R3). R1, qui demande si une mission terminée doit encore accepter des dépenses, attend une décision métier : comportement inchangé (409).
+- **Preuve** :
+  - contrat `mission-budget-expenses` 13/13, dont deux cas ajoutés :
+    - date du lendemain à Douala : 400, rien n'est écrit ;
+    - date antérieure au décaissement : 400 ; le jour même passe ; aucune borne sans date de décaissement ;
+  - le mutant qui retire cette borne est tué ;
+  - test unitaire : les 4 FK sont dans la liste relue au démarrage.
+
+## 2026-11-05 — Budget de mission (L1f-1) : panneau sur la fiche mission
+
+- **Quoi** : onglet « Budget » de la fiche mission, visible par la logistique, la direction, le secrétariat et l'administrateur (drapeau finance). Chaque rôle n'y voit que son étape : la logistique saisit et corrige, la direction approuve, le secrétariat décaisse depuis une banque ou une caisse puis saisit les dépenses justifiées.
+- **Comment** :
+  - `GET /api/mission-budgets?missionId=` : filtre additif, au plus un élément ;
+  - `client/src/lib/mission-budget-ui.ts` : actions par rôle et par statut, dérivées des constantes de rôles partagées avec les gardes serveur ; aucune action sur une mission terminée ou annulée ;
+  - `client/src/components/missions/mission-budget-panel.tsx` : saisie (barème ou saisie libre), approbation, décaissement avec compte source (liste `/api/fuel-card/source-accounts`, déjà ouverte aux rôles qui décaissent), dépenses et suppression ;
+  - trois couches : mise à jour du cache après succès, événement `mission_budget_updated` écouté par la table des satellites, invalidation de la liste et du besoin du jour ;
+  - envoi par `useSingleFlightMutate`, id passé dans les variables, erreurs par `userMessageOf`.
+- **Correctif** : `mission_budget_updated` partait sans portée depuis L1. `broadcastUpdate` étant fermé par défaut, l'événement n'atteignait personne. La portée est désormais les rôles qui lisent le budget. Leçon dans `docs/analysis/LESSONS_LEARNED.md`.
+- **Pourquoi** : lot L1f validé par l'orchestrateur. L'ancien bloc budget de la fiche reste en place ; son retrait relève d'un lot ultérieur.
+- **Preuve** :
+  - contrat `mission-budgets` : filtre `missionId` (rôles, mission sans budget, id illisible) et portée de l'événement lue par `normalizeScope` ; contrats budgets et dépenses 53/53 ;
+  - unitaires 2954/2954, dont `mission-budget-ui` 6/6 et le garde-fou des satellites, qui voit maintenant les appels `broadcast?.(` ;
+  - e2e `26-mission-budget-panel` 2/2 sur la base locale : trame reçue par un second compte de rôle différent à chaque étape, technicien sans onglet ;
+  - 3 mutants sur 3 tués (portée retirée, filtre retiré, satellite retiré) ; typage 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1f-2) : page « Besoin du jour »
+
+- **Quoi** : écran `/finance/mission-budgets`, entrée de menu « Besoin du jour », en lecture seule, pour la logistique, la direction, le secrétariat et l'administrateur (drapeau finance). Pour une date (aujourd'hui par défaut), il affiche :
+  - les totaux : budgets, carburant, FDR, frais annexes, total ;
+  - le reste à décaisser (demandés + approuvés) ;
+  - un compteur par statut ;
+  - le détail par mission. Une ligne mène à la fiche mission, où se font les actions.
+- **Comment** :
+  - écran déclaré dans `client/src/config/lot-screens.ts`, rôles `MISSION_BUDGET_READ_ROLES` (ceux des routes lues) ;
+  - composant `client/src/components/finance/mission-budgets-daily-need.tsx` ;
+  - `GET /api/mission-budgets` : champ additif optionnel `missionOrderNumber` (jointure `missions`), pour nommer la mission sans requête par ligne ;
+  - `GET /api/mission-budgets/daily-need` : inchangé ;
+  - temps réel par la table des satellites posée en L1f-1 (`mission_budget_updated` invalide la liste et le besoin du jour) ;
+  - couleurs des statuts partagées avec le panneau (`MISSION_BUDGET_STATUS_CLASSES`).
+- **Pourquoi** : lot L1f validé par l'orchestrateur. Le secrétariat prépare les décaissements du jour sans ouvrir chaque mission.
+- **Preuve** :
+  - contrat `mission-budgets` 41/41, dont un cas ajouté : chaque élément de la liste porte le numéro de commande de sa mission ;
+  - unitaires 2984 :
+    - `toDisburseOf` exclut les budgets décaissés ;
+    - garde-fous des écrans du lot (rôles écran = rôles route ; table des composants) ;
+  - e2e `27-mission-budgets-daily-need` 2/2 sur la base locale :
+    - totaux exacts sur une date isolée ;
+    - approbation par la direction : trame reçue par le secrétariat, écran mis à jour sans rechargement ;
+    - technicien sans page ni menu ;
+  - 3 mutants sur 3 tués (jointure retirée, décaissés comptés, technicien ajouté à l'écran) ;
+  - typage 0 erreur.

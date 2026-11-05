@@ -16,6 +16,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
+import { MissionBudgetPanel } from "@/components/missions/mission-budget-panel";
+import { canReadMissionBudget } from "@/lib/mission-budget-ui";
+import { useFeature } from "@/hooks/use-feature";
+import { MissionPriceCard } from "@/components/missions/mission-price-card";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
@@ -498,6 +502,9 @@ export default function MissionDetailsPage() {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState("details");
+  // Budget de mission (L1f) : drapeau finance et rôles de lecture ; le serveur garde les deux.
+  const financeEnabled = useFeature("finance");
+  const showBudgetTab = financeEnabled && canReadMissionBudget(user?.role);
   const [openInvoiceDialog, setOpenInvoiceDialog] = useState(false);
   const [openEditDialog, setOpenEditDialog] = useState(false);
   const [openMissionBudgetDialog, setOpenMissionBudgetDialog] = useState(false);
@@ -2137,10 +2144,21 @@ export default function MissionDetailsPage() {
           { value: "details", label: "Détails", icon: <TabIcon icon={FileText} /> },
           { value: "fuel", label: "Carburant", icon: <TabIcon icon={Fuel} /> },
           { value: "invoices", label: "Factures", icon: <TabIcon icon={Receipt} /> },
+          ...(showBudgetTab ? [{ value: "budget", label: "Budget", icon: <TabIcon icon={Wallet} /> }] : []),
           { value: "print", label: "Imprimer", icon: <TabIcon icon={Printer} /> },
         ]} />
 
         <TabsContent value="details" className="space-y-4 mt-4">
+          <MissionPriceCard
+            missionId={mission.id}
+            status={mission.status}
+            clientId={mission.clientId ? String(mission.clientId) : ""}
+            pickupAddress={mission.pickupAddress || ""}
+            deliveryAddress={mission.deliveryAddress || ""}
+            cargoDescription={mission.cargoDescription || ""}
+            pickupDate={mission.pickupDate ? String(mission.pickupDate).slice(0, 10) : ""}
+            weight={mission.weight != null ? String(mission.weight) : ""}
+          />
           {/* ── Rangée 1 : Informations Mission + Ressources (même hauteur) ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col">
@@ -2822,6 +2840,12 @@ export default function MissionDetailsPage() {
           </div>
           <MissionInvoicesTab missionId={mission.id} />
         </TabsContent>
+
+        {showBudgetTab && (
+          <TabsContent value="budget" className="mt-4">
+            <MissionBudgetPanel missionId={mission.id} missionStatus={mission.status} role={user?.role} />
+          </TabsContent>
+        )}
 
         <TabsContent value="print">
           <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">

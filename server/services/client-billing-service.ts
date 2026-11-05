@@ -107,6 +107,8 @@ export class ClientBillingService {
         .from(missions)
         .leftJoin(clients, eq(missions.clientId, clients.id))
         .where(eq(missions.id, missionId))
+        // Verrou de la ligne mission : le PUT du prix convenu la verrouille aussi, la facture et la correction se suivent.
+        .for("update", { of: missions })
         .limit(1);
 
       if (!result || !result.mission) {

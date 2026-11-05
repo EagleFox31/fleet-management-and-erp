@@ -3181,6 +3181,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, cas « un motif de document tu par la borne du message reste dans body.motifs ». Rouge si `details` est retiré de la levée dans `server/api/missions.routes.ts`.
 - **Leçon généralisée** : retirer ou renommer un champ de réponse exige de chercher ses lecteurs (client, e2e) et de figer le champ conservé par un test de contrat, pas seulement par un e2e.
 
+## 2026-11-05 — Prix convenu (O3) : une donnée réservée fuyait par les routes qui renvoient la ligne entière
+
+- **Contexte** : le prix convenu d'une mission n'est lisible que par les lecteurs de la grille tarifaire. La revue de #487 a relevé que `GET /api/operations/missions*`, la réponse de `PUT /api/missions/:id/status` (chauffeur) et la trame WebSocket de mission (tout le personnel, technicien compris) renvoyaient la ligne `missions` entière, donc `agreedPrice`.
+- **Cause racine** : la colonne a été ajoutée en pensant aux écrans de saisie ; les consommateurs qui sélectionnent `missions` en bloc n'ont pas été énumérés.
+- **Classification** : fuite de donnée sensible par projection implicite (même famille que le prix d'achat véhicule).
+- **Résolution** : `server/lib/mission-price-scope.ts` (`redactMissionPrice`, clés à `null`, échec fermé) appliqué aux routes operations, au PUT status et à la trame temps réel. Facturation client, exports et tableau de bord direction n'ont que des rôles lecteurs : sans exposition.
+- **Prévention vérifiable** : `tests/contract/mission-price-redaction.contract.test.ts` (technicien et chauffeur, vu rouge sans le helper) et `tests/unit/server/mission-price-scope.test.ts`.
+- **Leçon généralisée** : ajouter une colonne réservée à un rôle impose d'énumérer toutes les lectures de la table (`select()`, `mission: missions`, trames) avant de livrer, pas seulement l'écran de saisie.
 ## 2026-11-05 — Effet argent sur une transition dont le statut est lu hors verrou (L1d, #491)
 
 - **Contexte** : L1d branche la contre-passation du budget de mission sur `PUT /api/missions/:id/status` (annulation). La relecture sécurité de #491 a relevé que la route lisait le statut courant avant la transaction, sans verrou, puis écrivait par un UPDATE non conditionné.
@@ -3195,3 +3203,46 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
   - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
 - **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
+
+## 2026-11-05 — Événement temps réel émis sans portée : diffusé à personne (L1 à L1e)
+
+- **Contexte** : en branchant l'écran du budget de mission (L1f), la trame `mission_budget_updated` n'arrivait à aucun compte.
+- **Cause racine** : `broadcastUpdate` est fermé par défaut. Sans `scope` dans les données, `normalizeScope` renvoie `null` et l'événement est jeté, avec un simple avertissement au journal. Le service l'émettait sans portée depuis L1. Le contrat vérifiait seulement l'appel, pas la portée. Le garde-fou des satellites cherchait `broadcastUpdate(` et ne voyait pas l'appel `broadcast?.(`.
+- **Classification** : défaut latent de la couche 2 (temps réel), masqué par l'absence d'écran consommateur. Near miss : trouvé avant toute mise en service de l'écran.
+- **Résolution** : portée par rôles (`MISSION_BUDGET_READ_ROLES`, montants d'argent), assertion de contrat sur la portée telle que le serveur la lit, regex du garde-fou élargie à `?.(`, e2e qui lit la trame chez un second compte.
+- **Prévention vérifiable** :
+  - `tests/contract/mission-budgets.contract.test.ts` : `normalizeScope(emitted.data.scope)` égal à la portée attendue (rouge sans portée) ;
+  - `tests/unit/client/realtime-satellites.test.ts` : les émetteurs `broadcast?.(` sont recensés ;
+  - `e2e/26-mission-budget-panel.spec.ts` : trame reçue par l'autre rôle à chaque étape.
+- **Leçon généralisée** : un test d'événement temps réel vérifie la portée comme le serveur la lit, ou la trame chez un destinataire, jamais le seul appel de l'émetteur. Les autres appels de diffusion sans portée n'ont pas été recensés ici : audit à mener dans un lot dédié.
+## 2026-11-05 — Test d'idempotence instable : les statistiques Postgres ne sont pas un témoin d'écriture
+
+- **Contexte** : `tests/integration/lot-recette-schema-idempotence.test.ts` vérifie qu'un second `initializeDatabase()` n'écrit aucune ligne. Il a échoué en CI sur #496, sans lien avec la PR, puis est repassé sans changement.
+- **Cause racine** : le test comparait `n_tup_ins/upd/del` de `pg_stat_user_tables` avant et après. `pg_stat_force_next_flush()` ne vide que les statistiques de la connexion appelante. Les écritures faites par les autres connexions du pool pendant le premier démarrage arrivaient en différé, parfois entre les deux lectures : l'écart venait du premier démarrage, pas du second.
+- **Classification** : test instable, témoin asynchrone pris pour un état. Aucune régression produit.
+- **Résolution** : instantané déterministe par table, `count(*)` et `md5(string_agg(xmin::text ORDER BY xmin::text, ctid))`. Toute écriture validée (INSERT, UPDATE même à valeur égale, DELETE) change le nombre de lignes ou un `xmin`, quelle que soit la connexion. Le tri par `xmin::text` puis `ctid` rend l'empreinte indépendante de l'ordre de parcours.
+- **Limite assumée** : une écriture annulée (ROLLBACK) ne laisse aucune version visible et n'est pas détectée. C'est voulu : le contrat porte sur l'état validé.
+- **Prévention vérifiable** : garde-fou négatif dans le même fichier. Un `UPDATE … SET label = label` validé entre deux instantanés doit être détecté, sur `vehicle_document_types` seulement. Si l'instantané cessait de voir les écritures, ce cas passerait au rouge. Le test a passé 30 exécutions locales consécutives.
+- **Leçon généralisée** : pour prouver l'absence d'écriture, comparer l'état (lignes, `xmin`), jamais des compteurs statistiques. Ceux-ci sont asynchrones et propres à chaque connexion. Un témoin d'absence doit toujours avoir son cas négatif : un instantané qui ne voit rien passe tous les tests d'idempotence.
+## 2026-11-05 — Mutant de SQL d'init neutralisé par la migration jumelle (L2, #497)
+
+- **Contexte** : L2 pose `maintenance_schedules.updated_at` et le déclencheur `trg_maintenance_schedules_touch`. Le SQL vit dans `VEHICLE_LIFECYCLE_SQL` (`server/init-database.ts`) et dans sa migration jumelle `server/db/migrations/20261105_vehicle_lifecycle.sql`.
+- **Cause racine** : le mutant « corps du déclencheur vidé » ne portait que sur `init-database.ts`. Le répertoire `migrations/` est rejoué au démarrage après l'init : la migration jumelle redéfinissait la fonction intacte, et le mutant survivait sans que le test soit en cause. Une écriture Drizzle dans le test renouvelait en plus `updated_at` d'elle-même et masquait l'absence du déclencheur.
+- **Classification** : faux vert de mutation, outillage de test. C'est un near miss : relevé avant livraison.
+- **Résolution** : le mutant porte sur les deux jumeaux. Le cas de contrat écrit en SQL brut, pour que seul le déclencheur renouvelle l'horodatage. Le mutant passe alors au rouge.
+- **Prévention vérifiable** : `tests/unit/server/vehicle-lifecycle-schema.test.ts` exige des jumeaux identiques, donc un mutant d'un seul jumeau échoue d'abord là. Le contrat `vehicle-lifecycle` (« plan désactivé à la main pendant le retrait ») écrit en SQL brut.
+- **Leçon généralisée** : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise. Un test qui prouve un déclencheur écrit en SQL brut, jamais par l'ORM : l'ORM peut poser lui-même la valeur attendue.
+
+## 2026-11-05 — Cloison « véhicule retiré » appliquée par chemin, pas par filtre ni par liste (L1 puis L1b)
+
+- **Contexte** : L1 ferme `GET /api/fuel-records/vehicle/:id` au client propriétaire d'un véhicule retiré. Les mêmes pleins restaient lisibles par `GET /api/fuel-records?vehicleId=` et `/consumption-history?vehicleId=`, encore en `canAccessOwned` seul dans `routes.ts`.
+- **Cause racine** : la règle « retiré » est appliquée route par route. Chaque entrée qui expose la même donnée (chemin, filtre de requête, liste, agrégat) porte son propre contrôle, et rien ne force à les aligner.
+- **Classification** : contrôle d'accès incomplet (cloison client). Near miss : le trou était documenté comme limite de L1, puis fermé par L1b avant la mise en production.
+- **Résolution (L1b)** : les deux filtres passent par `assertVehicleSubresourcesReadable`, comme l'historique OT, les plans par véhicule et le téléchargement d'un document. Le contrat `vehicle-history-retired-scope` joue le même acteur sur chaque entrée qui expose un plein : chemin, filtre et agrégat. Six mutants « garde retirée » rougissent tous.
+- **Reste (L1c)** : l'audit L1b recense quatre listes encore ouvertes au propriétaire d'un véhicule retiré, filtrées sur `ownerId` sans `deleted_at` :
+  - `vehicles/all-with-status` et les documents expirés ;
+  - `vehicles/documents/all` ;
+  - `vehicle-tires` ;
+  - `work-orders`.
+- **Prévention vérifiable** : pour toute donnée rattachée au véhicule, le contrat joue le même acteur sur chaque entrée : chemin, filtre, liste, agrégat et fichier. À prévoir en L1c : un prédicat partagé (`owner_id = ? AND deleted_at IS NULL`), plus un cas « aucune liste ne renvoie l'id retiré ».
+- **Leçon généralisée** : fermer une donnée, c'est fermer toutes ses entrées. Recenser d'abord chaque chemin, filtre, liste et export qui la renvoient, puis prouver la fermeture sur chacun avec le même acteur.

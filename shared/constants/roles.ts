@@ -469,6 +469,41 @@ export const TARIFF_GRID_READ_ROLES = ["admin", "management", "secretary", "logi
 /** Grille tarifaire (O3) : écriture réservée à la direction et à l'admin. */
 export const TARIFF_GRID_WRITE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 
+/** Prix convenu d'une mission (O3) : saisi à la création par les gestionnaires de missions qui lisent la grille. */
+export function canSetMissionPrice(role: string | null | undefined): boolean {
+  return (MISSION_MANAGER_ROLES as readonly string[]).includes(String(role ?? "")) &&
+    (TARIFF_GRID_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canWriteTariffGrid(role: string | null | undefined): boolean {
   return (TARIFF_GRID_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/** Lecture du prix convenu d'une mission et de son historique (O3) : mêmes rôles que la grille tarifaire. */
+export const MISSION_PRICE_READ_ROLES = TARIFF_GRID_READ_ROLES;
+/** Rôles pouvant corriger un prix une fois la mission partie (in_progress, delivered), avec motif. */
+export const MISSION_PRICE_LATE_EDIT_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+/** Motif minimal (caractères) exigé pour une correction tardive. */
+export const MISSION_PRICE_REASON_MIN = 5;
+
+export type MissionPriceDecision =
+  | { allowed: true; reasonRequired: boolean }
+  | { allowed: false; blockedBy: "role" | "status" | "invoice" };
+
+/**
+ * Qui peut changer le prix convenu, selon le statut (règle partagée serveur/écran, O3 lot 3b) :
+ * - draft, planned, assigned : gestionnaires de missions ;
+ * - in_progress, delivered : admin et direction, motif obligatoire ;
+ * - completed, cancelled : prix figé ;
+ * - une facture non annulée liée à la mission fige le prix dans tous les cas (correction par avoir).
+ */
+export function canEditMissionPrice(role: string | null | undefined, status: string, hasLiveInvoice: boolean): MissionPriceDecision {
+  const r = String(role ?? "");
+  const early = ["draft", "planned", "assigned"].includes(status);
+  const late = ["in_progress", "delivered"].includes(status);
+  if (!early && !late) return { allowed: false, blockedBy: "status" };
+  const roles: readonly string[] = early ? MISSION_MANAGER_ROLES : MISSION_PRICE_LATE_EDIT_ROLES;
+  if (!roles.includes(r)) return { allowed: false, blockedBy: "role" };
+  if (hasLiveInvoice) return { allowed: false, blockedBy: "invoice" };
+  return { allowed: true, reasonRequired: late };
 }

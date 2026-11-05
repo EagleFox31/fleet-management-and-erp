@@ -14,7 +14,7 @@
  * le journal de trésorerie (T1) n'est pas branché ; `treasuryEntryId` reste alors `null`.
  */
 import { z } from "zod";
-import { bodyIdSchema, isoDateSchema, isoDateTimeSchema } from "./common";
+import { bodyIdSchema, idSchema, isoDateSchema, isoDateTimeSchema } from "./common";
 
 export const MISSION_BUDGETS_PATH = "/api/mission-budgets";
 export const MISSION_BUDGETS_DAILY_NEED_PATH = "/api/mission-budgets/daily-need";
@@ -22,6 +22,8 @@ export const missionBudgetPath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}`
 export const missionBudgetApprovePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/approve`;
 export const missionBudgetDisbursePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/disburse`;
 export const MISSION_DESTINATIONS_PATH = "/api/mission-budgets/destinations";
+export const missionBudgetExpensesPath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/expenses`;
+export const missionBudgetExpensePath = (id: number, expenseId: number) => `${missionBudgetExpensesPath(id)}/${expenseId}`;
 
 export const MISSION_BUDGET_STATUSES = ["requested", "approved", "disbursed"] as const;
 export type MissionBudgetStatus = (typeof MISSION_BUDGET_STATUSES)[number];
@@ -130,10 +132,19 @@ export const missionBudgetsQuerySchema = z
   .object({
     date: isoDateSchema.optional(),
     status: z.enum(MISSION_BUDGET_STATUSES).optional(),
+    /** Budget d'une mission (fiche mission, L1f) : au plus un élément, un budget par mission. */
+    missionId: idSchema.optional(),
   })
   .strict();
 
-export const missionBudgetsResponseSchema = z.array(missionBudgetSchema);
+/**
+ * Élément de la liste : le budget et le numéro de commande de sa mission (page « Besoin du jour », L1f-2).
+ * Optionnel : une réponse de création ou de transition n'en porte pas, l'écran l'écrit tel quel dans la liste.
+ */
+export const missionBudgetListItemSchema = missionBudgetSchema.extend({ missionOrderNumber: z.string().optional() });
+export type MissionBudgetListItem = z.infer<typeof missionBudgetListItemSchema>;
+
+export const missionBudgetsResponseSchema = z.array(missionBudgetListItemSchema);
 
 export const dailyNeedQuerySchema = z.object({ date: isoDateSchema }).strict();
 
@@ -161,6 +172,57 @@ export const missionDestinationSchema = z.object({
 });
 
 export const missionDestinationsResponseSchema = z.array(missionDestinationSchema);
+
+/**
+ * Dépenses justifiées (L1e) d'un budget décaissé, par ligne de décaissement : `fdr` (FDR et frais
+ * annexes) et `carburant`. Montant entier en XAF ; date au jour de Douala, jamais dans le futur.
+ * Somme des dépenses non supprimées d'une ligne ≤ montant décaissé sur cette ligne (409 au-delà).
+ */
+export const MISSION_BUDGET_EXPENSE_LINES = ["fdr", "carburant"] as const;
+export type MissionBudgetExpenseLine = (typeof MISSION_BUDGET_EXPENSE_LINES)[number];
+
+export const MISSION_BUDGET_EXPENSE_LINE_LABELS: Record<MissionBudgetExpenseLine, string> = {
+  fdr: "FDR et frais annexes",
+  carburant: "Carburant",
+};
+
+export const createMissionBudgetExpenseRequestSchema = z
+  .object({
+    line: z.enum(MISSION_BUDGET_EXPENSE_LINES),
+    amount: z.number().int().positive().max(MISSION_BUDGET_MAX_AMOUNT),
+    label: z.string().trim().min(1).max(200),
+    /** Absente : le jour courant à Douala. */
+    expenseDate: isoDateSchema.optional(),
+  })
+  .strict();
+export type CreateMissionBudgetExpenseRequest = z.infer<typeof createMissionBudgetExpenseRequestSchema>;
+
+export const missionBudgetExpenseSchema = z.object({
+  id: bodyIdSchema,
+  budgetId: bodyIdSchema,
+  line: z.enum(MISSION_BUDGET_EXPENSE_LINES),
+  amount: z.number().int(),
+  label: z.string(),
+  expenseDate: isoDateSchema,
+  createdBy: bodyIdSchema.nullable(),
+  createdAt: isoDateTimeSchema,
+});
+export type MissionBudgetExpense = z.infer<typeof missionBudgetExpenseSchema>;
+
+/** Dépenses non supprimées d'un budget et, par ligne, décaissé, justifié et reste à justifier. */
+export const missionBudgetExpensesResponseSchema = z.object({
+  budgetId: bodyIdSchema,
+  lines: z.array(
+    z.object({
+      line: z.enum(MISSION_BUDGET_EXPENSE_LINES),
+      disbursed: z.number(),
+      justified: z.number().int(),
+      remaining: z.number(),
+    }),
+  ),
+  expenses: z.array(missionBudgetExpenseSchema),
+});
+export type MissionBudgetExpenses = z.infer<typeof missionBudgetExpensesResponseSchema>;
 
 export type MissionDestination = z.infer<typeof missionDestinationSchema>;
 export type CreateMissionBudgetRequest = z.infer<typeof createMissionBudgetRequestSchema>;
