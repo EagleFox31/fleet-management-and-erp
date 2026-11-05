@@ -124,11 +124,6 @@ export const alertsService = {
     }
   },
 
-  isExpired(expiresAt?: string): boolean {
-    if (!expiresAt) return false;
-    return new Date(expiresAt) < new Date();
-  },
-
   sortByPriority(alerts: Alert[]): Alert[] {
     const severityOrder = { critical: 0, error: 1, warning: 2, info: 3 };
     return [...alerts].sort((a, b) => {

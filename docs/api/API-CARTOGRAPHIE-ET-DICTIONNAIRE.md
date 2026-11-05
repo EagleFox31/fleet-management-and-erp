@@ -186,7 +186,8 @@ flowchart TB
 
 | Méthode | Path | Auth | Description |
 |---------|------|------|-------------|
-| GET | `/api/health` | ⚠️ | Statut API + liste services (modular) |
+| GET | `/api/health` | ⚠️ | Statut et version seulement, public (modular) |
+| GET | `/api/health/details` | ✅ | Descriptif de l'API et des services, administrateur seul |
 | GET | `/api/health` | ⚠️ | Doublon legacy (routes.ts L117) |
 
 ### 4.2 Missions — `/api/missions` ⚠️
