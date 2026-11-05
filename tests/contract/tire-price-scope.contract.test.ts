@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { inArray } from "drizzle-orm";
-import { tires } from "../../shared/schema";
+import { tires, vehicleTires } from "../../shared/schema";
 import { getDefaultTireFormValues } from "../../shared/tire-form";
 import { normalizeScope, resolveRecipients } from "../../server/lib/realtime-scope";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { createTestVehicle } from "../support/factories";
 import { startContractActors } from "../support/contract-actors";
 import { uniqueTestToken } from "../support/ids";
 
@@ -21,6 +22,8 @@ const frames: { eventType: string; scope?: unknown }[] = [];
 const previousBroadcast = (global as any).broadcastUpdate;
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 let tireId = 0;
+let ownedVehicleId = 0;
+let otherVehicleId = 0;
 const model = uniqueTestToken("tpr");
 
 const reaches = (scope: unknown, actor: Actor): boolean =>
@@ -52,10 +55,19 @@ beforeAll(async () => {
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   tireId = res.body.id;
   tireIds.push(tireId);
+  // Un pneu monté sur un véhicule du client, un autre sur un véhicule de personne.
+  const owned = await createTestVehicle({ ownerId: session.userIdOf("client") });
+  const other = await createTestVehicle();
+  ids.vehicleIds.push(owned.id, other.id);
+  [ownedVehicleId, otherVehicleId] = [owned.id, other.id];
+  for (const vehicleId of [owned.id, other.id]) {
+    await db.insert(vehicleTires).values({ vehicleId, tireId, position: "front_left", installationDate: "2026-01-01", installationMileage: 1000 });
+  }
 }, 120000);
 
 afterAll(async () => {
   (global as any).broadcastUpdate = previousBroadcast;
+  if (tireIds.length > 0) await db.delete(vehicleTires).where(inArray(vehicleTires.tireId, tireIds));
   if (tireIds.length > 0) await db.delete(tires).where(inArray(tires.id, tireIds));
   await cleanupCreated(ids);
   await session?.close();
@@ -81,6 +93,23 @@ describe("prix d'achat des pneus", { timeout: 120000 }, () => {
     const low = await session.call("GET", "/api/tires/low-stock", { actor: "driver" });
     expect(low.status).toBe(200);
     expect(hasPrice(low.body)).toBe(false);
+  });
+
+  it("pneus montés sur un véhicule (jointure) : prix d'achat du pneu absent pour chauffeur et client, présent au magasin", async () => {
+    const mountedPrice = (body: any[]) => body.some((r) => r.tires && "purchasePrice" in r.tires);
+    const cases: [Actor, number, boolean][] = [
+      ["warehouse", otherVehicleId, true],
+      ["driver", otherVehicleId, false],
+      ["client", ownedVehicleId, false],
+    ];
+    for (const [actor, vehicleId, visible] of cases) {
+      const res = await session.call("GET", `/api/vehicles/${vehicleId}/tires`, { actor });
+      expect(res.status, actor).toBe(200);
+      expect(res.body.length, actor).toBeGreaterThan(0);
+      expect(res.body[0].tires?.id, actor).toBe(tireId);
+      expect(mountedPrice(res.body), actor).toBe(visible);
+      expect(hasPrice(res.body.map((r: any) => r.tires)), actor).toBe(visible);
+    }
   });
 
   it("valeur d'inventaire : refusée au chauffeur, servie au magasinier", async () => {

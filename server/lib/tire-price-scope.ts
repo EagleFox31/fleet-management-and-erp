@@ -8,8 +8,11 @@ export function canReadTirePrice(role: string | null | undefined): boolean {
   return (PART_CATALOG_EVENT_ROLES as readonly string[]).includes((role ?? "").trim().toLowerCase());
 }
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
 
 const walk = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(walk);

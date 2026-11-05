@@ -5,3 +5,6 @@
 - Temps réel : les trames `tire_*` partent au personnel hors chauffeur ; `vehicle_tire_*` (sans prix) restent au personnel.
 - Écrans satellites vérifiés : aucun n'est piloté par `tire_*`. Le tableau de bord appelle `/api/tires/low-stock`, toujours servi au chauffeur.
 - Garde : `tests/contract/tire-price-scope.contract.test.ts` (deux rôles, résolveur réel), trois mutations vues rouges.
+- Correctif de relecture : la jointure des pneus montés (`GET /api/vehicles/:id/tires`, `getVehicleTires`) renvoyait la fiche pneu entière, prix compris, au chauffeur et au client propriétaire. Le masque est appliqué à la partie `tires` de chaque ligne seulement (un masque sur toute la réponse retirerait aussi le prix du véhicule, que le contrat véhicule veut présent à null). Le cas est couvert par le contrat (magasin, chauffeur, client propriétaire) et une mutation vue rouge.
+- Les satellites n'avaient pas tous été vérifiés : les lectures entières de `tires` sont désormais gelées dans `tests/unit/server/tire-select-hygiene.test.ts` (sept occurrences, chacune justifiée ; toute nouvelle fait échouer le test).
+- `isPlainObject` de `tire-price-scope.ts` accepte aussi les objets sans prototype, comme l'assistant véhicule.
