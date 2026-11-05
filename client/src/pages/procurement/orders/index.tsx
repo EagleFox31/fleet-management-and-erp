@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   Package,
   Plus,
   FileText,
   TrendingUp,
   Calendar,
-  Eye,
   CheckCircle,
   XCircle,
   Clock,
@@ -68,6 +67,7 @@ export default function PurchaseOrdersListPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [, setLocation] = useLocation();
 
   const { data: orders = [], isLoading } = useQuery<PurchaseOrder[]>({
     queryKey: ["/api/purchase-orders", { status: statusFilter }],
@@ -189,8 +189,8 @@ export default function PurchaseOrdersListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                {["N° Commande", "Fournisseur", "Date", "Montant TTC", "Lignes", "Statut", ""].map((h, i) => (
-                  <th key={i} className={`px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400 whitespace-nowrap ${i === 6 ? 'text-right' : 'text-left'}`}>
+                {["N° Commande", "Fournisseur", "Date", "Montant TTC", "Lignes", "Statut"].map((h, i) => (
+                  <th key={i} className={`px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400 whitespace-nowrap text-left`}>
                     {h}
                   </th>
                 ))}
@@ -209,7 +209,7 @@ export default function PurchaseOrdersListPage() {
                 ))
               ) : filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center">
+                  <td colSpan={6} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-gray-400">
                       <Package className="h-9 w-9 opacity-30" />
                       <p className="text-sm font-medium">Aucune commande trouvée</p>
@@ -225,17 +225,22 @@ export default function PurchaseOrdersListPage() {
                   return (
                     <tr
                       key={order.id}
-                      className={`group border-b border-gray-50 last:border-0 transition-colors hover:bg-gray-50/60 border-l-2 ${urgencyBorder}`}
+                      onClick={() => setLocation(`/procurement/orders/${order.id}`)}
+                      className={`group cursor-pointer border-b border-gray-50 last:border-0 transition-colors hover:bg-gray-50/60 border-l-2 ${urgencyBorder}`}
                       data-testid={`order-${order.id}`}
                     >
                       {/* N° Commande */}
                       <td className="px-4 py-3.5">
-                        <span
-                          className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-mono font-semibold text-gray-600 whitespace-nowrap"
+                        {/* Ligne cliquable = détail (AGENTS §5) ; le numéro reste un lien pour le clavier. */}
+                        <Link
+                          href={`/procurement/orders/${order.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`Voir la commande ${order.orderNumber}`}
+                          className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-mono font-semibold text-gray-600 whitespace-nowrap hover:bg-blue-50 hover:text-blue-700"
                           data-testid={`order-number-${order.id}`}
                         >
                           {order.orderNumber}
-                        </span>
+                        </Link>
                       </td>
 
                       {/* Fournisseur */}
@@ -282,19 +287,6 @@ export default function PurchaseOrdersListPage() {
                         </span>
                       </td>
 
-                      {/* Actions */}
-                      <td className="px-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end">
-                          <Link href={`/procurement/orders/${order.id}`}>
-                            <button
-                              className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition-colors"
-                              data-testid={`button-view-${order.id}`}
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </button>
-                          </Link>
-                        </div>
-                      </td>
                     </tr>
                   );
                 })
