@@ -115,7 +115,7 @@ export const SATELLITE_GROUPS = {
     prefixes: ["/api/fuel-records/vehicle/"],
   },
   /** Chiffre d'affaires (factures client). */
-  clientMoney: { keys: [MANAGEMENT_DASHBOARD] },
+  clientMoney: { keys: [MANAGEMENT_DASHBOARD, "/api/finance/invoices-awaiting-payment"] },
   /** Dettes fournisseurs (factures fournisseur et règlements). */
   supplierMoney: {
     keys: [
@@ -165,6 +165,8 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   client_invoice_created: ["clientMoney"],
   client_invoice_payment_recorded: ["clientMoney"],
   client_invoices_overdue: ["clientMoney"],
+  client_invoice_deposited: ["clientMoney"],
+  client_withholding_updated: ["clientMoney"],
   supplier_invoice_created: ["supplierMoney"],
   supplier_invoice_updated: ["supplierMoney"],
   supplier_invoice_settlement_recorded: ["supplierMoney"],

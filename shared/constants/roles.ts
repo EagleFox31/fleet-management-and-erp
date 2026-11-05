@@ -163,6 +163,12 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
+/** Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture. */
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary"] as const satisfies readonly AppRole[];
+
+/** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
+export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
  * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
