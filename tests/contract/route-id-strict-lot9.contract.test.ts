@@ -155,7 +155,9 @@ describe("ids de route (lot 9) : server/api, objet <id> intact", { timeout: 1200
 describe("ids de route (lot 9) : lectures de server/routes.ts", { timeout: 120000 }, () => {
   it("GET /api/vehicles/:id : le client lit son véhicule par son id (témoin), pas par <id>abc", async () => {
     expect((await call("client", "GET", `/api/vehicles/${ownVehicleId}`)).status).toBe(200);
-    expect(await call("client", "GET", `/api/vehicles/${ownVehicleId}abc`)).toEqual({ status: 404, message: "Véhicule non trouvé" });
+    // `<id>abc` est lu comme une immatriculation absente : 403 pour le client (#398), 404 pour le personnel.
+    expect(await call("client", "GET", `/api/vehicles/${ownVehicleId}abc`)).toEqual({ status: 403, message: "Accès non autorisé à ce véhicule" });
+    expect(await call("admin", "GET", `/api/vehicles/${ownVehicleId}abc`)).toEqual({ status: 404, message: "Véhicule non trouvé" });
   });
 
   it("GET /api/vehicles/:immatriculation : le client lit la sienne, pas celle d'un autre client (403)", async () => {

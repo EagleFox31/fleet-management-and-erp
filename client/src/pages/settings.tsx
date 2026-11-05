@@ -238,7 +238,7 @@ export default function Settings() {
           <Button
             variant="outline"
             size="sm"
-            className="text-destructive hover:text-destructive"
+            className="text-destructive-text hover:text-destructive-text"
             onClick={(e) => {
               e.stopPropagation();
               setSelectedUser(row);
