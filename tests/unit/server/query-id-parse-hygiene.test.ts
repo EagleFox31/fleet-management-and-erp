@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { MAX_DB_INTEGER_ID, parseQueryId, queryIdOrNaN } from "../../../server/lib/route-id";
+import { countBoundRequestConversions, looseNumericValue, requestFieldName, unwrapValue } from "../../support/request-id-scan";
 import { sourceFiles, stripComments } from "../../support/route-guard-scan";
 
 /**
@@ -13,104 +14,42 @@ import { sourceFiles, stripComments } from "../../support/route-guard-scan";
  * `parseInt("12abc")` vaut 12 : la liste est filtrée sur un autre objet que celui demandé ; `NaN`
  * (`?vehicleId=abc`) fait ignorer le filtre ou répondre 500, et un id au-delà de l'int4 fait répondre 500.
  *
- * Cliquet sur `server/api` et `server/routes.ts` : une conversion lâche (`parseInt`, `Number.parseInt`,
- * `Number`, avec ou sans `String(…)`) d'un paramètre de requête dont le nom désigne un id
- * (`id`, `…Id`, `…By`), lu directement (`parseInt(req.query.vehicleId)`) ou par une variable
- * (`const { clientId } = req.query; parseInt(clientId)`). `year`, `month`, `limit` ne sont pas des ids.
- * Limite : un nom d'id qui ne suit pas ce motif (`owner`, `client`) n'est pas vu.
+ * Cliquet sur `server/api` et `server/routes.ts` : une conversion lâche (`parseInt`, `parseFloat`, `Number`,
+ * `Number.parseInt`, `Number.parseFloat`, `+` unaire, avec ou sans `String(…)`) d'un paramètre de requête
+ * dont le nom désigne un id (`id`, `…Id`, `…edBy`), lu directement (`parseInt(req.query.vehicleId)`) ou par
+ * une variable rattachée à sa déclaration (`const { clientId } = req.query; parseInt(clientId)`,
+ * `tests/support/request-id-scan.ts`). La requête est `req` ou le premier paramètre du handler.
+ * `year`, `month`, `limit`, `sortBy`, `groupBy` ne sont pas des ids.
+ * Limites : un nom d'id hors motif (`owner`, `client`, `by`) n'est pas vu, ni une conversion par `Math.*`,
+ * `~~x`, `x | 0` ou un parseur maison.
  */
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 const API_DIR = join(ROOT, "server/api");
-const ID_NAME = /^(?:id|\w*Id|\w*By)$/;
+/** `id`, `vehicleId`, `createdBy`… ; pas `sortBy`, `groupBy`, `orderBy` (pas de participe en `-ed`). */
+const ID_NAME = /^(?:id|\w*Id|\w+edBy)$/;
 
 /** Relevé du 5 novembre 2026 après le lot 11 : vide. Ne peut que rétrécir. */
 const FROZEN: Record<string, number> = {};
 const ROUTES_TS_FROZEN = 0;
 
-function isLooseConversion(call: ts.CallExpression): boolean {
-  const callee = call.expression;
-  if (ts.isIdentifier(callee)) return callee.text === "parseInt" || callee.text === "Number";
-  return (
-    ts.isPropertyAccessExpression(callee) &&
-    ts.isIdentifier(callee.expression) &&
-    callee.expression.text === "Number" &&
-    callee.name.text === "parseInt"
-  );
-}
-
-/** Retire `( )`, `as T`, `!` et `String(…)` autour de la valeur convertie. */
-function unwrap(node: ts.Expression): ts.Expression {
-  let current = node;
-  for (;;) {
-    if (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isNonNullExpression(current)) {
-      current = current.expression;
-    } else if (
-      ts.isCallExpression(current) &&
-      ts.isIdentifier(current.expression) &&
-      current.expression.text === "String" &&
-      current.arguments.length === 1
-    ) {
-      current = current.arguments[0];
-    } else {
-      return current;
-    }
-  }
-}
-
-function isReqQuery(node: ts.Expression): boolean {
-  return ts.isPropertyAccessExpression(node) && node.name.text === "query" && ts.isIdentifier(node.expression) && node.expression.text === "req";
-}
-
-/** `req.query.vehicleId` ou `req.query["vehicleId"]` : le nom lu, sinon `null`. */
-function queryFieldName(node: ts.Expression): string | null {
-  if (ts.isPropertyAccessExpression(node) && isReqQuery(node.expression)) return node.name.text;
-  if (ts.isElementAccessExpression(node) && isReqQuery(node.expression) && ts.isStringLiteral(node.argumentExpression)) {
-    return node.argumentExpression.text;
-  }
-  return null;
-}
-
-/** Noms d'id liés par `const { vehicleId, a: supplierId } = req.query` ou `const x = req.query.vehicleId`. */
-function idNamesBoundFromQuery(decl: ts.VariableDeclaration): string[] {
-  const init = decl.initializer && unwrap(decl.initializer);
-  if (!init) return [];
-  if (isReqQuery(init) && ts.isObjectBindingPattern(decl.name)) {
-    return decl.name.elements.flatMap((el) => {
-      const field = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : ts.isIdentifier(el.name) ? el.name.text : "";
-      return ID_NAME.test(field) && ts.isIdentifier(el.name) ? [el.name.text] : [];
-    });
-  }
-  const field = queryFieldName(init);
-  return field !== null && ID_NAME.test(field) && ts.isIdentifier(decl.name) ? [decl.name.text] : [];
-}
-
-export function countLooseQueryIdReads(source: string): number {
-  const sf = ts.createSourceFile("f.ts", stripComments(source), ts.ScriptTarget.Latest, true);
+/** Conversion lâche d'un id de filtre lu directement : `parseInt(req.query.vehicleId)`, `+req.query["createdBy"]`. */
+function countDirect(sf: ts.SourceFile): number {
   let count = 0;
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && isLooseConversion(node) && node.arguments.length > 0) {
-      const field = queryFieldName(unwrap(node.arguments[0]));
-      if (field !== null && ID_NAME.test(field)) count += 1;
-    }
-    if (ts.isVariableDeclaration(node)) {
-      const names = new Set(idNamesBoundFromQuery(node));
-      const scope = node.parent?.parent?.parent;
-      if (names.size > 0 && scope) {
-        const countIn = (inner: ts.Node): void => {
-          if (ts.isCallExpression(inner) && isLooseConversion(inner) && inner.arguments.length > 0) {
-            const arg = unwrap(inner.arguments[0]);
-            if (ts.isIdentifier(arg) && names.has(arg.text)) count += 1;
-          }
-          ts.forEachChild(inner, countIn);
-        };
-        countIn(scope);
-      }
-    }
+    const value = looseNumericValue(node);
+    const field = value ? requestFieldName(unwrapValue(value), "query") : null;
+    if (field !== null && ID_NAME.test(field)) count += 1;
     ts.forEachChild(node, visit);
   };
   visit(sf);
   return count;
+}
+
+export function countLooseQueryIdReads(source: string): number {
+  const clean = stripComments(source);
+  const direct = countDirect(ts.createSourceFile("f.ts", clean, ts.ScriptTarget.Latest, true));
+  return direct + countBoundRequestConversions("f.ts", clean, "query", (name) => ID_NAME.test(name), looseNumericValue);
 }
 
 function actualCounts(): Record<string, number> {
@@ -149,6 +88,10 @@ describe("ids de filtre (req.query) : parseQueryId, cliquet sur les lectures lâ
     expect(countLooseQueryIdReads(handler("const { supplierId: s } = req.query;\nf(parseInt(s as string));"))).toBe(1);
     expect(countLooseQueryIdReads(handler("const raw = req.query.vehicleTireId;\nf(Number(raw));"))).toBe(1);
     expect(countLooseQueryIdReads(handler("const limit = parseInt(req.query.limit as string) || 20;"))).toBe(0);
+    expect(countLooseQueryIdReads(handler("const { sortBy, groupBy } = req.query;\nf(Number(sortBy), Number(groupBy));"))).toBe(0);
+    expect(countLooseQueryIdReads(handler("const a = +req.query.vehicleId;\nconst b = parseFloat(req.query.clientId as string);"))).toBe(2);
+    expect(countLooseQueryIdReads("router.get(\"/\", (request, response) => {\nconst { partId } = request.query;\nf(+partId);\n});")).toBe(1);
+    expect(countLooseQueryIdReads(handler("const { clientId } = req.query;\nrows.map((clientId) => Number(clientId));"))).toBe(0);
     expect(countLooseQueryIdReads(handler("const a = parseQueryId(req.query.vehicleId, 'm');"))).toBe(0);
     expect(countLooseQueryIdReads("// parseInt(req.query.vehicleId)\nconst a = 1;")).toBe(0);
   });
