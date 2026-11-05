@@ -46,3 +46,10 @@
 - Comment : filtre `notInArray(assignments.status, VOID_ASSIGNMENT_STATUSES)` côté personnel, `driverLiveAssignmentFilter` côté chauffeur ; le `catch` relaie les `AppError` telles quelles.
 - Pourquoi : `router.param` cloisonne la mission, pas l'affectation lue ; mineurs de la relecture de #345.
 - Tester : `tests/contract/mission-launch-readiness-live-assignment.contract.test.ts` (2 échecs sur 2 sans le correctif), `tests/unit/server/mission-assignment-read-scope.test.ts`.
+
+## 2026-11-05 — document-renewal-requests : affectation vivante seule
+
+- Quoi : GET et POST /:id/document-renewal-requests lisent le véhicule de l affectation vivante, plus la première affectation par id (annulée ou d un autre chauffeur) ; liste gelée du garde vidée.
+- Comment : le filtre (driverLiveAssignmentFilter pour un chauffeur, VOID_ASSIGNMENT_STATUSES exclus pour le personnel) est posé dans la condition de la jointure, la mission reste trouvée (404 inchangé).
+- Pourquoi : router.param cloisonne la mission, pas l affectation lue ; dette gelée de #349.
+- Tester : tests/contract/mission-document-renewal-live-assignment.contract.test.ts (3 échecs sur 5 sans le correctif), tests/unit/server/mission-assignment-read-scope.test.ts.
