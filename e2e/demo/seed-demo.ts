@@ -290,6 +290,7 @@ export async function seedDemo(): Promise<void> {
   const clientAId = await ensureUser(DEMO_ACCOUNTS.clientA);
   const clientBId = await ensureUser(DEMO_ACCOUNTS.clientB);
   await ensureUser(DEMO_ACCOUNTS.warehouse);
+  await ensureUser(DEMO_ACCOUNTS.management);
 
   await ensureVehicle(DEMO_VEHICLES.clientA1, "T480", clientAId);
   await ensureVehicle(DEMO_VEHICLES.clientA2, "Master", clientAId);
