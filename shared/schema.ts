@@ -2302,6 +2302,8 @@ export const vehicleDeletionEffects = pgTable("vehicle_deletion_effects", {
   columnName: text("column_name").notNull(),
   previousValue: jsonb("previous_value").notNull(),
   appliedValue: jsonb("applied_value").notNull(),
+  // Horodatage posé sur la ligne par la suppression : la restauration ne la rouvre que s'il n'a pas bougé.
+  appliedStamp: timestamp("applied_stamp"),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [

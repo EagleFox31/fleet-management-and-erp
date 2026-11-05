@@ -36,7 +36,7 @@ const ids = createIdBag();
 const missionIds: number[] = [];
 const driverIds: number[] = [];
 
-let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "technician">>>;
+let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "technician" | "owner" | "stranger">>>;
 const asAdmin = (method: string, path: string) => actors.call(method, path, { actor: "admin" });
 
 async function vehicle() {
@@ -80,7 +80,7 @@ beforeAll(async () => {
   (global as any).broadcastUpdate = vi.fn((eventType: string, data: unknown) => {
     captured.push({ eventType, data });
   });
-  actors = await startContractActors({ admin: "admin", technician: "technician" }, ids.userIds);
+  actors = await startContractActors({ admin: "admin", technician: "technician", owner: "client", stranger: "client" }, ids.userIds);
 }, 180000);
 
 afterAll(async () => {
@@ -246,3 +246,27 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
   });
 });
 
+describe("cloison client : ni retrait ni remise en service, même de son propre véhicule", { timeout: 60000 }, () => {
+  for (const actor of ["owner", "stranger"] as const) {
+    it(`client ${actor === "owner" ? "propriétaire" : "tiers"} : 403 sur DELETE et restore, véhicule intact, aucune trame`, async () => {
+      const own = await createTestVehicle({ ownerId: actors.userIdOf("owner") });
+      ids.vehicleIds.push(own.id);
+      const plan = await addSchedule(own.id, true);
+      captured.length = 0;
+
+      expect((await actors.call("DELETE", `/api/vehicles/${own.id}`, { actor })).status).toBe(403);
+      expect((await vehicleRow(own.id))?.deletedAt).toBeNull();
+      expect(await scheduleActive(plan.id)).toBe(true);
+
+      await addDocument(own.id);
+      expect((await asAdmin("DELETE", `/api/vehicles/${own.id}`)).status).toBe(200);
+      captured.length = 0;
+      expect((await actors.call("POST", `/api/vehicles/${own.id}/restore`, { actor })).status).toBe(403);
+      expect((await vehicleRow(own.id))?.deletedAt).not.toBeNull();
+      expect(await scheduleActive(plan.id)).toBe(false);
+      expect(await effectsOf(own.id)).toHaveLength(1);
+
+      expect(captured.filter((c) => c.eventType === "vehicle_deleted" || c.eventType === "vehicle_restored")).toHaveLength(0);
+    });
+  }
+});

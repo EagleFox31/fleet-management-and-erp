@@ -1640,6 +1640,7 @@ export async function initializeDatabase() {
   created_at timestamp NOT NULL DEFAULT now(),
   CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
 );`);
+    await db.execute(sql`ALTER TABLE vehicle_deletion_effects ADD COLUMN IF NOT EXISTS applied_stamp timestamp`);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
