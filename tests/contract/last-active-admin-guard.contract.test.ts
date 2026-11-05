@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type Server } from "http";
 import { eq, inArray, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { PoolClient } from "@neondatabase/serverless";
 import { db, pool } from "../../server/db";
 import { listActiveAdminIds } from "../../server/lib/last-admin";
@@ -147,14 +147,12 @@ describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement e
   // désactivés : la base de test locale se répare par `UPDATE users SET deleted_at = NULL WHERE role = 'admin'`.
   afterAll(async () => {
     try {
-      if (lockHolder) await lockHolder.query("SELECT pg_advisory_unlock_all()").catch(() => undefined);
+      // D'abord la base : les admins préexistants reviennent quoi qu'il arrive.
+      if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
     } finally {
-      try {
-        lockHolder?.release(true);
-      } finally {
-        // Toujours rétablir les admins préexistants, quel que soit l'échec d'un test ou du déverrouillage.
-        if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
-      }
+      // Connexion détruite sans requête préalable : Postgres lâche le verrou de session à sa fermeture.
+      lockHolder?.release(true);
+      lockHolder = undefined;
     }
   });
 
@@ -163,15 +161,27 @@ describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement e
   const LOCK = "SELECT pg_advisory_lock(hashtext('fleetmaster_last_admin'))";
   const UNLOCK = "SELECT pg_advisory_unlock(hashtext('fleetmaster_last_admin'))";
   async function takeLock() {
+    // Un détenteur oublié (test précédent interrompu) est détruit avant d'en prendre un nouveau.
+    lockHolder?.release(true);
     lockHolder = await pool.connect();
     await lockHolder.query(LOCK);
   }
   async function dropLock() {
-    if (!lockHolder) return;
-    await lockHolder.query(UNLOCK);
-    lockHolder.release();
+    const holder = lockHolder;
+    if (!holder) return;
     lockHolder = undefined;
+    try {
+      await holder.query(UNLOCK);
+      holder.release();
+    } catch (error) {
+      holder.release(true);
+      throw error;
+    }
   }
+  // Verrou rendu après chaque test, même si une assertion a échoué entre la prise et la libération.
+  afterEach(async () => {
+    await dropLock().catch(() => undefined);
+  });
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function onlyTheseAreActiveAdmins(a: number, b: number) {
