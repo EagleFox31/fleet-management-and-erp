@@ -28,3 +28,21 @@
   - `route-id-strict-lot3` : 8 cas. Ancien code 6 rouges ; les id valides inconnus gardent leur 404. Correctif 8 verts.
   - `route-id-strict-suppliers` : 8 cas, dont la non-désactivation. Code du lot 1 : 8 rouges. Correctif : 8 verts.
   - 15 contrats existants sur chauffeurs et fournisseurs : 467 verts.
+
+## 2026-11-05 04:16 — lot 4 de #360 : parseurs locaux lâches, chauffeur absent en 404
+
+- Correctif du lot 3 : « Code du lot 1 : 8 rouges » est faux pour `route-id-strict-suppliers`. Sur la tête de #366, il y a 2 rouges (rating et calculate-ratings) ; les 8 rouges ne valent que pour le code d'avant le lot 1.
+- Quoi :
+  - `parseDriverId` (supprimé), `parseClientId`, `parseAlertId`, `parseCenterId`, et `idParam` (`server/lib/route-helpers.ts`, 19 appels) délèguent à `parseRouteId`. `parseIdParam` (commandes fournisseur), déjà strict, délègue aussi pour n'avoir qu'une lecture. `parseCenterId` garde son 404 « Centre agréé introuvable. » : c'est le contrat existant.
+  - Le service CPC lève `AppError(404, "Chauffeur introuvable")` au lieu d'une `Error`. Cela couvre GET `/api/drivers/:id`, `cpc-status` et `update-cpc` sur un id valide mais absent, qui répondaient 500.
+  - Les catch des 5 routes chauffeur laissent passer une `AppError`.
+- Comment : le cliquet `route-id-parse-hygiene` lit maintenant l'AST. Il compte chaque appel `f(req.params…)` quand `f` est un parseur local, ou importé par chemin relatif, qui fait `parseInt` ou `Number(…)` sans déléguer à `parseRouteId`. Les prédicats (`value is string`, `: boolean`) sont exclus, par exemple `isVehicleIdSegment`.
+  - FROZEN : la liste provisoire comptait alerts, clients et document-renewal-centers (lus par le compteur AST) ; ils n'y entrent pas. Ils n'ont jamais figuré dans le FROZEN fusionné.
+  - fault-catalog et fuel-records n'y entrent pas : `idParam` est corrigé à la source.
+  - parts-catalog reste à 3.
+- Pourquoi : `parseDriverId` lisait `"1abc"` comme 1 et contournait le cliquet textuel, qui ne voyait que `parseInt(req.params`. La route `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`.
+- Tester :
+  - mutation : avec l'ancien `idParam`, le cliquet passe au rouge (fault-catalog 6, fuel-records 1, parts-catalog 15) ; avec l'ancien `parseDriverId`, il passe aussi au rouge (drivers-management 5).
+  - `route-id-strict-lot4` : 18 cas. Ancien code : 16 rouges ; restent verts le 404 du centre agréé (non-régression) et create-user (corrigé au lot 3). Correctif : 18 verts.
+  - tsc : 0 erreur. Unitaires : 2438 verts. 32 contrats touchés : 445 verts.
+- Hors périmètre : le filet contre les id au-delà de l'int4 (middleware `/api`) est confié à la session de.

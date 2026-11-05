@@ -2990,6 +2990,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` lit l'AST de `server/` (#363 ; la première version, textuelle, ne voyait que `return next()` et laissait passer `next(); return;`) : tout `.param` doit appeler un parseur strict `parseX(value)` (pas `parseInt` / `parseFloat`, un `throw` dans le corps s'il est local) avant tout passage (`next()`, `next("route")`, `next(null)` et autres valeurs fausses) ; un nom ou un callback non littéral est refusé comme illisible.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
 
+## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
+
+- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 19 appels).
+- **Cause racine** : le garde-fou cherchait une forme textuelle de l'appel, pas le comportement. Une fonction intermédiaire suffisait à le rendre aveugle.
+- **Classification** : garde-fou incomplet, faux négatif structurel ; sécurité et intégrité (mauvais objet visé).
+- **Résolution** : tous ces parseurs délèguent à `parseRouteId`. Le service CPC répond 404 au lieu de 500 pour un chauffeur absent.
+- **Prévention vérifiable** : le cliquet lit l'AST. Il compte chaque appel `f(req.params…)` vers une fonction locale, ou importée par chemin relatif, qui convertit (`parseInt`, `Number`) sans appeler `parseRouteId`. Il est rouge par mutation : avec l'ancien `parseDriverId`, drivers-management passe à 5 ; avec l'ancien `idParam`, fault-catalog passe à 6. Le contrat `tests/contract/route-id-strict-lot4.contract.test.ts` couvre ces routes.
+- **Leçon généralisée** : un cliquet qui interdit une construction doit suivre les fonctions qui l'enveloppent, sinon il ne mesure que le style. Avant de déclarer un fichier propre, prouver par mutation qu'une variante enveloppée le rend rouge.
 ## 2026-11-05 — Toast à message fixe qui masque la raison serveur
 
 - **Contexte** : le refus de lancement d'une mission disait pourquoi (budget, conflit), mais le toast du chauffeur affichait un texte fixe, et le message serveur de plus de 300 caractères était remplacé par un libellé générique.
