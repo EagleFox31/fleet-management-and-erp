@@ -114,12 +114,16 @@ export async function listMissionDestinations(): Promise<MissionDestination[]> {
   return rows.map((r) => ({ id: r.id, code: r.code, label: r.label, fuelLiters: Number(r.fuelLiters), fdrAmount: Number(r.fdrAmount) }));
 }
 
-/** Liste fermée : une destination inconnue ou retirée du barème est refusée (400). */
-async function activeDestination(id: number) {
-  const [row] = await db
+/**
+ * Liste fermée : une destination inconnue ou retirée du barème est refusée (400). Lue dans la
+ * transaction de la saisie, FOR SHARE : un retrait concurrent attend la fin de la saisie.
+ */
+async function activeDestination(ex: Executor, id: number) {
+  const [row] = await ex
     .select()
     .from(missionDestinations)
-    .where(and(eq(missionDestinations.id, id), eq(missionDestinations.active, true)));
+    .where(and(eq(missionDestinations.id, id), eq(missionDestinations.active, true)))
+    .for("share");
   if (!row) throw new AppError(400, "Destination inconnue ou retirée du barème.");
   return row;
 }
@@ -147,7 +151,7 @@ export async function createMissionBudget(userId: number, input: CreateMissionBu
     const row = await db.transaction(async (tx) => {
       await lockOpenMission(tx, input.missionId);
       // Barème : complète litres et FDR absents du corps ; une valeur fournie l'emporte.
-      const destination = input.destinationId != null ? await activeDestination(input.destinationId) : null;
+      const destination = input.destinationId != null ? await activeDestination(tx, input.destinationId) : null;
       const fuelLiters = input.fuelLiters ?? (destination ? Number(destination.fuelLiters) : undefined);
       const fdrAmount = input.fdrAmount ?? (destination ? Number(destination.fdrAmount) : undefined);
       // Garanti par le contrat (litres et FDR requis sans destination) : garde de type seulement.
@@ -188,7 +192,7 @@ export async function updateMissionBudget(id: number, userId: number, input: Upd
     await lockOpenMission(tx, target.missionId);
     const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
     if (current.status !== "requested") throw new AppError(409, "Ce budget n'est plus modifiable : il a déjà été approuvé.");
-    if (input.destinationId != null) await activeDestination(input.destinationId);
+    if (input.destinationId != null) await activeDestination(tx, input.destinationId);
     const merged = {
       budgetDate: input.budgetDate ?? current.budgetDate,
       fuelLiters: input.fuelLiters ?? Number(current.fuelLiters),

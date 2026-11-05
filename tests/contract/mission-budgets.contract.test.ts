@@ -110,8 +110,9 @@ beforeAll(async () => {
   const rows = await db
     .insert(missionDestinations)
     .values([
-      { code: `${TEST_PREFIX}mb-dest-${Date.now()}`, label: `${TEST_PREFIX} Destination`, fuelLiters: "450", fdrAmount: "100000" },
-      { code: `${TEST_PREFIX}mb-retired-${Date.now()}`, label: `${TEST_PREFIX} Retirée`, fuelLiters: "1", fdrAmount: "1", active: false },
+      // createdBy de test : un run interrompu avant afterAll est rattrapé par le ménage des comptes de test.
+      { code: `${TEST_PREFIX}mb-dest-${Date.now()}`, label: `${TEST_PREFIX} Destination`, fuelLiters: "450", fdrAmount: "100000", createdBy: userIds.get("admin")! },
+      { code: `${TEST_PREFIX}mb-retired-${Date.now()}`, label: `${TEST_PREFIX} Retirée`, fuelLiters: "1", fdrAmount: "1", active: false, createdBy: userIds.get("admin")! },
     ])
     .returning({ id: missionDestinations.id });
   destinationIds.push(...rows.map((r) => r.id));
