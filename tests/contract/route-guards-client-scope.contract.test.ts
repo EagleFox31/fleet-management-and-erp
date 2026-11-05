@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { alerts, maintenanceSchedules } from "../../shared/schema";
+import { alerts, maintenanceSchedules, vehicleAcquisitionWorkflows } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -26,6 +26,8 @@ const ids = createIdBag();
 const cookies = new Map<Actor, string>();
 const userIds = new Map<Actor, number>();
 const scheduleIds: number[] = [];
+const workflowIds: number[] = [];
+const workflowSession = (key: string) => `TEST-wf-liste-${key}-${process.pid}`;
 const vehicleOf = {} as Record<"A" | "B", number>;
 
 async function get(path: string, actor?: Actor) {
@@ -70,11 +72,14 @@ beforeAll(async () => {
       .values({ vehicleId: vehicle.id, title: `TEST vidange ${key}`, frequency: "monthly", frequencyValue: 1 })
       .returning();
     scheduleIds.push(schedule.id);
+    const [workflow] = await db.insert(vehicleAcquisitionWorkflows).values({ userId: ownerId, sessionId: workflowSession(key), workflowData: {} }).returning();
+    workflowIds.push(workflow.id);
     await db.insert(alerts).values({ userId: ownerId, title: `TEST alerte ${key}`, message: "TEST", type: "maintenance" });
   }
 }, 60000);
 
 afterAll(async () => {
+  if (workflowIds.length > 0) await db.delete(vehicleAcquisitionWorkflows).where(inArray(vehicleAcquisitionWorkflows.id, workflowIds));
   // Planifications avant les véhicules (clé étrangère) ; les alertes partent avec les utilisateurs.
   if (scheduleIds.length > 0) {
     await db.delete(maintenanceSchedules).where(inArray(maintenanceSchedules.id, scheduleIds));
@@ -157,10 +162,15 @@ describe("listes ouvertes à un client : jamais la liste d'un autre", () => {
     });
   }
 
-  it("GET /api/workflows/active et /stats : calculés sur la session, jamais sur un autre utilisateur", async () => {
-    const active = await get("/api/workflows/active", "clientA");
-    expect(active.status).toBe(200);
-    expect(JSON.stringify(active.body)).not.toContain("clientB");
-    expect((await get("/api/workflows/stats", "clientA")).status).toBe(200);
+  it("GET /api/workflows/active et /stats : la session de A, jamais celle de B", async () => {
+    for (const [mine, other] of [["A", "B"], ["B", "A"]] as const) {
+      const active = await get("/api/workflows/active", `client${mine}`);
+      expect(active.status).toBe(200);
+      expect(active.body.map((w: { sessionId: string }) => w.sessionId)).toEqual([workflowSession(mine)]);
+      expect(JSON.stringify(active.body)).not.toContain(workflowSession(other));
+      const stats = await get("/api/workflows/stats", `client${mine}`);
+      expect(stats.status).toBe(200);
+      expect(stats.body.total).toBe(1);
+    }
   });
 });
