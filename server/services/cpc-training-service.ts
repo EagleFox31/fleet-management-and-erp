@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { drivers, type Driver } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
+import { CPC_VALIDITY_DAYS } from "@shared/constants/driver-cpc-eligibility";
 
 /**
  * Service CPC & Formations
@@ -32,7 +33,7 @@ export class CPCTrainingService {
     
     // Date d'expiration = date formation + 731 jours
     const expiryDate = new Date(trainingDate);
-    expiryDate.setDate(expiryDate.getDate() + 731);
+    expiryDate.setDate(expiryDate.getDate() + CPC_VALIDITY_DAYS);
     
     // Date d'alerte = aujourd'hui + 59 jours
     const alertDate = new Date(now);
@@ -52,7 +53,7 @@ export class CPCTrainingService {
     
     return allDrivers.map(driver => {
       const expiryDate = driver.cpcTrainingDate ? 
-        new Date(new Date(driver.cpcTrainingDate).getTime() + 731 * 24 * 60 * 60 * 1000) : null;
+        new Date(new Date(driver.cpcTrainingDate).getTime() + CPC_VALIDITY_DAYS * 24 * 60 * 60 * 1000) : null;
       
       const daysRemaining = expiryDate ? 
         Math.floor((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
@@ -71,6 +72,8 @@ export class CPCTrainingService {
         hireDate: driver.hireDate,
         geoTrainingDate: driver.geoTrainingDate,
         cpcStatus: this.calculateCPCStatus(driver.cpcTrainingDate),
+        // Statut enregistré en base : c'est lui que la garde d'affectation d'une mission lit.
+        cpcStatusRecorded: driver.cpcStatus ?? null,
         cpcTrainingDate: driver.cpcTrainingDate,
         cpcStatusUpdatedAt: driver.cpcStatusUpdatedAt,
         expiryDate: expiryDate ? expiryDate.toISOString() : null,
@@ -158,7 +161,7 @@ export class CPCTrainingService {
     }
     
     const expiryDate = driver.cpcTrainingDate ? 
-      new Date(new Date(driver.cpcTrainingDate).getTime() + 731 * 24 * 60 * 60 * 1000) : null;
+      new Date(new Date(driver.cpcTrainingDate).getTime() + CPC_VALIDITY_DAYS * 24 * 60 * 60 * 1000) : null;
     
     const daysRemaining = expiryDate ? 
       Math.floor((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
