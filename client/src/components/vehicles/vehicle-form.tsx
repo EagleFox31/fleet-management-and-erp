@@ -400,7 +400,7 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
                           <p className="mb-1">État actuel de disponibilité du véhicule.</p>
                           <ul className="space-y-1">
                             <li><span className="font-semibold text-success">Opérationnel</span> - Disponible pour utilisation immédiate</li>
-                            <li><span className="font-semibold text-warning">En maintenance</span> - En réparation ou révision programmée</li>
+                            <li><span className="font-semibold text-warning-text">En maintenance</span> - En réparation ou révision programmée</li>
                             <li><span className="font-semibold text-destructive">Hors service</span> - Indisponible pour utilisation (panne, accident)</li>
                           </ul>
                           <div className="absolute w-2 h-2 bg-popover rotate-45 left-1/2 bottom-0 transform translate-y-1/2 -translate-x-1/2 border-r border-b"></div>

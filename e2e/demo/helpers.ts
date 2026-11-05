@@ -15,11 +15,29 @@ export async function loginThroughForm(page: Page, username: string, password: s
   await beat(page, 500);
   await page.getByTestId("input-password").fill(password);
   await beat(page, 500);
-  const [response] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/api/auth/login") && r.request().method() === "POST"),
-    page.getByTestId("button-submit-login").click(),
-  ]);
-  expect(response.ok(), `connexion ${username}`).toBeTruthy();
+  // Au premier chargement après le démarrage du serveur, un clic peut précéder l'attache du
+  // gestionnaire du formulaire : sans réponse sous 15 s, on clique à nouveau (3 essais).
+  let response: Awaited<ReturnType<Page["waitForResponse"]>> | undefined;
+  for (let attempt = 1; attempt <= 3 && !response; attempt++) {
+    try {
+      [response] = await Promise.all([
+        page.waitForResponse((r) => r.url().includes("/api/auth/login") && r.request().method() === "POST", { timeout: 15_000 }),
+        page.getByTestId("button-submit-login").click(),
+      ]);
+    } catch (error) {
+      if (attempt === 3) throw error;
+    }
+  }
+  expect(response!.ok(), `connexion ${username}`).toBeTruthy();
   await expect(page).not.toHaveURL(/\/login$/, { timeout: 30_000 });
   await beat(page, 1500);
+}
+
+/** Déconnexion par le menu utilisateur de la barre du haut (visible dans la vidéo). */
+export async function logoutThroughUi(page: Page, displayName: string): Promise<void> {
+  await page.getByRole("button", { name: new RegExp(displayName) }).first().click();
+  await beat(page, 600);
+  await page.getByRole("menuitem", { name: /Déconnexion/ }).click();
+  await expect(page).toHaveURL(/\/(login)?$/, { timeout: 30_000 });
+  await beat(page, 1000);
 }
