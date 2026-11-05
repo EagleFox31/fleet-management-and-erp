@@ -25,6 +25,9 @@ import { sourceFiles, stripComments } from "../../support/route-guard-scan";
  * pas vue, ni un parseur importé par alias (`@/…`) ou d'un paquet, ni un appel membre
  * (`helpers.parseX(req.params.id)`). Un parseur strict qui ne délègue pas à `parseRouteId`
  * compte comme lâche : le faire déléguer. `server/routes.ts`, gelé, n'est pas couvert.
+ * Non vus non plus : un parseur à deux niveaux (`parseWrapped` qui appelle `rawNum`, qui fait
+ * `parseInt`) ; un parseur mixte qui appelle aussi `parseRouteId` (`lax ? parseInt(v) : parseRouteId(v)`) ;
+ * une conversion dans une fonction déclarée prédicat (`: v is string`, `: boolean`) puis transtypée (`as any`).
  */
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "../../..");

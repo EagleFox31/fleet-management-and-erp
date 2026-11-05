@@ -89,11 +89,11 @@ describe("ids de route (lot 4) : parseurs locaux stricts, chauffeur absent en 40
     expect(body.message).toBe(message);
   });
 
-  it("DELETE /api/drivers/<id>abc ne supprime pas le chauffeur <id>", async () => {
+  it("DELETE /api/drivers/<id>abc ne désactive pas le chauffeur <id>", async () => {
     const driver = await newDriver();
     expect((await send("DELETE", `/api/drivers/${driver.id}abc`)).status).toBe(400);
-    const rows = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.id, driver.id));
-    expect(rows).toHaveLength(1);
+    const [row] = await db.select({ isActive: drivers.isActive }).from(drivers).where(eq(drivers.id, driver.id));
+    expect(row.isActive).toBe(true);
   });
 
   it("POST /api/drivers/<id>abc/create-user ne crée pas de compte au chauffeur <id>", async () => {
