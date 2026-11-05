@@ -566,7 +566,7 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
 
   it("L1d — mission annulée après décaissement : le reliquat revient au compte source, une fois", async () => {
     const { missionId, approved } = await approvedBudget();
-    const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank });
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank });
     expect(res.status).toBe(200);
     const cancelled = await cancelMission(missionId);
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
@@ -590,22 +590,26 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     expect(await entriesOf(approved.id)).toHaveLength(4);
   });
 
-  it("L1d — annulation avant décaissement, ou décaissement sans compte : aucun mouvement", async () => {
+  it("L1d — annulation avant décaissement, ou budget décaissé avant L1c (sans écriture) : aucun mouvement", async () => {
     const before = await approvedBudget();
     expect((await cancelMission(before.missionId)).status).toBe(200);
     expect(await entriesOf(before.approved.id)).toHaveLength(0);
     const [stillApproved] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, before.approved.id));
     expect(stillApproved.status).toBe("approved");
 
-    const noAccount = await approvedBudget();
-    expect((await call("POST", missionBudgetDisbursePath(noAccount.approved.id), "management", seen(noAccount.approved))).status).toBe(200);
-    expect((await cancelMission(noAccount.missionId)).status).toBe(200);
-    expect(await entriesOf(noAccount.approved.id)).toHaveLength(0);
+    // Rétroactif : un budget décaissé avant L1c n'a aucune ligne au journal, rien à contre-passer.
+    const legacy = await approvedBudget();
+    await db
+      .update(missionBudgets)
+      .set({ status: "disbursed", disbursedBy: userIds.get("admin")!, disbursedAt: new Date() })
+      .where(eq(missionBudgets.id, legacy.approved.id));
+    expect((await cancelMission(legacy.missionId)).status).toBe(200);
+    expect(await entriesOf(legacy.approved.id)).toHaveLength(0);
   });
 
   it("L1d — un autre statut que l'annulation ne contre-passe rien", async () => {
     const { missionId, approved } = await approvedBudget();
-    await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.cash });
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.cash })).status).toBe(200);
     for (const status of ["planned", "in_progress", "delivered", "completed"]) {
       await db.transaction((tx) => onMissionStatusChange(tx, missionId, status, userIds.get("admin")!));
     }

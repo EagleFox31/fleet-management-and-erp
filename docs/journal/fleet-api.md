@@ -656,3 +656,22 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - contrat `mission-budgets` : au décaissement, direction, technicien, chauffeur et client 403 ; secrétariat et logistique 200 ; sans compte (absent ou `null`) 400, budget resté approuvé, journal vide. En lecture, secrétariat 200 (liste, besoin du jour, détail après décaissement) ;
   - tests unitaires : `lock_timeout` présent dans les SQL L1b et L1c ; lecture = saisie ∪ approbation ∪ décaissement ; seul l'administrateur approuve et décaisse ;
   - `tsc` : 0 erreur ; unitaires 2880 ; contrats complets 2531/2531 ; intégration 352/352 ; contrats `mission-budgets`, trésorerie et moyens de paiement 71/71 après l'ajout de la lecture.
+
+## 2026-11-05 — Budget de mission (L1d) : contre-passation à l'annulation de la mission
+
+- **Quoi** : une mission annulée après décaissement rend au compte source le reliquat de chaque ligne décaissée. Une mission annulée avant décaissement ne produit aucun mouvement.
+- **Comment** :
+  - `reverseMissionBudgetDisbursements(tx, budgetIds, userId)` (`treasury-links.ts`) relit les sorties `mission-budget:<id>:fdr` et `:carburant`. Pour chacune, elle écrit une entrée `in` du même compte, de la même catégorie et liée à la même mission, de clé `<clé>:reverse`, via `insertLinked`. Un rejeu n'écrit rien. Elle suit le modèle de `reverseFuelLink` : elle est indépendante du drapeau finance, car une sortie déjà écrite se contre-passe toujours ;
+  - montant = décaissé − justifié. Justifié vaut 0 tant que le lot des justificatifs n'existe pas ; un reliquat nul n'écrit rien ;
+  - `onMissionStatusChange(tx, missionId, nextStatus, userId)` (`mission-budgets-service.ts`) n'agit que sur `cancelled`. Elle vise les budgets `disbursed` de la mission ;
+  - `missions.routes.ts` (gelé) reçoit un seul appel, après l'UPDATE de la mission, dans la transaction de `PUT /api/missions/:id/status`. Aucune logique n'y est ajoutée ;
+  - le budget reste `disbursed`, figé avec sa mission (`lockOpenMission`).
+- **Pourquoi** : décision 0a, faute d'arbitrage de la cliente. L'argent remis pour une mission qui n'a pas lieu revient au compte d'où il est sorti, et le journal le montre.
+- **Rétroactif** : un budget décaissé avant L1c n'a aucune ligne au journal. Son annulation n'écrit rien.
+- **Suites connues** : quand les justificatifs existeront, `justified` lira leur somme ; aucun événement trésorerie dans ce lot, comme L1c.
+- **Preuve** :
+  - contrat `mission-budgets`, 3 cas L1d :
+    - après décaissement par la logistique, 4 lignes : chaque `:reverse` est `in`, de même montant, compte, catégorie et mission ; le rejeu de l'annulation et du service n'ajoute rien ;
+    - avant décaissement, et budget décaissé avant L1c : aucun mouvement ;
+    - les autres statuts ne contre-passent rien ;
+  - `tsc` 0 ; contrats `mission-budgets`, trésorerie, moyens de paiement et missions 76/76.
