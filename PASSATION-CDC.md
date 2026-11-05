@@ -89,3 +89,10 @@
 - #381 (fix/booking-guard-role-first) : main fusionné (b97349eb), attend CI et ready. #386 (fix/last-admin-db-trigger, 4bb6f764) : relue, mineurs à traiter.
 - Ordre fixé par 0a : (A) PR santé de b7, branche fix/health-minimal-public (worktree agent-a5880f2fbf922de2e) : GET /api/health public = statut et version, détail derrière isAdmin, contrats anonyme / staff non admin / admin, texte neutre ; (B) #386 : 40P01 et 40001 vers 409 « Opération en cours, réessayez » dans toHttpError + test unitaire, test unitaire de la branche isLastActiveAdminViolation, test « admin déjà inactif » (ghost), description de PR corrigée (traduction HTTP par route : complément #375), documenter la réparation manuelle si le test RR meurt ; (C) complément #375 après fusion de #379 : traduction sur les 4 routes (PATCH users, DELETE users, admin/users, toggle), storage.updateUser/deleteUser qui avalent l'erreur, un contrat par route, constante de message commune avec #379.
 - c7test (55432/55433) : trigger retiré ; un redémarrage depuis #386 le repose. À arrêter en fin de session.
+
+## 2026-11-05 06:10 — c7 : #386 mineurs traités ; santé livrée
+
+- #388 (fix/health-minimal-public) : PR santé ouverte en brouillon, en relecture et contrôle sécurité chez 0a.
+- #386 : `toHttpError` traduit 40P01 et 40001 en 409 « Opération en cours, réessayez » (limite connue : l'interblocage possible entre la lecture verrouillante et le verrou consultatif ne casse pas l'intégrité, il se réessaie) ; tests unitaires de cette branche et de la violation du dernier administrateur ; cas « admin déjà inactif » ; réparation manuelle documentée en tête du test d'intégration. Description de PR : traduction HTTP par route renvoyée au complément #375.
+- Reste #386 : point 5 (une seule constante de message avec #379) dans le complément #375.
+- Complément #375 (après fusion de #379) : traduction sur PATCH users, DELETE users, DELETE admin/users, toggle ; storage.updateUser/deleteUser avalent l'erreur ; un contrat par route ; message commun avec #379.

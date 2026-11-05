@@ -7,6 +7,10 @@ import { users } from "../../shared/schema";
 import { uniqueTestToken } from "../support/ids";
 
 /**
+ * Réparation manuelle : si le test d'isolation est tué en cours de route, les autres administrateurs de la base de
+ * test peuvent rester désactivés. Les rétablir : UPDATE users SET deleted_at = NULL WHERE role = 'admin' AND
+ * username NOT LIKE 'TEST-%'; (base de test locale uniquement), en posant d'abord SET session_replication_role = replica.
+ *
  * Trigger « au moins un administrateur actif » : refus en base, quel que soit l'appelant.
  * Les administrateurs existants sont écartés (rôle driver, en transaction annulée) pour isoler le cas.
  */
@@ -89,7 +93,14 @@ describe("trigger users_keep_one_active_admin", { timeout: 60_000 }, () => {
       await tx.execute(sql`DELETE FROM users WHERE id = ${other.id}`);
       expect(await refused(() => tx.execute(sql`UPDATE users SET deleted_at = now() WHERE id = ${lone.id}`))).toBe(true);
     });
-    expect(ghost.id).toBeGreaterThan(0);
+    // Admin déjà inactif : le trigger ne compte pas comme une sortie ; il passe même s'il ne reste qu'un seul actif.
+    await withOnlyAdmins([lone.id], async (tx) => {
+      await tx.execute(sql`UPDATE users SET deleted_at = now() WHERE id = ${ghost.id}`);
+      await tx.execute(sql`UPDATE users SET role = 'driver' WHERE id = ${ghost.id}`);
+      await tx.execute(sql`DELETE FROM users WHERE id = ${ghost.id}`);
+      const [row] = (await tx.execute(sql`SELECT count(*)::int AS n FROM users WHERE id = ${ghost.id}`)).rows as any[];
+      expect(row.n).toBe(0);
+    });
   });
 
   it("le SQL est rejouable sans erreur", async () => {
