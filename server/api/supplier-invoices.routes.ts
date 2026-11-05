@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
+import { SETTLEMENT_PROOF_PREFIX, settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
@@ -621,19 +621,16 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
       }
 
       if (!req.user) {
-        return res.status(401).json({ error: "Utilisateur non authentifié" });
+        return next(new AppError(401, "Utilisateur non authentifié"));
       }
 
       const invoiceId = parseInt(req.params.id);
       if (Number.isNaN(invoiceId)) {
-        return res.status(400).json({ error: "ID facture invalide" });
+        return next(new AppError(400, "ID facture invalide"));
       }
 
       if (!req.file) {
-        return res.status(400).json({
-          error: "Justificatif requis",
-          details: "Le justificatif (image/PDF) est obligatoire pour enregistrer un règlement.",
-        });
+        return next(new AppError(400, "Justificatif requis : joignez une image ou un PDF du règlement."));
       }
 
       const readField = (value: unknown): string | undefined => {
@@ -668,7 +665,7 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
         notes: z.string().trim().optional(),
       }).parse(normalizedPayload);
 
-      const proofReference = `/uploads/supplier-invoices/settlements/${req.file.filename}`;
+      const proofReference = `${SETTLEMENT_PROOF_PREFIX}${req.file.filename}`;
 
       const { settlement, invoice, replayed } = await threeWayMatchingService.recordInvoiceSettlement(
         invoiceId,
@@ -725,13 +722,15 @@ router.post("/:id/settlements", checkPaymentPermission, (req: Request, res: Resp
   });
 });
 
+/** Supprime le justificatif reçu, borné au dossier des justificatifs (liens résolus : settlementProofPath). */
 function removeUploadedProof(req: Request) {
-  if (req.file?.path && fs.existsSync(req.file.path)) {
-    try {
-      fs.unlinkSync(req.file.path);
-    } catch (unlinkError) {
-      log.error({ err: unlinkError, requestId: req.requestId }, "suppression du justificatif téléversé impossible");
-    }
+  if (!req.file) return;
+  const proofPath = settlementProofPath(`${SETTLEMENT_PROOF_PREFIX}${req.file.filename}`);
+  if (!proofPath || !fs.existsSync(proofPath)) return;
+  try {
+    fs.unlinkSync(proofPath);
+  } catch (unlinkError) {
+    log.error({ err: unlinkError, requestId: req.requestId }, "suppression du justificatif téléversé impossible");
   }
 }
 

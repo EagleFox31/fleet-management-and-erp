@@ -62,7 +62,12 @@ export const ACCESS_CALLS = new Set([
   "rmdir",
   "rmdirSync",
 ]);
-const BOUND_CALLS = new Set(["uploadedFileCandidates", "existingUploadedFile", "settlementProofPath", "isInsideDirectory"]);
+const BOUND_CALLS: ReadonlySet<string> = new Set(["uploadedFileCandidates", "existingUploadedFile", "settlementProofPath", "isInsideDirectory"]);
+/**
+ * Bornes qui résolvent aussi les liens (`realPathStaysInside`) : `isInsideDirectory` seul est lexical.
+ * Exigées pour une suppression dans `server/api` (`tests/unit/server/upload-delete-hygiene.test.ts`).
+ */
+export const LINK_RESOLVING_BOUND_CALLS: ReadonlySet<string> = new Set(["uploadedFileCandidates", "existingUploadedFile", "settlementProofPath"]);
 
 function calleeName(node: ts.CallExpression): string | null {
   const callee = node.expression;
@@ -71,10 +76,10 @@ function calleeName(node: ts.CallExpression): string | null {
   return ts.isIdentifier(callee) ? callee.text : null;
 }
 
-function boundCallsIn(node: ts.Node): ts.CallExpression[] {
+function boundCallsIn(node: ts.Node, bounds: ReadonlySet<string> = BOUND_CALLS): ts.CallExpression[] {
   const found: ts.CallExpression[] = [];
   const visit = (current: ts.Node) => {
-    if (ts.isCallExpression(current) && BOUND_CALLS.has(calleeName(current) ?? "")) found.push(current);
+    if (ts.isCallExpression(current) && bounds.has(calleeName(current) ?? "")) found.push(current);
     ts.forEachChild(current, visit);
   };
   visit(node);
@@ -189,11 +194,11 @@ function initializersOf(name: string, scope: ts.Node): ts.Expression[] {
  *   - ou déclaré : toutes ses déclarations dans la portée sont des expressions bornées.
  * Un paramètre ou `req` n'a pas de déclaration locale : il n'est borné que gardé directement.
  */
-function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Node): boolean {
+function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Node, bounds: ReadonlySet<string>): boolean {
   if (seen.has(name)) return false;
   seen.add(name);
   // Seul isInsideDirectory est une garde : uploadedFileCandidates(p) borne son résultat, pas p.
-  const guarded = boundCallsIn(scope).some((call) => {
+  const guarded = boundCallsIn(scope, bounds).some((call) => {
     if (calleeName(call) !== "isInsideDirectory" || !call.arguments[1] || !isUploadsRoot(call.arguments[0])) return false;
     const candidate = unwrap(call.arguments[1]);
     return (
@@ -205,7 +210,7 @@ function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Nod
   });
   if (guarded) return true;
   const initializers = initializersOf(name, scope);
-  return initializers.length > 0 && initializers.every((init) => isBoundExpression(init, scope, seen, init));
+  return initializers.length > 0 && initializers.every((init) => isBoundExpression(init, scope, seen, init, bounds));
 }
 
 /**
@@ -215,27 +220,27 @@ function isBoundName(name: string, scope: ts.Node, seen: Set<string>, at: ts.Nod
  *   - identifiant borné (`isBoundName`) ;
  *   - `a ?? b`, `a || b`, `c ? a : b` : **chaque** branche bornée (`candidates[0] ?? p` ne l'est pas).
  */
-function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string>, at: ts.Node): boolean {
+function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string>, at: ts.Node, bounds: ReadonlySet<string>): boolean {
   const expr = unwrap(node);
   if (ts.isCallExpression(expr)) {
-    if (BOUND_CALLS.has(calleeName(expr) ?? "")) return true;
+    if (bounds.has(calleeName(expr) ?? "")) return true;
     return (
       ts.isPropertyAccessExpression(expr.expression) &&
       BOUND_PRESERVING_METHODS.has(expr.expression.name.text) &&
-      isBoundExpression(expr.expression.expression, scope, seen, at)
+      isBoundExpression(expr.expression.expression, scope, seen, at, bounds)
     );
   }
-  if (ts.isElementAccessExpression(expr)) return isBoundExpression(expr.expression, scope, seen, at);
-  if (ts.isIdentifier(expr)) return isBoundName(expr.text, scope, seen, at);
+  if (ts.isElementAccessExpression(expr)) return isBoundExpression(expr.expression, scope, seen, at, bounds);
+  if (ts.isIdentifier(expr)) return isBoundName(expr.text, scope, seen, at, bounds);
   if (ts.isBinaryExpression(expr)) {
     const kind = expr.operatorToken.kind;
     if (kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken) {
-      return isBoundExpression(expr.left, scope, new Set(seen), at) && isBoundExpression(expr.right, scope, new Set(seen), at);
+      return isBoundExpression(expr.left, scope, new Set(seen), at, bounds) && isBoundExpression(expr.right, scope, new Set(seen), at, bounds);
     }
     return false;
   }
   if (ts.isConditionalExpression(expr)) {
-    return isBoundExpression(expr.whenTrue, scope, new Set(seen), at) && isBoundExpression(expr.whenFalse, scope, new Set(seen), at);
+    return isBoundExpression(expr.whenTrue, scope, new Set(seen), at, bounds) && isBoundExpression(expr.whenFalse, scope, new Set(seen), at, bounds);
   }
   return false;
 }
@@ -243,11 +248,11 @@ function isBoundExpression(node: ts.Expression, scope: ts.Node, seen: Set<string
 /** Appels qui écrivent à une destination : la destination doit être bornée elle aussi. */
 const TWO_PATH_CALLS = new Set(["copyFile", "copyFileSync", "cp", "cpSync", "rename", "renameSync"]);
 
-function isBoundAccess(node: ts.CallExpression, call: string, scope: ts.Node): boolean {
+function isBoundAccess(node: ts.CallExpression, call: string, scope: ts.Node, bounds: ReadonlySet<string>): boolean {
   const [source, destination] = node.arguments;
-  if (!source || !isBoundExpression(source, scope, new Set(), node)) return false;
+  if (!source || !isBoundExpression(source, scope, new Set(), node, bounds)) return false;
   if (!TWO_PATH_CALLS.has(call)) return true;
-  return !!destination && isBoundExpression(destination, scope, new Set(), node);
+  return !!destination && isBoundExpression(destination, scope, new Set(), node, bounds);
 }
 
 /**
@@ -308,7 +313,8 @@ export function renamedAccessImports(file: string, text: string): string[] {
   return renamed;
 }
 
-export function scanFileAccesses(file: string, text: string): FileAccessSite[] {
+/** `bounds` : bornes acceptées (toutes par défaut ; `LINK_RESOLVING_BOUND_CALLS` pour exiger la résolution des liens). */
+export function scanFileAccesses(file: string, text: string, bounds: ReadonlySet<string> = BOUND_CALLS): FileAccessSite[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const sites: FileAccessSite[] = [];
   const visit = (node: ts.Node) => {
@@ -321,7 +327,7 @@ export function scanFileAccesses(file: string, text: string): FileAccessSite[] {
           scope: scope?.name ?? "<module>",
           call,
           line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          bounded: isBoundAccess(node, call, scope?.node ?? source),
+          bounded: isBoundAccess(node, call, scope?.node ?? source, bounds),
         });
       }
     }
