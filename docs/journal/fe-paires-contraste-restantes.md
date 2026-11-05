@@ -15,3 +15,6 @@ Option A : `--primary` a `142 69% 31%` : blanc dessus 4,66 ; texte primary sur /
 
 ## Précision
 Le remplacement `bg-secondary/10 text-secondary` par `bg-muted text-muted-foreground` (badge.tsx variante `neutral`, alerts-panel.tsx) n'a aucun effet visible aujourd'hui : la variante n'a pas de consommateur et alerts-panel n'est importé nulle part. Correction préventive.
+
+## Mise à jour (option A appliquée)
+Le corps ci-dessus date de la première passe (sans accents, « 4 paires gelées », « décision en attente ») et est périmé : la décision est prise (option A), la liste gelée est vide et le garde-fou lit désormais `cn(`, `cva(`, `className`, `classNames={{ }}` et les branches de ternaire. Voir `fe-primary-31-primary-text.md`.

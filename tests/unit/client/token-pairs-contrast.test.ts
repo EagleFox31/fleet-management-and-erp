@@ -18,9 +18,9 @@ const GELES = new Set<string>();
 // Blocs de classes : tout `cn(...)`, `className={...}` ou `className="..."`, groupes par equilibrage des parentheses/accolades,
 // donc une paire etalee sur plusieurs lignes d'un meme bloc est vue. Limite : deux classes posees dans deux blocs distincts
 // (ex. parent et enfant) ne sont pas comparees.
-function blocks(src: string): { text: string; line: number }[] {
-  const out: { text: string; line: number }[] = [];
-  const starts = /cn\(|className=\{|className=(?=["'`])/g;
+function blocks(src: string): { text: string; line: number; alt?: boolean }[] {
+  const out: { text: string; line: number; alt?: boolean }[] = [];
+  const starts = /cn\(|cva\(|classNames?=\{|className=(?=["'`])/g;
   for (const m of src.matchAll(starts)) {
     const i = m.index! + m[0].length;
     let end = i;
@@ -36,7 +36,7 @@ function blocks(src: string): { text: string; line: number }[] {
       const q = src[i];
       end = src.indexOf(q, i + 1) + 1;
     }
-    out.push({ text: src.slice(i, end), line: src.slice(0, m.index).split("\n").length });
+    out.push({ alt: /^(cva|classNames)/.test(m[0]), text: src.slice(i, end), line: src.slice(0, m.index).split("\n").length });
   }
   return out;
 }
@@ -48,10 +48,18 @@ describe("paires texte/fond par jeton, dans un meme bloc de classes", () => {
     const bad = new Map<string, string[]>();
     for (const f of walk(resolve(root, "client/src"))) {
       const rel = relative(root, f).split(sep).join("/");
-      const segs = blocks(readFileSync(f, "utf8")).flatMap((b) =>
-        // branches d'un ternaire (` ? ... : ...`) : jamais appliquees ensemble
-        b.text.split(/\s\?\s|\s:\s/).map((text) => ({ text, line: b.line })),
-      );
+      // branches d'un ternaire (` ? ... : ...`) : la base (premiere partie) est comparee a chaque branche, jamais les branches entre elles
+      const segs = blocks(readFileSync(f, "utf8")).flatMap((b) => {
+        if (b.alt) {
+          // cva( / classNames={{ }} : chaque litteral est une variante, la premiere de cva( est la base commune
+          const lits = [...b.text.matchAll(/(["'`])((?:(?!\1)[^\\])*?)\1/g)].map((m) => m[2]);
+          const base = /^\s*["'`]/.test(b.text) ? (lits[0] ?? "") : "";
+          return lits.map((l) => ({ text: base + " " + l, line: b.line }));
+        }
+        const parts = b.text.split(/\s\?\s|\s:\s/);
+        if (parts.length === 1) return [{ text: b.text, line: b.line }];
+        return parts.slice(1).map((br) => ({ text: parts[0] + " " + br, line: b.line }));
+      });
       for (const blk of segs) {
         const t: [string, number][] = [];
         const bg: [string, number][] = [];
@@ -69,10 +77,16 @@ describe("paires texte/fond par jeton, dans un meme bloc de classes", () => {
           if (GELES.has(where)) continue;
           const key = `${tn}${ta < 1 ? "/" + Math.round(ta * 100) : ""} sur ${bn}${ba < 1 ? "/" + Math.round(ba * 100) : ""}`;
           (bad.get(key) ?? bad.set(key, []).get(key)!).push(where);
+          // doublons (meme bloc, plusieurs branches) : dedupliques ci-dessous
         }
       }
     }
-    expect(Object.fromEntries(bad)).toEqual({});
+    expect(Object.fromEntries([...bad].map(([k, v]) => [k, [...new Set(v)]]))).toEqual({});
+  });
+
+  it("le detecteur voit cva(, classNames={{ }} et les branches d'un ternaire", () => {
+    expect(blocks('const v = cva("base", { variants: { a: "bg-secondary/10 text-secondary" } })').some((b) => /bg-secondary/.test(b.text))).toBe(true);
+    expect(blocks('<X classNames={{ day: "bg-primary text-muted-foreground" }} />').some((b) => /bg-primary/.test(b.text))).toBe(true);
   });
 
   it("le detecteur voit une paire etalee sur plusieurs lignes", () => {
