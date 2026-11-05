@@ -1,6 +1,7 @@
-import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { assignments, missions } from "@shared/schema";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { AppError } from "../lib/app-error";
 import type { db } from "../db";
 
 /**
@@ -88,4 +89,37 @@ export async function lockPlanningPairs(tx: Executor, pairs: Array<{ vehicleId: 
 
 export function lockPlanningResources(tx: Executor, vehicleId: number, driverId: number): Promise<void> {
   return lockPlanningPairs(tx, [{ vehicleId, driverId }]);
+}
+
+/** Message commun quand l'état lu avant la transaction n'est plus celui de la base sous verrou. */
+export const PLANNING_STALE_MESSAGE = "La mission vient d'être modifiée par un autre utilisateur : rechargez la page et recommencez.";
+
+type PlanningStateRow = { id: number; status: string; vehicleId: number | null; driverId: number | null };
+
+/** Empreinte du créneau et des affectations retenues : sert à détecter une lecture périmée. */
+export function planningStateKey(state: { pickupDate: DateLike; deliveryDate: DateLike; rows: PlanningStateRow[] }): string {
+  const t = (d: DateLike) => (d ? new Date(d).getTime() : null);
+  const rows = [...state.rows].sort((a, b) => a.id - b.id).map((r) => `${r.id}:${r.status}:${r.vehicleId}:${r.driverId}`);
+  return JSON.stringify([t(state.pickupDate), t(state.deliveryDate), rows]);
+}
+
+/**
+ * À appeler dans la transaction, APRÈS le verrou de la ligne mission : relit le créneau et les
+ * affectations retenues par `keep` et lève un 409 lisible si leur empreinte diffère de celle lue avant
+ * la transaction (un PATCH ou un ajout concurrent est passé entre-temps).
+ */
+export async function assertPlanningStateUnchanged(
+  tx: Executor,
+  missionId: number,
+  keep: (status: string) => boolean,
+  expectedKey: string,
+): Promise<void> {
+  const [mission] = await tx.select({ pickupDate: missions.pickupDate, deliveryDate: missions.deliveryDate }).from(missions).where(eq(missions.id, missionId));
+  const rows = await tx
+    .select({ id: assignments.id, status: assignments.status, vehicleId: assignments.vehicleId, driverId: assignments.driverId })
+    .from(assignments)
+    .where(eq(assignments.missionId, missionId))
+    .orderBy(asc(assignments.id));
+  const key = planningStateKey({ pickupDate: mission?.pickupDate, deliveryDate: mission?.deliveryDate, rows: rows.filter((r) => keep(r.status)) });
+  if (key !== expectedKey) throw new AppError(409, PLANNING_STALE_MESSAGE);
 }

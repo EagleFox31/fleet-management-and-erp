@@ -21,7 +21,7 @@ import {
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { assertValidDbId } from "../lib/work-order-scope";
-import { findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage } from "../services/mission-planning";
+import { assertPlanningStateUnchanged, findPlanningClash, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
@@ -2025,7 +2025,7 @@ const createMissionSchema = insertMissionSchema
   .extend({ status: z.enum(["draft", "planned"]).optional() });
 
 // POST /api/missions - Créer une nouvelle mission
-router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
+router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     // Le routeur est monté derrière authenticate: la session porte toujours
     // l'auteur réel. Plus de repli sur l'utilisateur 1, qui attribuait la
@@ -2193,7 +2193,8 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res) => {
 
     return res.status(201).json(newMission);
   } catch (error) {
-    if (error instanceof AppError && error.status === 409) return res.status(409).json({ message: error.message });
+    // Conflit de planning : AppError traité par le gestionnaire central (code et requestId).
+    if (error instanceof AppError && error.status === 409) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Create mission error");
     return res.status(500).json({ message: "Erreur lors de la création de la mission" });
   }
@@ -2586,11 +2587,16 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
       }
     }
 
+    // Empreinte de ce qui a été lu avant la transaction (créneau et affectations vivantes).
+    const readKey = planningStateKey({ pickupDate: existingMission.pickupDate, deliveryDate: existingMission.deliveryDate, rows: liveAssignments });
     const updatedMission = await db.transaction(async (tx) => {
-      if (planningTargets.length > 0) {
+      if (planningTargets.length > 0 || assignmentProvided) {
         // Même ordre que POST /:id/assignments : ligne mission d'abord, verrous consultatifs ensuite
         // (l'ordre inverse interbloquerait un PATCH et un ajout d'affectation sur la même mission).
         await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+        // Les décisions ci-dessus reposent sur une lecture antérieure : périmée, on refuse plutôt que de
+        // contrôler l'ancienne paire.
+        await assertPlanningStateUnchanged(tx, missionId, (s) => !isVoidAssignmentStatus(s), readKey);
         await lockPlanningPairs(tx, planningTargets);
       }
       for (const target of planningTargets) {
@@ -3086,7 +3092,34 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     }
 
     const needsExecutionDate = targetStatus === "in_progress" || targetStatus === "delivered" || targetStatus === "completed";
+    // Devenir « planned » ou « assigned » rend la mission active : ses affectations ne doivent pas
+    // chevaucher une autre mission active (même règle et même verrou que la création, le PATCH et l'ajout).
+    const claimsSlot = targetStatus === "planned" || targetStatus === "assigned";
+    const readKey = planningStateKey({
+      pickupDate: mission.pickupDate,
+      deliveryDate: mission.deliveryDate,
+      rows: missionAssignmentRows.filter((r) => isActiveAssignmentStatus(r.status)),
+    });
     const updatedMission = await db.transaction(async (tx) => {
+      if (claimsSlot) {
+        // Ligne mission d'abord, verrous consultatifs ensuite : même ordre que POST /:id/assignments et PATCH.
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+        // Affectations et créneau lus avant la transaction : refus si un PATCH concurrent est passé entre-temps.
+        await assertPlanningStateUnchanged(tx, missionId, isActiveAssignmentStatus, readKey);
+        const pairs = targetAssignments.flatMap((row) => (row.vehicleId && row.driverId ? [{ vehicleId: row.vehicleId, driverId: row.driverId }] : []));
+        await lockPlanningPairs(tx, pairs);
+        for (const row of targetAssignments) {
+          if (!row.vehicleId || !row.driverId) continue;
+          const clash = await findPlanningClash(tx, {
+            missionId,
+            pickupDate: mission.pickupDate,
+            deliveryDate: mission.deliveryDate,
+            vehicleId: row.vehicleId,
+            driverId: row.driverId,
+          });
+          if (clash) throw new AppError(409, planningClashMessage(clash));
+        }
+      }
       // Patch de workflowData appliqué à la version relue sous verrou de ligne, jamais à la copie lue en
       // tête de requête : une régularisation de plein validée entre-temps n'est plus effacée. Sans patch,
       // workflowData n'est pas réécrit du tout.
