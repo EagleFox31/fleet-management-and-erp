@@ -743,8 +743,8 @@ export default function DriverDashboard() {
       queryClient.invalidateQueries({ queryKey: [`/api/missions/${variables.id}`] });
       queryClient.invalidateQueries({ queryKey: [`/api/missions/${variables.id}/launch-readiness`] });
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Erreur", description: "Impossible de mettre à jour le statut." });
+    onError: (error: unknown) => {
+      toast({ variant: "destructive", title: "Erreur", description: userMessageOf(error, "Impossible de mettre à jour le statut.") });
     },
   });
 

@@ -30,6 +30,15 @@ test("démo direction : tableau de bord, corridors CEMAC et rapports", async ({ 
     await page.getByRole("tab", { name: label }).click();
     await expect(page.getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByText("Accès refusé")).toHaveCount(0);
+    if (label.startsWith("Audit")) {
+      // La mission terminée du seed donne un camion sous TCO et une marge non nulle.
+      await expect(page.getByText(/^[1-9]\d* camions?/).first()).toBeVisible();
+    }
+    if (label.startsWith("Trésorerie")) {
+      // La base de test est partagée : on vérifie des montants non nuls, pas un total exact.
+      const encaisse = page.locator("div.rounded-3xl", { hasText: "Encaissé (factures clients réglées)" }).last();
+      await expect(encaisse.getByText(/[1-9][0-9.\s]*FCFA/).first()).toBeVisible();
+    }
     await beat(page, 3000);
   }
 });
