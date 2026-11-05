@@ -36,3 +36,8 @@
 
 - **Quoi** : une garde inconnue posée par `router.use(...)` compte désormais comme permissive (route retenue), comme en en-tête ; seuls les sous-routeurs sont ignorés. Le balayage de statut 400 n'est accepté que pour la ligne `maintenance-cost`.
 - **Limites connues** (backlog) : un `router.use(isStaff)` placé dans un `if` est compté comme inconditionnel (route écartée à tort) ; un chemin en gabarit `${}` ou un appel illisible est ignoré au lieu d'être retenu ; un second routeur non monté hérite des gardes du premier ; l'égalité étranger = absent n'est pas prouvée pour les écritures de workflow couvertes ailleurs.
+## Contrôles de fuite : angles morts de la garde fermés
+
+- **Quoi** : `tests/unit/leak-check-hygiene.test.ts` détecte maintenant `expect` sur plusieurs lignes (virgule finale), `JSON.stringify(corps, null, 2)`, `String(corps)`, `res.text` / `await res.text()`, et le contrôle en deux temps (`const t = ...; expect(t).not...`), pour `.not.toMatch` comme `.not.toContain`.
+- **Comment** : une aiguille n'est dangereuse que si elle est courte (moins de 5 caractères) et faite de caractères d'un `requestId` (lettres, chiffres, `_`, `-`) ; `%PDF` ou un chemin ne le sont pas. Cas positifs et négatifs au test. Le balayage du dépôt a trouvé un seul vrai cas (`"4821"` dans admin-patch-user-pin), passé par `leakText`.
+- **Pourquoi** : la première garde ne voyait que `JSON.stringify(x)).not.toMatch` sur une ligne. Limite : une aiguille passée par une variable n'est pas évaluée.

@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 
 const URGENCY_STYLE = {
   critical: {
-    badge: "bg-red-100 text-red-700 border-red-200",
-    border: "border-l-red-500",
+    badge: "bg-destructive/10 text-destructive-text border-destructive/30",
+    border: "border-l-destructive",
     label: "Critique",
   },
   high: {

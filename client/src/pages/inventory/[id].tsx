@@ -43,7 +43,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, FileText, Download, Package, Wrench, Calendar, BarChart3, Eye, Pencil } from "lucide-react";
+import { AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, FileText, Download, Package, Wrench, Calendar, BarChart3, Eye, Pencil, User } from "lucide-react";
 
 interface PartDetailsParams {
   params: { id: string };
@@ -533,7 +533,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
                             )}
                             {(movement.technicianName || movement.createdByName || movement.createdBy) && (
                               <p className="text-xs text-purple-600 dark:text-purple-400">
-                                👤 Par: {getMovementActorLabel(movement)}
+                                <User className="inline h-3.5 w-3.5 mr-1 align-text-bottom" aria-hidden />Par : {getMovementActorLabel(movement)}
                               </p>
                             )}
                           </div>

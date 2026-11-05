@@ -66,6 +66,7 @@ import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
+import uploadedDocumentsRoutes from "./uploaded-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
 import { routeIdRangeGuard } from "../middleware/route-id-range-guard";
 import { validateBody } from "../middleware/validate-body";
@@ -142,6 +143,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(adminUsersGuardRoutes);
   apiRouter.use(lastAdminGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
+  // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
+  apiRouter.use(uploadedDocumentsRoutes);
   apiRouter.use(workflowsRoutes);
   // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
   apiRouter.use(fuelRecordsRoutes);

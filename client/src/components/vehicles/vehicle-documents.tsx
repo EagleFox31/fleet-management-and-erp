@@ -318,8 +318,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   
   // Télécharger un document
   const handleDownload = (documentId: number) => {
-    // Rediriger vers l'API pour télécharger le fichier
-    window.open(`/api/documents/${documentId}/download`, '_blank');
+    // Servi en pièce jointe : le navigateur enregistre le fichier sans quitter la page
+    window.location.assign(`/api/documents/${documentId}/download`);
   };
 
   const openRenewalDialog = (doc: VehicleDocument) => {
