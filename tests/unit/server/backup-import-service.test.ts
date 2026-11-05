@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const calls: string[] = [];
 let inserted: Record<string, any> = {};
 let failOn: string | null = null;
+let linkedTreasury = false;
 
 function sqlText(query: any): string {
   return (query?.queryChunks ?? []).map((c: any) => (Array.isArray(c?.value) ? c.value.join("") : "")).join("");
@@ -20,6 +21,7 @@ function tableName(table: any): string {
 const tx = {
   execute: async (query: unknown) => {
     calls.push(`execute ${sqlText(query)}`);
+    return { rows: [{ linked: linkedTreasury }] };
   },
   delete: (table: unknown) => {
     calls.push(`delete ${tableName(table)}`);
@@ -58,6 +60,8 @@ beforeEach(() => {
   calls.length = 0;
   failOn = null;
   inserted = {};
+  linkedTreasury = false;
+  delete process.env.FEATURE_FLAGS;
 });
 
 const backup = {
@@ -68,6 +72,28 @@ const backup = {
 } as any;
 
 describe("restoreBackup", () => {
+  it("drapeau finance actif, écriture liée à un plein : 409 avant toute suppression", async () => {
+    process.env.FEATURE_FLAGS = "finance=on";
+    linkedTreasury = true;
+    await expect(restoreBackup(backup)).rejects.toMatchObject({ status: 409 });
+    expect(calls.some((c) => c.includes("pg_advisory_xact_lock"))).toBe(true);
+    expect(calls.filter((c) => c.startsWith("delete") || c.startsWith("insert"))).toEqual([]);
+    expect(calls.at(-1)).toBe("ROLLBACK");
+  });
+
+  it("drapeau finance actif sans écriture liée : la restauration passe", async () => {
+    process.env.FEATURE_FLAGS = "finance=on";
+    await expect(restoreBackup(backup)).resolves.toMatchObject({ vehicles: 1 });
+    expect(calls.at(-1)).toBe("COMMIT");
+  });
+
+  it("drapeau finance coupé : ni verrou ni contrôle, comportement d'avant", async () => {
+    linkedTreasury = true;
+    await restoreBackup(backup);
+    expect(calls.some((c) => c.includes("pg_advisory_xact_lock") || c.includes("treasury_entries"))).toBe(false);
+    expect(calls.at(-1)).toBe("COMMIT");
+  });
+
   it("coupe les effets des triggers avant la première écriture, dans la transaction", async () => {
     const stats = await restoreBackup(backup);
     expect(calls[0]).toBe("BEGIN");
