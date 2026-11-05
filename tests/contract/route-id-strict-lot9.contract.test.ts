@@ -2,6 +2,7 @@ import { createServer, type Server } from "http";
 import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { ROUTE_ID_OUT_OF_RANGE_MESSAGE } from "../../server/middleware/route-id-range-guard";
 import { vehicles, workOrderItems, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -133,7 +134,7 @@ describe("ids de route (lot 9) : server/api, objet <id> intact", { timeout: 1200
     ids.partIds.push(part.id);
     expect(await call("admin", "POST", `/api/parts/${OUT_OF_RANGE}/update-stock`, { adjustment: 1, reason: "TEST lot 9" })).toEqual({
       status: 400,
-      message: "ID de pièce invalide",
+      message: ROUTE_ID_OUT_OF_RANGE_MESSAGE,
     });
     expect(await call("admin", "PATCH", "/api/parts/0", { name: "TEST lot 9" })).toEqual({ status: 400, message: "ID de pièce invalide" });
     expect(await call("admin", "DELETE", "/api/parts/0")).toEqual({ status: 400, message: "ID de pièce invalide" });
@@ -146,7 +147,7 @@ describe("ids de route (lot 9) : server/api, objet <id> intact", { timeout: 1200
     ["GET", `/api/part-requirements/by-part/${BAD}`, "ID de pièce invalide"],
     ["GET", `/api/work-orders/${BAD}/items`, "ID d'ordre de travail invalide"],
     ["GET", `/api/work-orders/${BAD}/pending-part-requirements`, "ID d'ordre de travail invalide"],
-    ["GET", `/api/vehicles/${OUT_OF_RANGE}`, "ID de véhicule invalide"],
+    ["GET", `/api/vehicles/${OUT_OF_RANGE}`, ROUTE_ID_OUT_OF_RANGE_MESSAGE],
   ])("%s %s : 400", async (method, url, message) => {
     expect(await call("admin", method, url, method === "GET" ? undefined : { status: "in_progress" })).toEqual({ status: 400, message });
   });
