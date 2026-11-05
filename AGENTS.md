@@ -355,8 +355,13 @@ Notes :
   pour laquelle leur chemin ne vient pas de la base (multer, fichiers livrés, sauvegardes).
   Revue faite le 3 novembre 2026. Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
   aussi les liens (`realPathStaysInside`) : un lien symbolique ou une jonction sous `uploads/`
-  qui mène dehors est refusé. Risque résiduel accepté : un lien créé entre le contrôle et
-  l'accès, ce qui suppose déjà un accès au disque.
+  qui mène dehors est refusé, de même qu'un lien pendant ou un fichier absent derrière un lien
+  sortant (une écriture le suivrait). `settlementProofPath` et les deux destinations d'écriture
+  bornées par dossier (`workflow-document-service.ts`, copie vers le dossier du véhicule ;
+  `vehicleDocumentDirectory` de `server/middleware/upload.ts`) font le même contrôle : une
+  borne lexicale seule (`isInsideDirectory`) ne suffit plus pour un accès disque neuf.
+  Risque résiduel accepté : un lien créé entre le contrôle et l'accès, ce qui suppose déjà
+  un accès au disque.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la

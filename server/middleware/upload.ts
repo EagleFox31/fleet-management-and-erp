@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { Request } from 'express';
 import { AppError } from '../lib/app-error';
-import { isInsideDirectory, uploadedFileCandidates } from '../lib/uploaded-file';
+import { isInsideDirectory, realPathStaysInside, uploadedFileCandidates } from '../lib/uploaded-file';
 
 // Dossier pour stocker les documents des véhicules
 const UPLOAD_DIRECTORY = './uploads/documents';
@@ -32,7 +32,8 @@ export function isVehicleIdSegment(value: unknown): value is string {
 export function vehicleDocumentDirectory(vehicleId: unknown): string | null {
   if (!isVehicleIdSegment(vehicleId)) return null;
   const directory = path.join(UPLOAD_DIRECTORY, `vehicle-${vehicleId}`);
-  return isInsideDirectory(UPLOAD_DIRECTORY, directory) ? directory : null;
+  // Liens résolus aussi : un `vehicle-<id>` remplacé par un lien n'écrit pas hors de `uploads/documents`.
+  return isInsideDirectory(UPLOAD_DIRECTORY, directory) && realPathStaysInside(UPLOAD_DIRECTORY, directory) ? directory : null;
 }
 
 // Configuration de stockage multer pour les documents des véhicules

@@ -6,7 +6,7 @@ import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { isInsideDirectory, isSafePathSegment, uploadedFileCandidates } from "../lib/uploaded-file";
+import { isInsideDirectory, isSafePathSegment, realPathStaysInside, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
 
@@ -155,7 +155,7 @@ export class WorkflowDocumentService {
         const newPath = path.join(vehicleUploadDir, newFileName);
 
         // Copier le fichier (destination bornée au dossier du véhicule, cf. AGENTS.md §9)
-        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath)) {
+        if (!originalPath || !isInsideDirectory(vehicleUploadDir, newPath) || !realPathStaysInside(vehicleUploadDir, newPath)) {
           // Ni copié ni marqué : le document reste dans le workflow, visible comme non transféré.
           log.warn(
             { sessionId, vehicleId, docId: doc.id, reason: originalPath ? "destination hors du dossier du véhicule" : "fichier source introuvable" },

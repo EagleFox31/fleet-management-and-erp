@@ -1,5 +1,5 @@
 import path from "path";
-import { isInsideDirectory } from "./uploaded-file";
+import { isInsideDirectory, realPathStaysInside } from "./uploaded-file";
 
 /**
  * Justificatif de règlement fournisseur : la seule forme acceptée est celle
@@ -50,5 +50,6 @@ export function settlementProofPath(storedReference: string | null | undefined, 
   if (!isSettlementProofReference(storedReference)) return null;
   const directory = path.resolve(root, ...SETTLEMENT_PROOF_DIR_PARTS);
   const candidate = path.resolve(directory, storedReference.slice(SETTLEMENT_PROOF_PREFIX.length));
-  return isInsideDirectory(directory, candidate) ? candidate : null;
+  // Liens résolus aussi : un lien posé dans le dossier ne sert pas un fichier d'ailleurs.
+  return isInsideDirectory(directory, candidate) && realPathStaysInside(directory, candidate) ? candidate : null;
 }

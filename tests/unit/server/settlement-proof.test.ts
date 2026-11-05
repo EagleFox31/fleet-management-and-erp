@@ -1,3 +1,5 @@
+import fs from "fs";
+import os from "os";
 import path from "path";
 import { describe, expect, it } from "vitest";
 import {
@@ -40,6 +42,24 @@ describe("justificatif de règlement fournisseur : borné à son dossier", () =>
     expect(isSettlementProofReference(42)).toBe(false);
     expect(settlementProofPath(null, root)).toBeNull();
     expect(settlementProofPath(undefined, root)).toBeNull();
+  });
+});
+
+describe("justificatif de règlement : liens résolus", () => {
+  it("un lien posé dans le dossier et qui mène dehors : refusé ; un fichier réel : conservé", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-proof-"));
+    try {
+      const dir = path.join(tmp, "uploads", "supplier-invoices", "settlements");
+      const outside = path.join(tmp, "outside");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(dir, "vrai.pdf"), "pdf");
+      fs.symlinkSync(outside, path.join(dir, "piege.pdf"), "junction");
+      expect(settlementProofPath(`${SETTLEMENT_PROOF_PREFIX}vrai.pdf`, tmp)).toBe(path.join(dir, "vrai.pdf"));
+      expect(settlementProofPath(`${SETTLEMENT_PROOF_PREFIX}piege.pdf`, tmp)).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

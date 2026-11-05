@@ -422,3 +422,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : la référence était libre à l'écriture et la lecture n'était bornée qu'à `uploads/` en entier (dette AGENTS §9).
 - **Écrivains recensés** : téléversement `POST /:id/settlements` (toujours sous le dossier) et `POST /:id/payment` legacy (libre, sans appelant client). Ni seed, ni import de sauvegarde, ni trigger n'écrit `proof_reference`.
 - **Preuve** : contrat `supplier-settlement-proof-path` (écriture hors dossier 400 sans règlement créé, ligne en base hors dossier 404, téléversé 200, legacy avec justificatif du dossier 200) ; unitaire `settlement-proof`.
+
+## 2026-11-05 — Liens résolus : chemin absent, justificatif, destinations d'écriture
+- **Quoi** : `realPathStaysInside` contrôle, pour un fichier absent, le dernier élément existant du chemin : lien pendant ou lien sortant refusés. `settlementProofPath`, la copie des documents de workflow vers le dossier du véhicule et `vehicleDocumentDirectory` (multer) passent par ce contrôle en plus de la borne lexicale.
+- **Pourquoi** : relecture de #337. Un fichier absent derrière un lien était accepté, et une écriture l'aurait suivi hors du dossier ; deux destinations d'écriture n'étaient bornées que lexicalement.
+- **Preuve** : unitaires `uploaded-file` (lien pendant, absent derrière une jonction sortante, `uploads/` absent, racine montée par jonction via `uploadedFileCandidates`) et `settlement-proof` (jonction dans le dossier refusée).
