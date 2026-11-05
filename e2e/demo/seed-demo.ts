@@ -41,11 +41,12 @@ import {
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
+  technicianBis: { username: "demotech2", password: "tech123", name: "Rodrigue Fotsing", role: "technician" },
   secretary: { username: "secretaire1", password: "secret123", name: "Awa Ndiaye", role: "secretary" },
   clientA: { username: "client1", password: "client123", name: "Transports Kamga", role: "client" },
   clientB: { username: "client2", password: "client123", name: "Logistique Fotso", role: "client" },
   warehouse: { username: "fatou", password: "warehouse123", name: "Fatoumata Diallo", role: "warehouse" },
-  logistics: { username: "logi1", password: "logi123", name: "Jean Tchoumi", role: "logistics" },
+  logistics: { username: "logi1", password: "logi123", name: "Rodrigue Fotsing", role: "logistics" },
   workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
   management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
@@ -113,8 +114,8 @@ async function ensureUser(account: { username: string; password: string; name: s
   // Réconciliation : un compte déjà présent retrouve rôle et mot de passe de la démo.
   const [current] = await db.select().from(users).where(eq(users.username, account.username));
   const passwordOk = current ? await bcrypt.compare(account.password, current.password) : true;
-  if (current && (current.role !== account.role || !passwordOk)) {
-    await db.update(users).set({ role: account.role as typeof users.$inferInsert.role, password: await bcrypt.hash(account.password, 4) }).where(eq(users.id, current.id));
+  if (current && (current.role !== account.role || current.name !== account.name || !passwordOk)) {
+    await db.update(users).set({ role: account.role as typeof users.$inferInsert.role, name: account.name, password: await bcrypt.hash(account.password, 4) }).where(eq(users.id, current.id));
   }
   const [row] = await db.select({ id: users.id }).from(users).where(eq(users.username, account.username));
   return row.id;
@@ -141,6 +142,7 @@ function isoDayFromNow(days: number): string {
 async function seedWorkshop(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.workshopManager);
   await ensureUser(DEMO_ACCOUNTS.technician);
+  await ensureUser(DEMO_ACCOUNTS.technicianBis);
   const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
   const old = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.vehicleId, vehicleId), like(workOrders.title, `${DEMO_OT_PREFIX}%`)));
   if (old.length > 0) {
@@ -166,6 +168,8 @@ function writeDemoPdf(name: string): void {
 async function purgeReceptionOrders(): Promise<void> {
   const oldOrders = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.orderNumber, DEMO_RECEPTION.orderNumber));
   if (oldOrders.length > 0) {
+    // Mouvements d'entrée créés par les réceptions précédentes : sans cette purge, ils s'accumulent à chaque rejeu.
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.reason, oldOrders.map((o) => `Réception commande #${o.id}`)));
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, oldOrders.map((o) => o.id)));
@@ -314,12 +318,14 @@ async function seedFleetAudit(vehicleId: number): Promise<void> {
 
 /** Carte grise, assurance et visite technique valides : le départ d'une mission n'est pas bloqué. */
 async function ensureValidPapers(vehicleId: number, registration: string): Promise<void> {
-  const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+  const docs = await db.select({ id: vehicleDocuments.id, type: vehicleDocuments.type, expiryDate: vehicleDocuments.expiryDate }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
     writeDemoPdf(`${registration}-${type}.pdf`);
     const existing = docs.find((d) => d.type === type);
     if (existing) {
-      await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      if (String(existing.expiryDate) !== "2099-12-31") {
+        await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      }
       continue;
     }
     await db.insert(vehicleDocuments).values({
@@ -433,7 +439,7 @@ export async function seedDemo(): Promise<void> {
     .select({ id: workOrders.id })
     .from(workOrders)
     .where(and(eq(workOrders.vehicleId, workshopVehicleId), eq(workOrders.title, DEMO_WORK_ORDER_TITLE)));
-  const reset = { status: "in_progress" as const, technicianId, endDate: null, description: "Vidange moteur, remplacement du filtre et contrôle des freins." };
+  const reset = { status: "pending" as const, technicianId, endDate: null, description: "Vidange moteur, remplacement du filtre et contrôle des freins." };
   let workOrderIds = existing.map((row) => row.id);
   if (workOrderIds.length === 0) {
     const [created] = await db
@@ -450,7 +456,7 @@ export async function seedDemo(): Promise<void> {
 
   // Document du secrétariat : assurance qui expire dans 10 jours (alerte d'échéance).
   const documents = await db
-    .select({ id: vehicleDocuments.id })
+    .select({ id: vehicleDocuments.id, expiryDate: vehicleDocuments.expiryDate })
     .from(vehicleDocuments)
     .where(and(eq(vehicleDocuments.vehicleId, secretaryVehicleId), eq(vehicleDocuments.name, DEMO_DOCUMENT_NAME)));
   if (documents.length > 0) {
@@ -470,7 +476,8 @@ export async function seedDemo(): Promise<void> {
       expiryDate: isoDayFromNow(10),
     });
   } else {
-    await db.update(vehicleDocuments).set({ expiryDate: isoDayFromNow(10) }).where(inArray(vehicleDocuments.id, documents.map((d) => d.id)));
+    const stale = documents.filter((d) => String(d.expiryDate) !== isoDayFromNow(10)).map((d) => d.id);
+    if (stale.length > 0) await db.update(vehicleDocuments).set({ expiryDate: isoDayFromNow(10) }).where(inArray(vehicleDocuments.id, stale));
   }
 }
 

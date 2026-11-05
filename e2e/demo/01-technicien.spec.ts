@@ -7,7 +7,7 @@ import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_PART, DEMO_WORK_ORDER_TITLE, s
 
 /**
  * Démo « technicien » (E2E_DEMO=1, état de départ : node --import tsx e2e/demo/seed-demo.ts, avec DATABASE_URL local, voir README).
- * Parcours : connexion, ouverture de son intervention, demande d'une pièce (le technicien ne
+ * Parcours : connexion, démarrage de son intervention (Commencer), ouverture de son intervention, demande d'une pièce (le technicien ne
  * sort pas de stock : le magasinier sort), clôture de l'OT. Un seul navigateur.
  */
 test.beforeAll(async () => {
@@ -20,6 +20,18 @@ test("démo technicien : demander une pièce puis clôturer son intervention", a
   await loginThroughForm(page, DEMO_ACCOUNTS.technician.username, DEMO_ACCOUNTS.technician.password);
 
   await page.getByRole("link", { name: "Mes interventions" }).first().click();
+  await page.getByRole("tab", { name: /^En attente/ }).click();
+  await expect(page.getByText(DEMO_WORK_ORDER_TITLE).first()).toBeVisible({ timeout: 30_000 });
+  await beat(page, 1200);
+
+  // Geste de démarrage : le technicien commence l intervention qui lui est assignée.
+  await page.locator("[data-help-target=\"tech-wo-start\"]").first().click();
+  const startDialog = page.getByRole("dialog", { name: "Commencer l'intervention" });
+  await expect(startDialog).toBeVisible();
+  await beat(page, 1200);
+  await startDialog.getByRole("button", { name: "Commencer l'intervention" }).click();
+  await expect.poll(async () => (await db.select({ status: workOrders.status }).from(workOrders).where(eq(workOrders.title, DEMO_WORK_ORDER_TITLE)))[0]?.status, { timeout: 30_000 }).toBe("in_progress");
+  await beat(page, 1500);
   await page.getByRole("tab", { name: /^En cours/ }).click();
   await expect(page.getByText(DEMO_WORK_ORDER_TITLE).first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
