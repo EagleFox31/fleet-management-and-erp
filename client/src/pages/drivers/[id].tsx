@@ -12,6 +12,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageDrivers } from "@shared/constants/roles";
+import { CPCUpdateForm } from "@/components/drivers/cpc-update-form";
 import { normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { driverLicenseDaysLabel, getDriverLicenseStatus } from "@/lib/driver-license-status";
 import {
@@ -311,6 +312,18 @@ export default function DriverDetail() {
                     <div className="text-xs font-semibold text-gray-800">{value}</div>
                   </div>
                 ))}
+
+                {/* Même garde que POST /api/drivers/:id/update-cpc (isDriverManager) :
+                    le formulaire n'est pas affiché aux rôles qui recevraient un 403. */}
+                {peutGererChauffeurs && (
+                  <CPCUpdateForm
+                    driverId={driver.id}
+                    driverName={`${driver.firstName} ${driver.lastName}`}
+                    currentCPCDate={driver.cpcTrainingDate}
+                    currentStatus={driver.cpcStatus}
+                    embedded
+                  />
+                )}
               </div>
             </div>
           </div>

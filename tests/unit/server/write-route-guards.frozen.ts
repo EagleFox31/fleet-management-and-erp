@@ -11,7 +11,6 @@ export const FROZEN_UNGUARDED_WRITE_ROUTES: readonly string[] = [
   "billing.routes.ts POST /invoices/:id/payments",
   "billing.routes.ts POST /invoices/generate",
   "drivers.routes.ts POST /:id/update-cpc",
-  "drivers.routes.ts POST /sync-cpc-statuses",
   "index.ts POST /auth/login (apiRouter)",
   "index.ts POST /auth/pin-login (apiRouter)",
   "missions.routes.ts POST /:id/document-renewal-requests",
