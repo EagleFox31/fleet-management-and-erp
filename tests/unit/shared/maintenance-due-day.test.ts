@@ -7,10 +7,11 @@ import { getMaintenanceScheduleStatus } from "../../../client/src/lib/maintenanc
  * navigateur. L'ancien calcul (période ajoutée par `setDate` / `setMonth` à l'heure locale, écart
  * en ms avec l'instant, `Math.ceil`) dépendait du fuseau. Rejoué ici, il échoue sur :
  * - « le résultat ne dépend pas du fuseau » (2, 1 ou -2 jours selon la zone) : le vrai rouge ;
- * - « changement d'heure » (1 au lieu de 0 : la période locale glisse d'une heure) ;
+ * - « changement d'heure » : 1 au lieu de 0 le jour J (la période locale glisse d'une heure) ;
+ * - « lendemain du changement d'heure » : `-0` (« À venir ») au lieu de -1 (« En retard ») ;
  * - « fin de mois » (débordement 3 mars au lieu du plafond 28 février, aligné sur le serveur).
- * Le cas « jour J à 23h30 » ne rend `-0` qu'avec l'ancien calcul : c'est une normalisation, pas
- * un rouge significatif.
+ * Le cas « jour J à 23h30 » rend `-0` avec l'ancien calcul, `0` avec le nouveau : l'assertion
+ * normalise par `+ 0` (`toEqual(0)` rejette `-0`), ce cas n'est donc pas compté comme un rouge.
  */
 const ORIGINAL_TZ = process.env.TZ;
 
@@ -41,17 +42,25 @@ describe("échéance d'entretien : jour UTC", () => {
   });
 
   it("période en jours qui traverse le changement d'heure (25 octobre 2026) : jour J à 00:30 UTC", () => {
-    // Échéance le 26 ; à 00:30 UTC (01:30 à Paris) c'est le jour J. L'ancien calcul, en heure
-    // locale, plaçait l'échéance à 01:00 UTC et rendait 1.
+    // Échéance le 26 ; l'ancien calcul, en heure locale, la plaçait à 01:00 UTC.
     const schedule = { isActive: true, scheduledDate: "2026-10-24", frequency: "daily", frequencyValue: 2 };
-    const now = new Date("2026-10-26T00:30:00Z");
-    expect(maintenanceDaysUntil(schedule, now)).toBe(0);
-    expect(getMaintenanceScheduleStatus(schedule, now).label).toBe("À venir");
+    // Le 26 à 00:30 UTC (01:30 à Paris) : jour J. L'ancien calcul rendait 1.
+    const dueDay = new Date("2026-10-26T00:30:00Z");
+    expect(maintenanceDaysUntil(schedule, dueDay)).toBe(0);
+    expect(getMaintenanceScheduleStatus(schedule, dueDay).label).toBe("À venir");
+  });
+
+  it("lendemain du changement d'heure, 27 octobre 00:30 UTC : « En retard », pas « À venir »", () => {
+    // L'ancien calcul rendait -0 ici : `-0 < 0` est faux, le badge restait « À venir ».
+    const schedule = { isActive: true, scheduledDate: "2026-10-24", frequency: "daily", frequencyValue: 2 };
+    const nextDay = new Date("2026-10-27T00:30:00Z");
+    expect(maintenanceDaysUntil(schedule, nextDay)).toBe(-1);
+    expect(getMaintenanceScheduleStatus(schedule, nextDay).label).toBe("En retard");
   });
 
   it("jour J jusqu'à 23h30 UTC, en retard à minuit UTC", () => {
     const schedule = { isActive: true, scheduledDate: "2026-11-04", frequency: "daily", frequencyValue: 1 };
-    expect(maintenanceDaysUntil(schedule, new Date("2026-11-05T23:30:00Z"))).toEqual(0);
+    expect(maintenanceDaysUntil(schedule, new Date("2026-11-05T23:30:00Z"))! + 0).toBe(0);
     expect(getMaintenanceScheduleStatus(schedule, new Date("2026-11-05T23:30:00Z")).label).toBe("À venir");
     expect(maintenanceDaysUntil(schedule, new Date("2026-11-06T00:00:00Z"))).toBe(-1);
   });

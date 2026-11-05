@@ -92,7 +92,7 @@ const MAINTENANCE_LOCAL_DAY = new RegExp(String.raw`${LOCAL_DAY.source}|\bsetDat
  * (createdAt -> endDate d'un ordre de travail), pas pour une échéance ; le fichier reste pourtant
  * fautif ailleurs (`setDate` aux lignes 226 et 247, `24 * 60 * 60 * 1000` ligne 426 sur
  * `scheduledDate`). Il n'est donc pas exclu : il reste gelé jusqu'à correction complète.
- * `maintenanceService.ts:163` n'est pas un calcul local (il appelle `maintenanceElapsedDays`).
+ * `maintenanceService.ts:161` n'est pas un calcul local (il appelle `maintenanceElapsedDays`).
  */
 const FROZEN_MAINTENANCE = new Set<string>([
   "client/src/components/vehicles/vehicle-health-score.tsx",

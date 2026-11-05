@@ -59,4 +59,13 @@ describe("durée de réalisation : jours calendaires UTC", () => {
   it("valeur absolue : réalisation avant la date prévue", () => {
     expect(maintenanceService.calculateCompletionTime("2026-03-30", "2026-03-28T01:00:00Z")).toBe(2);
   });
+
+  it("réalisation le jour prévu : 0 jour, même avec une heure", () => {
+    expect(maintenanceService.calculateCompletionTime("2026-03-30", "2026-03-30T15:00:00Z")).toBe(0);
+  });
+
+  it("date illisible : NaN, jamais confondu avec 0 jour", () => {
+    expect(maintenanceService.calculateCompletionTime("pas une date", "2026-03-30")).toBeNaN();
+    expect(maintenanceService.calculateCompletionTime("2026-03-30", "")).toBeNaN();
+  });
 });

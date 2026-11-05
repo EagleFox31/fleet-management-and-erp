@@ -47,9 +47,13 @@ export function maintenanceDaysUntil(
   return due === null ? null : daysBetweenDateOnly(due, todayUtcDateOnly(now));
 }
 
-/** Jours calendaires (UTC, valeur absolue) entre la date prévue et la date de réalisation. `0` si l'une est illisible. */
+/**
+ * Jours calendaires (UTC, valeur absolue) entre la date prévue et la date de réalisation.
+ * `NaN` si l'une est absente ou illisible, comme l'ancien calcul : une durée inconnue ne doit
+ * pas se confondre avec une réalisation le jour même.
+ */
 export function maintenanceElapsedDays(scheduledDate: string | Date | null | undefined, completedDate: string | Date | null | undefined): number {
   const a = toExpiryDateOnly(scheduledDate);
   const b = toExpiryDateOnly(completedDate);
-  return a === null || b === null ? 0 : Math.abs(daysBetweenDateOnly(a, b));
+  return a === null || b === null ? Number.NaN : Math.abs(daysBetweenDateOnly(a, b));
 }
