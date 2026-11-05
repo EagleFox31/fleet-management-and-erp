@@ -543,7 +543,7 @@ export default function NewMission() {
                           <span className="text-muted-foreground">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
                             driverCpc.eligible ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
-                            normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-warning/10 text-warning' :
+                            normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-warning/10 text-warning-text' :
                             'bg-destructive/10 text-destructive'
                           }`}>
                             {driverCpcStatus ?? "Non défini"}
