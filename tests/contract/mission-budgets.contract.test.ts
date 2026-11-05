@@ -9,9 +9,11 @@ import {
   missionBudgetDisbursePath,
   missionBudgetPath,
   missionBudgetSchema,
+  MISSION_DESTINATIONS_PATH,
+  missionDestinationsResponseSchema,
 } from "../../shared/contracts/mission-budgets";
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
-import { fuelPrices, missionBudgets, missions } from "../../shared/schema";
+import { fuelPrices, missionBudgets, missionDestinations, missions } from "../../shared/schema";
 import { db } from "../../server/db";
 import { resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
 import { getContractApp } from "../support/app";
@@ -38,6 +40,8 @@ const missionIds: number[] = [];
 const events: { event: string; data: any }[] = [];
 // Prix déjà posé à DAY par un autre fichier : restauré en fin de test, jamais supprimé.
 let previousPrice: string | null = null;
+/** [active, retirée] */
+const destinationIds: number[] = [];
 
 async function login(role: TestUserRole) {
   const user = await createTestUser({ role });
@@ -102,6 +106,15 @@ beforeAll(async () => {
     .insert(fuelPrices)
     .values({ effectiveFrom: DAY, pricePerLiter: String(PRICE), createdBy: userIds.get("admin")! })
     .onConflictDoUpdate({ target: fuelPrices.effectiveFrom, set: { pricePerLiter: String(PRICE) } });
+  // Destinations propres au test : le barème semé par la migration n'est ni lu ni modifié.
+  const rows = await db
+    .insert(missionDestinations)
+    .values([
+      { code: `${TEST_PREFIX}mb-dest-${Date.now()}`, label: `${TEST_PREFIX} Destination`, fuelLiters: "450", fdrAmount: "100000" },
+      { code: `${TEST_PREFIX}mb-retired-${Date.now()}`, label: `${TEST_PREFIX} Retirée`, fuelLiters: "1", fdrAmount: "1", active: false },
+    ])
+    .returning({ id: missionDestinations.id });
+  destinationIds.push(...rows.map((r) => r.id));
 }, 180000);
 
 afterAll(async () => {
@@ -109,6 +122,7 @@ afterAll(async () => {
     await db.delete(missionBudgets).where(inArray(missionBudgets.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
+  if (destinationIds.length) await db.delete(missionDestinations).where(inArray(missionDestinations.id, destinationIds));
   if (previousPrice === null) await db.delete(fuelPrices).where(eq(fuelPrices.effectiveFrom, DAY));
   else await db.update(fuelPrices).set({ pricePerLiter: previousPrice }).where(eq(fuelPrices.effectiveFrom, DAY));
   await cleanupCreated(ids);
@@ -325,5 +339,55 @@ describe("Drapeau finance coupé", { timeout: 120000 }, () => {
     } finally {
       process.env.FEATURE_FLAGS = saved;
     }
+  });
+});
+
+describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
+  it("liste des destinations actives : lecture logistique, direction, administrateur ; retirée absente", async () => {
+    for (const role of ["logistics", "management", "admin"]) {
+      const res = await call("GET", MISSION_DESTINATIONS_PATH, role);
+      expect(res.status, role).toBe(200);
+      const list = missionDestinationsResponseSchema.parse(res.body);
+      expect(list.map((d) => d.id)).toContain(destinationIds[0]);
+      expect(list.map((d) => d.id)).not.toContain(destinationIds[1]);
+    }
+    for (const role of ["secretary", "technician", "driver", "client"]) {
+      expect((await call("GET", MISSION_DESTINATIONS_PATH, role)).status, role).toBe(403);
+    }
+  });
+
+  it("une destination pré-remplit litres et FDR absents ; une valeur fournie l'emporte", async () => {
+    const prefilled = await call("POST", MISSION_BUDGETS_PATH, "logistics", {
+      missionId: await newMission(), budgetDate: DAY, destinationId: destinationIds[0],
+    });
+    expect(prefilled.status, JSON.stringify(prefilled.body)).toBe(201);
+    expect(prefilled.body).toMatchObject({ destinationId: destinationIds[0], fuelLiters: 450, fdrAmount: 100_000, fuelUnitPrice: PRICE });
+
+    const overridden = await call("POST", MISSION_BUDGETS_PATH, "logistics", {
+      missionId: await newMission(), budgetDate: DAY, destinationId: destinationIds[0], fdrAmount: 80_000,
+    });
+    expect(overridden.status).toBe(201);
+    expect(overridden.body).toMatchObject({ fuelLiters: 450, fdrAmount: 80_000 });
+  });
+
+  it("destination retirée ou inconnue : 400 ; sans destination, litres et FDR requis : 400", async () => {
+    const missionId = await newMission();
+    for (const destinationId of [destinationIds[1], 2_000_000_000]) {
+      const res = await call("POST", MISSION_BUDGETS_PATH, "logistics", { missionId, budgetDate: DAY, destinationId });
+      expect(res.status, String(destinationId)).toBe(400);
+    }
+    expect((await call("POST", MISSION_BUDGETS_PATH, "logistics", { missionId, budgetDate: DAY, fdrAmount: 1 })).status).toBe(400);
+    expect(await db.select().from(missionBudgets).where(eq(missionBudgets.missionId, missionId))).toHaveLength(0);
+  });
+
+  it("correction : changer de destination n'écrase pas les montants ; la retirer remet la saisie libre", async () => {
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(await newMission()))).body);
+    const linked = await call("PATCH", missionBudgetPath(created.id), "logistics", { destinationId: destinationIds[0] });
+    expect(linked.status).toBe(200);
+    expect(linked.body).toMatchObject({ destinationId: destinationIds[0], fuelLiters: created.fuelLiters, fdrAmount: created.fdrAmount });
+    expect((await call("PATCH", missionBudgetPath(created.id), "logistics", { destinationId: destinationIds[1] })).status).toBe(400);
+    const unlinked = await call("PATCH", missionBudgetPath(created.id), "logistics", { destinationId: null });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body.destinationId).toBeNull();
   });
 });

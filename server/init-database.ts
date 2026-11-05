@@ -1002,6 +1002,48 @@ CREATE TABLE IF NOT EXISTS mission_destinations (
   CONSTRAINT mission_destinations_amounts_check CHECK (fuel_liters >= 0 AND fdr_amount >= 0)
 );
 
+DO $$
+DECLARE
+  existing text;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS). Noms identiques à shared/schema.ts.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+                 AND conname = 'mission_destinations_amounts_check') THEN
+    ALTER TABLE mission_destinations ADD CONSTRAINT mission_destinations_amounts_check
+      CHECK (fuel_liters >= 0 AND fdr_amount >= 0) NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+             AND conname = 'mission_destinations_amounts_check' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_destinations VALIDATE CONSTRAINT mission_destinations_amounts_check;
+    EXCEPTION WHEN check_violation THEN
+      RAISE WARNING 'mission_destinations : lignes hors contrainte mission_destinations_amounts_check, laissée NOT VALID';
+    END;
+  END IF;
+  -- Unicité du code sous le nom attendu : celle posée sous un autre nom est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+                 AND conname = 'mission_destinations_code_unique') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'mission_destinations'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'code'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE mission_destinations RENAME CONSTRAINT %I TO mission_destinations_code_unique', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE mission_destinations ADD CONSTRAINT mission_destinations_code_unique UNIQUE (code);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'mission_destinations : codes en double, contrainte mission_destinations_code_unique non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_destinations non réconciliées : verrou de table indisponible';
+END $$;
+
 INSERT INTO mission_destinations (code, label, fuel_liters, fdr_amount) VALUES
   ('ndjamena', 'N''Djamena', 750, 150000),
   ('kome', 'Komé', 450, 100000),
@@ -1214,6 +1256,9 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_budgets_status_check',
   'mission_budgets_amounts_check',
   'mission_budgets_mission_id_unique',
+  // Posées par MISSION_DESTINATIONS_SQL (lot L1b).
+  'mission_destinations_amounts_check',
+  'mission_destinations_code_unique',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };

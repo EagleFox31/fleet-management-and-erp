@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { missionBudgets } from "../../../shared/schema";
+import { missionBudgets, missionDestinations } from "../../../shared/schema";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
 
@@ -36,7 +36,9 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
   });
 
   it("chaque colonne et chaque contrainte Drizzle existe dans le SQL, sous le même nom", () => {
-    const sql = fromMigration();
+    // destination_id et sa FK sont ajoutées par la migration du barème (L1b).
+    const sql = fromMigration() + "\n" + norm(readFileSync("server/db/migrations/20261105_mission_destinations.sql", "utf8"))
+      .replace(/ADD COLUMN IF NOT EXISTS destination_id/, "\n  destination_id");
     const config = getTableConfig(missionBudgets);
     for (const column of config.columns) expect(sql, column.name).toMatch(new RegExp(`\\n  ${column.name} `));
     const names = [
@@ -79,7 +81,65 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
 
   it("l'écart de contraintes est relu après la création de mission_budgets, pas avant", () => {
     const src = norm(readFileSync("server/init-database.ts", "utf8"));
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_DESTINATIONS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
     expect(src).not.toMatch(/async function applyCdcSchema\(\) \{[^}]*reportCdcConstraintGaps/);
+  });
+});
+
+describe("L1b : barème mission_destinations, init-database, migration jumelle et Drizzle", () => {
+  const MIGRATION = "server/db/migrations/20261105_mission_destinations.sql";
+  const migration = () =>
+    norm(norm(readFileSync(MIGRATION, "utf8")).split("\n").filter((line) => !line.startsWith("--")).join("\n"));
+  const initSource = () => norm(readFileSync("server/init-database.ts", "utf8"));
+  const initSql = () => {
+    const src = initSource();
+    const marker = "export const MISSION_DESTINATIONS_SQL = `";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    return norm(src.slice(start + marker.length, src.indexOf("`;", start)));
+  };
+
+  it("init-database porte exactement le SQL de la migration, appliqué après celui des budgets", () => {
+    expect(initSql()).toBe(migration());
+    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+  });
+
+  it("additif et idempotent : seed sans réécriture, aucune suppression", () => {
+    const sql = migration();
+    expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS mission_destinations");
+    expect(sql).toContain("ON CONFLICT (code) DO NOTHING");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS destination_id integer");
+    expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
+    // L'unicité du code est réconciliée avant le seed, qui en dépend (ON CONFLICT).
+    expect(sql.indexOf("mission_destinations_code_unique UNIQUE (code);")).toBeLessThan(sql.indexOf("INSERT INTO mission_destinations"));
+  });
+
+  it("seed limité aux cinq destinations relevées", () => {
+    const codes = [...migration().matchAll(/^\s+\('([a-z]+)', '/gm)].map((m) => m[1]);
+    expect(codes).toEqual(["ndjamena", "kome", "sarh", "ngong", "douala"]);
+  });
+
+  it("colonnes et contraintes : mêmes noms dans Drizzle, dans le SQL et dans CDC_RECONCILED_CONSTRAINTS", () => {
+    const sql = migration();
+    const config = getTableConfig(missionDestinations);
+    for (const column of config.columns) expect(sql, column.name).toMatch(new RegExp(`\n  ${column.name} `));
+    const declared = [
+      ...config.checks.map((c) => c.name),
+      ...config.columns.filter((c) => c.isUnique).map((c) => c.uniqueName),
+    ].sort();
+    expect(declared).toEqual(["mission_destinations_amounts_check", "mission_destinations_code_unique"]);
+    const src = initSource();
+    const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
+    const reconciled = src.slice(listStart, src.indexOf("];", listStart));
+    for (const name of declared) {
+      expect(sql, name).toMatch(new RegExp(`CONSTRAINT ${name}\\s`));
+      expect(reconciled, name).toContain(`'${name}'`);
+    }
+    expect(sql).toContain("NOT VALID");
+    expect(sql).toContain("VALIDATE CONSTRAINT mission_destinations_amounts_check");
+    const fk = getTableConfig(missionBudgets).foreignKeys.map((k) => k.getName());
+    expect(fk).toContain("mission_budgets_destination_id_mission_destinations_id_fk");
+    expect(sql).toContain("CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk");
   });
 });

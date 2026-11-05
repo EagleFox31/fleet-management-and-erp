@@ -56,6 +56,29 @@ describe("L1 : contrat de saisie", () => {
   });
 });
 
+describe("L1b : saisie par destination du barème", () => {
+  const base = { missionId: 1, budgetDate: "2026-11-05" };
+
+  it("avec une destination, litres et FDR sont facultatifs (pré-remplis par le serveur)", () => {
+    expect(createMissionBudgetRequestSchema.safeParse({ ...base, destinationId: 3 }).success).toBe(true);
+    expect(createMissionBudgetRequestSchema.safeParse({ ...base, destinationId: 3, fdrAmount: 80_000 }).success).toBe(true);
+  });
+
+  it("sans destination, litres et FDR sont requis", () => {
+    for (const extra of [{}, { fuelLiters: 300 }, { fdrAmount: 50_000 }, { destinationId: null, fuelLiters: 300 }]) {
+      expect(createMissionBudgetRequestSchema.safeParse({ ...base, ...extra }).success, JSON.stringify(extra)).toBe(false);
+    }
+    expect(createMissionBudgetRequestSchema.safeParse({ ...base, fuelLiters: 300, fdrAmount: 50_000 }).success).toBe(true);
+  });
+
+  it("destination hors plage int4 ou non entière : refusée ; une correction peut la retirer (null)", () => {
+    for (const destinationId of [0, -1, 1.5, MAX_ID_FOR_TEST + 1]) {
+      expect(createMissionBudgetRequestSchema.safeParse({ ...base, destinationId }).success, String(destinationId)).toBe(false);
+    }
+    expect(updateMissionBudgetRequestSchema.safeParse({ destinationId: null }).success).toBe(true);
+  });
+});
+
 describe("L1 : garde-fous de sécurité", () => {
   it("date du budget : fenêtre de 60 jours de part et d'autre, bornes incluses, passage d'année", () => {
     expect(isBudgetDateInWindow("2026-11-05", "2026-11-05")).toBe(true);
