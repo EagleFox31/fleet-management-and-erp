@@ -35,10 +35,13 @@ import { HeaderCard, KpiGrid, KpiTile, CardShell, SectionLabel, PremiumTabsNav }
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
+import { useAuth } from "@/hooks/useAuth";
+import { canManageDrivers } from "@shared/constants/roles";
 
 export default function WorkshopManagerDashboard() {
   const [, setLocation] = useLocation();
   const warehouse = useWarehouse();
+  const { user } = useAuth();
 
   const { data: workOrderStats } = useQuery<any>({ queryKey: ["/api/work-orders/statistics"] });
   const { data: teamMembers = [] } = useQuery<any[]>({ queryKey: ["/api/users/technicians"] });
@@ -654,34 +657,36 @@ export default function WorkshopManagerDashboard() {
             <CPCAlertsPanel />
           </div>
 
-          {/* Formulaires de mise à jour rapide */}
-          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Mise à Jour des Certifications CPC</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Enregistrement rapide des dates de validité pour les chauffeurs</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              {driversStatus?.slice(0, 6).map((driver: any) => (
-                <CPCUpdateForm
-                  key={driver.id}
-                  driverId={driver.id}
-                  driverName={`${driver.firstName} ${driver.lastName}`}
-                  currentCPCDate={driver.cpcTrainingDate}
-                  currentStatus={driver.cpcStatus}
-                />
-              ))}
-            </div>
-
-            {driversStatus && driversStatus.length > 6 && (
-              <div className="text-center pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-muted-foreground">
-                Affichage des 6 premiers chauffeurs.{" "}
-                <Link href="/drivers">
-                  <span className="text-emerald-600 font-bold hover:underline cursor-pointer">Voir tous les conducteurs</span>
-                </Link>
+          {/* Mise à jour CPC : réservée aux gestionnaires de chauffeurs (POST /api/drivers/:id/update-cpc) */}
+          {canManageDrivers(user?.role) && (
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Mise à Jour des Certifications CPC</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Enregistrement rapide des dates de validité pour les chauffeurs</p>
               </div>
-            )}
-          </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {driversStatus?.slice(0, 6).map((driver: any) => (
+                  <CPCUpdateForm
+                    key={driver.id}
+                    driverId={driver.id}
+                    driverName={`${driver.firstName} ${driver.lastName}`}
+                    currentCPCDate={driver.cpcTrainingDate}
+                    currentStatus={driver.cpcStatus}
+                  />
+                ))}
+              </div>
+
+              {driversStatus && driversStatus.length > 6 && (
+                <div className="text-center pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-muted-foreground">
+                  Affichage des 6 premiers chauffeurs.{" "}
+                  <Link href="/drivers">
+                    <span className="text-emerald-600 font-bold hover:underline cursor-pointer">Voir tous les conducteurs</span>
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

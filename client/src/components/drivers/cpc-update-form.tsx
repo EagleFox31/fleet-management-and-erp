@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -16,22 +17,24 @@ interface CPCUpdateFormProps {
   driverName: string;
   currentCPCDate?: string | null;
   currentStatus?: string;
+  /** Dans une carte existante (fiche chauffeur) : ni cadre, ni nom, ni badge répétés. */
+  embedded?: boolean;
 }
 
-export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentStatus }: CPCUpdateFormProps) {
+export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentStatus, embedded = false }: CPCUpdateFormProps) {
   const [cpcDate, setCpcDate] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: async (date: string) => {
-      const res = await apiRequest("POST", `/api/drivers/${driverId}/update-cpc`, {
+    mutationFn: async ({ id, date }: { id: number; date: string }) => {
+      const res = await apiRequest("POST", `/api/drivers/${id}/update-cpc`, {
         cpcDate: date,
       });
       return await res.json();
     },
-    onSuccess: () => {
-      invalidateDriverCpcDependents(queryClient, driverId);
+    onSuccess: (_data, { id }) => {
+      invalidateDriverCpcDependents(queryClient, id);
       toast({
         title: "Formation CPC mise à jour",
         description: `La certification CPC de ${driverName} a été enregistrée avec succès.`,
@@ -46,6 +49,8 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       });
     },
   });
+
+  const submitCpc = useSingleFlightMutate(mutation.mutate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +76,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
       return;
     }
 
-    mutation.mutate(cpcDate);
+    submitCpc({ id: driverId, date: cpcDate });
   };
 
   const TONE_CLASSES: Record<CpcStatusTone, string> = {
@@ -83,8 +88,15 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
   const getStatusBadge = (status?: string) => TONE_CLASSES[cpcStatusTone(status)];
 
   return (
-    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
-      <div className="space-y-2">
+    <div
+      className={
+        embedded
+          ? "space-y-3"
+          : "p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between"
+      }
+      data-testid={`cpc-update-form-${driverId}`}
+    >
+      {!embedded && (<div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-300 shrink-0">
@@ -112,7 +124,7 @@ export function CPCUpdateForm({ driverId, driverName, currentCPCDate, currentSta
             <span className="font-bold text-foreground">{formatDate(currentCPCDate)}</span>
           </div>
         )}
-      </div>
+      </div>)}
 
       <form onSubmit={handleSubmit} className="space-y-2.5 pt-1">
         <div className="space-y-1">
