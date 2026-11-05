@@ -1290,6 +1290,38 @@ export const TREASURY_SCHEMA_STATEMENTS = [
   `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS supplier_settlement_id integer REFERENCES supplier_invoice_settlements(id) ON DELETE SET NULL`,
   `ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS treasury_account_id integer REFERENCES treasury_accounts(id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active`,
+  // Lot T4 : traites et chèques. Jumelle de shared/schema.ts (paymentInstruments).
+  `CREATE TABLE IF NOT EXISTS payment_instruments (
+    id serial PRIMARY KEY,
+    kind text NOT NULL,
+    direction text NOT NULL DEFAULT 'outgoing',
+    number text NOT NULL,
+    drawer text NOT NULL,
+    drawee text NOT NULL,
+    paying_bank text,
+    amount numeric(15,2) NOT NULL,
+    issue_date date NOT NULL,
+    due_date date NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    paid_at date,
+    treasury_entry_id integer REFERENCES treasury_entries(id) CONSTRAINT payment_instruments_treasury_entry_id_key UNIQUE,
+    supplier_id integer REFERENCES suppliers(id),
+    client_id integer REFERENCES clients(id),
+    vehicle_id integer REFERENCES vehicles(id),
+    observations text,
+    request_key text CONSTRAINT payment_instruments_request_key_key UNIQUE,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT payment_instruments_kind_check CHECK (kind IN ('traite', 'cheque')),
+    CONSTRAINT payment_instruments_direction_check CHECK (direction IN ('outgoing', 'incoming')),
+    CONSTRAINT payment_instruments_status_check CHECK (status IN ('pending', 'paid', 'bounced', 'cancelled')),
+    CONSTRAINT payment_instruments_amount_check CHECK (amount > 0),
+    CONSTRAINT payment_instruments_dates_check CHECK (due_date >= issue_date),
+    CONSTRAINT payment_instruments_paid_check CHECK ((status = 'paid') = (paid_at IS NOT NULL AND treasury_entry_id IS NOT NULL))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_instruments_status_due ON payment_instruments (status, due_date)`,
   // Tables créées par drizzle-kit push, ou avant qu'une contrainte soit déclarée : CREATE TABLE IF NOT EXISTS
   // a été sauté. Même réconciliation que le schéma CDC : CHECK en NOT VALID puis VALIDATE, UNIQUE renommé
   // s'il existe sous un autre nom, WARNING plutôt que démarrage bloqué si des lignes existantes dérogent.
@@ -1303,7 +1335,13 @@ BEGIN
     ('treasury_accounts', 'treasury_accounts_kind_check', 'CHECK (kind IN (''bank'', ''cash'', ''fuel_card''))'),
     ('treasury_entries', 'treasury_entries_amount_check', 'CHECK (amount > 0)'),
     ('treasury_entries', 'treasury_entries_direction_check', 'CHECK (direction IN (''in'', ''out''))'),
-    ('treasury_entries', 'treasury_entries_category_check', 'CHECK (${TREASURY_CATEGORY_CHECK.replace(/'/g, "''")})')
+    ('treasury_entries', 'treasury_entries_category_check', 'CHECK (${TREASURY_CATEGORY_CHECK.replace(/'/g, "''")})'),
+    ('payment_instruments', 'payment_instruments_kind_check', 'CHECK (kind IN (''traite'', ''cheque''))'),
+    ('payment_instruments', 'payment_instruments_direction_check', 'CHECK (direction IN (''outgoing'', ''incoming''))'),
+    ('payment_instruments', 'payment_instruments_status_check', 'CHECK (status IN (''pending'', ''paid'', ''bounced'', ''cancelled''))'),
+    ('payment_instruments', 'payment_instruments_amount_check', 'CHECK (amount > 0)'),
+    ('payment_instruments', 'payment_instruments_dates_check', 'CHECK (due_date >= issue_date)'),
+    ('payment_instruments', 'payment_instruments_paid_check', 'CHECK ((status = ''paid'') = (paid_at IS NOT NULL AND treasury_entry_id IS NOT NULL))')
   ) AS v(tbl, name, def) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
@@ -1318,7 +1356,9 @@ BEGIN
   END LOOP;
   FOR c IN SELECT * FROM (VALUES
     ('treasury_accounts', 'treasury_accounts_code_key', ARRAY['code']),
-    ('treasury_entries', 'treasury_entries_request_key_key', ARRAY['request_key'])
+    ('treasury_entries', 'treasury_entries_request_key_key', ARRAY['request_key']),
+    ('payment_instruments', 'payment_instruments_request_key_key', ARRAY['request_key']),
+    ('payment_instruments', 'payment_instruments_treasury_entry_id_key', ARRAY['treasury_entry_id'])
   ) AS v(tbl, name, cols) LOOP
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       CONTINUE;
@@ -1353,6 +1393,14 @@ export const TREASURY_RECONCILED_CONSTRAINTS: readonly string[] = [
   'treasury_entries_category_check',
   'treasury_accounts_code_key',
   'treasury_entries_request_key_key',
+  'payment_instruments_kind_check',
+  'payment_instruments_direction_check',
+  'payment_instruments_status_check',
+  'payment_instruments_amount_check',
+  'payment_instruments_dates_check',
+  'payment_instruments_paid_check',
+  'payment_instruments_request_key_key',
+  'payment_instruments_treasury_entry_id_key',
 ];
 
 async function applyTreasurySchema() {

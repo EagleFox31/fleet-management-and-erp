@@ -12,10 +12,16 @@ const CHECKS: [string, string][] = [
   ["treasury_entries", "treasury_entries_amount_check"],
   ["treasury_entries", "treasury_entries_direction_check"],
   ["treasury_entries", "treasury_entries_category_check"],
+  // Lot T4 : traites et chèques.
+  ...["kind", "direction", "status", "amount", "dates", "paid"].map(
+    (c): [string, string] => ["payment_instruments", `payment_instruments_${c}_check`],
+  ),
 ];
 const UNIQUES: [string, string][] = [
   ["treasury_accounts", "treasury_accounts_code_key"],
   ["treasury_entries", "treasury_entries_request_key_key"],
+  ["payment_instruments", "payment_instruments_request_key_key"],
+  ["payment_instruments", "payment_instruments_treasury_entry_id_key"],
 ];
 
 async function withClient(run: (client: PoolClient) => Promise<void>) {

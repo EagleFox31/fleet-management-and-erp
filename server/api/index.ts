@@ -53,6 +53,7 @@ import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
 import treasuryRoutes from "./treasury.routes";
+import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
 import qhseInspectionsRoutes from "./qhse-inspections.routes";
@@ -258,6 +259,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(missionOperationsRoutes);
   apiRouter.use(treasuryRoutes);
+  apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(driverBreakdownsRoutes);
   apiRouter.use(qhseInspectionsRoutes);

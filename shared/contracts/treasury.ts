@@ -42,7 +42,7 @@ const isRealDate = (value: string) => {
   const d = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 };
-const dateSchema = z.string().regex(DATE, "Date invalide (AAAA-MM-JJ).").refine(isRealDate, "Date invalide (AAAA-MM-JJ).");
+export const dateSchema = z.string().regex(DATE, "Date invalide (AAAA-MM-JJ).").refine(isRealDate, "Date invalide (AAAA-MM-JJ).");
 
 /** Décimal à 2 chiffres au plus, ramené à "x.yy". Accepte un nombre ou une chaîne. */
 const decimal = (allowNegative: boolean) =>
