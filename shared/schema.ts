@@ -1638,6 +1638,38 @@ export const insertMissionOperationSchema = createInsertSchema(missionOperations
   updatedAt: true,
 });
 export type MissionOperation = typeof missionOperations.$inferSelect;
+
+// Grille tarifaire (O3) : prix suggéré, jamais appliqué seul. `client_id` NULL = tarif générique.
+export const tariffGrid = pgTable("tariff_grid", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").references(() => clients.id),
+  origin: text("origin").notNull(),
+  destination: text("destination").notNull(),
+  cargoType: text("cargo_type").notNull().default(""),
+  pricingUnit: text("pricing_unit").notNull(),
+  unitPrice: numeric("unit_price", { precision: 15, scale: 0 }).notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("tariff_grid_pricing_unit_check", sql`${table.pricingUnit} IN ('ton', 'container', 'trip')`),
+  check("tariff_grid_unit_price_check", sql`${table.unitPrice} >= 0`),
+  check("tariff_grid_period_check", sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`),
+  uniqueIndex("tariff_grid_key_unique").on(
+    // Sans virgule ni mélange colonne/expression : relisible par drizzle-kit push (voir schema-index-introspection).
+    sql`(CASE WHEN ${table.clientId} IS NULL THEN 0 ELSE ${table.clientId} END)`,
+    sql`(lower(${table.origin}))`,
+    sql`(lower(${table.destination}))`,
+    sql`(lower(${table.cargoType}))`,
+    sql`(${table.validFrom})`,
+  ).where(sql`${table.active}`),
+]);
+export type TariffGridRow = typeof tariffGrid.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({

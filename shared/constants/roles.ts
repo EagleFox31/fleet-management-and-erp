@@ -457,3 +457,8 @@ export const QHSE_INSPECTION_ROLES = ["admin", "management", "logistics"] as con
 
 /** Grille de critères (référentiel configurable) : l'administration et la direction la modifient. */
 export const QHSE_CRITERIA_MANAGER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+
+/** Grille tarifaire (O3) : lecture et suggestion ouvertes à la facturation et à la logistique (taux clients en lecture seule). */
+export const TARIFF_GRID_READ_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+/** Grille tarifaire (O3) : écriture réservée à la direction et à l'admin. */
+export const TARIFF_GRID_WRITE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
