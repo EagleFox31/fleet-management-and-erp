@@ -129,6 +129,23 @@ describe("traites et chèques : droits", { timeout: 120000 }, () => {
 });
 
 describe("traites et chèques : saisie", { timeout: 120000 }, () => {
+  it("détail GET /:id : lecture admin, secrétariat, direction, égal à la création ; autres 403 ; anonyme 401 ; inconnu 404 ; id non strict 400", async () => {
+    const created = await create("DET");
+    for (const role of ["admin", "secretary", "management"]) {
+      const res = await call("GET", at(created.id), role);
+      expect(res.status, role).toBe(200);
+      expect(res.body, role).toEqual(created);
+    }
+    for (const role of ["technician", "client", "logistics"]) {
+      expect((await call("GET", at(created.id), role)).status, role).toBe(403);
+    }
+    expect((await call("GET", at(created.id))).status).toBe(401);
+    expect((await call("GET", at(2_000_000_000), "admin")).status).toBe(404);
+    for (const raw of [`${created.id}abc`, "0", "2147483648"]) {
+      expect((await call("GET", `${PAYMENT_INSTRUMENTS_PATH}/${raw}`, "admin")).status, raw).toBe(400);
+    }
+  });
+
   it("création : en attente, sens par défaut « à payer », audit renseigné", async () => {
     const created = await create("C1");
     expect(created).toMatchObject({ status: "pending", direction: "outgoing", amount: "2500000.00", daysUntilDue: 20, alert: "none" });
