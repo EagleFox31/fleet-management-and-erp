@@ -53,6 +53,7 @@ import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { isRetiredVehicle, vehicleEditRefusal, vehicleReadableBy } from "./lib/vehicle-retired";
 import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -996,7 +997,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/vehicles/check/:registrationNumber", isAnyUser, async (req, res) => {
     try {
       const registrationNumber = req.params.registrationNumber;
-      const vehicle = await storage.getVehicleByRegistration(registrationNumber);
+      const vehicle = vehicleReadableBy(req.user?.role, await storage.getVehicleByRegistration(registrationNumber));
       
       if (!vehicle) {
         return res.status(200).json({ exists: false });
@@ -1008,10 +1009,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(200).json({ exists: false });
       }
       
+      // Pour le personnel, une immatriculation retirée reste réservée : la recréer ferait échouer la restauration (409).
       return res.status(200).json({ 
         exists: true, 
         id: vehicle.id,
-        registrationNumber: vehicle.registrationNumber
+        registrationNumber: vehicle.registrationNumber,
+        retired: isRetiredVehicle(vehicle)
       });
     } catch (error) {
       log.error({ err: error, requestId: req.requestId }, "contrôle d'existence du véhicule en échec");
@@ -1046,6 +1049,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // C'est probablement une immatriculation
         vehicle = await storage.getVehicleByRegistration(idOrRegistration);
       }
+      vehicle = vehicleReadableBy(user.role, vehicle);
       
       // Un client reçoit la même réponse (403, même message) pour un véhicule absent et pour celui d'un
       // autre : il ne peut pas deviner quels identifiants existent. Le personnel garde le 404.
@@ -1180,6 +1184,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!vehicle) {
         return res.status(404).json({ message: "Véhicule non trouvé" });
       }
+      const retired = vehicleEditRefusal(vehicle);
+      if (retired) return next(retired);
       
       // Récupérer l'ID de l'utilisateur connecté depuis la session
       const userId = req.user?.id;
@@ -1187,7 +1193,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Corps brut du formulaire : "" vaut champ vidé, et un type invalide
       // doit revenir en 400 plutôt qu'en échec silencieux du stockage.
       // Colonnes d'audit et clé : jamais lues du corps (AGENTS.md §5).
-      const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, ...editableBody } = req.body ?? {};
+      // Retrait et restauration : uniquement par DELETE et POST /restore (server/api/vehicle-lifecycle.routes.ts).
+      const { id: _id, createdBy: _createdBy, createdAt: _createdAt, updatedAt: _updatedAt, deletedAt: _deletedAt, deletedBy: _deletedBy, ...editableBody } = req.body ?? {};
       // Capacité des réservoirs (FUEL3) : 0 ou négatif violerait la contrainte de la base (500).
       // Même schéma que la création : "" ou null vide la capacité, hors bornes = 400 lisible.
       if ("tankCapacityL" in editableBody) {

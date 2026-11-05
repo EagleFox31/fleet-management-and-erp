@@ -36,7 +36,7 @@ const ids = createIdBag();
 const missionIds: number[] = [];
 const driverIds: number[] = [];
 
-let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "technician">>>;
+let actors: Awaited<ReturnType<typeof startContractActors<"admin" | "technician" | "owner" | "stranger">>>;
 const asAdmin = (method: string, path: string) => actors.call(method, path, { actor: "admin" });
 
 async function vehicle() {
@@ -80,7 +80,7 @@ beforeAll(async () => {
   (global as any).broadcastUpdate = vi.fn((eventType: string, data: unknown) => {
     captured.push({ eventType, data });
   });
-  actors = await startContractActors({ admin: "admin", technician: "technician" }, ids.userIds);
+  actors = await startContractActors({ admin: "admin", technician: "technician", owner: "client", stranger: "client" }, ids.userIds);
 }, 180000);
 
 afterAll(async () => {
@@ -216,6 +216,26 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
     expect(notes.map((r) => r.n)).toEqual(expect.arrayContaining(["Retiré de la flotte (suppression douce)", "Remis dans la flotte (restauration)"]));
   });
 
+  it("renouvellement rejeté à la main pendant le retrait : même valeur, mais pas rouvert (updated_at a bougé)", async () => {
+    const v = await vehicle();
+    const doc = await addDocument(v.id);
+    const byDeletion = await addRenewal(v.id, doc.id, "pending");
+    const byHand = await addRenewal(v.id, doc.id, "pending");
+    expect((await asAdmin("DELETE", `/api/vehicles/${v.id}`)).status).toBe(200);
+    expect(await renewalStatus(byHand.id)).toBe("rejected");
+    const stamped = await db.execute(sql`SELECT count(*)::int AS n FROM vehicle_deletion_effects WHERE vehicle_id = ${v.id} AND applied_stamp IS NOT NULL`);
+    expect((stamped.rows[0] as { n: number }).n).toBe(2);
+
+    // Rejet confirmé à la main pendant le retrait : tout écrivain renouvelle updated_at.
+    await db.execute(sql`UPDATE document_renewal_requests SET status = 'rejected', updated_at = now() + interval '1 second' WHERE id = ${byHand.id}`);
+
+    const res = await asAdmin("POST", `/api/vehicles/${v.id}/restore`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toEqual({ vehicleId: v.id, restored: true, reactivated: 1 });
+    expect(await renewalStatus(byDeletion.id)).toBe("pending");
+    expect(await renewalStatus(byHand.id)).toBe("rejected");
+  });
+
   it("un second appel sur un véhicule actif ne change rien (200, restored: false, aucune trame)", async () => {
     const v = await vehicle();
     const plan = await addSchedule(v.id, false);
@@ -248,6 +268,30 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
   });
 });
 
+describe("cloison client : ni retrait ni remise en service, même de son propre véhicule", { timeout: 60000 }, () => {
+  for (const actor of ["owner", "stranger"] as const) {
+    it(`client ${actor === "owner" ? "propriétaire" : "tiers"} : 403 sur DELETE et restore, véhicule intact, aucune trame`, async () => {
+      const own = await createTestVehicle({ ownerId: actors.userIdOf("owner") });
+      ids.vehicleIds.push(own.id);
+      const plan = await addSchedule(own.id, true);
+      captured.length = 0;
+
+      expect((await actors.call("DELETE", `/api/vehicles/${own.id}`, { actor })).status).toBe(403);
+      expect((await vehicleRow(own.id))?.deletedAt).toBeNull();
+      expect(await scheduleActive(plan.id)).toBe(true);
+
+      await addDocument(own.id);
+      expect((await asAdmin("DELETE", `/api/vehicles/${own.id}`)).status).toBe(200);
+      captured.length = 0;
+      expect((await actors.call("POST", `/api/vehicles/${own.id}/restore`, { actor })).status).toBe(403);
+      expect((await vehicleRow(own.id))?.deletedAt).not.toBeNull();
+      expect(await scheduleActive(plan.id)).toBe(false);
+      expect(await effectsOf(own.id)).toHaveLength(1);
+
+      expect(captured.filter((c) => c.eventType === "vehicle_deleted" || c.eventType === "vehicle_restored")).toHaveLength(0);
+    });
+  }
+});
 
 describe("POST /api/vehicles/:id/restore : repli sur l'ancienne table vehicle_archived", { timeout: 60000 }, () => {
   // Aucune migration ne crée vehicle_archived : le test la crée, puis la supprime.
