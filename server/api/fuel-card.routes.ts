@@ -10,10 +10,13 @@ import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
+import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("fuel-card");
 
 const router = Router();
+// Nombre ou chaîne de chiffres seulement : `z.coerce` seul ferait de `true` le compte 1.
+const sourceAccountIdSchema = z.union([z.number(), z.string().trim().regex(/^\d+$/)]).pipe(z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID));
 
 const broadcastFuelCardUpdate = (
   eventType: string,
@@ -82,10 +85,15 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
       return res.status(400).json({ message: "Données de recharge incomplètes" });
     }
     // Compte de trésorerie qui paie la recharge (facultatif, lot T2).
-    const sourceAccountValue =
-      sourceAccountId === undefined || sourceAccountId === null || sourceAccountId === "" ? null : Number(sourceAccountId);
-    if (sourceAccountValue !== null && (!Number.isInteger(sourceAccountValue) || sourceAccountValue <= 0)) {
-      return res.status(400).json({ message: "Compte source de la recharge invalide" });
+    let sourceAccountValue: number | null = null;
+    if (sourceAccountId !== undefined && sourceAccountId !== null && sourceAccountId !== "") {
+      // Débiter une banque ou une caisse : liste explicite, refus avant toute lecture du compte.
+      if (!(FUEL_RECHARGE_SOURCE_ROLES as readonly string[]).includes(String(req.user?.role ?? ""))) {
+        throw new AppError(403, "Votre rôle ne permet pas de choisir le compte qui paie la recharge.");
+      }
+      const parsed = sourceAccountIdSchema.safeParse(sourceAccountId);
+      if (!parsed.success) return res.status(400).json({ message: "Compte source de la recharge invalide" });
+      sourceAccountValue = parsed.data;
     }
 
     const resolvedQuantity = hasQuantity

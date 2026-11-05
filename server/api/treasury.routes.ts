@@ -63,8 +63,11 @@ router.get(
     const accountId = parseRouteId(req.params.id, "Identifiant de compte invalide.");
     const query = treasuryLedgerQuerySchema.parse(req.query);
     const month = query.month ?? currentMonth();
+    // Hors carte : 403 avant la lecture du livre, et même réponse pour un compte absent (rien à sonder).
+    if (fuelCardOnly(req) && (await treasuryService.accountKind(accountId)) !== "fuel_card") {
+      throw new AppError(403, "Accès réservé au compte carte carburant.");
+    }
     const ledger = await treasuryService.ledger(accountId, month);
-    if (fuelCardOnly(req) && ledger.account.kind !== "fuel_card") throw new AppError(403, "Accès réservé au compte carte carburant.");
     if (query.format === "csv") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="tresorerie-${ledger.account.code}-${month}.csv"`);

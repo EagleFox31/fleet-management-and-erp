@@ -224,6 +224,64 @@ describe("T2 : carte carburant au journal de trésorerie", { timeout: 120000 }, 
     expect(orphans).toHaveLength(0);
   });
 
+  it("logistique : choisit le compte source (dérogation FUEL_RECHARGE_SOURCE_ROLES), lignes signées par elle", async () => {
+    const { res } = await recharge({ sourceAccountId: String(bankId), amount: 20000 }, "logistics");
+    expect(res.status).toBe(201);
+    const lines = await linesOfFuel(res.body.recharge.id);
+    expect(lines.map((l) => l.requestKey).sort()).toEqual([`fuel:${res.body.recharge.id}`, `fuel:${res.body.recharge.id}:source`]);
+    expect(lines.find((l) => l.direction === "out")).toMatchObject({ accountId: bankId, amount: "20000.00" });
+    expect(lines.every((l) => l.createdBy === session.userId("logistics"))).toBe(true);
+  });
+
+  it("compte source : rôle hors liste 403, id non entier ou hors borne 400, sans plein ni écriture", async () => {
+    for (const actor of ["management", "technician", "workshop_manager"] as const) {
+      const { res, orderNumber } = await recharge({ sourceAccountId: bankId }, actor);
+      expect(res.status, actor).toBe(403);
+      expect(await fuelByOrder(orderNumber)).toHaveLength(0);
+    }
+    for (const sourceAccountId of [true, 1.5, -1, 0, 2147483648, [bankId], " "]) {
+      const { res, orderNumber } = await recharge({ sourceAccountId });
+      expect(res.status, JSON.stringify(sourceAccountId)).toBe(400);
+      expect(await fuelByOrder(orderNumber)).toHaveLength(0);
+    }
+  });
+
+  it("suppression d'une recharge payée par un compte source ou d'un plein : contre-passation, net nul", async () => {
+    const net = (lines: Awaited<ReturnType<typeof linesOfFuel>>, accountId: number) =>
+      lines.filter((l) => l.accountId === accountId).reduce((s, l) => s + (l.direction === "in" ? 1 : -1) * Number(l.amount), 0);
+    const { res } = await recharge({ sourceAccountId: bankId, amount: 30000 });
+    expect(res.status).toBe(201);
+    const id = res.body.recharge.id as number;
+    expect((await session.call("DELETE", `/api/fuel-records/${id}`, { actor: "secretary" })).status).toBeLessThan(300);
+    const lines = await linesOfFuel(id);
+    expect(lines).toHaveLength(4);
+    expect(lines.map((l) => l.requestKey).sort()).toEqual([`fuel:${id}`, `fuel:${id}:reverse`, `fuel:${id}:source`, `fuel:${id}:source:reverse`]);
+    expect(net(lines, cardId)).toBe(0);
+    expect(net(lines, bankId)).toBe(0);
+    const reversed = lines.filter((l) => l.requestKey!.endsWith(":reverse"));
+    expect(reversed[0].transferGroup).toBeTruthy();
+    expect(reversed[0].transferGroup).toBe(reversed[1].transferGroup);
+    expect(reversed.every((l) => l.createdBy === session.userId("secretary"))).toBe(true);
+    // Seconde suppression : la ligne est déjà supprimée, aucune ligne de plus.
+    await session.call("DELETE", `/api/fuel-records/${id}`, { actor: "secretary" });
+    expect(await linesOfFuel(id)).toHaveLength(4);
+
+    const vehicle = await createTestVehicle();
+    session.ids.vehicleIds.push(vehicle.id);
+    const plein = await session.call("POST", "/api/fuel-card/consumption", {
+      actor: "admin",
+      body: { vehicleId: vehicle.id, quantity: 5, unitPrice: 800, date: DATE, stationName: uniqueTestToken("T2rev"), destination: "Douala" },
+    });
+    expect(plein.status).toBe(201);
+    const pleinId = plein.body.consumption.id as number;
+    fuelIds.push(pleinId);
+    expect((await session.call("DELETE", `/api/fuel-records/${pleinId}`, { actor: "admin" })).status).toBeLessThan(300);
+    const pleinLines = await linesOfFuel(pleinId);
+    expect(pleinLines).toHaveLength(2);
+    expect(net(pleinLines, cardId)).toBe(0);
+    expect(pleinLines.find((l) => l.requestKey === `fuel:${pleinId}:reverse`)).toMatchObject({ direction: "in", vehicleId: vehicle.id });
+  });
+
   it("drapeau finance coupé : recharge sans écriture ; avec compte source, refus 409 sans plein", async () => {
     const { res } = await withFinanceOff(() => recharge());
     expect(res.status).toBe(201);
@@ -241,6 +299,9 @@ describe("T2 : carte carburant au journal de trésorerie", { timeout: 120000 }, 
     expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/${cardId}/entries?month=2037-02`, { actor: "logistics" })).status).toBe(200);
     expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/${bankId}/entries?month=2037-02`, { actor: "logistics" })).status).toBe(403);
     expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/${bankId}/entries?month=2037-02&format=csv`, { actor: "logistics" })).status).toBe(403);
+    // Compte absent : même 403 qu'un compte banque, rien à sonder.
+    expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/2147483000/entries`, { actor: "logistics" })).status).toBe(403);
+    expect((await session.call("GET", `${TREASURY_BASE_PATH}/accounts/2147483000/entries`, { actor: "management" })).status).toBe(404);
     const entry = { accountId: cardId, entryDate: DATE, label: "x", direction: "in", amount: "1" };
     expect((await session.call("POST", `${TREASURY_BASE_PATH}/entries`, { actor: "logistics", body: entry })).status).toBe(403);
     // La direction garde la lecture de tous les comptes.

@@ -34,5 +34,26 @@
 - Sans réconciliation, une base créée par `drizzle-kit push` aurait gardé des noms d'unicité différents (`_unique` au lieu de `_key`). La prochaine poussée aurait alors posé une seconde contrainte.
 
 ### Suites connues
-- La suppression d'un plein laisse son écriture de trésorerie, dont le lien passe à `NULL`. Il faudra décider de la contre-passer.
 - L'écran de choix du compte source d'une recharge reste à faire ; l'API l'accepte déjà.
+
+## 5 novembre 2026, reprise après relecture et audit de #469
+
+### Quoi
+- **Dérogation de rôle, décidée par l'utilisatrice** : `FUEL_RECHARGE_SOURCE_ROLES` (admin, secrétariat, logistique) peut choisir le compte qui paie une recharge. C'est une exception à `TREASURY_WRITE_ROLES`, limitée à cette seule action. La logistique ne saisit rien d'autre au journal. Un rôle hors de la liste qui envoie `sourceAccountId` reçoit 403, sans plein ni écriture.
+- Le compte source doit être actif et de type banque ou caisse, jamais la carte.
+- **Suppression d'un plein ou d'une recharge liée** : elle contre-passe ses écritures, avec les clés `fuel:<id>:reverse` et `fuel:<id>:source:reverse`. Le solde net est nul sur la carte comme sur la source, et l'historique est gardé.
+- **Démarrage** :
+  - deux cartes actives en base ne bloquent plus l'index `uq_treasury_accounts_active_fuel_card` : le démarrage émet un WARNING, et l'index sera posé une fois l'une des cartes désactivée ;
+  - `treasury_entries.vehicle_id` et `mission_id` passent en `ON DELETE SET NULL`, puisque la restauration de sauvegarde supprime les véhicules.
+- **Lecture logistique d'un livre** : le 403 tombe avant la lecture, avec la même réponse pour un compte absent.
+- **Dates** : celles des contre-passations et le repli de la date d'un plein se lisent en Africa/Douala, et non en UTC.
+- `POST /api/fuel-card/recharge` sort de la liste gelée du cliquet « tout corps lu est validé ».
+
+### Comment
+- `sourceAccountId` est validé par Zod : un nombre, ou une chaîne de chiffres, entier positif borné. Un `true` ou un tableau donnent 400.
+- Une FK sans `ON DELETE` est remplacée sous le même nom, en une seule instruction `ALTER TABLE` (`DROP` puis `ADD`). C'est le seul `DROP` admis par `treasury-schema-drift.test.ts`.
+- `reverseFuelLink` relit les lignes `fuel:<id>` et `fuel:<id>:source`, puis insère leurs inverses en `ON CONFLICT DO NOTHING`. Il s'exécute sous `lockFuelCard`, dans la transaction de la suppression.
+
+### Pourquoi
+- La logistique recharge la carte et sait d'où part l'argent. L'utilisatrice a préféré cette dérogation explicite et nommée à un circuit par le secrétariat.
+- Une suppression douce garde la ligne de plein. Sans contre-passation, le solde de la carte au journal divergeait de son solde réel.

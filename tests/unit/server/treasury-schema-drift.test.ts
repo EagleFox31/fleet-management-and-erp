@@ -44,7 +44,18 @@ describe("schéma trésorerie : contraintes nommées pareil partout", () => {
     expect(block).toContain("CHECK (${TREASURY_CATEGORY_CHECK})");
   });
 
-  it("reste additif : aucun DROP", () => {
-    expect(block).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT)\b/i);
+  it("reste additif : aucun DROP, sauf le remplacement d'une FK sous le même nom", () => {
+    expect(block).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX)\b/i);
+    const drops = [...block.matchAll(/DROP\s+CONSTRAINT[^']*/gi)].map((m) => m[0]);
+    expect(drops).toEqual(["DROP CONSTRAINT %I, ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE SET NULL"]);
+  });
+
+  it("véhicule et mission : ON DELETE SET NULL dans Drizzle comme au démarrage (restauration de sauvegarde)", () => {
+    const { foreignKeys } = getTableConfig(treasuryEntries);
+    for (const column of ["vehicle_id", "mission_id"]) {
+      const fk = foreignKeys.find((f) => f.reference().columns[0].name === column);
+      expect(fk?.onDelete, column).toBe("set null");
+      expect(block, column).toMatch(new RegExp(`${column} integer REFERENCES \\w+\\(id\\) ON DELETE SET NULL`));
+    }
   });
 });

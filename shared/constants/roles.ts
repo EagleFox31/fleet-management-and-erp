@@ -165,6 +165,13 @@ export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies re
 export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
 /** Lecture limitée aux comptes carte carburant (lot T2) : la logistique suit la carte, pas la banque. */
 export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics"] as const satisfies readonly AppRole[];
+/**
+ * Choix du compte (banque ou caisse) qui paie une recharge de carte carburant, et seulement cette
+ * action. Dérogation à `TREASURY_WRITE_ROLES`, décidée le 5 novembre 2026 : le gestionnaire de flotte
+ * (logistique) recharge la carte et sait d'où part l'argent. Il ne saisit rien d'autre au journal.
+ * Voir docs/journal/tresorerie-t2t3-journal.md.
+ */
+export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];

@@ -2065,8 +2065,8 @@ export const treasuryEntries = pgTable("treasury_entries", {
   counterpartyLabel: text("counterparty_label"),
   transferGroup: text("transfer_group"),
   notes: text("notes"),
-  vehicleId: integer("vehicle_id").references(() => vehicles.id),
-  missionId: integer("mission_id").references(() => missions.id),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id, { onDelete: "set null" }),
+  missionId: integer("mission_id").references(() => missions.id, { onDelete: "set null" }),
   clientId: integer("client_id").references(() => clients.id),
   supplierId: integer("supplier_id").references(() => suppliers.id),
   // Liens posés par le serveur seul (T2 plein ou recharge, T3 règlement). SET NULL : supprimer la source ne bloque rien.
