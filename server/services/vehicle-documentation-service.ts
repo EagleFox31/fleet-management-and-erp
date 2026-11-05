@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { ownedLiveVehicles } from "../lib/client-vehicle-scope";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isExpiredOn, todayUtcDateOnly } from "@shared/constants/expiry-day";
@@ -54,10 +55,10 @@ const isDateExpiringSoon = (
  * - Suivi position maintenance
  */
 export class VehicleDocumentationService {
-  /** `ownerId` : ne garder que les véhicules de ce propriétaire (cloison client). */
+  /** `ownerId` : ne garder que les véhicules de ce propriétaire, retirés exclus (cloison client). */
   private async getVehiclesWithEffectiveDocumentDates(ownerId: number | null = null) {
     const [allVehicles, docs] = await Promise.all([
-      db.select().from(vehicles).where(ownerId === null ? undefined : eq(vehicles.ownerId, ownerId)),
+      db.select().from(vehicles).where(ownedLiveVehicles(ownerId)),
       db
         .select({
           vehicleId: vehicleDocuments.vehicleId,

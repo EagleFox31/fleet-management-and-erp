@@ -429,5 +429,9 @@ sessions d'acquisition qu'il a créées.
   Exception : un ordre de travail hors périmètre répond 404, comme un OT inexistant
   (`assertWorkOrderReadable`), pour ne pas laisser énumérer les OT des autres.
 - Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).
+- Véhicule retiré (`deleted_at`) : invisible à son client, en détail, en sous-ressource
+  (`assertVehicleSubresourcesReadable`) comme en liste (`clientVehicleScope`,
+  `server/lib/client-vehicle-scope.ts`). Le personnel le voit toujours. Exception : les OT
+  (liste et détail) restent lisibles par le client, l'historique d'un OT ne suit pas le retrait.
 - Source : `server/lib/client-scope.ts`. Test de référence :
   `tests/contract/vehicle-documents-client-scope.contract.test.ts`.

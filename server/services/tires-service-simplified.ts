@@ -4,6 +4,7 @@ import { eq, desc, and, sql, like, isNull, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { activityLogger } from "./activity-logger";
 import type { Tire, InsertTire, VehicleTire, InsertVehicleTire } from "@shared/schema";
+import { ownedLiveVehicles } from "../lib/client-vehicle-scope";
 import { computeTireWearScore } from "@shared/constants/tires";
 import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
 import { usedTiresLabel } from "@shared/constants/tire-stock";
@@ -326,7 +327,7 @@ export class TiresService {
   }
 
   // Vehicle Tires Management - Version simplifiée
-  /** `ownerId` : propriétaire imposé à un client (`ownerScopeOf`), `null` pour le personnel (pas de filtre). */
+  /** `ownerId` : propriétaire imposé à un client (`ownerScopeOf`), `null` pour le personnel (pas de filtre). Client : véhicules retirés exclus. */
   async getAllVehicleTires(ownerId: number | null = null): Promise<any[]> {
     try {
       log.debug("getAllVehicleTires called - using simplified PostgreSQL methods");
@@ -352,7 +353,7 @@ export class TiresService {
         .from(vehicleTires)
         .leftJoin(tires, eq(vehicleTires.tireId, tires.id))
         .leftJoin(vehicles, eq(vehicleTires.vehicleId, vehicles.id))
-        .where(ownerId === null ? eq(vehicleTires.status, "active") : and(eq(vehicleTires.status, "active"), eq(vehicles.ownerId, ownerId)))
+        .where(and(eq(vehicleTires.status, "active"), ownedLiveVehicles(ownerId)))
         .orderBy(desc(vehicleTires.installationDate));
 
       return rows.map((row) => ({
