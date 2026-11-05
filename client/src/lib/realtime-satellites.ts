@@ -106,7 +106,6 @@ export const SATELLITE_GROUPS = {
       "/api/fuel-card/history",
       "/api/fuel-card/monthly-stats",
       "/api/fuel-card/stats-by-client",
-      "/api/fuel-card/consumption-history",
       "/api/fuel-records",
       "/api/fuel-records/statistics",
       "/api/fuel-records/consumption-history",
