@@ -18,7 +18,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { findFuelPriceAt, todayIsoDate } from "./fuel-price-service";
-import { linkMissionBudgetDisbursement } from "./treasury-links";
+import { linkMissionBudgetDisbursement, reverseMissionBudgetDisbursements } from "./treasury-links";
 
 const log = moduleLogger("mission-budgets");
 
@@ -285,6 +285,21 @@ export async function transitionMissionBudget(
 }
 
 /** Besoin du jour : somme en base des budgets de la date, au total et par statut. */
+/**
+ * Changement de statut d'une mission, appelé dans sa transaction (PUT /api/missions/:id/status).
+ * Seule l'annulation agit : budget non décaissé, aucun mouvement (il reste figé, cf. lockOpenMission) ;
+ * budget décaissé, contre-passation du reliquat au journal (reverseMissionBudgetDisbursements).
+ */
+export async function onMissionStatusChange(tx: Executor, missionId: number, nextStatus: string, userId: number | null): Promise<void> {
+  if (nextStatus !== "cancelled") return;
+  const disbursed = await tx
+    .select({ id: missionBudgets.id })
+    .from(missionBudgets)
+    .where(and(eq(missionBudgets.missionId, missionId), eq(missionBudgets.status, "disbursed")));
+  const reversed = await reverseMissionBudgetDisbursements(tx as never, disbursed.map((b) => b.id), userId);
+  if (reversed > 0) log.info({ missionId, budgetIds: disbursed.map((b) => b.id), reversed }, "budget de mission contre-passé (mission annulée)");
+}
+
 export async function dailyNeed(date: string): Promise<DailyNeed> {
   const rows = await db
     .select({

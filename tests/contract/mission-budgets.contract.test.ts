@@ -15,7 +15,7 @@ import {
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
 import { fuelPrices, missionBudgets, missionDestinations, missions, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { db } from "../../server/db";
-import { resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
+import { onMissionStatusChange, resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
 import { linkMissionBudgetDisbursement } from "../../server/services/treasury-links";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -522,6 +522,56 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", { ...seen(created), treasuryAccountId: accounts.bank })).status).toBe(400);
     const { approved } = await approvedBudget();
     expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: 2_147_483_648 })).status).toBe(400);
+  });
+
+  const cancelMission = (missionId: number) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status: "cancelled" });
+
+  it("L1d — mission annulée après décaissement : le reliquat revient au compte source, une fois", async () => {
+    const { missionId, approved } = await approvedBudget();
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    const cancelled = await cancelMission(missionId);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+
+    const entries = await entriesOf(approved.id);
+    expect(entries).toHaveLength(4);
+    const byKey = new Map(entries.map((e) => [e.requestKey, e]));
+    for (const line of ["fdr", "carburant"]) {
+      const out = byKey.get(`mission-budget:${approved.id}:${line}`)!;
+      const back = byKey.get(`mission-budget:${approved.id}:${line}:reverse`)!;
+      // Aucune dépense justifiée aujourd'hui : reliquat = montant décaissé.
+      expect(back, line).toMatchObject({ accountId: accounts.bank, direction: "in", amount: out.amount, category: out.category, missionId, createdBy: userIds.get("admin") });
+    }
+    // Le budget reste décaissé, figé avec sa mission.
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    expect(row.status).toBe("disbursed");
+
+    // Rejeu de l'annulation (route rejouable) puis du service : rien de plus au journal.
+    await cancelMission(missionId);
+    await db.transaction((tx) => onMissionStatusChange(tx, missionId, "cancelled", userIds.get("admin")!));
+    expect(await entriesOf(approved.id)).toHaveLength(4);
+  });
+
+  it("L1d — annulation avant décaissement, ou décaissement sans compte : aucun mouvement", async () => {
+    const before = await approvedBudget();
+    expect((await cancelMission(before.missionId)).status).toBe(200);
+    expect(await entriesOf(before.approved.id)).toHaveLength(0);
+    const [stillApproved] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, before.approved.id));
+    expect(stillApproved.status).toBe("approved");
+
+    const noAccount = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(noAccount.approved.id), "management", seen(noAccount.approved))).status).toBe(200);
+    expect((await cancelMission(noAccount.missionId)).status).toBe(200);
+    expect(await entriesOf(noAccount.approved.id)).toHaveLength(0);
+  });
+
+  it("L1d — un autre statut que l'annulation ne contre-passe rien", async () => {
+    const { missionId, approved } = await approvedBudget();
+    await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.cash });
+    for (const status of ["planned", "in_progress", "delivered", "completed"]) {
+      await db.transaction((tx) => onMissionStatusChange(tx, missionId, status, userIds.get("admin")!));
+    }
+    expect((await entriesOf(approved.id)).filter((e) => e.requestKey.endsWith(":reverse"))).toHaveLength(0);
   });
 
   it("drapeau finance coupé : un compte demandé est refusé (409), sans compte rien n'est écrit", async () => {

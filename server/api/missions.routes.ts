@@ -1,4 +1,5 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
+import { onMissionStatusChange } from "../services/mission-budgets-service";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
@@ -3170,6 +3171,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         })
         .where(eq(missions.id, missionId))
         .returning();
+      await onMissionStatusChange(tx, missionId, targetStatus, req.user?.id ?? null);
       // Une écriture par affectation visée, conditionnée au statut lu : une ligne annulée entre-temps
       // (DELETE concurrent) n'est pas ressuscitée.
       for (const target of targetAssignments) {
