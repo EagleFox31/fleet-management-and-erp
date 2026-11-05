@@ -5,8 +5,6 @@ import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { laborRateForWorkOrder, workOrderExists } from "../services/workshop-labor-rates-service";
 
-/** Plus grand `integer` Postgres : au-delà, la conversion échouerait en 500. */
-
 /**
  * Taux horaire en vigueur pour un OT, monté sur `/api/work-orders`.
  *
