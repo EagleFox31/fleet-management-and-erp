@@ -77,3 +77,21 @@
 ### Suites connues
 - `server/storage.ts` (`deleteVehicle`) supprime les pleins du véhicule sans `reverseFuelLink`. Les écritures de trésorerie restent, avec un lien `fuel_record_id` à NULL. Hors de cette PR.
 - Les FK `client_id` et `supplier_id` de `treasury_entries` restent sans `ON DELETE` : aucune suppression ne les vise (avis de l'audit).
+
+## 5 novembre 2026, écran du compte source d'une recharge
+
+### Quoi
+- Le formulaire de recharge de la carte carburant propose « Compte qui paie la recharge » : une banque ou une caisse active, ou « Non précisé » (entrée sur la carte seule, comme avant). Ce point ferme la suite connue du premier lot.
+- `GET /api/fuel-card/source-accounts` liste ces comptes (id, code, libellé, type), sans aucun solde, pour `FUEL_RECHARGE_SOURCE_ROLES`. La liste est vide quand le drapeau finance est coupé, et le champ n'apparaît alors pas.
+
+### Comment
+- La mutation reçoit le corps en variables, figé au clic, et part par `useSingleFlightMutate`.
+- Les trois couches :
+  1. invalidations existantes (solde, historique, pleins, statistiques) ;
+  2. l'événement `fuel_card_recharged` sur le groupe satellite « fuel » ;
+  3. aucune clé ajoutée, la liste des comptes étant un référentiel.
+- `realtime-satellites.test.ts` ne lit plus « count » dans « account » : la clé `/api/fuel-card/source-accounts` était prise pour un compteur.
+
+### Pourquoi
+- `GET /api/treasury/accounts` ne montre à la logistique que la carte : sans cette route, la dérogation ne pouvait pas servir à l'écran.
+- Aucun solde n'est exposé : la logistique choisit un compte, elle ne lit pas la trésorerie.
