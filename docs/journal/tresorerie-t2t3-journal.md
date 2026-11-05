@@ -77,3 +77,16 @@
 ### Suites connues
 - `server/storage.ts` (`deleteVehicle`) supprime les pleins du véhicule sans `reverseFuelLink`. Les écritures de trésorerie restent, avec un lien `fuel_record_id` à NULL. Hors de cette PR.
 - Les FK `client_id` et `supplier_id` de `treasury_entries` restent sans `ON DELETE` : aucune suppression ne les vise (avis de l'audit).
+
+## 5 novembre 2026, suppression définitive d'un véhicule
+
+### Quoi
+- `storage.deleteVehicle` contre-passe les écritures de trésorerie des pleins du véhicule avant de les supprimer, comme le fait la suppression unitaire d'un plein. Le solde net redevient nul sur la carte, et sur la source pour une recharge.
+- La suppression se fait en une seule transaction : un échec n'en laisse aucune partie appliquée.
+
+### Comment
+- Sous `lockFuelCard`, `reverseFuelLink(tx, pleinId, acteur)` est appelé pour chaque plein, puis viennent les suppressions dans l'ordre des clés étrangères. Les `console.*` de la méthode sont migrés vers `moduleLogger("storage")`.
+- La méthode n'a aujourd'hui aucun appelant. La route DELETE véhicule passe par `vehicle-deletion-service-trigger`, et `fuel_records.vehicle_id` reste en NO ACTION : un véhicule qui a des pleins y est refusé. Le correctif évite qu'un futur appelant crée des écritures orphelines.
+
+### Suites connues
+- `backup-import-service.ts` (restauration de sauvegarde) supprime tous les pleins sans toucher à la trésorerie : les écritures restent, avec `fuel_record_id` à NULL. Une PR séparée suivra ; l'option (inclure `treasury_*` dans la sauvegarde, ou contre-passer) est soumise avant de coder.

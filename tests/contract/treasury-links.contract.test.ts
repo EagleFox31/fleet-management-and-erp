@@ -7,6 +7,7 @@ import { db } from "../../server/db";
 import { fuelRecords, supplierInvoiceSettlements, treasuryAccounts, treasuryEntries, type FuelRecord } from "../../shared/schema";
 import { fuelCardService } from "../../server/services/fuel-card-service";
 import { linkFuelConsumption } from "../../server/services/treasury-links";
+import { storage } from "../../server/storage";
 import { createTestSupplier, createTestSupplierInvoice, createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
@@ -198,6 +199,35 @@ describe("T2 : carte carburant au journal de trésorerie", { timeout: 120000 }, 
     expect(replayed.replayed).toBe(true);
     const after = await db.select({ n: sql<number>`count(*)::int` }).from(treasuryEntries).where(eq(treasuryEntries.accountId, cardId));
     expect(after[0].n).toBe(before[0].n);
+  });
+
+  it("suppression définitive d'un véhicule : ses pleins liés sont contre-passés, net nul sur la carte", async () => {
+    await recharge();
+    const vehicle = await createTestVehicle();
+    session.ids.vehicleIds.push(vehicle.id);
+    const res = await session.call("POST", "/api/fuel-card/consumption", {
+      actor: "admin",
+      body: { vehicleId: vehicle.id, quantity: 5, unitPrice: 800, date: DATE, stationName: "TEST T2 VEH", destination: "Douala" },
+    });
+    expect(res.status).toBe(201);
+    const recordId = (res.body.consumption as FuelRecord).id;
+    const keys = [`fuel:${recordId}`, `fuel:${recordId}:reverse`];
+    const lines = () => db.select().from(treasuryEntries).where(inArray(treasuryEntries.requestKey, keys));
+    try {
+      expect(await storage.deleteVehicle(vehicle.id, session.userId("secretary"))).toBe(true);
+      expect(await fuelByStation("TEST T2 VEH")).toHaveLength(0);
+      const after = await lines();
+      expect(after.map((l) => l.requestKey).sort()).toEqual(keys);
+      const reverse = after.find((l) => l.requestKey === keys[1])!;
+      expect(reverse).toMatchObject({ accountId: cardId, direction: "in", createdBy: session.userId("secretary") });
+      const net = after.reduce((sum, l) => sum + (l.direction === "in" ? 1 : -1) * Number(l.amount), 0);
+      expect(net).toBe(0);
+      // Plein et véhicule supprimés : les écritures restent, leurs liens passent à NULL.
+      expect(after.every((l) => l.fuelRecordId === null && l.vehicleId === null)).toBe(true);
+    } finally {
+      // Le lien au plein est tombé : nettoyage par la clé.
+      await db.delete(treasuryEntries).where(inArray(treasuryEntries.requestKey, keys));
+    }
   });
 
   it("plein annulé (écriture liée en échec, solde insuffisant) : ni plein, ni écriture orpheline", async () => {
