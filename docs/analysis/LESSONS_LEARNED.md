@@ -3147,6 +3147,18 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - Aucun travail non commité dans le dépôt principal : toute modification se fait dans un worktree et se met à l'abri par un commit, même temporaire.
 - **Leçon généralisée** : une commande destructive ne doit dépendre d'aucune hypothèse sur le répertoire courant. Si son préalable peut échouer, l'échec doit arrêter la chaîne. Et un répertoire partagé par plusieurs sessions ne doit porter aucun état non commité, car il n'a pas de propriétaire unique qui le protège.
 
+## 2026-11-05 — backup-db sous charge : le délai rallongé ne suffisait pas, le coût est par processus
+
+- **Contexte** : malgré le `timeout: 30_000` de l'entrée du 2026-11-04, deux tests de `tests/unit/deploy/backup-db.test.ts` dépassaient encore 30 s dans la suite complète (35 s), et passaient isolés.
+- **Cause racine** : sous Git Bash, `fork` est émulé. Une trace `bash -x` horodatée prise pendant la suite complète montre environ 2 s par processus lancé, uniformément sur toutes les étapes (contre ~0,03 s isolé) : ni I/O, ni horloge simulée, ni verrou. Une exécution du script (une quinzaine de processus) passait de 0,45 s à 31 s, et les tests en échec lançaient le script deux fois (une exécution de préparation, puis celle testée).
+- **Classification** : test instable, délai calibré sur une mesure isolée ; correctif précédent par élargissement du délai, sans mesure sous charge.
+- **Résolution** : délai inchangé, processus réduits.
+  - Un seul lancement du script par test : l'état préalable (dump du jour, dossier) est écrit directement.
+  - Le stub lit l'en-tête du dump avec `read` au lieu de `head | grep`.
+  - `deploy/backup-db.sh` date le journal et le dump par `printf '%(...)T'` (bash >= 4.2) au lieu de `date`, et n'appelle plus `dirname`. Sortie identique à `date` vérifiée sur 20 cas (5 fuseaux, bascules d'heure d'été). Comportement hors journal inchangé : même code de sortie, même nom de dump, même rétention.
+- **Prévention vérifiable** : 3 suites unitaires complètes vertes (2697 chacune) ; le test 1 vérifie le format de chaque ligne du journal. Le commentaire du `describe` fixe la règle : réduire les processus, ne pas rallonger le délai.
+- **Leçon généralisée** : un test lent sous charge se diagnostique par une mesure prise sous charge, étape par étape, avant de toucher au délai. Pour un test qui lance des processus, le coût à réduire est le nombre de processus, et l'état préalable s'écrit, il ne se rejoue pas.
+
 ## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
 
 - **Contexte** : après l'incident du `git checkout -- .` (entrée « Modifications non commitées perdues : `cd` en échec… », même date), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
