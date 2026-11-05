@@ -37,6 +37,12 @@ export const MISSION_BUDGET_STATUS_LABELS: Record<MissionBudgetStatus, string> =
 /** Mission close : plus de budget à saisir pour elle (409). */
 export const MISSION_STATUSES_WITHOUT_BUDGET = ["completed", "cancelled"] as const;
 
+/**
+ * Mission dont les dépenses justifiées ne changent plus (409). Terminée, elle les garde ouvertes tant
+ * que le reliquat n'est pas rendu (R1) ; annulée, son reliquat est contre-passé : jamais.
+ */
+export const MISSION_STATUSES_WITHOUT_EXPENSES = ["cancelled"] as const;
+
 /** Plafond d'un montant saisi : numeric(15,2) en base. */
 export const MISSION_BUDGET_MAX_AMOUNT = 1_000_000_000;
 /** Plafond des litres d'un budget : numeric(12,2) en base, très au-delà d'un plein de convoi. */
