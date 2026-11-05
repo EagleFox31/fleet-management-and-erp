@@ -296,3 +296,65 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - `check-alerts` et les deux statistiques étaient déjà filtrés, mais aucun test ne le figeait : ils sont ajoutés au contrat ;
   - la note B7 dit maintenant qu'il faudra aussi cloisonner `GET /requests` et `/centers` avant d'ouvrir le rôle au client.
   - Hors périmètre, dette existante : dans `GET /api/vehicle-tires` (`routes.ts`), le service avale ses erreurs. Pas joignable sans session, puisque `isAnyUser` passe avant.
+
+## 2026-11-05T22:46:00+01:00 — Écritures rattachées à un véhicule retiré : refus 409 (L3)
+
+- **Quoi** : sur un véhicule retiré, le personnel reçoit un 409 (`VEHICLE_RETIRED_EDIT_MESSAGE`) pour toute écriture rattachée : OT, plans d'entretien, pleins et bons carburant, kilométrage, documents, renouvellements, pneus, pièces, demandes de pièce, QHSE.
+  - Décision 0a, option A, révisable et ajoutée aux questions client : pour une saisie tardive, on restaure le véhicule, on saisit, puis on le retire à nouveau.
+  - Le démontage de pneu reste ouvert, par décision.
+  - Un client ou un anonyme n'est pas concerné : la route répond elle-même 403 ou 401, comme avant.
+- **Comment** :
+  - Table déclarative `RETIRED_VEHICLE_WRITE_ROUTES` (`server/lib/retired-vehicle-write-routes.ts`, 44 entrées). Pour chaque route, elle dit où lire le véhicule : corps, paramètre, ou recherche par OT, plein, pneu, document, renouvellement, pièce ou demande.
+  - Garde `retiredVehicleWriteGuard` (`server/middleware/retired-vehicle-write-guard.ts`). C'est un `Router` Express qui déclare chaque entrée avec sa méthode et son chemin. Elle est montée dans `server/api/index.ts` avant `registerRoutes`, donc elle couvre aussi `routes.ts` sans y ajouter de ligne.
+  - Corps multipart (`quick-renew`) : la garde ne voit pas le véhicule, alors la poignée appelle `assertVehicleWritable` après le parsing.
+  - `asVehicleRef` lit l'id au moins aussi largement que la route (`z.coerce.number`, `Number()`) et le borne à `MAX_DB_INTEGER_ID`.
+- **Pourquoi** : L1 et L2 cachent le véhicule retiré aux lecteurs. Rien n'empêchait encore d'y rattacher de nouvelles écritures, qui faussaient l'historique et les agrégats d'un véhicule sorti du parc.
+- **Preuve automatisée** :
+  - `tests/contract/vehicle-retired-writes.contract.test.ts` (30 tests) :
+    - 22 écritures refusées en 409, dont `quick-renew` en multipart ;
+    - les rôles chef d'atelier et technicien ;
+    - les contournements : casse du chemin, `%xx`, `" N"`, `[N]`, `"N.0"`, `+N` urlencodé ;
+    - aucune ligne créée ou modifiée ;
+    - contrôles : véhicule actif non bloqué, client 403, anonyme 401, id hors bornes jamais en 500, démontage de pneu ouvert.
+  - `tests/unit/server/retired-vehicle-writes-hygiene.test.ts` :
+    - balaie toutes les routes d'écriture de `routes.ts` et des routeurs de `server/api/`, poignées nommées comprises (`scanWriteRoutes`, `tests/support/route-guard-scan.ts`) ;
+    - toute route qui nomme un véhicule doit être dans la table, appeler `assertVehicleWritable`, ou figurer dans la liste gelée `NOT_GUARDED` (8 entrées motivées). Cette liste est un cliquet : elle ne peut que rétrécir ;
+    - la taille de la table est figée (`TABLE_FLOOR`) : retirer une entrée exige une revue.
+  - `prefix-middleware-guardrail` : la garde est inscrite avec sa raison.
+  - Mutants : les 14 sont détectés.
+
+    | Mutant | Rouges |
+    |---|---|
+    | Client non exempté | 1 |
+    | Recherche par OT vide | 6 |
+    | Corps ignoré | 11 |
+    | Paramètre ignoré | 17 |
+    | Refus jamais levé | 25 |
+    | `quick-renew` sans contrôle | 1 |
+    | `asVehicleRef` strict (ancien) | 1 |
+    | Borne entière retirée (contrat) | 1 |
+    | Borne entière retirée (unitaire) | 1 |
+    | Bon carburant hors table | 1 |
+    | Plein supprimé lu | 1 |
+    | Id zéro accepté | 1 |
+    | `assertVehicleWritable` ignoré par l'hygiène | 1 |
+    | Route retirée de la table | 1 |
+
+    Les deux derniers mutants survivaient tant que le plancher valait 43, en `>=`, alors que la table comptait 44 entrées. Le plancher est maintenant égal à la taille de la table. Contrôle fait : hygiène verte sans mutant, rouge avec.
+- **Audit sécurité** : premier verdict « OK sous réserve », réserves levées.
+  - Bloquants, corrigés :
+    - la garde utilisait une regex sensible à la casse, et ne décodait pas `%xx`, alors qu'Express fait les deux. Elle utilise maintenant le même moteur de correspondance que le routeur ;
+    - les ids que Zod ou `Number()` convertissent (`" 7"`, `[7]`, `"7.0"`, `"+7"`, urlencodé) passaient la garde et atteignaient la route.
+  - Mineurs, corrigés :
+    - borne entière : un id au-delà de l'entier Postgres faisait un 500 en 22003, cas `qhse-inspections` ;
+    - `POST /api/fuel-vouchers/:id/validate` n'était pas gardée ;
+    - le balayage d'hygiène ne voyait pas les poignées nommées ;
+    - champs du corps de `PATCH /api/part-requirements/:id`.
+  - Acceptés :
+    - un membre du personnel sans droit sur la route reçoit 409 au lieu de 403. Il n'apprend que l'état retiré, déjà visible pour le personnel ;
+    - une session d'utilisateur désactivé reçoit 409 : négligeable ;
+    - le rejeu idempotent d'un 409 n'a pas d'effet.
+- **Leçon (near miss)** : une garde montée en amont doit utiliser le même moteur de correspondance que le routeur, et lire les ids au moins aussi largement que la route. Sinon, chaque écart d'analyse devient un contournement. Cette leçon est figée par les cas de contournement du contrat et par le test d'accord `asVehicleRef` / `z.coerce`.
+- **Limites connues** :
+  - une route qui n'atteint le véhicule que par `workOrderId`, ou qui passe le corps entier à Zod sans nommer le véhicule, échappe au marqueur d'hygiène. Le plancher de la table compense en partie ;
+  - les sous-routeurs montés dans un routeur ne sont pas balayés.

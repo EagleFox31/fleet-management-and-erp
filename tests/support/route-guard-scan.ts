@@ -659,6 +659,56 @@ export function extractRoutes(rawSource: string): Array<{ routerVar: string; met
 }
 
 /**
+ * Écritures (POST, PUT, PATCH, DELETE) de `server/routes.ts` (routeur `app`) et des routeurs montés dans
+ * `server/api/index.ts`, avec le texte de leur déclaration (gardes et poignée, commentaires retirés).
+ * Signatures `METHODE /api/chemin/:p` (cf. `routeSignature`). Une poignée nommée (`validateVoucher`)
+ * déclarée dans le même fichier est ajoutée au texte. Même limite que `scanShadowedRoutes` :
+ * un sous-routeur monté par un autre fichier n'est pas vu.
+ */
+function namedHandlerText(source: string, name: string): string {
+  const decl = new RegExp(String.raw`(?:\bfunction\s+${name}\s*\(|\b(?:const|let)\s+${name}\b[^=]*=)`).exec(source);
+  if (!decl) return "";
+  const brace = source.indexOf("{", decl.index + decl[0].length);
+  const close = brace < 0 ? -1 : matchingClose(source, brace);
+  return close < 0 ? "" : source.slice(decl.index, close + 1);
+}
+
+export function scanWriteRoutes(serverDir: string): Array<{ signature: string; file: string; handler: string }> {
+  const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
+  const mounts = parseMounts(indexSource, { restrictive: new Set(), permissive: new Set(), neutral: new Set(), arrays: new Map(), roles: {} });
+  const out: Array<{ signature: string; file: string; handler: string }> = [];
+  const collect = (file: string, raw: string, prefixOf: (routerVar: string) => string | undefined) => {
+    const source = stripComments(raw);
+    const routers = routerVarsOf(source);
+    for (const m of source.matchAll(/\b(\w+)\s*\.\s*(post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
+      if (!routers.has(m[1]) || (m[3] === "`" && m[4].includes("${"))) continue;
+      const prefix = prefixOf(m[1]);
+      if (prefix === undefined) continue;
+      const open = source.indexOf("(", m.index! + m[1].length);
+      const close = matchingClose(source, open);
+      const declaration = source.slice(open, close < 0 ? undefined : close);
+      const named = splitTopLevel(declaration.slice(1))
+        .map((arg) => arg.trim())
+        .filter((arg) => /^\w+$/.test(arg))
+        .map((name) => namedHandlerText(source, name));
+      out.push({ signature: routeSignature(m[2], `${prefix}${m[4]}`), file, handler: [declaration, ...named].join(" ") });
+    }
+  };
+  collect("server/routes.ts", readFileSync(join(serverDir, "routes.ts"), "utf8"), (v) => (v === "app" ? "" : undefined));
+  for (const path of sourceFiles(join(serverDir, "api"))) {
+    const file = `server/api/${path.slice(join(serverDir, "api").length + 1).replace(/\\/g, "/")}`;
+    const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
+    if (fileMounts.length === 0) continue;
+    const raw = readFileSync(path, "utf8");
+    collect(file, raw, (v) => {
+      const own = mountOf(fileMounts, v, raw);
+      return own ? `/api${own.prefix}` : undefined;
+    });
+  }
+  return out;
+}
+
+/**
  * Routes de `server/routes.ts` masquées par un routeur de `server/api/` : `apiRouter` est monté sur
  * `/api` AVANT `registerRoutes` (server/app.ts), donc Express sert la déclaration de `server/api/`
  * et celle de `routes.ts` dort, avec ses gardes et sa logique, prête à revenir si l'autre disparaît.
