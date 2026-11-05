@@ -458,6 +458,12 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `multer-lifecycle-hygiene` parcourt `server/api` (sous-dossiers) et `server/routes.ts`, suit les handlers nommés du fichier, `upload.single()` et `const { file } = req` ; le drapeau doit suivre une écriture (`await` avant, `await` après seulement dans un `try`/`catch`) et le `finally` doit appeler une suppression. `upload-delete-hygiene` couvre tout `server/` (`deleteFile` du middleware compris ; job et stockage de sauvegarde, service workflow gelés avec raison). Dépôt de document véhicule : si la synchro du miroir puis le retrait de la ligne échouent, la ligne et son fichier restent. `ownedBy` supprimé (aucun consommateur ; garde et handler y lisaient l'id séparément).
 - **Pourquoi** : réserves de la relecture et de l'audit sécurité de #350.
 - **Preuve** : contrat `vehicle-documents-orphan-row-file` rouge sur l'ancien code, vert après (spies, la suite contrat tourne en `isolate: false`) ; garde multer rouge quand le drapeau du dépôt est avancé avant l'écriture ; cas synthétiques (drapeau avant ou entre deux écritures, effet au mieux, `finally` sans suppression, handler nommé, déstructuration).
+
+## 2026-11-05 — Gardes fichiers téléversés : gel compté, drapeau après une écriture
+- **Quoi** : `upload-delete-hygiene` compte les suppressions non bornées par clé gelée (`count`) ; `multer-lifecycle-hygiene` exige qu'un `await` d'écriture (`WRITE_NAME` : `insert`, `update`, `transaction`, `create…`, `record…`, `save…`) précède le drapeau, un `await` de lecture seul ne suffit plus.
+- **Pourquoi** : réserves non bloquantes de la relecture de #355 (seconde suppression dans une fonction gelée, `await` quelconque avant le drapeau).
+- **Preuve** : seconde `unlinkSync` injectée dans une fonction gelée → garde rouge (1 → 2) ; cas `/lecture-seule` accepté sans la règle, refusé avec ; cas `/transaction` accepté ; 11/11.
+
 ## 2026-11-05 — Coûts de mission : id strict, mission inconnue en 404
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.

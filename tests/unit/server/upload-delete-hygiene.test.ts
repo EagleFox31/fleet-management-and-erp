@@ -14,24 +14,33 @@ import { fileAccessKey, LINK_RESOLVING_BOUND_CALLS, scanFileAccesses } from "../
  */
 const DELETE_CALLS = new Set(["unlink", "unlinkSync", "rm", "rmSync", "rmdir", "rmdirSync"]);
 
-const DELETE_FROZEN: Record<string, { reason: string; unfreezeWhen: string }> = {
+/**
+ * Clé `fichier:fonction:appel` et nombre d'occurrences non bornées sous cette clé : une seconde
+ * suppression ajoutée dans une fonction déjà gelée change le compte et fait échouer la garde.
+ */
+const DELETE_FROZEN: Record<string, { count: number; reason: string; unfreezeWhen: string }> = {
   "server/api/document-renewals.routes.ts:removeUploadedProof:unlinkSync": {
+    count: 1,
     reason: "req.file.path, chemin écrit par multer dans le dossier des preuves de la requête en cours, jamais lu en base",
     unfreezeWhen: "la suppression passe par une borne qui résout les liens sur le dossier des preuves (uploadedFileCandidates ou équivalent)",
   },
   "server/services/workflow-document-service.ts:saveWorkflowDocument:rmSync": {
+    count: 1,
     reason: "chemin construit dans le même appel (uploads/workflows/<sessionId borné>/<nom généré>), supprimé si l'INSERT est refusé, jamais lu en base",
     unfreezeWhen: "la suppression passe par uploadedFileCandidates sur le chemin relatif stocké, comme deleteWorkflowDocument",
   },
   "server/services/workflow-document-service.ts:cleanupAbandonedWorkflowDocuments:rmSync": {
+    count: 1,
     reason: "dossier uploads/workflows/<sessionId> après isSafePathSegment ; borne lexicale seulement, rmSync récursif",
     unfreezeWhen: "le dossier est vérifié par une borne qui résout les liens (isInsideDirectory résolu ou équivalent) avant le rmSync",
   },
   "server/jobs/backup.ts:runBackup:rm": {
+    count: 1,
     reason: "fichier temporaire de sauvegarde créé par le job lui-même, hors uploads/, jamais un fichier téléversé",
     unfreezeWhen: "sans objet tant que le chemin temporaire est créé par le job ; s'il vient d'une entrée, le borner",
   },
   "server/lib/backup/storage.ts:remove:rm": {
+    count: 1,
     reason: "dossier BACKUP_DIR, refusé sous uploads/ au démarrage, nom de fichier produit par le job de sauvegarde",
     unfreezeWhen: "sans objet tant que les noms viennent du job ; s'ils viennent d'une requête, passer par une borne qui résout les liens",
   },
@@ -63,6 +72,12 @@ describe("suppression de fichier dans server/ : borne qui résout les liens (AGE
   it("toute suppression non bornée par une borne qui résout les liens figure dans la liste gelée", () => {
     const offenders = deletions.filter((s) => !s.bounded && !(fileAccessKey(s) in DELETE_FROZEN));
     expect(offenders.map((s) => `${fileAccessKey(s)} (ligne ${s.line})`)).toEqual([]);
+  });
+
+  it("liste gelée comptée par occurrence : pas de seconde suppression non bornée sous une clé gelée", () => {
+    const counts: Record<string, number> = {};
+    for (const site of deletions.filter((s) => !s.bounded)) counts[fileAccessKey(site)] = (counts[fileAccessKey(site)] ?? 0) + 1;
+    expect(counts).toEqual(Object.fromEntries(Object.entries(DELETE_FROZEN).map(([key, { count }]) => [key, count])));
   });
 
   it("liste gelée sans entrée morte, chaque entrée justifiée avec sa condition de dégel", () => {
