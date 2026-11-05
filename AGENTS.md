@@ -347,7 +347,10 @@ Notes :
   Une valeur de requête ne devient un segment de chemin qu'après `isSafePathSegment`.
   Tous les accès disque de `server/` (`sendFile`, `download`, `createReadStream`,
   `readFile`, `copyFile`, `unlink`, `rm`) passent par `uploadedFileCandidates`,
-  `existingUploadedFile` ou `isInsideDirectory`, `deleteFile` compris. Sinon ils figurent
+  `existingUploadedFile`, `settlementProofPath` ou `isInsideDirectory`, `deleteFile` compris.
+  Un fichier propre à un dossier se borne à **son** dossier, pas à tout `uploads/` : le
+  justificatif de règlement fournisseur passe par `settlementProofPath`
+  (`server/lib/settlement-proof.ts`), validé dès l'écriture. Sinon ils figurent
   dans la liste gelée de `tests/unit/server/stored-path-hygiene.test.ts`, avec la raison
   pour laquelle leur chemin ne vient pas de la base (multer, fichiers livrés, sauvegardes).
   Revue faite le 3 novembre 2026. Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
