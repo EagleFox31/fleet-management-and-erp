@@ -382,6 +382,25 @@ export function canReadWorkOrderCost(role: string | null | undefined): boolean {
 }
 
 /**
+ * Retrait d'une pièce posée sur un OT (`DELETE /api/parts-used/:id`) : magasin et atelier
+ * (le geste remet du stock). Le technicien est refusé. Même liste que la route serveur.
+ */
+export const PART_USED_REMOVE_ROLES = ["admin", "warehouse", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Statuts d'OT où le retrait est refusé par le serveur (409). */
+export const PART_USED_REMOVE_BLOCKED_WO_STATUSES = ["completed", "cancelled"] as const;
+
+export function canRoleRemovePartUsed(
+  role: string | null | undefined,
+  workOrderStatus: string | null | undefined,
+): boolean {
+  return (
+    (PART_USED_REMOVE_ROLES as readonly string[]).includes(String(role ?? "")) &&
+    !(PART_USED_REMOVE_BLOCKED_WO_STATUSES as readonly string[]).includes(String(workOrderStatus ?? ""))
+  );
+}
+
+/**
  * Écarts du cahier des charges (chantier CDC, lot CDC-0a). Groupes lus par le montage
  * de `server/api/index.ts` et, plus tard, par les écrans : ne pas les recopier.
  */

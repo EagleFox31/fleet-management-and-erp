@@ -19,3 +19,13 @@
 **Pourquoi.** Déclaration fiscale et rapprochement des attestations de retenue.
 
 **Comment tester.** Ouvrir l'écran avec un compte admin, direction, secrétariat ou logistique (drapeau finance actif) : mois en cours par défaut, aucune action. Autre rôle : pas de menu, route introuvable. Tests : `tests/unit/client/withholdings-summary.test.ts`.
+
+## 2026-11-05 — Corbeille des pièces posées alignée sur le serveur
+
+**Quoi.** Sur la fiche OT, la corbeille des pièces posées n'apparaît que pour admin, magasin et chef d'atelier, et pas sur un OT terminé ou annulé. Commentaire de `canIssueFromStock` corrigé (la garde serveur `isStockIssuer` inclut le chef d'atelier, exclu ici car il passe par la sortie exceptionnelle).
+
+**Comment.** `PART_USED_REMOVE_ROLES` et `canRoleRemovePartUsed` dans `shared/constants/roles.ts` (aucune liste partagée n'existait). Clic via `useSingleFlightMutate`, id en variables. Après succès : invalidation des pièces de l'OT, du détail, de la liste et des satellites stock ; l'événement `part_used_removed` était déjà écouté.
+
+**Pourquoi.** Le technicien recevait un 403 et l'OT annulé un 409 après affichage du bouton.
+
+**Comment tester.** Compte technicien : pas de corbeille. Admin, magasin ou chef d'atelier sur OT en cours : corbeille présente ; OT annulé ou terminé : absente. Test : `tests/unit/client/part-used-remove-roles.test.ts`.
