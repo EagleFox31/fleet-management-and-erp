@@ -103,3 +103,39 @@ describe("garde de double affectation des OT", { timeout: 180000 }, () => {
     expect(rename.status).toBe(200);
   });
 });
+
+describe("garde de double affectation : contrôle de rôle avant lecture", { timeout: 180000 }, () => {
+  it.each(["client", "driver"] as const)("compte %s : 403 sans détail de planning, en création et en modification", async (role) => {
+    const user = await createTestUser({ role });
+    const tech = await createTestUser({ role: "technician" });
+    ids.userIds.push(user.id, tech.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const login = await fetch(baseUrl + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user.username, password: TEST_USER_PASSWORD }),
+    });
+    expect(login.status).toBe(200);
+    const cookie = login.headers.get("set-cookie")!.split(";")[0];
+    const [active] = await db
+      .insert(workOrders)
+      .values({
+        vehicleId: vehicle.id,
+        title: "TEST rôle avant lecture",
+        status: "in_progress",
+        technicianId: tech.id,
+        startDate: new Date("2031-04-01T08:00:00Z"),
+        endDate: new Date("2031-04-01T12:00:00Z"),
+      })
+      .returning();
+    workOrderIds.push(active.id);
+    const overlapping = { vehicleId: vehicle.id, technicianId: tech.id, startDate: "2031-04-01T09:00:00Z", endDate: "2031-04-01T11:00:00Z" };
+    const created = await call("POST", "/api/work-orders", cookie, { title: "TEST", ...overlapping });
+    const patched = await call("PATCH", `/api/work-orders/${active.id}`, cookie, overlapping);
+    for (const res of [created, patched]) {
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(JSON.stringify(res.body)).not.toContain("conflicts");
+    }
+  });
+});

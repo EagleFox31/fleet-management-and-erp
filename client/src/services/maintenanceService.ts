@@ -1,4 +1,5 @@
 import { maintenanceApi } from "@/lib/api-calls";
+import { maintenanceElapsedDays } from "@shared/constants/maintenance-due-day";
 
 export interface WorkOrder {
   id: number;
@@ -157,10 +158,6 @@ export const maintenanceService = {
   },
 
   calculateCompletionTime(scheduledDate: string, completedDate: string): number {
-    const scheduled = new Date(scheduledDate);
-    const completed = new Date(completedDate);
-    const diffTime = Math.abs(completed.getTime() - scheduled.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+    return maintenanceElapsedDays(scheduledDate, completedDate);
   },
 };

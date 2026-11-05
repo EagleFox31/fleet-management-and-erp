@@ -41,6 +41,7 @@ import {
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
+  technicianBis: { username: "demotech2", password: "tech123", name: "Rodrigue Fotsing", role: "technician" },
   secretary: { username: "secretaire1", password: "secret123", name: "Awa Ndiaye", role: "secretary" },
   clientA: { username: "client1", password: "client123", name: "Transports Kamga", role: "client" },
   clientB: { username: "client2", password: "client123", name: "Logistique Fotso", role: "client" },
@@ -49,6 +50,7 @@ export const DEMO_ACCOUNTS = {
   workshopManager: { username: "terry", password: "workshop123", name: "Terry Ekambi", role: "workshop_manager" },
   management: { username: "direction1", password: "direction123", name: "Marie Essomba", role: "management" },
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
+  recruit: { username: "recrue1", password: "recrue123", name: "Paul Recrue", role: "warehouse" },
   driver: { username: "chauffeur1", password: "chauffeur123", name: "Samuel Biyick", role: "driver" },
 } as const;
 
@@ -112,8 +114,8 @@ async function ensureUser(account: { username: string; password: string; name: s
   // Réconciliation : un compte déjà présent retrouve rôle et mot de passe de la démo.
   const [current] = await db.select().from(users).where(eq(users.username, account.username));
   const passwordOk = current ? await bcrypt.compare(account.password, current.password) : true;
-  if (current && (current.role !== account.role || !passwordOk)) {
-    await db.update(users).set({ role: account.role as typeof users.$inferInsert.role, password: await bcrypt.hash(account.password, 4) }).where(eq(users.id, current.id));
+  if (current && (current.role !== account.role || current.name !== account.name || !passwordOk)) {
+    await db.update(users).set({ role: account.role as typeof users.$inferInsert.role, name: account.name, password: await bcrypt.hash(account.password, 4) }).where(eq(users.id, current.id));
   }
   const [row] = await db.select({ id: users.id }).from(users).where(eq(users.username, account.username));
   return row.id;
@@ -129,10 +131,12 @@ async function ensureVehicle(registration: string, model: string, ownerId: numbe
   return row.id;
 }
 
+/** Jour calendaire LOCAL décalé de `days` (les rapports raisonnent en heure locale, pas en UTC). */
 function isoDayFromNow(days: number): string {
   const date = new Date();
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  date.setDate(date.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** Logistique : client donneur d'ordre, véhicule aux papiers valides, chauffeur formé, carte carburant créditée. */
@@ -140,6 +144,7 @@ function isoDayFromNow(days: number): string {
 async function seedWorkshop(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.workshopManager);
   await ensureUser(DEMO_ACCOUNTS.technician);
+  await ensureUser(DEMO_ACCOUNTS.technicianBis);
   const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
   const old = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.vehicleId, vehicleId), like(workOrders.title, `${DEMO_OT_PREFIX}%`)));
   if (old.length > 0) {
@@ -165,6 +170,8 @@ function writeDemoPdf(name: string): void {
 async function purgeReceptionOrders(): Promise<void> {
   const oldOrders = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.orderNumber, DEMO_RECEPTION.orderNumber));
   if (oldOrders.length > 0) {
+    // Mouvements d'entrée créés par les réceptions précédentes : sans cette purge, ils s'accumulent à chaque rejeu.
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.reason, oldOrders.map((o) => `Réception commande #${o.id}`)));
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, oldOrders.map((o) => o.id)));
     await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, oldOrders.map((o) => o.id)));
@@ -228,29 +235,119 @@ async function seedWarehouse(): Promise<void> {
   });
 }
 
-async function seedLogistics(): Promise<void> {
-  await ensureUser(DEMO_ACCOUNTS.logistics);
-  await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
-  const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
-  const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
+export const DEMO_INVOICE = {
+  number: "DEMO-FAC-001",
+  numberPaid: "DEMO-FAC-002",
+  clientName: "Brasseries du Littoral (démo)",
+  amountHT: 1_000_000,
+  amountTTC: 1_192_500,
+  firstPayment: 500_000,
+} as const;
+
+/** Factures de la période : purgées (paiements en cascade) puis recréées, donc rejeu sans doublon. */
+async function seedClientInvoices(): Promise<void> {
+  await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, "DEMO-FAC-%"));
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const today = isoDayFromNow(0);
+  const due = isoDayFromNow(30);
+  await db.insert(clientInvoices).values([
+    {
+      invoiceNumber: DEMO_INVOICE.number,
+      clientId: client.id,
+      invoiceDate: today,
+      dueDate: due,
+      amountHT: String(DEMO_INVOICE.amountHT),
+      vatAmount: "192500",
+      amountTTC: String(DEMO_INVOICE.amountTTC),
+      balance: String(DEMO_INVOICE.amountTTC),
+      status: "pending",
+    },
+    {
+      invoiceNumber: DEMO_INVOICE.numberPaid,
+      clientId: client.id,
+      invoiceDate: today,
+      dueDate: due,
+      amountHT: "600000",
+      vatAmount: "115500",
+      amountTTC: "715500",
+      balance: "0",
+      status: "paid",
+    },
+  ]);
+}
+
+export const DEMO_TCO = { orderNumber: "DEMO-TCO-001", invoiceNumber: "DEMO-FAC-003", amountHT: 800_000, amountTTC: 953_400 } as const;
+
+/** Mission terminée de la période, affectée à un camion et facturée : alimente l'audit flotte et TCO. */
+async function seedFleetAudit(vehicleId: number): Promise<void> {
+  const old = await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, DEMO_TCO.orderNumber));
+  if (old.length > 0) {
+    const ids = old.map((m) => m.id);
+    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, ids));
+    await db.delete(assignments).where(inArray(assignments.missionId, ids));
+    await db.delete(missions).where(inArray(missions.id, ids));
+  }
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const now = new Date();
+  const [mission] = await db
+    .insert(missions)
+    .values({
+      clientId: client.id,
+      orderNumber: DEMO_TCO.orderNumber,
+      pickupAddress: "Douala, port",
+      deliveryAddress: "Yaoundé, entrepôt central",
+      pickupDate: new Date(now.getTime() - 2 * 86_400_000),
+      deliveryDate: now,
+      actualDistance: 240,
+      status: "completed",
+    })
+    .returning({ id: missions.id });
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId, status: "completed", completedAt: now });
+  const today = isoDayFromNow(0);
+  await db.insert(clientInvoices).values({
+    invoiceNumber: DEMO_TCO.invoiceNumber,
+    missionId: mission.id,
+    clientId: client.id,
+    invoiceDate: today,
+    dueDate: today,
+    amountHT: String(DEMO_TCO.amountHT),
+    vatAmount: "153400",
+    amountTTC: String(DEMO_TCO.amountTTC),
+    balance: "0",
+    status: "paid",
+  });
+}
+
+/** Carte grise, assurance et visite technique valides : le départ d'une mission n'est pas bloqué. */
+async function ensureValidPapers(vehicleId: number, registration: string): Promise<void> {
+  const docs = await db.select({ id: vehicleDocuments.id, type: vehicleDocuments.type, expiryDate: vehicleDocuments.expiryDate }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
-    writeDemoPdf(`${DEMO_MISSION.vehicle}-${type}.pdf`);
+    writeDemoPdf(`${registration}-${type}.pdf`);
     const existing = docs.find((d) => d.type === type);
     if (existing) {
-      await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      if (String(existing.expiryDate) !== "2099-12-31") {
+        await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
+      }
       continue;
     }
     await db.insert(vehicleDocuments).values({
       vehicleId,
-      name: `${DEMO_MISSION.vehicle} ${type}`,
+      name: `${registration} ${type}`,
       type,
       filename: `${type}.pdf`,
       filesize: 4,
       fileType: "application/pdf",
-      filePath: `uploads/demo/${DEMO_MISSION.vehicle}-${type}.pdf`,
+      filePath: `uploads/demo/${registration}-${type}.pdf`,
       expiryDate: "2099-12-31",
     });
   }
+}
+
+async function seedLogistics(): Promise<void> {
+  await ensureUser(DEMO_ACCOUNTS.logistics);
+  await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
+  const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
+  await ensureValidPapers(vehicleId, DEMO_MISSION.vehicle);
   await db
     .insert(drivers)
     .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
@@ -280,10 +377,40 @@ async function seedLogistics(): Promise<void> {
   }
 }
 
+export const DEMO_DRIVER_DAY = { orderNumber: "DEMO-JOUR-001", vehicle: "DEMO-JOUR-001", employee: "DEMO-EMP-JOUR", pickup: "Douala, port", delivery: "Bafoussam, marché central" } as const;
+
+/** Mission du jour du chauffeur1 : affectée, à démarrer depuis son tableau de bord. */
+async function seedDriverDay(): Promise<void> {
+  const userId = await ensureUser(DEMO_ACCOUNTS.driver);
+  const vehicleId = await ensureVehicle(DEMO_DRIVER_DAY.vehicle, "T480", null);
+  await ensureValidPapers(vehicleId, DEMO_DRIVER_DAY.vehicle);
+  const old = await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, DEMO_DRIVER_DAY.orderNumber));
+  if (old.length > 0) {
+    const ids = old.map((m) => m.id);
+    await db.delete(assignments).where(inArray(assignments.missionId, ids));
+    await db.delete(missions).where(inArray(missions.id, ids));
+  }
+  await db.update(drivers).set({ userId: null }).where(and(eq(drivers.userId, userId), ne(drivers.employeeNumber, DEMO_DRIVER_DAY.employee)));
+  await db
+    .insert(drivers)
+    .values({ userId, firstName: "Samuel", lastName: "Biyick", employeeNumber: DEMO_DRIVER_DAY.employee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
+    .onConflictDoNothing();
+  await db.update(drivers).set({ userId, isActive: true }).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
+  const [driver] = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const now = new Date();
+  const [mission] = await db
+    .insert(missions)
+    .values({ clientId: client.id, orderNumber: DEMO_DRIVER_DAY.orderNumber, pickupAddress: DEMO_DRIVER_DAY.pickup, deliveryAddress: DEMO_DRIVER_DAY.delivery, pickupDate: now, status: "assigned", workflowData: { budgetPlan: { fuelBudget: 150000, roadExpensesBudget: 40000, contingencyBudget: 20000 } } })
+    .returning({ id: missions.id });
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId, driverId: driver.id, status: "accepted" });
+}
+
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
   await purgeReceptionOrders();
   await seedLogistics();
+  await seedClientInvoices();
   await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
   await ensureUser(DEMO_ACCOUNTS.secretary);
@@ -291,12 +418,16 @@ export async function seedDemo(): Promise<void> {
   const clientBId = await ensureUser(DEMO_ACCOUNTS.clientB);
   await ensureUser(DEMO_ACCOUNTS.warehouse);
   await ensureUser(DEMO_ACCOUNTS.management);
+  await ensureUser(DEMO_ACCOUNTS.admin);
+  await ensureUser(DEMO_ACCOUNTS.recruit);
 
   await ensureVehicle(DEMO_VEHICLES.clientA1, "T480", clientAId);
   await ensureVehicle(DEMO_VEHICLES.clientA2, "Master", clientAId);
   await ensureVehicle(DEMO_VEHICLES.clientB1, "Premium", clientBId);
   const workshopVehicleId = await ensureVehicle(DEMO_VEHICLES.workshop, "T480", null);
   const secretaryVehicleId = await ensureVehicle(DEMO_VEHICLES.secretary, "Kerax", null);
+  await seedFleetAudit(secretaryVehicleId);
+  await seedDriverDay();
 
   await db
     .insert(parts)
@@ -310,7 +441,7 @@ export async function seedDemo(): Promise<void> {
     .select({ id: workOrders.id })
     .from(workOrders)
     .where(and(eq(workOrders.vehicleId, workshopVehicleId), eq(workOrders.title, DEMO_WORK_ORDER_TITLE)));
-  const reset = { status: "in_progress" as const, technicianId, endDate: null, description: "Vidange moteur, remplacement du filtre et contrôle des freins." };
+  const reset = { status: "pending" as const, technicianId, endDate: null, description: "Vidange moteur, remplacement du filtre et contrôle des freins." };
   let workOrderIds = existing.map((row) => row.id);
   if (workOrderIds.length === 0) {
     const [created] = await db
@@ -327,7 +458,7 @@ export async function seedDemo(): Promise<void> {
 
   // Document du secrétariat : assurance qui expire dans 10 jours (alerte d'échéance).
   const documents = await db
-    .select({ id: vehicleDocuments.id })
+    .select({ id: vehicleDocuments.id, expiryDate: vehicleDocuments.expiryDate })
     .from(vehicleDocuments)
     .where(and(eq(vehicleDocuments.vehicleId, secretaryVehicleId), eq(vehicleDocuments.name, DEMO_DOCUMENT_NAME)));
   if (documents.length > 0) {
@@ -347,7 +478,8 @@ export async function seedDemo(): Promise<void> {
       expiryDate: isoDayFromNow(10),
     });
   } else {
-    await db.update(vehicleDocuments).set({ expiryDate: isoDayFromNow(10) }).where(inArray(vehicleDocuments.id, documents.map((d) => d.id)));
+    const stale = documents.filter((d) => String(d.expiryDate) !== isoDayFromNow(10)).map((d) => d.id);
+    if (stale.length > 0) await db.update(vehicleDocuments).set({ expiryDate: isoDayFromNow(10) }).where(inArray(vehicleDocuments.id, stale));
   }
 }
 
