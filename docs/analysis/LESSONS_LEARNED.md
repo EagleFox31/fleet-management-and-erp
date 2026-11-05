@@ -1698,6 +1698,13 @@ Test non déterministe (flake), sans défaut produit.
 ### Leçon généralisée
 Un test ne vérifie que ce qu'il possède. Il faut retirer la part aléatoire avant de comparer, et mesurer ses propres lignes plutôt qu'un compteur partagé.
 
+### Récurrence (5 novembre 2026) : le garde-fou ne couvrait qu'une forme
+- Faux rouge en CI sur #405 (contract 4) : `role-guards-pistes-def.contract.test.ts:137` contrôlait `/sql|syntax|NaN/i` sur `JSON.stringify(await res.json())`, et un `requestId` « lMjhMsQlWe » contient « sQl ». `vehicle-documents-upload-errors` (`/form/`) avait le même risque.
+- Cause : le motif du garde-fou se limitait à `…body)).not.toMatch`. Les contrôles écrits sur `await res.json()` ou sur une variable `json` lui échappaient.
+- Prévention : motif élargi à `await x.json()` et aux variables `…json`, avec des cas positifs et un cas négatif (`data.payload`) dans `leak-check-hygiene.test.ts` ; les deux contrats passent par `leakText`.
+- Angles morts restants (hors motif) : `expect` sur plusieurs lignes, `res.text()`, `.not.toContain` sur un mot court. À traiter si un faux rouge en montre un.
+- Règle : un garde-fou par motif doit être éprouvé contre toutes les formes d'écriture du même contrôle, pas seulement celle qui a échoué la première fois.
+
 ## 2026-11-03 — Couche 3 : quinze écrans satellites oubliés, une table déclarative
 
 ### Contexte
@@ -2990,6 +2997,23 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` lit l'AST de `server/` (#363 ; la première version, textuelle, ne voyait que `return next()` et laissait passer `next(); return;`) : tout `.param` doit appeler un parseur strict `parseX(value)` (pas `parseInt` / `parseFloat`, un `throw` dans le corps s'il est local) avant tout passage (`next()`, `next("route")`, `next(null)` et autres valeurs fausses) ; un nom ou un callback non littéral est refusé comme illisible.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
 
+## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
+
+- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 19 appels).
+- **Cause racine** : le garde-fou cherchait une forme textuelle de l'appel, pas le comportement. Une fonction intermédiaire suffisait à le rendre aveugle.
+- **Classification** : garde-fou incomplet, faux négatif structurel ; sécurité et intégrité (mauvais objet visé).
+- **Résolution** : tous ces parseurs délèguent à `parseRouteId`. Le service CPC répond 404 au lieu de 500 pour un chauffeur absent.
+- **Prévention vérifiable** : le cliquet lit l'AST. Il compte chaque appel `f(req.params…)` vers une fonction locale, ou importée par chemin relatif, qui convertit (`parseInt`, `Number`) sans appeler `parseRouteId`. Il est rouge par mutation : avec l'ancien `parseDriverId`, drivers-management passe à 5 ; avec l'ancien `idParam`, fault-catalog passe à 6. Le contrat `tests/contract/route-id-strict-lot4.contract.test.ts` couvre ces routes.
+- **Leçon généralisée** : un cliquet qui interdit une construction doit suivre les fonctions qui l'enveloppent, sinon il ne mesure que le style. Avant de déclarer un fichier propre, prouver par mutation qu'une variante enveloppée le rend rouge.
+
+## 2026-11-05 — Relevé de dette fait sur une branche non à jour, et masquage de route supposé (near miss)
+
+- **Contexte** : pour le lot 5 de #360, le relevé des `parseInt(req.params…)` de `server/routes.ts` a d'abord été fait sur le `main` local, en retard de 232 commits. Les numéros de ligne et la liste des routes ne correspondaient plus à `origin/main` ; des numéros justes ont été « corrigés » à tort. Dans le même relevé, `GET /api/work-orders/vehicle/:vehicleId` et `/technician/:technicianId` étaient notés « masqués » par `GET /api/work-orders/:id`, déclaré plus haut, donc à supprimer.
+- **Cause racine** : (1) lecture d'une référence locale au lieu de la référence distante fraîche ; (2) confusion sur la correspondance des chemins Express : `:id` ne capte qu'un segment, `/vehicle/5` en a deux, la route n'est donc pas masquée.
+- **Classification** : erreur de méthode, sans impact livré (corrigée avant commit) ; la suppression aurait cassé la liste d'OT de la fiche véhicule ; la route technicien est vivante, couverte par contrat.
+- **Résolution** : relevé refait après `git fetch` sur `origin/main`. Les deux routes sont gardées et corrigées en place (`routeIdOrNaN`). Le contrat existant `former-storage-stubs` montrait déjà que la route technicien est vivante.
+- **Prévention vérifiable** : `route-id-strict-lot5` vérifie que les deux routes répondent 400 et non 200 sur `<id>abc`. Cela n'est possible que si la route est atteinte, donc vivante. Règle de méthode : avant de déclarer une route morte, faire passer un appel HTTP dans un contrat et chercher ses appelants (`client/src`, `tests/`).
+- **Leçon généralisée** : un relevé part de `git fetch` et de `origin/<base>`, jamais d'une branche locale. Une route n'est déclarée morte que sur la preuve d'un appel qui ne l'atteint pas, jamais sur la seule lecture de l'ordre des déclarations.
 ## 2026-11-05 — Toast à message fixe qui masque la raison serveur
 
 - **Contexte** : le refus de lancement d'une mission disait pourquoi (budget, conflit), mais le toast du chauffeur affichait un texte fixe, et le message serveur de plus de 300 caractères était remplacé par un libellé générique.
@@ -3022,3 +3046,137 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
+
+## 2026-11-05 — Justificatif de règlement fournisseur servi en ligne
+
+- **Contexte** : le justificatif d'un règlement fournisseur était ouvert dans un onglet et servi en ligne sur l'origine de l'application. L'extension écrite sur disque venait du nom d'origine.
+- **Cause racine** : le type servi dépendait du nom fourni au dépôt, pas d'une décision du serveur. Ni `Content-Disposition: attachment` ni `X-Content-Type-Options: nosniff` n'étaient posés.
+- **Classification** : sécurité (fichier téléversé). Near miss : relevé en revue, avant tout signalement.
+- **Résolution** : l'extension disque vient du type déclaré, pris dans une liste blanche (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`) ; le type est obligatoire dans `settlementProofFileName`. La route sert en `attachment` avec `nosniff`, et un type tiré de l'extension en liste blanche, sinon `application/octet-stream`. Le lien de l'écran devient « Télécharger la preuve ».
+- **Prévention vérifiable** : contrat `tests/contract/supplier-settlement-proof-path.contract.test.ts` (en-têtes, nom d'origine `.html` déclaré PDF). Garde-fou `tests/unit/server/file-serving-nosniff.test.ts` : tout fichier serveur qui sert un fichier doit poser `nosniff`, sauf la liste gelée, qui ne peut que rétrécir.
+- **Reste ouvert** : `server/routes.ts` sert encore deux fichiers téléversés sans `nosniff` : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` (ce dernier en ligne, avec le type enregistré au dépôt). Ils figurent dans la liste gelée du garde-fou, à traiter dans un routeur de `server/api/` (AGENTS.md §9).
+- **Leçon généralisée** : un fichier téléversé est servi en téléchargement, avec un type décidé par le serveur et `nosniff`. Jamais un type ni une extension tirés du nom ou du type fournis par le client sans liste blanche.
+## 2026-11-05 — Documents téléversés : téléchargement en pièce jointe (clôt le reste ouvert ci-dessus)
+
+- **Contexte** : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` servaient le fichier sans `nosniff`, le second en ligne avec le type enregistré au dépôt.
+- **Cause racine** : chaque route fixait ses en-têtes elle-même ; rien ne liait le type servi à la liste blanche du téléversement.
+- **Classification** : sécurité, fichiers téléversés.
+- **Résolution** : les deux routes quittent `server/routes.ts` pour `server/api/uploaded-documents.routes.ts`, monté avant `registerRoutes`. Elles passent par `sendUploadedFile` (`server/lib/uploaded-file-response.ts`) : chemin résolu par `uploadedFileCandidates`, pièce jointe, `nosniff`, type gardé seulement s'il est dans la liste blanche du téléversement et cohérent avec l'extension, sinon `application/octet-stream`. Côté écran, le bouton d'aperçu des documents d'acquisition (doublon du téléchargement) et les onglets vides sont retirés.
+- **Prévention** : contrat `uploaded-documents-download-headers` (rouge sur l'ancien code, mutation du filtre de type tuée) ; `server/routes.ts` sort de la liste gelée de `file-serving-nosniff`.
+- **Leçon** : un fichier fourni par un utilisateur se sert par un seul helper qui fixe les en-têtes ; une route n'écrit pas ses propres `Content-Type` / `Content-Disposition`.
+
+## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
+
+- **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
+- **Cause racine** : lecture par `parseInt`/`Number` sans borne haute dans les routes pas encore passées à `parseRouteId` ; la base lève 22003 (valeur hors plage).
+- **Classification** : validation d'entrée manquante.
+- **Résolution** : `routeIdRangeGuard` (`server/middleware/route-id-range-guard.ts`), monté en tête de `apiRouter` (`server/api/index.ts`), donc avant les routeurs de `server/api` et ceux de `routes.ts` : un segment entièrement numérique au-delà de `MAX_DB_INTEGER_ID` (`server/lib/route-id.ts`) répond 400 sans toucher à la base. Le segment est décodé, puis son entier de tête est comparé à la borne : `parseInt` lit aussi une forme encodée, signée, décimale ou suivie de lettres, et une première version qui n'examinait que les segments entièrement numériques laissait ces formes en 500.
+- **Reste ouvert** : un id hors plage passé en paramètre de requête ou dans le corps n'est pas couvert par ce filet, qui ne lit que le chemin ; ces lectures passent à `parseRouteId` au fil des routes (cliquet `route-id-parse-hygiene`).
+- **Prévention vérifiable** : `tests/contract/route-id-range-guard.contract.test.ts` (rouge sans le montage, puis rouge sur les formes lues par `parseInt` avant leur prise en compte), `tests/unit/server/route-id-range-guard.test.ts`, règle R3 de `tests/unit/server/prefix-middleware-guardrail.test.ts` (montage sans préfixe, avant le premier routeur).
+- **Leçon généralisée** : une entrée qui provoque à coup sûr une erreur base se refuse avant la base, par un filet commun plutôt que route par route. Ce filet reproduit la lecture la plus permissive de l'entrée (ici `parseInt`), pas sa forme attendue.
+## 2026-11-05 — Compteur de verrouillage : écriture hors du verrou de clé, mise à jour perdue
+
+- **Contexte** : `tests/contract/auth-login-unavailable.contract.test.ts` échouait par intermittence en CI (« expected 2 to be 1 ») : un seul mauvais mot de passe, juste après une connexion réussie, comptait deux échecs.
+- **Cause racine** : `DbLockoutStore.reserve` et `confirmFailure` lisent puis écrivent le compteur sous le verrou consultatif de la clé, mais `reset` (DELETE après un 2xx) et `release` (UPDATE après une 400/5xx) écrivaient sans ce verrou. Le garde lance ces écritures sur `finish` sans les attendre : le DELETE du succès précédent s'intercalait entre la lecture et l'upsert de la réservation suivante, qui réécrivait l'ancien compteur + 1. Le test dormait 500 ms au lieu d'attendre la fin de ces écritures.
+- **Classification** : concurrence (mise à jour perdue), plus attente fixe dans un test.
+- **Résolution** : `reset` et `release` passent par `underKeyLock`, la même transaction sous verrou de clé que les lectures-écritures. Le contrat attend l'état stable du garde (compteur stocké = miroir `users`) avant de lire et après chaque connexion, au lieu d'un délai fixe.
+- **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts` (« reset » et « release » attendent le verrou de la clé tenu par une autre transaction, rouges avant le correctif).
+- **Leçon généralisée** : un verrou consultatif ne protège que les écritures qui le prennent. Quand un état est lu puis réécrit sous verrou, toute autre écriture du même état passe par ce verrou, y compris les DELETE et les décréments « atomiques ». Dans un test, attendre une condition observable plutôt qu'un délai.
+## 2026-11-05 — Cloison client : l'étranger et l'inexistant se répondent à l'identique (complète #255)
+
+### Contexte
+- Un client qui ouvre le véhicule d'un autre reçoit 403. Sur deux routes seulement (`GET /api/vehicles/:id`, téléchargement d'un document), un identifiant absent répondait 404 avec un autre message : le client pouvait distinguer « existe chez un autre » de « n'existe pas » et parcourir les identifiants séquentiels.
+- Les dix autres routes passent par `canAccessOwned`, qui refuse déjà un propriétaire absent : même 403, même message.
+
+### Cause racine
+- Classification : cohérence manquante entre routes d'une même cloison. Les routes plus anciennes avaient leur propre contrôle d'existence avant la cloison, et aucun test ne comparait les deux cas.
+
+### Résolution
+- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner). Exception : `GET /api/vehicles/:id` garde son message historique « Accès non autorisé à ce véhicule » (absent comme étranger), que l'e2e 24 attend et que l'écran affiche ; le contrat le fige.
+- Ne renverse pas #255 : le 403 reste celui que l'écran lit comme « Accès refusé ». Un client qui saisit un identifiant absent lit donc aussi « Accès refusé », par choix assumé pour ne rien révéler.
+
+### Prévention (vérifiable)
+- `tests/contract/client-unknown-vs-foreign.contract.test.ts` : pour huit routes véhicule et le téléchargement de document, compare statut, message et code de la réponse « autre client » et de la réponse « identifiant absent ». Rouge sur main pour les deux routes concernées.
+
+### Règle Projet (obligatoire)
+- Toute route ouverte à un client se teste en comparant l'objet d'un autre client et un identifiant absent : les deux réponses doivent être identiques.
+
+## 2026-11-05 — Déverrouillage admin : dernière écriture du compteur hors du verrou de clé
+
+- **Contexte** : à la relecture du correctif précédent (`reset` et `release` passés sous le verrou de clé), on a constaté que `unlockUser` supprimait encore les compteurs sans prendre ce verrou. Même chose pour la remise à zéro du miroir `users` dans `reset`, faite après la transaction.
+- **Cause racine** : si l'admin déverrouille pendant une réservation en cours, celle-ci réécrit l'ancien compteur + 1, et le compte qu'on vient de débloquer garde ses échecs.
+- **Classification** : concurrence (mise à jour perdue). C'est un near miss : relevé en relecture, avant tout signalement.
+- **Résolution** : `underKeyLock` accepte plusieurs clés, verrouillées dans un ordre fixe. `unlockUser` remet à zéro le miroir et supprime les compteurs de toutes les clés du compte dans une même transaction sous ces verrous. `reset` fait de même pour son DELETE et le miroir.
+- **Reste ouvert** : le miroir `users` écrit par `confirmFailure`, et par `recordLock` quand `reserve` ou `confirmFailure` pose le verrou, part encore après la transaction. Seul l'affichage admin est concerné, le compteur qui décide du blocage ne l'est pas. Le rentrer dans la transaction changerait le comportement en cas de panne : un miroir en échec annulerait la tentative comptée.
+- **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts`, cas « déverrouillage admin ». Il échoue sur le store d'origine et passe après le correctif.
+- **Leçon généralisée** : quand on corrige une écriture hors verrou, recenser tous les écrivains du même état (`grep` de la table), pas seulement celui qui a déclenché l'incident.
+
+## 2026-11-05 — Main rouge : deux PR vertes chacune contre un main différent (#405 × #389)
+
+- **Contexte** : #405 ajoute une garde qui refuse en 400 « Identifiant invalide. » tout segment numérique de route au-delà de l'int4. #389 (lot 9 des ids stricts) ajoute un contrat qui attend, pour `99999999999`, le message propre à chaque route (« ID de pièce invalide », « ID de véhicule invalide »). Chacune a eu une CI verte, puis les deux ont été fusionnées : main est devenu rouge sur 2 cas de `route-id-strict-lot9.contract.test.ts`.
+- **Cause racine** : la CI de chaque PR a tourné contre un main qui ne contenait pas l'autre. Aucune des deux n'a été rejouée contre le main qui contenait déjà la seconde au moment de sa fusion. Le contrat lot 10 (#391) se trouvait dans le même cas.
+- **Classification** : intégration (fusions croisées), faux vert de CI. Main a été cassé, sans effet en production.
+- **Résolution** : les contrats lot 9 et lot 10 importent `ROUTE_ID_OUT_OF_RANGE_MESSAGE` depuis `server/middleware/route-id-range-guard.ts` au lieu de recopier un texte.
+- **Prévention vérifiable** : les cas hors plage de `route-id-strict-lot9` et `route-id-strict-lot10` lisent la constante de la garde. Un changement de texte de la garde ne peut donc plus faire diverger ces contrats. Reste ouvert, à trancher par le circuit de fusion : exiger une branche à jour avec main avant fusion (protection « require branches to be up to date »), ou rejouer la CI après tout merge qui touche une surface partagée (middlewares montés sur `/api`, cliquets).
+- **Leçon généralisée** : une CI verte ne prouve que l'état « PR + main au moment du run ». Quand deux PR touchent le même comportement (ici la réponse à un id hors plage), la seconde à fusionner doit être rejouée contre un main qui contient la première. Un message d'erreur produit par une garde partagée se teste par sa constante, jamais par son texte recopié.
+
+## 2026-11-05 — Id hors plage int4 dans la query ou le corps : refusé par le schéma
+
+- **Contexte** : suite du « reste ouvert » de l'entrée « Id de route hors plage int4 ». `?userId=2147483648` sur `/api/audit-logs`, ou `vehicleId: 2147483648` dans le corps de `POST /api/incidents`, répondait 500. Quinze routes de `server/api` étaient concernées : filtres de liste, créations et assignations.
+- **Cause racine** : les ids d'entrée validés par Zod (`z.coerce.number().int().positive()`, `z.number()`, `z.union([z.string(), z.number()]).transform(Number)`) n'avaient pas de borne haute. Le filet `routeIdRangeGuard` ne lit que le chemin. La valeur atteignait donc la base, qui levait 22003.
+- **Classification** : validation d'entrée manquante (même classe que l'entrée précédente, autre canal).
+- **Résolution** : `idSchema` (query, coercition) et le nouveau `bodyIdSchema` (corps JSON, nombre strict) de `shared/contracts/common.ts` sont bornés à `MAX_DB_INTEGER_ID`, désormais déclaré à cet endroit et réexporté par `server/lib/route-id.ts`. Les schémas d'entrée les utilisent. Ceux qui portent un message propre gardent ce message sur `.max(...)`.
+- **Prévention vérifiable** :
+  - `tests/contract/id-range-query-body.contract.test.ts` : 15 cas, 400 sur le champ id. Rouge sur l'ancien code (500, ou 400 sur un autre champ).
+  - Cliquet `tests/unit/server/zod-id-range-hygiene.test.ts` : une propriété nommée comme un id déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`, dans `server/api` ou `shared/contracts`. La liste gelée ne contient que des schémas de réponse. Le test passe au rouge si l'on retire la borne de `fuel-card`.
+- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne ; à reprendre quand la route passera dans un routeur de `server/api/`. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+  - Complété le 5 novembre 2026 (relecture de la PR) : deux ids échappaient au premier relevé et répondaient 500. `insertFaultCatalogPartSchema.partId` (`shared/schema.ts`, hors du périmètre scanné) et le plein lu dans la clé d'anomalie carburant (`consumption-gap:<id>`, chaîne découpée après validation par regex). Les deux sont bornés à `MAX_DB_INTEGER_ID`, avec un cas au contrat (`fault-catalog-lifecycle`, `fuel-anomalies`), rouge en 500 sur l'ancien code. Le cliquet scanne aussi `shared/schema.ts` et n'accepte plus qu'une borne `.max(MAX_DB_INTEGER_ID)` (ou sa valeur littérale) : une autre borne `.max(` laissait passer la valeur jusqu'à la base.
+  - Toujours hors cliquet : un id extrait d'une chaîne composite (clé, jeton). Le borner dans le schéma de la chaîne, pas au point de lecture.
+- **Leçon généralisée** : un filet posé sur un seul canal (le chemin) ne couvre pas la même valeur reçue par un autre canal (query, corps). La borne appartient au type partagé (`idSchema`), pas à chaque route.
+## 2026-11-05 — Modifications non commitées perdues : `cd` en échec suivi d'un `git checkout -- .` dans le dépôt principal
+
+- **Contexte** : plusieurs sessions travaillent en parallèle, chacune dans son worktree (`.claude/worktrees/<nom>`), autour d'un même dépôt principal. Un agent de relecture a lancé une commande de la forme `cd <worktree>; ...; git checkout -q -- .`. Le `cd` a échoué (chemin absent) sans arrêter la commande, si bien que le `checkout` s'est exécuté dans le dépôt principal. Il a écrasé environ 60 fichiers `client/src/components/**`, `client/src/assets/logo-icon.svg` et `.claude/agents/fleet-manager.md`, modifiés et non commités. Aucune copie n'a été retrouvée : ni blob orphelin (`git fsck`), ni `git stash`, ni historique local de l'éditeur.
+- **Cause racine** : deux défauts combinés.
+  1. Une commande chaînée sans garde : l'échec du `cd` n'interrompt pas la suite, et une commande destructive s'exécute dans le répertoire courant, quel qu'il soit.
+  2. Du travail non commité laissé dans le dépôt principal, que toutes les sessions partagent comme répertoire de départ.
+- **Classification** : perte de données locale (travail en cours), opération destructive hors de son périmètre. Sans effet sur `main` ni sur la production.
+- **Résolution** : pas de restauration possible. Le travail perdu est à refaire depuis sa source.
+- **Prévention vérifiable** : règles ajoutées à `AGENTS.md` §8, contrôlées en relecture des commandes d'agents.
+  - Tout `cd` suivi d'une autre commande s'écrit `cd <chemin> || exit 1` (ou `cd <chemin> && ...`), jamais `cd <chemin>; ...`.
+  - Aucune commande qui jette du travail (`git checkout -- <chemins>`, `git reset --hard`, `git clean`, `git restore`) dans le dépôt principal.
+  - Aucun travail non commité dans le dépôt principal : toute modification se fait dans un worktree et se met à l'abri par un commit, même temporaire.
+- **Leçon généralisée** : une commande destructive ne doit dépendre d'aucune hypothèse sur le répertoire courant. Si son préalable peut échouer, l'échec doit arrêter la chaîne. Et un répertoire partagé par plusieurs sessions ne doit porter aucun état non commité, car il n'a pas de propriétaire unique qui le protège.
+
+## 2026-11-05 — backup-db sous charge : le délai rallongé ne suffisait pas, le coût est par processus
+
+- **Contexte** : malgré le `timeout: 30_000` de l'entrée du 2026-11-04, deux tests de `tests/unit/deploy/backup-db.test.ts` dépassaient encore 30 s dans la suite complète (35 s), et passaient isolés.
+- **Cause racine** : sous Git Bash, `fork` est émulé. Une trace `bash -x` horodatée prise pendant la suite complète montre environ 2 s par processus lancé, uniformément sur toutes les étapes (contre ~0,03 s isolé) : ni I/O, ni horloge simulée, ni verrou. Une exécution du script (une quinzaine de processus) passait de 0,45 s à 31 s, et les tests en échec lançaient le script deux fois (une exécution de préparation, puis celle testée).
+- **Classification** : test instable, délai calibré sur une mesure isolée ; correctif précédent par élargissement du délai, sans mesure sous charge.
+- **Résolution** : délai inchangé, processus réduits.
+  - Un seul lancement du script par test : l'état préalable (dump du jour, dossier) est écrit directement.
+  - Le stub lit l'en-tête du dump avec `read` au lieu de `head | grep`.
+  - `deploy/backup-db.sh` date le journal et le dump par `printf '%(...)T'` (bash >= 4.2) au lieu de `date`, et n'appelle plus `dirname`. Sortie identique à `date` vérifiée sur 20 cas (5 fuseaux, bascules d'heure d'été). Comportement hors journal inchangé : même code de sortie, même nom de dump, même rétention.
+- **Prévention vérifiable** : 3 suites unitaires complètes vertes (2697 chacune) ; le test 1 vérifie le format de chaque ligne du journal. Le commentaire du `describe` fixe la règle : réduire les processus, ne pas rallonger le délai.
+- **Leçon généralisée** : un test lent sous charge se diagnostique par une mesure prise sous charge, étape par étape, avant de toucher au délai. Pour un test qui lance des processus, le coût à réduire est le nombre de processus, et l'état préalable s'écrit, il ne se rejoue pas.
+
+## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
+
+- **Contexte** : après l'incident du `git checkout -- .` (entrée « Modifications non commitées perdues : `cd` en échec… », même date), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
+- **Cause racine** : `core.autocrlf=true` sur les postes Windows. Les blobs du dépôt sont en LF, l'arbre de travail est le plus souvent en CRLF. Un outil qui réécrit un fichier en LF, ou un fichier recopié depuis un autre worktree, fait apparaître toutes ses lignes comme changées, alors que le texte est identique.
+- **Classification** : near miss, diagnostic erroné possible (conclure à une perte, ou restaurer et écraser un travail réel).
+- **Résolution** : aucune perte réelle. Les fichiers concernés sont alignés sur les fins de ligne de leur blob HEAD.
+- **Prévention vérifiable** :
+  - Avant de conclure à une perte ou à une réécriture, comparer en ignorant les fins de ligne :
+    `git diff --ignore-cr-at-eol --stat` (ou `git diff -w --stat`). Un fichier qui disparaît de cette liste n'a changé que par ses fins de ligne.
+  - Après une édition par script, si `git diff --stat` montre un fichier réécrit en entier, ramener ses fins de ligne à celles du blob HEAD avant de commiter.
+  - `.gitattributes` : déjà `eol=lf` sur `deploy/*.sh` et `.claude/hooks/*.mjs`, là où un CR casse l'exécution. Pas de `* text=auto` global : le dépôt contient encore un blob CRLF (`tests/support/file-access-scan.ts`, relevé `git ls-files --eol`). Une règle globale le ferait apparaître modifié dans tous les worktrees et imposerait une renormalisation du dépôt, ce qui est hors périmètre ici.
+- **Leçon généralisée** : un diff qui couvre tout un fichier sans raison est d'abord un soupçon de fins de ligne. Il se vérifie en une commande avant toute restauration ou toute alerte de perte.
+
+## 2026-11-05 — Champ d'erreur retiré (#354) : l'écran de lancement de mission perdait sa liste de motifs
+
+- **Contexte** : #354 a retiré `errors[]` du refus de lancement de mission (`PUT /api/missions/:id/status`) pour que le message central ne soit pas remplacé. Le message est borné et taisait des motifs ; or l'écran tire de la liste complète la proposition « Créer demande de renouvellement » (document manquant ou expiré). L'action disparaissait dès que le motif document n'entrait pas dans le message. Seul l'e2e `17:379` le voyait.
+- **Cause racine** : le retrait d'un champ de réponse a été jugé sans chercher ses consommateurs côté client, et aucun test de contrat ne figeait ce champ.
+- **Classification** : régression de contrat HTTP, consommateur client cassé en silence.
+- **Résolution** : #466 remonte la liste complète en `motifs` à la racine du corps (`AppError` `details`, fusionnés par `mergeErrorDetails`).
+- **Prévention vérifiable** : `tests/contract/mission-launch-driver-message.contract.test.ts`, cas « un motif de document tu par la borne du message reste dans body.motifs ». Rouge si `details` est retiré de la levée dans `server/api/missions.routes.ts`.
+- **Leçon généralisée** : retirer ou renommer un champ de réponse exige de chercher ses lecteurs (client, e2e) et de figer le champ conservé par un test de contrat, pas seulement par un e2e.

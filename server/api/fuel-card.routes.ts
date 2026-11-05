@@ -1,17 +1,50 @@
 import { Router } from "express";
-import { authenticate, isFuelCardManager } from "../middleware/auth";
+import { authenticate, authorize, isFuelCardManager } from "../middleware/auth";
+import { isFeatureEnabled } from "../lib/feature-flags";
+import { treasuryService } from "../services/treasury-service";
 import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { moduleLogger } from "../lib/logger";
 import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
+import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("fuel-card");
 
 const router = Router();
+// Nombre ou chaîne de chiffres seulement : `z.coerce` seul ferait de `true` le compte 1.
+const sourceAccountIdSchema = z.union([z.number(), z.string().trim().regex(/^\d+$/)]).pipe(z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID));
+
+/** Nombre JSON ou chaîne décimale (formulaires) : jamais « 100abc » lu 100 comme le faisait parseFloat. */
+const positiveAmount = z.union([z.number(), z.string().trim().regex(/^\d+(\.\d+)?$/)]).pipe(z.coerce.number().finite().positive());
+const optionalText = (max: number) => z.string().trim().max(max).nullish().transform((v) => v || undefined);
+
+/**
+ * Corps entier de POST /recharge, strict : une clé inconnue ou un type inattendu (`date: {}`) donne 400,
+ * jamais 500. `sourceAccountId` reste brut ici : le rôle est contrôlé avant de lire l'identifiant.
+ */
+const rechargeBodySchema = z
+  .object({
+    amount: positiveAmount,
+    quantity: positiveAmount.nullish(),
+    unitPrice: positiveAmount.nullish(),
+    priceSource: z.enum(["real", "fallback", "manual"]).nullish(),
+    date: z.string().trim().min(1).max(40).refine((v) => !Number.isNaN(new Date(v).getTime()), "Date de recharge illisible."),
+    paymentMode: z.string().trim().min(1).max(50),
+    orderNumber: optionalText(100),
+    notes: optionalText(2000),
+    sourceAccountId: z.unknown().optional(),
+  })
+  .strict()
+  .refine((body) => body.quantity != null || body.unitPrice != null, {
+    message: "Indiquez la quantité ou le prix par litre.",
+    path: ["unitPrice"],
+  });
 
 const broadcastFuelCardUpdate = (
   eventType: string,
@@ -49,6 +82,16 @@ const broadcastFuelCardUpdate = (
 // Apply authentication middleware to ALL routes in this router
 router.use(authenticate);
 
+// Comptes qui peuvent payer une recharge (banque, caisse), sans solde : la logistique choisit le compte
+// sans lire la trésorerie. Drapeau `finance` coupé : liste vide, le champ disparaît de l'écran.
+router.get("/source-accounts", authorize([...FUEL_RECHARGE_SOURCE_ROLES]), async (_req, res, next) => {
+  try {
+    res.json(isFeatureEnabled("finance") ? await treasuryService.listRechargeSourceAccounts() : []);
+  } catch (error) {
+    next(withLogContext(error, { event: "liste des comptes source de recharge en échec" }));
+  }
+});
+
 // Solde actuel de la carte carburant
 router.get("/balance", async (_req, res) => {
   try {
@@ -64,42 +107,37 @@ router.get("/balance", async (_req, res) => {
 // Rôles autorisés: admin, logistics, secretary
 router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
-    const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
-
-    const amountValue = Number.parseFloat(String(amount));
-    const quantityValue = quantity !== undefined && quantity !== null
-      ? Number.parseFloat(String(quantity))
-      : NaN;
-    const unitPriceValue = unitPrice !== undefined && unitPrice !== null
-      ? Number.parseFloat(String(unitPrice))
-      : NaN;
-    const hasQuantity = Number.isFinite(quantityValue) && quantityValue > 0;
-    const hasUnitPrice = Number.isFinite(unitPriceValue) && unitPriceValue > 0;
-
-    if (!Number.isFinite(amountValue) || amountValue <= 0 || !date || !paymentMode || (!hasQuantity && !hasUnitPrice)) {
-      return res.status(400).json({ message: "Données de recharge incomplètes" });
+    const body = rechargeBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      return res.status(400).json({ message: "Données de recharge incomplètes", errors: toFieldErrors(body.error.issues) });
+    }
+    const { amount: amountValue, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes, sourceAccountId } = body.data;
+    // Compte de trésorerie qui paie la recharge (facultatif, lot T2).
+    let sourceAccountValue: number | null = null;
+    if (sourceAccountId !== undefined && sourceAccountId !== null && sourceAccountId !== "") {
+      // Débiter une banque ou une caisse : liste explicite, refus avant toute lecture du compte.
+      if (!(FUEL_RECHARGE_SOURCE_ROLES as readonly string[]).includes(String(req.user?.role ?? ""))) {
+        throw new AppError(403, "Votre rôle ne permet pas de choisir le compte qui paie la recharge.");
+      }
+      const parsed = sourceAccountIdSchema.safeParse(sourceAccountId);
+      if (!parsed.success) return res.status(400).json({ message: "Compte source de la recharge invalide" });
+      sourceAccountValue = parsed.data;
     }
 
-    const resolvedQuantity = hasQuantity
-      ? quantityValue
-      : amountValue / unitPriceValue;
-    const resolvedUnitPrice = hasUnitPrice
-      ? unitPriceValue
-      : amountValue / quantityValue;
+    const resolvedQuantity = quantity ?? amountValue / unitPrice!;
+    const resolvedUnitPrice = unitPrice ?? amountValue / quantity!;
     
     const result = await fuelCardService.rechargeCard({
       amount: amountValue,
       quantity: resolvedQuantity,
       unitPrice: resolvedUnitPrice,
-      priceSource:
-        priceSource === "real" || priceSource === "fallback" || priceSource === "manual"
-          ? priceSource
-          : undefined,
+      priceSource: priceSource ?? undefined,
       date,
       paymentMode,
       orderNumber,
       notes,
-      userId: (req as any).session.userId
+      userId: (req as any).session.userId,
+      sourceAccountId: sourceAccountValue,
     });
 
     broadcastFuelCardUpdate(
@@ -127,7 +165,7 @@ const QUANTITY_MESSAGE = "La quantité doit être un nombre positif.";
 const VEHICLE_MESSAGE = "Identifiant de véhicule invalide.";
 const requiredText = z.string({ required_error: INCOMPLETE, invalid_type_error: INCOMPLETE }).trim().min(1, INCOMPLETE);
 const consumptionBodySchema = z.object({
-  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE),
+  vehicleId: z.coerce.number({ invalid_type_error: VEHICLE_MESSAGE }).int(VEHICLE_MESSAGE).positive(VEHICLE_MESSAGE).max(MAX_DB_INTEGER_ID, VEHICLE_MESSAGE),
   quantity: z.coerce.number({ invalid_type_error: QUANTITY_MESSAGE }).positive(QUANTITY_MESSAGE).finite(QUANTITY_MESSAGE),
   // Présent seulement : la lecture du prix (« Prix du litre invalide. ») reste à resolveFuelUnitPrice.
   unitPrice: z.any().refine((v) => typeof v === "number" || (typeof v === "string" && v.trim() !== ""), INCOMPLETE),
@@ -188,7 +226,7 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
 });
 
 // Historique carburant avec filtres
-router.get("/history", async (req, res) => {
+router.get("/history", async (req, res, next) => {
   try {
     const { year, month, vehicleId, type } = req.query;
     
@@ -196,7 +234,7 @@ router.get("/history", async (req, res) => {
     
     if (year) filters.year = parseInt(year as string);
     if (month) filters.month = parseInt(month as string);
-    if (vehicleId) filters.vehicleId = parseInt(vehicleId as string);
+    if (vehicleId) filters.vehicleId = parseQueryId(vehicleId, "ID de véhicule invalide");
     if (type && ['credit', 'debit', 'all'].includes(type as string)) {
       filters.type = type as 'credit' | 'debit' | 'all';
     }
@@ -205,7 +243,8 @@ router.get("/history", async (req, res) => {
     
     return res.status(200).json(history);
   } catch (error) {
-    console.error("Get fuel history error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Get fuel history error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -213,11 +252,7 @@ router.get("/history", async (req, res) => {
 // Statistiques de consommation par véhicule
 router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.vehicleId);
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
+    const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
     const stats = await fuelCardService.getConsumptionStatsByVehicle(vehicleId);
     
@@ -230,11 +265,7 @@ router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
 // Détection d'anomalies de consommation
 router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.vehicleId);
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
+    const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
     const anomalies = await fuelCardService.detectAnomalies(vehicleId);
     

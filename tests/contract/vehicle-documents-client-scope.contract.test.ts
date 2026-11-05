@@ -305,14 +305,14 @@ describe("suppression d'un document de workflow : cloison entre clients", { time
     expect(existsSync(document.filePath)).toBe(true);
   });
 
-  it("l'auteur de la session et le personnel suppriment ; un document absent donne 404", async () => {
+  it("l'auteur de la session et le personnel suppriment ; un document absent donne 404 au personnel, 403 au client (comme un document étranger)", async () => {
     for (const actor of ["clientB", "admin"] as const) {
       const document = await seedWorkflowDocument("B", `del-${actor}.pdf`);
       const res = await call("DELETE", `/api/workflows/documents/${document.id}`, { actor });
       expect(res.status).toBe(204);
       expect(existsSync(document.filePath)).toBe(false);
       const again = await call("DELETE", `/api/workflows/documents/${document.id}`, { actor });
-      expect(again.status).toBe(404);
+      expect(again.status).toBe(actor === "admin" ? 404 : 403);
     }
   });
 });
@@ -330,7 +330,7 @@ describe("téléchargement d'un document de workflow : nom d'origine dans l'en-t
     const document = await seedWorkflowDocument("B", "cd-unicode.pdf", original);
     const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
     expect(download.status).toBe(200);
-    expect(download.headers.get("content-disposition")).toMatch(/^inline;/);
+    expect(download.headers.get("content-disposition")).toMatch(/^attachment;/);
     expect(filenameOf(download.headers.get("content-disposition"))).toBe(original);
   });
 
@@ -353,6 +353,6 @@ describe("téléchargement d'un document de workflow : nom d'origine dans l'en-t
     const document = await seedWorkflowDocument("B", "cd-ascii.pdf", "facture-2026.pdf");
     const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
     expect(download.status).toBe(200);
-    expect(download.headers.get("content-disposition")).toBe('inline; filename="facture-2026.pdf"');
+    expect(download.headers.get("content-disposition")).toBe('attachment; filename="facture-2026.pdf"');
   });
 });

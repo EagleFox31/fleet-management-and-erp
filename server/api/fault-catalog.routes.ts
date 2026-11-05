@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { faultCatalog, insertFaultCatalogPartSchema, updateFaultCatalogPartSchema } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { moduleLogger } from "../lib/logger";
 import { idParam, makeFailWith } from "../lib/route-helpers";
@@ -24,10 +25,7 @@ const failWith = makeFailWith(log);
  */
 router.patch("/fault-catalog/:id", isWorkshopManager, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) {
-      throw new AppError(400, "ID invalide");
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const {
       id: _id,
@@ -64,7 +62,7 @@ router.patch("/fault-catalog/:id", isWorkshopManager, async (req, res, next) => 
  * Pièces associées à une panne (CAT2). Lecture : tout le personnel ; écriture : admin et chef d'atelier.
  * Règles métier (panne archivée figée, lien d'une autre panne, doublon) dans FaultCatalogService.
  */
-router.get("/fault-catalog/:id([0-9]+)/parts", isStaff, async (req, res, next) => {
+router.get("/fault-catalog/:id/parts", isStaff, async (req, res, next) => {
   try {
     return res.json(await faultCatalogService.listParts(idParam(req.params.id, "Identifiant de panne")));
   } catch (err) {
@@ -72,7 +70,7 @@ router.get("/fault-catalog/:id([0-9]+)/parts", isStaff, async (req, res, next) =
   }
 });
 
-router.post("/fault-catalog/:id([0-9]+)/parts", isWorkshopManager, async (req, res, next) => {
+router.post("/fault-catalog/:id/parts", isWorkshopManager, async (req, res, next) => {
   try {
     const data = insertFaultCatalogPartSchema.parse(req.body ?? {});
     const link = await faultCatalogService.addPart(idParam(req.params.id, "Identifiant de panne"), data);
@@ -82,7 +80,7 @@ router.post("/fault-catalog/:id([0-9]+)/parts", isWorkshopManager, async (req, r
   }
 });
 
-router.patch("/fault-catalog/:id([0-9]+)/parts/:linkId([0-9]+)", isWorkshopManager, async (req, res, next) => {
+router.patch("/fault-catalog/:id/parts/:linkId", isWorkshopManager, async (req, res, next) => {
   try {
     const data = updateFaultCatalogPartSchema.parse(req.body ?? {});
     const link = await faultCatalogService.updatePart(
@@ -96,7 +94,7 @@ router.patch("/fault-catalog/:id([0-9]+)/parts/:linkId([0-9]+)", isWorkshopManag
   }
 });
 
-router.delete("/fault-catalog/:id([0-9]+)/parts/:linkId([0-9]+)", isWorkshopManager, async (req, res, next) => {
+router.delete("/fault-catalog/:id/parts/:linkId", isWorkshopManager, async (req, res, next) => {
   try {
     await faultCatalogService.removePart(idParam(req.params.id, "Identifiant de panne"), idParam(req.params.linkId, "Identifiant de lien"));
     return res.status(204).send();

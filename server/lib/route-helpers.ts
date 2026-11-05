@@ -2,17 +2,14 @@ import type { NextFunction, Request } from "express";
 import { AppError } from "./app-error";
 import { withLogContext } from "./error-log-context";
 import type { moduleLogger } from "./logger";
+import { parseRouteId } from "./route-id";
 
-/** Plus grand entier d'une colonne `integer` Postgres : au-delà, la requête SQL échouerait en 500. */
-const MAX_PG_INTEGER = 2147483647;
-
-/** Identifiant de route : entier strictement positif tenant dans un `integer` Postgres, sinon 400 lisible. */
+/**
+ * Identifiant de route, sinon 400 « <label> invalide ». Délègue à `parseRouteId` : `Number.parseInt`
+ * lisait `"12abc"` comme 12 et visait un autre objet (5 novembre 2026).
+ */
 export function idParam(value: string, label: string): number {
-  const id = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(id) || id <= 0 || id > MAX_PG_INTEGER) {
-    throw new AppError(400, `${label} invalide`);
-  }
-  return id;
+  return parseRouteId(value, `${label} invalide`);
 }
 
 /**

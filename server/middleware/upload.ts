@@ -90,13 +90,14 @@ export const ALLOWED_EXTENSIONS_BY_MIME: Record<string, readonly string[]> = {
 
 /** Vrai si le type MIME est admis ET l'extension du nom cohérente avec lui. */
 export function isAllowedUpload(mimetype: string, originalName: string): boolean {
-  const extensions = ALLOWED_EXTENSIONS_BY_MIME[mimetype];
-  return !!extensions && extensions.includes(path.extname(originalName).toLowerCase());
+  // Propriété propre seulement : « constructor » ou « __proto__ » remonteraient au prototype.
+  if (!Object.hasOwn(ALLOWED_EXTENSIONS_BY_MIME, mimetype)) return false;
+  return ALLOWED_EXTENSIONS_BY_MIME[mimetype].includes(path.extname(originalName).toLowerCase());
 }
 
 // Filtre pour vérifier les types de fichiers acceptés
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  if (!ALLOWED_EXTENSIONS_BY_MIME[file.mimetype]) {
+  if (!Object.hasOwn(ALLOWED_EXTENSIONS_BY_MIME, file.mimetype)) {
     cb(new AppError(400, "Type de fichier non supporté. Veuillez télécharger un PDF, image, Word ou Excel."));
   } else if (!isAllowedUpload(file.mimetype, file.originalname)) {
     cb(new AppError(400, "L'extension du fichier ne correspond pas à son type. Vérifiez le fichier téléversé."));

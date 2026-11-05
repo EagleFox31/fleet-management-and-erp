@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Package, Store, ShoppingCart, FileText, CheckCircle2, ArrowRight, Info } from "lucide-react";
+import { Package, Store, ShoppingCart, FileText, CheckCircle2, ArrowRight, Info, PenLine, FileSpreadsheet, SearchCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface ProcurementTutorialModalProps {
@@ -155,19 +155,19 @@ export function ProcurementTutorialModal({ open, onOpenChange }: ProcurementTuto
           </p>
           <div className="space-y-3">
             <Card className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border-green-200 dark:border-green-800">
-              <h4 className="font-medium text-sm mb-2">✍️ Saisie manuelle</h4>
+              <h4 className="font-medium text-sm mb-2"><PenLine className="inline h-4 w-4 mr-1.5 align-text-bottom" aria-hidden />Saisie manuelle</h4>
               <p className="text-xs text-muted-foreground">
                 Enregistrez vos factures une par une avec tous les détails
               </p>
             </Card>
             <Card className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
-              <h4 className="font-medium text-sm mb-2">📊 Import Excel</h4>
+              <h4 className="font-medium text-sm mb-2"><FileSpreadsheet className="inline h-4 w-4 mr-1.5 align-text-bottom" aria-hidden />Import Excel</h4>
               <p className="text-xs text-muted-foreground">
                 Importez plusieurs factures en masse depuis un fichier Excel
               </p>
             </Card>
             <Card className="p-3 bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-950/30 dark:to-violet-950/30 border-purple-200 dark:border-purple-800">
-              <h4 className="font-medium text-sm mb-2">🔍 Validation automatique</h4>
+              <h4 className="font-medium text-sm mb-2"><SearchCheck className="inline h-4 w-4 mr-1.5 align-text-bottom" aria-hidden />Validation automatique</h4>
               <p className="text-xs text-muted-foreground">
                 Rapprochement automatique facture/commande pour détecter les écarts
               </p>
@@ -207,7 +207,7 @@ export function ProcurementTutorialModal({ open, onOpenChange }: ProcurementTuto
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
-              <IconComponent className="w-6 h-6 text-primary" />
+              <IconComponent className="w-6 h-6 text-primary-text" />
             </div>
             <div>
               <DialogTitle className="text-xl">{currentStepData.title}</DialogTitle>

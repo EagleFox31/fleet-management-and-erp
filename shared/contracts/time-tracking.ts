@@ -6,7 +6,7 @@
  * totaux mensuels sont calculés à la lecture.
  */
 import { z } from "zod";
-import { isoDateSchema } from "./common";
+import { bodyIdSchema, idSchema, isoDateSchema } from "./common";
 
 export const TIME_TRACKING_PATH = "/api/time-tracking";
 export const TIME_TRACKING_MONTHLY_STATS_PATH = "/api/time-tracking/monthly-stats";
@@ -29,7 +29,7 @@ const monthQuery = {
   year: z.coerce.number().int().min(2000).max(2100),
 };
 
-export const timeTrackingQuerySchema = z.object({ userId: z.coerce.number().int().positive().optional(), ...monthQuery });
+export const timeTrackingQuerySchema = z.object({ userId: idSchema.optional(), ...monthQuery });
 export const timeTrackingMonthlyStatsQuerySchema = z.object(monthQuery);
 
 export const timeTrackingEntrySchema = z.object({
@@ -40,7 +40,7 @@ export const timeTrackingEntrySchema = z.object({
 });
 
 export const upsertTimeTrackingRequestSchema = z.object({
-  userId: z.number().int().positive(),
+  userId: bodyIdSchema,
   date: isoDateSchema,
   status: z.enum(TIME_CODES),
   notes: z.string().trim().max(500).optional(),

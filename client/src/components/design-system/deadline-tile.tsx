@@ -30,21 +30,21 @@ interface DeadlineTileProps {
 /** Habillage par état. Une seule source pour les quatre cas. */
 const STYLES: Record<KpiStatus, { tile: string; iconWrap: string; icon: string; value: string }> = {
   critical: {
-    tile: "border-red-200 bg-red-50",
-    iconWrap: "bg-red-100",
-    icon: "text-red-600",
-    value: "text-red-700",
+    tile: "border-destructive/30 bg-destructive/10",
+    iconWrap: "bg-destructive/15",
+    icon: "text-destructive-text",
+    value: "text-destructive-text",
   },
   warning: {
-    tile: "border-amber-200 bg-amber-50",
-    iconWrap: "bg-amber-100",
-    icon: "text-amber-600",
-    value: "text-amber-700",
+    tile: "border-warning/40 bg-warning/10",
+    iconWrap: "bg-warning/20",
+    icon: "text-warning-text",
+    value: "text-warning-text",
   },
   success: {
     tile: "border-gray-100 bg-gray-50",
-    iconWrap: "bg-green-50",
-    icon: "text-green-600",
+    iconWrap: "bg-success/10",
+    icon: "text-success",
     value: "text-gray-800",
   },
   neutral: {

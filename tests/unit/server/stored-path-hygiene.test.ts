@@ -54,8 +54,7 @@ describe("accès disque : chemin borné à uploads/ ou exception justifiée (AGE
   it("le scan voit les accès bornés connus (il n'est pas aveugle)", () => {
     const bounded = new Set(sites.filter((s) => s.bounded).map(fileAccessKey));
     for (const key of [
-      "server/routes.ts:GET /api/documents/:id/download:download",
-      "server/routes.ts:GET /api/workflows/documents/:documentId:createReadStream",
+      "server/lib/uploaded-file-response.ts:sendUploadedFile:sendFile",
       "server/middleware/upload.ts:deleteFile:unlink",
       "server/services/workflow-document-service.ts:deleteWorkflowDocument:unlinkSync",
     ]) {

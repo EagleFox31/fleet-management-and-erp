@@ -467,3 +467,151 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
 - **Preuve** : contrat `operations-driver-scope` (cas id non strict et inconnu) rouge sur l'ancien code, vert après (10/10).
+## 2026-11-05 — Justificatif de renouvellement consultable
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` sert le justificatif déposé au renouvellement rapide. Rôles lecteurs des demandes (`DOCUMENT_RENEWAL_VIEWER_ROLES`), id par `parseRouteId`, cloison `canAccessOwned`, fichier servi depuis le seul dossier `uploads/document-renewals/proofs` (`uploadedFileCandidates` + `isInsideDirectory`), 404 lisible si la demande n'a pas de justificatif ou si le fichier a disparu.
+- **Pourquoi** : décision produit (option A) : le justificatif était écrit sur disque mais jamais consultable.
+- **Preuve** : contrat `document-renewal-proof-download` rouge sans la route (12/13), vert après (13/13) ; contrats renouvellement voisins 28/28 ; unitaires 2524, tsc 0.
+
+
+## 2026-11-05 — Justificatif de renouvellement : toujours en téléchargement
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` répond en `attachment` avec `nosniff`, type tiré d'une liste blanche d'extensions (sinon `application/octet-stream`), chemin résolu contrôlé contre le dossier des justificatifs. Au dépôt, l'extension stockée vient du type accepté (table commune avec le récépissé).
+- **Pourquoi** : relecture de sécurité. Le type servi dépendait de l'extension du nom envoyé, que le filtre de dépôt ne contrôlait pas.
+- **Preuve** : contrats `document-renewal-proof-download` et `document-quick-renew-proof-lifecycle`, nouveaux cas rouges sur la route d'origine, verts après.
+## 2026-11-05 — Justificatif de règlement : identifiants lus strictement
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` lit ses deux ids en chiffres seuls puis `assertValidDbId` (400). AGENTS.md §9 : revue des chemins stockés reprise (routes.ts, rapports, preuves de renouvellement), aucun accès non borné.
+- **Pourquoi** : `parseInt("12abc")` valait 12 et servait le justificatif de la facture 12.
+- **Preuve** : contrat `supplier-settlement-proof-path` (5 ids non stricts) rouge sur l'ancien code (200), vert après (15/15).
+
+## 2026-11-05 — Lecture commune des ids de route
+- **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
+- **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
+- **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+
+## 2026-11-05 — Justificatif de règlement fournisseur : téléchargement forcé, extension tirée du type
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` sert le fichier en `attachment` avec `nosniff`, et choisit son type d'après l'extension sur disque, en liste blanche (`settlementProofContentType`). Toute autre extension part en `application/octet-stream`. Au dépôt, l'extension vient du type déclaré (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`), plus du nom d'origine. Le filtre de dépôt lit la même table.
+- **Pourquoi** : même forme que le justificatif de renouvellement. Un nom d'origine en `.html` déclaré PDF était écrit en `.html`, puis servi en ligne sur l'origine de l'application.
+- **Preuve** : contrat `supplier-settlement-proof-path` rouge 8/18 avant, vert 18/18 après. Avec les autres contrats de règlement : 31/31. Unitaires `settlement-proof` 41, et une mutation de la liste blanche tuée.
+## 2026-11-05 — Filet des ids de route hors int4
+- **Quoi** : `routeIdRangeGuard` monté en tête de `apiRouter` (`server/api/index.ts`) : segment dont l'entier de tête (après décodage, signe admis) dépasse `MAX_DB_INTEGER_ID` → `AppError(400, "Identifiant invalide.")`, pour `server/api` comme pour `routes.ts`. Inscrit dans la liste blanche du garde-fou des middlewares (sans base), retiré des attendus. Le contrat d'upload de document véhicule attend ce message pour un id hors plage (même 400).
+- **Pourquoi** : un id hors plage répondait 500 après une erreur base 22003.
+- **Preuve** : contrat `route-id-range-guard` rouge sans le montage (4/7 en échec), vert après ; formes lues par `parseInt` (encodée, signée, décimale, suffixée) rouges puis vertes ; avec l'upload de document 18/18 ; deux mutations du garde tuées ; garde-fou des middlewares vert.
+## 2026-11-05 — Compteur de verrouillage : toutes les écritures sous le verrou de clé
+- **Quoi** : `DbLockoutStore.reset` et `release` passent par `underKeyLock`, la transaction sous verrou consultatif déjà utilisée par `reserve` et `confirmFailure`. Dans `auth-login-unavailable`, l'attente fixe de 500 ms est remplacée par l'attente de l'état stable du garde ; l'import en double est retiré.
+- **Pourquoi** : test instable en CI. Une réservation lue avant le DELETE du succès précédent réécrivait l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store`, nouveaux cas rouges avant le correctif et verts après ; contrats du verrouillage verts sur trois passes.
+
+## 2026-11-05 — Déverrouillage admin sous le verrou de clé
+- **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
+- **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.
+
+## 2026-11-05 — Documents téléversés servis en pièce jointe
+- **Quoi** : `GET /api/documents/:id/download` et `GET /api/workflows/documents/:documentId` déplacés de `routes.ts` vers `server/api/uploaded-documents.routes.ts` (mêmes gardes, même cloison, mêmes messages). Envoi par `sendUploadedFile` : `uploadedFileCandidates`, pièce jointe, `nosniff`, type en liste blanche cohérent avec l'extension. `routes.ts` retiré de la liste gelée `file-serving-nosniff` ; clé de contrôle de `stored-path-hygiene` déplacée vers le helper.
+- **Pourquoi** : reste ouvert de l'entrée LESSONS du justificatif de règlement fournisseur.
+- **Preuve** : nouveau contrat rouge sur l'ancien code (7/8), vert après ; mutation du filtre de type tuée (4 rouges) ; contrats existants des deux routes verts, attendus `inline` passés à `attachment`.
+## 2026-11-05 — Verrouillage de connexion : suite de la relecture du déverrouillage admin
+- **Quoi** : `registerFailure` est retiré de `LockoutStore` et des deux stores, avec `nextLockState`, son seul usage. Les tests produisent un échec par le vrai chemin, `failLogin` (`tests/support/lockout.ts` : reserve puis confirmFailure). L'ordre des verrous de clé devient une fonction pure, `lockKeyOrder`, testée en unitaire. Le « reste ouvert » de LESSONS mentionne aussi `reserve`.
+- **Pourquoi** : `registerFailure` écrivait sans verrou de clé et n'avait aucun appelant en production. Les tests s'en servaient comme raccourci, sans passer par le chemin réel. Quand on inversait le tri des clés, aucun test ne passait au rouge.
+- **Preuve** : intégration du verrouillage 13/13, contrats 32/32, unitaires 2583. Si on inverse le tri dans `lockKeyOrder`, le test échoue.
+## 2026-11-05 — Garde-fou : verrou de clé du compteur de verrouillage
+- **Quoi** : le test `tests/unit/server/lockout-key-lock-hygiene.test.ts` vérifie deux choses. La clé `fleet-lockout:` n'est verrouillée qu'à un seul endroit de `server/`, dans `underKeyLock`. Et seul le store écrit `login_attempts_by_username`, à une exception près, nommée : la reprise M3 au démarrage.
+- **Pourquoi** : les deux corrections du compteur (5 novembre) venaient d'écritures faites hors du verrou de clé. Un second endroit qui prendrait ce verrou pourrait l'appliquer dans un autre ordre, ou sur une autre forme de clé.
+- **Preuve** : vert sur main. Il passe au rouge si l'on ajoute une deuxième occurrence de la clé, ou un écrivain de la table hors du store. Unitaires 2612.
+
+## 2026-11-05 — Ids hors plage int4 dans la query et le corps
+- **Quoi** : `bodyIdSchema` et `MAX_DB_INTEGER_ID` dans `shared/contracts/common.ts` ; `idSchema` borné. Les ids d'entrée de quinze routes de `server/api` passent par ces schémas. Nouveau cliquet `zod-id-range-hygiene`.
+- **Pourquoi** : un id au-delà de l'int4 reçu dans la query ou le corps répondait 500. Le filet `routeIdRangeGuard` ne lit que le chemin.
+- **Preuve** : contrat `id-range-query-body` rouge 12/12 sur l'ancien code, vert 15/15 après. Le cliquet passe au rouge si l'on retire une borne.
+
+## 2026-11-05 — Suites de l'audit de #427 et de la relecture de #442
+- **Quoi** : `upload.ts` n'accepte qu'un type MIME déclaré en propre (`Object.hasOwn`). `sendUploadedFile` classe l'échec d'envoi : interruption client (info, sans réponse), introuvable (404), autre (500). Contrat `uploaded-documents-download-headers` : id inconnu, chemin stocké hors de `uploads/`, fichier absent. `partId` du catalogue de pannes et plein de la clé d'anomalie carburant bornés à l'int4. Cliquet `zod-id-range-hygiene` étendu à `shared/schema.ts`, borne exigée `MAX_DB_INTEGER_ID`.
+- **Pourquoi** : `constructor` comme type MIME remontait au prototype. Un fichier disparu entre le contrôle et l'envoi répondait 500, et une interruption côté client était journalisée en erreur. Deux ids hors plage répondaient encore 500.
+- **Preuve** : unitaires rouges sur l'ancien `upload.ts` (2 cas) ; contrats `fault-catalog-lifecycle` et `fuel-anomalies` rouges en 500 sur l'ancien schéma, verts après.
+## 2026-11-05 — Budget de mission (L1, drapeau finance)
+- **Quoi** :
+  - table `mission_budgets`, une par mission (`shared/schema.ts`, `MISSION_BUDGETS_SQL` et la migration jumelle `20261105_mission_budgets.sql`), avec les colonnes d'audit et `treasury_entry_id` nullable, sans effet avant T1 ;
+  - contrat `shared/contracts/mission-budgets.ts` ;
+  - routeur `server/api/mission-budgets.routes.ts`, derrière `requireFeature("finance")` :
+    - saisie : logistique et administrateur ;
+    - approbation et décaissement : direction et administrateur ;
+    - lecture : les trois ;
+    - besoin du jour : `GET /api/mission-budgets/daily-need?date=`, somme en base, au total et par statut.
+- **Comment** :
+  - le prix du litre est celui de la date du budget (`getFuelPriceAt`), figé à la saisie ;
+  - `computeMissionBudget` calcule en centimes entiers ;
+  - le client n'écrit ni le prix, ni les montants calculés, ni le statut (schéma `.strict()`) ;
+  - une transition est un UPDATE conditionnel sur le statut attendu : un rejeu reçoit 409, sans double écriture ;
+  - l'unicité de la mission est tenue par une contrainte, avec 409 en cas de conflit.
+- **Pourquoi** : lot L1 du plan trésorerie et opérations. Le FDR est saisi librement ; le barème par destination fera l'objet d'un lot séparé (L1b).
+- **Preuve** :
+  - contrat `mission-budgets` rouge sur l'ancien code (8/10), vert après (10/10) ;
+  - unitaires de calcul et de saisie (7) ;
+  - test de dérive entre init-database, la migration et Drizzle (4) ;
+  - `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la relecture et de l'audit de sécurité
+- **Quoi** :
+  - approbation et décaissement liés à la version lue : corps strict `{ expectedUpdatedAt }`, 409 si le budget a changé ;
+  - prix carburant exigé à la date du budget : 409 sans prix, plus de prix par défaut sur ce flux (`findFuelPriceAt`) ;
+  - date du budget bornée à 60 jours autour d'aujourd'hui (400) ;
+  - mission terminée ou annulée : 409 à la saisie ;
+  - correction : des notes seules ne re-figent pas le prix ; un corps sans changement n'écrit rien ; `log.info` sur toute correction écrite ;
+  - contraintes `mission_budgets_status_check`, `_amounts_check` et `_mission_id_unique` réconciliées au démarrage (NOT VALID puis VALIDATE, renommage d'une unicité posée sous un autre nom) et relues par `reportCdcConstraintGaps`.
+- **Comment** :
+  - transition : UPDATE conditionnel sur le statut et sur `date_trunc('milliseconds', updated_at)` ;
+  - le relevé des contraintes est déplacé après `MISSION_BUDGETS_SQL`, pour ne pas signaler au premier démarrage une table pas encore créée.
+- **Pourquoi** :
+  - sans version lue, la direction pouvait approuver un montant corrigé entre sa lecture et son clic ;
+  - un prix par défaut silencieux faussait un montant décaissé.
+- **Décision utilisatrice** : aucune contrainte « 4 yeux » entre saisie, approbation et décaissement. La traçabilité `createdBy` / `approvedBy` / `disbursedBy` suffit.
+- **Preuve** :
+  - contrat `mission-budgets` 15/15 (version périmée, course de deux décaissements, chauffeur 403, logistique au décaissement 403, date hors fenêtre, prix absent, mission close, correction sans écriture) ;
+  - test des noms de contraintes Drizzle / SQL / `CDC_RECONCILED_CONSTRAINTS` ;
+  - `tsc` : 0 erreur.
+
+## 2026-11-05 — Lot Q1 : contrôles inopinés QHSE (serveur)
+- **Quoi** : tables `qhse_inspection_criteria` et `qhse_inspections` (schéma Drizzle, `init-database.ts` idempotent, migration jumelle, CHECK de nature et de forme jsonb). Seize critères semés, tous tirés du document QHSE (10 cabine, 6 arrêt). Routeur `server/api/qhse-inspections.routes.ts` derrière le drapeau `qhse` : critères (lecture admin, management, logistics ; écriture admin, management), contrôles (saisie et lecture admin, management, logistics ; le chauffeur lit les siens, 403 identique pour l'absent et l'interdit). Rôles dans `shared/constants/roles.ts`.
+- **Pourquoi** : le suivi des contrôles inopinés se faisait hors système. Chaque ligne garde code et libellé du critère à la saisie, pour qu'un renommage ne réécrive pas l'historique.
+- **Preuve** : unitaires de validation et de dérive migration/init-database ; contrat 3/3 (drapeau coupé, rôles, cloison chauffeur, validation, second démarrage sans écriture) sur Postgres local sous verrou ; tsc 0 erreur ; unitaires 2723 verts, hors backup-db (script shell, échec propre à ce poste).
+- **Reste en TypeScript** : l'égalité entre la nature du critère et la grille du contrôle (critères dans un jsonb) ; à confier à fleet-db si l'on passe à une table de lignes.
+
+## 2026-11-05 — Budget de mission (L1) : suites de la contre-relecture
+- **Quoi** :
+  - mission terminée ou annulée : correction, approbation et décaissement refusés en 409, comme la saisie ;
+  - libellé du relevé des contraintes rendu générique (« Contraintes de base incomplètes ») ;
+  - fusion de `origin/main` (Q1 #462, #458, F1 #464) : `CDC_RECONCILED_CONSTRAINTS` garde F1, `qhse_*` et `mission_budgets_*`.
+- **Comment** :
+  - la mission est verrouillée `FOR SHARE` dans la transaction qui écrit le budget (saisie, correction, transition), avant le verrou du budget ;
+  - même ordre de verrous partout (mission, puis budget) : une correction et une approbation simultanées ne s'interbloquent pas.
+- **Pourquoi** : on pouvait encore décaisser le budget d'une mission annulée ; une annulation concurrente attend désormais l'écriture du budget, ou la précède et la fait refuser.
+- **Preuve** : contrat `mission-budgets` 16/16, dont « mission close après la saisie » (correction, approbation, décaissement 409, budget intact) ; `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1b) : barème par destination
+- **Quoi** :
+  - table `mission_destinations` (code, libellé, litres, FDR, active) : liste fermée, semée avec les cinq destinations relevées ;
+  - `GET /api/mission-budgets/destinations` : destinations actives, mêmes rôles de lecture que les budgets ;
+  - saisie : `destinationId` facultatif ; il pré-remplit litres et FDR absents du corps, une valeur saisie l'emporte ; sans destination, litres et FDR restent requis ;
+  - destination retirée ou inconnue : 400 ; correction : changer ou retirer la destination ne réécrit pas les montants.
+- **Comment** :
+  - migration jumelle de `MISSION_DESTINATIONS_SQL`, appliquée après `MISSION_BUDGETS_SQL` et avant le relevé des contraintes ;
+  - `mission_destinations_amounts_check` (NOT VALID puis VALIDATE) et `mission_destinations_code_unique` réconciliées avant le seed, qui en dépend (`ON CONFLICT (code) DO NOTHING`) ;
+  - le pré-remplissage se fait dans la transaction de saisie, après le verrou de la mission ;
+  - `tests/support/cleanup.ts` supprime les destinations écrites par un compte de test, après avoir détaché les budgets qui les visent.
+- **Pourquoi** : choix à la main dans une liste fermée, sans rapprochement automatique avec l'adresse de la mission ; le seed ne réécrit jamais une valeur corrigée depuis.
+- **Preuve** : contrat `mission-budgets` 20/20 (liste par rôle, retirée absente, pré-remplissage, valeur saisie prioritaire, 400, correction) ; unitaires du schéma et du contrat 22/22 ; `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1b) : suites de la relecture
+
+- **Quoi** : trois réserves de la relecture levées.
+  - la clé étrangère `destination_id` ne bloque plus le démarrage sur une base qui contient des valeurs orphelines ;
+  - la destination est lue dans la transaction de saisie ;
+  - les destinations du test de contrat sont rattrapées par le ménage.
+- **Comment** :
+  - `mission_budgets_destination_id_mission_destinations_id_fk` est posée NOT VALID, puis validée ; une `foreign_key_violation` laisse un WARNING. Le modèle est `document_renewal_requests_receipt_uploaded_by_users_id_fk`. La contrainte est ajoutée à `CDC_RECONCILED_CONSTRAINTS` et au test de dérive ;
+  - `activeDestination(tx, id)` lit en `FOR SHARE` : un retrait concurrent de la destination attend la fin de la saisie ;
+  - les destinations du test portent `createdBy` d'un compte de test.
+- **Pourquoi** : une clé étrangère posée sans repli fait échouer `init-database` dès qu'une seule valeur orpheline existe.
+- **Preuve** :
+  - migration jouée deux fois sur la base locale sans erreur, et contrainte validée ;
+  - avec un budget orphelin, dans une transaction annulée ensuite, la contrainte reste NOT VALID et le démarrage n'est pas bloqué ;
+  - `tsc` : 0 erreur ; unitaires 2860 ; contrat `mission-budgets` 20/20 ; ménage des clés étrangères 3/3.

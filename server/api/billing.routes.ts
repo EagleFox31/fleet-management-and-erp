@@ -4,7 +4,11 @@ import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
-import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
+import { CLIENT_BILLING_EVENT_ROLES, CLIENT_BILLING_STATS_ROLES } from "@shared/constants/roles";
+import { AppError, isAppError } from "../lib/app-error";
+import { withLogContext } from "../lib/error-log-context";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
+import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
 
 const router = Router();
 
@@ -27,7 +31,8 @@ const MAX_INVOICE_AMOUNT_HT = 1_000_000_000_000;
 const generateInvoiceSchema = z.object({
   missionId: z.coerce.number({ invalid_type_error: "Mission invalide." })
     .int("Mission invalide.")
-    .positive("Mission invalide."),
+    .positive("Mission invalide.")
+    .max(MAX_DB_INTEGER_ID, "Mission invalide."),
   amount: z.coerce.number({ invalid_type_error: "Le montant doit être un nombre." })
     .positive("Le montant doit être supérieur à 0.")
     .max(MAX_INVOICE_AMOUNT_HT, "Le montant dépasse le plafond autorisé."),
@@ -44,9 +49,6 @@ type InvoicePdfItem = {
   unitPrice: number;
   total: number;
 };
-
-const getErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : "Erreur inconnue";
 
 const toOptionalString = (value: string | null | undefined): string | undefined =>
   value ?? undefined;
@@ -121,6 +123,7 @@ const normalizeInvoiceItems = (value: unknown): InvoicePdfItem[] | undefined => 
 // Secretary: créer, consulter, enregistrer paiements  
 // Logistics: créer, consulter
 const canAccessBilling = authorize([...CLIENT_BILLING_EVENT_ROLES]);
+const canReadBillingStatistics = authorize([...CLIENT_BILLING_STATS_ROLES]);
 const canRecordPayment = authorize(['admin', 'secretary']);
 
 const broadcastClientInvoiceUpdate = (
@@ -218,7 +221,7 @@ router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Re
  * GET /api/billing/invoices
  * Liste factures clients avec filtres
  */
-router.get("/invoices", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName, clientId, status, startDate, endDate } = req.query;
 
@@ -231,7 +234,7 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
     } = {};
 
     if (clientName) filters.clientName = clientName as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (status) filters.status = status as string;
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
@@ -240,8 +243,7 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
 
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error fetching invoices:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching invoices" }));
   }
 });
 
@@ -249,7 +251,7 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
  * GET /api/billing/invoices/summary
  * Résumé agrégé des factures clients (pour KPI dashboard)
  */
-router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName, clientId, status, startDate, endDate } = req.query;
 
@@ -262,7 +264,7 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
     } = {};
 
     if (clientName) filters.clientName = clientName as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (status) filters.status = status as string;
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
@@ -270,8 +272,7 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
     const result = await clientBillingService.getClientInvoices(filters);
     res.json(result.summary);
   } catch (error: unknown) {
-    console.error("Error fetching invoices summary:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching invoices summary" }));
   }
 });
 
@@ -279,10 +280,10 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
  * GET /api/billing/invoices/:id
  * Détails d'une facture avec client, mission et paiements
  */
-router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const invoice = await clientBillingService.getInvoiceById(parseInt(id));
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    const invoice = await clientBillingService.getInvoiceById(id);
     const invoicePayload: any = { ...invoice };
 
     if (invoice?.mission && typeof invoice.mission === "object") {
@@ -298,8 +299,7 @@ router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response
 
     res.json(invoicePayload);
   } catch (error: unknown) {
-    console.error("Error fetching invoice:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching invoice" }));
   }
 });
 
@@ -309,7 +309,8 @@ router.get("/invoices/:id", canAccessBilling, async (req: Request, res: Response
  */
 router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    // Lu avant le corps : un id invalide répond 400 sans rien écrire.
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     // Un montant non numérique devenait NaN et était écrit tel quel dans le solde.
     const { amount, paymentDate, paymentMethod, reference, notes } = recordPaymentSchema.parse(req.body ?? {});
 
@@ -318,7 +319,7 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
     }
 
     const result = await clientBillingService.recordPayment(
-      parseInt(id),
+      id,
       {
         amount,
         paymentDate,
@@ -337,11 +338,11 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
     broadcastClientInvoiceUpdate(
       "client_invoice_payment_recorded",
       {
-        invoiceId: parseInt(id),
+        invoiceId: id,
         payment: result,
       },
       {
-        invoiceId: parseInt(id),
+        invoiceId: id,
         actorUserId: req.user?.id ?? null,
         actorRole: req.user?.role ?? null,
       },
@@ -359,14 +360,13 @@ router.post("/invoices/:id/payments", canRecordPayment, async (req: Request, res
  * GET /api/billing/invoices/:id/payments
  * Historique des paiements d'une facture
  */
-router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const result = await clientBillingService.getInvoicePayments(parseInt(id));
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    const result = await clientBillingService.getInvoicePayments(id);
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error fetching invoice payments:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching invoice payments" }));
   }
 });
 
@@ -374,12 +374,12 @@ router.get("/invoices/:id/payments", canAccessBilling, async (req: Request, res:
  * GET /api/billing/invoices/:id/pdf
  * Télécharger la facture en PDF
  */
-router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+
     // Récupérer la facture avec tous les détails
-    const invoice = await clientBillingService.getInvoiceById(parseInt(id));
+    const invoice = await clientBillingService.getInvoiceById(id);
 
     if (!invoice.client) {
       return res.status(404).json({ error: "Client lié à la facture introuvable" });
@@ -423,8 +423,7 @@ router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Resp
     // Envoyer le PDF
     res.send(pdfBuffer);
   } catch (error: unknown) {
-    console.error("Error generating invoice PDF:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error generating invoice PDF" }));
   }
 });
 
@@ -432,7 +431,7 @@ router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Resp
  * GET /api/billing/reports/:clientName
  * Rapport facturation pour un client (MAERSK, CNPCC, AGL, SODECOTON)
  */
-router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName } = req.params;
     const { year, month } = req.query;
@@ -449,8 +448,7 @@ router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: R
 
     res.json(report);
   } catch (error: unknown) {
-    console.error("Error generating billing report:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error generating billing report" }));
   }
 });
 
@@ -458,13 +456,12 @@ router.get("/reports/:clientName", canAccessBilling, async (req: Request, res: R
  * GET /api/billing/statistics
  * Statistiques globales de facturation par client
  */
-router.get("/statistics", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/statistics", canReadBillingStatistics, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await clientBillingService.getBillingStatistics();
     res.json(stats);
   } catch (error: unknown) {
-    console.error("Error fetching billing statistics:", error);
-    res.status(500).json({ error: getErrorMessage(error) });
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching billing statistics" }));
   }
 });
 

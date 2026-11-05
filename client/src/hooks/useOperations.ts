@@ -24,12 +24,6 @@ export function useOperations() {
     ...liveQueryConfig,
   });
 
-  const statsSummary = useQuery<any>({
-    queryKey: ["/api/operations/stats/summary"],
-    queryFn: () => operationsService.getStatsSummary(),
-    ...liveQueryConfig,
-  });
-
   const upcomingMissions = useQuery<any>({
     queryKey: ["/api/operations/missions/upcoming"],
     queryFn: () => operationsService.getUpcomingMissions(),
@@ -82,7 +76,6 @@ export function useOperations() {
   return {
     statsByClient,
     statsByDestination,
-    statsSummary,
     upcomingMissions,
     activeMissions,
     createMission: createMissionMutation.mutate,

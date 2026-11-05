@@ -1,3 +1,4 @@
+import { messageText } from "../support/api-error";
 import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
@@ -72,7 +73,7 @@ describe("POST /api/vehicles/:id/documents : ligne restée en base après un dou
       update.mockRestore();
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.message).not.toMatch(/TEST|synchro|retrait/);
+      expect(messageText(body)).not.toMatch(/TEST|synchro|retrait/);
       expect(remove).toHaveBeenCalledTimes(1);
 
       const rows = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));

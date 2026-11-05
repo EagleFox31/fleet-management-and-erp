@@ -97,9 +97,9 @@ export function PremiumDataTable<T>({
       return <ArrowUpDown className="h-3 w-3 shrink-0 text-gray-400 opacity-60" />;
     }
     return sortDirection === "asc" ? (
-      <ArrowUp className="h-3 w-3 shrink-0 text-primary" />
+      <ArrowUp className="h-3 w-3 shrink-0 text-primary-text" />
     ) : (
-      <ArrowDown className="h-3 w-3 shrink-0 text-primary" />
+      <ArrowDown className="h-3 w-3 shrink-0 text-primary-text" />
     );
   };
 
@@ -177,7 +177,7 @@ export function PremiumDataTable<T>({
                 key={rowKey(row, rowIndex)}
                 className={cn(
                   excelHeader
-                    ? "border-b border-gray-200 hover:bg-blue-50/40"
+                    ? "border-b border-gray-200 hover:bg-muted/50"
                     : "border-b border-gray-50 last:border-0 hover:bg-gray-50/60",
                   "transition-colors",
                   onRowClick ? "cursor-pointer" : undefined,

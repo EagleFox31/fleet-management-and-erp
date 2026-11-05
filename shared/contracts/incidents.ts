@@ -3,7 +3,7 @@
  * Une déclaration prévient le chef d'atelier et l'admin (`incident_reported`).
  */
 import { z } from "zod";
-import { isoDateTimeSchema } from "./common";
+import { bodyIdSchema, isoDateTimeSchema } from "./common";
 
 export const INCIDENTS_PATH = "/api/incidents";
 
@@ -14,7 +14,7 @@ export const INCIDENT_STATUSES = ["open", "in_progress", "resolved"] as const;
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
 export const createIncidentRequestSchema = z.object({
-  vehicleId: z.number().int().positive(),
+  vehicleId: bodyIdSchema,
   description: z.string().trim().min(5).max(2000),
   severity: z.enum(INCIDENT_SEVERITIES),
 });

@@ -167,6 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
               { label: "Facture fournisseur", href: "/procurement/invoices", icon: FileText },
             ]
           },
+          { label: "Missions transport", href: "/missions", icon: Map },
           { label: "Facturation client", href: "/operations", icon: Receipt },
           {
             label: "Analyse",
@@ -273,6 +274,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
               { label: "Facture fournisseur", href: "/procurement/invoices", icon: FileText },
             ]
           },
+          { label: "Missions transport", href: "/missions", icon: Map },
           { label: "Facturation client", href: "/operations", icon: Receipt },
           { label: "Conformité docs", href: "/maintenance/date-alerts", icon: AlertTriangle },
           {
@@ -309,6 +311,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
           },
           { label: "Demandes de pièces", href: "/inventory-requests", icon: ClipboardList },
           { label: "Alertes stock", href: "/alerts", icon: AlertTriangle },
+          {
+            label: "Analyse",
+            icon: BarChart,
+            menuKey: "analysis",
+            submenu: [
+              { label: "Rapports", href: "/reports", icon: TrendingUp },
+            ]
+          },
         ];
 
       case 'logistics':
@@ -351,6 +361,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
       case 'management':
         return [
           { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
+          {
+            label: "Ressources Véhicules",
+            icon: Car,
+            menuKey: "resources",
+            submenu: [
+              { label: "Véhicules", href: "/vehicles", icon: Truck },
+              { label: "Carburant", href: "/fuel", icon: Fuel },
+            ]
+          },
           { label: "Corridors CEMAC", href: "/management/corridor-map", icon: Map },
           { label: "Mon équipe", href: "/management/team", icon: Users },
           {

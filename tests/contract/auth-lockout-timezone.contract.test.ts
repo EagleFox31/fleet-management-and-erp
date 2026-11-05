@@ -7,6 +7,7 @@ import { DbLockoutStore, storedLockoutKey } from "../../server/services/login-lo
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { failLogin } from "../support/lockout";
 
 /**
  * Heure de fin de verrou, serveur hors UTC (Douala, UTC+1).
@@ -61,7 +62,7 @@ describe("/api/admin/users/locked : heure de fin hors UTC", { timeout: 120000 },
 
   it("renvoie l'instant exact de fin de verrou, et le compte sort de la liste à cet instant", async () => {
     const now = new Date();
-    for (let i = 0; i < cfg.maxAttempts; i++) await store.registerFailure(target.username, now, cfg);
+    for (let i = 0; i < cfg.maxAttempts; i++) await failLogin(store, target.username, now, cfg);
     const expected = now.getTime() + cfg.lockMinutes * 60_000;
 
     const res = await fetch(baseUrl + LOCKED_USERS_PATH, { headers: { Cookie: cookie } });

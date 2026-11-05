@@ -4,7 +4,7 @@ import { db } from "../../server/db";
 import { workOrders } from "../../shared/schema";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
-import { leakText } from "../support/api-error";
+import { leakText, messageText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 
 /**
@@ -122,7 +122,7 @@ describe("R1 : corps invalide, 400 errors[] par champ", { timeout: 120000 }, () 
       expect(Array.isArray(res.body.errors) && res.body.errors.length).toBeGreaterThan(0);
       for (const e of res.body.errors) expect(typeof e.field).toBe("string");
       expect(typeof res.body.requestId).toBe("string");
-      expect(res.body.message).not.toMatch(/zod|issues|\{/i);
+      expect(messageText(res.body)).not.toMatch(/zod|issues|\{/i);
     });
   }
 });

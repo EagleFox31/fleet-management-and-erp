@@ -1,3 +1,4 @@
+import { messageText } from "../support/api-error";
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -173,7 +174,7 @@ describe("TIR7 montage, neuf par défaut, usagé sur choix explicite", { timeout
     const res = await mount(tireId);
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/2 usagé/);
-    expect(res.body.message).not.toMatch(/error|stack|SQL/i);
+    expect(messageText(res.body)).not.toMatch(/error|stack|SQL/i);
     expect(await tireRow(tireId)).toMatchObject({ stockQuantity: 0, usedStockQuantity: 2 });
   });
 

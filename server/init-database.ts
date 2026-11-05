@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { db, pool } from './db';
 import { users } from '../shared/schema';
+import { TREASURY_CATEGORIES } from '../shared/contracts/treasury';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
@@ -624,6 +625,166 @@ EXCEPTION WHEN lock_not_available OR unique_violation THEN
 END $$;`;
 
 /**
+ * Retenues à la source (lot F1) : colonnes clients / client_invoices et leurs CHECK. Doit rester identique à
+ * server/db/migrations/20261105_finance_withholding.sql : tests/unit/server/finance-withholding-schema.test.ts
+ * compare les deux.
+ */
+export const FINANCE_WITHHOLDING_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS withholding_vat_rate numeric(5,2);
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS withholding_is_rate numeric(5,2);
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS withholding_is_base text NOT NULL DEFAULT 'ht';
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS deposited_at date;
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS withholding_vat_amount numeric(15,2);
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS withholding_is_amount numeric(15,2);
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS net_payable numeric(15,2);
+ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS deposited_by integer;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS withholding_updated_by integer;
+DO $$
+DECLARE
+  c record;
+  f record;
+BEGIN
+  -- Auteur du dépôt et des taux : ON DELETE SET NULL, la trace ne bloque pas la suppression d'un compte.
+  FOR f IN SELECT * FROM (VALUES
+    ('client_invoices', 'client_invoices_deposited_by_users_id_fk', 'deposited_by'),
+    ('clients', 'clients_withholding_updated_by_users_id_fk', 'withholding_updated_by')
+  ) AS v(tbl, name, col) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = f.tbl::regclass AND conname = f.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES users(id) ON DELETE SET NULL', f.tbl, f.name, f.col);
+    END IF;
+  END LOOP;
+  FOR c IN SELECT * FROM (VALUES
+    ('clients_withholding_vat_rate_check', 'CHECK (withholding_vat_rate IS NULL OR (withholding_vat_rate >= 0 AND withholding_vat_rate <= 100))'),
+    ('clients_withholding_is_rate_check', 'CHECK (withholding_is_rate IS NULL OR (withholding_is_rate >= 0 AND withholding_is_rate <= 100))'),
+    ('clients_withholding_is_base_check', 'CHECK (withholding_is_base IN (''ht'', ''ttc''))')
+  ) AS v(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'clients'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE clients ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'clients'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE clients VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'clients : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes de retenue client non posées : verrou indisponible, nouvel essai au démarrage suivant';
+END $$;`;
+
+/**
+ * Lot Q1 (drapeau qhse) : contrôles inopinés QHSE. Doit rester identique à
+ * server/db/migrations/20261105_qhse_inspections.sql : tests/unit/server/qhse-inspections-schema.test.ts
+ * compare les deux. Semis des critères cités par le document QHSE, par code, sans jamais réécrire un critère
+ * existant.
+ */
+export const QHSE_INSPECTIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS qhse_inspection_criteria (
+  id serial PRIMARY KEY,
+  code text NOT NULL CONSTRAINT qhse_inspection_criteria_code_key UNIQUE,
+  label text NOT NULL CONSTRAINT qhse_inspection_criteria_label_check CHECK (length(btrim(label)) > 0),
+  category text NOT NULL CONSTRAINT qhse_inspection_criteria_category_check CHECK (category IN ('cabin', 'stop')),
+  active boolean NOT NULL DEFAULT true,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS qhse_inspections (
+  id serial PRIMARY KEY,
+  kind text NOT NULL CONSTRAINT qhse_inspections_kind_check CHECK (kind IN ('cabin', 'stop')),
+  inspected_at timestamp NOT NULL DEFAULT now(),
+  location text NOT NULL CONSTRAINT qhse_inspections_location_check CHECK (length(btrim(location)) > 0),
+  vehicle_id integer NOT NULL REFERENCES vehicles(id),
+  driver_id integer NOT NULL REFERENCES drivers(id),
+  inspector_id integer NOT NULL REFERENCES users(id),
+  items jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT qhse_inspections_items_check CHECK (jsonb_typeof(items) = 'array'),
+  general_observation text,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_driver ON qhse_inspections (driver_id, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_vehicle ON qhse_inspections (vehicle_id);
+
+DO $$
+DECLARE
+  c record;
+  existing text;
+BEGIN
+  -- Tables déjà créées sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('qhse_inspection_criteria', 'qhse_inspection_criteria_label_check', 'CHECK (length(btrim(label)) > 0)'),
+    ('qhse_inspection_criteria', 'qhse_inspection_criteria_category_check', 'CHECK (category IN (''cabin'', ''stop''))'),
+    ('qhse_inspections', 'qhse_inspections_kind_check', 'CHECK (kind IN (''cabin'', ''stop''))'),
+    ('qhse_inspections', 'qhse_inspections_location_check', 'CHECK (length(btrim(location)) > 0)'),
+    ('qhse_inspections', 'qhse_inspections_items_check', 'CHECK (jsonb_typeof(items) = ''array'')')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- Unicité du code sous le nom attendu : celle posée sous un autre nom (qhse_inspection_criteria_code_unique
+  -- d'un push Drizzle antérieur) est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'qhse_inspection_criteria'::regclass
+                 AND conname = 'qhse_inspection_criteria_code_key') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'qhse_inspection_criteria'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'code'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE qhse_inspection_criteria RENAME CONSTRAINT %I TO qhse_inspection_criteria_code_key', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE qhse_inspection_criteria ADD CONSTRAINT qhse_inspection_criteria_code_key UNIQUE (code);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'qhse_inspection_criteria : codes en double, contrainte qhse_inspection_criteria_code_key non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes QHSE non réconciliées : verrou de table indisponible';
+END $$;
+
+INSERT INTO qhse_inspection_criteria (code, label, category, sort_order) VALUES
+  ('cabin_epi', 'Port des EPI', 'cabin', 10),
+  ('cabin_tenue_de_route', 'Tenue de route', 'cabin', 20),
+  ('cabin_telephone', 'Téléphone au volant', 'cabin', 30),
+  ('cabin_ceinture', 'Port de la ceinture', 'cabin', 40),
+  ('cabin_fumer_manger', 'Fumer ou manger au volant', 'cabin', 50),
+  ('cabin_cession_conduite', 'Cession de la conduite', 'cabin', 60),
+  ('cabin_passager', 'Passager à bord', 'cabin', 70),
+  ('cabin_exces_vitesse', 'Excès de vitesse', 'cabin', 80),
+  ('cabin_signalisation_verticale', 'Respect de la signalisation verticale', 'cabin', 90),
+  ('cabin_heures_conduite', 'Heures de conduite', 'cabin', 100),
+  ('stop_epi', 'Port des EPI', 'stop', 10),
+  ('stop_stationnement', 'Stationnement sur emplacement dédié', 'stop', 20),
+  ('stop_cales', 'Utilisation des cales', 'stop', 30),
+  ('stop_portieres', 'Fermeture des portières', 'stop', 40),
+  ('stop_signalisation_vehicule', 'Signalisation du véhicule', 'stop', 50),
+  ('stop_gardien', 'Présence d''un gardien', 'stop', 60)
+ON CONFLICT (code) DO NOTHING;`;
+
+/**
  * Clé de requête d'un plein de mission (rejeu sans second débit). Doit rester identique à
  * server/db/migrations/20261103_fuel_records_request_key.sql : tests/unit/server/fuel-records-request-key-schema.test.ts
  * compare les deux.
@@ -864,6 +1025,218 @@ WHEN (
 )
 EXECUTE FUNCTION fn_work_orders_hold_vehicle();`;
 
+/**
+ * Au moins un administrateur actif reste en base (trigger BEFORE sur users). Doit rester identique à
+ * server/db/migrations/20261105_users_keep_active_admin.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/users-keep-active-admin-schema.test.ts. Un seul envoi = une transaction.
+ */
+export const USERS_KEEP_ACTIVE_ADMIN_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE OR REPLACE FUNCTION fn_users_keep_active_admin()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Seule la sortie d'un administrateur actif (suppression, changement de rôle, désactivation) compte.
+  IF OLD.role = 'admin' AND OLD.deleted_at IS NULL
+     AND (TG_OP = 'DELETE' OR NEW.role IS DISTINCT FROM 'admin' OR NEW.deleted_at IS NOT NULL) THEN
+    -- Sérialise les sorties concurrentes : la seconde relit l'état validé par la première.
+    PERFORM pg_advisory_xact_lock(hashtext('fleetmaster_last_active_admin'));
+    -- Lecture verrouillante (FOR SHARE) : un autre administrateur ne peut pas sortir avant la fin de cette transaction.
+    PERFORM 1 FROM users u WHERE u.role = 'admin' AND u.deleted_at IS NULL AND u.id <> OLD.id FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Il doit rester au moins un administrateur actif.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'users_keep_one_active_admin';
+    END IF;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_users_keep_active_admin
+BEFORE UPDATE OF role, deleted_at OR DELETE ON users
+FOR EACH ROW
+EXECUTE FUNCTION fn_users_keep_active_admin();`;
+
+/**
+ * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
+ * server/db/migrations/20261105_mission_budgets.sql : tests/unit/server/mission-budgets-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const MISSION_BUDGETS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS mission_budgets (
+  id serial PRIMARY KEY,
+  mission_id integer NOT NULL
+    CONSTRAINT mission_budgets_mission_id_missions_id_fk REFERENCES missions(id),
+  budget_date date NOT NULL,
+  fuel_liters numeric(12,2) NOT NULL,
+  fuel_unit_price numeric(15,2) NOT NULL,
+  fuel_amount numeric(15,2) NOT NULL,
+  fdr_amount numeric(15,2) NOT NULL,
+  extras_amount numeric(15,2) NOT NULL DEFAULT '0',
+  total_amount numeric(15,2) NOT NULL,
+  status text NOT NULL DEFAULT 'requested',
+  notes text,
+  treasury_entry_id integer,
+  approved_by integer CONSTRAINT mission_budgets_approved_by_users_id_fk REFERENCES users(id),
+  approved_at timestamp,
+  disbursed_by integer CONSTRAINT mission_budgets_disbursed_by_users_id_fk REFERENCES users(id),
+  disbursed_at timestamp,
+  created_by integer CONSTRAINT mission_budgets_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_budgets_updated_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_budgets_mission_id_unique UNIQUE (mission_id),
+  CONSTRAINT mission_budgets_status_check CHECK (status IN ('requested', 'approved', 'disbursed')),
+  CONSTRAINT mission_budgets_amounts_check
+    CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mission_budgets_budget_date ON mission_budgets (budget_date);
+
+DO $$
+DECLARE
+  c record;
+  existing text;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_budgets_status_check', 'CHECK (status IN (''requested'', ''approved'', ''disbursed''))'),
+    ('mission_budgets_amounts_check', 'CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)')
+  ) AS v(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_budgets ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_budgets VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_budgets : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- Un budget par mission, sous le nom attendu par le service (409) : une unicité posée sous un autre nom
+  -- sur mission_id est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_mission_id_unique') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'mission_budgets'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'mission_id'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE mission_budgets RENAME CONSTRAINT %I TO mission_budgets_mission_id_unique', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE mission_budgets ADD CONSTRAINT mission_budgets_mission_id_unique UNIQUE (mission_id);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'mission_budgets : missions en double, contrainte mission_budgets_mission_id_unique non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_budgets non réconciliées : verrou de table indisponible';
+END $$;`;
+
+// Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
+// Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
+export const MISSION_DESTINATIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS mission_destinations (
+  id serial PRIMARY KEY,
+  code text NOT NULL,
+  label text NOT NULL,
+  fuel_liters numeric(12,2) NOT NULL,
+  fdr_amount numeric(15,2) NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_by integer CONSTRAINT mission_destinations_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_destinations_updated_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_destinations_code_unique UNIQUE (code),
+  CONSTRAINT mission_destinations_amounts_check CHECK (fuel_liters >= 0 AND fdr_amount >= 0)
+);
+
+DO $$
+DECLARE
+  existing text;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS). Noms identiques à shared/schema.ts.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+                 AND conname = 'mission_destinations_amounts_check') THEN
+    ALTER TABLE mission_destinations ADD CONSTRAINT mission_destinations_amounts_check
+      CHECK (fuel_liters >= 0 AND fdr_amount >= 0) NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+             AND conname = 'mission_destinations_amounts_check' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_destinations VALIDATE CONSTRAINT mission_destinations_amounts_check;
+    EXCEPTION WHEN check_violation THEN
+      RAISE WARNING 'mission_destinations : lignes hors contrainte mission_destinations_amounts_check, laissée NOT VALID';
+    END;
+  END IF;
+  -- Unicité du code sous le nom attendu : celle posée sous un autre nom est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_destinations'::regclass
+                 AND conname = 'mission_destinations_code_unique') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'mission_destinations'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'code'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE mission_destinations RENAME CONSTRAINT %I TO mission_destinations_code_unique', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE mission_destinations ADD CONSTRAINT mission_destinations_code_unique UNIQUE (code);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'mission_destinations : codes en double, contrainte mission_destinations_code_unique non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_destinations non réconciliées : verrou de table indisponible';
+END $$;
+
+INSERT INTO mission_destinations (code, label, fuel_liters, fdr_amount) VALUES
+  ('ndjamena', 'N''Djamena', 750, 150000),
+  ('kome', 'Komé', 450, 100000),
+  ('sarh', 'Sarh', 700, 150000),
+  ('ngong', 'Ngong', 350, 40000),
+  ('douala', 'Douala', 591, 107000)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE mission_budgets ADD COLUMN IF NOT EXISTS destination_id integer;
+
+DO $$
+BEGIN
+  -- Posée NOT VALID puis validée : une destination_id orpheline laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_destination_id_mission_destinations_id_fk') THEN
+    ALTER TABLE mission_budgets
+      ADD CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk
+      FOREIGN KEY (destination_id) REFERENCES mission_destinations(id) NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+             AND conname = 'mission_budgets_destination_id_mission_destinations_id_fk' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_budgets VALIDATE CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'mission_budgets_destination_id_mission_destinations_id_fk laissée NOT VALID : destination_id vers une destination absente';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'mission_budgets_destination_id_mission_destinations_id_fk non posée : verrou indisponible';
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1053,24 +1426,47 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'idempotency_keys_state_check',
   'workshop_labor_rates_effective_from_key',
   'idempotency_keys_user_id_key_key',
+  // Retenues à la source (F1) : posées et validées par FINANCE_WITHHOLDING_SQL, avant ce relevé.
+  'clients_withholding_vat_rate_check',
+  'clients_withholding_is_rate_check',
+  'clients_withholding_is_base_check',
+  // Posées par QHSE_INSPECTIONS_SQL (lot Q1), relues ici au même titre.
+  'qhse_inspection_criteria_code_key',
+  'qhse_inspection_criteria_label_check',
+  'qhse_inspection_criteria_category_check',
+  'qhse_inspections_kind_check',
+  'qhse_inspections_location_check',
+  'qhse_inspections_items_check',
+  // Posées par MISSION_BUDGETS_SQL (lot L1), relues ici au même titre.
+  'mission_budgets_status_check',
+  'mission_budgets_amounts_check',
+  'mission_budgets_mission_id_unique',
+  // Posées par MISSION_DESTINATIONS_SQL (lot L1b).
+  'mission_destinations_amounts_check',
+  'mission_destinations_code_unique',
+  'mission_budgets_destination_id_mission_destinations_id_fk',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 type WarnLogger = { warn: (obj: object, msg: string) => void };
 
 /** Contraintes absentes ou laissées NOT VALID (lignes non conformes ou doublons), journalisées en warn. */
-export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger = initLog) {
+export async function reportCdcConstraintGaps(
+  client: Queryable,
+  log: WarnLogger = initLog,
+  names: readonly string[] = CDC_RECONCILED_CONSTRAINTS,
+) {
   const { rows } = await client.query(
     `SELECT conname, convalidated FROM pg_constraint WHERE conname = ANY($1)`,
-    [CDC_RECONCILED_CONSTRAINTS],
+    [names],
   );
   const found = new Map(rows.map((r) => [r.conname as string, r.convalidated as boolean]));
-  const missing = CDC_RECONCILED_CONSTRAINTS.filter((name) => !found.has(name));
-  const notValidated = CDC_RECONCILED_CONSTRAINTS.filter((name) => found.get(name) === false);
+  const missing = names.filter((name) => !found.has(name));
+  const notValidated = names.filter((name) => found.get(name) === false);
   if (missing.length || notValidated.length) {
     log.warn(
       { missing, notValidated },
-      'Contraintes CDC incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
+      'Contraintes de base incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
     );
   }
   return { missing, notValidated };
@@ -1078,7 +1474,213 @@ export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger
 
 async function applyCdcSchema() {
   await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
-  await reportCdcConstraintGaps(pool);
+}
+
+/** Liste SQL des catégories, tirée du contrat partagé : la CHECK suit TREASURY_CATEGORIES sans copie à tenir. */
+const TREASURY_CATEGORY_CHECK = `category IN (${TREASURY_CATEGORIES.map((c) => `'${c}'`).join(', ')})`;
+
+/** Journal de trésorerie (lot T1) : tables et index, idempotents. Jumelle de shared/schema.ts (treasuryAccounts, treasuryEntries). */
+export const TREASURY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS treasury_accounts (
+    id serial PRIMARY KEY,
+    code text NOT NULL CONSTRAINT treasury_accounts_code_key UNIQUE,
+    label text NOT NULL,
+    kind text NOT NULL,
+    bank_name text,
+    opening_balance numeric(15,2) NOT NULL DEFAULT 0,
+    opening_date date,
+    is_active boolean NOT NULL DEFAULT true,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_accounts_kind_check CHECK (kind IN ('bank', 'cash', 'fuel_card'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS treasury_entries (
+    id serial PRIMARY KEY,
+    account_id integer NOT NULL REFERENCES treasury_accounts(id),
+    entry_date date NOT NULL,
+    piece_ref text,
+    label text NOT NULL,
+    direction text NOT NULL,
+    amount numeric(15,2) NOT NULL,
+    category text NOT NULL DEFAULT 'autre',
+    counterparty_label text,
+    transfer_group text,
+    notes text,
+    vehicle_id integer REFERENCES vehicles(id) ON DELETE SET NULL,
+    mission_id integer REFERENCES missions(id) ON DELETE SET NULL,
+    client_id integer REFERENCES clients(id),
+    supplier_id integer REFERENCES suppliers(id),
+    request_key text CONSTRAINT treasury_entries_request_key_key UNIQUE,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_entries_amount_check CHECK (amount > 0),
+    CONSTRAINT treasury_entries_direction_check CHECK (direction IN ('in', 'out')),
+    CONSTRAINT treasury_entries_category_check CHECK (${TREASURY_CATEGORY_CHECK})
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_account_date ON treasury_entries (account_id, entry_date, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_transfer_group ON treasury_entries (transfer_group)`,
+  // Lots T2 et T3 : liens plein/recharge et règlement fournisseur, carte carburant active unique.
+  `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS fuel_record_id integer REFERENCES fuel_records(id) ON DELETE SET NULL`,
+  `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS supplier_settlement_id integer REFERENCES supplier_invoice_settlements(id) ON DELETE SET NULL`,
+  `ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS treasury_account_id integer REFERENCES treasury_accounts(id)`,
+  // Lot T4 : traites et chèques. Jumelle de shared/schema.ts (paymentInstruments).
+  `CREATE TABLE IF NOT EXISTS payment_instruments (
+    id serial PRIMARY KEY,
+    kind text NOT NULL,
+    direction text NOT NULL DEFAULT 'outgoing',
+    number text NOT NULL,
+    drawer text NOT NULL,
+    drawee text NOT NULL,
+    paying_bank text,
+    amount numeric(15,2) NOT NULL,
+    issue_date date NOT NULL,
+    due_date date NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    paid_at date,
+    treasury_entry_id integer REFERENCES treasury_entries(id) CONSTRAINT payment_instruments_treasury_entry_id_key UNIQUE,
+    supplier_id integer REFERENCES suppliers(id),
+    client_id integer REFERENCES clients(id),
+    vehicle_id integer REFERENCES vehicles(id),
+    observations text,
+    request_key text CONSTRAINT payment_instruments_request_key_key UNIQUE,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT payment_instruments_kind_check CHECK (kind IN ('traite', 'cheque')),
+    CONSTRAINT payment_instruments_direction_check CHECK (direction IN ('outgoing', 'incoming')),
+    CONSTRAINT payment_instruments_status_check CHECK (status IN ('pending', 'paid', 'bounced', 'cancelled')),
+    CONSTRAINT payment_instruments_amount_check CHECK (amount > 0),
+    CONSTRAINT payment_instruments_dates_check CHECK (due_date >= issue_date),
+    CONSTRAINT payment_instruments_paid_check CHECK ((status = 'paid') = (paid_at IS NOT NULL AND treasury_entry_id IS NOT NULL))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_instruments_status_due ON payment_instruments (status, due_date)`,
+  // Deux cartes actives déjà en base : WARNING, l'index attend qu'on en désactive une (démarrage non bloqué).
+  // Verrou de table indisponible sous 5 s : WARNING aussi, l'index est retenté au démarrage suivant.
+  `DO $$
+BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
+  IF to_regclass('uq_treasury_accounts_active_fuel_card') IS NOT NULL THEN
+    RETURN;
+  END IF;
+  IF (SELECT count(*) FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active) > 1 THEN
+    RAISE WARNING 'treasury_accounts : plusieurs cartes carburant actives, index uq_treasury_accounts_active_fuel_card non posé';
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_accounts : index uq_treasury_accounts_active_fuel_card non posé, verrou de table indisponible sous 5 s';
+END $$`,
+  // Véhicule ou mission supprimés (restauration de sauvegarde, purge) : l'écriture reste, son lien passe à NULL.
+  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction. Verrou
+  // indisponible sous 5 s : WARNING, rien n'est remplacé (bloc annulé en entier), retenté au démarrage suivant.
+  `DO $$
+DECLARE
+  c record;
+  fk record;
+BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
+  FOR c IN SELECT * FROM (VALUES ('vehicle_id', 'vehicles'), ('mission_id', 'missions')) AS v(col, ref) LOOP
+    FOR fk IN
+      SELECT k.conname FROM pg_constraint k
+      JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+      WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = c.col AND k.confdeltype <> 'n'
+    LOOP
+      EXECUTE format('ALTER TABLE treasury_entries DROP CONSTRAINT %I, ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE SET NULL',
+        fk.conname, fk.conname, c.col, c.ref);
+    END LOOP;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_entries : FK vehicle_id et mission_id non passées en ON DELETE SET NULL, verrou de table indisponible sous 5 s';
+END $$`,
+  // Tables créées par drizzle-kit push, ou avant qu'une contrainte soit déclarée : CREATE TABLE IF NOT EXISTS
+  // a été sauté. Même réconciliation que le schéma CDC : CHECK en NOT VALID puis VALIDATE, UNIQUE renommé
+  // s'il existe sous un autre nom, WARNING plutôt que démarrage bloqué si des lignes existantes dérogent.
+  `DO $$
+DECLARE
+  c record;
+  existing text;
+  duplicates integer;
+BEGIN
+  FOR c IN SELECT * FROM (VALUES
+    ('treasury_accounts', 'treasury_accounts_kind_check', 'CHECK (kind IN (''bank'', ''cash'', ''fuel_card''))'),
+    ('treasury_entries', 'treasury_entries_amount_check', 'CHECK (amount > 0)'),
+    ('treasury_entries', 'treasury_entries_direction_check', 'CHECK (direction IN (''in'', ''out''))'),
+    ('treasury_entries', 'treasury_entries_category_check', 'CHECK (${TREASURY_CATEGORY_CHECK.replace(/'/g, "''")})'),
+    ('payment_instruments', 'payment_instruments_kind_check', 'CHECK (kind IN (''traite'', ''cheque''))'),
+    ('payment_instruments', 'payment_instruments_direction_check', 'CHECK (direction IN (''outgoing'', ''incoming''))'),
+    ('payment_instruments', 'payment_instruments_status_check', 'CHECK (status IN (''pending'', ''paid'', ''bounced'', ''cancelled''))'),
+    ('payment_instruments', 'payment_instruments_amount_check', 'CHECK (amount > 0)'),
+    ('payment_instruments', 'payment_instruments_dates_check', 'CHECK (due_date >= issue_date)'),
+    ('payment_instruments', 'payment_instruments_paid_check', 'CHECK ((status = ''paid'') = (paid_at IS NOT NULL AND treasury_entry_id IS NOT NULL))')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  FOR c IN SELECT * FROM (VALUES
+    ('treasury_accounts', 'treasury_accounts_code_key', ARRAY['code']),
+    ('treasury_entries', 'treasury_entries_request_key_key', ARRAY['request_key']),
+    ('payment_instruments', 'payment_instruments_request_key_key', ARRAY['request_key']),
+    ('payment_instruments', 'payment_instruments_treasury_entry_id_key', ARRAY['treasury_entry_id'])
+  ) AS v(tbl, name, cols) LOOP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      CONTINUE;
+    END IF;
+    existing := NULL;
+    SELECT k.conname INTO existing FROM pg_constraint k
+    WHERE k.conrelid = c.tbl::regclass AND k.contype = 'u'
+      AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a
+           WHERE a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey))
+        = (SELECT array_agg(x ORDER BY x) FROM unnest(c.cols) AS x)
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', c.tbl, existing, c.name);
+      CONTINUE;
+    END IF;
+    EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM %I WHERE %I IS NOT NULL GROUP BY %s HAVING count(*) > 1) d',
+      c.tbl, c.cols[1], array_to_string(c.cols, ', ')) INTO duplicates;
+    IF duplicates > 0 THEN
+      RAISE WARNING '% : % doublon(s), contrainte % non posée', c.tbl, duplicates, c.name;
+    ELSE
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I UNIQUE (%s)', c.tbl, c.name, array_to_string(c.cols, ', '));
+    END IF;
+  END LOOP;
+END $$`,
+];
+
+// Contraintes de trésorerie réconciliées au démarrage, relues et journalisées comme celles du CDC.
+export const TREASURY_RECONCILED_CONSTRAINTS: readonly string[] = [
+  'treasury_accounts_kind_check',
+  'treasury_entries_amount_check',
+  'treasury_entries_direction_check',
+  'treasury_entries_category_check',
+  'treasury_accounts_code_key',
+  'treasury_entries_request_key_key',
+  'payment_instruments_kind_check',
+  'payment_instruments_direction_check',
+  'payment_instruments_status_check',
+  'payment_instruments_amount_check',
+  'payment_instruments_dates_check',
+  'payment_instruments_paid_check',
+  'payment_instruments_request_key_key',
+  'payment_instruments_treasury_entry_id_key',
+];
+
+async function applyTreasurySchema() {
+  for (const statement of TREASURY_SCHEMA_STATEMENTS) await pool.query(statement);
+  await reportCdcConstraintGaps(pool, initLog, TREASURY_RECONCILED_CONSTRAINTS);
 }
 
 export async function initializeDatabase() {
@@ -1119,6 +1721,8 @@ export async function initializeDatabase() {
     // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
+    // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
+    await pool.query(QHSE_INSPECTIONS_SQL);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
@@ -1126,6 +1730,8 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS mission_id integer REFERENCES missions(id) ON DELETE SET NULL`);
     // Clé de requête des pleins de mission — jumelle de server/db/migrations/20261103_fuel_records_request_key.sql.
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
+    // Retenues à la source (F1) — jumelle de server/db/migrations/20261105_finance_withholding.sql.
+    await pool.query(FINANCE_WITHHOLDING_SQL);
     // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
@@ -1354,8 +1960,30 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
+    // Suivi des opérations clients (O1) : 1-1 avec missions.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS mission_operations (
+        id serial PRIMARY KEY,
+        mission_id integer NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+        trailer_vehicle_id integer REFERENCES vehicles(id),
+        container_number text,
+        bl_number text,
+        sector text,
+        loading_date timestamp,
+        departure_date timestamp,
+        return_date timestamp,
+        unloading_date timestamp,
+        goods_nature text,
+        comment text,
+        created_by integer REFERENCES users(id),
+        updated_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
     await applyLotRecetteSchema();
     await applyCdcSchema();
+    await applyTreasurySchema();
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
     // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
     await applyWorkOrderVehicleStatusTriggers();
@@ -1372,6 +2000,15 @@ export async function initializeDatabase() {
     // Après toute reprise des PIN en clair : la validation ne réussit que si aucun clair ne reste.
     await pool.query(USERS_PIN_BCRYPT_CHECK_SQL);
     await reportUsersPinBcryptGaps(pool);
+    // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
+    await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
+    await pool.query(MISSION_BUDGETS_SQL);
+    // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
+    await pool.query(MISSION_DESTINATIONS_SQL);
+    // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
+    // pas encore créée serait signalée à tort.
+    await reportCdcConstraintGaps(pool);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

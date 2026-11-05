@@ -141,7 +141,7 @@ export function UsersTable() {
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-semibold text-primary">
+                  <span className="text-xs font-semibold text-primary-text">
                     {user.name?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
                   </span>
                 </div>
@@ -166,7 +166,7 @@ export function UsersTable() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive-text"
                     title="Désactiver l'utilisateur"
                     onClick={() => deactivateMutation.mutate(user.id)}
                     disabled={deactivateMutation.isPending}

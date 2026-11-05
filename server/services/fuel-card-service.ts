@@ -2,6 +2,7 @@ import { getFuelPriceAt } from "./fuel-price-service";
 import { AppError } from "../lib/app-error";
 import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
 import { moduleLogger } from "../lib/logger";
+import { linkFuelConsumption, linkFuelRecharge } from "./treasury-links";
 import { buildFuelConsumptionNotes } from "../lib/mission-fuel-regularization";
 import { db } from "../db";
 import { fuelRecords, users, vehicles, type FuelRecord } from "@shared/schema";
@@ -160,6 +161,8 @@ export class FuelCardService {
     orderNumber?: string;
     notes?: string;
     userId: number;
+    /** Compte de trésorerie qui paie la recharge (lot T2) : la recharge devient un virement vers la carte. */
+    sourceAccountId?: number | null;
   }) {
     log.info({ amount: data.amount, paymentMode: data.paymentMode, userId: data.userId }, "recharge de la carte carburant");
 
@@ -227,6 +230,8 @@ export class FuelCardService {
           createdBy: data.userId
         })
         .returning();
+      // Journal de trésorerie (lot T2) : sous le verrou carte déjà pris, annulé avec la recharge.
+      await linkFuelRecharge(tx, recharge, data.userId, data.sourceAccountId);
       return { recharge, currentBalance, newBalance, newFuelBalance };
     });
 
@@ -345,6 +350,8 @@ export class FuelCardService {
           requestKey: data.requestKey ?? null,
         })
         .returning();
+      // Journal de trésorerie (lot T2) : sortie de la carte, sous le même verrou, annulée avec le plein.
+      await linkFuelConsumption(tx, consumption, data.userId);
       if (withinTransaction) await withinTransaction(tx, consumption, cost);
       return { consumption, currentBalance, newBalance, replayed: false };
     });

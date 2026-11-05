@@ -11,6 +11,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
+  ClipboardList,
   Clock,
   CircleDot,
   DatabaseBackup,
@@ -25,7 +26,9 @@ import {
   Milestone,
 } from "lucide-react";
 import {
+  FINANCE_RECEIVABLE_READ_ROLES,
   FUEL_READ_ROLES,
+  MISSION_OPERATIONS_READ_ROLES,
   PENDING_INVOICE_ROLES,
   STAFF_ROLES,
   TIME_TRACKING_READ_ROLES,
@@ -148,6 +151,18 @@ export const LOT_SCREENS: readonly LotScreen[] = [
     id: "pending-invoices", path: "/operations/pending-invoices", title: "Factures en attente", task: "T-54a", feature: "pending-invoices",
     description: "Factures clients en attente, triées par ancienneté.",
     roles: PENDING_INVOICE_ROLES, menu: { group: "top", label: "Factures en attente", icon: Receipt },
+  },
+  {
+    id: "mission-operations", path: "/operations/tracking", title: "Suivi des opérations", task: "O1", feature: "operations-tracking",
+    description: "Suivi des opérations par client : conteneur, BL, dates, durée, facturation.",
+    roles: MISSION_OPERATIONS_READ_ROLES, menu: { group: "top", label: "Suivi des opérations", icon: ClipboardList },
+  },
+  // Entrée de menu en attente de l'alignement des menus (écarts n°2, 6 et 8).
+  {
+    id: "invoices-awaiting-payment", path: "/finance/invoices-awaiting-payment", title: "Factures en attente de paiement",
+    task: "F1c", feature: "finance",
+    description: "Factures émises non soldées : retenues à la source, net à payer, jours depuis le dépôt.",
+    roles: FINANCE_RECEIVABLE_READ_ROLES,
   },
 ];
 

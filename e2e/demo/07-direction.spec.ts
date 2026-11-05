@@ -29,7 +29,7 @@ test("démo direction : tableau de bord, corridors CEMAC et rapports", async ({ 
   for (const label of ["Trésorerie & Recouvrement", "Audit Flotte & TCO"]) {
     await page.getByRole("tab", { name: label }).click();
     await expect(page.getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByText("Accès refusé")).toHaveCount(0);
+    await expect(page.getByText("Accès refusé", { exact: true })).toHaveCount(0);
     if (label.startsWith("Audit")) {
       // La mission terminée du seed donne un camion sous TCO et une marge non nulle.
       await expect(page.getByText(/^[1-9]\d* camions?/).first()).toBeVisible();

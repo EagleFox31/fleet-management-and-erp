@@ -93,16 +93,16 @@ const REQUIREMENT_STATUS_LABELS: Record<string, string> =
 const REQUIREMENT_STATUS_BADGES: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
   approved: "bg-blue-100 text-blue-800",
-  rejected: "bg-red-100 text-red-700",
+  rejected: "bg-destructive/15 text-destructive-text",
   ordered: "bg-purple-100 text-purple-800",
   partially_received: "bg-orange-100 text-orange-800",
-  received: "bg-emerald-100 text-emerald-700",
+  received: "bg-success/15 text-success",
   partial: "bg-orange-100 text-orange-800",
-  delivered: "bg-emerald-100 text-emerald-700",
+  delivered: "bg-success/15 text-success",
   issued: "bg-cyan-100 text-cyan-800",
   fulfilled: "bg-slate-100 text-slate-700",
-  cancel_requested: "bg-amber-100 text-amber-800",
-  cancelled: "bg-red-100 text-red-700",
+  cancel_requested: "bg-warning/15 text-warning-text",
+  cancelled: "bg-destructive/15 text-destructive-text",
 };
 
 const URGENCY_LABELS: Record<string, string> = {
@@ -114,9 +114,9 @@ const URGENCY_LABELS: Record<string, string> = {
 
 const URGENCY_BADGES: Record<string, string> = {
   low: "bg-slate-100 text-slate-700",
-  medium: "bg-amber-100 text-amber-800",
+  medium: "bg-warning/15 text-warning-text",
   high: "bg-orange-100 text-orange-800",
-  critical: "bg-red-100 text-red-700",
+  critical: "bg-destructive/15 text-destructive-text",
 };
 
 const formSchema = z.object({
@@ -597,14 +597,14 @@ export default function NewPurchaseOrderPage() {
             value={formatPrice(totalEstimated)}
             subValue="avant remise"
             icon={<TrendingUp className="h-4 w-4" />}
-            iconWrapperClassName="bg-emerald-50 text-emerald-600"
+            iconWrapperClassName="bg-success/10 text-success"
           />
           <KpiTile
             label="Remise"
             value={`${discountPct.toFixed(1)}%`}
             subValue={discountPct > 0 ? `- ${formatPrice(discountAmount)}` : "Aucune remise"}
             icon={<TrendingUp className="h-4 w-4" />}
-            iconWrapperClassName="bg-amber-50 text-amber-600"
+            iconWrapperClassName="bg-warning/10 text-warning-text"
           />
           <KpiTile
             label="Total TTC"
@@ -627,15 +627,15 @@ export default function NewPurchaseOrderPage() {
             </p>
           </div>
           <div className="px-5 py-4">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <div className="rounded-xl border border-success/30 bg-success/10 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm text-emerald-700 font-medium">Pièce ciblée</p>
-                  <p className="text-lg font-semibold text-emerald-900">
+                  <p className="text-sm text-success font-medium">Pièce ciblée</p>
+                  <p className="text-lg font-semibold text-success">
                     {preselectedRequirement?.partName || (typeof prefillParams.partId === "number" ? `Pièce #${prefillParams.partId}` : "Pièce")}
                     {preselectedRequirement?.partReference ? ` - ${preselectedRequirement.partReference}` : ""}
                   </p>
-                  <p className="text-sm text-emerald-700 mt-1">
+                  <p className="text-sm text-success mt-1">
                     Demande #{preselectedRequirement?.id ?? prefillParams.requirementId ?? "N/A"} • Qté: {preselectedRequirement?.quantityNeeded ?? "N/A"}
                   </p>
                 </div>
@@ -660,31 +660,31 @@ export default function NewPurchaseOrderPage() {
               </div>
 
               <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <div className="rounded-lg border border-emerald-200 bg-white/80 px-3 py-2">
-                  <p className="text-xs uppercase tracking-wide text-emerald-700">Fournisseur historique</p>
-                  <p className="font-semibold text-emerald-900">{prefilledSupplierName || preselectedRequirement?.partSupplier || "Non défini"}</p>
+                <div className="rounded-lg border border-success/30 bg-card/80 px-3 py-2">
+                  <p className="text-xs uppercase tracking-wide text-success">Fournisseur historique</p>
+                  <p className="font-semibold text-success">{prefilledSupplierName || preselectedRequirement?.partSupplier || "Non défini"}</p>
                 </div>
                 <div
                   className={cn(
                     "rounded-lg border px-3 py-2",
                     isUsingHistoricalSupplier
-                      ? "border-emerald-300 bg-emerald-100/70"
-                      : "border-amber-200 bg-amber-50"
+                      ? "border-success/40 bg-success/15"
+                      : "border-warning/30 bg-warning/10"
                   )}
                 >
                   <p className="text-xs uppercase tracking-wide text-slate-600">Sélection active</p>
                   <div className="mt-0.5 flex items-center gap-2">
                     {isUsingHistoricalSupplier ? (
                       <>
-                        <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                        <p className="text-sm font-semibold text-emerald-800">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <p className="text-sm font-semibold text-success">
                           Fournisseur historique préselectionné
                         </p>
                       </>
                     ) : (
                       <>
-                        <AlertTriangle className="h-4 w-4 text-amber-700" />
-                        <p className="text-sm font-semibold text-amber-800">
+                        <AlertTriangle className="h-4 w-4 text-warning-text" />
+                        <p className="text-sm font-semibold text-warning-text">
                           Fournisseur modifié manuellement
                         </p>
                       </>
@@ -694,7 +694,7 @@ export default function NewPurchaseOrderPage() {
               </div>
 
               {!prefillMatchedSupplier && (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning-text">
                   Aucun fournisseur exact n'a été trouvé automatiquement. Sélectionnez le fournisseur ci-dessous pour continuer.
                 </div>
               )}
@@ -751,7 +751,7 @@ export default function NewPurchaseOrderPage() {
                             data-testid="select-supplier"
                             className={cn(
                               isUsingHistoricalSupplier &&
-                                "border-emerald-400 bg-emerald-50 text-emerald-900 ring-emerald-200"
+                                "border-success bg-success/10 text-success ring-success/30"
                             )}
                           >
                             <SelectValue placeholder="Sélectionnez un fournisseur" />
@@ -774,7 +774,7 @@ export default function NewPurchaseOrderPage() {
                 />
 
                 {isUsingHistoricalSupplier && (
-                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
                     Fournisseur historique préselectionné pour accélérer la commande.
                   </div>
                 )}
@@ -869,7 +869,7 @@ export default function NewPurchaseOrderPage() {
                   </div>
 
                   {discountPct > 0 && (
-                    <div className="flex justify-between text-green-600 dark:text-green-400">
+                    <div className="flex justify-between text-success dark:text-success">
                       <span>Remise ({discountPct.toFixed(1)}%):</span>
                       <span className="font-medium">
                         -{formatPrice(discountAmount)}
@@ -893,8 +893,8 @@ export default function NewPurchaseOrderPage() {
                 </div>
 
                 {discountPct > 0 && (
-                  <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
-                    <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                  <div className="bg-success/10 dark:bg-green-900/20 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-success dark:text-success">
                       <TrendingUp className="h-4 w-4" />
                       <span className="font-medium">
                         Économie: {formatPrice(discountAmount)}
@@ -916,7 +916,7 @@ export default function NewPurchaseOrderPage() {
               </div>
               <div className="px-5 py-4">
                 {!canSelectApprovedRequirements && (
-                  <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <div className="mb-4 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning-text">
                     Ce profil peut créer des commandes, mais ne convertit pas directement les demandes pièces atelier.
                   </div>
                 )}
@@ -1007,7 +1007,7 @@ export default function NewPurchaseOrderPage() {
                           {additionalSupplierApprovedRequirements.slice(0, 5).map((req) => (
                             <div
                               key={`suggest-approved-${req.id}`}
-                              className="flex items-center justify-between rounded-lg border border-blue-200 bg-white px-3 py-2"
+                              className="flex items-center justify-between rounded-lg border border-blue-200 bg-card px-3 py-2"
                             >
                               <div>
                                 <p className="text-sm font-medium text-gray-900">
@@ -1042,7 +1042,7 @@ export default function NewPurchaseOrderPage() {
                             return (
                               <div
                                 key={`suggest-low-stock-${part.id}`}
-                                className="flex items-center justify-between rounded-lg border border-blue-200 bg-white px-3 py-2"
+                                className="flex items-center justify-between rounded-lg border border-blue-200 bg-card px-3 py-2"
                               >
                                 <div>
                                   <p className="text-sm font-medium text-gray-900">
@@ -1196,7 +1196,7 @@ export default function NewPurchaseOrderPage() {
                             onClick={() => removeManualLine(line.id)}
                             data-testid={`button-remove-${line.id}`}
                           >
-                            <Trash2 className="h-4 w-4 text-red-500" />
+                            <Trash2 className="h-4 w-4 text-destructive-text" />
                           </Button>
                         </div>
                       ))}

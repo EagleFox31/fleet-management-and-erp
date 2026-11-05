@@ -1,3 +1,4 @@
+import { publicClientColumns, publicClientInvoiceColumns } from "../lib/client-public-columns";
 import { db } from "../db";
 import { 
   clientInvoices,
@@ -65,7 +66,7 @@ export class ClientBillingService {
     
     // Now safely find the last number
     const todayInvoices = await tx
-      .select()
+      .select(publicClientInvoiceColumns)
       .from(clientInvoices)
       .where(sql`${clientInvoices.invoiceNumber} LIKE ${'FACT-' + dateStr + '-%'}`)
       .orderBy(desc(clientInvoices.invoiceNumber))
@@ -100,7 +101,7 @@ export class ClientBillingService {
       const [result] = await tx
         .select({
           mission: missions,
-          client: clients,
+          client: publicClientColumns,
         })
         .from(missions)
         .leftJoin(clients, eq(missions.clientId, clients.id))
@@ -170,7 +171,7 @@ export class ClientBillingService {
           }],
           createdBy: invoiceData.userId,
         })
-        .returning();
+        .returning(publicClientInvoiceColumns);
 
       console.log(`Invoice ${invoice.invoiceNumber} created for client ${client.name}`);
 
@@ -197,8 +198,8 @@ export class ClientBillingService {
 
     let query = db
       .select({
-        invoice: clientInvoices,
-        client: clients,
+        invoice: publicClientInvoiceColumns,
+        client: publicClientColumns,
         mission: missions,
       })
       .from(clientInvoices)
@@ -214,7 +215,7 @@ export class ClientBillingService {
     if (filters?.clientName) {
       // Récupérer le client par nom
       const [client] = await db
-        .select()
+        .select(publicClientColumns)
         .from(clients)
         .where(eq(clients.name, filters.clientName))
         .limit(1);
@@ -325,7 +326,7 @@ export class ClientBillingService {
     // transaction, deux paiements simultanés ne peuvent plus s'écraser.
     const result = await db.transaction(async (tx) => {
       const [invoice] = await tx
-        .select()
+        .select(publicClientInvoiceColumns)
         .from(clientInvoices)
         .where(eq(clientInvoices.id, invoiceId))
         .limit(1)
@@ -432,8 +433,8 @@ export class ClientBillingService {
     
     const [result] = await db
       .select({
-        invoice: clientInvoices,
-        client: clients,
+        invoice: publicClientInvoiceColumns,
+        client: publicClientColumns,
         mission: missions,
       })
       .from(clientInvoices)
@@ -442,7 +443,7 @@ export class ClientBillingService {
       .where(eq(clientInvoices.id, invoiceId));
     
     if (!result) {
-      throw new Error("Facture non trouvée");
+      throw new AppError(404, "Facture non trouvée.");
     }
     
     // Récupérer les paiements associés
@@ -468,7 +469,7 @@ export class ClientBillingService {
 
     // Récupérer le client
     const [client] = await db
-      .select()
+      .select(publicClientColumns)
       .from(clients)
       .where(eq(clients.name, clientName))
       .limit(1);
@@ -489,7 +490,7 @@ export class ClientBillingService {
 
     // Récupérer les factures
     const invoices = await db
-      .select()
+      .select(publicClientInvoiceColumns)
       .from(clientInvoices)
       .where(eq(clientInvoices.clientId, client.id));
 
@@ -553,8 +554,8 @@ export class ClientBillingService {
     // Récupérer toutes les factures
     const allInvoices = await db
       .select({
-        invoice: clientInvoices,
-        client: clients,
+        invoice: publicClientInvoiceColumns,
+        client: publicClientColumns,
       })
       .from(clientInvoices)
       .leftJoin(clients, eq(clientInvoices.clientId, clients.id));

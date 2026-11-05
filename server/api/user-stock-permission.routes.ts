@@ -6,10 +6,11 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate, isAdmin } from "../middleware/auth";
+import { idSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("user-stock-permission");
 
-const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
+const paramsSchema = z.object({ id: idSchema });
 const bodySchema = z.object({
   canIssueStock: z.boolean({
     errorMap: () => ({ message: "Valeur invalide : indiquez si le droit de sortie est accordé (oui ou non)." }),

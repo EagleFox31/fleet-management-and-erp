@@ -31,6 +31,7 @@ import { CardShell, SectionLabel } from "@/components/design-system";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { vehicleDraft } from "@/lib/form-drafts";
+import { Check, ClipboardList, FileText, Wrench, Play } from "lucide-react";
 
 // Create schema for vehicle form validation
 const vehicleFormSchema = z.object({
@@ -284,11 +285,11 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
               
               <div className="flex items-center space-x-2">
                 {[
-                  { id: 1, name: 'Informations Véhicule', icon: '📝', time: '2 min' },
-                  { id: 2, name: 'Validation VIN', icon: '✓', time: '1 min' },
-                  { id: 3, name: 'Documents Obligatoires', icon: '📄', time: '3 min' },
-                  { id: 4, name: 'Planification Maintenance', icon: '🔧', time: '2 min' },
-                  { id: 5, name: 'Activation Flotte', icon: '▶️', time: '1 min' }
+                  { id: 1, name: 'Informations Véhicule', icon: ClipboardList, time: '2 min' },
+                  { id: 2, name: 'Validation VIN', icon: Check, time: '1 min' },
+                  { id: 3, name: 'Documents Obligatoires', icon: FileText, time: '3 min' },
+                  { id: 4, name: 'Planification Maintenance', icon: Wrench, time: '2 min' },
+                  { id: 5, name: 'Activation Flotte', icon: Play, time: '1 min' }
                 ].map((step, index) => {
                   const isCompleted = index === 0;
                   const isCurrent = index === 0;
@@ -302,7 +303,7 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
                             ? 'bg-blue-600 text-white'
                             : 'bg-gray-200 text-gray-600'
                       }`}>
-                        {isCompleted ? '✓' : step.icon}
+                        {isCompleted ? <Check className="h-4 w-4" aria-hidden /> : <step.icon className="h-4 w-4" aria-hidden />}
                       </div>
                       <div className="text-xs text-center">
                         <div className={`font-medium ${isCurrent ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'}`}>
@@ -401,7 +402,7 @@ export function VehicleForm({ initialData, isEdit = false, vehicleId }: VehicleF
                           <ul className="space-y-1">
                             <li><span className="font-semibold text-success">Opérationnel</span> - Disponible pour utilisation immédiate</li>
                             <li><span className="font-semibold text-warning-text">En maintenance</span> - En réparation ou révision programmée</li>
-                            <li><span className="font-semibold text-destructive">Hors service</span> - Indisponible pour utilisation (panne, accident)</li>
+                            <li><span className="font-semibold text-destructive-text">Hors service</span> - Indisponible pour utilisation (panne, accident)</li>
                           </ul>
                           <div className="absolute w-2 h-2 bg-popover rotate-45 left-1/2 bottom-0 transform translate-y-1/2 -translate-x-1/2 border-r border-b"></div>
                         </div>

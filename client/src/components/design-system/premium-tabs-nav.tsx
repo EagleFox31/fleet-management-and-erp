@@ -33,7 +33,7 @@ export function PremiumTabsNav({ tabs, className, helpTarget }: PremiumTabsNavPr
             value={value}
             data-help-target={helpTarget}
             data-testid={testId}
-            className="rounded-xl text-xs sm:text-sm px-3 sm:px-4 py-2 font-medium text-gray-500 dark:text-slate-400 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-gray-900 dark:data-[state=active]:text-white data-[state=active]:shadow-[0_1px_3px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)] transition-all shrink-0"
+            className="rounded-xl text-xs sm:text-sm px-3 sm:px-4 py-2 font-medium text-gray-500 dark:text-slate-400 data-[state=active]:bg-card dark:data-[state=active]:bg-slate-900 data-[state=active]:text-gray-900 dark:data-[state=active]:text-white data-[state=active]:shadow-[0_1px_3px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)] transition-all shrink-0"
           >
             <span className="inline-flex items-center gap-1.5 sm:gap-2">
               {icon ? (

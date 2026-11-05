@@ -12,6 +12,7 @@ import { PART_UNITS } from "@shared/constants/parts";
 import { REALTIME_EVENTS, type RealtimeEventPayload } from "@shared/contracts/realtime-events";
 import { prepareColumnUpdate } from "../lib/column-validation";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { idParam, makeFailWith } from "../lib/route-helpers";
 import { isUniqueViolation } from "../lib/pg-errors";
@@ -68,9 +69,9 @@ router.post("/parts", authenticate, isPartsCatalogManager, async (req, res, next
   }
 });
 
-router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
+router.delete("/parts/:id", isAdmin, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
+    const id = parseRouteId(req.params.id, "ID de pièce invalide");
     await partsService.deletePart(id);
     broadcastPartCatalogChanged({ id, action: "deleted" }, req.user?.id);
     return res.status(204).send();
@@ -80,9 +81,9 @@ router.delete("/parts/:id([0-9]+)", isAdmin, async (req, res, next) => {
   }
 });
 
-router.patch("/parts/:id([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.patch("/parts/:id", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
-    const id = Number.parseInt(req.params.id, 10);
+    const id = parseRouteId(req.params.id, "ID de pièce invalide");
     // Le stock ne change que par `update-stock`, qui trace le mouvement et son motif : une
     // quantité dans le PATCH modifierait le stock sans aucune trace. Même refus côté service.
     assertNoStockFields(req.body);
@@ -135,9 +136,9 @@ const stockAdjustmentSchema = z.object({
     .min(1, "La raison de l'ajustement est obligatoire."),
 });
 
-router.post("/parts/:id([0-9]+)/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
+router.post("/parts/:id/update-stock", authenticate, isInventoryManager, async (req, res, next) => {
   try {
-    const partId = Number.parseInt(req.params.id, 10);
+    const partId = parseRouteId(req.params.id, "ID de pièce invalide");
     const { adjustment, reason } = stockAdjustmentSchema.parse(req.body);
     const updatedPart = await partsService.updateStock(partId, adjustment, reason, req.user?.id);
     broadcastPartCatalogChanged({ id: partId, action: "stock_adjusted" }, req.user?.id);
@@ -153,7 +154,7 @@ router.post("/parts/:id([0-9]+)/update-stock", authenticate, isInventoryManager,
  * l'atelier choisissent une variante dans une demande) ; écriture : admin et magasin (isPartsCatalogManager).
  * Référentiel : pas d'événement temps réel, la liste se relit à l'ouverture de la fiche.
  */
-router.get("/parts/:id([0-9]+)/specifications", isStaff, async (req, res, next) => {
+router.get("/parts/:id/specifications", isStaff, async (req, res, next) => {
   try {
     return res.json(await partCatalogChildrenService.listSpecifications(idParam(req.params.id, "Identifiant de pièce")));
   } catch (err) {
@@ -161,7 +162,7 @@ router.get("/parts/:id([0-9]+)/specifications", isStaff, async (req, res, next) 
   }
 });
 
-router.post("/parts/:id([0-9]+)/specifications", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.post("/parts/:id/specifications", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = insertPartSpecificationSchema.parse(req.body ?? {});
     const created = await partCatalogChildrenService.createSpecification(idParam(req.params.id, "Identifiant de pièce"), data);
@@ -171,7 +172,7 @@ router.post("/parts/:id([0-9]+)/specifications", authenticate, isPartsCatalogMan
   }
 });
 
-router.patch("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.patch("/parts/:id/specifications/:specId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = updatePartSpecificationSchema.parse(req.body ?? {});
     const updated = await partCatalogChildrenService.updateSpecification(
@@ -185,7 +186,7 @@ router.patch("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, 
   }
 });
 
-router.delete("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.delete("/parts/:id/specifications/:specId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     await partCatalogChildrenService.deleteSpecification(
       idParam(req.params.id, "Identifiant de pièce"),
@@ -197,7 +198,7 @@ router.delete("/parts/:id([0-9]+)/specifications/:specId([0-9]+)", authenticate,
   }
 });
 
-router.get("/parts/:id([0-9]+)/variants", isStaff, async (req, res, next) => {
+router.get("/parts/:id/variants", isStaff, async (req, res, next) => {
   try {
     return res.json(await partCatalogChildrenService.listVariants(idParam(req.params.id, "Identifiant de pièce")));
   } catch (err) {
@@ -205,7 +206,7 @@ router.get("/parts/:id([0-9]+)/variants", isStaff, async (req, res, next) => {
   }
 });
 
-router.post("/parts/:id([0-9]+)/variants", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.post("/parts/:id/variants", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = insertPartVariantSchema.parse(req.body ?? {});
     const created = await partCatalogChildrenService.createVariant(idParam(req.params.id, "Identifiant de pièce"), data);
@@ -215,7 +216,7 @@ router.post("/parts/:id([0-9]+)/variants", authenticate, isPartsCatalogManager, 
   }
 });
 
-router.patch("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.patch("/parts/:id/variants/:variantId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     const data = updatePartVariantSchema.parse(req.body ?? {});
     const updated = await partCatalogChildrenService.updateVariant(
@@ -229,7 +230,7 @@ router.patch("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isP
   }
 });
 
-router.delete("/parts/:id([0-9]+)/variants/:variantId([0-9]+)", authenticate, isPartsCatalogManager, async (req, res, next) => {
+router.delete("/parts/:id/variants/:variantId", authenticate, isPartsCatalogManager, async (req, res, next) => {
   try {
     await partCatalogChildrenService.deleteVariant(
       idParam(req.params.id, "Identifiant de pièce"),

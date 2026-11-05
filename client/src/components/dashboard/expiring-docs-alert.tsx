@@ -107,7 +107,7 @@ export function ExpiringDocsAlert() {
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Tous les documents sont à jour ✓</p>
+          <p className="text-sm text-green-600 dark:text-green-400 font-medium">Tous les documents sont à jour</p>
         </CardContent>
       </Card>
     );

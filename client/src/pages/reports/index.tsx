@@ -1,6 +1,6 @@
 import { userMessageOf } from "@/lib/api-error";
 import React, { useMemo, useState } from "react";
-import { canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
+import { canReadDocumentation, canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -183,7 +183,7 @@ export default function ReportsIndex() {
   // Charger la liste des documents (admin + secrétaire)
   const { data: docs, isLoading: isLoadingDocs } = useQuery<{ files: { name: string; title: string; description: string; }[] }>({
     queryKey: ['/api/documentation'],
-    enabled: user?.role === 'admin' || user?.role === 'secretary',
+    enabled: canReadDocumentation(user?.role),
   });
 
   const { data: fleetStats, isLoading: fleetLoading } = useQuery<any>({
@@ -516,7 +516,7 @@ export default function ReportsIndex() {
     // CONTRÔLE DE SÉCURITÉ : Vérifier les permissions avant génération
     if ((reportType === "maintenance-costs" || reportType === "fuel-consumption") && !isFinancialDataAuthorized) {
       toast({
-        title: "🔒 Accès refusé",
+        title: "Accès refusé",
         description: "Vous n'avez pas l'autorisation d'accéder aux données financières.",
         variant: "destructive",
       });
@@ -528,7 +528,7 @@ export default function ReportsIndex() {
       (reportType === "technician-performance" && !canReadTechnicianReport(user?.role))
     ) {
       toast({
-        title: "🔒 Accès refusé", 
+        title: "Accès refusé", 
         description: "Ce rapport n'est pas disponible pour votre rôle utilisateur.",
         variant: "destructive",
       });
@@ -562,14 +562,14 @@ export default function ReportsIndex() {
 
       if (success) {
         toast({
-          title: "✅ Rapport généré",
+          title: "Rapport généré",
           description: "Le fichier PDF a été téléchargé avec succès.",
         });
       }
     } catch (error) {
       console.error("Erreur génération rapport:", error);
       toast({
-        title: "❌ Erreur",
+        title: "Erreur",
         description: userMessageOf(error, "Une erreur est survenue lors de la génération du rapport."),
         variant: "destructive",
       });
@@ -931,14 +931,6 @@ export default function ReportsIndex() {
         icon: <FileText className="h-4 w-4" />,
         iconWrapperClassName: "bg-blue-50 text-blue-600",
       },
-      {
-        key: "guides",
-        label: "Guides & procédures",
-        value: documentationCount,
-        subValue: "Documentation QA",
-        icon: <BookOpen className="h-4 w-4" />,
-        iconWrapperClassName: "bg-indigo-50 text-indigo-600",
-      },
     ];
 
     const logisticsKpis: ReportsKpiItem[] = [
@@ -1100,7 +1092,7 @@ export default function ReportsIndex() {
               label: "Exports",
               icon: <TabIcon icon={Download} />,
             },
-            ...((user?.role === "admin" || user?.role === "secretary")
+            ...(canReadDocumentation(user?.role)
               ? [{
                   value: "documentation",
                   label: (
@@ -1368,7 +1360,7 @@ export default function ReportsIndex() {
         <TabsContent value="documentation" className="space-y-4">
           {isLoadingDocs ? (
             <div className="flex items-center justify-center min-h-[400px]">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <Loader2 className="h-8 w-8 animate-spin text-primary-text" />
             </div>
           ) : (
             <div className="space-y-6">
@@ -1387,7 +1379,7 @@ export default function ReportsIndex() {
                     <CardHeader>
                       <div className="flex items-center gap-3">
                         <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <FileText className="h-6 w-6 text-primary" />
+                          <FileText className="h-6 w-6 text-primary-text" />
                         </div>
                         <div>
                           <CardTitle>{doc.title}</CardTitle>
@@ -1437,7 +1429,7 @@ export default function ReportsIndex() {
                   
                   {isLoadingContent ? (
                     <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <Loader2 className="h-8 w-8 animate-spin text-primary-text" />
                     </div>
                   ) : (
                     <div className="prose prose-sm max-w-none dark:prose-invert">

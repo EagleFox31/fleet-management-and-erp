@@ -160,8 +160,52 @@ export function canWriteFuelPrice(role: string | null | undefined): boolean {
 /** Mouvements de pneus (`GET /api/tires/movements`), lecture seule. */
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 
+/** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
+export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+/** Lecture limitée aux comptes carte carburant (lot T2) : la logistique suit la carte, pas la banque. */
+export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics"] as const satisfies readonly AppRole[];
+/**
+ * Choix du compte (banque ou caisse) qui paie une recharge de carte carburant, et seulement cette
+ * action. Dérogation à `TREASURY_WRITE_ROLES`, décidée le 5 novembre 2026 : le gestionnaire de flotte
+ * (logistique) recharge la carte et sait d'où part l'argent. Il ne saisit rien d'autre au journal.
+ * Voir docs/journal/tresorerie-t2t3-journal.md.
+ * Aujourd'hui égale à `FUEL_CARD_MANAGER_ROLES`, mais tenue à part exprès : la recharge est gardée par
+ * `isFuelCardManager`, cette liste ne peut qu'en être un sous-ensemble, et ajouter un gestionnaire de
+ * carte ne doit pas lui donner le droit de débiter une banque. Figé par fuel-recharge-source-roles.test.ts.
+ */
+export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
+
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+
+/** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve et décaisse. */
+export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
+/**
+ * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.
+ * La logistique lit les retenues, le net et les taux : son suivi « opération et facturation » les porte déjà
+ * (décision du 2026-11-05). Elle n'écrit rien (FINANCE_RECEIVABLE_WRITE_ROLES).
+ */
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+
+/** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
+export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+
+export function canReadFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+export function canWriteFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/** Suivi des opérations clients (`mission_operations`) : saisie par l'administration et la logistique. */
+export const MISSION_OPERATIONS_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+/** Lecture du suivi des opérations : + secrétariat et direction. */
+export const MISSION_OPERATIONS_READ_ROLES = ["admin", "logistics", "secretary", "management"] as const satisfies readonly AppRole[];
 
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
@@ -305,6 +349,28 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  */
 export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
 
+/**
+ * Statistiques de facturation client (`GET /api/billing/statistics`, graphique CA par client) : les
+ * roles de la facturation plus la direction, qui lit le chiffre d'affaires sans recevoir les
+ * evenements de facture. Decision du 5 novembre 2026. Liste distincte de
+ * `CLIENT_BILLING_EVENT_ROLES`, qui garde les autres routes et le ciblage WebSocket.
+ */
+export const CLIENT_BILLING_STATS_ROLES: readonly AppRole[] = [...CLIENT_BILLING_EVENT_ROLES, "management"];
+
+export function canReadClientBilling(role: string | null | undefined): boolean {
+  return (CLIENT_BILLING_STATS_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Guides et cahier de tests servis par `GET /api/documentation` : la route serveur est réservée
+ * à l'admin (`isAdmin`). Un autre rôle ne doit ni émettre la requête ni voir l'onglet.
+ */
+export const DOCUMENTATION_READ_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+export function canReadDocumentation(role: string | null | undefined): boolean {
+  return (DOCUMENTATION_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }
@@ -374,3 +440,20 @@ export function canRoleSetMissionStatus(role: string | null | undefined, targetS
 
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/**
+ * Gestion des demandes de pièce (`PATCH /api/part-requirements/:id`, `isInventoryManager`).
+ * Toute transition de `STATUS_PERMISSIONS` doit rester dans ce jeu, sinon le droit est mort.
+ */
+export const INVENTORY_MANAGER_ROLES = ["admin", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+
+/**
+ * Contrôles inopinés QHSE (lot Q1). Saisie et lecture de tous les contrôles : l'administration, la
+ * direction et la logistique (qui initie les contrôles sur itinéraire). Le chauffeur lit seulement
+ * les siens (cloison `driverScopeOf`), il n'entre pas dans ce groupe.
+ * Doit rester aligné sur les gardes de `server/api/qhse-inspections.routes.ts`.
+ */
+export const QHSE_INSPECTION_ROLES = ["admin", "management", "logistics"] as const satisfies readonly AppRole[];
+
+/** Grille de critères (référentiel configurable) : l'administration et la direction la modifient. */
+export const QHSE_CRITERIA_MANAGER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];

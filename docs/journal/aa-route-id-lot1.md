@@ -1,0 +1,210 @@
+# Journal aa-route-id-lot1
+
+## 2026-11-05 03:34 — lot 1 de #360 : 16 lectures d'id passées à parseRouteId
+
+- Quoi : 16 lectures `parseInt` / `Number` de `req.params` dans 9 routeurs de `server/api` passent à `parseRouteId` (document-renewals, vehicle-documents, work-order-items, work-order-labor-rate, missions, warehouse, fault-catalog, purchase-orders, supplier-invoices). Les messages d'erreur ne changent pas. Le cliquet `route-id-parse-hygiene` baisse en conséquence : 6 fichiers sortent de la liste, 3 sont abaissés.
+- Comment : `parseRouteId(valeur, message)` lève une `AppError` 400. Les `assertValidDbId` devenus redondants sont retirés, ainsi que le `MAX_INTEGER_ID` local de work-order-labor-rate. Le `res.status(400).json` du rapprochement de règlement devient un throw, que le gestionnaire central normalise.
+- Pourquoi : `parseInt("1abc")` et `Number("1e0")` valent 1. La route agissait alors sur l'objet 1 (catalogue de pannes, ligne de commande, règlement, document, stock) au lieu de refuser.
+- Tester : `tests/contract/route-id-strict-lot1.contract.test.ts`, 9 routes en admin. Ancien code rejoué : 7 rouges, 2 refusaient déjà. Correctif en place : 9 verts.
+
+## 2026-11-05 03:38 — lot 2 de #360 : fournisseurs
+
+- Quoi : les 7 lectures `parseInt(req.params.id)` des routes de `suppliers.routes.ts` (lecture, performances, modification, évaluations, calcul des évaluations, désactivation, réactivation) passent à `parseRouteId`. FROZEN : suppliers passe de 8 à 1. Celle qui reste est dans le middleware `checkEvaluationPermission`, hors du périmètre de ce lot.
+- Comment : le bloc `isNaN` + `res.status(400).json({ error })` est remplacé par une `AppError` 400 « ID invalide », normalisée en `{ message }` par le gestionnaire central. « de » a vérifié qu'aucun écran ne lit `.error`.
+- Pourquoi : `parseInt("1abc")` vaut 1. La route lisait, modifiait ou désactivait le fournisseur 1.
+- Tester : `tests/contract/route-id-strict-suppliers.contract.test.ts` (GET, PATCH, DELETE `/api/suppliers/1abc`). Ancien code rejoué : 3 rouges. Correctif en place : 3 verts.
+
+## 2026-11-05 03:53 — lot 3 de #360 : garde d'évaluation fournisseur, CPC et compte chauffeur
+
+- Quoi : `parseRouteId` remplace `parseInt` dans le middleware `checkEvaluationPermission` (suppliers:99), dans `drivers.routes.ts` (update-cpc, cpc-status) et dans `drivers-management.routes.ts` (create-user, qui n'avait aucune garde). FROZEN : suppliers, drivers et drivers-management sortent de la liste. Le contrat fournisseurs couvre maintenant les 7 routes, plus un test sur l'objet réel.
+- Comment : les `catch` de ces trois routes enveloppaient toute erreur en 500. Ils laissent maintenant passer une `AppError`. Le service CPC ne lève que des `Error` simples : le reste de leur comportement ne change pas.
+- Pourquoi : comportement relevé avant le correctif :
+  - `PATCH /suppliers/1abc/rating` répondait 404 après avoir cherché le fournisseur 1 ;
+  - `abc` répondait 500, et `99999999999` aussi, en 8,8 s ;
+  - les routes CPC chauffeur répondaient 500 sur `1abc` ;
+  - `create-user` sur `1abc` visait le chauffeur 1 ;
+  - `DELETE /suppliers/<id>abc` répondait 200 et désactivait le fournisseur <id>.
+- Tester :
+  - `route-id-strict-lot3` : 8 cas. Ancien code 6 rouges ; les id valides inconnus gardent leur 404. Correctif 8 verts.
+  - `route-id-strict-suppliers` : 8 cas, dont la non-désactivation. Code du lot 1 : 8 rouges. Correctif : 8 verts.
+  - 15 contrats existants sur chauffeurs et fournisseurs : 467 verts.
+
+## 2026-11-05 04:16 — lot 4 de #360 : parseurs locaux lâches, chauffeur absent en 404
+
+- Correctif du lot 3 : « Code du lot 1 : 8 rouges » est faux pour `route-id-strict-suppliers`. Sur la tête de #366, il y a 2 rouges (rating et calculate-ratings) ; les 8 rouges ne valent que pour le code d'avant le lot 1.
+- Quoi :
+  - `parseDriverId` (supprimé), `parseClientId`, `parseAlertId`, `parseCenterId`, et `idParam` (`server/lib/route-helpers.ts`, 19 appels) délèguent à `parseRouteId`. `parseIdParam` (commandes fournisseur), déjà strict, délègue aussi pour n'avoir qu'une lecture. `parseCenterId` garde son 404 « Centre agréé introuvable. » : c'est le contrat existant.
+  - Le service CPC lève `AppError(404, "Chauffeur introuvable")` au lieu d'une `Error`. Cela couvre GET `/api/drivers/:id`, `cpc-status` et `update-cpc` sur un id valide mais absent, qui répondaient 500.
+  - Les catch des 5 routes chauffeur laissent passer une `AppError`.
+- Comment : le cliquet `route-id-parse-hygiene` lit maintenant l'AST. Il compte chaque appel `f(req.params…)` quand `f` est un parseur local, ou importé par chemin relatif, qui fait `parseInt` ou `Number(…)` sans déléguer à `parseRouteId`. Les prédicats (`value is string`, `: boolean`) sont exclus, par exemple `isVehicleIdSegment`.
+  - FROZEN : la liste provisoire comptait alerts, clients et document-renewal-centers (lus par le compteur AST) ; ils n'y entrent pas. Ils n'ont jamais figuré dans le FROZEN fusionné.
+  - fault-catalog et fuel-records n'y entrent pas : `idParam` est corrigé à la source.
+  - parts-catalog reste à 3.
+- Pourquoi : `parseDriverId` lisait `"1abc"` comme 1 et contournait le cliquet textuel, qui ne voyait que `parseInt(req.params`. La route `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`.
+- Tester :
+  - mutation : avec l'ancien `idParam`, le cliquet passe au rouge (fault-catalog 6, fuel-records 1, parts-catalog 15) ; avec l'ancien `parseDriverId`, il passe aussi au rouge (drivers-management 5).
+  - `route-id-strict-lot4` : 18 cas. Ancien code : 16 rouges ; restent verts le 404 du centre agréé (non-régression) et create-user (corrigé au lot 3). Correctif : 18 verts.
+  - tsc : 0 erreur. Unitaires : 2438 verts. 32 contrats touchés : 445 verts.
+- Hors périmètre : le filet contre les id au-delà de l'int4 (middleware `/api`) est confié à la session de.
+
+## Lot 5 — `server/routes.ts` (en place) et statistiques carburant
+
+- Quoi :
+  - `routeIdOrNaN` (`server/lib/route-id.ts`) fait la même lecture que `parseRouteId`, mais rend `NaN` au lieu de lever. Il remplace `parseInt` en place dans `server/routes.ts`, qui est gelé et dont les handlers testent déjà `isNaN`.
+  - Routes concernées : 9 DELETE (users, admin/users, vehicles, maintenance-schedules, work-orders, parts-used, fault-catalog, tires, workflows/documents), plus `GET /api/work-orders/vehicle/:vehicleId` et `/technician/:technicianId`.
+  - `fuel-card.routes.ts` : stats et anomalies par véhicule passent par `parseRouteId`. Le catch laisse passer l'`AppError`.
+- Comment : le cliquet compte les lectures lâches de `routes.ts` (`ROUTES_TS_FROZEN = 39`, contre 50 sur `origin/main`). fuel-card sort de FROZEN.
+- Pourquoi : `DELETE /api/vehicles/<id>abc` visait le véhicule `<id>`.
+- Correctif de méthode : les deux GET d'OT, d'abord notés comme masqués par `GET /api/work-orders/:id`, sont vivants (`:id` = un seul segment). Ils sont corrigés et non supprimés (voir LESSONS, 2026-11-05).
+- Tester : `route-id-strict-lot5` compte 15 cas. Sur l'ancien code, 15 rouges. Le correctif les rend verts. `former-storage-stubs` reste vert.
+- Réserves de relecture : DELETE users (suppression douce) et DELETE admin/users (définitive) vérifient `deletedAt` nul ; un test cantonne `routeIdOrNaN` à `server/routes.ts`.
+- Hors périmètre : PATCH users (b7) et toggle admin-users (c7, #375).
+
+## Lot 6 — écritures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur 11 écritures.
+  - Véhicules : PATCH, restore, mileage/sync, POST tires.
+  - Planifications : generate-work-order, PATCH.
+  - PATCH work-orders, fuel-records et tires.
+  - PATCH vehicle-tires et vehicle-tires/remove.
+- Détails :
+  - `mileage/sync` n'avait aucun contrôle : il reçoit le 400 « ID de véhicule invalide ».
+  - `generate-work-order` (`Number`) acceptait `1e0` et `" 7 "`.
+- Comment : `ROUTES_TS_FROZEN = 28` (39 au lot 5). `POST /api/parts/:id/update-stock` est déjà strict : la route est `:id([0-9]+)` dans `parts-catalog.routes.ts`, donc hors lot.
+- Pourquoi : `PATCH /api/vehicles/<id>abc` modifiait le véhicule `<id>`, et `restore` le restaurait.
+- Tester : `route-id-strict-lot6` couvre 14 cas, dont 3 vérifient que l'objet reste intact (véhicule modifié, véhicule restauré, plein modifié).
+  - Ancien code : 14 rouges. Correctif : 14 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
+- Effet de bord assumé : un id `0` répondait 404 (objet absent), il répond désormais 400 (id invalide).
+- Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
+
+## Lot 7 — lectures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur les 26 lectures restantes.
+  - 11 d'entre elles passent par `canAccessOwned` : documents de véhicule, téléchargement de document, planifications, OT, carburant, kilométrage et son historique, historique de statut, pneus du véhicule, documents de workflow.
+  - `GET /api/work-orders/:id` (`Number`) acceptait `1e0`.
+- Comment :
+  - `ROUTES_TS_FROZEN = 2` : les deux lectures de la forme `parseInt(req.params…)` qui restent sont PATCH users (#379) et toggle admin-users (#375).
+  - Le cliquet ne voit pas les lectures qui passent par une variable : `GET /api/vehicles/:id` (`parseInt(idOrRegistration)`, id ou immatriculation) lit encore de façon lâche. Elle est confiée au lot 9, avec `GET /api/users/:id`, monté avec `authenticate` seul.
+  - `generate-work-order` était déjà couvert au lot 6.
+- Pourquoi : un client propriétaire du véhicule `<id>` qui demandait `<id>abc` recevait les données du véhicule `<id>` au lieu d'un 400.
+- Tester :
+  - `route-id-strict-lot7` : 26 cas. Un témoin (le client lit son véhicule avec un id valide), 8 cas côté client et 17 côté personnel.
+  - Ancien code : 25 rouges, le témoin reste vert. Correctif : 26 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 97 contrats du périmètre : 1115 verts.
+
+## Lot 8 — écritures de `server/api` (factures fournisseur, pièces d'OT, demandes de pièce)
+
+- Quoi : `parseRouteId` (AppError 400) remplace `parseInt` sur 9 lectures d'écriture.
+  - `supplier-invoices` : `PATCH /:id/validate`, `PATCH /:id/approve`, `POST /:id/payment`.
+  - `work-order-parts` : `POST /:workOrderId/awaiting-parts`, `POST /:workOrderId/parts`, `POST /:workOrderId/part-requirements/:requirementId/issue` (2 ids).
+  - `part-requirements` : `PATCH /:id`, `DELETE /:id`.
+- Comment :
+  - `work-order-parts` et `part-requirements` gardent leur message de 400. `supplier-invoices` n'avait aucun 400 sur ces trois routes : « Identifiant de facture invalide. » est un message nouveau, aligné sur celui du fichier.
+  - Les contrôles `isNaN` devenus morts sont retirés.
+  - `issue`, `PATCH` et `DELETE` de demande renvoyaient 500 pour toute erreur : leur catch relaie désormais les AppError (`next(error)`), le reste garde son log et son 500.
+  - FROZEN : `supplier-invoices` 5 → 2, `work-order-parts` 5 → 1, `part-requirements` 3 → 1. Le reste (lectures) est confié au lot 9.
+- Pourquoi : un appel sur `<id>abc` agissait sur l'objet `<id>`.
+- Tester : `route-id-strict-lot8`, 9 cas. Chacun vise `<id>abc` avec `<id>` existant et vérifie le 400, le message, puis que l'objet `<id>` est intact (statut de facture et aucun règlement ; quantité en stock, statut de demande, aucun mouvement ni pièce utilisée ; aucune demande créée ; statut d'OT ; demande ni modifiée ni supprimée).
+  - Ancien code : 9 rouges (200, 201 ou 204 ; `payment` répondait 400 sur un autre motif). Correctif : 9 verts.
+  - tsc : 0 erreur. Unitaires : 2441 verts. 24 contrats du périmètre : 418 verts.
+  - Ménage : sur l'ancien code, les routes écrivent (mouvement lié à l'OT, demande créée) et le mouvement bloquait la suppression de l'OT. Le `afterAll` retrouve désormais les OT par préfixe de titre (`TEST lot 8`) et les demandes par motif, puis supprime des enfants vers les parents. Rejoué : 0 résidu après le vert et après le rouge.
+
+## Lot 9 — fin de `server/api`, `GET /api/vehicles/:id` et `GET /api/users/:id`
+
+- Quoi : `parseRouteId` remplace les 14 lectures lâches qui restaient dans `server/api`.
+  - `document-renewals` : `PATCH /requests/:id/status`.
+  - `part-requirements` : `GET /by-part/:partId`.
+  - `parts-catalog` : `DELETE`, `PATCH /parts/:id`, `POST /parts/:id/update-stock`.
+  - `supplier-invoices` : `GET /:id`, `GET /:id/settlements`.
+  - `vehicles` : `PUT /:id/mileage`, `PUT /:id/maintenance-position`.
+  - `work-order-items` : `GET` et `POST /:workOrderId/items`, `PATCH` et `DELETE /work-order-items/:id`.
+  - `work-order-parts` : `GET /:workOrderId/pending-part-requirements`.
+  - `admin-users-guard` reste à 1 : il est traité par #375.
+- Dans `server/routes.ts`, modifié en place :
+  - `GET /api/vehicles/:id` : seuls des chiffres valent un id (400 hors de l'int4). Le reste est cherché comme immatriculation, donc `12abc` ne lit plus le véhicule 12.
+  - `GET /api/users/:id` passe d'`authenticate` à `isAnyUser`. `authenticate` ne charge pas `req.user`, donc la route répondait 401 à tout compte. Hors admin, chacun ne lit que son profil.
+- Comment :
+  - Les messages existants sont gardés. `supplier-invoices GET /:id` n'avait pas de 400 : il prend « Identifiant de facture invalide. ».
+  - `parts-catalog` était déjà filtré par `([0-9]+)`. Le gain porte sur `0` et sur un id hors de l'int4 (500 avant, 400 maintenant).
+  - Les catch de `by-part`, `POST`, `PATCH` et `DELETE` de ligne d'OT relaient les AppError. Les 3 `console.error` de `work-order-items` sont migrés vers `log.error`, aucun n'est supprimé.
+  - Le FROZEN ne garde que `admin-users-guard.routes.ts: 1`.
+  - `supplier-invoice-error-details` provoquait sa 500 avec `pas-un-id`, qui répond désormais 400 : la 500 est maintenant provoquée par `vi.spyOn` sur le service.
+- Tester : `route-id-strict-lot9`, 12 cas.
+  - Véhicule : kilométrage et position inchangés.
+  - Ligne d'OT : aucune créée, ni modifiée, ni supprimée.
+  - `parts-catalog` : 0 et id hors de l'int4.
+  - 7 lectures à 400.
+  - Le client lit son véhicule par son id (témoin), et reçoit 404 sur `<id>abc`.
+  - Profil : le sien à 200, celui d'un autre à 403, l'admin lit tout le monde.
+  - Ancien code : 12 rouges (200, 201, 404, 500 ; `GET /api/users/:id` à 401). Correctif : 12 verts.
+  - Ménage par préfixe de titre (`TEST lot 9`) : 0 résidu.
+  - tsc : 0 erreur. Unitaires : 2441 verts. 50 contrats du périmètre : 793 verts.
+
+- Réserves de relecture :
+  - contrat : un client lit son véhicule par son immatriculation, et reçoit 403 sur celle d'un autre client ;
+  - le profil `GET /api/users/:id` ne porte que ses 8 champs (garde-fou contre un futur mot de passe ou PIN) ;
+  - les `console.error` des deux catch touchés dans `server/routes.ts` sont migrés vers `log.error`.
+  - Contrat : 14 verts, 0 résidu.
+
+## Lot 10 — `billing.routes.ts` et forme déstructurée dans le cliquet
+
+- Quoi : `route-id-parse-hygiene` voit maintenant une lecture qui passe par une variable : `const { id } = req.params; parseInt(id)`, `const raw = req.params.id; Number(raw)`. Il ne relevait que la lecture directe `parseInt(req.params…)`.
+- Relevé du nouveau motif sur `server/api` : `billing.routes.ts`, et seulement lui, avec 6 conversions sur 4 routes (`GET /invoices/:id`, `POST` et `GET /invoices/:id/payments`, `GET /invoices/:id/pdf`). Le cliquet était rouge avant le correctif.
+- Comment :
+  - `parseRouteId(req.params.id, "Identifiant de facture invalide.")`, une lecture par route. Sur `POST /payments`, elle a lieu avant le corps.
+  - Les 3 GET reçoivent `next` et relaient les AppError. Leurs `console.error` sont migrés vers `moduleLogger("billing")`, aucun n'est supprimé. La réponse 500 des autres erreurs n'a pas changé.
+  - Comptage par bloc de déclaration : un nom homonyme dans un autre handler n'est pas compté, mais le masquage par une déclaration interne n'est pas suivi.
+- Tester : `route-id-strict-lot10`, 6 cas.
+  - `POST /payments` sur `<id>abc` : 400, aucun paiement, ligne de facture identique.
+  - `POST /payments` sur un id hors de l'int4 : 400.
+  - Témoin : un paiement sur un id valide est enregistré.
+  - Les 3 GET sur `<id>abc` : 400.
+  - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
+  - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
+
+## Lot 11 — ids de filtre lus dans `req.query`
+
+- Quoi : `parseQueryId(value, message)` dans `server/lib/route-id.ts`. Absent ou vide : pas de filtre. Sinon même lecture que `parseRouteId` (400) ; une valeur répétée (tableau) est refusée. `queryIdOrNaN` est son pendant pour `server/routes.ts` (gelé), cantonné par un test.
+- Cliquet `query-id-parse-hygiene` : conversion lâche (`parseInt`, `Number.parseInt`, `Number`, avec ou sans `String(…)`) d'un paramètre de requête nommé `id`, `…Id` ou `…By`, lu directement ou par une variable liée depuis `req.query`. Rouge avant le correctif : `server/api` 8 lectures sur 6 fichiers, `server/routes.ts` 5. Gel : vide et 0.
+- Comment :
+  - `server/api` : `billing` (`GET /invoices`, `/invoices/summary`), `fuel-card` (`/history`), `operations` (`/missions`), `purchase-orders` (`supplierId`, `createdBy`), `supplier-invoices`, `document-renewals` (`/requests`). Les catch de `billing` et `fuel-card` reçoivent `next` et relaient les AppError ; leurs `console.error` sont migrés vers `log.error`.
+  - `server/routes.ts`, en place : `queryIdOrNaN` puis `if (Number.isNaN(x)) return res.status(400)` sur `stock-movements`, `fuel-records`, `consumption-history`, `tire-inspections`, `tire-rotations`. Aucune route ajoutée.
+  - Contrat modifié : `client-read-scope-tires`, `?vehicleId=B&vehicleId=A` passait en 403 (le premier paramètre faisait foi) ; il est désormais refusé en 400. Aucune donnée renvoyée dans les deux cas.
+  - Côté client : les filtres envoyés sont numériques et gardés (`enabled`, `?? undefined`) ; aucun écran n'envoie `all` ou `null`.
+- Tester : `route-id-strict-lot11`, 13 filtres × 3 cas (`12abc` → 400 et son message, hors int4 → 400, id bien formé → 200).
+  - Ancien code : 24 rouges sur 39 (les 2 cas hors int4 de `fuel-records` étaient déjà refusés). Correctif : 39 verts, aucune donnée créée hors du compte admin.
+  - tsc : 0 erreur. Unitaires : 2448 verts. 64 contrats du périmètre (facturation, achats, carburant, pneus, missions, renouvellements, ids) : 825 verts.
+
+## Lot 12 — 500 de la facturation, portée des cliquets d'id
+
+- Quoi : trois points de relecture des lots 10 et 11.
+  - `billing.routes.ts` : les 7 lectures répondaient `{ error: error.message }` en 500 (AGENTS §10). Elles relaient désormais au gestionnaire central par `next(withLogContext(isAppError(e) ? e : new AppError(500, …, { cause }), { event }))`. `getErrorMessage`, les `console.error` restants et le logger local sont retirés ; la trace est tenue par le gestionnaire central, avec le même libellé d'événement.
+  - Cliquets `route-id-parse-hygiene` et `query-id-parse-hygiene` : repérage partagé (`tests/support/request-id-scan.ts`).
+    - Une variable liée est rattachée à sa déclaration par le vérificateur TypeScript (un fichier, sans lib), au lieu du bloc `parent.parent.parent`. Un nom masqué (`for (const { id } of rows)`, paramètre homonyme) n'est plus compté.
+    - La requête est `req` ou le premier paramètre du handler (`(request, res) =>`).
+    - Conversions vues : `parseInt`, `parseFloat`, `Number`, `Number.parseInt`, `Number.parseFloat`, `+` unaire, avec ou sans `String(…)`.
+    - Cliquet query : nom d'id `id`, `…Id`, `…edBy` ; `sortBy`, `groupBy`, `orderBy` ne sont plus pris.
+  - `server/routes.ts` : `isNaN` mort retiré sur `stock-movements` (déjà refusé par `queryIdOrNaN`).
+- Tester :
+  - `error-500-relay-hygiene` couvre `billing` : rouge sur l'ancien code (500 locale, `console.*`), vert après.
+  - Contrat `billing-error-details` : 7 routes, 500 générique avec référence, sans le message du service. Il passait déjà avant (garde de sortie du gestionnaire) : non-régression.
+  - Nouveaux cas des cliquets : 4 rouges avec l'ancienne implémentation (autre nom de requête, `String(…)`, variable liée sous un autre nom, masquage par paramètre).
+  - Le cliquet query réécrit retrouve sur le code d'avant le lot 11 les mêmes comptes (8 / 5). Les gels n'ont pas bougé.
+  - tsc : 0 erreur. Unitaires : 2453 verts. 23 contrats (facturation, ids, stock) : 239 verts.
+### Lot 9 — complément : lecture des profils par la direction et le secrétariat
+
+- Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
+- Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
+
+### Lot 12 — complément : chemins Windows dans le repérage partagé
+
+- Quoi : `singleFileChecker` comparait le nom de fichier brut à celui que `createProgram` normalise en `/`. Sous Windows (chemins en `\`), aucun fichier n'était trouvé : les conversions de variables liées n'étaient pas comptées. Le nom est normalisé en `/` avant usage. La docstring liste les limites, dont l'alias `const r = req` qui n'est pas suivi.
+- Tester : cas unitaire avec un chemin en `\`, rouge sans le correctif, vert avec. Mutation `const { id: rid } = req.params; Number(rid)` dans `billing.routes.ts` : non vue avant, vue après (`billing.routes.ts: 1`).
+
+## Lot 13 — facture client absente : 404
+
+- Quoi : `clientBillingService.getInvoiceById` levait `Error("Facture non trouvée")` ; `GET /api/billing/invoices/:id` et `/pdf` répondaient 500 sur une facture absente. Il lève `AppError(404, "Facture non trouvée.")`.
+- Les deux autres points demandés pour ce lot étaient déjà corrigés dans la pile : `DELETE /api/missions/:id/assignments/:assignmentId` passe par `parseRouteId`, et `supplier-invoices.routes.ts` n'a plus de lecture lâche ni d'entrée gelée.
+- Vu sans changement : `parts-service.ts:217` lève une `Error`, mais `parts-catalog.routes.ts` la traduit déjà en 404 par son message.
+- Tester : contrat `billing-error-details` (2 cas 404) rouge sur l'ancien service (500), vert après. Contrats facturation : 25 verts. tsc : 0 erreur.

@@ -31,6 +31,7 @@ import authLockoutRoutes from "./auth-lockout.routes";
 import pinAuthRoutes from "./pin-auth.routes";
 import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
+import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
@@ -48,10 +49,16 @@ import partRequirementReceiveRoutes from "./part-requirement-receive.routes";
 import fuelAnomaliesRoutes from "./fuel-anomalies.routes";
 import fuelVouchersRoutes from "./fuel-vouchers.routes";
 import fuelPricesRoutes from "./fuel-prices.routes";
+import missionBudgetsRoutes from "./mission-budgets.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
+import financeReceivablesRoutes from "./finance-receivables.routes";
+import missionOperationsRoutes from "./mission-operations.routes";
+import treasuryRoutes from "./treasury.routes";
+import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
+import qhseInspectionsRoutes from "./qhse-inspections.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
 import partScansRoutes from "./part-scans.routes";
@@ -66,7 +73,9 @@ import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
+import uploadedDocumentsRoutes from "./uploaded-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
+import { routeIdRangeGuard } from "../middleware/route-id-range-guard";
 import { validateBody } from "../middleware/validate-body";
 import { pinLoginRequestSchema } from "@shared/contracts/auth-pin-login";
 import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contracts/auth-login";
@@ -87,6 +96,8 @@ import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services
 
 export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   const apiRouter = Router();
+  // Id hors int4 refusé avant toute route /api (server/api puis routes.ts, servi après) : sinon erreur base 22003 et 500.
+  apiRouter.use(routeIdRangeGuard);
 
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
@@ -135,10 +146,13 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(partsCatalogRoutes);
   // Catalogue de pannes : valideur pose par le serveur, id inconnu -> 404.
   apiRouter.use(faultCatalogRoutes);
+  apiRouter.use(tireRotationsRoutes);
   // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
   apiRouter.use(adminUsersGuardRoutes);
   apiRouter.use(lastAdminGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
+  // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
+  apiRouter.use(uploadedDocumentsRoutes);
   apiRouter.use(workflowsRoutes);
   // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
   apiRouter.use(fuelRecordsRoutes);
@@ -243,10 +257,17 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(fuelAnomaliesRoutes);
   apiRouter.use(fuelVouchersRoutes);
   apiRouter.use(fuelPricesRoutes);
+  // Budget de mission (L1) : drapeau finance et rôles posés route par route.
+  apiRouter.use(missionBudgetsRoutes);
   apiRouter.use(timeTrackingRoutes);
   apiRouter.use(pendingInvoicesRoutes);
+  apiRouter.use(financeReceivablesRoutes);
+  apiRouter.use(missionOperationsRoutes);
+  apiRouter.use(treasuryRoutes);
+  apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(driverBreakdownsRoutes);
+  apiRouter.use(qhseInspectionsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);
   apiRouter.use(userStockPermissionRoutes);

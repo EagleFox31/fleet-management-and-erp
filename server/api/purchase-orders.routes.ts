@@ -2,10 +2,12 @@ import { Router, Request, Response, NextFunction } from "express";
 import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 import { withLogContext } from "../lib/error-log-context";
+import { bodyIdSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("purchase-orders");
 
@@ -131,11 +133,7 @@ const checkApprovalPermission = (req: Request, res: Response, next: NextFunction
 
 /** Identifiant d'URL : entier positif, sinon 400 lisible (avant : NaN jusqu'à la base, 500). */
 const parseIdParam = (value: string, label: string): number => {
-  const id = Number(value);
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(id) || id <= 0) {
-    throw new AppError(400, `${label} invalide.`);
-  }
-  return id;
+  return parseRouteId(value, `${label} invalide.`);
 };
 
 /**
@@ -147,8 +145,8 @@ router.get("/", requireAuth, async (req: Request, res: Response, next: NextFunct
 
     const orders = await procurementService.getPurchaseOrders({
       status: status as string | undefined,
-      supplierId: supplierId ? parseInt(supplierId as string) : undefined,
-      createdBy: createdBy ? parseInt(createdBy as string) : undefined,
+      supplierId: parseQueryId(supplierId, "ID fournisseur invalide"),
+      createdBy: parseQueryId(createdBy, "ID d'utilisateur invalide"),
       dateFrom: dateFrom as string | undefined,
       dateTo: dateTo as string | undefined,
     });
@@ -259,10 +257,10 @@ router.post("/", requireAuth, checkWritePermission, async (req: Request, res: Re
   try {
     // Valider les données de base
     const schema = z.object({
-      supplierId: z.number(),
-      requirementIds: z.array(z.number()).optional().default([]),
+      supplierId: bodyIdSchema,
+      requirementIds: z.array(bodyIdSchema).optional().default([]),
       requirementQuantities: z.array(z.object({
-        requirementId: z.number(),
+        requirementId: bodyIdSchema,
         quantityOrdered: z.number().int().positive(),
       })).optional().default([]),
       manualLines: z.array(z.object({
@@ -386,11 +384,8 @@ router.patch("/:id/status", requireAuth, checkWritePermission, async (req: Reque
  */
 router.patch("/:id/lines/:lineId", requireAuth, checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = parseInt(req.params.id);
-    const lineId = parseInt(req.params.lineId);
-    if (Number.isNaN(orderId) || Number.isNaN(lineId)) {
-      throw new AppError(400, "Commande ou ligne invalide.");
-    }
+    const orderId = parseRouteId(req.params.id, "Commande ou ligne invalide.");
+    const lineId = parseRouteId(req.params.lineId, "Commande ou ligne invalide.");
 
     const scope = await getScopeByOrderId(orderId);
     if (!canManageScope(req.user?.role, scope)) {

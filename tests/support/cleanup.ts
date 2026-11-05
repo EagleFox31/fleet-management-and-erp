@@ -8,18 +8,27 @@ import {
   documentRenewalCenters,
   documentRenewalRequests,
   fuelPrices,
+  missionBudgets,
+  missionDestinations,
+  missionOperations,
   missions,
   fuelRecords,
   partRequirements,
   parts,
   partsStockMovements,
   partsUsed,
+  qhseInspectionCriteria,
+  qhseInspections,
   statusHistory,
   supplierInvoices,
   suppliers,
   tireInspections,
   tireRotationDetails,
   tireRotations,
+  supplierInvoiceSettlements,
+  paymentInstruments,
+  treasuryAccounts,
+  treasuryEntries,
   vehicleAcquisitionWorkflows,
   vehicleTires,
   users,
@@ -67,14 +76,22 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     await db.delete(parts).where(inArray(parts.id, ids.partIds));
   }
   if (ids.vehicleIds.length > 0) {
+    // Contrôles QHSE sur un véhicule de test : qhse_inspections_vehicle_id_fkey bloquerait la suppression.
+    await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, ids.vehicleIds));
+    // Écriture de trésorerie liée au véhicule (recharge carte, lot T2) : bloquerait la suppression (FK).
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.vehicleId, ids.vehicleIds));
+    await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds)));
+    await db.delete(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds));
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
     // Factures créées sans id connu du test (import Excel) : bloquaient la suppression (FK).
     await deleteSupplierInvoicesOf(db.select({ id: suppliers.id }).from(suppliers).where(inArray(suppliers.id, ids.supplierIds)));
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.supplierId, ids.supplierIds));
     await db.delete(suppliers).where(inArray(suppliers.id, ids.supplierIds));
   }
   if (ids.clientIds.length > 0) {
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.clientId, ids.clientIds));
     await db.delete(clients).where(inArray(clients.id, ids.clientIds));
   }
   if (ids.userIds.length > 0) {
@@ -90,6 +107,14 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       // Un changement de statut tracé par un compte de test sur un véhicule hors du lot
       // survit à la cascade vehicle_id : status_history_updated_by_id_users_id_fk bloque.
       await db.delete(statusHistory).where(inArray(statusHistory.updatedById, ids.userIds));
+      // Contrôles et critères QHSE tracés par un compte de test (inspecteur ou audit).
+      await db.delete(qhseInspections).where(inArray(qhseInspections.inspectorId, ids.userIds));
+      await db.delete(qhseInspections).where(inArray(qhseInspections.createdBy, ids.userIds));
+      await db.delete(qhseInspections).where(inArray(qhseInspections.updatedBy, ids.userIds));
+      await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, ids.userIds));
+      await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, ids.userIds));
+      // Trésorerie : écritures auto (plein, recharge, règlement) et comptes créés par un compte de test.
+      await deleteTreasuryOfUsers(ids.userIds);
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
         break;
@@ -99,6 +124,32 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       }
     }
   }
+}
+
+/** Écritures de trésorerie et comptes créés par ces utilisateurs ; un règlement garde son paiement, perd le lien de compte. */
+async function deleteTreasuryOfUsers(userIds: number[]): Promise<void> {
+  const accounts = db
+    .select({ id: treasuryAccounts.id })
+    .from(treasuryAccounts)
+    .where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
+  await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, accounts));
+  // Traites et chèques (T4) : créés par ces comptes, ou payés par une écriture qui va disparaître.
+  await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, userIds), inArray(paymentInstruments.updatedBy, userIds)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds))));
+  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts));
+  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds)));
+  await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
+}
+
+/** Traite ou chèque payé par ces écritures : payment_instruments_treasury_entry_id_fkey bloquerait leur suppression. */
+async function deleteInstrumentsOfEntries(entryIds: SQLWrapper): Promise<void> {
+  await db.delete(paymentInstruments).where(inArray(paymentInstruments.treasuryEntryId, entryIds as any));
+}
+
+/** Une écriture de plein garde sa mission (FK sans cascade) : à supprimer avant la mission. */
+export async function deleteTreasuryEntriesOfMissions(missionIds: number[]): Promise<void> {
+  if (missionIds.length > 0) await db.delete(treasuryEntries).where(inArray(treasuryEntries.missionId, missionIds));
 }
 
 /**
@@ -168,6 +219,7 @@ async function deleteOrphanTestRows(): Promise<void> {
   // bloquait la suppression du véhicule et faisait échouer le hook global de chaque fichier de contrat.
   await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, orphanVehicles));
   await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, orphanVehicles));
   await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
   await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, orphanWorkOrders));
   // Pneus montés, inspections et rotations d'un véhicule orphelin (client-read-scope-tires) : FK vers le véhicule.
@@ -209,9 +261,49 @@ async function deleteOrphanTestRows(): Promise<void> {
   // missions_created_by_users_id_fk) et faisait échouer le hook global de tous les fichiers.
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
+  // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
+  await db.delete(missionBudgets).where(
+    or(
+      inArray(missionBudgets.missionId, testMissions),
+      inArray(missionBudgets.createdBy, testUsers),
+      inArray(missionBudgets.updatedBy, testUsers),
+      inArray(missionBudgets.approvedBy, testUsers),
+      inArray(missionBudgets.disbursedBy, testUsers),
+    ),
+  );
+  // Destination du barème (L1b) écrite par un compte de test : un budget hors test qui la vise la
+  // perd (destination_id nullable), il n'est pas supprimé.
+  const testDestinations = db
+    .select({ id: missionDestinations.id })
+    .from(missionDestinations)
+    .where(or(inArray(missionDestinations.createdBy, testUsers), inArray(missionDestinations.updatedBy, testUsers)));
+  await db.update(missionBudgets).set({ destinationId: null }).where(inArray(missionBudgets.destinationId, testDestinations));
+  await db.delete(missionDestinations).where(inArray(missionDestinations.createdBy, testUsers));
+  await db.delete(missionDestinations).where(inArray(missionDestinations.updatedBy, testUsers));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
+  // Suivi d'opération saisi par un compte de test sur une mission qui ne l'est pas (FK created_by/updated_by).
+  await db.delete(missionOperations).where(inArray(missionOperations.createdBy, testUsers));
+  await db.delete(missionOperations).where(inArray(missionOperations.updatedBy, testUsers));
+  // Journal de trésorerie saisi par un compte de test : écritures d'abord (elles référencent les
+  // comptes), y compris celles posées sur un compte créé par un compte de test, puis les comptes.
+  const testTreasuryAccounts = db
+    .select({ id: treasuryAccounts.id })
+    .from(treasuryAccounts)
+    .where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
+  await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, testTreasuryAccounts));
+  await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, testUsers), inArray(paymentInstruments.updatedBy, testUsers)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers))));
+  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts));
+  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
+  await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.inspectorId, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.createdBy, testUsers));
+  await db.delete(qhseInspections).where(inArray(qhseInspections.updatedBy, testUsers));
+  await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, testUsers));
+  await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(users).where(orphan(users.username, users.createdAt));

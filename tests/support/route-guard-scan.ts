@@ -487,23 +487,53 @@ export function sourceFiles(dir: string): string[] {
 }
 
 /**
+ * Vrai si l'instruction à `index` ne s'exécute pas toujours : corps d'un `if` / `else` / `for` / `while`
+ * (avec ou sans accolades) ou branche d'un `?:`/`&&`. Un `router.use(isStaff)` conditionnel ne protège pas la route.
+ */
+export function isConditionalAt(source: string, index: number): boolean {
+  const head = source.slice(0, index);
+  if (/(?:\bif\s*\((?:[^()]|\([^()]*\))*\)|\belse|\b(?:for|while)\s*\((?:[^()]|\([^()]*\))*\))\s*$/.test(head)) return true;
+  if (/(?:&&|\|\||\?)\s*$/.test(head)) return true;
+  let depth = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    const c = source[i];
+    if (c === "}") depth++;
+    else if (c === "{") {
+      if (depth > 0) {
+        depth--;
+        continue;
+      }
+      if (/(?:\bif\s*\((?:[^()]|\([^()]*\))*\)|\belse(?:\s+if\s*\((?:[^()]|\([^()]*\))*\))?|\b(?:for|while)\s*\((?:[^()]|\([^()]*\))*\))\s*$/.test(source.slice(0, i))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Gardes posées sur tout un routeur par `router.use(garde)` (sans chemin) : identifiants nus,
  * `authorize(...)`, `sessionGuard(...)` et spreads. Les autres appels (`express.json()`) sont du bruit.
  */
 export function routerLevelGuards(rawSource: string, kinds: GuardKinds, before: number = Number.POSITIVE_INFINITY): Map<string, string[]> {
-  // un identifiant nu n'est lu que s'il est une garde connue : `use(sessionMiddleware)`, `use(unRouteur)` sont du bruit
-  const known = (a: string) => !/^\w+$/.test(a) || kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
   const source = stripComments(rawSource);
+  // échec fermé, comme en en-tête : un identifiant nu inconnu compte comme garde permissive (route retenue).
+  // Seuls les sous-routeurs (`use(unRouteur)`) sont du bruit.
+  const routers = routerVarsOf(source);
+  const knownKind = (a: string) => kinds.restrictive.has(a) || kinds.permissive.has(a) || kinds.neutral.has(a);
+  // intergiciels globaux (`app.use(cors)`, `apiRouter.use(session)`) : bruit, seules les gardes connues comptent
+  const known = (a: string, receiver: string) => !/^\w+$/.test(a) || knownKind(a) || (!["app", "apiRouter"].includes(receiver) && !(routers.has(a) || /Router$/.test(a)));
+  const isGuardArg = (a: string) => /^(\w+|authorize\s*\(.*\)|sessionGuard\s*\(.*\)|\.\.\.\s*\w+)$/s.test(a);
   const out = new Map<string, string[]>();
   for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(/g)) {
     // Express applique les `use` dans l'ordre : un `use` posé après la route ne la couvre pas.
     if (m.index! >= before) break;
+    // un `use` conditionnel (if/else/boucle/&&) ne couvre pas toujours la route : il ne compte pas
+    if (isConditionalAt(source, m.index!)) continue;
     const open = m.index! + m[0].length - 1;
     const close = matchingClose(source, open);
     if (close === -1) continue;
     const args = splitTopLevel(source.slice(open + 1, close));
     if (args.length === 0 || /^["'`]/.test(args[0])) continue;
-    const guards = args.filter((a) => /^(\w+|authorize\s*\(.*\)|sessionGuard\s*\(.*\)|\.\.\.\s*\w+)$/s.test(a) && known(a));
+    const guards = args.filter((a) => isGuardArg(a) && known(a, m[1]));
     if (guards.length > 0) out.set(m[1], [...(out.get(m[1]) ?? []), ...guards]);
   }
   return out;
@@ -543,10 +573,20 @@ const fullPathOf = (file: string, prefix: string, path: string) => (file === "se
 const underPrefix = (fullPath: string, prefix: string) => fullPath === `/api${prefix}` || fullPath.startsWith(`/api${prefix}/`);
 
 /**
- * Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`),
- * les déclarations illisibles et les routes vues.
+ * Montage d'une variable de routeur : par son nom, sinon le seul montage connu du fichier, mais seulement si cette
+ * variable est le routeur exporté (ou le seul routeur du fichier). Un second routeur non monté n'hérite pas des gardes.
  */
-export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants) {
+export function mountOf<T extends { variable: string }>(fileMounts: T[], routerVar: string, rawSource: string): T | undefined {
+  const byName = fileMounts.find((m) => m.variable === routerVar);
+  if (byName || fileMounts.length !== 1) return byName;
+  const source = stripComments(rawSource);
+  const declared = [...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:express\s*\.\s*)?Router\s*\(/g)].map((m) => m[1]);
+  const exported = source.match(/export\s+default\s+(\w+)/)?.[1];
+  return declared.length <= 1 || exported === routerVar ? fileMounts[0] : undefined;
+}
+
+/** Gardes de base (auth.ts) et montages de `server/api/index.ts`, communs aux scans de routes. */
+function guardContext(serverDir: string, roleConstants: RoleConstants) {
   const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
   // gardes locales de index.ts et des middlewares qu'il importe (ex. `exportsGuard`)
   let indexKinds = extendKinds(baseKinds, "");
@@ -559,6 +599,15 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
   const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
   indexKinds = extendKinds(indexKinds, indexSource);
   const mounts = parseMounts(indexSource, indexKinds);
+  return { baseKinds, mounts };
+}
+
+/**
+ * Parcourt `server/` et renvoie les lectures GET ouvertes à un client sans cloison (clé `fichier GET chemin`),
+ * les déclarations illisibles et les routes vues.
+ */
+export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants) {
+  const { baseKinds, mounts } = guardContext(serverDir, roleConstants);
 
   const offenders: string[] = [];
   const unanalysable: string[] = [];
@@ -573,7 +622,7 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
     for (const route of extractGetRoutes(file, raw)) {
       const routerGuards = routerLevelGuards(raw, kinds, route.at);
       // un fichier peut exporter plusieurs routeurs : on rattache par variable, sinon au seul montage connu
-      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      const own = mountOf(fileMounts, route.routerVar, raw);
       const prefix = own?.prefix ?? "";
       const full = { ...route, mountPrefix: prefix, key: `${file} GET ${prefix}${route.path}` };
       seen.add(full.key);
@@ -621,8 +670,9 @@ export function scanShadowedRoutes(serverDir: string) {
     const file = `server/api/${path.slice(join(serverDir, "api").length + 1).replace(/\\/g, "/")}`;
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
     if (fileMounts.length === 0) continue;
-    for (const route of extractRoutes(readFileSync(path, "utf8"))) {
-      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+    const raw = readFileSync(path, "utf8");
+    for (const route of extractRoutes(raw)) {
+      const own = mountOf(fileMounts, route.routerVar, raw);
       if (!own) continue;
       apiSignatures.add(routeSignature(route.method, `/api${own.prefix}${route.path}`));
     }
@@ -632,4 +682,54 @@ export function scanShadowedRoutes(serverDir: string) {
     .map((route) => routeSignature(route.method, route.path));
   const shadowed = [...new Set(legacy.filter((signature) => apiSignatures.has(signature)))].sort();
   return { shadowed, apiRouteCount: apiSignatures.size, legacyRouteCount: legacy.length };
+}
+
+/**
+ * Routes (toutes methodes) dont le chemin porte un parametre et dont l'en-tete contient la garde
+ * `isAnyUser` : un client peut y viser un objet. Chaque route doit figurer au balayage de cloison
+ * (`tests/support/client-scope-sweep-table.ts`) ou a sa liste d'exclusions justifiee. Renvoie des
+ * signatures `METHODE /api/chemin/:p` (cf. `routeSignature`). Gardes effectives = montages, `router.use`
+ * poses avant la route et en-tete ; toute route avec une garde de session sans garde restrictive est retenue.
+ * Limite : un routeur importe par un autre fichier que `server/api/index.ts` n'est pas rattache a son prefixe.
+ */
+export function scanClientOpenParamRoutes(serverDir: string, roleConstants: RoleConstants): string[] {
+  const { baseKinds, mounts } = guardContext(serverDir, roleConstants);
+  const found = new Set<string>();
+  for (const path of sourceFiles(serverDir)) {
+    const file = `server/${path.slice(serverDir.length + 1).replace(/\\/g, "/")}`;
+    const raw = readFileSync(path, "utf8");
+    const source = stripComments(raw);
+    const kinds = extendKinds(baseKinds, raw);
+    for (const name of RESTRICTIVE_ALLOWLIST[file] ?? []) kinds.restrictive.add(name);
+    const routers = routerVarsOf(source);
+    const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
+    for (const call of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(/g)) {
+      if (!routers.has(call[1])) continue;
+      const open = call.index! + call[0].length - 1;
+      const close = matchingClose(source, open);
+      if (close === -1) continue;
+      const callArgs = splitTopLevel(source.slice(open + 1, close));
+      const first = callArgs[0] ?? "";
+      const literal = first.match(/^(["'`])([^"'`]*)\1$/);
+      // échec fermé : un chemin en gabarit (`${}` -> `:p`) ou illisible (variable, appel) est retenu, jamais ignoré
+      const routePath = literal && !(literal[1] === "`" && literal[2].includes("${")) ? literal[2] : literal ? literal[2].replace(/\$\{[^}]*\}/g, ":p") : `/:illisible(${first.replace(/\s+/g, " ").slice(0, 40)})`;
+      if (!routePath.includes(":")) continue;
+      // un handler seul (`map.get(key)`) n'est pas une route : il faut au moins un chemin et un handler
+      if (callArgs.length < 2) continue;
+      const m = [call[0], call[1], call[2], "", routePath] as unknown as RegExpMatchArray;
+      m.index = call.index;
+      const header = callArgs.slice(1, -1);
+      const own = mountOf(fileMounts, m[1], raw);
+      const fullPath = fullPathOf(file, own?.prefix ?? "", m[4]);
+      // memes gardes effectives que scanOpenGetReads : montages masquants, montage propre, `router.use` poses avant, en-tete
+      const servedAt = file === "server/routes.ts" ? Number.POSITIVE_INFINITY : (own?.order ?? Number.POSITIVE_INFINITY);
+      const masking = mounts.filter((x) => x.prefix && x.order <= servedAt && underPrefix(fullPath, x.prefix) && x !== own).flatMap((x) => x.guards);
+      const effective = [...masking, ...(own?.guards ?? []), ...(routerLevelGuards(raw, kinds, m.index!).get(m[1]) ?? []), ...header];
+      // echec ferme : une garde de session sans garde restrictive laisse passer un client
+      const chain = classifyChain(effective, kinds);
+      if (!chain.session || chain.restrictive) continue;
+      found.add(routeSignature(m[2], fullPath));
+    }
+  }
+  return [...found].sort();
 }

@@ -71,7 +71,13 @@ import ProfilePage from "@/pages/profile";
 import UsersIndex from "@/pages/users/index";
 import AdminUsersPage from "@/pages/admin/users";
 import DocumentationPage from "@/pages/admin/documentation";
-import { DRIVER_MANAGER_ROLES, MISSION_MANAGER_ROLES, PROCUREMENT_ROLES } from "@shared/constants/roles";
+import {
+  DRIVER_MANAGER_ROLES,
+  FUEL_READ_ROLES,
+  MISSION_MANAGER_ROLES,
+  PENDING_INVOICE_ROLES,
+  PROCUREMENT_ROLES,
+} from "@shared/constants/roles";
 import ImportBackup from "@/pages/admin/import-backup";
 import { WorkflowsIndex } from "@/pages/workflows/index";
 import { VehicleAcquisitionWorkflow } from "@/pages/workflows/vehicle-acquisition";
@@ -144,8 +150,8 @@ function AccessDeniedRoute() {
     <div className="p-6">
       <Card className="border-destructive/40 bg-destructive/5">
         <CardContent className="p-6 text-center space-y-3">
-          <h2 className="text-lg font-semibold text-destructive">Accès refusé</h2>
-          <p className="text-sm text-destructive/90">
+          <h2 className="text-lg font-semibold text-destructive-text">Accès refusé</h2>
+          <p className="text-sm text-destructive-text/90">
             Vous n&apos;avez pas les droits nécessaires pour accéder à cette section.
           </p>
           <Button variant="destructive" onClick={() => setLocation("/dashboard")}>
@@ -403,7 +409,7 @@ function App() {
 
             <Route path="/maintenance/preventive">
               <AppLayout>
-                <PrivateRoute component={PreventiveMaintenancePage} />
+                <RoleRoute component={PreventiveMaintenancePage} allowedRoles={["admin", "workshop_manager"]} />
               </AppLayout>
             </Route>
 
@@ -470,7 +476,7 @@ function App() {
             
             <Route path="/inventory/tires">
               <AppLayout>
-                <PrivateRoute component={TiresInventoryIndex} />
+                <RoleRoute component={TiresInventoryIndex} allowedRoles={["admin", "workshop_manager", "warehouse", "secretary", "logistics", "technician"]} />
               </AppLayout>
             </Route>
             
@@ -506,7 +512,7 @@ function App() {
             
             <Route path="/fuel">
               <AppLayout>
-                <PrivateRoute component={FuelIndex} />
+                <RoleRoute component={FuelIndex} allowedRoles={FUEL_READ_ROLES} />
               </AppLayout>
             </Route>
             
@@ -526,7 +532,7 @@ function App() {
             
             <Route path="/technicians">
               <AppLayout>
-                <PrivateRoute component={TechniciansIndex} />
+                <RoleRoute component={TechniciansIndex} allowedRoles={["admin", "workshop_manager"]} />
               </AppLayout>
             </Route>
             
@@ -545,7 +551,7 @@ function App() {
             {/* Missions routes */}
             <Route path="/missions">
               <AppLayout>
-                <PrivateRoute component={MissionsIndex} />
+                <RoleRoute component={MissionsIndex} allowedRoles={MISSION_MANAGER_ROLES} />
               </AppLayout>
             </Route>
             
@@ -566,7 +572,7 @@ function App() {
             {/* Operations routes */}
             <Route path="/operations">
               <AppLayout>
-                <PrivateRoute component={OperationsDashboard} />
+                <RoleRoute component={OperationsDashboard} allowedRoles={PENDING_INVOICE_ROLES} />
               </AppLayout>
             </Route>
 

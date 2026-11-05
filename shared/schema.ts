@@ -3,7 +3,10 @@ import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
+import { MAX_DB_INTEGER_ID } from "./contracts/common";
 import { WORK_ORDER_ITEM_STATUSES } from "./constants/work-order-items";
+import { TREASURY_ACCOUNT_KINDS, TREASURY_CATEGORIES, TREASURY_DIRECTIONS } from "./contracts/treasury";
+import { PAYMENT_INSTRUMENT_DIRECTIONS, PAYMENT_INSTRUMENT_KINDS, PAYMENT_INSTRUMENT_STATUSES } from "./contracts/payment-instruments";
 
 // Users and authentication
 export const users = pgTable("users", {
@@ -838,7 +841,11 @@ const faultPartOptionalSchema = z.boolean({ invalid_type_error: "Le caractère o
 export const insertFaultCatalogPartSchema = createInsertSchema(faultCatalogParts)
   .omit({ id: true, createdAt: true, faultCatalogId: true })
   .extend({
-    partId: z.number({ invalid_type_error: "La pièce est obligatoire." }).int("La pièce est invalide.").positive("La pièce est invalide."),
+    partId: z
+      .number({ invalid_type_error: "La pièce est obligatoire." })
+      .int("La pièce est invalide.")
+      .positive("La pièce est invalide.")
+      .max(MAX_DB_INTEGER_ID, "La pièce est invalide."),
     quantity: faultPartQuantitySchema.optional().default(1),
     isOptional: faultPartOptionalSchema.optional().default(false),
   });
@@ -1164,7 +1171,9 @@ export const supplierInvoiceSettlements = pgTable("supplier_invoice_settlements"
   paymentReference: text("payment_reference").notNull(), // Référence bancaire/chèque/MM
   paymentDate: date("payment_date").notNull(),
   valueDate: date("value_date"), // Date de valeur (optionnel)
-  treasuryAccount: text("treasury_account"), // Compte/caisse de sortie
+  treasuryAccount: text("treasury_account"), // Compte/caisse de sortie (texte libre, gardé en repli)
+  // Compte du journal de trésorerie (lot T3) : le règlement y écrit sa sortie, dans la même transaction.
+  treasuryAccountId: integer("treasury_account_id").references(() => treasuryAccounts.id),
   proofReference: text("proof_reference"), // URL/ID justificatif externe
   status: text("status", { enum: ["recorded", "reconciled", "rejected"] }).notNull().default("recorded"),
   recordedBy: integer("recorded_by").references(() => users.id),
@@ -1297,9 +1306,21 @@ export const clients = pgTable("clients", {
   isActive: boolean("is_active").default(true),
   createdBy: integer("created_by").references(() => users.id), // Créateur de la fiche client
   notes: text("notes"),
+  // Retenues à la source (lot F1) : taux en %, NULL = pas de retenue. Écrits par
+  // PATCH /api/finance/clients/:id/withholding, jamais par la fiche client.
+  withholdingVatRate: numeric("withholding_vat_rate", { precision: 5, scale: 2 }),
+  withholdingIsRate: numeric("withholding_is_rate", { precision: 5, scale: 2 }),
+  // Base de la retenue IS : 'ht' (feuille CNPCC) ou 'ttc' (feuille OPERATION). Repli 'ht' en attente
+  // de la question client n°2 ; réglable par client.
+  withholdingIsBase: text("withholding_is_base", { enum: ["ht", "ttc"] }).notNull().default("ht"),
+  withholdingUpdatedBy: integer("withholding_updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  check("clients_withholding_vat_rate_check", sql`${table.withholdingVatRate} IS NULL OR (${table.withholdingVatRate} >= 0 AND ${table.withholdingVatRate} <= 100)`),
+  check("clients_withholding_is_rate_check", sql`${table.withholdingIsRate} IS NULL OR (${table.withholdingIsRate} >= 0 AND ${table.withholdingIsRate} <= 100)`),
+  check("clients_withholding_is_base_check", sql`${table.withholdingIsBase} IN ('ht', 'ttc')`),
+]);
 
 // Table missions - Missions de transport (livraisons, récupérations)
 export const missions = pgTable("missions", {
@@ -1356,6 +1377,78 @@ export const missions = pgTable("missions", {
   completedAt: timestamp("completed_at"),
   cancelledAt: timestamp("cancelled_at"),
   cancellationReason: text("cancellation_reason"),
+});
+
+// Budget de mission (L1, drapeau finance) : un par mission. Jumelle SQL : MISSION_BUDGETS_SQL
+// (server/init-database.ts) et server/db/migrations/20261105_mission_budgets.sql. Montants calculés
+// par le serveur (computeMissionBudget). treasury_entry_id sans FK ni effet jusqu'au journal T1.
+// Pas de cascade : supprimer une mission budgétée est refusé, la trace d'argent reste.
+export const missionBudgets = pgTable("mission_budgets", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().unique().references(() => missions.id),
+  budgetDate: date("budget_date").notNull(),
+  fuelLiters: numeric("fuel_liters", { precision: 12, scale: 2 }).notNull(),
+  fuelUnitPrice: numeric("fuel_unit_price", { precision: 15, scale: 2 }).notNull(),
+  fuelAmount: numeric("fuel_amount", { precision: 15, scale: 2 }).notNull(),
+  fdrAmount: numeric("fdr_amount", { precision: 15, scale: 2 }).notNull(),
+  extrasAmount: numeric("extras_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull(),
+  status: text("status", { enum: ["requested", "approved", "disbursed"] }).notNull().default("requested"),
+  notes: text("notes"),
+  treasuryEntryId: integer("treasury_entry_id"),
+  // L1b : destination du barème, choisie à la main ; pré-remplit litres et FDR, toujours modifiables.
+  destinationId: integer("destination_id").references(() => missionDestinations.id),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  disbursedBy: integer("disbursed_by").references(() => users.id),
+  disbursedAt: timestamp("disbursed_at"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_budgets_status_check", sql`${table.status} IN ('requested', 'approved', 'disbursed')`),
+  check("mission_budgets_amounts_check", sql`${table.fuelLiters} >= 0 AND ${table.fuelUnitPrice} >= 0 AND ${table.fdrAmount} >= 0 AND ${table.extrasAmount} >= 0`),
+  index("idx_mission_budgets_budget_date").on(table.budgetDate),
+]);
+export type MissionBudgetRow = typeof missionBudgets.$inferSelect;
+
+// Barème FDR par destination (L1b), liste fermée. Jumelle SQL : MISSION_DESTINATIONS_SQL
+// (server/init-database.ts) et server/db/migrations/20261105_mission_destinations.sql, qui porte le seed.
+export const missionDestinations = pgTable("mission_destinations", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  fuelLiters: numeric("fuel_liters", { precision: 12, scale: 2 }).notNull(),
+  fdrAmount: numeric("fdr_amount", { precision: 15, scale: 2 }).notNull(),
+  active: boolean("active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_destinations_amounts_check", sql`${table.fuelLiters} >= 0 AND ${table.fdrAmount} >= 0`),
+]);
+export type MissionDestinationRow = typeof missionDestinations.$inferSelect;
+
+// Suivi des opérations clients (O1) : une ligne par mission, colonnes de la feuille de suivi client.
+export const missionOperations = pgTable("mission_operations", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().unique().references(() => missions.id, { onDelete: "cascade" }),
+  trailerVehicleId: integer("trailer_vehicle_id").references(() => vehicles.id),
+  containerNumber: text("container_number"),
+  blNumber: text("bl_number"),
+  sector: text("sector"),
+  loadingDate: timestamp("loading_date"),
+  departureDate: timestamp("departure_date"),
+  returnDate: timestamp("return_date"),
+  unloadingDate: timestamp("unloading_date"),
+  goodsNature: text("goods_nature"),
+  comment: text("comment"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Table assignments - Affectation véhicule + chauffeur à une mission
@@ -1422,7 +1515,14 @@ export const clientInvoices = pgTable("client_invoices", {
   // Paiement
   balance: numeric("balance", { precision: 15, scale: 2 }).notNull(), // Solde restant
   status: text("status", { enum: ["pending", "partial", "paid", "overdue", "cancelled"] }).notNull().default("pending"),
-  
+
+  // Dépôt chez le client (lot F1) : date de dépôt et retenues figées à cet instant.
+  depositedAt: date("deposited_at"),
+  withholdingVatAmount: numeric("withholding_vat_amount", { precision: 15, scale: 2 }),
+  withholdingIsAmount: numeric("withholding_is_amount", { precision: 15, scale: 2 }),
+  netPayable: numeric("net_payable", { precision: 15, scale: 2 }),
+  depositedBy: integer("deposited_by").references(() => users.id, { onDelete: "set null" }),
+
   // Items facture (détails lignes)
   items: jsonb("items"), // [{description, quantity, unitPrice, total}]
   
@@ -1518,9 +1618,24 @@ export const fuelRecordsRelations = relations(fuelRecords, ({ one }) => ({
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdBy: true,
+  withholdingVatRate: true,
+  withholdingIsRate: true,
+  withholdingIsBase: true,
+  withholdingUpdatedBy: true,
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertMissionOperationSchema = createInsertSchema(missionOperations).omit({
+  id: true,
+  missionId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type MissionOperation = typeof missionOperations.$inferSelect;
+export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
   id: true,
@@ -1552,6 +1667,11 @@ export const insertMissionStepSchema = createInsertSchema(missionSteps).omit({
 
 export const insertClientInvoiceSchema = createInsertSchema(clientInvoices).omit({
   id: true,
+  depositedAt: true,
+  withholdingVatAmount: true,
+  withholdingIsAmount: true,
+  netPayable: true,
+  depositedBy: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
@@ -1992,3 +2112,199 @@ export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
 export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
 export type VehicleImportRow = typeof vehicleImports.$inferSelect;
+
+// Journal de trésorerie (lot T1) : comptes (banque, caisse, carte carburant) et écritures.
+// Le solde courant n'est jamais stocké : il se calcule par fonction fenêtre sur (entry_date, id).
+export const treasuryAccounts = pgTable("treasury_accounts", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique("treasury_accounts_code_key"),
+  label: text("label").notNull(),
+  kind: text("kind", { enum: TREASURY_ACCOUNT_KINDS }).notNull(),
+  bankName: text("bank_name"),
+  openingBalance: numeric("opening_balance", { precision: 15, scale: 2 }).notNull().default("0"),
+  openingDate: date("opening_date"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("treasury_accounts_kind_check", sql`${table.kind} IN ('bank', 'cash', 'fuel_card')`),
+  // Une seule carte carburant active : les pleins et recharges y écrivent sans ambiguïté (lot T2).
+  uniqueIndex("uq_treasury_accounts_active_fuel_card").on(table.kind).where(sql`${table.kind} = 'fuel_card' AND ${table.isActive}`),
+]);
+
+export const treasuryEntries = pgTable("treasury_entries", {
+  id: serial("id").primaryKey(),
+  accountId: integer("account_id").notNull().references(() => treasuryAccounts.id),
+  entryDate: date("entry_date").notNull(),
+  pieceRef: text("piece_ref"),
+  label: text("label").notNull(),
+  direction: text("direction", { enum: TREASURY_DIRECTIONS }).notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  category: text("category", { enum: TREASURY_CATEGORIES }).notNull().default("autre"),
+  counterpartyLabel: text("counterparty_label"),
+  transferGroup: text("transfer_group"),
+  notes: text("notes"),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id, { onDelete: "set null" }),
+  missionId: integer("mission_id").references(() => missions.id, { onDelete: "set null" }),
+  clientId: integer("client_id").references(() => clients.id),
+  supplierId: integer("supplier_id").references(() => suppliers.id),
+  // Liens posés par le serveur seul (T2 plein ou recharge, T3 règlement). SET NULL : supprimer la source ne bloque rien.
+  fuelRecordId: integer("fuel_record_id").references(() => fuelRecords.id, { onDelete: "set null" }),
+  supplierSettlementId: integer("supplier_settlement_id").references(() => supplierInvoiceSettlements.id, { onDelete: "set null" }),
+  // Clé de rejeu choisie par l'appelant : une même clé ne crée jamais deux lignes.
+  requestKey: text("request_key").unique("treasury_entries_request_key_key"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_treasury_entries_account_date").on(table.accountId, table.entryDate, table.id),
+  index("idx_treasury_entries_transfer_group").on(table.transferGroup),
+  check("treasury_entries_amount_check", sql`${table.amount} > 0`),
+  check("treasury_entries_direction_check", sql`${table.direction} IN ('in', 'out')`),
+  check("treasury_entries_category_check", sql.raw(`category IN (${TREASURY_CATEGORIES.map((c) => `'${c}'`).join(", ")})`)),
+]);
+
+export const insertTreasuryAccountSchema = createInsertSchema(treasuryAccounts).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omit({
+  id: true,
+  transferGroup: true,
+  fuelRecordId: true,
+  supplierSettlementId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type TreasuryAccountRow = typeof treasuryAccounts.$inferSelect;
+export type TreasuryEntryRow = typeof treasuryEntries.$inferSelect;
+
+// Traites et chèques (lot T4). Jumelle SQL : TREASURY_SCHEMA_STATEMENTS (server/init-database.ts).
+// « Payée » exige la date et l'écriture du journal, et inversement (payment_instruments_paid_check).
+export const paymentInstruments = pgTable("payment_instruments", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: PAYMENT_INSTRUMENT_KINDS }).notNull(),
+  direction: text("direction", { enum: PAYMENT_INSTRUMENT_DIRECTIONS }).notNull().default("outgoing"),
+  number: text("number").notNull(),
+  drawer: text("drawer").notNull(),
+  drawee: text("drawee").notNull(),
+  payingBank: text("paying_bank"),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  dueDate: date("due_date").notNull(),
+  status: text("status", { enum: PAYMENT_INSTRUMENT_STATUSES }).notNull().default("pending"),
+  paidAt: date("paid_at"),
+  treasuryEntryId: integer("treasury_entry_id")
+    .references(() => treasuryEntries.id)
+    .unique("payment_instruments_treasury_entry_id_key"),
+  supplierId: integer("supplier_id").references(() => suppliers.id),
+  clientId: integer("client_id").references(() => clients.id),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id),
+  observations: text("observations"),
+  requestKey: text("request_key").unique("payment_instruments_request_key_key"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_payment_instruments_status_due").on(table.status, table.dueDate),
+  check("payment_instruments_kind_check", sql`${table.kind} IN ('traite', 'cheque')`),
+  check("payment_instruments_direction_check", sql`${table.direction} IN ('outgoing', 'incoming')`),
+  check("payment_instruments_status_check", sql`${table.status} IN ('pending', 'paid', 'bounced', 'cancelled')`),
+  check("payment_instruments_amount_check", sql`${table.amount} > 0`),
+  check("payment_instruments_dates_check", sql`${table.dueDate} >= ${table.issueDate}`),
+  check(
+    "payment_instruments_paid_check",
+    sql`(${table.status} = 'paid') = (${table.paidAt} IS NOT NULL AND ${table.treasuryEntryId} IS NOT NULL)`,
+  ),
+]);
+
+export const insertPaymentInstrumentSchema = createInsertSchema(paymentInstruments).omit({
+  id: true,
+  status: true,
+  paidAt: true,
+  treasuryEntryId: true,
+  requestKey: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type PaymentInstrumentRow = typeof paymentInstruments.$inferSelect;
+
+// Contrôles inopinés QHSE (lot Q1, drapeau `qhse`). Jumelle SQL : QHSE_INSPECTIONS_SQL dans
+// server/init-database.ts et server/db/migrations/20261105_qhse_inspections.sql (AGENTS.md §5).
+export const QHSE_CRITERION_CATEGORIES = ["cabin", "stop"] as const;
+
+export const qhseInspectionCriteria = pgTable("qhse_inspection_criteria", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  label: text("label").notNull(),
+  category: text("category", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  // Noms identiques à ceux posés par QHSE_INSPECTIONS_SQL (CDC_RECONCILED_CONSTRAINTS) : un push Drizzle
+  // les pose aussi, et un push --force ne les retire plus.
+  unique("qhse_inspection_criteria_code_key").on(table.code),
+  check("qhse_inspection_criteria_label_check", sql`length(btrim(${table.label})) > 0`),
+  check("qhse_inspection_criteria_category_check", sql`${table.category} IN ('cabin', 'stop')`),
+]);
+
+export const qhseInspections = pgTable("qhse_inspections", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: QHSE_CRITERION_CATEGORIES }).notNull(),
+  inspectedAt: timestamp("inspected_at").defaultNow().notNull(),
+  location: text("location").notNull(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id),
+  driverId: integer("driver_id").notNull().references(() => drivers.id),
+  inspectorId: integer("inspector_id").notNull().references(() => users.id),
+  items: jsonb("items").$type<Array<{
+    criterionId: number;
+    code: string;
+    label: string;
+    conform: boolean;
+    observation?: string;
+  }>>().notNull().default(sql`'[]'::jsonb`),
+  generalObservation: text("general_observation"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_qhse_inspections_driver").on(table.driverId, table.inspectedAt),
+  index("idx_qhse_inspections_vehicle").on(table.vehicleId),
+  check("qhse_inspections_kind_check", sql`${table.kind} IN ('cabin', 'stop')`),
+  check("qhse_inspections_location_check", sql`length(btrim(${table.location})) > 0`),
+  check("qhse_inspections_items_check", sql`jsonb_typeof(${table.items}) = 'array'`),
+]);
+
+export const insertQhseInspectionCriterionSchema = createInsertSchema(qhseInspectionCriteria).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).omit({
+  id: true,
+  inspectorId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
+export type QhseInspectionRow = typeof qhseInspections.$inferSelect;

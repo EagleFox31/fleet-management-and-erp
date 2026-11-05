@@ -4,7 +4,9 @@ import { alias } from "drizzle-orm/pg-core";
 import { db, type DbExecutor } from "./db";
 import { AppError, isAppError } from "./lib/app-error";
 import { moduleLogger } from "./lib/logger";
-import { isCheckViolation } from "./lib/pg-errors";
+import { lockFuelCard } from "./lib/fuel-card-lock";
+import { reverseFuelLink } from "./services/treasury-links";
+import { isAdminGuardDbRefusal, isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
@@ -209,7 +211,7 @@ export interface IStorage {
   listAllVehicles(): Promise<{ vehicles: Vehicle[], total: number }>;
   createVehicle(vehicle: InsertVehicle, createdById?: number): Promise<Vehicle>;
   updateVehicle(id: number, vehicle: Partial<InsertVehicle>, updatedById?: number): Promise<Vehicle | undefined>;
-  deleteVehicle(id: number): Promise<boolean>;
+  deleteVehicle(id: number, actorUserId?: number | null): Promise<boolean>;
   
   // Status History methods
   getStatusHistory(vehicleId: number): Promise<StatusHistory[]>;
@@ -671,6 +673,7 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updatedUser;
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) throw error;
       storageLog.error({ err: error, userId: id }, "Error updating user");
       return undefined;
     }
@@ -700,6 +703,7 @@ export class DatabaseStorage implements IStorage {
         .returning({ id: users.id });
       return Boolean(deletedUser);
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) throw error;
       storageLog.error({ err: error, userId: id }, "Error deleting user");
       return false;
     }
@@ -932,38 +936,40 @@ export class DatabaseStorage implements IStorage {
       return undefined;
     }
   }
-  async deleteVehicle(id: number): Promise<boolean> {
+  /**
+   * Suppression définitive d'un véhicule et de ses données liées, en une seule transaction.
+   * Les pleins liés à la trésorerie (lot T2) sont d'abord contre-passés, sous le verrou de la carte,
+   * comme une suppression unitaire de plein : sans cela, la carte garderait au journal des débits
+   * dont le plein n'existe plus.
+   */
+  async deleteVehicle(id: number, actorUserId: number | null = null): Promise<boolean> {
     try {
-      console.log(`🗑️ Attempting to delete vehicle with ID: ${id}`);
-      
-      // Supprimer toutes les données liées au véhicule dans l'ordre correct
-      
-      // 1. Supprimer l'historique des statuts
-      const statusHistoryDeleted = await db.delete(statusHistory).where(eq(statusHistory.vehicleId, id)).returning();
-      console.log(`🗑️ Deleted ${statusHistoryDeleted.length} status history records`);
-      
-      // 2. Supprimer les planifications de maintenance
-      const scheduleResult = await db.delete(maintenanceSchedules).where(eq(maintenanceSchedules.vehicleId, id)).returning();
-      console.log(`🗑️ Deleted ${scheduleResult.length} maintenance schedules`);
-      
-      // 3. Supprimer les ordres de travail
-      const workOrderResult = await db.delete(workOrders).where(eq(workOrders.vehicleId, id)).returning();
-      console.log(`🗑️ Deleted ${workOrderResult.length} work orders`);
-      
-      // 4. Supprimer les enregistrements de carburant
-      const fuelResult = await db.delete(fuelRecords).where(eq(fuelRecords.vehicleId, id)).returning();
-      console.log(`🗑️ Deleted ${fuelResult.length} fuel records`);
-      
-      // 5. Enfin, supprimer le véhicule lui-même
-      const vehicleResult = await db.delete(vehicles).where(eq(vehicles.id, id)).returning();
-      console.log(`🗑️ Deleted vehicle:`, vehicleResult);
-      
-      const success = vehicleResult.length > 0;
-      console.log(`🗑️ Vehicle deletion ${success ? 'successful' : 'failed'}`);
-      
-      return success;
-    } catch (error) {
-      console.error('🗑️ Error deleting vehicle:', error);
+      const counts = await db.transaction(async (tx) => {
+        await lockFuelCard(tx);
+        // Un plein supprimé en douceur a déjà été contre-passé à sa suppression.
+        const fuel = await tx
+          .select({ id: fuelRecords.id })
+          .from(fuelRecords)
+          .where(and(eq(fuelRecords.vehicleId, id), isNull(fuelRecords.deletedAt)));
+        for (const record of fuel) await reverseFuelLink(tx, record.id, actorUserId);
+        // Ordre imposé par les clés étrangères : historique, planifications, OT, pleins, puis le véhicule.
+        const statusHistoryDeleted = await tx.delete(statusHistory).where(eq(statusHistory.vehicleId, id)).returning();
+        const schedules = await tx.delete(maintenanceSchedules).where(eq(maintenanceSchedules.vehicleId, id)).returning();
+        const orders = await tx.delete(workOrders).where(eq(workOrders.vehicleId, id)).returning();
+        const fuelDeleted = await tx.delete(fuelRecords).where(eq(fuelRecords.vehicleId, id)).returning();
+        const vehicleDeleted = await tx.delete(vehicles).where(eq(vehicles.id, id)).returning();
+        return {
+          statusHistory: statusHistoryDeleted.length,
+          maintenanceSchedules: schedules.length,
+          workOrders: orders.length,
+          fuelRecords: fuelDeleted.length,
+          vehicle: vehicleDeleted.length,
+        };
+      });
+      storageLog.info({ vehicleId: id, actorUserId, ...counts }, "suppression définitive d'un véhicule");
+      return counts.vehicle > 0;
+    } catch (err) {
+      storageLog.error({ err, vehicleId: id }, "échec de la suppression définitive d'un véhicule");
       return false;
     }
   }

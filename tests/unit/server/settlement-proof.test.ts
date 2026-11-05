@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   SETTLEMENT_PROOF_PREFIX,
   isSettlementProofReference,
+  settlementProofContentType,
   settlementProofFileName,
   settlementProofPath,
 } from "../../../server/lib/settlement-proof";
@@ -66,22 +67,48 @@ describe("justificatif de règlement : liens résolus", () => {
 describe("nom disque du justificatif téléversé : toujours accepté à la relecture", () => {
   it.each([
     ["nom simple", "facture.pdf", /^facture-U\.pdf$/],
-    ["espace dans l'extension", "scan.p f", /^scan-U\.p_f$/],
-    ["extension longue", "a.verylongextension", /^a-U\.verylonge$/],
+    ["espace dans l'extension", "scan.p f", /^scan-U\.pdf$/],
+    ["extension longue", "a.verylongextension", /^a-U\.pdf$/],
     ["accents et espaces", "Reçu été 2026.PDF", /^Re_u__t__2026-U\.pdf$/],
     ["séparateurs", "../../x/y.pdf", /^\.\._\.\._x_y-U\.pdf$/],
-    ["séparateur Windows", "..\\a.png", /^\.\._a-U\.png$/],
-    ["espace final", "Facture.PDF ", /^Facture-U\.pdf_$/],
-    ["copie numérotée", "scan.pdf(1)", /^scan-U\.pdf_1_$/],
-    ["accent dans l'extension", "reçu.pdé", /^re_u-U\.pd_$/],
-    ["sans extension", "justificatif", /^justificatif-U\.bin$/],
-    ["point final", "a.", /^a-U\.bin$/],
-    ["vide", "", /^proof-U\.bin$/],
-    ["absent", undefined, /^proof-U\.bin$/],
+    ["séparateur Windows", "..\\a.png", /^\.\._a-U\.pdf$/],
+    ["espace final", "Facture.PDF ", /^Facture-U\.pdf$/],
+    ["copie numérotée", "scan.pdf(1)", /^scan-U\.pdf$/],
+    ["accent dans l'extension", "reçu.pdé", /^re_u-U\.pdf$/],
+    ["sans extension", "justificatif", /^justificatif-U\.pdf$/],
+    ["point final", "a.", /^a-U\.pdf$/],
+    ["vide", "", /^proof-U\.pdf$/],
+    ["absent", undefined, /^proof-U\.pdf$/],
     ["nom très long", `${"x".repeat(300)}.pdf`, /^x{40}-U\.pdf$/],
   ])("%s", (_label, original, expected) => {
-    const name = settlementProofFileName(original as string | undefined, "U");
+    const name = settlementProofFileName(original as string | undefined, "U", "application/pdf");
     expect(name).toMatch(expected);
     expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
+  });
+});
+
+describe("justificatif : extension tirée du type déclaré, type servi en liste blanche", () => {
+  it.each([
+    ["page.html", "application/pdf", /^page-U\.pdf$/],
+    ["photo.svg", "image/png", /^photo-U\.png$/],
+    ["scan.PDF", "image/jpeg", /^scan-U\.jpg$/],
+    ["x.pdf", "text/html", /^x-U\.bin$/],
+    ["x.pdf", "constructor", /^x-U\.bin$/],
+  ])("%s déclaré %s", (original, mime, expected) => {
+    const name = settlementProofFileName(original, "U", mime);
+    expect(name).toMatch(expected);
+    expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
+  });
+
+  it.each([
+    ["a.pdf", "application/pdf"],
+    ["a.JPEG", "image/jpeg"],
+    ["a.webp", "image/webp"],
+    ["a.html", "application/octet-stream"],
+    ["a.svg", "application/octet-stream"],
+    ["a.bin", "application/octet-stream"],
+    ["a", "application/octet-stream"],
+  ])("%s servi en %s", (file, type) => {
+    expect(settlementProofContentType(file)).toBe(type);
   });
 });

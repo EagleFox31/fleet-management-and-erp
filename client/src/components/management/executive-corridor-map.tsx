@@ -7,6 +7,7 @@ import {
   Route,
   Search,
   Truck,
+  X,
 } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -407,8 +408,9 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
                 type="button"
                 onClick={() => setSelectedVehicle(null)}
                 className="text-slate-400 hover:text-white text-xs font-bold px-1.5 py-0.5 rounded bg-slate-800 cursor-pointer"
+                aria-label="Fermer"
               >
-                ✕
+                <X className="h-3.5 w-3.5" aria-hidden />
               </button>
             </div>
 

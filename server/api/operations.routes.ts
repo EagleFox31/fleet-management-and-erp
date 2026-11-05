@@ -1,14 +1,15 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import { idSchema } from "@shared/contracts/common";
 import { operationsService } from "../services/operations-service";
 import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
-import { assertValidDbId } from "../lib/work-order-scope";
+import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
 
 const log = moduleLogger("operations");
 const router = Router();
@@ -45,7 +46,8 @@ const broadcastOperationMissionUpdate = (
     entity: "mission",
     entityId: options?.missionId ?? null,
     payload,
-    scope: { type: "broadcast" },
+    // Missions, clients et pleins : données internes, jamais diffusées aux comptes client.
+    scope: { type: "roles", roles: [...STAFF_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
@@ -71,7 +73,7 @@ const broadcastOperationMissionUpdate = (
  * Créer une mission depuis un enregistrement carburant
  */
 const createFromFuelSchema = z.object({
-  fuelRecordId: z.coerce.number().int().positive(),
+  fuelRecordId: idSchema,
   clientName: z.string().trim().min(1),
   orderNumber: z.string().trim().optional(),
   pickupAddress: z.string().trim().optional(),
@@ -166,7 +168,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
     const filters: any = {};
 
     if (status) filters.status = status as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
 
@@ -232,10 +234,7 @@ router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Requ
  */
 router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Lecture stricte : `parseInt("12abc")` vaudrait 12 et viserait une autre mission.
-    const raw = req.params.id;
-    const missionId = /^\d+$/.test(raw) ? Number(raw) : NaN;
-    assertValidDbId(missionId, "Identifiant de mission invalide.");
+    const missionId = parseRouteId(req.params.id, MISSION_ID_INVALID_MESSAGE);
     const costs = await operationsService.calculateMissionCosts(missionId, req.user);
     res.json(costs);
   } catch (error: any) {

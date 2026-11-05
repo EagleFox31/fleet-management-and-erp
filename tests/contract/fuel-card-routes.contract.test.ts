@@ -118,6 +118,15 @@ describe("FUEL1 : recharge de la carte", { timeout: 60000 }, () => {
     ["date absente", { date: undefined }],
     ["mode de paiement absent", { paymentMode: undefined }],
     ["ni quantité ni prix unitaire", { unitPrice: undefined, quantity: undefined }],
+    // Corps validé en entier (Zod strict) : un type inattendu donne 400, jamais 500.
+    ["date objet", { date: {} }],
+    ["mode de paiement objet", { paymentMode: {} }],
+    ["numéro de commande objet", { orderNumber: { $ne: 1 } }],
+    ["notes tableau", { notes: ["x"] }],
+    ["montant suffixé", { amount: "100abc" }],
+    ["prix unitaire négatif", { unitPrice: -800 }],
+    ["origine du prix inconnue", { priceSource: "devine" }],
+    ["clé inconnue", { creditAmount: 1 }],
   ];
   for (const [label, over] of invalid) {
     it(`${label} -> 400, aucun crédit créé`, async () => {

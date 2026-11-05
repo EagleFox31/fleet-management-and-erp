@@ -314,11 +314,12 @@ describe("carburant : ?vehicleId= invalide ou répété", () => {
     }
   });
 
-  it("?vehicleId=B&vehicleId=A : un client est refusé (403), le premier paramètre fait foi", async () => {
+  // Avant le lot 11 (ids stricts), le premier paramètre faisait foi (403) ; une valeur répétée est désormais refusée en 400.
+  it("?vehicleId=B&vehicleId=A : valeur répétée refusée en 400, aucun plein renvoyé", async () => {
     const res = await get(`/api/fuel-records?vehicleId=${vehicleB}&vehicleId=${vehicleA}`, "clientA");
-    expect(apiErrorProblems(res.status, res.body, 403)).toEqual([]);
+    expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
     const history = await get(`/api/fuel-records/consumption-history?vehicleId=${vehicleB}&vehicleId=${vehicleA}`, "clientA");
-    expect(apiErrorProblems(history.status, history.body, 403)).toEqual([]);
+    expect(apiErrorProblems(history.status, history.body, 400)).toEqual([]);
   });
 
   it("un client sans véhicule reçoit une liste vide", async () => {
