@@ -6,7 +6,7 @@ import { db } from "../../server/db";
 import { clientInvoices, missionPriceHistory, missions, tariffGrid } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
-import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
 /** O3 lot 3b : correction du prix convenu (rôle x statut, facture, motif, historique, événement sans prix). */
@@ -65,7 +65,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
   (global as any).broadcastUpdate = (type: string, data: unknown) => events.push({ type, data });
   const admin = await login("admin");
-  for (const r of ["management", "logistics", "secretary", "technician", "client"] as const) await login(r);
+  for (const r of ["management", "logistics", "secretary", "technician", "client", "driver", "warehouse"] as const) await login(r);
   const [t] = await db
     .insert(tariffGrid)
     .values({ origin, destination: "x", pricingUnit: "ton", unitPrice: "100", validFrom: "2026-01-01", createdBy: admin.id, updatedBy: admin.id })
@@ -177,5 +177,77 @@ describe("prix convenu : correction", { timeout: 120000 }, () => {
     expect(frames).not.toContain("424242");
     expect(frames).not.toContain("434343");
     expect(frames).not.toContain("agreedPrice");
+  });
+
+  it("brouillon et affectée : même règle qu’avant le départ ; chauffeur et magasinier 403 à tout stade", async () => {
+    for (const status of ["draft", "assigned"]) {
+      const id = await mission(status, { agreedPrice: 100 });
+      expect((await call("PUT", missionPricePath(id), "logistics", { agreedPrice: 120 })).status, status).toBe(200);
+      for (const role of ["driver", "warehouse"]) {
+        expect((await call("PUT", missionPricePath(id), role, { agreedPrice: 1 })).status, role + " " + status).toBe(403);
+        expect((await call("GET", missionPricePath(id), role)).status, role + " GET").toBe(403);
+      }
+      expect(await priceOf(id)).toEqual({ p: "120", t: null });
+    }
+  });
+
+  it("admin sur une mission en cours sans motif : 400, rien n’est écrit", async () => {
+    const id = await mission("in_progress", { agreedPrice: 100 });
+    expect((await call("PUT", missionPricePath(id), "admin", { agreedPrice: 200 })).status).toBe(400);
+    expect(await priceOf(id)).toEqual({ p: "100", t: null });
+    expect(await historyOf(id)).toHaveLength(0);
+  });
+
+  it("génération de facture : attend le verrou de la mission tenu par une correction de prix", async () => {
+    const client = await createTestClient();
+    ids.clientIds.push(client.id);
+    const id = await mission("delivered", { agreedPrice: 100, clientId: client.id });
+    const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => (locked = r));
+    const holder = db.transaction(async (tx) => {
+      await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, id)).for("update");
+      locked();
+      await held;
+    });
+    await lockTaken;
+    let done = false;
+    const gen = call("POST", "/api/billing/invoices/generate", "admin", { missionId: id, amount: 100, dueDate: due, includeVAT: false }).then((r) => {
+      done = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    expect(done, "la génération doit attendre le verrou").toBe(false);
+    release();
+    await holder;
+    const res = await gen;
+    expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+  });
+
+  it("correction de prix et génération de facture lancées ensemble : 409, ou facture émise après la correction", async () => {
+    const client = await createTestClient();
+    ids.clientIds.push(client.id);
+    const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    for (let i = 0; i < 4; i++) {
+      const id = await mission("delivered", { agreedPrice: 100, clientId: client.id });
+      const [put, gen] = await Promise.all([
+        call("PUT", missionPricePath(id), "admin", { agreedPrice: 250, reason: "correction concurrente" }),
+        call("POST", "/api/billing/invoices/generate", "admin", { missionId: id, amount: 250, dueDate: due, includeVAT: false }),
+      ]);
+      expect(gen.status, JSON.stringify(gen.body)).toBeLessThan(300);
+      const live = await db.select().from(clientInvoices).where(eq(clientInvoices.missionId, id));
+      expect(live).toHaveLength(1);
+      if (put.status === 409) {
+        expect(await priceOf(id)).toEqual({ p: "100", t: null });
+        expect(await historyOf(id)).toHaveLength(0);
+      } else {
+        expect(put.status, JSON.stringify(put.body)).toBe(200);
+        const [h] = await historyOf(id);
+        expect(h.newPrice).toBe("250");
+        expect(Number(live[0].amountHT)).toBe(Number(h.newPrice));
+      }
+    }
   });
 });
