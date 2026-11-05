@@ -41,7 +41,9 @@ describe("balayage de cloison : aucune route ouverte a un client ne manque", () 
   });
 
   it("les exclusions portent une raison et ne peuvent que rétrécir", () => {
-    expect(EXCLUSIONS.length).toBeLessThanOrEqual(MAX_EXCLUSIONS);
+    // Plafond en dur ici (et non importe) : relever MAX_EXCLUSIONS ne doit pas suffire a faire passer le test.
+    expect(EXCLUSIONS.length).toBeLessThanOrEqual(1);
+    expect(MAX_EXCLUSIONS).toBe(1);
     for (const e of EXCLUSIONS) expect(e.raison.length, signatureOf(e)).toBeGreaterThan(30);
   });
 

@@ -22,6 +22,8 @@ export type SweepRoute = {
   lecturePropre?: boolean;
   /** Vrai : la reponse 200 porte un corps, comparé entre l'etranger et l'absent. */
   comparerCorps?: boolean;
+  /** Sous-chaine que le corps de la lecture de son propre objet doit contenir (sinon une route qui renvoie [] a tous resterait verte). */
+  corpsPropre?: string;
 };
 
 export const SWEEP_ROUTES: SweepRoute[] = [
@@ -29,11 +31,11 @@ export const SWEEP_ROUTES: SweepRoute[] = [
   { label: "historique de statut", kind: "vehicle", method: "GET", template: "/api/vehicles/:id/status-history", attendu: 403 },
   { label: "historique du kilometrage", kind: "vehicle", method: "GET", template: "/api/vehicles/:id/mileage/history", attendu: 403 },
   { label: "pleins d'un vehicule", kind: "vehicle", method: "GET", template: "/api/fuel-records/vehicle/:id", attendu: 403 },
-  { label: "verification de plaque", kind: "plate", method: "GET", template: "/api/vehicles/check/:id", attendu: 200, comparerCorps: true },
+  { label: "verification de plaque", kind: "plate", method: "GET", template: "/api/vehicles/check/:id", attendu: 200, comparerCorps: true, corpsPropre: '"exists":true' },
   { label: "document de workflow (lecture)", kind: "wfDocument", method: "GET", template: "/api/workflows/documents/:id", attendu: 403 },
   { label: "document de workflow (suppression)", kind: "wfDocument", method: "DELETE", template: "/api/workflows/documents/:id", attendu: 403, lecturePropre: false },
-  { label: "documents d'une session de workflow", kind: "wfSession", method: "GET", template: "/api/workflows/:id/documents", attendu: 200, comparerCorps: true },
-  { label: "etat d'un brouillon d'acquisition", kind: "wfSession", method: "GET", template: "/api/workflows/vehicle-acquisition/:id", attendu: 200, comparerCorps: true },
+  { label: "documents d'une session de workflow", kind: "wfSession", method: "GET", template: "/api/workflows/:id/documents", attendu: 200, comparerCorps: true, corpsPropre: "propre.pdf" },
+  { label: "etat d'un brouillon d'acquisition", kind: "wfSession", method: "GET", template: "/api/workflows/vehicle-acquisition/:id", attendu: 200, comparerCorps: true, corpsPropre: "-s-propre" },
   { label: "profil d'un utilisateur", kind: "user", method: "GET", template: "/api/users/:id", attendu: 403 },
   { label: "ordre de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id", attendu: 404 },
   { label: "lignes de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id/items", attendu: 404 },
