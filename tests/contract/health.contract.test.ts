@@ -41,7 +41,7 @@ describe("GET /api/health", () => {
 describe("GET /api/health/details", () => {
   it("anonyme : refusé", async () => {
     const { status } = await api.call("GET", "/api/health/details");
-    expect([401, 403]).toContain(status);
+    expect(status).toBe(401);
   });
 
   it("personnel non admin : 403", async () => {

@@ -257,6 +257,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Route de santé pour l'API
   // Réponse publique minimale (statut + version) : c'est ce que lisent les sondes
   // (deploy/docker-compose.yml ne regarde que le code HTTP). Aucune lecture de données métier.
+  // Version : APP_VERSION si définie, sinon npm_package_version (absente quand l'image lance `node dist`),
+  // sinon "unknown". Repli connu : en déploiement, définir APP_VERSION dans l'environnement du service.
   apiRouter.get("/health", (_req, res) => {
     res.status(200).json({
       status: "ok",
