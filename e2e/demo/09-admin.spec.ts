@@ -26,6 +26,8 @@ test("démo administrateur : changer le rôle d'un compte", async ({ page }) => 
   await beat(page, 800);
   await page.getByRole("link", { name: "Utilisateurs" }).first().click();
   await expect(page).toHaveURL(/\/admin\/users/, { timeout: 30_000 });
+  // Liste paginée par 10 sur une base partagée : on cherche le compte au lieu de supposer sa page.
+  await page.getByPlaceholder("Rechercher un utilisateur…").fill(DEMO_ACCOUNTS.recruit.username);
   const row = page.locator("tr", { hasText: DEMO_ACCOUNTS.recruit.username });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await beat(page, 2000);
