@@ -48,11 +48,9 @@ export const COUPLES = [
   ["muted-foreground sur muted/50 dans une carte destructive/5 (Suggestions)", "muted-foreground", "muted", 0.5, { sous: [["destructive", 0.05]] }, [EB, "bg-muted/50"]],
   ["badge CPC neutre apres (foreground sur muted)", "foreground", "muted", 1, "background", [CPC, "bg-muted text-foreground"]],
   ["badge CPC valide (success sur success/10)", "success", "success", 0.1, "background", [CPC, "bg-success/10 text-success"]],
-  ["badge CPC valide sur carte muted ancien (success sur success/10 sur muted)", "success", "success", 0.1, "muted", null],
   ["warning-text sur warning/10 (page)", "warning-text", "warning", 0.1, "background", [CPC, "bg-warning/10 text-warning-text"]],
   ["warning-text sur warning/10 (carte muted)", "warning-text", "warning", 0.1, "muted", [MIS, "bg-warning/10 text-warning-text"]],
   ["destructive-text sur destructive/10 (page)", "destructive-text", "destructive", 0.1, "background", [MIS, "bg-destructive/10 text-destructive-text"]],
-  ["destructive sur destructive/10 ancien (page)", "destructive", "destructive", 0.1, "background", null],
   ["statut CPC eligible mission (success sur page)", "success", "background", 0, "background", [MIS, "bg-background text-success"]],
   ["success-foreground sur success", "success-foreground", "success", 1, "background", [MIS, "bg-success text-success-foreground"]],
   ["muted-foreground sur page", "muted-foreground", "background", 1, "background", null],
@@ -64,10 +62,8 @@ export const COUPLES = [
   ["carte CPC : muted-foreground sur carte (bg-white / dark:bg-slate-900)", "muted-foreground", "background", 0, CARTE_CPC, null],
   ["carte CPC : success-foreground sur success (bouton)", "success-foreground", "success", 1, CARTE_CPC, [CPC, "bg-success text-success-foreground"]],
 ];
-// Libelles exclus du seuil 4,5 : liste fixe, une ligne ajoutee ici doit etre justifiee en revue.
+// Libelles exclus du seuil 4,5 : liste fixe, vide a ce jour (les deux couples historiques sans lien au code ont ete supprimes). Une ligne ajoutee ici doit etre justifiee en revue.
 export const EXCLUS_HISTORIQUE = [
-  "badge CPC valide sur carte muted ancien (success sur success/10 sur muted)",
-  "destructive sur destructive/10 ancien (page)",
 ];
 // surface : jeton, couleur fixe { clair, sombre }, ou { sous: [[jeton, alpha], ...] } = couches posees sur --background.
 const surfaceOf = (t, name, surf) => {

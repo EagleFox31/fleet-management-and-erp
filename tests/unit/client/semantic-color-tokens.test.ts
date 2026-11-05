@@ -61,15 +61,14 @@ describe("contraste WCAG des couples employes", () => {
     for (const l of EXCLUS_HISTORIQUE) expect(labels, l).toContain(l);
   });
 
-  it("la liste d'exclusion est figee : libelles uniques, exactement les 2 couples historiques, sans lien au code", async () => {
+  it("la liste d'exclusion est figee et vide : libelles uniques, aucun couple tolere sous 4,5", async () => {
     const { computeCouples, EXCLUS_HISTORIQUE } = await loadScript();
-    expect(new Set(EXCLUS_HISTORIQUE).size).toBe(EXCLUS_HISTORIQUE.length);
     expect(new Set(computeCouples().map((c) => c.label)).size).toBe(computeCouples().length);
-    expect(EXCLUS_HISTORIQUE).toEqual([
-      "badge CPC valide sur carte muted ancien (success sur success/10 sur muted)",
-      "destructive sur destructive/10 ancien (page)",
-    ]);
-    for (const c of computeCouples().filter((x) => EXCLUS_HISTORIQUE.includes(x.label))) expect(c.source, c.label).toBeNull();
+    expect(EXCLUS_HISTORIQUE).toEqual([]);
+    for (const c of computeCouples()) {
+      expect(c.clair, `${c.label} clair`).toBeGreaterThanOrEqual(4.5);
+      expect(c.sombre, `${c.label} sombre`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("chaque couple non exclu est relie a des classes presentes dans le code", async () => {
