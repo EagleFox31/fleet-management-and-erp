@@ -11,7 +11,7 @@ import { WorkOrderExportButton } from "@/components/work-orders/work-order-expor
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { computeWorkOrderCost, partLineCost, totalLaborHours } from "@shared/work-order-cost";
-import { canReadWorkOrderCost } from "@shared/constants/roles";
+import { canReadWorkOrderCost, canRoleRemovePartUsed } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useHelpPagePrepare } from "@/hooks/useHelpPagePrepare";
@@ -212,7 +212,8 @@ export default function WorkOrderDetails({
   const canProcessWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager' || user?.role === 'technician';
 
   // Sortir une pièce du stock, c'est le geste du magasin. Doit rester aligné
-  // sur `isStockIssuer` côté serveur, sinon on affiche un bouton qui fait 403.
+  // sur le bouton de sortie : le chef d'atelier passe la porte `isStockIssuer` côté serveur, mais
+  // il en est volontairement exclu ici : sa sortie est une dérogation motivée (`canOverrideIssue`).
   const canIssueFromStock = user?.role === 'admin' || user?.role === 'warehouse';
 
   // Le chef d'atelier n'a pas ce droit: il a une dérogation motivée, pour les
@@ -514,14 +515,16 @@ export default function WorkOrderDetails({
   const submitIssueRequirement = useSingleFlightMutate(issuePendingRequirementMutation.mutate);
 
   const removePartMutation = useMutation({
-    mutationFn: (partUsedId: number) =>
+    mutationFn: ({ partUsedId }: { partUsedId: number }) =>
       apiRequest("DELETE", `/api/parts-used/${partUsedId}`),
     onSuccess: () => {
       toast({
-        title: "Pièce supprimée",
-        description: "La pièce a été supprimée de l'ordre de travail.",
+        title: "Pièce retirée",
+        description: "Pièce retirée et remise en stock.",
       });
       queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}/parts`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['/api/parts'] });
       queryClient.invalidateQueries({ queryKey: ['/api/parts/statistics'] });
       queryClient.invalidateQueries({ queryKey: ['/api/parts/stock-movements'] });
@@ -538,6 +541,12 @@ export default function WorkOrderDetails({
       });
     },
   });
+  // Retrait d'une pièce posée : remet du stock, un seul envoi par clic.
+  const submitRemovePart = useSingleFlightMutate(removePartMutation.mutate);
+
+  // Corbeille des pièces posées, distincte de la sortie : tous les rôles de `STOCK_ISSUER_ROLES`
+  // (chef d'atelier compris), OT ni terminé ni annulé (DELETE /api/parts-used/:id).
+  const canRemovePartUsed = canRoleRemovePartUsed(user?.role, workOrder?.status);
 
   // Mutation to start work order (pending -> in_progress)
   const startWorkOrderMutation = useMutation({
@@ -1702,11 +1711,12 @@ export default function WorkOrderDetails({
                             </Badge>
                           </td>
                           <td className="px-4 py-3.5">
-                            {workOrder?.status !== 'completed' && (
+                            {canRemovePartUsed && (
                               <div className="flex justify-end flex">
                                 <button
-                                  onClick={() => removePartMutation.mutate(partUsed.id)}
+                                  onClick={() => submitRemovePart({ partUsedId: partUsed.id })}
                                   disabled={removePartMutation.isPending}
+                                  aria-label="Retirer la pièce de l'ordre de travail"
                                   className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive-text hover:text-destructive-text transition-colors"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />

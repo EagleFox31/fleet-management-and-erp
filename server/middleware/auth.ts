@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, PART_CATALOG_EVENT_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { ALL_APP_ROLES, STOCK_ISSUER_ROLES, PART_CATALOG_EVENT_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -183,7 +183,7 @@ export const isInventoryManager = authorize([...INVENTORY_MANAGER_ROLES]);
 // dans le service: le magasin sort de plein droit, le chef d'atelier
 // uniquement en dérogation motivée (magasin fermé). Le technicien n'entre
 // pas — il demande la pièce, il ne se sert pas lui-même.
-export const isStockIssuer = authorize(['admin', 'warehouse', 'workshop_manager']);
+export const isStockIssuer = authorize([...STOCK_ISSUER_ROLES]);
 
 export const isPartsCatalogManager = authorize(['admin', 'warehouse']);
 // Catalogue pneus = stock magasin (réception fournisseur, quantités, emplacement).
