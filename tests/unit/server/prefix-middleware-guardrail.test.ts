@@ -64,6 +64,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "accessLog", file: APP, type: "ecrit-apres-reponse", source: "server/middleware/error-handler.ts", raison: "journal pino sur `finish` (methode, chemin, statut, userId), sans corps ni lecture de donnee" },
   { name: "errorResponseGuard", file: APP, type: "sans-base", source: "server/middleware/error-handler.ts", raison: "enveloppe res.json pour normaliser les erreurs >= 400 ; aucune lecture avant la reponse" },
   { name: "compression", file: APP, type: "sans-base", raison: "compression de la reponse, sans etat metier" },
+  { name: "routeIdRangeGuard", file: INDEX, type: "sans-base", source: "server/middleware/route-id-range-guard.ts", raison: "refuse en 400 un segment numerique de l'URL hors plage int4 avant toute lecture ; ne lit que le chemin" },
   { name: "(anonyme)@*", file: APP, type: "sans-base", occurrences: 2, raison: "deux fonctions : en-tetes Cache-Control sur /api, puis CORS (en-tetes d'origine, OPTIONS -> 204) ; aucun acces base" },
   { name: "express.json", file: APP, type: "sans-base", raison: "analyse du corps JSON (limite par defaut d'Express)" },
   { name: "express.urlencoded", file: APP, type: "sans-base", raison: "analyse du corps urlencoded" },
@@ -101,7 +102,6 @@ const DEROGATIONS_CONNUES: Array<{ name: string; file: string; raison: string }>
 
 /** Middlewares annonces par d'autres lots : tolerés absents, inscrits des maintenant pour ne pas bloquer leur arrivee. */
 const ATTENDUS_TOLERES_ABSENTS: Array<{ name: string; raison: string }> = [
-  { name: "routeIdRangeGuard", raison: "borne des identifiants de route (a venir) : doit etre sans base, valider le format avant toute lecture" },
 ];
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));

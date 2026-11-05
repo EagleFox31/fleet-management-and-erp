@@ -10,6 +10,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { leakText } from "../support/api-error";
+import { ROUTE_ID_OUT_OF_RANGE_MESSAGE } from "../../server/middleware/route-id-range-guard";
 
 /**
  * #130 : l'identifiant de véhicule de l'URL devient un dossier disque dans la destination multer.
@@ -27,9 +28,9 @@ const suffixedDir = () => path.resolve("uploads/documents/vehicle-12abc");
 const rejectedDirs = () => ["vehicle-007", "vehicle-99999999999"].map((d) => path.resolve("uploads/documents", d));
 
 /** Contrat `ApiErrorBody` (shared/errors.ts) : message lisible, code, requestId, aucun détail technique. */
-function expectApiError400(res: { status: number; body: any }) {
+function expectApiError400(res: { status: number; body: any }, message = "ID de véhicule invalide") {
   expect(res.status).toBe(400);
-  expect(res.body.message).toBe("ID de véhicule invalide");
+  expect(res.body.message).toBe(message);
   expect(res.body.code).toBeTruthy();
   expect(res.body.requestId).toBeTruthy();
   expect(leakText(res.body)).not.toMatch(/stack|ENOENT|EACCES|uploads|\.\.\//i);
@@ -88,9 +89,13 @@ describe("POST /api/vehicles/:vehicleId/documents — identifiant hors chiffres"
     expect(fs.existsSync(suffixedDir())).toBe(false);
   });
 
-  it.each(["007", "99999999999"])("`%s` (zéro en tête, hors int Postgres) : 400, aucun dossier créé", async (rawId) => {
+  // Hors int4 : refusé plus tôt par le filet de server/app.ts (route-id-range-guard), même 400.
+  it.each([
+    ["007", "ID de véhicule invalide"],
+    ["99999999999", ROUTE_ID_OUT_OF_RANGE_MESSAGE],
+  ])("`%s` (zéro en tête, hors int Postgres) : 400, aucun dossier créé", async (rawId, message) => {
     const res = await post(rawId);
-    expectApiError400(res);
+    expectApiError400(res, message);
     for (const dir of rejectedDirs()) expect(fs.existsSync(dir), dir).toBe(false);
   });
 });

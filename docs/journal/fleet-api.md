@@ -471,3 +471,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+## 2026-11-05 — Filet des ids de route hors int4
+- **Quoi** : `routeIdRangeGuard` monté en tête de `apiRouter` (`server/api/index.ts`) : segment numérique > `MAX_DB_INTEGER_ID` → `AppError(400, "Identifiant invalide.")`, pour `server/api` comme pour `routes.ts`. Inscrit dans la liste blanche du garde-fou des middlewares (sans base), retiré des attendus. Le contrat d'upload de document véhicule attend ce message pour un id hors plage (même 400).
+- **Pourquoi** : un id hors plage répondait 500 après une erreur base 22003.
+- **Preuve** : contrat `route-id-range-guard` rouge sans le montage (4/7 en échec), vert après ; avec l'upload de document 15/15 ; garde-fou des middlewares vert.

@@ -3022,3 +3022,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
+
+## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
+
+- **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
+- **Cause racine** : lecture par `parseInt`/`Number` sans borne haute dans les routes pas encore passées à `parseRouteId` ; la base lève 22003 (valeur hors plage).
+- **Classification** : validation d'entrée manquante.
+- **Résolution** : `routeIdRangeGuard` (`server/middleware/route-id-range-guard.ts`), monté en tête de `apiRouter` (`server/api/index.ts`), donc avant les routeurs de `server/api` et ceux de `routes.ts` : un segment entièrement numérique au-delà de `MAX_DB_INTEGER_ID` (`server/lib/route-id.ts`) répond 400 sans toucher à la base.
+- **Prévention vérifiable** : `tests/contract/route-id-range-guard.contract.test.ts` (rouge sans le montage), `tests/unit/server/route-id-range-guard.test.ts`, règle R3 de `tests/unit/server/prefix-middleware-guardrail.test.ts` (montage sans préfixe, avant le premier routeur).
+- **Leçon généralisée** : une entrée qui provoque à coup sûr une erreur base se refuse avant la base, par un filet commun plutôt que route par route.
