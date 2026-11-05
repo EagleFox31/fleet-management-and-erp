@@ -255,8 +255,18 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Les nouvelles fonctions de facturation passent par /api/billing/*.
 
   // Route de santé pour l'API
+  // Réponse publique minimale (statut + version) : c'est ce que lisent les sondes
+  // (deploy/docker-compose.yml ne regarde que le code HTTP). Aucune lecture de données métier.
   apiRouter.get("/health", (_req, res) => {
-    res.status(200).json({ 
+    res.status(200).json({
+      status: "ok",
+      version: process.env.APP_VERSION ?? process.env.npm_package_version ?? "unknown",
+    });
+  });
+
+  // Détail du descriptif de l'API : réservé aux administrateurs (chemin dédié, la sonde reste simple).
+  apiRouter.get("/health/details", isAdmin, (_req, res) => {
+    res.status(200).json({
       status: "ok",
       message: "Yaro FleetOS API - MVP Phase 1 (Fournisseurs & Procurement)",
       services: {
