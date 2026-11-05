@@ -199,6 +199,10 @@ export function useWorkflowPersistence(resumeSessionId?: string) {
       if (dataSnapshot) {
         setData(dataSnapshot);
       }
+      // Les sauvegardes différées d'`updateData` portent l'étape et les données d'avant ce changement :
+      // parties après lui, elles ramèneraient le brouillon serveur en arrière (étape 3, documents non validés).
+      pendingSaves.current.forEach(clearTimeout);
+      pendingSaves.current.clear();
       saveWorkflow(dataSnapshot ?? data, newStep);
     },
     [data, saveWorkflow]

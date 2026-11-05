@@ -421,3 +421,14 @@ export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"]
  * Toute transition de `STATUS_PERMISSIONS` doit rester dans ce jeu, sinon le droit est mort.
  */
 export const INVENTORY_MANAGER_ROLES = ["admin", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+
+/**
+ * Contrôles inopinés QHSE (lot Q1). Saisie et lecture de tous les contrôles : l'administration, la
+ * direction et la logistique (qui initie les contrôles sur itinéraire). Le chauffeur lit seulement
+ * les siens (cloison `driverScopeOf`), il n'entre pas dans ce groupe.
+ * Doit rester aligné sur les gardes de `server/api/qhse-inspections.routes.ts`.
+ */
+export const QHSE_INSPECTION_ROLES = ["admin", "management", "logistics"] as const satisfies readonly AppRole[];
+
+/** Grille de critères (référentiel configurable) : l'administration et la direction la modifient. */
+export const QHSE_CRITERIA_MANAGER_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];

@@ -217,6 +217,10 @@ test.describe("VEH3 - acquisition de véhicule", () => {
         return draft ? { step: draft.currentStep, docs: draft.workflowData.documentsUploaded } : null;
       })
       .toEqual({ step: 4, docs: true });
+    // Une sauvegarde différée (500 ms) partie avant « Continuer » ne doit pas ramener le brouillon à l'étape 3.
+    await page.waitForTimeout(1500);
+    const settled = await serverDraft(page, seed.sessionId);
+    expect({ step: settled?.currentStep, docs: settled?.workflowData.documentsUploaded }).toEqual({ step: 4, docs: true });
   });
 
   test("fin completed : l'activation crée le véhicule, clôt le brouillon et vide le bandeau", async ({ page }) => {
