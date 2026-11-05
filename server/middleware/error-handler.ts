@@ -128,11 +128,12 @@ export function errorResponseGuard(req: Request, res: Response, next: NextFuncti
 export function toHttpError(err: unknown): {
   status: number;
   message?: string;
+  code?: ApiErrorCode;
   fieldErrors?: ApiFieldError[];
   details?: Record<string, unknown>;
 } {
   if (err instanceof AppError) {
-    return { status: err.status, message: err.message, fieldErrors: err.fieldErrors, details: err.details };
+    return { status: err.status, message: err.message, code: err.code, fieldErrors: err.fieldErrors, details: err.details };
   }
   if (err instanceof ZodError) return { status: 400, fieldErrors: toFieldErrors(err.issues) };
   // Refus du trigger « au moins un administrateur actif » : message lisible, non un 500.
@@ -170,7 +171,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
     res.destroy();
     return;
   }
-  const { status, message, fieldErrors, details } = toHttpError(err);
+  const { status, message, code, fieldErrors, details } = toHttpError(err);
   // Seule ligne de journal d'une erreur relayée : la route y ajoute son contexte (withLogContext)
   // au lieu de journaliser elle-même (AGENTS.md §10).
   const context = { ...logContextOf(err), requestId: req.requestId, method: req.method, path: req.path, userId: userIdOf(req), status, err };
@@ -180,5 +181,6 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
   if (res.locals) res.locals.errorLogged = true;
   // Transmis à la garde de sortie, qui normalise le corps puis y fusionne les détails.
   if (details && res.locals) res.locals.appErrorDetails = details;
-  res.status(status).json({ message, errors: fieldErrors });
+  // Le code d'une AppError (ex. VEHICLE_RETIRED) est conservé : la garde de sortie l'accepte s'il est connu.
+  res.status(status).json({ message, code, errors: fieldErrors });
 }

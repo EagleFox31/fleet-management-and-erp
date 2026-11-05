@@ -7,8 +7,8 @@ import {
   IDEMPOTENCY_KEY_PATTERN,
   IDEMPOTENCY_REPLAYED_HEADER,
   IDEMPOTENCY_ROUTES,
+  isPreWriteRefusal,
   isReplayableStatus,
-  PRE_WRITE_REFUSALS,
   type IdempotencyRoute,
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
@@ -49,7 +49,8 @@ export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: s
  * - première requête : la clé est réservée, la route s'exécute, sa réponse est enregistrée ;
  * - même clé, même requête, déjà traitée : la réponse enregistrée est rejouée, sans réécrire ;
  * - même clé encore en cours : 409 ; même clé pour une autre requête : 422 ;
- * - 5xx, 401, 403, 408, 429 : la clé est libérée, le client réessaie ;
+ * - 5xx, 401, 403, 408, 429 et les codes de `PRE_WRITE_REFUSAL_CODES` (véhicule retiré) : la clé est
+ *   libérée, le client réessaie ;
  * - réponse terminée sans JSON : la clé est libérée ;
  * - connexion coupée : rien n'est libéré, la route peut encore répondre et sa réponse est
  *   enregistrée ; si elle ne répond jamais, la réservation expire (arrêt du serveur compris).
@@ -122,12 +123,12 @@ export function idempotencyGuard(
       if (settled) return originalJson(body);
       settled = true;
       const status = res.statusCode;
-      const persist = isReplayableStatus(status)
+      const persist = isReplayableStatus(status, body)
         ? store.complete(userId, key, status, body).catch((err) => {
             log.error({ err, requestId: req.requestId }, "enregistrement de la réponse idempotente en échec");
             return keepKey ? keepUncertain("réponse non enregistrée") : release();
           })
-        : keepKey && !PRE_WRITE_REFUSALS.includes(status)
+        : keepKey && !isPreWriteRefusal(status, body)
           ? keepUncertain(`statut ${status}`)
           : release();
       // La réponse part une fois la clé tranchée : un rejeu immédiat voit l'état final.

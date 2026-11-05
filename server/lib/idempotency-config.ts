@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "@shared/errors";
 import type { FeatureKey } from "@shared/feature-flags";
 
 /**
@@ -77,6 +78,20 @@ export const IDEMPOTENCY_STALE_SECONDS = 60;
  */
 export const PRE_WRITE_REFUSALS: readonly number[] = [401, 403, 408, 429];
 
-export function isReplayableStatus(status: number): boolean {
-  return status >= 200 && status < 500 && !PRE_WRITE_REFUSALS.includes(status);
+/**
+ * Refus métier prononcés avant toute écriture, reconnus au `code` du corps d'erreur : libérés comme
+ * `PRE_WRITE_REFUSALS`. `VEHICLE_RETIRED` (L3) : une fois le véhicule restauré, la même clé doit écrire.
+ */
+export const PRE_WRITE_REFUSAL_CODES: readonly ApiErrorCode[] = ["VEHICLE_RETIRED"];
+
+/** Vrai si la réponse est un refus prononcé avant toute écriture : la clé est libérée, jamais rejouée. */
+export function isPreWriteRefusal(status: number, body?: unknown): boolean {
+  if (PRE_WRITE_REFUSALS.includes(status)) return true;
+  if (status < 400 || typeof body !== "object" || body === null) return false;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === "string" && (PRE_WRITE_REFUSAL_CODES as readonly string[]).includes(code);
+}
+
+export function isReplayableStatus(status: number, body?: unknown): boolean {
+  return status >= 200 && status < 500 && !isPreWriteRefusal(status, body);
 }
