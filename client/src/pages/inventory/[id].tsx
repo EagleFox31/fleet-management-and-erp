@@ -269,8 +269,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
     <div className="space-y-5">
 
       {/* ── Header ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
 
           {/* Retour + Actions */}
@@ -361,7 +361,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
           {/* Badge état stock */}
           <div className="flex items-center gap-2 mb-4">
             {isLowStock && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-warning/15 text-warning-text border border-warning/30">
                 <AlertTriangle className="w-3 h-3" />
                 Stock bas
               </span>
@@ -375,11 +375,11 @@ export default function PartDetails({ params }: PartDetailsParams) {
 
           {/* Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center shrink-0">
-              <Package className="h-5 w-5 text-green-600" />
+            <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
+              <Package className="h-5 w-5 text-success" />
             </div>
             <div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Pièce détachée</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-success">Pièce détachée</span>
               <h1 className="text-xl font-bold text-gray-900 leading-tight">{part.name}</h1>
               <p className="text-[11px] text-gray-400 mt-0.5">
                 Réf: {part.reference} • {part.location || 'Emplacement non défini'} • Créé par {creatorLabel}
@@ -391,7 +391,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mt-5 pt-5 border-t border-gray-100">
             {[
               {
-                icon: <Package className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50",
+                icon: <Package className="h-4 w-4 text-success" />, iconBg: "bg-success/10",
                 label: "Stock actuel",
                 value: `${part.quantity} unité${part.quantity > 1 ? 's' : ''}`,
                 sub: <><Progress value={Math.min(stockLevel, 100)} className="h-1 mt-2 mb-1" /><span className="text-[10px] text-gray-400">{stockLevel.toFixed(0)}% du seuil min.</span></>,
@@ -415,10 +415,10 @@ export default function PartDetails({ params }: PartDetailsParams) {
                 sub: <span className="text-[10px] text-gray-400">moyenne 30 jours</span>,
               },
               {
-                icon: <Calendar className="h-4 w-4 text-emerald-600" />, iconBg: "bg-emerald-50",
+                icon: <Calendar className="h-4 w-4 text-success" />, iconBg: "bg-success/10",
                 label: "Autonomie",
                 value: daysRemaining > 365 ? "∞" : `${daysRemaining} j`,
-                sub: <span className={`text-[10px] font-medium ${daysRemaining < 30 ? "text-red-500" : "text-gray-400"}`}>
+                sub: <span className={`text-[10px] font-medium ${daysRemaining < 30 ? "text-destructive-text" : "text-gray-400"}`}>
                   {daysRemaining < 30 ? "Réappro. urgente !" : "Délai estimé"}
                 </span>,
               },
@@ -442,7 +442,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
       {/* Onglets */}
       <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab}>
         {/* Tab navigation bar — segmented control style */}
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white px-2 py-2 mb-5">
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card px-2 py-2 mb-5">
           <TabsList className="flex w-full bg-transparent p-0 h-auto gap-1">
             <TabsTrigger
               value="overview"
@@ -491,8 +491,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
             <Card className="rounded-2xl border border-gray-100 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                    <TrendingUp className="h-3.5 w-3.5 text-green-600" />
+                  <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                    <TrendingUp className="h-3.5 w-3.5 text-success" />
                   </div>
                   Mouvements de stock
                 </CardTitle>
@@ -515,8 +515,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
                       <div key={movement.id} className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="flex items-center space-x-3">
                           <div className={`h-2 w-2 rounded-full ${
-                            movement.movementType === 'out' ? 'bg-red-500' : 
-                            movement.movementType === 'in' ? 'bg-green-500' : 'bg-blue-500'
+                            movement.movementType === 'out' ? 'bg-destructive' : 
+                            movement.movementType === 'in' ? 'bg-success' : 'bg-blue-500'
                           }`} />
                           <div>
                             <p className="text-sm font-medium">
@@ -604,8 +604,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
             <Card className="lg:col-span-2 rounded-2xl border border-gray-100 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                  <div className="w-7 h-7 rounded-lg bg-warning/10 flex items-center justify-center">
+                    <AlertTriangle className="h-3.5 w-3.5 text-warning-text" />
                   </div>
                   Recommandations
                 </CardTitle>
@@ -651,8 +651,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
                 
                 {!isLowStock && part.location && part.supplier && (
                   <div className="text-center py-8">
-                    <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 dark:bg-green-900 mb-4">
-                      <Package className="h-6 w-6 text-green-600" />
+                    <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-success/15 dark:bg-success/20 mb-4">
+                      <Package className="h-6 w-6 text-success" />
                     </div>
                     <h3 className="text-lg font-medium text-foreground mb-2">Tout va bien !</h3>
                     <p className="text-sm text-muted-foreground">
@@ -669,8 +669,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
           <Card className="rounded-2xl border border-gray-100 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                  <TrendingUp className="h-3.5 w-3.5 text-green-600" />
+                <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                  <TrendingUp className="h-3.5 w-3.5 text-success" />
                 </div>
                 Historique des mouvements
               </CardTitle>
@@ -698,8 +698,8 @@ export default function PartDetails({ params }: PartDetailsParams) {
                 <div className="space-y-6">
                   {/* Graphique d'évolution du stock */}
                   <div className="rounded-xl bg-gray-50 border-0 p-3 flex items-center gap-3 text-[11px] text-gray-500">
-                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-green-500"></span>Entrées</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-red-500"></span>Sorties</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-success"></span>Entrées</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-destructive"></span>Sorties</span>
                     <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-indigo-500"></span>Ajustements</span>
                     <span className="flex items-center gap-1.5"><span className="inline-block w-4 border-t-2 border-blue-600"></span>Niveau de stock</span>
                     <span className="flex items-center gap-1.5 ml-auto"><span className="inline-block w-4 border-t-2 border-dashed border-orange-400"></span>Seuil minimum</span>
@@ -771,24 +771,24 @@ export default function PartDetails({ params }: PartDetailsParams) {
                       const net = totalIn - totalOut;
                       return (
                         <div className="w-36 shrink-0 flex flex-col gap-2">
-                          <div className="rounded-xl bg-green-50 px-3 py-2.5 flex flex-col flex-1">
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-green-700 mb-0.5">Entrées</p>
-                            <p className="text-2xl font-bold text-green-800 leading-none">{totalIn}</p>
-                            <p className="text-[10px] text-green-600 mt-1">{inMvts.length} opération{inMvts.length > 1 ? 's' : ''}</p>
+                          <div className="rounded-xl bg-success/10 px-3 py-2.5 flex flex-col flex-1">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-success mb-0.5">Entrées</p>
+                            <p className="text-2xl font-bold text-success leading-none">{totalIn}</p>
+                            <p className="text-[10px] text-success mt-1">{inMvts.length} opération{inMvts.length > 1 ? 's' : ''}</p>
                           </div>
-                          <div className="rounded-xl bg-red-50 px-3 py-2.5 flex flex-col flex-1">
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-red-700 mb-0.5">Sorties</p>
-                            <p className="text-2xl font-bold text-red-800 leading-none">{totalOut}</p>
-                            <p className="text-[10px] text-red-600 mt-1">{outMvts.length} opération{outMvts.length > 1 ? 's' : ''}</p>
+                          <div className="rounded-xl bg-destructive/10 px-3 py-2.5 flex flex-col flex-1">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-destructive-text mb-0.5">Sorties</p>
+                            <p className="text-2xl font-bold text-destructive-text leading-none">{totalOut}</p>
+                            <p className="text-[10px] text-destructive-text mt-1">{outMvts.length} opération{outMvts.length > 1 ? 's' : ''}</p>
                           </div>
                           <div className="rounded-xl bg-indigo-50 px-3 py-2.5 flex flex-col flex-1">
                             <p className="text-[9px] font-bold uppercase tracking-widest text-indigo-700 mb-0.5">Ajustements</p>
                             <p className="text-2xl font-bold text-indigo-800 leading-none">{totalAdj}</p>
                             <p className="text-[10px] text-indigo-600 mt-1">{adjMvts.length} opération{adjMvts.length > 1 ? 's' : ''}</p>
                           </div>
-                          <div className={`rounded-xl px-3 py-2.5 flex flex-col flex-1 ${net >= 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                          <div className={`rounded-xl px-3 py-2.5 flex flex-col flex-1 ${net >= 0 ? 'bg-success/10' : 'bg-rose-50'}`}>
                             <p className="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-0.5">Solde net</p>
-                            <p className={`text-2xl font-bold leading-none ${net >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}>
+                            <p className={`text-2xl font-bold leading-none ${net >= 0 ? 'text-success' : 'text-rose-700'}`}>
                               {net >= 0 ? '+' : ''}{net}
                             </p>
                             <p className="text-[10px] text-gray-400 mt-1">{stockHistory.length} mouv. total</p>
@@ -807,16 +807,16 @@ export default function PartDetails({ params }: PartDetailsParams) {
                       <div key={`movement-${movement.id}`} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
                         <div className="flex items-center space-x-4">
                           <div className={`h-3 w-3 rounded-full ${
-                            movement.movementType === 'out' ? 'bg-red-500' : 
-                            movement.movementType === 'in' ? 'bg-green-500' : 'bg-blue-500'
+                            movement.movementType === 'out' ? 'bg-destructive' : 
+                            movement.movementType === 'in' ? 'bg-success' : 'bg-blue-500'
                           }`} />
                           <div>
                             <p className="font-medium text-sm">
                               <span className="inline-flex items-center gap-1.5">
                                 {movement.movementType === 'out' ? (
-                                  <TrendingDown className="h-3.5 w-3.5 text-red-600" />
+                                  <TrendingDown className="h-3.5 w-3.5 text-destructive-text" />
                                 ) : movement.movementType === 'in' ? (
-                                  <TrendingUp className="h-3.5 w-3.5 text-green-600" />
+                                  <TrendingUp className="h-3.5 w-3.5 text-success" />
                                 ) : (
                                   <BarChart3 className="h-3.5 w-3.5 text-blue-600" />
                                 )}
@@ -842,9 +842,9 @@ export default function PartDetails({ params }: PartDetailsParams) {
                         <div className="text-right">
                           <p className={`text-sm font-bold ${
                             movement.movementType === 'out'
-                              ? 'text-red-600'
+                              ? 'text-destructive-text'
                               : movement.movementType === 'in'
-                                ? 'text-green-600'
+                                ? 'text-success'
                                 : 'text-blue-600'
                           }`}>
                             {(() => {
@@ -909,13 +909,13 @@ export default function PartDetails({ params }: PartDetailsParams) {
               ) : (
                 <div className="space-y-3">
                   {workOrders.map((workOrder: any) => (
-                    <div key={workOrder.id} className="relative flex overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-all group">
+                    <div key={workOrder.id} className="relative flex overflow-hidden rounded-xl border border-gray-100 bg-card shadow-sm hover:shadow-md transition-all group">
                       {/* Status strip */}
                       <div className={`w-1 shrink-0 ${
-                        workOrder.status === 'completed' ? 'bg-green-500' :
+                        workOrder.status === 'completed' ? 'bg-success' :
                         workOrder.status === 'in_progress' ? 'bg-blue-500' :
                         workOrder.status === 'cancelled' ? 'bg-gray-300' :
-                        'bg-amber-400'
+                        'bg-warning'
                       }`} />
                       <div className="flex-1 px-4 py-3.5">
                         <div className="flex items-start justify-between gap-3">
@@ -937,16 +937,16 @@ export default function PartDetails({ params }: PartDetailsParams) {
                             {/* Status + Priority badges */}
                             <div className="flex items-center gap-1.5 mt-2">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                                workOrder.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                workOrder.status === 'completed' ? 'bg-success/15 text-success' :
                                 workOrder.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
                                 workOrder.status === 'cancelled' ? 'bg-gray-100 text-gray-500' :
-                                'bg-amber-100 text-amber-700'
+                                'bg-warning/15 text-warning-text'
                               }`}>
                                 {getWorkOrderStatusLabel(workOrder.status)}
                               </span>
                               {workOrder.priority && (
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                                  workOrder.priority === 'critical' ? 'bg-red-100 text-red-700' :
+                                  workOrder.priority === 'critical' ? 'bg-destructive/15 text-destructive-text' :
                                   workOrder.priority === 'high' ? 'bg-orange-100 text-orange-700' :
                                   workOrder.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
                                   'bg-gray-100 text-gray-500'
@@ -1037,12 +1037,12 @@ export default function PartDetails({ params }: PartDetailsParams) {
               </div>
 
               {/* Valeur totale en stock — highlighted */}
-              <div className="rounded-xl bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100 px-5 py-4 flex items-center justify-between">
+              <div className="rounded-xl bg-gradient-to-r from-success/10 to-success/10 border border-success/20 px-5 py-4 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-green-700 mb-0.5">Valeur totale en stock</p>
-                  <p className="text-2xl font-bold text-green-800">{formatPrice(part.quantity * part.unitPrice)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-success mb-0.5">Valeur totale en stock</p>
+                  <p className="text-2xl font-bold text-success">{formatPrice(part.quantity * part.unitPrice)}</p>
                 </div>
-                <div className="text-right text-xs text-green-700 opacity-70">
+                <div className="text-right text-xs text-success opacity-70">
                   <p>{part.quantity} unité{part.quantity > 1 ? 's' : ''}</p>
                   <p>× {formatPrice(part.unitPrice)}</p>
                 </div>
