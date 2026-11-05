@@ -9,6 +9,7 @@ import {
 } from "../../shared/constants/supplier-ratings";
 import { z } from "zod";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { storage } from "../storage";
@@ -236,11 +237,7 @@ router.get("/search", async (req: Request, res: Response, next: NextFunction) =>
 // GET /api/suppliers/:id - Récupérer un fournisseur par ID avec statistiques
 router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const supplier = await supplierManagementService.getSupplierById(id);
     
@@ -257,11 +254,7 @@ router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/suppliers/:id/performance - Récupérer les performances d'un fournisseur
 router.get("/:id/performance", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const performance = await supplierManagementService.getSupplierPerformance(id);
     
@@ -373,11 +366,7 @@ router.post("/", checkSupplierCreatePermission, async (req: Request, res: Respon
 // PATCH /api/suppliers/:id - Mettre à jour un fournisseur (admin, secretary et logistics)
 router.patch("/:id", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     // Validation partielle des données
     const partialSchema = insertSupplierSchema.partial();
@@ -418,11 +407,7 @@ router.patch("/:id", checkWritePermission, async (req: Request, res: Response, n
 // PATCH /api/suppliers/:id/rating - Mettre à jour les évaluations d'un fournisseur (droits par métrique)
 router.patch("/:id/rating", checkEvaluationPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const ratingSchema = z.object({
       qualityRating: z.number().min(0).max(5).optional(),
@@ -501,11 +486,7 @@ router.patch("/:id/rating", checkEvaluationPermission, async (req: Request, res:
 // POST /api/suppliers/:id/calculate-ratings - Calculer automatiquement les évaluations (admin uniquement)
 router.post("/:id/calculate-ratings", checkEvaluationPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const normalizedRole = normalizeRole(req.user?.role);
     if (normalizedRole !== "admin") {
@@ -549,11 +530,7 @@ router.post("/:id/calculate-ratings", checkEvaluationPermission, async (req: Req
 // DELETE /api/suppliers/:id - Désactiver un fournisseur (soft delete) (admin, secretary et logistics)
 router.delete("/:id", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const success = await supplierManagementService.deactivateSupplier(id);
     
@@ -581,11 +558,7 @@ router.delete("/:id", checkWritePermission, async (req: Request, res: Response, 
 // PATCH /api/suppliers/:id/reactivate - Réactiver un fournisseur (admin, secretary et logistics)
 router.patch("/:id/reactivate", checkWritePermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id);
-    
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "ID invalide" });
-    }
+    const id = parseRouteId(req.params.id, "ID invalide");
 
     const success = await supplierManagementService.reactivateSupplier(id);
     
