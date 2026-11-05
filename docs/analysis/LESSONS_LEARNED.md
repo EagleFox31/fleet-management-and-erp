@@ -3098,7 +3098,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : si l'admin déverrouille pendant une réservation en cours, celle-ci réécrit l'ancien compteur + 1, et le compte qu'on vient de débloquer garde ses échecs.
 - **Classification** : concurrence (mise à jour perdue). C'est un near miss : relevé en relecture, avant tout signalement.
 - **Résolution** : `underKeyLock` accepte plusieurs clés, verrouillées dans un ordre fixe. `unlockUser` remet à zéro le miroir et supprime les compteurs de toutes les clés du compte dans une même transaction sous ces verrous. `reset` fait de même pour son DELETE et le miroir.
-- **Reste ouvert** : le miroir `users` écrit après un échec confirmé (`confirmFailure`, `recordLock`) part encore après la transaction. Seul l'affichage admin est concerné, le compteur qui décide du blocage ne l'est pas. Le rentrer dans la transaction changerait le comportement en cas de panne : un miroir en échec annulerait la tentative comptée.
+- **Reste ouvert** : le miroir `users` écrit par `confirmFailure`, et par `recordLock` quand `reserve` ou `confirmFailure` pose le verrou, part encore après la transaction. Seul l'affichage admin est concerné, le compteur qui décide du blocage ne l'est pas. Le rentrer dans la transaction changerait le comportement en cas de panne : un miroir en échec annulerait la tentative comptée.
 - **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts`, cas « déverrouillage admin ». Il échoue sur le store d'origine et passe après le correctif.
 - **Leçon généralisée** : quand on corrige une écriture hors verrou, recenser tous les écrivains du même état (`grep` de la table), pas seulement celui qui a déclenché l'incident.
 

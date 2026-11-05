@@ -6,7 +6,7 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 
@@ -189,7 +189,7 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
 });
 
 // Historique carburant avec filtres
-router.get("/history", async (req, res) => {
+router.get("/history", async (req, res, next) => {
   try {
     const { year, month, vehicleId, type } = req.query;
     
@@ -197,7 +197,7 @@ router.get("/history", async (req, res) => {
     
     if (year) filters.year = parseInt(year as string);
     if (month) filters.month = parseInt(month as string);
-    if (vehicleId) filters.vehicleId = parseInt(vehicleId as string);
+    if (vehicleId) filters.vehicleId = parseQueryId(vehicleId, "ID de véhicule invalide");
     if (type && ['credit', 'debit', 'all'].includes(type as string)) {
       filters.type = type as 'credit' | 'debit' | 'all';
     }
@@ -206,7 +206,8 @@ router.get("/history", async (req, res) => {
     
     return res.status(200).json(history);
   } catch (error) {
-    console.error("Get fuel history error:", error);
+    if (error instanceof AppError) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Get fuel history error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
