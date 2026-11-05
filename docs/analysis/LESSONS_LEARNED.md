@@ -2917,6 +2917,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Leçon généralisée** : une échéance est une date sans heure, comparée en jours calendaires UTC par un seul module. Tout calcul de durée en millisecondes ou en jour local est un défaut latent qui ne se déclenche qu'à certaines heures : le test doit simuler l'heure (23h30 UTC), pas attendre qu'elle arrive.
 
 
+## 2026-11-05 — Contrôle de lien : la référence était le dossier visé lui-même
+
+- **Contexte** : #340 ajoutait `realPathStaysInside` à la copie des documents de workflow vers le dossier du véhicule. Relecture : le contrôle ne refusait rien (near miss, détecté avant fusion).
+- **Cause racine** : la référence passée était `uploads/documents/vehicle-<id>`, calculée depuis l'id. Si ce dossier est lui-même une jonction vers l'extérieur, référence et candidat se résolvent tous deux dehors : le candidat reste « sous » la référence. Le contrôle venait en plus après le `mkdirSync`.
+- **Classification** : garde de sécurité inopérante par mauvais choix de référence ; near miss.
+- **Résolution** : référence = racine possédée `uploads/documents`, contrôle avant tout `mkdir` ; dossier refusé → aucun document transféré, `log.warn` sans chemin. Côté multer, un id valide dont le dossier mène dehors renvoie « Dossier de destination invalide » (plus « ID de véhicule invalide »).
+- **Prévention vérifiable** : `tests/integration/workflow-document-transfer.test.ts` (jonction `vehicle-<id>` vers un dossier extérieur : rien copié, document non transféré) et `tests/contract/vehicle-documents-upload-path.contract.test.ts` (400 « Dossier de destination invalide », rien écrit dehors), rouges sur la version précédente, verts après.
+- **Leçon généralisée** : la référence d'un contrôle de chemin réel est la racine de l'application, jamais un sous-dossier calculé depuis une donnée de requête ou un id : ce sous-dossier est précisément ce qu'un lien peut remplacer.
 ## 2026-11-05 — Conflit de planning : contrôle copié trois fois, absent de la création et du PATCH
 
 - **Contexte** : suite de #328. `POST /api/missions` avec affectation et `PATCH /:id` (changement de véhicule, de chauffeur ou de dates) n'avaient aucun contrôle de conflit de planning ; seuls `POST /:id/assignments` et le lancement l'appliquaient.
