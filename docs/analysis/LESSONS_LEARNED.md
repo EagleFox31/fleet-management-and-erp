@@ -3110,3 +3110,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : les contrats lot 9 et lot 10 importent `ROUTE_ID_OUT_OF_RANGE_MESSAGE` depuis `server/middleware/route-id-range-guard.ts` au lieu de recopier un texte.
 - **Prévention vérifiable** : les cas hors plage de `route-id-strict-lot9` et `route-id-strict-lot10` lisent la constante de la garde. Un changement de texte de la garde ne peut donc plus faire diverger ces contrats. Reste ouvert, à trancher par le circuit de fusion : exiger une branche à jour avec main avant fusion (protection « require branches to be up to date »), ou rejouer la CI après tout merge qui touche une surface partagée (middlewares montés sur `/api`, cliquets).
 - **Leçon généralisée** : une CI verte ne prouve que l'état « PR + main au moment du run ». Quand deux PR touchent le même comportement (ici la réponse à un id hors plage), la seconde à fusionner doit être rejouée contre un main qui contient la première. Un message d'erreur produit par une garde partagée se teste par sa constante, jamais par son texte recopié.
+
+## 2026-11-05 — Id hors plage int4 dans la query ou le corps : refusé par le schéma
+
+- **Contexte** : suite du « reste ouvert » de l'entrée « Id de route hors plage int4 ». `?userId=2147483648` sur `/api/audit-logs`, ou `vehicleId: 2147483648` dans le corps de `POST /api/incidents`, répondait 500. Quinze routes de `server/api` étaient concernées : filtres de liste, créations et assignations.
+- **Cause racine** : les ids d'entrée validés par Zod (`z.coerce.number().int().positive()`, `z.number()`, `z.union([z.string(), z.number()]).transform(Number)`) n'avaient pas de borne haute. Le filet `routeIdRangeGuard` ne lit que le chemin. La valeur atteignait donc la base, qui levait 22003.
+- **Classification** : validation d'entrée manquante (même classe que l'entrée précédente, autre canal).
+- **Résolution** : `idSchema` (query, coercition) et le nouveau `bodyIdSchema` (corps JSON, nombre strict) de `shared/contracts/common.ts` sont bornés à `MAX_DB_INTEGER_ID`, désormais déclaré à cet endroit et réexporté par `server/lib/route-id.ts`. Les schémas d'entrée les utilisent. Ceux qui portent un message propre gardent ce message sur `.max(...)`.
+- **Prévention vérifiable** :
+  - `tests/contract/id-range-query-body.contract.test.ts` : 15 cas, 400 sur le champ id. Rouge sur l'ancien code (500, ou 400 sur un autre champ).
+  - Cliquet `tests/unit/server/zod-id-range-hygiene.test.ts` : une propriété nommée comme un id déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`, dans `server/api` ou `shared/contracts`. La liste gelée ne contient que des schémas de réponse. Le test passe au rouge si l'on retire la borne de `fuel-card`.
+- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+- **Leçon généralisée** : un filet posé sur un seul canal (le chemin) ne couvre pas la même valeur reçue par un autre canal (query, corps). La borne appartient au type partagé (`idSchema`), pas à chaque route.

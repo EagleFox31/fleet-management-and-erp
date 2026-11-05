@@ -10,6 +10,7 @@ import { authenticate, authorize } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
 import { storage } from "../storage";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
+import { idSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("technician-work-orders");
 
@@ -21,7 +22,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "annulé",
 };
 
-const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
+const paramsSchema = z.object({ id: idSchema });
 
 const bodySchema = z.object({
   status: z.enum(TECHNICIAN_TARGET_STATUSES, {
