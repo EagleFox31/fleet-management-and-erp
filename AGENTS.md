@@ -353,9 +353,10 @@ Notes :
   (`server/lib/settlement-proof.ts`), validé dès l'écriture. Sinon ils figurent
   dans la liste gelée de `tests/unit/server/stored-path-hygiene.test.ts`, avec la raison
   pour laquelle leur chemin ne vient pas de la base (multer, fichiers livrés, sauvegardes).
-  Revue faite le 3 novembre 2026. Risque résiduel accepté : la comparaison se fait sur le
-  chemin résolu, pas sur `realpath`. Un lien symbolique placé dans `uploads/` pourrait donc
-  viser un fichier extérieur. multer ne crée pas de lien, il faudrait un accès au disque.
+  Revue faite le 3 novembre 2026. Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
+  aussi les liens (`realPathStaysInside`) : un lien symbolique ou une jonction sous `uploads/`
+  qui mène dehors est refusé. Risque résiduel accepté : un lien créé entre le contrôle et
+  l'accès, ce qui suppose déjà un accès au disque.
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la

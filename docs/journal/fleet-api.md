@@ -413,6 +413,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : un mot de passe clair restauré était stocké en clair et le compte ne pouvait plus se connecter.
 - **Preuve** : contrat `backup-import-password` (clair → 200 au login, SHA-256 → 200 puis migré, trop court → 401), rouge sur le comportement de main (2 échecs, valeur stockée en clair) ; unitaire `user-password`.
 
+## 2026-11-05 — Fichiers téléversés : liens résolus
+- **Quoi** : `uploadedFileCandidates` refuse un candidat existant dont le chemin réel (liens et jonctions résolus) sort de `uploads/` (`realPathStaysInside`). Fichier absent : la comparaison lexicale suffit. `uploads/` monté par lien reste valide.
+- **Pourquoi** : risque résiduel de la revue §9 du 3 novembre ; la borne ne comparait que le chemin lexical.
+- **Preuve** : unitaire `uploaded-file` (jonction sortante refusée, rouge sur main ; lien de fichier sauté avec sa raison si l'OS refuse le droit de création).
 ## 2026-11-05 — Justificatif de règlement fournisseur borné à son dossier
 - **Quoi** : `server/lib/settlement-proof.ts` (`isSettlementProofReference`, `settlementProofPath`). `recordInvoiceSettlement` refuse en 400 toute référence qui n'est pas un fichier de `/uploads/supplier-invoices/settlements/`, endpoint legacy `/payment` compris. La route du justificatif ne sert que ce dossier : une ligne ancienne hors dossier donne 404. `settlementProofPath` est ajoutée aux bornes du scan des accès disque.
 - **Pourquoi** : la référence était libre à l'écriture et la lecture n'était bornée qu'à `uploads/` en entier (dette AGENTS §9).
