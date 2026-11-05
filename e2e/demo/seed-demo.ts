@@ -29,6 +29,9 @@ import {
   parts,
   partsStockMovements,
   partsUsed,
+  purchaseOrderLines,
+  purchaseOrders,
+  suppliers,
   users,
   vehicleDocuments,
   vehicles,
@@ -68,6 +71,14 @@ export const DEMO_MISSION = {
 export const DEMO_OT_PREFIX = "Démo atelier - ";
 
 export const DEMO_PART = { reference: "DEMO-FILTRE-HUILE", name: "Filtre à huile démo" } as const;
+export const DEMO_RECEPTION = {
+  supplierName: "Pièces Douala (démo)",
+  orderNumber: "DEMO-BC-001",
+  deliveryCode: "BL-DEMO-001",
+  workOrderTitle: `${DEMO_OT_PREFIX}Entretien magasin`,
+  orderedQuantity: 5,
+  requestedQuantity: 2,
+} as const;
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
 export const DEMO_DOCUMENT_NAME = "Assurance DEMO-SEC-001";
 
@@ -149,6 +160,72 @@ function writeDemoPdf(name: string): void {
   fs.writeFileSync(target, body);
 }
 
+/** Les lignes de commande référencent les demandes de pièce : à purger avant les OT de démo. */
+async function purgeReceptionOrders(): Promise<void> {
+  const oldOrders = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.orderNumber, DEMO_RECEPTION.orderNumber));
+  if (oldOrders.length > 0) {
+    await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, oldOrders.map((o) => o.id)));
+    await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, oldOrders.map((o) => o.id)));
+  }
+}
+
+/** Magasinier : une commande fournisseur confirmée à réceptionner, et la demande de pièce d'un OT qui l'attend. */
+async function seedWarehouse(): Promise<void> {
+  const warehouseId = await ensureUser(DEMO_ACCOUNTS.warehouse);
+  const managerId = await ensureUser(DEMO_ACCOUNTS.workshopManager);
+  const vehicleId = await ensureVehicle(DEMO_VEHICLES.atelierChef, "T480", null);
+  const [part] = await db.select({ id: parts.id }).from(parts).where(eq(parts.reference, DEMO_PART.reference));
+
+  const oldOts = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.title, DEMO_RECEPTION.workOrderTitle));
+  if (oldOts.length > 0) {
+    const ids = oldOts.map((o) => o.id);
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, ids));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, ids));
+    await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, ids));
+    await db.delete(workOrders).where(inArray(workOrders.id, ids));
+  }
+
+  await db.insert(suppliers).values({ name: DEMO_RECEPTION.supplierName, category: "Pièces", isActive: true }).onConflictDoNothing();
+  const [supplier] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.name, DEMO_RECEPTION.supplierName));
+  const [workOrder] = await db
+    .insert(workOrders)
+    .values({ vehicleId, title: DEMO_RECEPTION.workOrderTitle, priority: "medium", status: "in_progress", description: "Remplacement du filtre à huile : pièce commandée, en attente de réception." })
+    .returning({ id: workOrders.id });
+  const [requirement] = await db
+    .insert(partRequirements)
+    .values({
+      partId: part.id,
+      vehicleId,
+      workOrderId: workOrder.id,
+      quantityNeeded: DEMO_RECEPTION.requestedQuantity,
+      reason: "Remplacement du filtre à huile",
+      status: "ordered",
+      requestedBy: managerId,
+    })
+    .returning({ id: partRequirements.id });
+  const [order] = await db
+    .insert(purchaseOrders)
+    .values({
+      orderNumber: DEMO_RECEPTION.orderNumber,
+      supplierId: supplier.id,
+      orderDate: isoDayFromNow(-3),
+      expectedDeliveryDate: isoDayFromNow(0),
+      status: "confirmed",
+      totalAmountHT: "62500",
+      totalAmountTTC: "74528.13",
+      createdBy: warehouseId,
+    })
+    .returning({ id: purchaseOrders.id });
+  await db.insert(purchaseOrderLines).values({
+    purchaseOrderId: order.id,
+    partRequirementId: requirement.id,
+    partId: part.id,
+    quantityOrdered: DEMO_RECEPTION.orderedQuantity,
+    unitPrice: "12500",
+    totalPrice: "62500",
+  });
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
@@ -203,6 +280,7 @@ async function seedLogistics(): Promise<void> {
 
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
+  await purgeReceptionOrders();
   await seedLogistics();
   await seedWorkshop();
   const technicianId = await ensureUser(DEMO_ACCOUNTS.technician);
@@ -222,6 +300,7 @@ export async function seedDemo(): Promise<void> {
     .values({ reference: DEMO_PART.reference, name: DEMO_PART.name, quantity: 20, minQuantity: 2, unitPrice: "12500", location: "Rayon A1" })
     .onConflictDoNothing();
   await db.update(parts).set({ quantity: 20 }).where(and(eq(parts.reference, DEMO_PART.reference), ne(parts.quantity, 20)));
+  await seedWarehouse();
 
   // Intervention du technicien : ramenée à « en cours », sans demande de pièce.
   const existing = await db
