@@ -207,7 +207,7 @@ export function ProcurementTutorialModal({ open, onOpenChange }: ProcurementTuto
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
-              <IconComponent className="w-6 h-6 text-primary" />
+              <IconComponent className="w-6 h-6 text-primary-text" />
             </div>
             <div>
               <DialogTitle className="text-xl">{currentStepData.title}</DialogTitle>

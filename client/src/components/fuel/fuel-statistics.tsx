@@ -116,7 +116,7 @@ export function FuelStatistics() {
           <div className="space-y-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                <Fuel className="h-6 w-6 mb-2 text-primary" />
+                <Fuel className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Total carburant</div>
                 <div className="text-2xl font-bold">
                   {totalFuel > 0
@@ -126,7 +126,7 @@ export function FuelStatistics() {
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                <div className="h-6 w-6 mb-2 flex items-center justify-center text-primary">F</div>
+                <div className="h-6 w-6 mb-2 flex items-center justify-center text-primary-text">F</div>
                 <div className="text-sm text-muted-foreground mb-1">Coût total</div>
                 <div className="text-2xl font-bold">
                   {totalCost > 0
@@ -136,7 +136,7 @@ export function FuelStatistics() {
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                <BarChart3 className="h-6 w-6 mb-2 text-primary" />
+                <BarChart3 className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Prix moyen/L</div>
                 <div className="text-2xl font-bold">
                   {avgCostPerLiter > 0 
@@ -146,7 +146,7 @@ export function FuelStatistics() {
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                <LineChart className="h-6 w-6 mb-2 text-primary" />
+                <LineChart className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Nb de pleins</div>
                 <div className="text-2xl font-bold">
                   {consumptionHistory?.reduce((total: number, current: ConsumptionData) => total + current.count, 0) || 0}

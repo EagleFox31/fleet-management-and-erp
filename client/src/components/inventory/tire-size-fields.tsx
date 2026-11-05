@@ -73,7 +73,7 @@ export function TireSizeFields({
             />
           </FormControl>
           <p className="mt-1 text-[11px] text-muted-foreground">Largeur (mm)</p>
-          {widthError ? <p className="text-sm font-medium text-destructive">{widthError}</p> : null}
+          {widthError ? <p className="text-sm font-medium text-destructive-text">{widthError}</p> : null}
         </div>
         <div>
           <FormControl>
@@ -89,7 +89,7 @@ export function TireSizeFields({
             />
           </FormControl>
           <p className="mt-1 text-[11px] text-muted-foreground">Profil (%)</p>
-          {aspectError ? <p className="text-sm font-medium text-destructive">{aspectError}</p> : null}
+          {aspectError ? <p className="text-sm font-medium text-destructive-text">{aspectError}</p> : null}
         </div>
         <div>
           <FormControl>
@@ -106,7 +106,7 @@ export function TireSizeFields({
           </FormControl>
           <p className="mt-1 text-[11px] text-muted-foreground">Diamètre (pouces)</p>
           {diameterError ? (
-            <p className="text-sm font-medium text-destructive">{diameterError}</p>
+            <p className="text-sm font-medium text-destructive-text">{diameterError}</p>
           ) : null}
         </div>
       </div>

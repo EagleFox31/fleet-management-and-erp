@@ -684,7 +684,7 @@ export function RoleExplanationCard({ pageType, className = "", collapsed = fals
       <CardContent className="py-4">
         <div className="flex items-start gap-4">
           <div className="p-2 rounded-lg bg-primary/10">
-            <IconComponent className="h-6 w-6 text-primary" />
+            <IconComponent className="h-6 w-6 text-primary-text" />
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-lg mb-1" data-testid="role-card-title">{message.title}</h3>

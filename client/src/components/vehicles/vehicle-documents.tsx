@@ -460,7 +460,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
               aria-label="Supprimer le document"
               className="h-8 w-8"
             >
-              <Trash2 className="h-4 w-4 text-destructive" />
+              <Trash2 className="h-4 w-4 text-destructive-text" />
             </Button>
           )}
         </div>
@@ -584,8 +584,8 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
                     />
                     {uploadMutation.isPending && (
                       <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-md bg-background/85 backdrop-blur-[1px]">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-sm font-medium text-primary">Import en cours…</span>
+                        <Loader2 className="h-4 w-4 animate-spin text-primary-text" />
+                        <span className="text-sm font-medium text-primary-text">Import en cours…</span>
                       </div>
                     )}
                   </div>
@@ -618,7 +618,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
             <Loader2 className="h-6 w-6 animate-spin text-green-600" />
           </div>
         ) : error ? (
-          <div className="bg-destructive/10 p-4 rounded-md flex items-center text-destructive">
+          <div className="bg-destructive/10 p-4 rounded-md flex items-center text-destructive-text">
             <AlertCircle className="h-5 w-5 mr-2" />
             Erreur lors du chargement des documents. Veuillez réessayer.
           </div>

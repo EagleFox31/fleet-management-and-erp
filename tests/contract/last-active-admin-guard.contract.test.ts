@@ -126,14 +126,11 @@ describe("LAG2 : suppression d'un administrateur", { timeout: 60000 }, () => {
   }
 });
 
-// Le trigger « au moins un administrateur actif » interdit la désactivation du dernier admin, que ces cas
-// organisent volontairement : ils sont ignorés (avec explication) quand il est posé. La garantie y est alors
-// couverte par tests/integration/users-keep-active-admin.test.ts.
-const keepAdminTrigger = (
-  await db.execute(sql`SELECT 1 AS present FROM pg_trigger WHERE tgname = 'trg_users_keep_active_admin' AND NOT tgisinternal`)
-).rows.length > 0;
-
-describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement en même temps (ignoré si le trigger de base est posé)", { timeout: 60000 }, () => {
+// Le trigger « au moins un administrateur actif » (s'il est posé) interdit d'organiser l'état de départ de ces
+// cas : l'isolement et la restauration des admins passent par une transaction en `session_replication_role =
+// replica` (locale à la transaction, triggers inactifs). Les requêtes testées, elles, s'exécutent trigger actif :
+// la garde applicative, prise avant l'écriture, doit répondre seule.
+describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout: 60000 }, () => {
   // Chaque test ne doit voir que ses deux admins : les admins actifs sont désactivés avant chaque
   // test. Les nôtres le restent (nettoyés ensuite) ; les préexistants de la base de test (compte du
   // seed) sont rétablis en fin de bloc. Les suites de contrat s'enchaînent sous verrou.
@@ -141,14 +138,22 @@ describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement e
   async function isolateAdmins() {
     const active = await listActiveAdminIds();
     for (const id of active) if (!ids.userIds.includes(id)) preexisting.add(id);
-    if (active.length > 0) await db.update(users).set({ deletedAt: new Date() }).where(inArray(users.id, active));
+    await setDeletedAt(active, new Date());
+  }
+  /** Écriture d'état de départ hors trigger : `SET LOCAL` ne dure que le temps de la transaction. */
+  async function setDeletedAt(userIds: number[], deletedAt: Date | null) {
+    if (userIds.length === 0) return;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role = replica`);
+      await tx.update(users).set({ deletedAt }).where(inArray(users.id, userIds));
+    });
   }
   // Restauration en finally. Si le processus meurt en plein bloc, les admins préexistants restent
   // désactivés : la base de test locale se répare par `UPDATE users SET deleted_at = NULL WHERE role = 'admin'`.
   afterAll(async () => {
     try {
       // D'abord la base : les admins préexistants reviennent quoi qu'il arrive.
-      if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
+      await setDeletedAt([...preexisting], null);
     } finally {
       // Connexion détruite sans requête préalable : Postgres lâche le verrou de session à sa fermeture.
       lockHolder?.release(true);
@@ -300,4 +305,42 @@ describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement e
       expect(await listActiveAdminIds()).toHaveLength(1);
     });
   }
+
+  const toggleOff = (cookie: string, id: number) => call("PATCH", `/api/admin/users/${id}/toggle`, { cookie, body: { isActive: false } });
+
+  it("désactivation (toggle) : une seule passe (200), l'autre est refusée ; il reste un admin actif", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    const [r1, r2] = await Promise.all([toggleOff(a.cookie, b.id), toggleOff(b.cookie, a.id)]);
+    const statuses = [r1.status, r2.status];
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.filter((s) => REFUSALS.includes(s))).toHaveLength(1);
+    expect(await listActiveAdminIds()).toHaveLength(1);
+  });
+
+  it("désactivation et suppression concurrentes : une seule passe, il reste un admin actif", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    const [r1, r2] = await Promise.all([toggleOff(a.cookie, b.id), call("DELETE", `/api/users/${a.id}`, { cookie: b.cookie })]);
+    const statuses = [r1.status, r2.status];
+    expect(statuses.filter((s) => s === 200 || s === 204)).toHaveLength(1);
+    expect(statuses.filter((s) => REFUSALS.includes(s))).toHaveLength(1);
+    expect(await listActiveAdminIds()).toHaveLength(1);
+  });
+
+  it("un admin ne se désactive pas lui-même (400, garde d'auto-désactivation) : il reste actif", async (ctx) => {
+    await isolateAdmins();
+    const a = await newAdmin();
+    const b = await newAdmin();
+    if (!(await onlyTheseAreActiveAdmins(a.id, b.id))) ctx.skip();
+    expect((await toggleOff(a.cookie, b.id)).status).toBe(200);
+    // Un seul admin actif (a) : b est désactivé et ne peut plus agir ; a ne peut pas retirer le dernier (lui-même).
+    const self = await toggleOff(a.cookie, a.id);
+    expect(self.status).toBe(400);
+    expect(await listActiveAdminIds()).toEqual([a.id]);
+  });
 });

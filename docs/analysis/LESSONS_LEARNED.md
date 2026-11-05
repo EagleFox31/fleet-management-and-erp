@@ -3039,3 +3039,58 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
+
+## 2026-11-05 — Id de route hors plage int4 : refusé avant la base
+
+- **Contexte** : un identifiant de route au-delà de la plage `integer` atteignait la base et répondait 500.
+- **Cause racine** : lecture par `parseInt`/`Number` sans borne haute dans les routes pas encore passées à `parseRouteId` ; la base lève 22003 (valeur hors plage).
+- **Classification** : validation d'entrée manquante.
+- **Résolution** : `routeIdRangeGuard` (`server/middleware/route-id-range-guard.ts`), monté en tête de `apiRouter` (`server/api/index.ts`), donc avant les routeurs de `server/api` et ceux de `routes.ts` : un segment entièrement numérique au-delà de `MAX_DB_INTEGER_ID` (`server/lib/route-id.ts`) répond 400 sans toucher à la base. Le segment est décodé, puis son entier de tête est comparé à la borne : `parseInt` lit aussi une forme encodée, signée, décimale ou suivie de lettres, et une première version qui n'examinait que les segments entièrement numériques laissait ces formes en 500.
+- **Reste ouvert** : un id hors plage passé en paramètre de requête ou dans le corps n'est pas couvert par ce filet, qui ne lit que le chemin ; ces lectures passent à `parseRouteId` au fil des routes (cliquet `route-id-parse-hygiene`).
+- **Prévention vérifiable** : `tests/contract/route-id-range-guard.contract.test.ts` (rouge sans le montage, puis rouge sur les formes lues par `parseInt` avant leur prise en compte), `tests/unit/server/route-id-range-guard.test.ts`, règle R3 de `tests/unit/server/prefix-middleware-guardrail.test.ts` (montage sans préfixe, avant le premier routeur).
+- **Leçon généralisée** : une entrée qui provoque à coup sûr une erreur base se refuse avant la base, par un filet commun plutôt que route par route. Ce filet reproduit la lecture la plus permissive de l'entrée (ici `parseInt`), pas sa forme attendue.
+## 2026-11-05 — Compteur de verrouillage : écriture hors du verrou de clé, mise à jour perdue
+
+- **Contexte** : `tests/contract/auth-login-unavailable.contract.test.ts` échouait par intermittence en CI (« expected 2 to be 1 ») : un seul mauvais mot de passe, juste après une connexion réussie, comptait deux échecs.
+- **Cause racine** : `DbLockoutStore.reserve` et `confirmFailure` lisent puis écrivent le compteur sous le verrou consultatif de la clé, mais `reset` (DELETE après un 2xx) et `release` (UPDATE après une 400/5xx) écrivaient sans ce verrou. Le garde lance ces écritures sur `finish` sans les attendre : le DELETE du succès précédent s'intercalait entre la lecture et l'upsert de la réservation suivante, qui réécrivait l'ancien compteur + 1. Le test dormait 500 ms au lieu d'attendre la fin de ces écritures.
+- **Classification** : concurrence (mise à jour perdue), plus attente fixe dans un test.
+- **Résolution** : `reset` et `release` passent par `underKeyLock`, la même transaction sous verrou de clé que les lectures-écritures. Le contrat attend l'état stable du garde (compteur stocké = miroir `users`) avant de lire et après chaque connexion, au lieu d'un délai fixe.
+- **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts` (« reset » et « release » attendent le verrou de la clé tenu par une autre transaction, rouges avant le correctif).
+- **Leçon généralisée** : un verrou consultatif ne protège que les écritures qui le prennent. Quand un état est lu puis réécrit sous verrou, toute autre écriture du même état passe par ce verrou, y compris les DELETE et les décréments « atomiques ». Dans un test, attendre une condition observable plutôt qu'un délai.
+## 2026-11-05 — Cloison client : l'étranger et l'inexistant se répondent à l'identique (complète #255)
+
+### Contexte
+- Un client qui ouvre le véhicule d'un autre reçoit 403. Sur deux routes seulement (`GET /api/vehicles/:id`, téléchargement d'un document), un identifiant absent répondait 404 avec un autre message : le client pouvait distinguer « existe chez un autre » de « n'existe pas » et parcourir les identifiants séquentiels.
+- Les dix autres routes passent par `canAccessOwned`, qui refuse déjà un propriétaire absent : même 403, même message.
+
+### Cause racine
+- Classification : cohérence manquante entre routes d'une même cloison. Les routes plus anciennes avaient leur propre contrôle d'existence avant la cloison, et aucun test ne comparait les deux cas.
+
+### Résolution
+- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner). Exception : `GET /api/vehicles/:id` garde son message historique « Accès non autorisé à ce véhicule » (absent comme étranger), que l'e2e 24 attend et que l'écran affiche ; le contrat le fige.
+- Ne renverse pas #255 : le 403 reste celui que l'écran lit comme « Accès refusé ». Un client qui saisit un identifiant absent lit donc aussi « Accès refusé », par choix assumé pour ne rien révéler.
+
+### Prévention (vérifiable)
+- `tests/contract/client-unknown-vs-foreign.contract.test.ts` : pour huit routes véhicule et le téléchargement de document, compare statut, message et code de la réponse « autre client » et de la réponse « identifiant absent ». Rouge sur main pour les deux routes concernées.
+
+### Règle Projet (obligatoire)
+- Toute route ouverte à un client se teste en comparant l'objet d'un autre client et un identifiant absent : les deux réponses doivent être identiques.
+
+## 2026-11-05 — Déverrouillage admin : dernière écriture du compteur hors du verrou de clé
+
+- **Contexte** : à la relecture du correctif précédent (`reset` et `release` passés sous le verrou de clé), on a constaté que `unlockUser` supprimait encore les compteurs sans prendre ce verrou. Même chose pour la remise à zéro du miroir `users` dans `reset`, faite après la transaction.
+- **Cause racine** : si l'admin déverrouille pendant une réservation en cours, celle-ci réécrit l'ancien compteur + 1, et le compte qu'on vient de débloquer garde ses échecs.
+- **Classification** : concurrence (mise à jour perdue). C'est un near miss : relevé en relecture, avant tout signalement.
+- **Résolution** : `underKeyLock` accepte plusieurs clés, verrouillées dans un ordre fixe. `unlockUser` remet à zéro le miroir et supprime les compteurs de toutes les clés du compte dans une même transaction sous ces verrous. `reset` fait de même pour son DELETE et le miroir.
+- **Reste ouvert** : le miroir `users` écrit après un échec confirmé (`confirmFailure`, `recordLock`) part encore après la transaction. Seul l'affichage admin est concerné, le compteur qui décide du blocage ne l'est pas. Le rentrer dans la transaction changerait le comportement en cas de panne : un miroir en échec annulerait la tentative comptée.
+- **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts`, cas « déverrouillage admin ». Il échoue sur le store d'origine et passe après le correctif.
+- **Leçon généralisée** : quand on corrige une écriture hors verrou, recenser tous les écrivains du même état (`grep` de la table), pas seulement celui qui a déclenché l'incident.
+
+## 2026-11-05 — Main rouge : deux PR vertes chacune contre un main différent (#405 × #389)
+
+- **Contexte** : #405 ajoute une garde qui refuse en 400 « Identifiant invalide. » tout segment numérique de route au-delà de l'int4. #389 (lot 9 des ids stricts) ajoute un contrat qui attend, pour `99999999999`, le message propre à chaque route (« ID de pièce invalide », « ID de véhicule invalide »). Chacune a eu une CI verte, puis les deux ont été fusionnées : main est devenu rouge sur 2 cas de `route-id-strict-lot9.contract.test.ts`.
+- **Cause racine** : la CI de chaque PR a tourné contre un main qui ne contenait pas l'autre. Aucune des deux n'a été rejouée contre le main qui contenait déjà la seconde au moment de sa fusion. Le contrat lot 10 (#391) se trouvait dans le même cas.
+- **Classification** : intégration (fusions croisées), faux vert de CI. Main a été cassé, sans effet en production.
+- **Résolution** : les contrats lot 9 et lot 10 importent `ROUTE_ID_OUT_OF_RANGE_MESSAGE` depuis `server/middleware/route-id-range-guard.ts` au lieu de recopier un texte.
+- **Prévention vérifiable** : les cas hors plage de `route-id-strict-lot9` et `route-id-strict-lot10` lisent la constante de la garde. Un changement de texte de la garde ne peut donc plus faire diverger ces contrats. Reste ouvert, à trancher par le circuit de fusion : exiger une branche à jour avec main avant fusion (protection « require branches to be up to date »), ou rejouer la CI après tout merge qui touche une surface partagée (middlewares montés sur `/api`, cliquets).
+- **Leçon généralisée** : une CI verte ne prouve que l'état « PR + main au moment du run ». Quand deux PR touchent le même comportement (ici la réponse à un id hors plage), la seconde à fusionner doit être rejouée contre un main qui contient la première. Un message d'erreur produit par une garde partagée se teste par sa constante, jamais par son texte recopié.

@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ROUTE_ID_OUT_OF_RANGE_MESSAGE } from "../../server/middleware/route-id-range-guard";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
@@ -18,7 +19,7 @@ const ids = createIdBag();
 const CASES: Array<[method: string, url: string, status: number, message: string]> = [
   ["PATCH", "/api/suppliers/1abc/rating", 400, "ID invalide"],
   ["PATCH", "/api/suppliers/abc/rating", 400, "ID invalide"],
-  ["PATCH", "/api/suppliers/99999999999/rating", 400, "ID invalide"],
+  ["PATCH", "/api/suppliers/99999999999/rating", 400, ROUTE_ID_OUT_OF_RANGE_MESSAGE],
   ["PATCH", "/api/suppliers/2147483000/rating", 404, "Fournisseur non trouvé"],
   ["POST", "/api/drivers/1abc/update-cpc", 400, "ID de chauffeur invalide"],
   ["GET", "/api/drivers/1abc/cpc-status", 400, "ID de chauffeur invalide"],

@@ -190,7 +190,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        className="h-8 w-8 text-primary"
+                        className="h-8 w-8 text-primary-text"
                         onClick={() => handleEditClick(user)}
                         title="Modifier"
                       >
@@ -199,7 +199,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        className="h-8 w-8 text-destructive"
+                        className="h-8 w-8 text-destructive-text"
                         onClick={() => handleDeleteClick(user)}
                         title="Supprimer"
                       >
@@ -220,7 +220,7 @@ export function UserTable({ users, isLoading }: UserTableProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center">
-              <AlertTriangle className="h-5 w-5 text-destructive mr-2" />
+              <AlertTriangle className="h-5 w-5 text-destructive-text mr-2" />
               Confirmer la suppression
             </DialogTitle>
             <DialogDescription>

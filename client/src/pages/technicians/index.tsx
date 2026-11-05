@@ -925,7 +925,7 @@ export default function TechniciansIndex() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center">
-              <AlertTriangle className="h-5 w-5 text-destructive mr-2" />
+              <AlertTriangle className="h-5 w-5 text-destructive-text mr-2" />
               Confirmer la suppression
             </DialogTitle>
             <DialogDescription>
