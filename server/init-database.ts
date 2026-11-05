@@ -1390,6 +1390,27 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
+    // Suivi des opérations clients (O1) : 1-1 avec missions.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS mission_operations (
+        id serial PRIMARY KEY,
+        mission_id integer NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+        trailer_vehicle_id integer REFERENCES vehicles(id),
+        container_number text,
+        bl_number text,
+        sector text,
+        loading_date timestamp,
+        departure_date timestamp,
+        return_date timestamp,
+        unloading_date timestamp,
+        goods_nature text,
+        comment text,
+        created_by integer REFERENCES users(id),
+        updated_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
     await applyLotRecetteSchema();
     await applyCdcSchema();
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de

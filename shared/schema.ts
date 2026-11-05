@@ -1363,6 +1363,26 @@ export const missions = pgTable("missions", {
   cancellationReason: text("cancellation_reason"),
 });
 
+// Suivi des opérations clients (O1) : une ligne par mission, colonnes de la feuille de suivi client.
+export const missionOperations = pgTable("mission_operations", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().unique().references(() => missions.id, { onDelete: "cascade" }),
+  trailerVehicleId: integer("trailer_vehicle_id").references(() => vehicles.id),
+  containerNumber: text("container_number"),
+  blNumber: text("bl_number"),
+  sector: text("sector"),
+  loadingDate: timestamp("loading_date"),
+  departureDate: timestamp("departure_date"),
+  returnDate: timestamp("return_date"),
+  unloadingDate: timestamp("unloading_date"),
+  goodsNature: text("goods_nature"),
+  comment: text("comment"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Table assignments - Affectation véhicule + chauffeur à une mission
 export const assignments = pgTable("assignments", {
   id: serial("id").primaryKey(),
@@ -1526,6 +1546,17 @@ export const insertClientSchema = createInsertSchema(clients).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertMissionOperationSchema = createInsertSchema(missionOperations).omit({
+  id: true,
+  missionId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type MissionOperation = typeof missionOperations.$inferSelect;
+export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
   id: true,

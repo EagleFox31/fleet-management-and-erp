@@ -30,6 +30,7 @@ export const FEATURE_FLAGS = {
   "fuel-anomalies": { level: "should", defaultEnabled: false, label: "Traitement des anomalies carburant" },
   "fuel-prices": { level: "should", defaultEnabled: false, label: "Prix du carburant daté" },
   "time-tracking": { level: "should", defaultEnabled: false, label: "Pointage" },
+  "operations-tracking": { level: "should", defaultEnabled: false, label: "Suivi des opérations clients" },
   "pending-invoices": { level: "should", defaultEnabled: false, label: "Factures en attente" },
   incidents: { level: "should", defaultEnabled: false, label: "Déclaration de panne" },
   "oil-change-prefill": { level: "should", defaultEnabled: false, label: "Intervalles de vidange préremplis" },
