@@ -139,7 +139,7 @@ export default function WorkshopManagerDashboard() {
         icon={<Wrench className="h-5 w-5" />}
         actions={
           <Link href="/maintenance/work-orders/new">
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer">
+            <Button size="sm" className="bg-success hover:bg-success text-white font-semibold rounded-xl shadow-xs gap-1.5 cursor-pointer">
               <Plus className="h-4 w-4" />
               Créer un OT
             </Button>
@@ -169,8 +169,8 @@ export default function WorkshopManagerDashboard() {
                   : `${maintenanceComplianceTotal} véhicules à jour`
             }
             icon={<CheckCircle2 className="h-4 w-4" />}
-            iconWrapperClassName={overdueMaintenance > 0 ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"}
-            valueClassName={overdueMaintenance > 0 ? "text-red-600" : undefined}
+            iconWrapperClassName={overdueMaintenance > 0 ? "bg-destructive/10 text-destructive-text" : "bg-success/10 text-success"}
+            valueClassName={overdueMaintenance > 0 ? "text-destructive-text" : undefined}
             onClick={() => setLocation("/maintenance/preventive")}
           />
           <KpiTile
@@ -179,8 +179,8 @@ export default function WorkshopManagerDashboard() {
             value={`${availabilityRate.toFixed(0)}%`}
             subValue={`${operationalVehicles}/${totalVehicles} opérationnels`}
             icon={<Truck className="h-4 w-4" />}
-            iconWrapperClassName={availabilityRate >= 70 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}
-            valueClassName={availabilityRate < 70 ? "text-red-600" : undefined}
+            iconWrapperClassName={availabilityRate >= 70 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive-text"}
+            valueClassName={availabilityRate < 70 ? "text-destructive-text" : undefined}
             onClick={() => setLocation("/vehicles")}
           />
           <KpiTile
@@ -188,8 +188,8 @@ export default function WorkshopManagerDashboard() {
             value={reorderAlertsCount}
             subValue={`${stockRiskCount} références sous seuil`}
             icon={<AlertTriangle className="h-4 w-4" />}
-            iconWrapperClassName={reorderAlertsCount > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
-            valueClassName={reorderAlertsCount > 0 ? "text-amber-600" : undefined}
+            iconWrapperClassName={reorderAlertsCount > 0 ? "bg-warning/10 text-warning-text" : "bg-gray-100 text-gray-400"}
+            valueClassName={reorderAlertsCount > 0 ? "text-warning-text" : undefined}
             onClick={() => setLocation("/inventory")}
           />
         </KpiGrid>
@@ -209,7 +209,7 @@ export default function WorkshopManagerDashboard() {
         {/* ========================================================================= */}
         <TabsContent value="workshop" className="space-y-5">
           {/* Bento Hero : Répartition de la Charge Atelier */}
-          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+          <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -219,7 +219,7 @@ export default function WorkshopManagerDashboard() {
                       <AlertTriangle className="h-3 w-3" /> Atelier à l'arrêt
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/30 flex items-center gap-1">
                       <Zap className="h-3 w-3" /> Atelier en activité
                     </span>
                   )}
@@ -244,12 +244,12 @@ export default function WorkshopManagerDashboard() {
                     title={`En attente: ${otEnAttente}`}
                   />
                   <div
-                    className="bg-amber-500 transition-all duration-300"
+                    className="bg-warning transition-all duration-300"
                     style={{ width: `${(otEnCours / otTotal) * 100}%` }}
                     title={`En cours: ${otEnCours}`}
                   />
                   <div
-                    className="bg-emerald-500 rounded-r-full transition-all duration-300"
+                    className="bg-success rounded-r-full transition-all duration-300"
                     style={{ width: `${(otTermines / otTotal) * 100}%` }}
                     title={`Terminés: ${otTermines}`}
                   />
@@ -269,16 +269,16 @@ export default function WorkshopManagerDashboard() {
                   desc: "Assignations en file",
                 },
                 {
-                  couleurBg: "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200/60 text-amber-700 dark:text-amber-300",
-                  dotColor: "bg-amber-500",
+                  couleurBg: "bg-warning/10 dark:bg-warning/20 border-warning/30 text-warning-text dark:text-warning-text",
+                  dotColor: "bg-warning",
                   libelle: "En cours & pièces",
                   valeur: otEnCours,
                   statut: "in_progress",
                   desc: "Interventions actives",
                 },
                 {
-                  couleurBg: "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/60 text-emerald-700 dark:text-emerald-300",
-                  dotColor: "bg-emerald-500",
+                  couleurBg: "bg-success/10 dark:bg-success/20 border-success/30 text-success dark:text-success",
+                  dotColor: "bg-success",
                   libelle: "Terminés",
                   valeur: otTermines,
                   statut: "completed",
@@ -304,8 +304,8 @@ export default function WorkshopManagerDashboard() {
             </div>
 
             {atelierArrete && (
-              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+              <div className="p-3 rounded-2xl bg-warning/15 border border-warning flex items-center gap-2 text-xs font-bold text-warning-text dark:text-warning-text">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" />
                 <span>Attention : Aucune intervention en cours alors que {otEnAttente} OT attendent d'être traités.</span>
               </div>
             )}
@@ -313,14 +313,14 @@ export default function WorkshopManagerDashboard() {
 
           {/* Grille 2 colonnes : Actions Rapides & Véhicules Critiques */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-emerald-600" /> Actions Rapides Atelier
+                  <Sparkles className="h-3.5 w-3.5 text-success" /> Actions Rapides Atelier
                 </p>
                 <div className="space-y-2">
                   <Link href="/maintenance/work-orders/new">
-                    <Button size="sm" className="w-full justify-between bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer">
+                    <Button size="sm" className="w-full justify-between bg-success hover:bg-success text-white rounded-xl cursor-pointer">
                       <span className="flex items-center gap-2">
                         <Plus className="h-4 w-4" /> Créer un ordre de travail
                       </span>
@@ -347,10 +347,10 @@ export default function WorkshopManagerDashboard() {
               </div>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Véhicules Critiques &amp; Retards
+                  <AlertTriangle className="h-3.5 w-3.5 text-warning-text" /> Véhicules Critiques &amp; Retards
                 </p>
                 <div className="space-y-2.5">
                   <div className="p-3 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200/60 flex items-center justify-between">
@@ -363,12 +363,12 @@ export default function WorkshopManagerDashboard() {
                     </span>
                   </div>
 
-                  <div className="p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 flex items-center justify-between">
+                  <div className="p-3 rounded-2xl bg-warning/10 dark:bg-warning/20 border border-warning/30 flex items-center justify-between">
                     <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-amber-900 dark:text-amber-300">Entretiens en Retard</span>
+                      <span className="text-xs font-bold text-warning-text dark:text-warning-text">Entretiens en Retard</span>
                       <span className="text-[11px] text-muted-foreground block">Échéances kilométriques dépassées</span>
                     </div>
-                    <span className="text-xl font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                    <span className="text-xl font-black text-warning-text dark:text-warning-text tabular-nums">
                       {overdueMaintenance}
                     </span>
                   </div>
@@ -378,9 +378,9 @@ export default function WorkshopManagerDashboard() {
           </div>
 
           {/* Graphique Statut Flotte */}
-          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+          <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
             <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-emerald-600" />
+              <BarChart3 className="h-4 w-4 text-success" />
               <span className="text-sm font-bold text-foreground">Disponibilité Globale du Parc Roulant</span>
             </div>
             <VehicleStatusChart />
@@ -430,8 +430,8 @@ export default function WorkshopManagerDashboard() {
                 value={`${stockRiskCount}/${totalStockParts}`}
                 subValue={`${lowStockCount} bas · ${outOfStockCount} épuisés`}
                 icon={<Package className="h-4 w-4" />}
-                iconWrapperClassName={stockRiskCount > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
-                valueClassName={stockRiskCount > 0 ? "text-red-600" : undefined}
+                iconWrapperClassName={stockRiskCount > 0 ? "bg-destructive/10 text-destructive-text" : "bg-gray-100 text-gray-400"}
+                valueClassName={stockRiskCount > 0 ? "text-destructive-text" : undefined}
               />
             )}
           </KpiGrid>
@@ -443,7 +443,7 @@ export default function WorkshopManagerDashboard() {
             </span>
             <div className="flex items-center gap-2">
               <Link href="/inventory">
-                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl gap-1.5 cursor-pointer">
+                <Button size="sm" className="bg-success hover:bg-success text-white rounded-xl gap-1.5 cursor-pointer">
                   <Package className="h-3.5 w-3.5" /> Catalogue Pièces
                 </Button>
               </Link>
@@ -456,7 +456,7 @@ export default function WorkshopManagerDashboard() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-blue-600" />
                 <span className="text-sm font-bold text-foreground">Top Pièces Consommées en Atelier</span>
@@ -464,9 +464,9 @@ export default function WorkshopManagerDashboard() {
               <PartsConsumptionChart />
             </div>
 
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-emerald-600" />
+                <TrendingUp className="h-4 w-4 text-success" />
                 <span className="text-sm font-bold text-foreground">Évolution de la Valeur du Stock</span>
               </div>
               <StockValueChart />
@@ -503,7 +503,7 @@ export default function WorkshopManagerDashboard() {
               value={`${teamCompletionRate.toFixed(0)}%`}
               subValue={`${teamCompletedWorkOrders.length}/${assignedWorkOrders.length}`}
               icon={<CheckCircle2 className="h-4 w-4" />}
-              iconWrapperClassName="bg-green-50 text-green-600"
+              iconWrapperClassName="bg-success/10 text-success"
             />
             <KpiTile
               data-testid="wm-team-kpi-average-load"
@@ -517,7 +517,7 @@ export default function WorkshopManagerDashboard() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Répartition des OT par Statut */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
               <div className="flex items-center gap-2">
                 <Gauge className="h-4 w-4 text-blue-600" />
                 <span className="text-sm font-bold text-foreground">Répartition des OT de l'Équipe</span>
@@ -526,8 +526,8 @@ export default function WorkshopManagerDashboard() {
                 {[
                   { label: "En attente", count: teamPendingWorkOrders.length, color: "bg-blue-500" },
                   { label: "En cours", count: teamInProgressWorkOrders.length, color: "bg-orange-500" },
-                  { label: "Attente pièces", count: teamAwaitingPartsWorkOrders.length, color: "bg-amber-500" },
-                  { label: "Terminés", count: teamCompletedWorkOrders.length, color: "bg-emerald-500" },
+                  { label: "Attente pièces", count: teamAwaitingPartsWorkOrders.length, color: "bg-warning" },
+                  { label: "Terminés", count: teamCompletedWorkOrders.length, color: "bg-success" },
                 ].map(({ label, count, color }) => (
                   <div key={label} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
@@ -546,7 +546,7 @@ export default function WorkshopManagerDashboard() {
             </div>
 
             {/* Charge détaillée par Technicien */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-purple-600" />
                 <span className="text-sm font-bold text-foreground">Charge de Travail par Technicien</span>
@@ -562,13 +562,13 @@ export default function WorkshopManagerDashboard() {
                           <UserCircle2 className="h-4 w-4 text-slate-400" />
                           {tech.name}
                         </span>
-                        <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                        <span className="text-[11px] font-extrabold text-success dark:text-success">
                           {tech.activeCount} OT actif(s)
                         </span>
                       </div>
                       <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-emerald-500"
+                          className="h-full rounded-full bg-success"
                           style={{ width: `${Math.min(100, (tech.activeCount / maxTechLoad) * 100)}%` }}
                         />
                       </div>
@@ -585,7 +585,7 @@ export default function WorkshopManagerDashboard() {
           </div>
 
           {/* Raccourcis Équipe */}
-          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+          <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Pilotage des Effectifs</p>
@@ -593,7 +593,7 @@ export default function WorkshopManagerDashboard() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link href="/technicians">
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl gap-1.5 cursor-pointer">
+                  <Button size="sm" className="bg-success hover:bg-success text-white rounded-xl gap-1.5 cursor-pointer">
                     <Users className="h-3.5 w-3.5" /> Fiches Techniciens
                   </Button>
                 </Link>
@@ -623,7 +623,7 @@ export default function WorkshopManagerDashboard() {
               value={cpcFormed}
               subValue={`/ ${cpcTotal} chauffeurs au total`}
               icon={<CheckCircle2 className="h-4 w-4" />}
-              iconWrapperClassName="bg-emerald-50 text-emerald-600"
+              iconWrapperClassName="bg-success/10 text-success"
             />
             <KpiTile
               data-testid="wm-kpi-cpc-to-form"
@@ -631,8 +631,8 @@ export default function WorkshopManagerDashboard() {
               value={cpcToTrain}
               subValue="Alertes échéances actives"
               icon={<AlertTriangle className="h-4 w-4" />}
-              iconWrapperClassName={cpcToTrain > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={cpcToTrain > 0 ? "text-amber-600" : undefined}
+              iconWrapperClassName={cpcToTrain > 0 ? "bg-warning/10 text-warning-text" : "bg-gray-100 text-gray-400"}
+              valueClassName={cpcToTrain > 0 ? "text-warning-text" : undefined}
             />
             <KpiTile
               data-testid="wm-kpi-cpc-not-formed"
@@ -640,13 +640,13 @@ export default function WorkshopManagerDashboard() {
               value={cpcNotFormed}
               subValue="Formation requise"
               icon={<XCircle className="h-4 w-4" />}
-              iconWrapperClassName={cpcNotFormed > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={cpcNotFormed > 0 ? "text-red-600" : undefined}
+              iconWrapperClassName={cpcNotFormed > 0 ? "bg-destructive/10 text-destructive-text" : "bg-gray-100 text-gray-400"}
+              valueClassName={cpcNotFormed > 0 ? "text-destructive-text" : undefined}
             />
           </KpiGrid>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-purple-600" />
                 <span className="text-sm font-bold text-foreground">Répartition des Certifications CPC</span>
@@ -659,7 +659,7 @@ export default function WorkshopManagerDashboard() {
 
           {/* Mise à jour CPC : réservée aux gestionnaires de chauffeurs (POST /api/drivers/:id/update-cpc) */}
           {canManageDrivers(user?.role) && (
-            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="p-5 rounded-3xl bg-card dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Mise à Jour des Certifications CPC</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Enregistrement rapide des dates de validité pour les chauffeurs</p>
@@ -681,7 +681,7 @@ export default function WorkshopManagerDashboard() {
                 <div className="text-center pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-muted-foreground">
                   Affichage des 6 premiers chauffeurs.{" "}
                   <Link href="/drivers">
-                    <span className="text-emerald-600 font-bold hover:underline cursor-pointer">Voir tous les conducteurs</span>
+                    <span className="text-success font-bold hover:underline cursor-pointer">Voir tous les conducteurs</span>
                   </Link>
                 </div>
               )}
