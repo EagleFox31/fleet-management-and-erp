@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
+import { MISSION_BUDGET_READ_ROLES } from "@shared/constants/roles";
 import {
   computeMissionBudget,
   isBudgetDateInWindow,
@@ -118,9 +119,19 @@ async function lockOpenMission(tx: Executor, missionId: number) {
   if ((MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(mission.status)) throw new AppError(409, CLOSED_MISSION);
 }
 
+/**
+ * Portée explicite : sans elle, `broadcastUpdate` ne diffuse rien (fermé par défaut). De L1 à L1e,
+ * l'événement partait sans portée et n'atteignait personne. Montants d'argent : lecteurs du budget seuls.
+ */
 function notify(budget: MissionBudget) {
   const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
-  broadcast?.("mission_budget_updated", { id: budget.id, missionId: budget.missionId, status: budget.status, budgetDate: budget.budgetDate });
+  broadcast?.("mission_budget_updated", {
+    id: budget.id,
+    missionId: budget.missionId,
+    status: budget.status,
+    budgetDate: budget.budgetDate,
+    scope: { type: "roles", roles: [...MISSION_BUDGET_READ_ROLES] },
+  });
 }
 
 /** Barème FDR (L1b) : destinations actives, par libellé. */
@@ -147,8 +158,9 @@ async function activeDestination(ex: Executor, id: number) {
   return row;
 }
 
-export async function listMissionBudgets(filter: { date?: string; status?: MissionBudgetStatus }): Promise<MissionBudget[]> {
+export async function listMissionBudgets(filter: { date?: string; status?: MissionBudgetStatus; missionId?: number }): Promise<MissionBudget[]> {
   const where: SQL[] = [];
+  if (filter.missionId !== undefined) where.push(eq(missionBudgets.missionId, filter.missionId));
   if (filter.date) where.push(eq(missionBudgets.budgetDate, filter.date));
   if (filter.status) where.push(eq(missionBudgets.status, filter.status));
   const rows = await db
