@@ -258,3 +258,41 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Audit sécurité** : rien de bloquant.
   - Mineur corrigé : `?period=constructor` répondait 500, parce qu'une clé héritée d'`Object.prototype` était lue. Les périodes passent désormais par une `Map`.
   - Hors périmètre : quatre listes restent ouvertes au propriétaire d'un véhicule retiré. Elles sont détaillées dans la leçon et proposées en L1c.
+
+## 2026-11-05T20:47:49+01:00 — Listes et agrégats rattachés au véhicule : véhicule retiré exclu pour le client (L1c)
+
+- **Quoi** : un client ne voit plus son véhicule retiré dans les listes et les agrégats. Le détail et les sous-ressources le cachaient déjà. Le personnel le voit toujours.
+  - `/api/vehicles/all-with-status`, `expired-docs`, `expiring-docs` et `document-stats`, via `vehicle-documentation-service`.
+  - `/api/vehicles/documents/all` : la réponse au client ne porte plus `filePath`. Le client télécharge par `/api/documents/:id/download`.
+  - `/api/vehicle-tires`.
+- **Comment** :
+  - un seul prédicat, `server/lib/client-vehicle-scope.ts` : `ownedLiveVehicles(ownerId)` pour les services qui reçoivent déjà `ownerScopeOf`, `clientVehicleScope(req.user)` pour les routes ;
+  - personnel : aucun filtre ; client : `owner_id` et `deleted_at IS NULL` ; sans session : 401 par `ownerScopeOf`.
+- **Exception documentée** (AGENTS.md §11, décision 0a) : la liste des OT garde les OT d'un véhicule retiré, même règle que le détail. Un commentaire dans `storage.getWorkOrdersByOwner` le rappelle.
+- **B7** : la garde véhicule de `/api/document-renewals/requests/:id/proof` est inerte, car `client` n'appartient pas à `DOCUMENT_RENEWAL_VIEWER_ROLES`. Le commentaire le dit. Le contrat vérifie que le client reçoit 403 et que le rôle n'est pas lecteur : il échoue si la liste s'ouvre, et il faudra alors écrire le contrat de cette garde.
+- **Pourquoi** : ce sont les quatre listes que l'audit de L1b a laissées hors périmètre. La règle est la même partout : liste, détail et sous-ressource.
+- **Preuve automatisée** :
+  - `tests/contract/retired-vehicle-lists-client-scope.contract.test.ts` (17 tests). Il prend trois véhicules : actif et retiré du propriétaire, actif d'un autre client. Il couvre :
+    - le balayage de 12 listes ouvertes au client, `check-alerts` compris : jamais le retiré, jamais le véhicule tiers, toujours l'actif quand il est semé ;
+    - les agrégats exacts : `document-stats`, `statistics/fleet`, `statistics/maintenance-compliance` ;
+    - `filePath` : absent pour le client, présent pour le personnel ;
+    - le personnel, qui voit toujours le retiré ;
+    - l'exception OT ;
+    - B7.
+  - Mutants : les 6 sont détectés.
+
+    | Mutant | Rouges |
+    |---|---|
+    | `isNull` retiré du prédicat | 6 |
+    | Service documentation sans le prédicat | 4 |
+    | `documents/all` sans le prédicat | 1 |
+    | `filePath` laissé au client | 1 |
+    | `vehicle-tires` sans le prédicat | 1 |
+    | `check-alerts` sans `deleted_at` | 1 |
+
+  - `npm run check` : 0 erreur.
+  - Contrats voisins (véhicules, documents, pneus, pleins, cloisons) : 64 fichiers, 884 tests verts. Unitaires : 2 984 verts.
+- **Audit sécurité** : OK, rien de bloquant. Mineurs traités :
+  - `check-alerts` et les deux statistiques étaient déjà filtrés, mais aucun test ne le figeait : ils sont ajoutés au contrat ;
+  - la note B7 dit maintenant qu'il faudra aussi cloisonner `GET /requests` et `/centers` avant d'ouvrir le rôle au client.
+  - Hors périmètre, dette existante : dans `GET /api/vehicle-tires` (`routes.ts`), le service avale ses erreurs. Pas joignable sans session, puisque `isAnyUser` passe avant.

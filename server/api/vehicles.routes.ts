@@ -7,6 +7,7 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { ownerScopeOf } from "../lib/client-scope";
+import { clientVehicleScope } from "../lib/client-vehicle-scope";
 import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from "../lib/driver-scope";
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
 import { moduleLogger } from "../lib/logger";
@@ -252,7 +253,7 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
       })
       .from(vehicleDocuments)
       .leftJoin(vehicles, eq(vehicleDocuments.vehicleId, vehicles.id))
-      .where(ownerId === null ? undefined : eq(vehicles.ownerId, ownerId))
+      .where(clientVehicleScope(req.user))
       .orderBy(vehicleDocuments.expiryDate);
 
     const now = new Date();
@@ -266,6 +267,11 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
         if (expiry < now) expiryStatus = "expired";
         else if (expiry <= in30Days) expiryStatus = "expiring";
         else expiryStatus = "valid";
+      }
+      // Le chemin disque ne sert qu'au serveur : un client télécharge par `/api/documents/:id/download`.
+      if (ownerId !== null) {
+        const { filePath: _filePath, ...visible } = doc;
+        return { ...visible, expiryStatus };
       }
       return { ...doc, expiryStatus };
     });

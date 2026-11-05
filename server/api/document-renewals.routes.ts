@@ -405,7 +405,10 @@ router.get("/requests/:id/proof", async (req, res, next) => {
     if (!row) {
       throw new AppError(404, "Demande introuvable");
     }
-    // Cloison client (AGENTS.md §11), véhicule retiré compris : sans effet tant que le client n'est pas lecteur, garde si la liste s'ouvre.
+    // Cloison client (AGENTS.md §11), véhicule retiré compris. Inerte aujourd'hui : `client` n'est pas dans
+    // DOCUMENT_RENEWAL_VIEWER_ROLES, la garde de rôle ci-dessus répond 403 avant. Elle prend effet si la liste
+    // s'ouvre au client ; retired-vehicle-lists-client-scope.contract.test.ts échoue alors. Avant d'ouvrir,
+    // cloisonner aussi `GET /requests` et `/centers` par `clientVehicleScope`, et écrire leur contrat.
     if (!(await canAccessOwned(req.user, async () => row.ownerId)) || !vehicleReadableBy(req.user?.role, row)) {
       throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
     }

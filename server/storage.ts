@@ -1409,6 +1409,7 @@ export class DatabaseStorage implements IStorage {
     offset?: number
   ): Promise<WorkOrderListResult> {
     // Était un bouchon renvoyant une liste vide : un client ne voyait aucun OT.
+    // Véhicules retirés compris, par exception (AGENTS.md §11) : même règle que le détail d'un OT.
     const conditions: SQL<unknown>[] = [eq(vehicles.ownerId, ownerId)];
     if (status) {
       conditions.push(eq(workOrders.status, status as WorkOrder["status"]));
