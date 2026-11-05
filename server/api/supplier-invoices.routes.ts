@@ -89,7 +89,7 @@ function broadcastSupplierInvoiceUpdate(
       action: data.action,
       triggeredBy: data.triggeredBy ?? null,
     },
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...INVOICE_READ_ROLES] },
   });
 }
 
