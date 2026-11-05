@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Calendar, Clock, Edit, MoreVertical, Plus, Trash2, Truck, Link } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { MaintenanceScheduleForm } from "@/components/maintenance/maintenance-schedule-form";
+import { getMaintenanceScheduleStatus } from "@/lib/maintenance-schedule-status";
 
 // Fonctions utilitaires
 function getFrequencyText(frequency: string, value: number) {
@@ -60,64 +61,6 @@ function getFrequencyText(frequency: string, value: number) {
 }
 
 // Status des maintenances préventives
-function getMaintenanceStatus(schedule: any) {
-  if (!schedule.isActive) {
-    return {
-      label: "Inactive",
-      color: "bg-slate-400 hover:bg-slate-500",
-    };
-  }
-
-  // Si basée sur la date
-  if (schedule.frequency !== "mileage" && schedule.scheduledDate) {
-    const nextDate = new Date(schedule.scheduledDate);
-    
-    // Calculer la prochaine date prévue
-    switch (schedule.frequency) {
-      case "daily":
-        nextDate.setDate(nextDate.getDate() + schedule.frequencyValue);
-        break;
-      case "weekly":
-        nextDate.setDate(nextDate.getDate() + schedule.frequencyValue * 7);
-        break;
-      case "monthly":
-        nextDate.setMonth(nextDate.getMonth() + schedule.frequencyValue);
-        break;
-      case "quarterly":
-        nextDate.setMonth(nextDate.getMonth() + schedule.frequencyValue * 3);
-        break;
-      case "yearly":
-        nextDate.setFullYear(nextDate.getFullYear() + schedule.frequencyValue);
-        break;
-    }
-
-    const today = new Date();
-    const daysUntil = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (daysUntil < 0) {
-      return {
-        label: "En retard",
-        color: "bg-red-500 hover:bg-red-600",
-      };
-    } else if (daysUntil < 15) {
-      return {
-        label: "À venir",
-        color: "bg-amber-500 hover:bg-amber-600",
-      };
-    } else {
-      return {
-        label: "Planifiée",
-        color: "bg-green-500 hover:bg-green-600",
-      };
-    }
-  }
-  
-  // Si basée sur le kilométrage, supposons que nous n'avons pas accès au kilométrage actuel
-  return {
-    label: "À vérifier",
-    color: "bg-blue-500 hover:bg-blue-600",
-  };
-}
 
 export default function MaintenanceSchedulesPage() {
   const { toast } = useToast();
@@ -188,12 +131,12 @@ export default function MaintenanceSchedulesPage() {
     // Filtre par onglet
     if (activeTab === "upcoming") {
       filtered = filtered.filter((schedule) => {
-        const status = getMaintenanceStatus(schedule);
+        const status = getMaintenanceScheduleStatus(schedule);
         return status.label === "À venir";
       });
     } else if (activeTab === "overdue") {
       filtered = filtered.filter((schedule) => {
-        const status = getMaintenanceStatus(schedule);
+        const status = getMaintenanceScheduleStatus(schedule);
         return status.label === "En retard";
       });
     } else if (activeTab === "mileage") {
@@ -295,7 +238,7 @@ export default function MaintenanceSchedulesPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredSchedules.map((schedule: any) => {
           const vehicle = findVehicle(schedule.vehicleId);
-          const status = getMaintenanceStatus(schedule);
+          const status = getMaintenanceScheduleStatus(schedule);
           return (
             <Card key={schedule.id} className={`${!schedule.isActive ? 'opacity-70' : ''}`}>
               <CardHeader className="pb-3">

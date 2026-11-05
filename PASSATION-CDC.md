@@ -104,3 +104,12 @@
 - #379 (réserves, branche locale c7-lag-reserves = fix/last-active-admin-guard + 1 commit 7782c78f, NON poussé) : (a) restauration imbriquée et cleanupCreated en finally, (c) LAG3 ignoré (describe.skipIf) si trg_users_keep_active_admin présent. Mesuré : sans trigger 15/15 verts, avec trigger 9 verts + 6 ignorés. Reste (b) journal docs/journal/api-last-admin-guard.md : le « rouge B » est faux (retirer le contrôle writableFinished/destroyed laisse unitaires 10/10 et contrat 15/15 verts) ; « rouge C » non défini pour moi, à demander à 0a ; puis pousser avec `git push origin HEAD:fix/last-active-admin-guard` (fast-forward, sans force) et prévenir 0a.
 - Piège : tests/integration/users-keep-active-admin.test.ts repose le trigger sur c7test ; le retirer (node drop via pg sur 55432) avant de lancer les contrats de #379.
 - Ensuite : complément #375 ; #376 (merge main). Worktrees de b7 : node_modules inutilisable, travailler depuis c7-backup via branche locale + push HEAD:branche.
+## 2026-11-05 — B1 garde de réservation OT : rôle avant lecture (fix/booking-guard-role-first, base main) ; état de session c7
+- Garde de réservation : contrôle de rôle (mêmes gardes que les routes d'écriture) avant la première lecture ; contrat client/chauffeur 403 rouge avant, vert après ; LESSONS ajoutée.
+- État : #373 mineurs poussés et fusionnés dans #375 ; #378 mineurs poussés (JSDoc, cas sans propriétaire) ; B1 à relire (« mr » envoyé).
+- À venir après fusion de #379 : compléter la garde toggle, voir #375.
+- Stack de test c7test à arrêter en fin de session ; chore/recensement-229 locale, en attente de l'utilisatrice.
+## 2026-11-05 — assertWorkOrderReadable : même réponse hors périmètre et inexistant (fix/work-order-scope-uniform-404, base main)
+- Un client sur l'OT d'un autre client recevait 403, sur un OT inexistant 404 : l'écart permettait d'énumérer les OT. Désormais 404, même message, dans les deux cas ; le personnel est inchangé.
+- Convention retenue : 404 pour les OT (écart assumé avec le 403 de `canAccessOwned` ailleurs), noté dans AGENTS §11 et dans le JSDoc du helper.
+- Contrats adaptés (a5-role-guards, work-order-detail-client-scope, work-order-reads-client-scope) : comparaison explicite statut, message et code avec un OT inexistant.

@@ -353,3 +353,78 @@ test.describe("DRV2 : espace chauffeur", () => {
     });
   });
 });
+
+/**
+ * Fiche chauffeur : mise à jour du CPC par un gestionnaire (logistique), avec un observateur d'un autre rôle.
+ * Le formulaire n'est pas proposé aux rôles que la route refuserait (direction : refusée par la route de la fiche).
+ */
+test.describe("DRV2-6 : fiche chauffeur, mise à jour du CPC", () => {
+  let target: Crew;
+  let logistics: E2ECredentials & { id: number };
+  let direction: E2ECredentials & { id: number };
+
+  test.beforeAll(async () => {
+    const client = await createTestClient({ name: token("CLI6") });
+    ids.clientIds.push(client.id);
+    target = await createCrew("F", client.id);
+    logistics = await createAccount("logistics", "LOGI");
+    direction = await createAccount("management", "DIR");
+  });
+
+  test("la logistique met à jour le CPC depuis la fiche, l'atelier reçoit la trame", async ({ browser }) => {
+    let frames: string[] = [];
+    const atelier = await openSession(browser, workshop, (page) => {
+      frames = captureFrames(page);
+    });
+    const manager = await openSession(browser, logistics);
+    try {
+      await atelier.goto("/maintenance/work-orders", { waitUntil: "domcontentloaded" });
+      await expect
+        .poll(() => frames.some((frame) => frame.includes("auth_success")), {
+          message: "la session atelier n'a pas ouvert la socket /ws",
+          timeout: 60_000,
+        })
+        .toBe(true);
+
+      await manager.goto(`/drivers/${target.driverId}`, { waitUntil: "domcontentloaded" });
+      await manager.getByRole("tab", { name: /Informations/ }).click();
+      await expect(manager.getByTestId(`btn-update-cpc-${target.driverId}`)).toBeVisible({ timeout: 60_000 });
+      await expect(manager.getByText("NON FORMÉ").first()).toBeVisible();
+
+      const today = new Date().toISOString().split("T")[0];
+      await manager.getByTestId(`input-cpc-date-${target.driverId}`).fill(today);
+      const [response] = await Promise.all([
+        manager.waitForResponse(
+          (r) => r.request().method() === "POST" && r.url().includes(`/api/drivers/${target.driverId}/update-cpc`),
+        ),
+        manager.getByTestId(`btn-update-cpc-${target.driverId}`).click(),
+      ]);
+      expect(response.status()).toBe(200);
+
+      // Preuve temps réel : une trame reçue par l'autre profil, que le polling ne peut pas produire.
+      await expect
+        .poll(() => frames.some((frame) => frame.includes("driver_cpc_updated") && frame.includes(`${target.driverId}`)), {
+          message: "trame driver_cpc_updated absente côté atelier",
+          timeout: 15_000,
+        })
+        .toBe(true);
+      // La fiche est rafraîchie par invalidation du détail.
+      await expect(manager.getByText("FORMÉ", { exact: true }).first()).toBeVisible();
+    } finally {
+      await atelier.context().close();
+      await manager.context().close();
+    }
+  });
+
+  test("la direction est refusée sur la fiche, sans formulaire", async ({ browser }) => {
+    const atelier = await openSession(browser, direction);
+    try {
+      await atelier.goto(`/drivers/${target.driverId}`, { waitUntil: "domcontentloaded" });
+      // La route /drivers/:id est réservée à DRIVER_MANAGER_ROLES : la direction n'atteint pas la fiche.
+      await expect(atelier.getByText("Accès refusé")).toBeVisible({ timeout: 60_000 });
+      await expect(atelier.getByTestId(`btn-update-cpc-${target.driverId}`)).toHaveCount(0);
+    } finally {
+      await atelier.context().close();
+    }
+  });
+});

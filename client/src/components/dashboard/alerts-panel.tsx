@@ -60,9 +60,9 @@ export function AlertsPanel({
   const getIconStyle = (priority: string): string => {
     switch (priority) {
       case "critical":
-        return "bg-warning/10 text-warning";
+        return "bg-warning/10 text-warning-text";
       case "high":
-        return "bg-warning/10 text-warning";
+        return "bg-warning/10 text-warning-text";
       case "medium":
         return "bg-secondary/10 text-secondary";
       case "low":

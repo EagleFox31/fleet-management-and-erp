@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { eq, like } from "drizzle-orm";
 import { db } from "../../server/db";
 import { users, workOrders } from "../../shared/schema";
-import { beat, loginThroughForm } from "./helpers";
+import { beat, loginThroughForm, logoutThroughUi } from "./helpers";
 import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_OT_PREFIX, DEMO_VEHICLES, seedDemo } from "./seed-demo";
 
 /**
@@ -53,21 +53,36 @@ test("démo chef d'atelier : créer, assigner, suivre un OT jusqu'à sa clôture
   // Assignation depuis la liste.
   await row.getByRole("button", { name: "Assigner" }).click();
   await page.getByRole("dialog").getByRole("combobox").click();
-  await page.getByRole("option", { name: new RegExp(DEMO_ACCOUNTS.technician.name) }).click();
+  await page.getByRole("option", { name: new RegExp(DEMO_ACCOUNTS.technicianBis.name) }).click();
   await beat(page);
   await page.getByRole("dialog").getByRole("button", { name: "Assigner" }).click();
-  const [tech] = await db.select({ id: users.id }).from(users).where(eq(users.username, DEMO_ACCOUNTS.technician.username));
+  const [tech] = await db.select({ id: users.id }).from(users).where(eq(users.username, DEMO_ACCOUNTS.technicianBis.username));
   await expect.poll(async () => (await workOrder()).technicianId, { timeout: 30_000 }).toBe(tech.id);
   await beat(page, 1500);
 
-  // Suivi : le détail de l'OT, démarrage puis clôture.
-  await row.getByRole("button", { name: "Voir OT" }).click();
-  await expect(page.getByTestId("button-start-work-order")).toBeVisible({ timeout: 30_000 });
-  await beat(page, 1800);
-  await page.getByTestId("button-start-work-order").click();
-  await beat(page, 800);
-  await page.getByRole("alertdialog").getByRole("button", { name: /Commencer|Démarrer|Confirmer/ }).click();
+  // Le technicien assigné démarre l'intervention (le chef ne démarre pas à sa place).
+  await logoutThroughUi(page, DEMO_ACCOUNTS.workshopManager.name);
+  await loginThroughForm(page, DEMO_ACCOUNTS.technicianBis.username, DEMO_ACCOUNTS.technicianBis.password);
+  await page.getByRole("link", { name: "Mes interventions" }).first().click();
+  await page.getByRole("tab", { name: /^En attente/ }).click();
+  const card = page.locator("div").filter({ hasText: TITLE }).filter({ has: page.locator('[data-help-target="tech-wo-start"]') }).last();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await beat(page, 1500);
+  await card.locator('[data-help-target="tech-wo-start"]').click();
+  const startDialog = page.getByRole("dialog", { name: "Commencer l'intervention" });
+  await expect(startDialog).toBeVisible();
+  await beat(page, 1200);
+  await startDialog.getByRole("button", { name: "Commencer l'intervention" }).click();
   await expect.poll(async () => (await workOrder()).status, { timeout: 30_000 }).toBe("in_progress");
+  await beat(page, 2000);
+
+  // Suivi : le chef retrouve l'OT en cours et le clôture.
+  await logoutThroughUi(page, DEMO_ACCOUNTS.technicianBis.name);
+  await loginThroughForm(page, DEMO_ACCOUNTS.workshopManager.username, DEMO_ACCOUNTS.workshopManager.password);
+  await page.getByRole("link", { name: "Ordres de travail" }).first().click();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.getByText(TITLE).click();
+  await expect(page).toHaveURL(/\/maintenance\/work-orders\/\d+/, { timeout: 30_000 });
   await expect(page.getByTestId("button-complete-work-order")).toBeVisible({ timeout: 30_000 });
   await beat(page, 2000);
   await page.getByTestId("button-complete-work-order").click();

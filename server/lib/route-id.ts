@@ -1,0 +1,21 @@
+import { AppError } from "./app-error";
+
+/** Plus grand id d'une colonne `integer` Postgres : au-delà, la base répondrait 500. */
+export const MAX_DB_INTEGER_ID = 2147483647;
+
+/**
+ * Identifiant lu dans l'URL (`req.params`) : chiffres seuls, entier de 1 à `MAX_DB_INTEGER_ID`,
+ * sinon `AppError(400, message)`. `parseInt("12abc")` vaudrait 12 et viserait un autre objet ;
+ * `Number("1e3")` ou `Number(" 7 ")` passeraient aussi. Seule lecture d'un id de route.
+ */
+export function parseRouteId(value: unknown, message: string): number {
+  const text = typeof value === "string" ? value : "";
+  const id = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(id) || id < 1 || id > MAX_DB_INTEGER_ID) {
+    throw new AppError(400, message);
+  }
+  return id;
+}
+
+/** Message commun aux routes qui lisent un id de mission (`missions`, `operations`). */
+export const MISSION_ID_INVALID_MESSAGE = "Identifiant de mission invalide.";
