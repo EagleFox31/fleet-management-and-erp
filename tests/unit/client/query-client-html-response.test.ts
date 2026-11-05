@@ -5,7 +5,10 @@ import { userMessageOf } from "@/lib/api-error";
 
 /** Une route /api qui répond du HTML ne doit pas montrer l'URL ni l'extrait à l'utilisateur. */
 describe("apiRequest : réponse HTML sur /api", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it("lève un message sans jargon et journalise le détail", async () => {
     vi.stubGlobal(
