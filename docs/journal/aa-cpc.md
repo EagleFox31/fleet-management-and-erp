@@ -32,3 +32,10 @@
 - Comment : `server/lib/mission-driver-cpc.ts`, `invalidateDriverCpcDependents` (client) pour la couche 3 (la synchro temps réel `driver_updated` et `driver_cpc_updated` invalide aussi le détail de mission), `buildDriverPatchPayload` : la fiche n'envoie `cpcTrainingDate` que si elle a changé.
 - Pourquoi : le tableau de bord logistique jugeait le CPC sur le statut seul, une formation expirée passait ; l'envoi systématique de la date réécrivait le statut CPC à chaque modification de fiche.
 - Tester : `tests/contract/mission-driver-cpc-eligibility.contract.test.ts` (8 échecs sur 11 sans le correctif), `tests/contract/drivers-input-validation.contract.test.ts` (4 échecs sur 6 sans le correctif).
+
+## 2026-11-05 — launch-readiness sans date CPC, code de raison exposé, ton de statut partagé
+
+- Quoi : `GET /api/missions/:id/launch-readiness` ne renvoie plus la raison datée du CPC (libellé fixe + `cpcIneligibleCode` sur la vérification `driver_cpc_valid`) ; un chauffeur (accès à la route) n'y lit que ses missions (403 sinon) et la checklist porte sur sa propre affectation. `cpcIneligibleCode` s'ajoute à `cpcIneligibleReason` sur les affectations. `cpcStatusTone` (shared) remplace les tables de couleurs par graphie de statut (fiche chauffeur, admin/users). Écran mission : sans verdict serveur, « Verdict CPC indisponible » (plus de repli sur le statut). Tableau de bord logistique : le blocage affiche la raison serveur. Date `0000-01-01` : 400 au lieu de 500. Les `res.status(500)` de `drivers-management.routes.ts` passent à `AppError`.
+- Comment : `driverScopeOf`, `canAccessMissionAsDriver` et `driverLiveAssignmentFilter` dans la route ; parcours récursif des clés JSON dans le contrat.
+- Pourquoi : la raison datée sortait vers tout le personnel, chauffeurs compris ; un repli client concluait à l'éligibilité sans verdict.
+- Tester : `tests/contract/mission-driver-cpc-eligibility.contract.test.ts` (3 échecs sur 15 sans le correctif), `tests/contract/mission-driver-cpc-status.contract.test.ts` (1 échec), `tests/contract/drivers-input-validation.contract.test.ts` (1 échec), `tests/unit/shared/driver-cpc-eligibility-codes.test.ts`.

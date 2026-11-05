@@ -43,8 +43,9 @@ const optionalDateField = z
   .refine((value) => value === null || /^\d{4}-\d{2}-\d{2}$/.test(value), {
     message: "Format de date invalide (YYYY-MM-DD)",
   })
-  // Bon format, jour inexistant (9999-99-99, 2026-02-30) : refusé ici, sinon la base le rejette en 500.
-  .refine((value) => value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value) || toExpiryDateOnly(value) === value, {
+  // Bon format, jour inexistant (9999-99-99, 2026-02-30) ou année 0000 (JavaScript l'accepte, Postgres non) :
+  // refusé ici, sinon la base le rejette en 500.
+  .refine((value) => value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value) || (!value.startsWith("0000-") && toExpiryDateOnly(value) === value), {
     message: DATE_IMPOSSIBLE_MESSAGE,
   });
 
@@ -136,7 +137,7 @@ function broadcastDriverUpdate(
 }
 
 // GET /api/drivers/me — Profil chauffeur de l'utilisateur connecté + ses missions
-router.get("/me", async (req, res) => {
+router.get("/me", async (req, res, next) => {
   try {
     const userId = req.session?.userId;
     if (!userId) return res.status(401).json({ message: "Non authentifié" });
@@ -186,11 +187,11 @@ router.get("/me", async (req, res) => {
     return res.status(200).json({ driver, missions: driverMissions });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Lecture du chauffeur connecté en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de charger votre fiche chauffeur.", { cause: error }));
   }
 });
 
-router.get("/:id/missions", async (req, res) => {
+router.get("/:id/missions", async (req, res, next) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) return res.status(400).json({ message: "ID de chauffeur invalide" });
@@ -224,7 +225,7 @@ router.get("/:id/missions", async (req, res) => {
     return res.status(200).json(rows);
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Lecture des missions du chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de charger les missions du chauffeur.", { cause: error }));
   }
 });
 
@@ -246,7 +247,7 @@ router.get("/:id", async (req, res, next) => {
 // affecte les chauffeurs aux missions et doit pouvoir enregistrer une arrivée,
 // la secrétaire tient les papiers. Restreindre la création à l'admin alors que
 // les trois peuvent déjà modifier n'importe quel champ ne protégeait rien.
-router.post("/", isDriverManager, async (req, res) => {
+router.post("/", isDriverManager, async (req, res, next) => {
   try {
     const parsed = createDriverSchema.parse(req.body);
     const cpcStatus = cpcTrainingService.calculateCPCStatus(parsed.cpcTrainingDate);
@@ -287,11 +288,11 @@ router.post("/", isDriverManager, async (req, res) => {
     }
 
     log.error({ err: error, requestId: req.requestId }, "Creation du chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de créer le chauffeur.", { cause: error }));
   }
 });
 
-router.patch("/:id", isDriverManager, async (req, res) => {
+router.patch("/:id", isDriverManager, async (req, res, next) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) {
@@ -373,11 +374,11 @@ router.patch("/:id", isDriverManager, async (req, res) => {
     }
 
     log.error({ err: error, requestId: req.requestId }, "Mise a jour du chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de mettre à jour le chauffeur.", { cause: error }));
   }
 });
 
-router.patch("/:id/toggle", isDriverManager, async (req, res) => {
+router.patch("/:id/toggle", isDriverManager, async (req, res, next) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) {
@@ -408,11 +409,11 @@ router.patch("/:id/toggle", isDriverManager, async (req, res) => {
     }
 
     log.error({ err: error, requestId: req.requestId }, "Bascule d'activation du chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de modifier l'activation du chauffeur.", { cause: error }));
   }
 });
 
-router.delete("/:id", isAdmin, async (req, res) => {
+router.delete("/:id", isAdmin, async (req, res, next) => {
   try {
     const driverId = parseDriverId(req.params.id);
     if (!driverId) {
@@ -437,7 +438,7 @@ router.delete("/:id", isAdmin, async (req, res) => {
     });
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Desactivation du chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de désactiver le chauffeur.", { cause: error }));
   }
 });
 
@@ -445,7 +446,7 @@ const DRIVER_ALREADY_LINKED = "Ce chauffeur a déjà un compte utilisateur";
 class DriverAlreadyLinkedError extends Error {}
 
 // POST /api/drivers/:id/create-user - Créer un compte utilisateur pour un chauffeur
-router.post("/:id/create-user", isAdmin, async (req, res) => {
+router.post("/:id/create-user", isAdmin, async (req, res, next) => {
   try {
     const driverId = parseInt(req.params.id, 10);
     const { pin, email } = req.body;
@@ -521,7 +522,7 @@ router.post("/:id/create-user", isAdmin, async (req, res) => {
       return res.status(409).json({ message: "Identifiant, email ou liaison utilisateur déjà utilisé" });
     }
     log.error({ err: error, requestId: req.requestId, driverId: req.params.id }, "Creation du compte chauffeur en echec");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(new AppError(500, "Impossible de créer le compte du chauffeur.", { cause: error }));
   }
 });
 

@@ -1,4 +1,4 @@
-import { getDriverCpcEligibility } from "../../shared/constants/driver-cpc-eligibility";
+import { getDriverCpcEligibility, type CpcIneligibleCode } from "../../shared/constants/driver-cpc-eligibility";
 
 /**
  * Éligibilité CPC d'un chauffeur affecté, calculée côté serveur pour les lectures de missions.
@@ -19,6 +19,9 @@ type DriverWithCpcInputs = {
 
 export interface DriverCpcVerdict {
   cpcEligible: boolean;
+  /** Motif stable (lu par les écrans et les contrats) ; null quand éligible. */
+  cpcIneligibleCode: CpcIneligibleCode | null;
+  /** Libellé fixe du motif, sans date. */
   cpcIneligibleReason: string | null;
 }
 
@@ -40,7 +43,12 @@ export function withDriverCpcVerdict<D extends DriverWithCpcInputs>(
     (driverScope === undefined || (typeof driver.id === "number" && driverScope.includes(driver.id)));
   if (!mayRead) return rest;
   const verdict = getDriverCpcEligibility({ cpcStatus: driver.cpcStatus, cpcTrainingDate }, today);
-  return { ...rest, cpcEligible: verdict.eligible, cpcIneligibleReason: verdict.eligible ? null : (verdict.label ?? null) };
+  return {
+    ...rest,
+    cpcEligible: verdict.eligible,
+    cpcIneligibleCode: verdict.eligible ? null : (verdict.code ?? null),
+    cpcIneligibleReason: verdict.eligible ? null : (verdict.label ?? null),
+  };
 }
 
 /** Applique `withDriverCpcVerdict` au `driver` de chaque affectation. */

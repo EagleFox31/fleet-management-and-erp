@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { cpcStatusTone, type CpcStatusTone } from "@shared/constants/driver-cpc-eligibility";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -126,10 +127,11 @@ const ROLE_COLORS: Record<string, string> = {
   user: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
-const CPC_COLORS: Record<string, string> = {
-  "FORMÉ": "bg-green-50 text-green-700 border border-green-200",
-  "À FORMER": "bg-amber-50 text-amber-700 border border-amber-200",
-  "NON FORMÉ": "bg-red-50 text-red-700 border border-red-200",
+const CPC_TONE_CLASSES: Record<CpcStatusTone, string> = {
+  success: "bg-green-50 text-green-700 border border-green-200",
+  warning: "bg-amber-50 text-amber-700 border border-amber-200",
+  danger: "bg-red-50 text-red-700 border border-red-200",
+  neutral: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
 function PresenceDot({ isOnline }: { isOnline?: boolean }) {
@@ -483,7 +485,7 @@ export default function UsersAdminPage() {
       header: "Statut CPC",
       cell: (d) => {
         const s = d.cpcStatus ?? "NON FORMÉ";
-        return <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", CPC_COLORS[s] ?? "bg-gray-100 text-gray-500 border border-gray-200")}>{s}</span>;
+        return <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", CPC_TONE_CLASSES[cpcStatusTone(s)])}>{s}</span>;
       },
     },
     {
