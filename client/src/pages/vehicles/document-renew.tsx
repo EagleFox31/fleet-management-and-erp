@@ -80,7 +80,7 @@ const DOC_LABELS: Record<VehicleDocumentType, string> = {
 const DOC_ICON_BG: Record<VehicleDocumentType, string> = {
   carte_grise:      "bg-blue-50 text-blue-600",
   assurance:        "bg-purple-50 text-purple-600",
-  visite_technique: "bg-amber-50 text-amber-600",
+  visite_technique: "bg-warning/10 text-warning-text",
   taxe:             "bg-orange-50 text-orange-600",
   autre:            "bg-gray-50 text-gray-600",
 };
@@ -93,10 +93,10 @@ const ASSIGN_OPTIONS = [
 ];
 
 const RENEWAL_STATUS: Record<string, { label: string; color: string }> = {
-  pending:     { label: "En attente",  color: "bg-amber-50 text-amber-700 border-amber-200" },
+  pending:     { label: "En attente",  color: "bg-warning/10 text-warning-text border-warning/30" },
   in_progress: { label: "En cours",   color: "bg-blue-50 text-blue-700 border-blue-200" },
-  completed:   { label: "Traité",     color: "bg-green-50 text-green-700 border-green-200" },
-  rejected:    { label: "Rejeté",     color: "bg-red-50 text-red-700 border-red-200" },
+  completed:   { label: "Traité",     color: "bg-success/10 text-success border-success/30" },
+  rejected:    { label: "Rejeté",     color: "bg-destructive/10 text-destructive-text border-destructive/30" },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -480,10 +480,10 @@ export default function VehicleDocumentRenewPage() {
   if (!isValidContext || !canRenew) {
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl overflow-hidden border border-red-100 shadow-sm bg-white">
-          <div className="h-0.5 bg-gradient-to-r from-red-400 to-rose-400" />
+        <div className="rounded-2xl overflow-hidden border border-destructive/20 shadow-sm bg-card">
+          <div className="h-0.5 bg-gradient-to-r from-destructive to-rose-400" />
           <div className="px-6 py-6 flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-red-600">
+            <div className="flex items-center gap-2 text-destructive-text">
               <AlertTriangle className="h-5 w-5" />
               <span className="font-semibold">{!isValidContext ? "Contexte invalide" : "Accès refusé"}</span>
             </div>
@@ -508,8 +508,8 @@ export default function VehicleDocumentRenewPage() {
     <div className="space-y-5 animate-in fade-in-0 slide-in-from-right-4 duration-300">
 
       {/* ── Header card ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
 
           {/* Back + Refresh */}
@@ -526,13 +526,13 @@ export default function VehicleDocumentRenewPage() {
           {/* Breadcrumb steps */}
           <div className="flex items-center gap-1.5 mb-4">
             <span className={cn("text-[11px] font-semibold px-2.5 py-1 rounded-full border",
-              step === 1 ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-400 border-gray-200"
+              step === 1 ? "bg-success/10 text-success border-success/30" : "bg-gray-50 text-gray-400 border-gray-200"
             )}>
               1 · Contexte
             </span>
             <ChevronRight className="h-3 w-3 text-gray-300" />
             <span className={cn("text-[11px] font-semibold px-2.5 py-1 rounded-full border",
-              step === 2 ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-400 border-gray-200"
+              step === 2 ? "bg-success/10 text-success border-success/30" : "bg-gray-50 text-gray-400 border-gray-200"
             )}>
               2 · Validation
             </span>
@@ -540,11 +540,11 @@ export default function VehicleDocumentRenewPage() {
 
           {/* Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center">
-              <FileCheck className="h-5 w-5 text-green-600" />
+            <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center">
+              <FileCheck className="h-5 w-5 text-success" />
             </div>
             <div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Renouvellement document</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-success">Renouvellement document</span>
               <h1 className="text-xl font-bold text-gray-900">Traiter le renouvellement</h1>
               <p className="text-[11px] text-gray-400 mt-0.5">
                 Source : {source === "documents_conformity" ? "Documents & Conformité" : "Détail véhicule"} — retour automatique après enregistrement
@@ -559,7 +559,7 @@ export default function VehicleDocumentRenewPage() {
 
         {/* ── Sidebar — Document ciblé ── */}
         <div className="lg:col-span-4 space-y-4">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
             <div className="h-0.5 bg-gradient-to-r from-blue-400 to-indigo-400" />
             <div className="px-5 py-4">
               <div className="flex items-center gap-2 mb-4">
@@ -574,7 +574,7 @@ export default function VehicleDocumentRenewPage() {
                   <Loader2 className="h-4 w-4 animate-spin" /> Chargement...
                 </div>
               ) : !selectedDocument ? (
-                <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700 flex items-center gap-2">
+                <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive-text flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Document introuvable pour ce véhicule.
                 </div>
@@ -596,7 +596,7 @@ export default function VehicleDocumentRenewPage() {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Expiration actuelle</p>
                     <p className={cn("text-[13px] font-semibold mt-0.5",
                       selectedDocument.expiryDate
-                        ? new Date(selectedDocument.expiryDate) < new Date() ? "text-red-600" : "text-gray-800"
+                        ? new Date(selectedDocument.expiryDate) < new Date() ? "text-destructive-text" : "text-gray-800"
                         : "text-gray-400"
                     )}>
                       {selectedDocument.expiryDate
@@ -611,12 +611,12 @@ export default function VehicleDocumentRenewPage() {
 
           {/* Demande liée */}
           {linkedRequest && (
-            <div className="rounded-2xl border border-amber-100 shadow-sm bg-white overflow-hidden">
-              <div className="h-0.5 bg-gradient-to-r from-amber-400 to-orange-400" />
+            <div className="rounded-2xl border border-warning/20 shadow-sm bg-card overflow-hidden">
+              <div className="h-0.5 bg-gradient-to-r from-warning to-orange-400" />
               <div className="px-5 py-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
-                    <ShieldCheck className="h-3.5 w-3.5 text-amber-500" />
+                  <div className="w-7 h-7 rounded-lg bg-warning/10 flex items-center justify-center">
+                    <ShieldCheck className="h-3.5 w-3.5 text-warning-text" />
                   </div>
                   <span className="text-sm font-semibold text-gray-800">Demande liée</span>
                 </div>
@@ -649,18 +649,18 @@ export default function VehicleDocumentRenewPage() {
 
         {/* ── Formulaire principal ── */}
         <div className="lg:col-span-8">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-            <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-success to-success" />
             <div className="px-5 py-5 md:px-6">
 
               {/* Titre step */}
               <div className="flex items-center gap-2 mb-5">
                 <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center",
-                  step === 1 ? "bg-green-50" : "bg-amber-50"
+                  step === 1 ? "bg-success/10" : "bg-warning/10"
                 )}>
                   {step === 1
-                    ? <FileText className="h-3.5 w-3.5 text-green-600" />
-                    : <CalendarDays className="h-3.5 w-3.5 text-amber-600" />
+                    ? <FileText className="h-3.5 w-3.5 text-success" />
+                    : <CalendarDays className="h-3.5 w-3.5 text-warning-text" />
                   }
                 </div>
                 <div>
@@ -677,15 +677,15 @@ export default function VehicleDocumentRenewPage() {
                   {/* Commentaire */}
                   <div className="space-y-1.5">
                     <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide">
-                      Motif / commentaire <span className="text-red-500">*</span>
+                      Motif / commentaire <span className="text-destructive-text">*</span>
                     </Label>
                     <Textarea
                       placeholder="Ex: Visite technique effectuée ce jour au centre agréé."
-                      className="resize-none min-h-[80px] text-sm rounded-xl border-gray-200 focus:border-green-400"
+                      className="resize-none min-h-[80px] text-sm rounded-xl border-gray-200 focus:border-success"
                       value={form.comment}
                       onChange={(e) => updateField("comment", e.target.value)}
                     />
-                    <p className={cn("text-[10px]", form.comment.trim().length < 3 && form.comment.length > 0 ? "text-red-400" : "text-gray-400")}>
+                    <p className={cn("text-[10px]", form.comment.trim().length < 3 && form.comment.length > 0 ? "text-destructive-text" : "text-gray-400")}>
                       {form.comment.trim().length}/3 caractères minimum
                     </p>
                   </div>
@@ -711,7 +711,7 @@ export default function VehicleDocumentRenewPage() {
 
                     <div className="space-y-1.5">
                       <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-1.5">
-                        <Building2 className="h-3 w-3" /> Centre agréé <span className="text-red-500">*</span>
+                        <Building2 className="h-3 w-3" /> Centre agréé <span className="text-destructive-text">*</span>
                       </Label>
                       <Select value={centerSelection || "none"} onValueChange={(v) => setCenterSelection(v === "none" ? "" : v)}>
                         <SelectTrigger className="rounded-xl border-gray-200 text-sm">
@@ -736,7 +736,7 @@ export default function VehicleDocumentRenewPage() {
                       </p>
                       <div className="mt-1 flex items-center justify-between gap-3">
                         <p className="text-sm font-medium text-gray-800">{selectedCenter.name}</p>
-                        <span className="inline-flex items-center rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                        <span className="inline-flex items-center rounded-full border border-blue-200 bg-card px-2.5 py-1 text-[11px] font-semibold text-blue-700">
                           Agrément: {selectedCenter.accreditationNumber}
                         </span>
                       </div>
@@ -745,14 +745,14 @@ export default function VehicleDocumentRenewPage() {
 
                   {/* Nouveau centre */}
                   {centerSelection === "__new__" && (
-                    <div className="rounded-xl border border-green-100 bg-green-50/40 p-4 space-y-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-green-800">
+                    <div className="rounded-xl border border-success/20 bg-success/10 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-success">
                         <Building2 className="h-4 w-4" /> Nouveau centre agréé
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="space-y-1.5 md:col-span-2">
                           <Label className="text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
-                            Nom du centre <span className="text-red-500">*</span>
+                            Nom du centre <span className="text-destructive-text">*</span>
                           </Label>
                           <Input
                             placeholder="Ex: Centre Auto Contrôle Bonabéri"
@@ -806,7 +806,7 @@ export default function VehicleDocumentRenewPage() {
 
                   <div className="space-y-1.5 max-w-xs">
                     <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-1.5">
-                      <CalendarDays className="h-3 w-3" /> Nouvelle date d'expiration <span className="text-red-500">*</span>
+                      <CalendarDays className="h-3 w-3" /> Nouvelle date d'expiration <span className="text-destructive-text">*</span>
                     </Label>
                     <Input
                       type="date"
@@ -815,7 +815,7 @@ export default function VehicleDocumentRenewPage() {
                       onChange={(e) => updateField("newExpiryDate", e.target.value)}
                     />
                     {form.newExpiryDate && (
-                      <p className="text-[11px] text-green-600 font-medium">
+                      <p className="text-[11px] text-success font-medium">
                         {format(new Date(form.newExpiryDate), "dd MMMM yyyy", { locale: fr })}
                       </p>
                     )}
@@ -825,7 +825,7 @@ export default function VehicleDocumentRenewPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-1.5">
                         <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide">
-                          Référence visite technique <span className="text-red-500">*</span>
+                          Référence visite technique <span className="text-destructive-text">*</span>
                         </Label>
                         <Input
                           placeholder="Ex: VT-2026-00421"
@@ -836,7 +836,7 @@ export default function VehicleDocumentRenewPage() {
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide">
-                          Date de visite <span className="text-red-500">*</span>
+                          Date de visite <span className="text-destructive-text">*</span>
                         </Label>
                         <Input
                           type="date"
@@ -847,7 +847,7 @@ export default function VehicleDocumentRenewPage() {
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide">
-                          Nom inspecteur <span className="text-red-500">*</span>
+                          Nom inspecteur <span className="text-destructive-text">*</span>
                         </Label>
                         <Input
                           placeholder="Ex: M. Ekani Pierre"
@@ -872,19 +872,19 @@ export default function VehicleDocumentRenewPage() {
 
                   <div className="space-y-1.5 max-w-lg">
                     <Label className="text-[12px] font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-1.5">
-                      <FileUp className="h-3 w-3" /> Justificatif (PDF/Image) <span className="text-red-500">*</span>
+                      <FileUp className="h-3 w-3" /> Justificatif (PDF/Image) <span className="text-destructive-text">*</span>
                     </Label>
                     <Input
                       type="file"
                       accept=".pdf,image/png,image/jpeg,image/jpg,image/webp"
-                      className="rounded-xl border-gray-200 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-green-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-green-700"
+                      className="rounded-xl border-gray-200 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-success/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-success"
                       onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
                     />
                     <p className="text-[10px] text-gray-400">
                       Obligatoire. Formats acceptés: PDF, JPG, PNG, WEBP (max 8 MB).
                     </p>
                     {proofFile && (
-                      <p className="text-[11px] text-green-700 font-medium">
+                      <p className="text-[11px] text-success font-medium">
                         Fichier sélectionné: {proofFile.name}
                       </p>
                     )}
@@ -924,19 +924,19 @@ export default function VehicleDocumentRenewPage() {
                       <>
                         <div className="px-4 py-2.5 flex items-center justify-between">
                           <span className="text-[11px] text-gray-500">Référence visite</span>
-                          <span className={cn("text-[12px]", form.visitReference ? "text-gray-700" : "text-red-600")}>
+                          <span className={cn("text-[12px]", form.visitReference ? "text-gray-700" : "text-destructive-text")}>
                             {form.visitReference || "Manquante"}
                           </span>
                         </div>
                         <div className="px-4 py-2.5 flex items-center justify-between">
                           <span className="text-[11px] text-gray-500">Date visite</span>
-                          <span className={cn("text-[12px]", form.visitDate ? "text-gray-700" : "text-red-600")}>
+                          <span className={cn("text-[12px]", form.visitDate ? "text-gray-700" : "text-destructive-text")}>
                             {form.visitDate || "Manquante"}
                           </span>
                         </div>
                         <div className="px-4 py-2.5 flex items-center justify-between">
                           <span className="text-[11px] text-gray-500">Nom inspecteur</span>
-                          <span className={cn("text-[12px]", form.inspectorName ? "text-gray-700" : "text-red-600")}>
+                          <span className={cn("text-[12px]", form.inspectorName ? "text-gray-700" : "text-destructive-text")}>
                             {form.inspectorName || "Manquant"}
                           </span>
                         </div>
@@ -948,7 +948,7 @@ export default function VehicleDocumentRenewPage() {
                     )}
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-[11px] text-gray-500">Justificatif</span>
-                      <span className={cn("text-[12px]", proofFile ? "text-green-700 font-medium" : "text-red-600")}>
+                      <span className={cn("text-[12px]", proofFile ? "text-success font-medium" : "text-destructive-text")}>
                         {proofFile ? proofFile.name : "Manquant"}
                       </span>
                     </div>
@@ -982,7 +982,7 @@ export default function VehicleDocumentRenewPage() {
                     <Button
                       onClick={handleSubmit}
                       disabled={quickRenewMutation.isPending || !proofFile || !isRenewableType(selectedDocument?.type ?? "autre")}
-                      className="gap-2 bg-green-600 hover:bg-green-700"
+                      className="gap-2 bg-success hover:brightness-90"
                     >
                       {quickRenewMutation.isPending ? (
                         <><Loader2 className="h-4 w-4 animate-spin" /> Enregistrement...</>
