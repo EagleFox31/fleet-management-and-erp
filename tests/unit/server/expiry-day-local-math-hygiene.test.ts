@@ -88,11 +88,9 @@ const FROZEN_MAINTENANCE = new Set<string>([
   "client/src/components/vehicles/vehicle-health-score.tsx",
   "client/src/pages/maintenance/preventive.tsx",
   "client/src/pages/technician/fleet-status.tsx",
-  "client/src/services/maintenanceService.ts",
   "server/api/vehicles.routes.ts",
   "server/routes.ts",
   "server/services/alert-service.ts",
-  "server/services/preventive-maintenance-service.ts",
 ]);
 
 function maintenanceOffenders(): string[] {

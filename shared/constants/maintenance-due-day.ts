@@ -39,3 +39,10 @@ export function maintenanceDaysUntil(
   const due = nextMaintenanceDueDateOnly(schedule.scheduledDate, schedule.frequency, schedule.frequencyValue);
   return due === null ? null : daysBetweenDateOnly(due, todayUtcDateOnly(now));
 }
+
+/** Jours calendaires (UTC, valeur absolue) entre la date prévue et la date de réalisation. `0` si l'une est illisible. */
+export function maintenanceElapsedDays(scheduledDate: string | Date | null | undefined, completedDate: string | Date | null | undefined): number {
+  const a = toExpiryDateOnly(scheduledDate);
+  const b = toExpiryDateOnly(completedDate);
+  return a === null || b === null ? 0 : Math.abs(daysBetweenDateOnly(a, b));
+}
