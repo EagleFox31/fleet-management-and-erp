@@ -624,6 +624,115 @@ EXCEPTION WHEN lock_not_available OR unique_violation THEN
 END $$;`;
 
 /**
+ * Lot Q1 (drapeau qhse) : contrôles inopinés QHSE. Doit rester identique à
+ * server/db/migrations/20261105_qhse_inspections.sql : tests/unit/server/qhse-inspections-schema.test.ts
+ * compare les deux. Semis des critères cités par le document QHSE, par code, sans jamais réécrire un critère
+ * existant.
+ */
+export const QHSE_INSPECTIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS qhse_inspection_criteria (
+  id serial PRIMARY KEY,
+  code text NOT NULL CONSTRAINT qhse_inspection_criteria_code_key UNIQUE,
+  label text NOT NULL CONSTRAINT qhse_inspection_criteria_label_check CHECK (length(btrim(label)) > 0),
+  category text NOT NULL CONSTRAINT qhse_inspection_criteria_category_check CHECK (category IN ('cabin', 'stop')),
+  active boolean NOT NULL DEFAULT true,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS qhse_inspections (
+  id serial PRIMARY KEY,
+  kind text NOT NULL CONSTRAINT qhse_inspections_kind_check CHECK (kind IN ('cabin', 'stop')),
+  inspected_at timestamp NOT NULL DEFAULT now(),
+  location text NOT NULL CONSTRAINT qhse_inspections_location_check CHECK (length(btrim(location)) > 0),
+  vehicle_id integer NOT NULL REFERENCES vehicles(id),
+  driver_id integer NOT NULL REFERENCES drivers(id),
+  inspector_id integer NOT NULL REFERENCES users(id),
+  items jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT qhse_inspections_items_check CHECK (jsonb_typeof(items) = 'array'),
+  general_observation text,
+  created_by integer REFERENCES users(id),
+  updated_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_driver ON qhse_inspections (driver_id, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_qhse_inspections_vehicle ON qhse_inspections (vehicle_id);
+
+DO $$
+DECLARE
+  c record;
+  existing text;
+BEGIN
+  -- Tables déjà créées sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('qhse_inspection_criteria', 'qhse_inspection_criteria_label_check', 'CHECK (length(btrim(label)) > 0)'),
+    ('qhse_inspection_criteria', 'qhse_inspection_criteria_category_check', 'CHECK (category IN (''cabin'', ''stop''))'),
+    ('qhse_inspections', 'qhse_inspections_kind_check', 'CHECK (kind IN (''cabin'', ''stop''))'),
+    ('qhse_inspections', 'qhse_inspections_location_check', 'CHECK (length(btrim(location)) > 0)'),
+    ('qhse_inspections', 'qhse_inspections_items_check', 'CHECK (jsonb_typeof(items) = ''array'')')
+  ) AS v(tbl, name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- Unicité du code sous le nom attendu : celle posée sous un autre nom (qhse_inspection_criteria_code_unique
+  -- d'un push Drizzle antérieur) est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'qhse_inspection_criteria'::regclass
+                 AND conname = 'qhse_inspection_criteria_code_key') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'qhse_inspection_criteria'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'code'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE qhse_inspection_criteria RENAME CONSTRAINT %I TO qhse_inspection_criteria_code_key', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE qhse_inspection_criteria ADD CONSTRAINT qhse_inspection_criteria_code_key UNIQUE (code);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'qhse_inspection_criteria : codes en double, contrainte qhse_inspection_criteria_code_key non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes QHSE non réconciliées : verrou de table indisponible';
+END $$;
+
+INSERT INTO qhse_inspection_criteria (code, label, category, sort_order) VALUES
+  ('cabin_epi', 'Port des EPI', 'cabin', 10),
+  ('cabin_tenue_de_route', 'Tenue de route', 'cabin', 20),
+  ('cabin_telephone', 'Téléphone au volant', 'cabin', 30),
+  ('cabin_ceinture', 'Port de la ceinture', 'cabin', 40),
+  ('cabin_fumer_manger', 'Fumer ou manger au volant', 'cabin', 50),
+  ('cabin_cession_conduite', 'Cession de la conduite', 'cabin', 60),
+  ('cabin_passager', 'Passager à bord', 'cabin', 70),
+  ('cabin_exces_vitesse', 'Excès de vitesse', 'cabin', 80),
+  ('cabin_signalisation_verticale', 'Respect de la signalisation verticale', 'cabin', 90),
+  ('cabin_heures_conduite', 'Heures de conduite', 'cabin', 100),
+  ('stop_epi', 'Port des EPI', 'stop', 10),
+  ('stop_stationnement', 'Stationnement sur emplacement dédié', 'stop', 20),
+  ('stop_cales', 'Utilisation des cales', 'stop', 30),
+  ('stop_portieres', 'Fermeture des portières', 'stop', 40),
+  ('stop_signalisation_vehicule', 'Signalisation du véhicule', 'stop', 50),
+  ('stop_gardien', 'Présence d''un gardien', 'stop', 60)
+ON CONFLICT (code) DO NOTHING;`;
+
+/**
  * Clé de requête d'un plein de mission (rejeu sans second débit). Doit rester identique à
  * server/db/migrations/20261103_fuel_records_request_key.sql : tests/unit/server/fuel-records-request-key-schema.test.ts
  * compare les deux.
@@ -1089,6 +1198,13 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'idempotency_keys_state_check',
   'workshop_labor_rates_effective_from_key',
   'idempotency_keys_user_id_key_key',
+  // Posées par QHSE_INSPECTIONS_SQL (lot Q1), relues ici au même titre.
+  'qhse_inspection_criteria_code_key',
+  'qhse_inspection_criteria_label_check',
+  'qhse_inspection_criteria_category_check',
+  'qhse_inspections_kind_check',
+  'qhse_inspections_location_check',
+  'qhse_inspections_items_check',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -1204,6 +1320,8 @@ export async function initializeDatabase() {
     // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
+    // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
+    await pool.query(QHSE_INSPECTIONS_SQL);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
