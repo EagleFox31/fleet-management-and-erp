@@ -1,6 +1,8 @@
+import fs from "fs";
+import os from "os";
 import { join, resolve } from "path";
-import { describe, expect, it } from "vitest";
-import { isSafePathSegment, uploadedFileCandidates } from "../../../server/lib/uploaded-file";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { isSafePathSegment, realPathStaysInside, uploadedFileCandidates } from "../../../server/lib/uploaded-file";
 
 /**
  * Suppression d'un document de véhicule : le chemin vient de la base. On ne
@@ -60,5 +62,71 @@ describe("isSafePathSegment", () => {
     ["non texte", 42],
   ])("%s : refusé", (_label, value) => {
     expect(isSafePathSegment(value)).toBe(false);
+  });
+});
+
+/**
+ * Lien symbolique ou jonction sous `uploads/` qui mène hors de `uploads/` : refusé, même si le
+ * chemin stocké est lexicalement sous `uploads/`. Créer un lien de fichier demande un droit sous
+ * Windows (mode développeur ou admin) : le cas est alors sauté avec sa raison ; la jonction de
+ * dossier n'en demande pas et reste jouée partout.
+ */
+describe("uploadedFileCandidates : liens résolus", () => {
+  let tmp = "";
+  let uploads = "";
+  let outside = "";
+  let fileLink: string | null = null;
+
+  beforeAll(() => {
+    tmp = fs.mkdtempSync(join(os.tmpdir(), "fleet-realpath-"));
+    uploads = join(tmp, "uploads");
+    outside = join(tmp, "outside");
+    fs.mkdirSync(join(uploads, "docs"), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(join(outside, "secret.txt"), "secret");
+    fs.writeFileSync(join(uploads, "docs", "a.pdf"), "pdf");
+    fs.symlinkSync(outside, join(uploads, "dir-link"), "junction");
+    try {
+      fs.symlinkSync(join(outside, "secret.txt"), join(uploads, "file-link.txt"), "file");
+      fs.symlinkSync(join(uploads, "docs", "a.pdf"), join(uploads, "inner-link.pdf"), "file");
+      fileLink = "ok";
+    } catch (error) {
+      fileLink = null;
+      expect((error as NodeJS.ErrnoException).code).toMatch(/^(EPERM|EACCES)$/);
+    }
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("fichier réel sous uploads/ : conservé", () => {
+    expect(uploadedFileCandidates("/uploads/docs/a.pdf", tmp)).toEqual([join(uploads, "docs", "a.pdf")]);
+  });
+
+  it("jonction de dossier sous uploads/ qui mène dehors : refusée", () => {
+    expect(uploadedFileCandidates("/uploads/dir-link/secret.txt", tmp)).toEqual([]);
+  });
+
+  it("lien de fichier sous uploads/ qui mène dehors : refusé", (ctx) => {
+    if (!fileLink) ctx.skip("création de lien symbolique de fichier refusée par l'OS (droit absent)");
+    expect(uploadedFileCandidates("/uploads/file-link.txt", tmp)).toEqual([]);
+  });
+
+  it("lien de fichier qui reste sous uploads/ : conservé", (ctx) => {
+    if (!fileLink) ctx.skip("création de lien symbolique de fichier refusée par l'OS (droit absent)");
+    expect(uploadedFileCandidates("/uploads/inner-link.pdf", tmp)).toEqual([join(uploads, "inner-link.pdf")]);
+  });
+
+  it("fichier absent : la comparaison lexicale suffit (rien à lire ni supprimer)", () => {
+    expect(uploadedFileCandidates("/uploads/docs/absent.pdf", tmp)).toEqual([join(uploads, "docs", "absent.pdf")]);
+  });
+
+  it("uploads/ lui-même monté par jonction : ses fichiers restent valides", () => {
+    const mounted = join(tmp, "mounted");
+    fs.mkdirSync(mounted);
+    fs.symlinkSync(uploads, join(mounted, "uploads"), "junction");
+    expect(realPathStaysInside(join(mounted, "uploads"), join(mounted, "uploads", "docs", "a.pdf"))).toBe(true);
+    expect(realPathStaysInside(join(mounted, "uploads"), join(mounted, "uploads", "dir-link", "secret.txt"))).toBe(false);
   });
 });

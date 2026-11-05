@@ -412,3 +412,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `usersWithSafeSecrets` (ex-`usersWithSafePins`) prépare PIN et mot de passe hors transaction ; `passwordForRestore` reprend bcrypt strict et SHA-256 hérité, hache un clair conforme, remplace le reste par un hash inutilisable avec `warn` (username seul).
 - **Pourquoi** : un mot de passe clair restauré était stocké en clair et le compte ne pouvait plus se connecter.
 - **Preuve** : contrat `backup-import-password` (clair → 200 au login, SHA-256 → 200 puis migré, trop court → 401), rouge sur le comportement de main (2 échecs, valeur stockée en clair) ; unitaire `user-password`.
+
+## 2026-11-05 — Fichiers téléversés : liens résolus
+- **Quoi** : `uploadedFileCandidates` refuse un candidat existant dont le chemin réel (liens et jonctions résolus) sort de `uploads/` (`realPathStaysInside`). Fichier absent : la comparaison lexicale suffit. `uploads/` monté par lien reste valide.
+- **Pourquoi** : risque résiduel de la revue §9 du 3 novembre ; la borne ne comparait que le chemin lexical.
+- **Preuve** : unitaire `uploaded-file` (jonction sortante refusée, rouge sur main ; lien de fichier sauté avec sa raison si l'OS refuse le droit de création).
