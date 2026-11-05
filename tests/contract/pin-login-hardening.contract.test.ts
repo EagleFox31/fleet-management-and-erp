@@ -19,8 +19,10 @@ import { leakText } from "../support/api-error";
  */
 
 const PIN = "4821";
-// Compteur propre à ce fichier : r8 emploie 999999999, dont les échecs s'accumulent d'un passage à l'autre.
+// Compteur propre à ce fichier, hors de la plage de r8 (999980001-999989000). Purgé avant et après :
+// sur une base locale réutilisée, un passage interrompu laisse son compteur en place.
 const UNKNOWN_ID = 999999001 + Math.floor(Math.random() * 900);
+const UNKNOWN_KEY = storedLockoutKey(`pin:${UNKNOWN_ID}`);
 const MAX = Number(process.env.LOCKOUT_MAX_ATTEMPTS) || 5;
 const settle = () => new Promise((r) => setTimeout(r, 150));
 
@@ -54,6 +56,7 @@ async function newAccount(opts: { role?: "driver" | "warehouse"; pin?: string | 
 const stable = (body: any) => ({ message: body?.message, code: body?.code });
 
 beforeAll(async () => {
+  await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = $1", [UNKNOWN_KEY]);
   server = createServer(await getContractApp());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
