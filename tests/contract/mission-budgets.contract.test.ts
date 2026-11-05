@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   dailyNeedResponseSchema,
@@ -13,9 +13,11 @@ import {
   missionDestinationsResponseSchema,
 } from "../../shared/contracts/mission-budgets";
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
-import { fuelPrices, missionBudgets, missionDestinations, missions } from "../../shared/schema";
+import { fuelPrices, missionBudgets, missionDestinations, missions, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { db } from "../../server/db";
-import { resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
+import { onMissionStatusChange, resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
+import { linkMissionBudgetDisbursement } from "../../server/services/treasury-links";
+import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -24,6 +26,8 @@ import { TEST_PREFIX } from "../support/ids";
 /** Niveau C, L1 : budget de mission (drapeau finance), rôles, calcul serveur, transitions, besoin du jour. */
 // Suite en isolate: false : le drapeau est posé puis restauré, sans fuir vers les autres fichiers.
 const previousFlags = process.env.FEATURE_FLAGS;
+/** Comptes de trésorerie créés par ce fichier (L1c). */
+const treasuryAccountIds: number[] = [];
 
 const ROLES = ["admin", "logistics", "management", "secretary", "technician", "driver", "client"] as const;
 // Date du fichier, dans la fenêtre de saisie (± 60 j) : le besoin du jour ne somme que les budgets de ce test.
@@ -91,6 +95,22 @@ const body = (missionId: number, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+/** Compte de trésorerie de test (L1c), supprimé en fin de fichier. */
+async function newTreasuryAccount(kind: "bank" | "cash" | "fuel_card", isActive = true): Promise<number> {
+  const [row] = await db
+    .insert(treasuryAccounts)
+    .values({
+      code: `${TEST_PREFIX}mb-${kind}-${isActive}-${Date.now()}-${treasuryAccountIds.length}`,
+      label: `${TEST_PREFIX} ${kind}`,
+      kind,
+      isActive,
+      createdBy: userIds.get("admin")!,
+    })
+    .returning({ id: treasuryAccounts.id });
+  treasuryAccountIds.push(row.id);
+  return row.id;
+}
+
 beforeAll(async () => {
   process.env.FEATURE_FLAGS = "finance=on";
   (global as any).broadcastUpdate = (event: string, data: unknown) => events.push({ event, data });
@@ -121,8 +141,10 @@ beforeAll(async () => {
 afterAll(async () => {
   if (missionIds.length) {
     await db.delete(missionBudgets).where(inArray(missionBudgets.missionId, missionIds));
+    await db.delete(treasuryEntries).where(inArray(treasuryEntries.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
+  if (treasuryAccountIds.length) await db.delete(treasuryAccounts).where(inArray(treasuryAccounts.id, treasuryAccountIds));
   if (destinationIds.length) await db.delete(missionDestinations).where(inArray(missionDestinations.id, destinationIds));
   if (previousPrice === null) await db.delete(fuelPrices).where(eq(fuelPrices.effectiveFrom, DAY));
   else await db.update(fuelPrices).set({ pricePerLiter: previousPrice }).where(eq(fuelPrices.effectiveFrom, DAY));
@@ -259,12 +281,12 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     expect(patched.status).toBe(200);
     expect(patched.body).toMatchObject({ fuelAmount: 91_150, totalAmount: 136_150, status: "requested" });
 
-    // La logistique n'approuve pas, la direction ne décaisse pas avant approbation.
+    // La logistique n'approuve pas et ne décaisse pas avant approbation.
     const v1 = seen(patched.body);
     for (const role of ["logistics", "secretary", "driver"]) {
       expect((await call("POST", missionBudgetApprovePath(created.id), role, v1)).status, role).toBe(403);
     }
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "management", v1)).status).toBe(409);
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "logistics", v1)).status).toBe(409);
     // Sans version lue : 400.
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", {})).status).toBe(400);
 
@@ -274,18 +296,19 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     expect((await call("POST", missionBudgetApprovePath(created.id), "management", seen(approved.body))).status).toBe(409);
     // Approuvé : plus de correction.
     expect((await call("PATCH", missionBudgetPath(created.id), "logistics", { fdrAmount: 1 })).status).toBe(409);
-    // La logistique ne décaisse pas.
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "logistics", seen(approved.body))).status).toBe(403);
+    // Qui approuve ne décaisse pas ; chauffeur, technicien et client non plus.
+    const bank = await newTreasuryAccount("bank");
+    for (const role of ["management", "technician", "driver", "client"]) {
+      expect((await call("POST", missionBudgetDisbursePath(created.id), role, { ...seen(approved.body), treasuryAccountId: bank })).status, role).toBe(403);
+    }
+    // Finance active : le compte source est obligatoire.
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved.body))).status).toBe(400);
 
-    const disbursed = await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved.body));
+    const disbursed = await call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(approved.body), treasuryAccountId: bank });
     expect(disbursed.status).toBe(200);
-    expect(disbursed.body).toMatchObject({
-      status: "disbursed",
-      disbursedBy: userIds.get("admin"),
-      updatedBy: userIds.get("admin"),
-      treasuryEntryId: null,
-    });
-    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", seen(disbursed.body))).status).toBe(409);
+    expect(disbursed.body).toMatchObject({ status: "disbursed", disbursedBy: userIds.get("admin"), updatedBy: userIds.get("admin") });
+    expect(disbursed.body.treasuryEntryId).toEqual(expect.any(Number));
+    expect((await call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(disbursed.body), treasuryAccountId: bank })).status).toBe(409);
   });
 
   it("approbation liée à la version lue : un budget corrigé depuis répond 409 et reste demandé", async () => {
@@ -305,9 +328,10 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
     const approved = missionBudgetSchema.parse(
       (await call("POST", missionBudgetApprovePath(created.id), "management", seen(created))).body,
     );
+    const bank = await newTreasuryAccount("bank");
     const results = await Promise.all([
-      call("POST", missionBudgetDisbursePath(created.id), "management", seen(approved)),
-      call("POST", missionBudgetDisbursePath(created.id), "admin", seen(approved)),
+      call("POST", missionBudgetDisbursePath(created.id), "logistics", { ...seen(approved), treasuryAccountId: bank }),
+      call("POST", missionBudgetDisbursePath(created.id), "admin", { ...seen(approved), treasuryAccountId: bank }),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
@@ -320,16 +344,16 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
 });
 
 describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
-  it("détail GET /:id : rôles de lecture 200, égal à la saisie ; autres 403 ; anonyme 401 ; inconnu 404 ; id non strict 400", async () => {
+  it("détail GET /:id : rôles de lecture (dont secrétariat, qui décaisse) 200, égal à la saisie ; autres 403 ; anonyme 401 ; inconnu 404 ; id non strict 400", async () => {
     const created = await call("POST", MISSION_BUDGETS_PATH, "logistics", body(await newMission()));
     expect(created.status).toBe(201);
     const path = missionBudgetPath(created.body.id);
-    for (const role of ["logistics", "management", "admin"]) {
+    for (const role of ["logistics", "management", "secretary", "admin"]) {
       const res = await call("GET", path, role);
       expect(res.status, role).toBe(200);
       expect(missionBudgetSchema.parse(res.body), role).toEqual(missionBudgetSchema.parse(created.body));
     }
-    for (const role of ["secretary", "technician", "driver", "client"]) {
+    for (const role of ["technician", "driver", "client"]) {
       expect((await call("GET", path, role)).status, role).toBe(403);
     }
     expect((await call("GET", path)).status).toBe(401);
@@ -339,11 +363,12 @@ describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
     }
   });
 
-  it("lecture : logistique, direction, administrateur ; 403 pour secrétariat, technicien, client", async () => {
-    for (const role of ["logistics", "management", "admin"]) {
+  it("lecture : logistique, direction, secrétariat (qui décaisse), administrateur ; 403 pour technicien, chauffeur, client", async () => {
+    for (const role of ["logistics", "management", "secretary", "admin"]) {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(200);
+      expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${DAY}`, role)).status, role).toBe(200);
     }
-    for (const role of ["secretary", "technician", "driver", "client"]) {
+    for (const role of ["technician", "driver", "client"]) {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(403);
       expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${DAY}`, role)).status, role).toBe(403);
     }
@@ -366,6 +391,73 @@ describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
   it("date absente ou illisible : 400", async () => {
     expect((await call("GET", MISSION_BUDGETS_DAILY_NEED_PATH, "management")).status).toBe(400);
     expect((await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=demain`, "management")).status).toBe(400);
+  });
+});
+
+describe("Besoin du jour : agrégation", { timeout: 120000 }, () => {
+  // Date propre à ce bloc : aucun autre cas n'y saisit de budget. `budget_date` est une date sans heure,
+  // comparée telle quelle : ni le fuseau du serveur ni celui d'Africa/Douala n'entrent dans le filtre.
+  const NEED_DAY = addDaysToIsoDate(TODAY, 41);
+  const needPath = (date: string) => `${MISSION_BUDGETS_DAILY_NEED_PATH}?date=${date}`;
+  const zero = { count: 0, fuelAmount: 0, fdrAmount: 0, extrasAmount: 0, totalAmount: 0 };
+
+  async function seed(budgetDate: string, status: "requested" | "approved" | "disbursed", fuel: string, fdr: string, extras: string, total: string) {
+    await db.insert(missionBudgets).values({
+      missionId: await newMission(),
+      budgetDate,
+      fuelLiters: "1",
+      fuelUnitPrice: fuel,
+      fuelAmount: fuel,
+      fdrAmount: fdr,
+      extrasAmount: extras,
+      totalAmount: total,
+      status,
+      createdBy: userIds.get("logistics")!,
+    });
+  }
+
+  beforeAll(async () => {
+    // Centimes qui dérivent en flottant (0,10 + 0,20) : la somme doit rester exacte.
+    await seed(NEED_DAY, "requested", "100.10", "0.20", "0.00", "100.30");
+    await seed(NEED_DAY, "requested", "0.20", "0.10", "0.05", "0.35");
+    await seed(NEED_DAY, "approved", "50000.00", "40000.00", "5000.00", "95000.00");
+    // Veille et lendemain : hors du besoin du jour.
+    await seed(addDaysToIsoDate(NEED_DAY, -1), "disbursed", "1000.00", "0.00", "0.00", "1000.00");
+    await seed(addDaysToIsoDate(NEED_DAY, 1), "requested", "1000.00", "0.00", "0.00", "1000.00");
+  }, 120000);
+
+  it("totaux exacts au centime, par statut ; statut sans budget à zéro ; veille et lendemain exclus", async () => {
+    const res = await call("GET", needPath(NEED_DAY), "logistics");
+    expect(res.status).toBe(200);
+    expect(dailyNeedResponseSchema.parse(res.body)).toEqual({
+      date: NEED_DAY,
+      count: 3,
+      fuelAmount: 50100.3,
+      fdrAmount: 40000.3,
+      extrasAmount: 5000.05,
+      totalAmount: 95100.65,
+      byStatus: {
+        requested: { count: 2, fuelAmount: 100.3, fdrAmount: 0.3, extrasAmount: 0.05, totalAmount: 100.65 },
+        approved: { count: 1, fuelAmount: 50000, fdrAmount: 40000, extrasAmount: 5000, totalAmount: 95000 },
+        disbursed: zero,
+      },
+    });
+  });
+
+  it("date sans budget : tous les statuts présents, à zéro", async () => {
+    const empty = addDaysToIsoDate(NEED_DAY, 3);
+    const res = await call("GET", needPath(empty), "admin");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ date: empty, ...zero, byStatus: { requested: zero, approved: zero, disbursed: zero } });
+  });
+
+  it.each([
+    ["date inexistante", "date=2026-02-30"],
+    ["date répétée", "date=2026-03-01&date=2026-03-02"],
+    ["paramètre inconnu", `date=2026-03-01&status=approved`],
+  ])("%s : 400 au format ApiErrorBody", async (_label, query) => {
+    const res = await call("GET", `${MISSION_BUDGETS_DAILY_NEED_PATH}?${query}`, "management");
+    expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
   });
 });
 
@@ -393,7 +485,7 @@ describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
       expect(list.map((d) => d.id)).toContain(destinationIds[0]);
       expect(list.map((d) => d.id)).not.toContain(destinationIds[1]);
     }
-    for (const role of ["secretary", "technician", "driver", "client"]) {
+    for (const role of ["technician", "driver", "client"]) {
       expect((await call("GET", MISSION_DESTINATIONS_PATH, role)).status, role).toBe(403);
     }
   });
@@ -431,5 +523,237 @@ describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
     const unlinked = await call("PATCH", missionBudgetPath(created.id), "logistics", { destinationId: null });
     expect(unlinked.status).toBe(200);
     expect(unlinked.body.destinationId).toBeNull();
+  });
+});
+
+describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, () => {
+  const accounts = { bank: 0, cash: 0, inactive: 0, card: 0 };
+
+  const account = newTreasuryAccount;
+
+  beforeAll(async () => {
+    accounts.bank = await account("bank");
+    accounts.cash = await account("cash");
+    accounts.inactive = await account("bank", false);
+    // Une seule carte active en base (index unique partiel) : une carte existante sert telle quelle.
+    const [card] = await db
+      .select({ id: treasuryAccounts.id })
+      .from(treasuryAccounts)
+      .where(and(eq(treasuryAccounts.kind, "fuel_card"), eq(treasuryAccounts.isActive, true)));
+    accounts.card = card ? card.id : await account("fuel_card");
+  });
+
+  async function approvedBudget(extra: Record<string, unknown> = {}) {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId, extra))).body);
+    const approved = missionBudgetSchema.parse((await call("POST", missionBudgetApprovePath(created.id), "management", seen(created))).body);
+    return { missionId, approved };
+  }
+
+  const entriesOf = (budgetId: number) =>
+    db.select().from(treasuryEntries).where(like(treasuryEntries.requestKey, `mission-budget:${budgetId}:%`));
+
+  it("avec un compte : deux sorties liées à la mission ; le budget retient la ligne FDR ; rejeu sans doublon", async () => {
+    const { missionId, approved } = await approvedBudget();
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    const entries = await entriesOf(approved.id);
+    expect(entries).toHaveLength(2);
+    const byKey = new Map(entries.map((e) => [e.requestKey, e]));
+    const fdr = byKey.get(`mission-budget:${approved.id}:fdr`)!;
+    const fuel = byKey.get(`mission-budget:${approved.id}:carburant`)!;
+    // body() : FDR 40 000 + frais annexes 5 000 ; carburant = fuelAmount calculé par le service.
+    expect(fdr).toMatchObject({ accountId: accounts.bank, direction: "out", amount: "45000.00", category: "fdr", missionId, createdBy: userIds.get("logistics") });
+    expect(fuel).toMatchObject({ accountId: accounts.bank, direction: "out", category: "carburant", missionId });
+    expect(Number(fuel.amount)).toBe(Number(approved.fuelAmount));
+    expect(res.body).toMatchObject({ status: "disbursed", treasuryEntryId: fdr.id });
+
+    // Rejeu HTTP : 409, rien de plus au journal.
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(res.body), treasuryAccountId: accounts.bank })).status).toBe(409);
+    // Rejeu du lien seul : clés déjà prises, aucune seconde ligne, même écriture retenue.
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    const again = await db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, accounts.bank, userIds.get("admin")!));
+    expect(again).toBe(fdr.id);
+    expect(await entriesOf(approved.id)).toHaveLength(2);
+  });
+
+  it("caisse acceptée ; sans FDR ni frais annexes, seule la ligne carburant est écrite et retenue", async () => {
+    const { approved } = await approvedBudget({ fdrAmount: 0, extrasAmount: 0 });
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "admin", { ...seen(approved), treasuryAccountId: accounts.cash });
+    expect(res.status).toBe(200);
+    const entries = await entriesOf(approved.id);
+    expect(entries.map((e) => e.requestKey)).toEqual([`mission-budget:${approved.id}:carburant`]);
+    expect(res.body.treasuryEntryId).toBe(entries[0].id);
+  });
+
+  it("finance active, sans compte (absent ou null) : 400, budget resté approuvé, journal vide", async () => {
+    for (const extra of [{}, { treasuryAccountId: null }]) {
+      const { approved } = await approvedBudget();
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), ...extra });
+      expect(res.status, JSON.stringify(extra)).toBe(400);
+      const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+      expect(row).toMatchObject({ status: "approved", disbursedBy: null, treasuryEntryId: null });
+      expect(await entriesOf(approved.id)).toHaveLength(0);
+    }
+  });
+
+  it("le secrétariat décaisse aussi ; la direction, qui approuve, est refusée (403)", async () => {
+    const { approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(403);
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "secretary", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "disbursed", disbursedBy: userIds.get("secretary") });
+    // Qui décaisse relit le budget.
+    const detail = await call("GET", `${MISSION_BUDGETS_PATH}/${approved.id}`, "secretary");
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ id: approved.id, status: "disbursed" });
+  });
+
+  it("carte carburant 400, compte désactivé 409, compte inconnu 404 : budget resté approuvé, journal vide", async () => {
+    const cases: Array<[number, number]> = [[accounts.card, 400], [accounts.inactive, 409], [2_000_000_000, 404]];
+    for (const [treasuryAccountId, status] of cases) {
+      const { approved } = await approvedBudget();
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId });
+      expect(res.status, String(treasuryAccountId)).toBe(status);
+      // L'UPDATE conditionnel précède le refus : la transaction l'annule.
+      const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+      expect(row).toMatchObject({ status: "approved", disbursedBy: null, treasuryEntryId: null });
+      expect(await entriesOf(approved.id)).toHaveLength(0);
+    }
+  });
+
+  it("l'approbation refuse un compte (400) ; un identifiant de compte hors plage est refusé (400)", async () => {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
+    expect((await call("POST", missionBudgetApprovePath(created.id), "management", { ...seen(created), treasuryAccountId: accounts.bank })).status).toBe(400);
+    const { approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: 2_147_483_648 })).status).toBe(400);
+  });
+
+  const cancelMission = (missionId: number) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status: "cancelled" });
+
+  it("L1d — mission annulée après décaissement : le reliquat revient au compte source, une fois", async () => {
+    const { missionId, approved } = await approvedBudget();
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    const cancelled = await cancelMission(missionId);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const [{ cancelledAt }] = await db.select({ cancelledAt: missions.cancelledAt }).from(missions).where(eq(missions.id, missionId));
+    expect(cancelledAt).not.toBeNull();
+
+    const entries = await entriesOf(approved.id);
+    expect(entries).toHaveLength(4);
+    const byKey = new Map(entries.map((e) => [e.requestKey, e]));
+    for (const line of ["fdr", "carburant"]) {
+      const out = byKey.get(`mission-budget:${approved.id}:${line}`)!;
+      const back = byKey.get(`mission-budget:${approved.id}:${line}:reverse`)!;
+      // Aucune dépense justifiée aujourd'hui : reliquat = montant décaissé.
+      expect(back, line).toMatchObject({ accountId: accounts.bank, direction: "in", amount: out.amount, category: out.category, missionId, createdBy: userIds.get("admin") });
+    }
+    // Le budget reste décaissé, figé avec sa mission.
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    expect(row.status).toBe("disbursed");
+
+    // Rejeu de l'annulation (route rejouable) puis du service : rien de plus au journal, date d'annulation inchangée.
+    expect((await cancelMission(missionId)).status).toBe(200);
+    await db.transaction((tx) => onMissionStatusChange(tx, missionId, "cancelled", userIds.get("admin")!));
+    expect(await entriesOf(approved.id)).toHaveLength(4);
+    const [replayed] = await db.select({ cancelledAt: missions.cancelledAt }).from(missions).where(eq(missions.id, missionId));
+    expect(replayed.cancelledAt).toEqual(cancelledAt);
+  });
+
+  /** Mission livrée, budget décaissé au journal : le cas où clôture et annulation se disputent l'argent. */
+  async function deliveredDisbursed() {
+    const { missionId, approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(200);
+    await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, missionId));
+    return { missionId, approved };
+  }
+  const reversalsOf = async (budgetId: number) => (await entriesOf(budgetId)).filter((e) => e.requestKey.endsWith(":reverse"));
+  const statusOf = async (missionId: number) =>
+    (await db.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId)))[0].status;
+
+  it("L1d — clôture et annulation simultanées d'une mission livrée : une seule passe, l'argent suit le gagnant", async () => {
+    const { missionId, approved } = await deliveredDisbursed();
+    const results = await Promise.all(
+      ["completed", "cancelled"].map((status) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status })),
+    );
+    expect(results.filter((r) => r.status === 200), JSON.stringify(results)).toHaveLength(1);
+    const final = await statusOf(missionId);
+    expect(["completed", "cancelled"]).toContain(final);
+    expect(await reversalsOf(approved.id)).toHaveLength(final === "cancelled" ? 2 : 0);
+  });
+
+  it("L1d — clôture passée entre la lecture et l'écriture de l'annulation : 409, rien n'est contre-passé", async () => {
+    const { missionId, approved } = await deliveredDisbursed();
+    let pending!: ReturnType<typeof cancelMission>;
+    await db.transaction(async (tx) => {
+      // La clôture concurrente tient la ligne : l'annulation a lu « delivered » et attend son UPDATE.
+      await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
+      pending = cancelMission(missionId);
+      let waiting = 0;
+      for (let i = 0; i < 200 && waiting === 0; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        const res = await db.execute(sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE 'update "missions"%'`);
+        waiting = Number((res.rows[0] as { n: number }).n);
+      }
+      expect(waiting, "l'annulation n'a pas atteint son UPDATE").toBeGreaterThan(0);
+      await tx.update(missions).set({ status: "completed", completedAt: new Date() }).where(eq(missions.id, missionId));
+    });
+    const res = await pending;
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(await statusOf(missionId)).toBe("completed");
+    expect(await reversalsOf(approved.id)).toHaveLength(0);
+  });
+
+  it("L1d — drapeau finance coupé après un décaissement au journal : l'annulation contre-passe quand même", async () => {
+    const { missionId, approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.bank })).status).toBe(200);
+    process.env.FEATURE_FLAGS = "finance=off";
+    try {
+      expect((await cancelMission(missionId)).status).toBe(200);
+    } finally {
+      process.env.FEATURE_FLAGS = "finance=on";
+    }
+    expect(await reversalsOf(approved.id)).toHaveLength(2);
+  });
+
+  it("L1d — annulation avant décaissement, ou budget décaissé avant L1c (sans écriture) : aucun mouvement", async () => {
+    const before = await approvedBudget();
+    expect((await cancelMission(before.missionId)).status).toBe(200);
+    expect(await entriesOf(before.approved.id)).toHaveLength(0);
+    const [stillApproved] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, before.approved.id));
+    expect(stillApproved.status).toBe("approved");
+
+    // Rétroactif : un budget décaissé avant L1c n'a aucune ligne au journal, rien à contre-passer.
+    const legacy = await approvedBudget();
+    await db
+      .update(missionBudgets)
+      .set({ status: "disbursed", disbursedBy: userIds.get("admin")!, disbursedAt: new Date() })
+      .where(eq(missionBudgets.id, legacy.approved.id));
+    expect((await cancelMission(legacy.missionId)).status).toBe(200);
+    expect(await entriesOf(legacy.approved.id)).toHaveLength(0);
+  });
+
+  it("L1d — un autre statut que l'annulation ne contre-passe rien", async () => {
+    const { missionId, approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "logistics", { ...seen(approved), treasuryAccountId: accounts.cash })).status).toBe(200);
+    for (const status of ["planned", "in_progress", "delivered", "completed"]) {
+      await db.transaction((tx) => onMissionStatusChange(tx, missionId, status, userIds.get("admin")!));
+    }
+    expect((await entriesOf(approved.id)).filter((e) => e.requestKey.endsWith(":reverse"))).toHaveLength(0);
+  });
+
+  it("drapeau finance coupé : un compte demandé est refusé (409), sans compte rien n'est écrit", async () => {
+    const { approved } = await approvedBudget();
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    process.env.FEATURE_FLAGS = "finance=off";
+    try {
+      await expect(db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, accounts.bank, userIds.get("admin")!))).rejects.toMatchObject({ status: 409 });
+      expect(await db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, null, userIds.get("admin")!))).toBeNull();
+    } finally {
+      process.env.FEATURE_FLAGS = "finance=on";
+    }
+    expect(await entriesOf(approved.id)).toHaveLength(0);
   });
 });

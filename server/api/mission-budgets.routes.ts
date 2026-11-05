@@ -4,6 +4,7 @@ import {
   dailyNeedQuerySchema,
   dailyNeedResponseSchema,
   missionBudgetSchema,
+  missionBudgetDisburseRequestSchema,
   missionBudgetTransitionRequestSchema,
   missionBudgetsQuerySchema,
   missionBudgetsResponseSchema,
@@ -12,6 +13,7 @@ import {
 } from "@shared/contracts/mission-budgets";
 import {
   MISSION_BUDGET_APPROVE_ROLES,
+  MISSION_BUDGET_DISBURSE_ROLES,
   MISSION_BUDGET_READ_ROLES,
   MISSION_BUDGET_WRITE_ROLES,
 } from "@shared/constants/roles";
@@ -93,8 +95,12 @@ const transition =
   async (req, res, next) => {
     try {
       const id = budgetId(req.params.id);
-      const { expectedUpdatedAt } = missionBudgetTransitionRequestSchema.parse(req.body ?? {});
-      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action, expectedUpdatedAt)));
+      // Approuver n'accepte que la version ; décaisser accepte aussi le compte de trésorerie (L1c).
+      const { expectedUpdatedAt, treasuryAccountId } =
+        action === "disburse"
+          ? missionBudgetDisburseRequestSchema.parse(req.body ?? {})
+          : { ...missionBudgetTransitionRequestSchema.parse(req.body ?? {}), treasuryAccountId: null };
+      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action, expectedUpdatedAt, treasuryAccountId)));
     } catch (error) {
       next(error);
     }
@@ -110,6 +116,6 @@ router.get("/mission-budgets/:id", requireFeature("finance"), authorize([...MISS
 router.post("/mission-budgets", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), create);
 router.patch("/mission-budgets/:id", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), update);
 router.post("/mission-budgets/:id/approve", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("approve"));
-router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("disburse"));
+router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), transition("disburse"));
 
 export default router;

@@ -301,8 +301,10 @@ export function classifyAuthGuards(authSource: string, roleConstants: RoleConsta
 }
 
 /** Contrôles de cloison reconnus (propriétaire, OT lisible). */
-const SCOPE_MARKERS = [/\bassertWorkOrderReadable\b/, /\bcanAccessOwned\b/, /\bownerScopeOf\b/, /\brole\s*[!=]==?\s*["']client["']/];
+const SCOPE_MARKERS = [/\bassertWorkOrderReadable\b/, /\bassertVehicleSubresourcesReadable\b/, /\bcanAccessOwned\b/, /\bownerScopeOf\b/, /\brole\s*[!=]==?\s*["']client["']/];
 const WORK_ORDER_MARKER = /\bassertWorkOrderReadable\b/;
+/** Gardes qui lèvent une erreur : en instruction seule, elles protègent. */
+const THROWING_MARKERS = new Set(["assertWorkOrderReadable", "assertVehicleSubresourcesReadable"]);
 const HANDLER_START = /\basync\b|\bfunction\b|\(\s*_?req\b|\(\s*_?request\b|=>/;
 
 /**
@@ -454,11 +456,14 @@ export function scopeCheckedBeforeSend(body: string, markers: RegExp[]): boolean
 /**
  * Un contrôle dont le résultat est jeté ne protège rien : `const s = ownerScopeOf(...)` sans usage
  * de `s`, ou `canAccessOwned(...)` / `ownerScopeOf(...)` en instruction seule.
- * `assertWorkOrderReadable(...)` lève une erreur : en instruction seule, il protège.
+ * `assertWorkOrderReadable(...)` et `assertVehicleSubresourcesReadable(...)` lèvent une erreur :
+ * en instruction seule, ils protègent, à condition d'être attendus (`await` ou `return`).
  */
 function markerUsed(code: string, at: number, word: string): boolean {
-  if (word === "assertWorkOrderReadable" || !/^\w+$/.test(word)) return true;
   const before = code.slice(0, at);
+  // une garde async qui lève ne protège que si sa promesse est attendue (sinon le rejet arrive après l'envoi)
+  if (THROWING_MARKERS.has(word)) return /\b(?:await|return)\s+$/.test(before);
+  if (!/^\w+$/.test(word)) return true;
   const assigned = before.match(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:await\s+)?$/);
   if (assigned) return new RegExp(String.raw`\b${assigned[1]}\b`).test(code.slice(at + word.length));
   return !/(?:^|[;{}])\s*(?:await\s+)?$/.test(before);

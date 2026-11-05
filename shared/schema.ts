@@ -1387,7 +1387,8 @@ export const missions = pgTable("missions", {
 
 // Budget de mission (L1, drapeau finance) : un par mission. Jumelle SQL : MISSION_BUDGETS_SQL
 // (server/init-database.ts) et server/db/migrations/20261105_mission_budgets.sql. Montants calculés
-// par le serveur (computeMissionBudget). treasury_entry_id sans FK ni effet jusqu'au journal T1.
+// par le serveur (computeMissionBudget). treasury_entry_id (L1c) : ligne du journal écrite au décaissement
+// (FDR, ou carburant sans FDR) ; FK posée par 20261105_mission_budgets_treasury.sql.
 // Pas de cascade : supprimer une mission budgétée est refusé, la trace d'argent reste.
 export const missionBudgets = pgTable("mission_budgets", {
   id: serial("id").primaryKey(),
@@ -1401,7 +1402,7 @@ export const missionBudgets = pgTable("mission_budgets", {
   totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull(),
   status: text("status", { enum: ["requested", "approved", "disbursed"] }).notNull().default("requested"),
   notes: text("notes"),
-  treasuryEntryId: integer("treasury_entry_id"),
+  treasuryEntryId: integer("treasury_entry_id").references(() => treasuryEntries.id),
   // L1b : destination du barème, choisie à la main ; pré-remplit litres et FDR, toujours modifiables.
   destinationId: integer("destination_id").references(() => missionDestinations.id),
   approvedBy: integer("approved_by").references(() => users.id),
