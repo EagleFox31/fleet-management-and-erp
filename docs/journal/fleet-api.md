@@ -811,3 +811,17 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : l'ancien chemin lisait, créditait puis supprimait sans transaction, avalait l'erreur et répondait 204 dans tous les cas.
 - **Comment tester (QA)** : `tests/contract/parts-used-removal-defects.contract.test.ts` (10 passés) sur Postgres local ; mutants : sans garde de statut 2 échecs, sans transaction 1 échec.
 - **Reste / risques** : l'écran OT affiche encore la corbeille au technicien (403 à l'usage) et seulement hors `completed` (pas `cancelled`) : à aligner côté front.
+## 2026-11-05T23:45:00+01:00 — Approbation d'une facture fournisseur (PATCH /api/supplier-invoices/:id/approve)
+- **Statut** : fait
+- **Quoi** : l'approbation n'accepte que `received` et `validated`. Facture inconnue : 404 ; déjà approuvée : 200 sans écriture (approbateur et date conservés) ; payée : 409 ; en litige : 409 « Lever le litige avant d'approuver » ; autre statut : 409.
+- **Comment** : `approveInvoice` (three-way-matching-service) fait `UPDATE ... WHERE id AND status IN (...) RETURNING`, puis relit la facture si aucune ligne n'est écrite. `autoApproveMatches` porte la même condition (`status = 'received'`) et ne compte que les lignes réellement écrites. La route était déjà dans `server/api/supplier-invoices.routes.ts`, rôles inchangés.
+- **Pourquoi** : l'UPDATE sans condition ramenait une facture payée à `approved`, écrasait l'approbateur et renvoyait 500 sur un id inconnu.
+- **Comment tester (QA)** : `tests/contract/supplier-invoice-approve-status-guard.contract.test.ts` (8 cas dont deux approbations simultanées et auto-approve) ; sans le filtre de statut, 4 échecs.
+- **Reste / risques** : aucun changement de contrat partagé ; événement `supplier_invoice_updated` toujours émis sur un rappel idempotent.
+## 2026-11-06T00:20:00+01:00 — Validation d'une facture fournisseur, rejeu sans diffusion (suite audit de #533)
+- **Statut** : fait
+- **Quoi** : `PATCH /:id/validate` n'accepte que `received` (compare-and-set). Inconnue 404, déjà validée 200 sans écriture, approuvée, payée ou en litige 409. Validate puis approve ne peut plus ramener une facture payée à `approved` ni écraser l'approbateur. `validateInvoice` et `approveInvoice` renvoient `{ invoice, replayed }` ; la route n'émet pas `supplier_invoice_updated` sur un rejeu.
+- **Comment** : même modèle que l'approbation (UPDATE conditionné, RETURNING, relecture). Les cas du contrat de défauts sont fusionnés dans `supplier-invoice-approve.contract.test.ts` (15 cas) avec E1 (payée), E2 (approuvée puis validate et approve), E3 (magasinier, facture de pièces payée) et le rejeu sans événement.
+- **Pourquoi** : audit sécurité de #533, `validateInvoice` contournait le correctif.
+- **Preuve** : mutants tués : validate sans filtre (5 échecs), approve sans filtre (7), diffusion systématique validate (1) et approve (1).
+- **Hors périmètre** : `syncInvoiceFromReconciledSettlements` fait passer `disputed` à `paid`.

@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
-import { isReplayableStatus } from "../../../server/lib/idempotency-config";
+import { isPreWriteRefusal, isReplayableStatus } from "../../../server/lib/idempotency-config";
 import { hashRequest, type IdempotencyStore, type ReserveOutcome } from "../../../server/lib/idempotency-store";
 import { idempotencyGuard } from "../../../server/middleware/idempotency-guard";
 
@@ -260,6 +260,15 @@ describe("empreinte et statuts rejouables", () => {
   it("2xx et 4xx métier rejoués ; 5xx et refus de session ou de débit libérés", () => {
     for (const s of [200, 201, 400, 404, 409, 422]) expect(isReplayableStatus(s), String(s)).toBe(true);
     for (const s of [401, 403, 408, 429, 500, 503]) expect(isReplayableStatus(s), String(s)).toBe(false);
+  });
+
+  it("véhicule retiré (code VEHICLE_RETIRED) : refus avant écriture, libéré et jamais rejoué", () => {
+    expect(isReplayableStatus(409, { message: "m", code: "VEHICLE_RETIRED" })).toBe(false);
+    expect(isPreWriteRefusal(409, { code: "VEHICLE_RETIRED" })).toBe(true);
+    // Un 409 de conflit ordinaire reste rejoué, et un code seul ne libère pas un succès.
+    expect(isReplayableStatus(409, { message: "m", code: "CONFLICT" })).toBe(true);
+    expect(isPreWriteRefusal(200, { code: "VEHICLE_RETIRED" })).toBe(false);
+    expect(isPreWriteRefusal(409, null)).toBe(false);
   });
 });
 
