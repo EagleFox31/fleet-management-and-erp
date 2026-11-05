@@ -75,3 +75,7 @@
 - État : #373 mineurs poussés et fusionnés dans #375 ; #378 mineurs poussés (JSDoc, cas sans propriétaire) ; B1 à relire (« mr » envoyé).
 - À venir après fusion de #379 : compléter la garde toggle, voir #375.
 - Stack de test c7test à arrêter en fin de session ; chore/recensement-229 locale, en attente de l'utilisatrice.
+## 2026-11-05 — assertWorkOrderReadable : même réponse hors périmètre et inexistant (fix/work-order-scope-uniform-404, base main)
+- Un client sur l'OT d'un autre client recevait 403, sur un OT inexistant 404 : l'écart permettait d'énumérer les OT. Désormais 404, même message, dans les deux cas ; le personnel est inchangé.
+- Convention retenue : 404 pour les OT (écart assumé avec le 403 de `canAccessOwned` ailleurs), noté dans AGENTS §11 et dans le JSDoc du helper.
+- Contrats adaptés (a5-role-guards, work-order-detail-client-scope, work-order-reads-client-scope) : comparaison explicite statut, message et code avec un OT inexistant.

@@ -145,3 +145,15 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **Preuve automatisée** : voir la PR.
 - **RAIDER** : couvert fermé par défaut, non-régression ; sans objet : migration.
 - **Reste / risques** : les événements d'OT restent en broadcast explicite (décision produit pour les restreindre).
+
+## 2026-11-05 — Garde de rôle sur la synchronisation des statuts CPC
+- **Statut** : fait
+- **Quoi** : `POST /api/drivers/sync-cpc-statuses` n'avait aucune garde de rôle ; le tableau de bord chef d'atelier montrait `CPCUpdateForm` alors que `workshop_manager` reçoit 403 sur la mise à jour CPC.
+- **Comment** : `isDriverManager` posé sur la route (liste gelée des routes sans garde réduite) ; formulaire masqué côté client par `canManageDrivers(user?.role)` (`shared/constants/roles.ts`, source unique alignée sur `isDriverManager`).
+- **Pourquoi** : maintenance globale ouverte à tout compte authentifié ; écran proposant une action refusée.
+- **Comment tester (QA)** : chef d'atelier : le bloc « Mise à Jour des Certifications CPC » n'apparaît plus ; secrétaire/logistique/admin inchangés.
+- **Preuve automatisée** : `tests/contract/drivers-sync-cpc-role.contract.test.ts` (401, 403 x2, 200 x3), `tests/unit/client/driver-cpc-update-visibility.test.ts`.
+- **RAIDER** : couvert non-régression, moindre privilège, pas de liste de rôles dupliquée ; sans objet : migration.
+- **Reste / risques** : aucun.
+- **Cycle rouge/vert (statuts CPC)** : garde `isDriverManager` retirée temporairement, contrat `drivers-sync-cpc-role` : 2 échecs sur 6 (`workshop_manager` et `technician` reçoivent 200 au lieu de 403 ; 401, admin, logistics, secretary passent). Garde restaurée : 6/6 verts.
+- **Relecture #374** : contrat étendu à driver et client (403), 8/8 verts ; test de rendu du tableau de bord non ajouté (ni jsdom ni testing-library dans le dépôt), test de visibilité conservé.
