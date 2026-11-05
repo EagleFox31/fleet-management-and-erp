@@ -225,8 +225,16 @@ describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâc
   });
 
   it("server/routes.ts (gelé) : le nombre de lectures lâches ne peut que baisser", () => {
-    // 50 relevées par ce motif le 5 novembre 2026 (origin/main) ; les 9 DELETE passent à routeIdOrNaN (lot 5).
+    // 50 relevées par ce motif le 5 novembre 2026 (origin/main) ; 11 lectures passent à routeIdOrNaN au lot 5 (9 DELETE + 2 GET d'OT).
     expect(countLooseParamReads(readFileSync(join(ROOT, "server/routes.ts"), "utf8"))).toBe(ROUTES_TS_FROZEN);
+  });
+
+  it("routeIdOrNaN reste cantonné à server/routes.ts (les routeurs neufs lèvent par parseRouteId)", () => {
+    const users = sourceFiles(join(ROOT, "server"))
+      .filter((file) => /\brouteIdOrNaN\b/.test(stripComments(readFileSync(file, "utf8"))))
+      .map((file) => relative(ROOT, file).replace(/\\/g, "/"))
+      .sort();
+    expect(users).toEqual(["server/lib/route-id.ts", "server/routes.ts"]);
   });
 
   it("routeIdOrNaN : même lecture que parseRouteId, NaN au lieu de lever", () => {
