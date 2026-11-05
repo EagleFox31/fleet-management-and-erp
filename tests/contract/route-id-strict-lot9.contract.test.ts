@@ -155,11 +155,32 @@ describe("ids de route (lot 9) : lectures de server/routes.ts", { timeout: 12000
     expect(await call("client", "GET", `/api/vehicles/${ownVehicleId}abc`)).toEqual({ status: 404, message: "Véhicule non trouvé" });
   });
 
+  it("GET /api/vehicles/:immatriculation : le client lit la sienne, pas celle d'un autre client (403)", async () => {
+    const other = await createTestUser({ role: "client" });
+    ids.userIds.push(other.id);
+    const foreign = await createTestVehicle({ ownerId: other.id });
+    ids.vehicleIds.push(foreign.id);
+    const [own] = await db.select({ plate: vehicles.registrationNumber }).from(vehicles).where(eq(vehicles.id, ownVehicleId));
+
+    expect((await call("client", "GET", `/api/vehicles/${encodeURIComponent(own.plate)}`)).status).toBe(200);
+    expect(await call("client", "GET", `/api/vehicles/${encodeURIComponent(foreign.registrationNumber)}`)).toEqual({
+      status: 403,
+      message: "Accès non autorisé à ce véhicule",
+    });
+  });
+
   it("GET /api/users/:id : chacun lit son profil, pas celui d'un autre", async () => {
     for (const role of ["technician", "client"] as const) {
       expect((await call(role, "GET", `/api/users/${users.get(role)}`)).status).toBe(200);
       expect(await call(role, "GET", `/api/users/${users.get("admin")}`)).toEqual({ status: 403, message: "Accès non autorisé" });
     }
     expect((await call("admin", "GET", `/api/users/${users.get("technician")}`)).status).toBe(200);
+  });
+
+  it("GET /api/users/:id : le profil ne porte que ses 8 champs (ni mot de passe, ni PIN)", async () => {
+    const response = await fetch(`${baseUrl}/api/users/${users.get("technician")}`, { headers: { Cookie: cookies.get("technician")! } });
+    expect(response.status).toBe(200);
+    const profile = (await response.json()) as Record<string, unknown>;
+    expect(Object.keys(profile).sort()).toEqual(["createdAt", "email", "id", "lastLoginAt", "loginCount", "name", "role", "username"]);
   });
 });

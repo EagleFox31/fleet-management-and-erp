@@ -917,7 +917,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: user.lastLoginAt
       });
     } catch (error) {
-      console.error("Get user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
@@ -1055,7 +1055,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(redactVehiclePrice({ role: normalizeRole(user.role) }, vehicle));
     } catch (error) {
-      console.error("Get vehicle error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Get vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

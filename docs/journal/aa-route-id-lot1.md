@@ -140,3 +140,8 @@
   - Ancien code : 12 rouges (200, 201, 404, 500 ; `GET /api/users/:id` à 401). Correctif : 12 verts.
   - Ménage par préfixe de titre (`TEST lot 9`) : 0 résidu.
   - tsc : 0 erreur. Unitaires : 2441 verts. 50 contrats du périmètre : 793 verts.
+- Réserves de relecture :
+  - contrat : un client lit son véhicule par son immatriculation, et reçoit 403 sur celle d'un autre client ;
+  - le profil `GET /api/users/:id` ne porte que ses 8 champs (garde-fou contre un futur mot de passe ou PIN) ;
+  - les `console.error` des deux catch touchés dans `server/routes.ts` sont migrés vers `log.error`.
+  - Contrat : 14 verts, 0 résidu.
