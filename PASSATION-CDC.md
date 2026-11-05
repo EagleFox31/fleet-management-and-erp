@@ -40,3 +40,6 @@
 ## 2026-11-05 01:58 — c7 : #334 réserves de relecture traitées ; suivi PUT /status empilé
 - #334 : PATCH prend la ligne mission FOR UPDATE avant les verrous consultatifs ; helper lockPlanningPairs (ordre global trié et dédoublonné, véhicules puis chauffeurs) dans mission-planning.ts. Rafale PATCH dates + ajout d'affectation sur le même véhicule : rouge 3/3 sans le FOR UPDATE, verte avec. Doc corrigée (les 3 copies = launch-readiness, POST /:id/assignments, validation de lancement de PUT /status). liveAssignments relu hors transaction : noté en suivi.
 - Branche fix/mission-status-planning-clash (empilée sur #334, WIP commité, non poussée) : PUT /:id/status vers planned/assigned rejoue findPlanningClash sous verrou ; contrat mission-planning-conflict-status 5 cas (3 rouges sans correctif). À rebaser sur #334 corrigée, verrouiller la ligne mission FOR UPDATE avant les verrous consultatifs, puis PR.
+
+## 2026-11-05 02:15 — c7 : PUT /:id/status rejoue le contrôle de planning (PR empilée sur #334)
+- Branche fix/mission-status-planning-clash rebasée sur #334 corrigée ; PUT /status vers planned/assigned prend la ligne mission FOR UPDATE, puis lockPlanningPairs, puis findPlanningClash ; 409 lisible (AppError). Contrat mission-planning-conflict-status : 5 cas (3 rouges sans correctif), cancelled non régressé. Suivi de LESSONS (« PUT /status ne rejoue pas ») clos.

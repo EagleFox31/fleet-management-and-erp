@@ -3084,6 +3084,8 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     const claimsSlot = targetStatus === "planned" || targetStatus === "assigned";
     const updatedMission = await db.transaction(async (tx) => {
       if (claimsSlot) {
+        // Ligne mission d'abord, verrous consultatifs ensuite : même ordre que POST /:id/assignments et PATCH.
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
         const pairs = targetAssignments.flatMap((row) => (row.vehicleId && row.driverId ? [{ vehicleId: row.vehicleId, driverId: row.driverId }] : []));
         await lockPlanningPairs(tx, pairs);
         for (const row of targetAssignments) {
