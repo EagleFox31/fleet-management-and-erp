@@ -3144,3 +3144,16 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - Aucune commande qui jette du travail (`git checkout -- <chemins>`, `git reset --hard`, `git clean`, `git restore`) dans le dépôt principal.
   - Aucun travail non commité dans le dépôt principal : toute modification se fait dans un worktree et se met à l'abri par un commit, même temporaire.
 - **Leçon généralisée** : une commande destructive ne doit dépendre d'aucune hypothèse sur le répertoire courant. Si son préalable peut échouer, l'échec doit arrêter la chaîne. Et un répertoire partagé par plusieurs sessions ne doit porter aucun état non commité, car il n'a pas de propriétaire unique qui le protège.
+
+## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
+
+- **Contexte** : après l'incident du `git checkout -- .` (entrée précédente), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
+- **Cause racine** : `core.autocrlf=true` sur les postes Windows. Les blobs du dépôt sont en LF, l'arbre de travail est le plus souvent en CRLF. Un outil qui réécrit un fichier en LF, ou un fichier recopié depuis un autre worktree, fait apparaître toutes ses lignes comme changées, alors que le texte est identique.
+- **Classification** : near miss, diagnostic erroné possible (conclure à une perte, ou restaurer et écraser un travail réel).
+- **Résolution** : aucune perte réelle. Les fichiers concernés sont alignés sur les fins de ligne de leur blob HEAD.
+- **Prévention vérifiable** :
+  - Avant de conclure à une perte ou à une réécriture, comparer en ignorant les fins de ligne :
+    `git diff --ignore-cr-at-eol --stat` (ou `git diff -w --stat`). Un fichier qui disparaît de cette liste n'a changé que par ses fins de ligne.
+  - Après une édition par script, si `git diff --stat` montre un fichier réécrit en entier, ramener ses fins de ligne à celles du blob HEAD avant de commiter.
+  - `.gitattributes` : déjà `eol=lf` sur `deploy/*.sh` et `.claude/hooks/*.mjs`, là où un CR casse l'exécution. Pas de `* text=auto` global : le dépôt contient encore un blob CRLF (`tests/support/file-access-scan.ts`, relevé `git ls-files --eol`). Une règle globale le ferait apparaître modifié dans tous les worktrees et imposerait une renormalisation du dépôt, ce qui est hors périmètre ici.
+- **Leçon généralisée** : un diff qui couvre tout un fichier sans raison est d'abord un soupçon de fins de ligne. Il se vérifie en une commande avant toute restauration ou toute alerte de perte.
