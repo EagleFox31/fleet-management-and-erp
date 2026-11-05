@@ -19,6 +19,10 @@ import {
   type PartRequestResult,
 } from "../services/work-order-part-request";
 import { isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
+
+const WORK_ORDER_ID_INVALID_MESSAGE = "Identifiant d'ordre de travail invalide.";
+const REQUIREMENT_ID_INVALID_MESSAGE = "Identifiant de demande invalide.";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-parts");
@@ -32,11 +36,7 @@ const openRequirementStatuses = OPEN_REQUIREMENT_STATUSES;
 
 router.get("/:workOrderId/pending-part-requirements", isAnyUser, async (req, res, next) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
-
-    if (isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
+    const workOrderId = parseRouteId(req.params.workOrderId, WORK_ORDER_ID_INVALID_MESSAGE);
 
     await assertWorkOrderReadable(req.user, workOrderId);
 
@@ -114,14 +114,10 @@ router.get("/:workOrderId/pending-part-requirements", isAnyUser, async (req, res
   }
 });
 
-router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
+router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res, next) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
+    const workOrderId = parseRouteId(req.params.workOrderId, WORK_ORDER_ID_INVALID_MESSAGE);
     const user = req.user;
-
-    if (isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
 
     const workOrder = await storage.getWorkOrder(workOrderId);
     if (!workOrder) {
@@ -191,9 +187,7 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
       message: "OT en attente de pièces.",
     });
   } catch (error) {
-    if (isAppError(error)) {
-      return res.status(error.status).json({ message: error.message });
-    }
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Mark work order as awaiting parts error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
@@ -247,10 +241,10 @@ function broadcastPartRequest(result: PartRequestResult, user: Request["user"]) 
 // « Demander la pièce » : le serveur décide au clic (voir `requestPartForWorkOrder`).
 // 201 dès qu'une demande est créée ; 200 si seule une demande déjà en cours est
 // réutilisée. Rien ne sort du stock ici : le magasinier sort par `/issue`.
-router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
+router.post("/:workOrderId/parts", isTechnician, async (req, res, next) => {
   try {
     const result = await requestPartForWorkOrder({
-      workOrderId: parseInt(req.params.workOrderId),
+      workOrderId: parseRouteId(req.params.workOrderId, WORK_ORDER_ID_INVALID_MESSAGE),
       partId: Number(req.body?.partId),
       quantity: req.body?.quantity === undefined ? 1 : Number(req.body.quantity),
       actor: { id: req.user!.id, role: String(req.user!.role) },
@@ -261,23 +255,17 @@ router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
     const created = !result.usedExistingRequirement && (result.stockRequirement !== null || result.requirement !== null);
     return res.status(created ? 201 : 200).json(result);
   } catch (error) {
-    if (isAppError(error)) {
-      return res.status(error.status).json({ message: error.message });
-    }
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "demande de pièce sur OT en échec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res) => {
+router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res, next) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
-    const requirementId = parseInt(req.params.requirementId);
+    const workOrderId = parseRouteId(req.params.workOrderId, WORK_ORDER_ID_INVALID_MESSAGE);
+    const requirementId = parseRouteId(req.params.requirementId, REQUIREMENT_ID_INVALID_MESSAGE);
     const user = req.user;
-
-    if (isNaN(workOrderId) || isNaN(requirementId)) {
-      return res.status(400).json({ message: "ID invalide" });
-    }
 
     const workOrder = await storage.getWorkOrder(workOrderId);
     if (!workOrder) {
@@ -472,6 +460,7 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         : "Pièce ajoutée définitivement à l'OT.",
     });
   } catch (error) {
+    if (isAppError(error)) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Issue part requirement to work order error");
     return res.status(500).json({ message: "Erreur serveur" });
   }

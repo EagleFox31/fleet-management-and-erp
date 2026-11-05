@@ -33,7 +33,6 @@ const FROZEN: Record<string, number> = {
   "fault-catalog.routes.ts": 1,
   "fuel-card.routes.ts": 2,
   "missions.routes.ts": 1,
-  "part-requirements.routes.ts": 3,
   "purchase-orders.routes.ts": 2,
   "supplier-invoices.routes.ts": 10,
   "suppliers.routes.ts": 8,
@@ -42,7 +41,6 @@ const FROZEN: Record<string, number> = {
   "warehouse.routes.ts": 1,
   "work-order-items.routes.ts": 1,
   "work-order-labor-rate.routes.ts": 1,
-  "work-order-parts.routes.ts": 5,
 };
 
 export function countLooseParamReads(source: string): number {

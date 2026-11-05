@@ -74,3 +74,8 @@
 - `work-order-items.routes.ts` : 4 lectures (:65, :81, :116, :153) passées à `parseRouteId` ; les handlers POST/PATCH/DELETE relaient désormais l'AppError (`next`) au lieu de la convertir en 500. Aucune contrainte de chemin retirée (il n'y en avait pas).
 - FROZEN `work-order-items.routes.ts` : 5 → 1 (reste l.222, validée localement par AppError). aa (#364) l'abaisse aussi : le second fusionné se rebase et garde les deux suppressions.
 - Contrat : `work-order-items-strict-id.contract.test.ts` (1abc, 1e3, hors int4, 0 → 400 ; inconnu → 404). Branche empilée sur #365.
+
+## 2026-11-05 03:46 — Cliquet id strict, derniers fichiers : part-requirements, work-order-parts
+- 8 lectures `parseInt(req.params…)` → `parseRouteId` (part-requirements :45 :132 :199 ; work-order-parts :35 :119 :253 :274-275). Entrées FROZEN des deux fichiers retirées. Aucune contrainte de chemin retirée. Flux issued / onTransition inchangé.
+- Les catch relaient désormais l'AppError (`next`). Statuts qui changent : un AppError qui sortait en 500 (by-part, PATCH/DELETE demande, /parts, /issue hors branche stock interne) sort avec son statut ; les AppError déjà gérés dans awaiting-parts et /parts gardent leur statut, corps normalisé (code, requestId).
+- Contrat : `part-requirements-strict-id.contract.test.ts` (13 cas : 400 sur 1abc/1e3/hors int4/0, 404 sur id inconnu). Branche empilée sur #367.
