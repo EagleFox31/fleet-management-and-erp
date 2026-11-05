@@ -156,3 +156,4 @@ Entrées ajoutées en bas, dans l'ordre chronologique, une par commit.
 - **RAIDER** : couvert non-régression, moindre privilège, pas de liste de rôles dupliquée ; sans objet : migration.
 - **Reste / risques** : aucun.
 - **Cycle rouge/vert (statuts CPC)** : garde `isDriverManager` retirée temporairement, contrat `drivers-sync-cpc-role` : 2 échecs sur 6 (`workshop_manager` et `technician` reçoivent 200 au lieu de 403 ; 401, admin, logistics, secretary passent). Garde restaurée : 6/6 verts.
+- **Relecture #374** : contrat étendu à driver et client (403), 8/8 verts ; test de rendu du tableau de bord non ajouté (ni jsdom ni testing-library dans le dépôt), test de visibilité conservé.

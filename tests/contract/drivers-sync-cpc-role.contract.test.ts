@@ -15,7 +15,7 @@ let server: Server;
 let baseUrl = "";
 const ids = createIdBag();
 
-async function loginAs(role: "admin" | "logistics" | "secretary" | "workshop_manager" | "technician") {
+async function loginAs(role: "admin" | "logistics" | "secretary" | "workshop_manager" | "technician" | "driver" | "client") {
   const user = await createTestUser({ role });
   ids.userIds.push(user.id);
   const res = await fetch(`${baseUrl}/api/auth/login`, {
@@ -49,7 +49,7 @@ describe("synchronisation des statuts CPC : rôles", { timeout: 60000 }, () => {
     expect((await sync()).status).toBe(401);
   });
 
-  it.each(["workshop_manager", "technician"] as const)("%s : 403", async (role) => {
+  it.each(["workshop_manager", "technician", "driver", "client"] as const)("%s : 403", async (role) => {
     expect((await sync(await loginAs(role))).status).toBe(403);
   });
 
