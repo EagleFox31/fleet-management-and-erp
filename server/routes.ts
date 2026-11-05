@@ -54,7 +54,7 @@ import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./l
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
-import { PROCUREMENT_ROLES } from "@shared/constants/roles";
+import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
@@ -882,7 +882,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Récupérer un utilisateur spécifique - admin, direction, secrétariat, ou l'utilisateur lui-même
   // isAnyUser charge req.user (authenticate seul ne le fait pas) ; les autres rôles ne lisent que leur profil (§11).
-  const USER_PROFILE_READERS = new Set<string>(["admin", "management", "secretary"]);
+  const USER_PROFILE_READERS = new Set<AppRole>(["admin", "management", "secretary"]);
   app.get("/api/users/:id", isAnyUser, async (req, res) => {
     try {
       const id = routeIdOrNaN(req.params.id);
