@@ -46,3 +46,6 @@
 
 ## 2026-11-05 03:05 — c7 : #339 réserves de relecture (lecture périmée, 409 centralisé)
 - PATCH (liveAssignments, créneau) et PUT /status comparent, sous le FOR UPDATE de la mission, l'empreinte lue avant la transaction à celle de la base (assertPlanningStateUnchanged) : 409 lisible si périmée. Contrat tests/contract/mission-planning-stale-read : déterministe via un verrou de ligne tenu par le test, rouge 2/2 sans la comparaison. POST / renvoie son 409 par next(error) (Express 4 : un throw dans le handler async ne répond jamais). Cas draft vers planned sans affectation : 200. Suivi liveAssignments clos.
+
+## 2026-11-05 03:30 — c7 : #339 poussée par merge de main (sans réécriture)
+- Branche distante fix/mission-status-planning-clash : merge de origin/main + commit des réserves (lecture périmée, 409 de POST / par next). Base de #339 = main. Contrats mission 222 / npm test 2413 / check 0 vérifiés sur l'arbre rebasé identique. En attente de relecture de 0a.
