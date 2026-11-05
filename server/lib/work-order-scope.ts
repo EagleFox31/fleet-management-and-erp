@@ -14,7 +14,7 @@ import { canAccessOwned, type ScopeReader } from "./client-scope";
  * de `canAccessOwned` utilisé pour les véhicules et documents.
  *
  * Écart connu : GET /api/work-orders/:id bloque aussi un technicien sur l'OT
- * d'un autre technicien (routes.ts ~1851). Ce helper ne le fait pas.
+ * d'un autre technicien (routes.ts, route GET /api/work-orders/:id). Ce helper ne le fait pas.
  */
 export const MAX_DB_INTEGER_ID = 2147483647;
 

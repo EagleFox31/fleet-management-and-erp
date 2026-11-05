@@ -118,6 +118,10 @@ describe.each(SUBRESOURCES)("GET /api/work-orders/:id/%s : cloison entre clients
   it("OT dont le véhicule n'a pas de propriétaire : 404 pour un client, 200 pour le personnel", async () => {
     const refused = await get(path(woOrphan), "clientA");
     expect(apiErrorProblems(refused.status, refused.body, 404)).toEqual([]);
+    const missing = await get(path(MISSING_ID), "clientA");
+    expect(missing.status).toBe(refused.status);
+    expect(missing.body.message).toBe(refused.body.message);
+    expect(missing.body.code).toBe(refused.body.code);
     expect((await get(path(woOrphan), "manager")).status).toBe(200);
   });
 });
