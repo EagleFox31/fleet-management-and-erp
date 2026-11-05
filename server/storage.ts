@@ -1133,6 +1133,7 @@ export class DatabaseStorage implements IStorage {
           frequencyValue: maintenanceSchedules.frequencyValue,
           isActive: maintenanceSchedules.isActive,
           createdAt: maintenanceSchedules.createdAt,
+          updatedAt: maintenanceSchedules.updatedAt,
           status: sql<MaintenanceScheduleWithVehicle["status"]>`
             CASE 
               WHEN ${maintenanceSchedules.scheduledDate} < CURRENT_DATE THEN 'overdue'

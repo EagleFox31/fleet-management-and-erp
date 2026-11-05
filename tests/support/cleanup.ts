@@ -8,6 +8,8 @@ import {
   documentRenewalCenters,
   documentRenewalRequests,
   fuelPrices,
+  missionBudgetExpenses,
+  missionPriceHistory,
   missionBudgets,
   missionDestinations,
   missionOperations,
@@ -116,6 +118,7 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.createdBy, ids.userIds));
       await db.delete(qhseInspectionCriteria).where(inArray(qhseInspectionCriteria.updatedBy, ids.userIds));
       // Trésorerie : écritures auto (plein, recharge, règlement) et comptes créés par un compte de test.
+      await db.delete(missionPriceHistory).where(inArray(missionPriceHistory.changedBy, ids.userIds));
       await deleteTreasuryOfUsers(ids.userIds);
       try {
         await db.delete(users).where(inArray(users.id, ids.userIds));
@@ -271,18 +274,28 @@ async function deleteOrphanTestRows(): Promise<void> {
   await db.delete(fuelPrices).where(inArray(fuelPrices.createdBy, testUsers));
   // Mission créée par un compte de test : bloquait la suppression du compte (FK
   // missions_created_by_users_id_fk) et faisait échouer le hook global de tous les fichiers.
+  // Historique du prix convenu (O3 3b) : changed_by vers users sans cascade, y compris sur une mission hors du lot.
+  await db.delete(missionPriceHistory).where(inArray(missionPriceHistory.changedBy, testUsers));
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
-  await db.delete(missionBudgets).where(
+  const testBudgetFilter = or(
+    inArray(missionBudgets.missionId, testMissions),
+    inArray(missionBudgets.createdBy, testUsers),
+    inArray(missionBudgets.updatedBy, testUsers),
+    inArray(missionBudgets.approvedBy, testUsers),
+    inArray(missionBudgets.disbursedBy, testUsers),
+  );
+  // Dépenses justifiées (L1e) : FK vers le budget et vers leurs auteurs, supprimées avant le budget.
+  await db.delete(missionBudgetExpenses).where(
     or(
-      inArray(missionBudgets.missionId, testMissions),
-      inArray(missionBudgets.createdBy, testUsers),
-      inArray(missionBudgets.updatedBy, testUsers),
-      inArray(missionBudgets.approvedBy, testUsers),
-      inArray(missionBudgets.disbursedBy, testUsers),
+      inArray(missionBudgetExpenses.budgetId, db.select({ id: missionBudgets.id }).from(missionBudgets).where(testBudgetFilter)),
+      inArray(missionBudgetExpenses.createdBy, testUsers),
+      inArray(missionBudgetExpenses.updatedBy, testUsers),
+      inArray(missionBudgetExpenses.deletedBy, testUsers),
     ),
   );
+  await db.delete(missionBudgets).where(testBudgetFilter);
   // Destination du barème (L1b) écrite par un compte de test : un budget hors test qui la vise la
   // perd (destination_id nullable), il n'est pas supprimé.
   const testDestinations = db

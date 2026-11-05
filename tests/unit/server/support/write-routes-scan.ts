@@ -7,6 +7,7 @@ import { ALL_APP_ROLES } from "../../../../shared/constants/roles";
 import * as schema from "../../../../shared/schema";
 import * as loginContract from "../../../../shared/contracts/auth-login";
 import * as invoicesAwaitingPaymentContract from "../../../../shared/contracts/invoices-awaiting-payment";
+import * as missionPriceContract from "../../../../shared/contracts/mission-price";
 
 /**
  * Analyse statique des routes d'écriture (POST/PUT/PATCH/DELETE) de `server/routes.ts` et de
@@ -383,11 +384,13 @@ export { SERVER_FIELDS };
 const SERVER_FIELD_ALT = SERVER_FIELDS.join("|");
 
 function exportedSchemaIsClean(name: string): boolean | undefined {
-  // Schémas de contrat lus par un handler sans validateBody (auth-login : corps validé deux fois ;
+  // Schémas de contrat lus par un handler sans validateBody (auth-login : corps validé deux fois ; mission-price : corps du PUT agreed-price ;
   // invoices-awaiting-payment : corps des routes finance F1).
-  const value = ({ ...schema, ...loginContract, ...invoicesAwaitingPaymentContract } as Record<string, unknown>)[name] as { shape?: Record<string, unknown> } | undefined;
-  if (!value || typeof value !== "object" || !value.shape) return undefined;
-  return !SERVER_FIELDS.some((f) => f in value.shape!);
+  const value = ({ ...schema, ...loginContract, ...invoicesAwaitingPaymentContract, ...missionPriceContract } as Record<string, unknown>)[name] as { shape?: Record<string, unknown>; _def?: { schema?: { shape?: Record<string, unknown> } } } | undefined;
+  // `.refine` enveloppe l objet : on lit le schema interne.
+  const shape = value && typeof value === "object" ? (value.shape ?? value._def?.schema?.shape) : undefined;
+  if (!shape) return undefined;
+  return !SERVER_FIELDS.some((f) => f in shape);
 }
 
 /** Texte de la définition d'un schéma local `const nom = z.object({...})`. */

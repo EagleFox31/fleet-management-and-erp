@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { missionPricePath } from "@shared/contracts/mission-price";
 import type { QueryKey } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
@@ -672,7 +673,7 @@ function normalizeUpdate(message: unknown): RealTimeUpdate | null {
   };
 }
 
-function handleDomainUpdate(update: RealTimeUpdate): void {
+export function handleDomainUpdate(update: RealTimeUpdate): void {
   const payload = update.payload ?? update.data;
   const payloadRecord = asRecord(payload) ?? {};
 
@@ -1129,6 +1130,7 @@ function handleDomainUpdate(update: RealTimeUpdate): void {
           toNumber(payloadRecord.missionId) ??
           toNumericId(update.entityId);
         if (missionId) {
+          queryClient.invalidateQueries({ queryKey: [missionPricePath(missionId)] });
           queryClient.invalidateQueries({ queryKey: [`/api/missions/${missionId}`] });
           void queryClient.refetchQueries({
             queryKey: [`/api/missions/${missionId}`],

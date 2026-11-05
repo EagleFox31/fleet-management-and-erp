@@ -1,10 +1,13 @@
 import { Router, type RequestHandler } from "express";
 import {
+  createMissionBudgetExpenseRequestSchema,
   createMissionBudgetRequestSchema,
   dailyNeedQuerySchema,
   dailyNeedResponseSchema,
   missionBudgetSchema,
   missionBudgetDisburseRequestSchema,
+  missionBudgetExpenseSchema,
+  missionBudgetExpensesResponseSchema,
   missionBudgetTransitionRequestSchema,
   missionBudgetsQuerySchema,
   missionBudgetsResponseSchema,
@@ -22,8 +25,11 @@ import { parseRouteId } from "../lib/route-id";
 import { authorize } from "../middleware/auth";
 import {
   createMissionBudget,
+  createMissionBudgetExpense,
   dailyNeed,
+  deleteMissionBudgetExpense,
   getMissionBudget,
+  listMissionBudgetExpenses,
   listMissionBudgets,
   listMissionDestinations,
   transitionMissionBudget,
@@ -106,6 +112,36 @@ const transition =
     }
   };
 
+/** Dépenses justifiées (L1e) : lecture comme le budget ; saisie et suppression par qui décaisse. */
+const expenseId = (raw: string) => parseRouteId(raw, "Identifiant de dépense invalide.");
+
+const listExpenses: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(missionBudgetExpensesResponseSchema.parse(await listMissionBudgetExpenses(budgetId(req.params.id))));
+  } catch (error) {
+    next(error);
+  }
+};
+
+const createExpense: RequestHandler = async (req, res, next) => {
+  try {
+    const id = budgetId(req.params.id);
+    const input = createMissionBudgetExpenseRequestSchema.parse(req.body);
+    res.status(201).json(missionBudgetExpenseSchema.parse(await createMissionBudgetExpense(id, req.user!.id, input)));
+  } catch (error) {
+    next(error);
+  }
+};
+
+const deleteExpense: RequestHandler = async (req, res, next) => {
+  try {
+    await deleteMissionBudgetExpense(budgetId(req.params.id), expenseId(req.params.expenseId), req.user!.id);
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+};
+
 const router = Router();
 // Gardes en ligne : le cliquet des routes d'écriture les lit sur la déclaration.
 // /daily-need avant /:id : Express sert la première déclaration qui correspond.
@@ -117,5 +153,8 @@ router.post("/mission-budgets", requireFeature("finance"), authorize([...MISSION
 router.patch("/mission-budgets/:id", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), update);
 router.post("/mission-budgets/:id/approve", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("approve"));
 router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), transition("disburse"));
+router.get("/mission-budgets/:id/expenses", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), listExpenses);
+router.post("/mission-budgets/:id/expenses", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), createExpense);
+router.delete("/mission-budgets/:id/expenses/:expenseId", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), deleteExpense);
 
 export default router;

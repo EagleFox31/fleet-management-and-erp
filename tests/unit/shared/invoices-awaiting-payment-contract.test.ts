@@ -23,6 +23,7 @@ function item(overrides: Record<string, unknown> = {}) {
     withholdingFrozen: true,
     depositedAt: "2026-10-10",
     daysSinceDeposit: daysSinceDeposit("2026-10-10", "2026-11-05"),
+    balanceDue: 10000,
     ...overrides,
   };
 }

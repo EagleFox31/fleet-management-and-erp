@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
+import { MissionPriceCard } from "@/components/missions/mission-price-card";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
@@ -2141,6 +2142,16 @@ export default function MissionDetailsPage() {
         ]} />
 
         <TabsContent value="details" className="space-y-4 mt-4">
+          <MissionPriceCard
+            missionId={mission.id}
+            status={mission.status}
+            clientId={mission.clientId ? String(mission.clientId) : ""}
+            pickupAddress={mission.pickupAddress || ""}
+            deliveryAddress={mission.deliveryAddress || ""}
+            cargoDescription={mission.cargoDescription || ""}
+            pickupDate={mission.pickupDate ? String(mission.pickupDate).slice(0, 10) : ""}
+            weight={mission.weight != null ? String(mission.weight) : ""}
+          />
           {/* ── Rangée 1 : Informations Mission + Ressources (même hauteur) ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col">
