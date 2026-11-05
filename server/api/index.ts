@@ -49,6 +49,7 @@ import partRequirementReceiveRoutes from "./part-requirement-receive.routes";
 import fuelAnomaliesRoutes from "./fuel-anomalies.routes";
 import fuelVouchersRoutes from "./fuel-vouchers.routes";
 import fuelPricesRoutes from "./fuel-prices.routes";
+import missionBudgetsRoutes from "./mission-budgets.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import financeReceivablesRoutes from "./finance-receivables.routes";
@@ -256,6 +257,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(fuelAnomaliesRoutes);
   apiRouter.use(fuelVouchersRoutes);
   apiRouter.use(fuelPricesRoutes);
+  // Budget de mission (L1) : drapeau finance et rôles posés route par route.
+  apiRouter.use(missionBudgetsRoutes);
   apiRouter.use(timeTrackingRoutes);
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(financeReceivablesRoutes);

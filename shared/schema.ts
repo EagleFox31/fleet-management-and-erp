@@ -1379,6 +1379,38 @@ export const missions = pgTable("missions", {
   cancellationReason: text("cancellation_reason"),
 });
 
+// Budget de mission (L1, drapeau finance) : un par mission. Jumelle SQL : MISSION_BUDGETS_SQL
+// (server/init-database.ts) et server/db/migrations/20261105_mission_budgets.sql. Montants calculés
+// par le serveur (computeMissionBudget). treasury_entry_id sans FK ni effet jusqu'au journal T1.
+// Pas de cascade : supprimer une mission budgétée est refusé, la trace d'argent reste.
+export const missionBudgets = pgTable("mission_budgets", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().unique().references(() => missions.id),
+  budgetDate: date("budget_date").notNull(),
+  fuelLiters: numeric("fuel_liters", { precision: 12, scale: 2 }).notNull(),
+  fuelUnitPrice: numeric("fuel_unit_price", { precision: 15, scale: 2 }).notNull(),
+  fuelAmount: numeric("fuel_amount", { precision: 15, scale: 2 }).notNull(),
+  fdrAmount: numeric("fdr_amount", { precision: 15, scale: 2 }).notNull(),
+  extrasAmount: numeric("extras_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull(),
+  status: text("status", { enum: ["requested", "approved", "disbursed"] }).notNull().default("requested"),
+  notes: text("notes"),
+  treasuryEntryId: integer("treasury_entry_id"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  disbursedBy: integer("disbursed_by").references(() => users.id),
+  disbursedAt: timestamp("disbursed_at"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_budgets_status_check", sql`${table.status} IN ('requested', 'approved', 'disbursed')`),
+  check("mission_budgets_amounts_check", sql`${table.fuelLiters} >= 0 AND ${table.fuelUnitPrice} >= 0 AND ${table.fdrAmount} >= 0 AND ${table.extrasAmount} >= 0`),
+  index("idx_mission_budgets_budget_date").on(table.budgetDate),
+]);
+export type MissionBudgetRow = typeof missionBudgets.$inferSelect;
+
 // Suivi des opérations clients (O1) : une ligne par mission, colonnes de la feuille de suivi client.
 export const missionOperations = pgTable("mission_operations", {
   id: serial("id").primaryKey(),
