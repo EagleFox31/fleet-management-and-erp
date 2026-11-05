@@ -25,3 +25,9 @@
 - **Quoi** : `scanClientOpenParamRoutes` (`tests/support/route-guard-scan.ts`) liste les routes `isAnyUser` à paramètre ; `tests/unit/server/client-scope-sweep-guard.test.ts` échoue si l'une n'est ni au balayage (`tests/support/client-scope-sweep-table.ts`), ni couverte par un contrat nommé, ni exclue avec sa raison (liste plafonnée à 1).
 - **Comment** : la table du balayage est partagée entre le contrat et la garde. Les lignes 200 comparent aussi le corps. Ligne ajoutée : `GET /api/users/:id` (403 pour un profil étranger comme pour un absent).
 - **Pourquoi** : sans garde, une route ajoutée ouverte à un client pouvait répondre autrement pour l'objet d'un autre et pour un absent. Mutation prouvée : une route `isAnyUser` fictive dans `routes.ts` fait échouer le test. Limite : seule la garde écrite dans l'en-tête de la route est vue.
+
+## Contrôles de fuite : angles morts de la garde fermés
+
+- **Quoi** : `tests/unit/leak-check-hygiene.test.ts` détecte maintenant `expect` sur plusieurs lignes (virgule finale), `JSON.stringify(corps, null, 2)`, `String(corps)`, `res.text` / `await res.text()`, et le contrôle en deux temps (`const t = ...; expect(t).not...`), pour `.not.toMatch` comme `.not.toContain`.
+- **Comment** : une aiguille n'est dangereuse que si elle est courte (moins de 5 caractères) et faite de caractères d'un `requestId` (lettres, chiffres, `_`, `-`) ; `%PDF` ou un chemin ne le sont pas. Cas positifs et négatifs au test. Le balayage du dépôt a trouvé un seul vrai cas (`"4821"` dans admin-patch-user-pin), passé par `leakText`.
+- **Pourquoi** : la première garde ne voyait que `JSON.stringify(x)).not.toMatch` sur une ligne. Limite : une aiguille passée par une variable n'est pas évaluée.

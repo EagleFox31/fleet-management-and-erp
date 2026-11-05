@@ -9,6 +9,7 @@ import { loginAttemptsByUsername, users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { leakText } from "../support/api-error";
 
 /**
  * PATCH /api/users/:id (admin) : un PIN fourni est validé (4 chiffres) puis haché ; il ouvre une session
@@ -67,7 +68,7 @@ describe("PATCH /api/users/:id : PIN", { timeout: 120000 }, () => {
 
     const res = await call("PATCH", `/api/users/${driver.id}`, { cookie, body: { pin: "4821" } });
     expect(res.status).toBe(200);
-    expect(JSON.stringify(res.body)).not.toContain("4821");
+    expect(leakText(res.body)).not.toContain("4821");
     expect(res.body).not.toHaveProperty("pin");
 
     const stored = (await storedPin(driver.id))!;
