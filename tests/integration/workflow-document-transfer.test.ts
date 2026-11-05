@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { eq, inArray } from "drizzle-orm";
@@ -189,8 +189,9 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
       const [source] = await db.select().from(workflowDocuments).where(eq(workflowDocuments.id, document.id));
       expect(source).toMatchObject({ isTransferred: false, vehicleId: null });
     } finally {
-      // La jonction seule, jamais sa cible par récursion.
-      rmdirSync(vehicleDir);
+      // Le lien seul, jamais sa cible par récursion : jonction Windows (rmdir), lien symbolique ailleurs (unlink).
+      if (process.platform === "win32") rmdirSync(vehicleDir);
+      else unlinkSync(vehicleDir);
       rmSync(outside, { recursive: true, force: true });
     }
   });

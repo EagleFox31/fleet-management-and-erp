@@ -109,8 +109,9 @@ describe("POST /api/vehicles/:vehicleId/documents — dossier du véhicule rempl
       expect(leakText(res.body)).not.toMatch(/uploads|vehicle-|fleet-upload-out|stack/i);
       expect(fs.readdirSync(outside)).toEqual([]);
     } finally {
-      // La jonction seule, jamais sa cible par récursion.
-      fs.rmdirSync(link);
+      // Le lien seul, jamais sa cible par récursion : jonction Windows (rmdir), lien symbolique ailleurs (unlink).
+      if (process.platform === "win32") fs.rmdirSync(link);
+      else fs.unlinkSync(link);
       fs.rmSync(outside, { recursive: true, force: true });
     }
   });
