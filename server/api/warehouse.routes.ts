@@ -3,6 +3,7 @@ import { authenticate, isPartsCatalogManager } from "../middleware/auth";
 import { PART_CATALOG_EVENT_ROLES } from "@shared/constants/roles";
 import { stockAlertsService } from "../services/stock-alerts-service";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { assertValidDbId } from "../lib/work-order-scope";
 
@@ -70,8 +71,7 @@ router.get("/reorder-alerts", authenticate, async (req: Request, res: Response) 
 // Stock réel d'une pièce avec historique mouvements
 router.get("/parts/:id/real-stock", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const partId = Number(req.params.id);
-    assertValidDbId(partId, "ID de pièce invalide");
+    const partId = parseRouteId(req.params.id, "ID de pièce invalide");
 
     const realStock = await stockAlertsService.getRealStock(partId);
 

@@ -6,6 +6,7 @@ import { moduleLogger } from "../lib/logger";
 const log = moduleLogger("work-order-items");
 import { storage } from "../storage";
 import { AppError, isAppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { workOrderItemsService } from "../services/work-order-items-service";
 import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
@@ -219,8 +220,7 @@ laborCatalogWriteRoutes.post("/", async (req, res) => {
 
 laborCatalogWriteRoutes.patch("/:id", async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant de poste invalide.");
+    const id = parseRouteId(req.params.id, "Identifiant de poste invalide.");
     const resultat = await workOrderItemsService.updateLaborCatalogEntry(id, req.body ?? {}, req.user?.id);
     if (!resultat.success) throw new AppError(400, resultat.error);
     return res.status(200).json(resultat.data);

@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { cpcExpiryDayOf } from "@shared/constants/driver-cpc-eligibility";
 import { addDaysToDateOnly, daysBetweenDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
+import { AppError } from "../lib/app-error";
 
 const log = moduleLogger("cpc-training");
 
@@ -125,7 +126,7 @@ export class CPCTrainingService {
       .returning();
     
     if (!updated) {
-      throw new Error(`Chauffeur ${driverId} non trouvé`);
+      throw new AppError(404, "Chauffeur introuvable");
     }
     
     log.info({ driverId, newStatus }, "Certification CPC mise a jour");
@@ -165,7 +166,7 @@ export class CPCTrainingService {
       .where(eq(drivers.id, driverId));
     
     if (!driver) {
-      throw new Error(`Chauffeur ${driverId} non trouvé`);
+      throw new AppError(404, "Chauffeur introuvable");
     }
     
     const { expiryDay, daysRemaining } = computeCpcExpiry(driver.cpcTrainingDate);

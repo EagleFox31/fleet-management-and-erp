@@ -2990,6 +2990,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` lit l'AST de `server/` (#363 ; la première version, textuelle, ne voyait que `return next()` et laissait passer `next(); return;`) : tout `.param` doit appeler un parseur strict `parseX(value)` (pas `parseInt` / `parseFloat`, un `throw` dans le corps s'il est local) avant tout passage (`next()`, `next("route")`, `next(null)` et autres valeurs fausses) ; un nom ou un callback non littéral est refusé comme illisible.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
 
+## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
+
+- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` désactivait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 19 appels).
+- **Cause racine** : le garde-fou cherchait une forme textuelle de l'appel, pas le comportement. Une fonction intermédiaire suffisait à le rendre aveugle.
+- **Classification** : garde-fou incomplet, faux négatif structurel ; sécurité et intégrité (mauvais objet visé).
+- **Résolution** : tous ces parseurs délèguent à `parseRouteId`. Le service CPC répond 404 au lieu de 500 pour un chauffeur absent.
+- **Prévention vérifiable** : le cliquet lit l'AST. Il compte chaque appel `f(req.params…)` vers une fonction locale, ou importée par chemin relatif, qui convertit (`parseInt`, `Number`) sans appeler `parseRouteId`. Il est rouge par mutation : avec l'ancien `parseDriverId`, drivers-management passe à 5 ; avec l'ancien `idParam`, fault-catalog passe à 6. Le contrat `tests/contract/route-id-strict-lot4.contract.test.ts` couvre ces routes.
+- **Leçon généralisée** : un cliquet qui interdit une construction doit suivre les fonctions qui l'enveloppent, sinon il ne mesure que le style. Avant de déclarer un fichier propre, prouver par mutation qu'une variante enveloppée le rend rouge.
 ## 2026-11-05 — Toast à message fixe qui masque la raison serveur
 
 - **Contexte** : le refus de lancement d'une mission disait pourquoi (budget, conflit), mais le toast du chauffeur affichait un texte fixe, et le message serveur de plus de 300 caractères était remplacé par un libellé générique.
@@ -3031,3 +3039,21 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : `reset` et `release` passent par `underKeyLock`, la même transaction sous verrou de clé que les lectures-écritures. Le contrat attend l'état stable du garde (compteur stocké = miroir `users`) avant de lire et après chaque connexion, au lieu d'un délai fixe.
 - **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts` (« reset » et « release » attendent le verrou de la clé tenu par une autre transaction, rouges avant le correctif).
 - **Leçon généralisée** : un verrou consultatif ne protège que les écritures qui le prennent. Quand un état est lu puis réécrit sous verrou, toute autre écriture du même état passe par ce verrou, y compris les DELETE et les décréments « atomiques ». Dans un test, attendre une condition observable plutôt qu'un délai.
+## 2026-11-05 — Cloison client : l'étranger et l'inexistant se répondent à l'identique (complète #255)
+
+### Contexte
+- Un client qui ouvre le véhicule d'un autre reçoit 403. Sur deux routes seulement (`GET /api/vehicles/:id`, téléchargement d'un document), un identifiant absent répondait 404 avec un autre message : le client pouvait distinguer « existe chez un autre » de « n'existe pas » et parcourir les identifiants séquentiels.
+- Les dix autres routes passent par `canAccessOwned`, qui refuse déjà un propriétaire absent : même 403, même message.
+
+### Cause racine
+- Classification : cohérence manquante entre routes d'une même cloison. Les routes plus anciennes avaient leur propre contrôle d'existence avant la cloison, et aucun test ne comparait les deux cas.
+
+### Résolution
+- Pour un client, un véhicule ou un document absent répond 403 avec le message de `OUT_OF_SCOPE_MESSAGE`, comme un objet étranger. Le personnel garde le 404 (il n'a rien à deviner). Exception : `GET /api/vehicles/:id` garde son message historique « Accès non autorisé à ce véhicule » (absent comme étranger), que l'e2e 24 attend et que l'écran affiche ; le contrat le fige.
+- Ne renverse pas #255 : le 403 reste celui que l'écran lit comme « Accès refusé ». Un client qui saisit un identifiant absent lit donc aussi « Accès refusé », par choix assumé pour ne rien révéler.
+
+### Prévention (vérifiable)
+- `tests/contract/client-unknown-vs-foreign.contract.test.ts` : pour huit routes véhicule et le téléchargement de document, compare statut, message et code de la réponse « autre client » et de la réponse « identifiant absent ». Rouge sur main pour les deux routes concernées.
+
+### Règle Projet (obligatoire)
+- Toute route ouverte à un client se teste en comparant l'objet d'un autre client et un identifiant absent : les deux réponses doivent être identiques.
