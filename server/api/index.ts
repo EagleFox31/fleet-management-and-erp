@@ -54,6 +54,7 @@ import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
 import financeReceivablesRoutes from "./finance-receivables.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
+import tariffGridRoutes from "./tariff-grid.routes";
 import treasuryRoutes from "./treasury.routes";
 import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
@@ -263,6 +264,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(pendingInvoicesRoutes);
   apiRouter.use(financeReceivablesRoutes);
   apiRouter.use(missionOperationsRoutes);
+  apiRouter.use(tariffGridRoutes);
   apiRouter.use(treasuryRoutes);
   apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);
