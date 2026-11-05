@@ -312,13 +312,11 @@ async function seedFleetAudit(vehicleId: number): Promise<void> {
   });
 }
 
-async function seedLogistics(): Promise<void> {
-  await ensureUser(DEMO_ACCOUNTS.logistics);
-  await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
-  const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
+/** Carte grise, assurance et visite technique valides : le départ d'une mission n'est pas bloqué. */
+async function ensureValidPapers(vehicleId: number, registration: string): Promise<void> {
   const docs = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
-    writeDemoPdf(`${DEMO_MISSION.vehicle}-${type}.pdf`);
+    writeDemoPdf(`${registration}-${type}.pdf`);
     const existing = docs.find((d) => d.type === type);
     if (existing) {
       await db.update(vehicleDocuments).set({ expiryDate: "2099-12-31" }).where(eq(vehicleDocuments.id, existing.id));
@@ -326,15 +324,22 @@ async function seedLogistics(): Promise<void> {
     }
     await db.insert(vehicleDocuments).values({
       vehicleId,
-      name: `${DEMO_MISSION.vehicle} ${type}`,
+      name: `${registration} ${type}`,
       type,
       filename: `${type}.pdf`,
       filesize: 4,
       fileType: "application/pdf",
-      filePath: `uploads/demo/${DEMO_MISSION.vehicle}-${type}.pdf`,
+      filePath: `uploads/demo/${registration}-${type}.pdf`,
       expiryDate: "2099-12-31",
     });
   }
+}
+
+async function seedLogistics(): Promise<void> {
+  await ensureUser(DEMO_ACCOUNTS.logistics);
+  await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
+  const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
+  await ensureValidPapers(vehicleId, DEMO_MISSION.vehicle);
   await db
     .insert(drivers)
     .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
@@ -364,6 +369,35 @@ async function seedLogistics(): Promise<void> {
   }
 }
 
+export const DEMO_DRIVER_DAY = { orderNumber: "DEMO-JOUR-001", vehicle: "DEMO-JOUR-001", employee: "DEMO-EMP-JOUR", pickup: "Douala, port", delivery: "Bafoussam, marché central" } as const;
+
+/** Mission du jour du chauffeur1 : affectée, à démarrer depuis son tableau de bord. */
+async function seedDriverDay(): Promise<void> {
+  const userId = await ensureUser(DEMO_ACCOUNTS.driver);
+  const vehicleId = await ensureVehicle(DEMO_DRIVER_DAY.vehicle, "T480", null);
+  await ensureValidPapers(vehicleId, DEMO_DRIVER_DAY.vehicle);
+  const old = await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, DEMO_DRIVER_DAY.orderNumber));
+  if (old.length > 0) {
+    const ids = old.map((m) => m.id);
+    await db.delete(assignments).where(inArray(assignments.missionId, ids));
+    await db.delete(missions).where(inArray(missions.id, ids));
+  }
+  await db.update(drivers).set({ userId: null }).where(and(eq(drivers.userId, userId), ne(drivers.employeeNumber, DEMO_DRIVER_DAY.employee)));
+  await db
+    .insert(drivers)
+    .values({ userId, firstName: "Samuel", lastName: "Biyick", employeeNumber: DEMO_DRIVER_DAY.employee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
+    .onConflictDoNothing();
+  await db.update(drivers).set({ userId, isActive: true }).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
+  const [driver] = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const now = new Date();
+  const [mission] = await db
+    .insert(missions)
+    .values({ clientId: client.id, orderNumber: DEMO_DRIVER_DAY.orderNumber, pickupAddress: DEMO_DRIVER_DAY.pickup, deliveryAddress: DEMO_DRIVER_DAY.delivery, pickupDate: now, status: "assigned", workflowData: { budgetPlan: { fuelBudget: 150000, roadExpensesBudget: 40000, contingencyBudget: 20000 } } })
+    .returning({ id: missions.id });
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId, driverId: driver.id, status: "accepted" });
+}
+
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
   await purgeReceptionOrders();
@@ -385,6 +419,7 @@ export async function seedDemo(): Promise<void> {
   const workshopVehicleId = await ensureVehicle(DEMO_VEHICLES.workshop, "T480", null);
   const secretaryVehicleId = await ensureVehicle(DEMO_VEHICLES.secretary, "Kerax", null);
   await seedFleetAudit(secretaryVehicleId);
+  await seedDriverDay();
 
   await db
     .insert(parts)
