@@ -7,11 +7,11 @@ const log = moduleLogger("work-order-items");
 import { storage } from "../storage";
 import { AppError, isAppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
+import { workOrderItemsService } from "../services/work-order-items-service";
+import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const WORK_ORDER_ID_INVALID_MESSAGE = "Identifiant d'ordre de travail invalide.";
 const ITEM_ID_INVALID_MESSAGE = "Identifiant de ligne invalide.";
-import { workOrderItemsService } from "../services/work-order-items-service";
-import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 /**
  * Lignes de travail d'un ordre de travail — heures passées, sans valorisation.
@@ -101,7 +101,7 @@ workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res, 
     return res.status(201).json(resultat.data);
   } catch (error) {
     if (isAppError(error)) return next(error);
-    console.error("Create work order item error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -140,7 +140,7 @@ workOrderItemDetailRoutes.patch("/:id", async (req, res, next) => {
     return res.status(200).json(resultat.data);
   } catch (error) {
     if (isAppError(error)) return next(error);
-    console.error("Update work order item error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Update work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -175,7 +175,7 @@ workOrderItemDetailRoutes.delete("/:id", async (req, res, next) => {
     return res.status(200).json(resultat.data);
   } catch (error) {
     if (isAppError(error)) return next(error);
-    console.error("Delete work order item error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Delete work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -207,7 +207,7 @@ laborCatalogWriteRoutes.post("/", async (req, res) => {
 
     return res.status(201).json(resultat.data);
   } catch (error) {
-    console.error("Create labor catalog entry error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Create labor catalog entry error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
