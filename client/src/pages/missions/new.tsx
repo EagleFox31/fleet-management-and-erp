@@ -571,7 +571,7 @@ export default function NewMission() {
                 <div className={`rounded-lg border p-4 ${
                   isWeightCompatible
                     ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle tonnage</p>
                   {!formData.vehicleId ? (
@@ -589,7 +589,7 @@ export default function NewMission() {
                 <div className={`rounded-lg border p-4 ${
                   isDriverCpcCompatible
                     ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
-                    : "bg-destructive/10 text-destructive border-destructive/30"
+                    : "bg-destructive/10 text-destructive-text border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle CPC</p>
                   {!formData.driverId ? (
