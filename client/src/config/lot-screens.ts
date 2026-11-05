@@ -19,6 +19,7 @@ import {
   Files,
   Fuel,
   Lock,
+  Percent,
   Receipt,
   ScrollText,
   Tag,
@@ -169,6 +170,12 @@ export const LOT_SCREENS: readonly LotScreen[] = [
     task: "F1c", feature: "finance",
     description: "Factures émises non soldées : retenues à la source, net à payer, jours depuis le dépôt.",
     roles: FINANCE_RECEIVABLE_READ_ROLES,
+  },
+  {
+    id: "finance-withholdings", path: "/finance/withholdings", title: "Retenues à la source",
+    task: "F1d", feature: "finance",
+    description: "Retenues TVA et IS subies par période : totaux, récapitulatif par client, détail par facture.",
+    roles: FINANCE_RECEIVABLE_READ_ROLES, menu: { group: "top", label: "Retenues à la source", icon: Percent },
   },
 ];
 

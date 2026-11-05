@@ -22,6 +22,7 @@ import {
   TariffGridScreen,
   TimeTrackingScreen,
   TireMovementsScreen,
+  WithholdingsScreen,
 } from "@/pages/lot/screens";
 
 export type LotScreenComponentProps = {
@@ -43,6 +44,7 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "time-tracking": TimeTrackingScreen,
   "pending-invoices": PendingInvoicesScreen,
   "invoices-awaiting-payment": InvoicesAwaitingPaymentScreen,
+  "finance-withholdings": WithholdingsScreen,
   "mission-operations": MissionOperationsScreen,
   "tariff-grid": TariffGridScreen,
 };
