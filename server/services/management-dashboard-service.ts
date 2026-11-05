@@ -1,3 +1,4 @@
+import { publicClientInvoiceColumns } from "../lib/client-public-columns";
 import { and, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   computeTrendPercent,
@@ -728,7 +729,7 @@ export class ManagementDashboardService {
 
     const invoiceRows = await db
       .select({
-        invoice: clientInvoices,
+        invoice: publicClientInvoiceColumns,
         clientName: clients.name,
       })
       .from(clientInvoices)

@@ -51,6 +51,7 @@ import fuelVouchersRoutes from "./fuel-vouchers.routes";
 import fuelPricesRoutes from "./fuel-prices.routes";
 import timeTrackingRoutes from "./time-tracking.routes";
 import pendingInvoicesRoutes from "./pending-invoices.routes";
+import financeReceivablesRoutes from "./finance-receivables.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
 import treasuryRoutes from "./treasury.routes";
 import incidentsRoutes from "./incidents.routes";
@@ -256,6 +257,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(fuelPricesRoutes);
   apiRouter.use(timeTrackingRoutes);
   apiRouter.use(pendingInvoicesRoutes);
+  apiRouter.use(financeReceivablesRoutes);
   apiRouter.use(missionOperationsRoutes);
   apiRouter.use(treasuryRoutes);
   apiRouter.use(incidentsRoutes);
