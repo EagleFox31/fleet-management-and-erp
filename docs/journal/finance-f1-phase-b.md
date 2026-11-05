@@ -73,3 +73,11 @@ Preuves : `finance-receivables.contract.test.ts` (32 tests), `finance-withholdin
 - **Pourquoi** : les colonnes ajoutées par le lot arrivaient avec toute lecture entière de `clients` ou `client_invoices`.
 - **Prévention** : `tests/unit/server/client-finance-select-hygiene.test.ts` échoue sur toute lecture entière de ces tables (`select()` vide, `{ x: clients }`, `getTableColumns`, `returning()` vide) hors liste blanche justifiée. La liste gelée de `broadcast-hygiene` perd une entrée.
 - **Preuves** : `tests/contract/client-finance-fields-scope.contract.test.ts` vérifie la réponse et la trame de la création de mission (aucun compte client destinataire), `GET /api/operations/missions` côté chauffeur affecté et côté logistique, et `GET /api/billing/invoices` et `/:id` côté logistique. Sans la projection, 3 des 4 tests échouent.
+
+## La logistique lit les champs finance (décision du 2026-11-05)
+
+- **Quoi** : la logistique voit en lecture seule les retenues, le net à payer et les taux par client. Cela couvre `/api/finance/invoices-awaiting-payment`, la fiche et la liste `/api/clients`, les trames `client_invoice_deposited` et `client_withholding_updated`, ainsi que l'écran « Factures en attente de paiement », où les boutons sont masqués. L'écriture (dépôt, taux) reste réservée à l'administration et au secrétariat.
+- **Comment** : `logistics` est ajouté à `FINANCE_RECEIVABLE_READ_ROLES` (`shared/constants/roles.ts`), qui est la source unique. Les routes, `forViewer`, les portées des trames et l'écran en dérivent.
+- **Pourquoi** : c'est la décision de l'utilisatrice. Le fichier « SUIVI OPERATION & FACTURATION » de la logistique porte déjà la TVA retenue, l'acompte et le solde net.
+- **Hors périmètre** : les projections publiques de facturation et des missions (`client-public-columns`) ne portent aucun champ finance, quel que soit le rôle, administrateur compris. Elles restent inchangées, et la lecture finance passe par les routes ci-dessus.
+- **Preuves** : `finance-receivables.contract.test.ts` vérifie que la logistique lit (200), reçoit 403 en écriture, et voit les taux sur la fiche client. Le technicien et le chauffeur ne les voient pas.

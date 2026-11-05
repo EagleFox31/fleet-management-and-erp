@@ -179,14 +179,27 @@ export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
-/** Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture. */
-export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary"] as const satisfies readonly AppRole[];
+/** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve et décaisse. */
+export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
+/**
+ * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.
+ * La logistique lit les retenues, le net et les taux : son suivi « opération et facturation » les porte déjà
+ * (décision du 2026-11-05). Elle n'écrit rien (FINANCE_RECEIVABLE_WRITE_ROLES).
+ */
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
 /** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
 export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
 
 export function canReadFinanceReceivable(role: string | null | undefined): boolean {
   return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+export function canWriteFinanceReceivable(role: string | null | undefined): boolean {
+  return (FINANCE_RECEIVABLE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
 /** Suivi des opérations clients (`mission_operations`) : saisie par l'administration et la logistique. */

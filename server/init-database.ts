@@ -1061,6 +1061,89 @@ BEFORE UPDATE OF role, deleted_at OR DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_users_keep_active_admin();`;
 
+/**
+ * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
+ * server/db/migrations/20261105_mission_budgets.sql : tests/unit/server/mission-budgets-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const MISSION_BUDGETS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS mission_budgets (
+  id serial PRIMARY KEY,
+  mission_id integer NOT NULL
+    CONSTRAINT mission_budgets_mission_id_missions_id_fk REFERENCES missions(id),
+  budget_date date NOT NULL,
+  fuel_liters numeric(12,2) NOT NULL,
+  fuel_unit_price numeric(15,2) NOT NULL,
+  fuel_amount numeric(15,2) NOT NULL,
+  fdr_amount numeric(15,2) NOT NULL,
+  extras_amount numeric(15,2) NOT NULL DEFAULT '0',
+  total_amount numeric(15,2) NOT NULL,
+  status text NOT NULL DEFAULT 'requested',
+  notes text,
+  treasury_entry_id integer,
+  approved_by integer CONSTRAINT mission_budgets_approved_by_users_id_fk REFERENCES users(id),
+  approved_at timestamp,
+  disbursed_by integer CONSTRAINT mission_budgets_disbursed_by_users_id_fk REFERENCES users(id),
+  disbursed_at timestamp,
+  created_by integer CONSTRAINT mission_budgets_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_budgets_updated_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_budgets_mission_id_unique UNIQUE (mission_id),
+  CONSTRAINT mission_budgets_status_check CHECK (status IN ('requested', 'approved', 'disbursed')),
+  CONSTRAINT mission_budgets_amounts_check
+    CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mission_budgets_budget_date ON mission_budgets (budget_date);
+
+DO $$
+DECLARE
+  c record;
+  existing text;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_budgets_status_check', 'CHECK (status IN (''requested'', ''approved'', ''disbursed''))'),
+    ('mission_budgets_amounts_check', 'CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)')
+  ) AS v(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_budgets ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_budgets VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_budgets : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- Un budget par mission, sous le nom attendu par le service (409) : une unicité posée sous un autre nom
+  -- sur mission_id est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_mission_id_unique') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'mission_budgets'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'mission_id'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE mission_budgets RENAME CONSTRAINT %I TO mission_budgets_mission_id_unique', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE mission_budgets ADD CONSTRAINT mission_budgets_mission_id_unique UNIQUE (mission_id);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'mission_budgets : missions en double, contrainte mission_budgets_mission_id_unique non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_budgets non réconciliées : verrou de table indisponible';
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1261,6 +1344,10 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'qhse_inspections_kind_check',
   'qhse_inspections_location_check',
   'qhse_inspections_items_check',
+  // Posées par MISSION_BUDGETS_SQL (lot L1), relues ici au même titre.
+  'mission_budgets_status_check',
+  'mission_budgets_amounts_check',
+  'mission_budgets_mission_id_unique',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -1282,7 +1369,7 @@ export async function reportCdcConstraintGaps(
   if (missing.length || notValidated.length) {
     log.warn(
       { missing, notValidated },
-      'Contraintes CDC incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
+      'Contraintes de base incomplètes : données existantes à corriger (doublons ou valeurs hors contrainte)',
     );
   }
   return { missing, notValidated };
@@ -1290,7 +1377,6 @@ export async function reportCdcConstraintGaps(
 
 async function applyCdcSchema() {
   await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
-  await reportCdcConstraintGaps(pool);
 }
 
 /** Liste SQL des catégories, tirée du contrat partagé : la CHECK suit TREASURY_CATEGORIES sans copie à tenir. */
@@ -1771,6 +1857,11 @@ export async function initializeDatabase() {
     await reportUsersPinBcryptGaps(pool);
     // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
+    await pool.query(MISSION_BUDGETS_SQL);
+    // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
+    // pas encore créée serait signalée à tort.
+    await reportCdcConstraintGaps(pool);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);
