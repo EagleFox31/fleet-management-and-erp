@@ -797,3 +797,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - unitaires 2987 ; typage 0 erreur ;
   - e2e `28-mission-launch-budget` 1/1 : refus lisible, onglet Budget ; la direction approuve et la logistique (second compte, autre rôle) reçoit la trame, puis sa check-list est relue sans rechargement ;
   - mutants : 7 sur 7 tués.
+
+
+## 2026-11-05 21:05 — Check-list de lancement : montants du budget réservés à ses lecteurs (suivi L1g)
+- **Quoi** : drapeau finance actif, `GET /api/missions/:id/launch-readiness` ne renvoie plus les montants du budget de mission à un rôle hors de `MISSION_BUDGET_READ_ROLES` (admin, logistique, direction, secrétariat). Les contrôles budget passés disent « Budget approuvé. », `budgets.*` et `fuel.requiredBudget` valent `null`, le motif de solde insuffisant ne cite plus le budget, ni dans la check-list ni au PUT de statut (ouvert au chauffeur). Les verdicts ne changent pas. Drapeau coupé : inchangé.
+- **Comment** : `resolveLaunchBudget(missionId, legacy, role)` renvoie aussi `present`, qui met en forme la réponse (`hideLaunchBudgetAmounts`, fonction pure), et `fuelShortfallMotif` pour le PUT. `missions.routes.ts` (gelé) : 5 lignes modifiées en place, aucune ajoutée.
+- **Pourquoi** : constat sécurité sur #515 : la route est ouverte au personnel (`isStaff`), la lecture du budget ne l'est pas.
+- **Preuve** : contrat 14/14 (technicien sans montant, logistique avec, drapeau coupé inchangé ; refus du PUT relu en base : mission toujours `assigned`) ; unitaires dédiés 8/8 ; mutants 6/6 tués.
