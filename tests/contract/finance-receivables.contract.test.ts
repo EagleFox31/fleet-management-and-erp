@@ -323,6 +323,7 @@ describe("fiche client /api/clients : taux de retenue réservés à la lecture f
     const stored = (await call("GET", `/api/clients/${res.body.id}`, "admin")).body;
     const reference = (await call("GET", `/api/clients/${plain.body.id}`, "admin")).body;
     expect(rates(stored)).toEqual(rates(reference));
+    expect(stored).toMatchObject({ withholdingIsBase: "ht", withholdingVatRate: null, withholdingIsRate: null });
     expect(stored.withholdingUpdatedBy ?? null).toBeNull();
   });
 

@@ -113,6 +113,29 @@ export function findWholeReads(source: string, key: string): string[] {
   const withWhole = /\bwith\s*:\s*\{[^}]*\b(?:clients?|clientInvoices?)\s*:\s*true\b/g;
   for (let m = withWhole.exec(source); m; m = withWhole.exec(source)) found.push(`${key}#with#${++relation}`);
   found.push(...findWholeSqlReads(source, key));
+  found.push(...findHiddenTableNames(source, key));
+  return found;
+}
+
+/**
+ * Noms qui masqueraient la table au détecteur, interdits sans exception : import renommé
+ * (`import { clients as c }`), accès par crochets (`schema["clients"]`) et copie locale
+ * (`const t = clients;`, `= schema.clients;`). `alias(clients, "c")` reste la seule forme suivie.
+ */
+export function findHiddenTableNames(source: string, key: string): string[] {
+  const found: string[] = [];
+  // `import * as schema from "@shared/schema"` : `schema.clients` vaut `clients`.
+  const namespaces = [...source.matchAll(/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["'][^"']*shared\/schema["']/g)].map((m) => m[1]);
+  const prefix = namespaces.length ? `(?:(?:${namespaces.join("|")})\\.)?` : "";
+  const patterns: [string, RegExp][] = [
+    ["rename", /\bimport\s+(?:type\s+)?\{[^}]*\b(?:clients|clientInvoices)\s+as\s+[A-Za-z_$]/g],
+    ["bracket", /\[\s*["'`](?:clients|clientInvoices|client_invoices)["'`]\s*\]/g],
+    ["copy", new RegExp(`=\\s*${prefix}(?:clients|clientInvoices)\\s*[;\\n]`, "g")],
+  ];
+  for (const [kind, pattern] of patterns) {
+    let n = 0;
+    for (let m = pattern.exec(source); m; m = pattern.exec(source)) found.push(`${key}#${kind}#${++n}`);
+  }
   return found;
 }
 
@@ -233,5 +256,19 @@ describe("lectures entières de clients / client_invoices (champs finance)", () 
     expect(findWholeReads("sql`SELECT * FROM ${schema.clients}`", "a")).toEqual(["a#sql:clients#1"]);
     // Projections nommées par espace de noms : sans effet.
     expect(findWholeReads("db.select({ id: schema.clients.id }).from(schema.clients)", "a")).toEqual([]);
+  });
+
+  it("le détecteur interdit les noms qui masquent la table : import renommé, crochets, copie locale", () => {
+    expect(findWholeReads("import { clients as c } from \"@shared/schema\";\ndb.select({ id: c.id }).from(c)", "a")).toEqual(["a#rename#1"]);
+    expect(findWholeReads("import { users, clientInvoices as inv } from \"@shared/schema\";", "a")).toEqual(["a#rename#1"]);
+    expect(findWholeReads("db.select().from(schema[\"clients\"])", "a")).toEqual(["a#bracket#1"]);
+    expect(findWholeReads("const t = schema['clientInvoices'];", "a")).toEqual(["a#bracket#1"]);
+    // Copie locale : `t` échapperait au suivi des lectures entières, elle est donc refusée.
+    expect(findWholeReads("const t = clients;\ndb.select().from(t)", "a")).toEqual(["a#copy#1"]);
+    expect(findWholeReads("import * as schema from \"@shared/schema\";\nconst t = schema.clientInvoices;", "a")).toEqual(["a#copy#1"]);
+    // Usages ordinaires : sans effet.
+    expect(findWholeReads("import { clients, clientInvoices } from \"@shared/schema\";", "a")).toEqual([]);
+    expect(findWholeReads("const id = clients.id;\nconst n = row.clients;", "a")).toEqual([]);
+    expect(findWholeReads("sql`SELECT c.id FROM clients as c`", "a")).toEqual([]);
   });
 });
