@@ -15,6 +15,8 @@ import { canReadVehiclePurchasePrice, VEHICLE_DOCUMENT_EVENT_ROLES } from "@shar
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 
+const VEHICLE_ID_INVALID_MESSAGE = "Identifiant de véhicule invalide.";
+
 const router = Router();
 const log = moduleLogger("vehicles-routes");
 
@@ -283,10 +285,8 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
  */
 router.put("/:id/mileage", isStaff, async (req, res, next) => {
   try {
-    const vehicleId = parseRouteId(req.params.id, "Identifiant de véhicule invalide.");
+    const vehicleId = parseRouteId(req.params.id, VEHICLE_ID_INVALID_MESSAGE);
     const { kilometers } = req.body;
-    
-    
 
     // Un chauffeur ne saisit que le véhicule de son affectation active (option A : avant clôture).
     if (!(await canWriteVehicleMileage(req.user, vehicleId))) {
@@ -329,11 +329,9 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
  */
 router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
   try {
-    const vehicleId = parseRouteId(req.params.id, "Identifiant de véhicule invalide.");
+    const vehicleId = parseRouteId(req.params.id, VEHICLE_ID_INVALID_MESSAGE);
     const { position } = req.body;
-    
-    
-    
+
     if (!position || typeof position !== 'string') {
       return res.status(400).json({ message: "Position invalide" });
     }

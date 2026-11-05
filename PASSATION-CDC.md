@@ -88,3 +88,7 @@
 ## 2026-11-05 04:04 — #369 : réserves de relecture et sécurité levées
 - isNaN mort retiré (part-requirements PATCH), constantes work-order-parts placées après le dernier import, contrat : /issue avec « 1abc » par technicien et par client → 403 (garde de rôle avant lecture de l'id). Rectif. de rapport : sur /parts le statut des AppError ne change pas, seul « 1abc » passe en 400.
 - #373 (dernière liste hors aa) est empilée sur #369 : fusionner #369 dedans après chaque changement. Reste : admin-users-guard:14 (audit sécurité, en dernier).
+
+## 2026-11-05 — #373 : précision et mineurs de relecture
+- Rectificatif : dans supplier-invoices, 4 lectures `parseInt` passées à `parseRouteId` + 1 garde `isNaN` remplacée par la validation du parseur (et non 4 lectures seules).
+- vehicles.routes.ts : lignes vides résiduelles retirées, message d'identifiant en constante `VEHICLE_ID_INVALID_MESSAGE`.
