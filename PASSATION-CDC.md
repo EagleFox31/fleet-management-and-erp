@@ -43,3 +43,6 @@
 
 ## 2026-11-05 02:15 — c7 : PUT /:id/status rejoue le contrôle de planning (PR empilée sur #334)
 - Branche fix/mission-status-planning-clash rebasée sur #334 corrigée ; PUT /status vers planned/assigned prend la ligne mission FOR UPDATE, puis lockPlanningPairs, puis findPlanningClash ; 409 lisible (AppError). Contrat mission-planning-conflict-status : 5 cas (3 rouges sans correctif), cancelled non régressé. Suivi de LESSONS (« PUT /status ne rejoue pas ») clos.
+
+## 2026-11-05 03:05 — c7 : #339 réserves de relecture (lecture périmée, 409 centralisé)
+- PATCH (liveAssignments, créneau) et PUT /status comparent, sous le FOR UPDATE de la mission, l'empreinte lue avant la transaction à celle de la base (assertPlanningStateUnchanged) : 409 lisible si périmée. Contrat tests/contract/mission-planning-stale-read : déterministe via un verrou de ligne tenu par le test, rouge 2/2 sans la comparaison. POST / renvoie son 409 par next(error) (Express 4 : un throw dans le handler async ne répond jamais). Cas draft vers planned sans affectation : 200. Suivi liveAssignments clos.

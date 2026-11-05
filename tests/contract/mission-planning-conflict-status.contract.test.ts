@@ -96,6 +96,17 @@ describe("PUT /:id/status : conflit de planning", { timeout: 120000 }, () => {
     expect(await statusOf(draft)).toBe("assigned");
   });
 
+  it("draft vers planned sans affectation : 200 (rien à contrôler)", async () => {
+    const [m] = await db
+      .insert(missions)
+      .values({ orderNumber: uniqueTestToken("MST"), pickupAddress: "A", deliveryAddress: "B", pickupDate: day(30), deliveryDate: day(31), status: "draft" } as any)
+      .returning();
+    missionIds.push(m.id);
+    const res = await put(m.id, "planned");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await statusOf(m.id)).toBe("planned");
+  });
+
   it("annulation d'une mission en conflit : aucun contrôle de planning (non-régression)", async () => {
     const [v, d] = [await vehicle(), await driver()];
     await seed("assigned", v, d, day(10), day(12));
