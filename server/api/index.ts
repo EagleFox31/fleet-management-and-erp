@@ -32,6 +32,7 @@ import pinAuthRoutes from "./pin-auth.routes";
 import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
+import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
 import backupsRoutes from "./backups.routes";
@@ -136,6 +137,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(faultCatalogRoutes);
   // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
   apiRouter.use(adminUsersGuardRoutes);
+  apiRouter.use(lastAdminGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   apiRouter.use(workflowsRoutes);
   // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
