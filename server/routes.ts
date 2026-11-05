@@ -877,7 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(204).send();
     } catch (error) {
       if (isAdminGuardDbRefusal(error)) return next(error);
-      console.error("Delete admin user error:", error);
+      log.error({ err: error, requestId: req.requestId }, "Delete admin user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });

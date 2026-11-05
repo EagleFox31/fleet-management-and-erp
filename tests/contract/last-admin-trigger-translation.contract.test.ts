@@ -16,6 +16,9 @@ import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
  * le dernier admin (l'appelant en est un) : le test reproduit la course où la garde a laissé passer la
  * requête, en retirant l'appelant des admins actifs juste avant l'écriture, depuis la lecture ou l'écriture
  * de la cible dans le stockage.
+ *
+ * Réparation en cas d'arrêt brutal en plein test : les admins préexistants de la base de test restent désactivés.
+ * Les rétablir avec `UPDATE users SET deleted_at = NULL WHERE role = 'admin'` (base de test uniquement).
  */
 const race = { before: undefined as undefined | (() => Promise<void>), targetId: 0 };
 const spies: Array<{ mockRestore: () => void }> = [];
