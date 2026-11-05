@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { assignments, drivers, missionBudgets, missions } from "../../shared/schema";
@@ -17,7 +17,7 @@ import { uniqueTestToken } from "../support/ids";
  * FDR = FDR, imprévus = frais annexes). Absent ou seulement demandé : refus qui dit quoi faire.
  * Le PUT de statut applique la même règle.
  */
-type Actor = "logistics";
+type Actor = "logistics" | "technician";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const missionIds: number[] = [];
 const driverIds: number[] = [];
@@ -55,10 +55,15 @@ async function missionWithBudget(state: BudgetState) {
   return m.id;
 }
 
-async function budgetChecks(missionId: number) {
-  const res = await session.call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "logistics" });
+async function readiness(missionId: number, actor: Actor = "logistics") {
+  const res = await session.call("GET", `/api/missions/${missionId}/launch-readiness`, { actor });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
-  return BUDGET_KEYS.map((key) => res.body.checks.find((c: any) => c.key === key));
+  return res.body;
+}
+
+async function budgetChecks(missionId: number, actor: Actor = "logistics") {
+  const body = await readiness(missionId, actor);
+  return BUDGET_KEYS.map((key) => body.checks.find((c: any) => c.key === key));
 }
 
 function withFlags(value: string) {
@@ -68,7 +73,7 @@ function withFlags(value: string) {
 }
 
 beforeAll(async () => {
-  session = await startContractSession<Actor>({ logistics: "logistics" });
+  session = await startContractSession<Actor>({ logistics: "logistics", technician: "technician" });
 }, 60000);
 
 afterAll(async () => {
@@ -140,6 +145,8 @@ describe("PUT /api/missions/:id/status vers in_progress, drapeau finance actif",
     const res = await session.call("PUT", `/api/missions/${missionId}/status`, { actor: "logistics", body: { status: "in_progress" } });
     expect(res.status, JSON.stringify(res.body)).toBe(400);
     expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
+    const [row] = await db.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId));
+    expect(row.status, "refus sans effet : la mission n'est pas lancée").toBe("assigned");
     return res.body.motifs as string[];
   };
 
@@ -158,5 +165,35 @@ describe("PUT /api/missions/:id/status vers in_progress, drapeau finance actif",
     const res = await session.call("PUT", `/api/missions/${await assigned("approved")}/status`, { actor: "logistics", body: { status: "in_progress" } });
     const motifs: string[] = res.body?.motifs ?? [];
     expect(motifs.filter((m) => /budget/i.test(m)), JSON.stringify(res.body)).toEqual([]);
+  });
+});
+
+describe("launch-readiness, montants du budget de mission réservés à ses lecteurs", { timeout: 60000 }, () => {
+  describe("drapeau actif", () => {
+    withFlags("finance=on");
+    it("technicien (personnel, non lecteur) : verdicts conservés, aucun montant", async () => {
+      const missionId = await missionWithBudget("approved");
+      const body = await readiness(missionId, "technician");
+      const checks = BUDGET_KEYS.map((key) => body.checks.find((c: any) => c.key === key));
+      expect(checks.map((c: any) => [c.passed, c.detail])).toEqual([
+        [true, "Budget approuvé."],
+        [true, "Budget approuvé."],
+        [true, "Budget approuvé."],
+      ]);
+      expect(body.budgets).toEqual({ fuelBudget: null, roadExpensesBudget: null, contingencyBudget: null, totalBudget: null });
+      expect(body.fuel.requiredBudget).toBeNull();
+    });
+    it("logistique (lectrice) : montants visibles", async () => {
+      const body = await readiness(await missionWithBudget("approved"));
+      expect(body.budgets).toEqual({ fuelBudget: 50000, roadExpensesBudget: 20000, contingencyBudget: 5000, totalBudget: 75000 });
+      expect(body.fuel.requiredBudget).toBe(50000);
+    });
+  });
+  describe("drapeau coupé", () => {
+    withFlags("finance=off");
+    it("technicien : ancien budget visible comme avant", async () => {
+      const [fuel] = await budgetChecks(await missionWithBudget("approved"), "technician");
+      expect(fuel.detail).toBe("111000 FCFA renseigné.");
+    });
   });
 });
