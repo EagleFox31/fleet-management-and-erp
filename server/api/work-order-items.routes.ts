@@ -63,10 +63,7 @@ export const workOrderItemsRoutes = Router();
 
 workOrderItemsRoutes.get("/:workOrderId/items", isAnyUser, async (req, res, next) => {
   try {
-    const workOrderId = Number.parseInt(req.params.workOrderId, 10);
-    if (Number.isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
+    const workOrderId = parseRouteId(req.params.workOrderId, "ID d'ordre de travail invalide");
 
     await assertWorkOrderReadable(req.user, workOrderId);
     return res.status(200).json(await workOrderItemsService.getItemsForWorkOrder(workOrderId));
@@ -77,12 +74,9 @@ workOrderItemsRoutes.get("/:workOrderId/items", isAnyUser, async (req, res, next
   }
 });
 
-workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res) => {
+workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res, next) => {
   try {
-    const workOrderId = Number.parseInt(req.params.workOrderId, 10);
-    if (Number.isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
+    const workOrderId = parseRouteId(req.params.workOrderId, "ID d'ordre de travail invalide");
 
     const refus = await refusPourCetteOT(workOrderId, req.user);
     if (refus) {
@@ -103,7 +97,8 @@ workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res) 
 
     return res.status(201).json(resultat.data);
   } catch (error) {
-    console.error("Create work order item error:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Create work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -112,12 +107,9 @@ workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res) 
 
 export const workOrderItemDetailRoutes = Router();
 
-workOrderItemDetailRoutes.patch("/:id", async (req, res) => {
+workOrderItemDetailRoutes.patch("/:id", async (req, res, next) => {
   try {
-    const itemId = Number.parseInt(req.params.id, 10);
-    if (Number.isNaN(itemId)) {
-      return res.status(400).json({ message: "ID de ligne invalide" });
-    }
+    const itemId = parseRouteId(req.params.id, "ID de ligne invalide");
 
     const ligne = await workOrderItemsService.getItem(itemId);
     if (!ligne) {
@@ -144,17 +136,15 @@ workOrderItemDetailRoutes.patch("/:id", async (req, res) => {
 
     return res.status(200).json(resultat.data);
   } catch (error) {
-    console.error("Update work order item error:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Update work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
-workOrderItemDetailRoutes.delete("/:id", async (req, res) => {
+workOrderItemDetailRoutes.delete("/:id", async (req, res, next) => {
   try {
-    const itemId = Number.parseInt(req.params.id, 10);
-    if (Number.isNaN(itemId)) {
-      return res.status(400).json({ message: "ID de ligne invalide" });
-    }
+    const itemId = parseRouteId(req.params.id, "ID de ligne invalide");
 
     const ligne = await workOrderItemsService.getItem(itemId);
     if (!ligne) {
@@ -181,7 +171,8 @@ workOrderItemDetailRoutes.delete("/:id", async (req, res) => {
 
     return res.status(200).json(resultat.data);
   } catch (error) {
-    console.error("Delete work order item error:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Delete work order item error");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

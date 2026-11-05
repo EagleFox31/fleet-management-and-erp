@@ -5,6 +5,7 @@ import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { ownerScopeOf } from "../lib/client-scope";
 import { canWriteVehicleMileage, OUT_OF_ASSIGNED_VEHICLE_MILEAGE_MESSAGE } from "../lib/driver-scope";
 import { boundedInt, listVehicles, VEHICLE_LIST_DEFAULT_LIMIT, VEHICLE_LIST_MAX_LIMIT } from "../services/vehicle-list-service";
@@ -282,12 +283,8 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
  */
 router.put("/:id/mileage", isStaff, async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.id);
+    const vehicleId = parseRouteId(req.params.id, "ID de véhicule invalide");
     const { kilometers } = req.body;
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
 
     // Un chauffeur ne saisit que le véhicule de son affectation active (option A : avant clôture).
     if (!(await canWriteVehicleMileage(req.user, vehicleId))) {
@@ -330,12 +327,8 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
  */
 router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.id);
+    const vehicleId = parseRouteId(req.params.id, "ID de véhicule invalide");
     const { position } = req.body;
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
     
     if (!position || typeof position !== 'string') {
       return res.status(400).json({ message: "Position invalide" });

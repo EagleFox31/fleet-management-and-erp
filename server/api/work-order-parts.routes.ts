@@ -33,11 +33,7 @@ const openRequirementStatuses = OPEN_REQUIREMENT_STATUSES;
 
 router.get("/:workOrderId/pending-part-requirements", isAnyUser, async (req, res, next) => {
   try {
-    const workOrderId = parseInt(req.params.workOrderId);
-
-    if (isNaN(workOrderId)) {
-      return res.status(400).json({ message: "ID d'ordre de travail invalide" });
-    }
+    const workOrderId = parseRouteId(req.params.workOrderId, "ID d'ordre de travail invalide");
 
     await assertWorkOrderReadable(req.user, workOrderId);
 

@@ -881,7 +881,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Récupérer un utilisateur spécifique - Administrateurs ou utilisateur lui-même
-  app.get("/api/users/:id", authenticate, async (req, res) => {
+  // isAnyUser charge req.user (authenticate seul ne le fait pas) ; hors admin, chacun ne lit que son profil (§11).
+  app.get("/api/users/:id", isAnyUser, async (req, res) => {
     try {
       const id = routeIdOrNaN(req.params.id);
       const currentUser = req.user;
@@ -1031,11 +1032,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Utilisateur non trouvé" });
       }
       
-      // Essayons d'abord de l'interpréter comme un ID numérique
-      const id = parseInt(idOrRegistration);
-      
-      if (!isNaN(id)) {
-        // C'est un ID numérique
+      // Chiffres seuls : un id (strict, 400 hors bornes). Sinon une immatriculation : `12abc` ne lit pas le véhicule 12.
+      if (/^\d+$/.test(idOrRegistration)) {
+        const id = routeIdOrNaN(idOrRegistration);
+        if (isNaN(id)) {
+          return res.status(400).json({ message: "ID de véhicule invalide" });
+        }
         vehicle = await storage.getVehicle(id);
       } else {
         // C'est probablement une immatriculation

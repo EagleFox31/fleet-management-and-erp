@@ -109,3 +109,34 @@
   - Ancien code : 9 rouges (200, 201 ou 204 ; `payment` répondait 400 sur un autre motif). Correctif : 9 verts.
   - tsc : 0 erreur. Unitaires : 2441 verts. 24 contrats du périmètre : 418 verts.
   - Ménage : sur l'ancien code, les routes écrivent (mouvement lié à l'OT, demande créée) et le mouvement bloquait la suppression de l'OT. Le `afterAll` retrouve désormais les OT par préfixe de titre (`TEST lot 8`) et les demandes par motif, puis supprime des enfants vers les parents. Rejoué : 0 résidu après le vert et après le rouge.
+
+## Lot 9 — fin de `server/api`, `GET /api/vehicles/:id` et `GET /api/users/:id`
+
+- Quoi : `parseRouteId` remplace les 14 lectures lâches qui restaient dans `server/api`.
+  - `document-renewals` : `PATCH /requests/:id/status`.
+  - `part-requirements` : `GET /by-part/:partId`.
+  - `parts-catalog` : `DELETE`, `PATCH /parts/:id`, `POST /parts/:id/update-stock`.
+  - `supplier-invoices` : `GET /:id`, `GET /:id/settlements`.
+  - `vehicles` : `PUT /:id/mileage`, `PUT /:id/maintenance-position`.
+  - `work-order-items` : `GET` et `POST /:workOrderId/items`, `PATCH` et `DELETE /work-order-items/:id`.
+  - `work-order-parts` : `GET /:workOrderId/pending-part-requirements`.
+  - `admin-users-guard` reste à 1 : il est traité par #375.
+- Dans `server/routes.ts`, modifié en place :
+  - `GET /api/vehicles/:id` : seuls des chiffres valent un id (400 hors de l'int4). Le reste est cherché comme immatriculation, donc `12abc` ne lit plus le véhicule 12.
+  - `GET /api/users/:id` passe d'`authenticate` à `isAnyUser`. `authenticate` ne charge pas `req.user`, donc la route répondait 401 à tout compte. Hors admin, chacun ne lit que son profil.
+- Comment :
+  - Les messages existants sont gardés. `supplier-invoices GET /:id` n'avait pas de 400 : il prend « Identifiant de facture invalide. ».
+  - `parts-catalog` était déjà filtré par `([0-9]+)`. Le gain porte sur `0` et sur un id hors de l'int4 (500 avant, 400 maintenant).
+  - Les catch de `by-part`, `POST`, `PATCH` et `DELETE` de ligne d'OT relaient les AppError. Les 3 `console.error` de `work-order-items` sont migrés vers `log.error`, aucun n'est supprimé.
+  - Le FROZEN ne garde que `admin-users-guard.routes.ts: 1`.
+  - `supplier-invoice-error-details` provoquait sa 500 avec `pas-un-id`, qui répond désormais 400 : la 500 est maintenant provoquée par `vi.spyOn` sur le service.
+- Tester : `route-id-strict-lot9`, 12 cas.
+  - Véhicule : kilométrage et position inchangés.
+  - Ligne d'OT : aucune créée, ni modifiée, ni supprimée.
+  - `parts-catalog` : 0 et id hors de l'int4.
+  - 7 lectures à 400.
+  - Le client lit son véhicule par son id (témoin), et reçoit 404 sur `<id>abc`.
+  - Profil : le sien à 200, celui d'un autre à 403, l'admin lit tout le monde.
+  - Ancien code : 12 rouges (200, 201, 404, 500 ; `GET /api/users/:id` à 401). Correctif : 12 verts.
+  - Ménage par préfixe de titre (`TEST lot 9`) : 0 résidu.
+  - tsc : 0 erreur. Unitaires : 2441 verts. 50 contrats du périmètre : 793 verts.
