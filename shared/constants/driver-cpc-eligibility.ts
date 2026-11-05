@@ -12,7 +12,7 @@
  * enregistré est valide mais dont la date est absente.
  */
 
-import { addDaysToDateOnly, isExpiredOn, todayUtcDateOnly } from "./expiry-day";
+import { addDaysToDateOnly, daysBetweenDateOnly, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "./expiry-day";
 
 /** Durée de validité d'une formation CPC, en jours (partagée avec `calculateCPCStatus`). */
 export const CPC_VALIDITY_DAYS = 731;
@@ -34,10 +34,34 @@ function formatFr(dateOnly: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/** Motif de refus, stable : les écrans et les contrats le lisent, jamais le libellé. */
+export type CpcIneligibleCode = "EXPIRED" | "NOT_VALID" | "MISSING" | "FUTURE_DATE";
+
+/**
+ * Libellé fixe par motif, SANS date ni statut saisi : il est diffusé avec la liste des
+ * missions, que lit tout le personnel. Le libellé daté (`reason`) reste réservé aux
+ * écrans qui possèdent déjà la date (assistant de mission) et aux messages d'erreur.
+ */
+export const CPC_INELIGIBLE_LABELS: Record<CpcIneligibleCode, string> = {
+  EXPIRED: "Formation CPC expirée.",
+  NOT_VALID: "CPC non valide. Un chauffeur au statut FORMÉ est requis.",
+  MISSING: "CPC non renseigné. Un chauffeur au statut FORMÉ est requis.",
+  FUTURE_DATE: "Date de formation CPC postérieure à aujourd'hui : à vérifier.",
+};
+
 export interface DriverCpcEligibility {
   eligible: boolean;
-  /** Raison lisible, absente quand le chauffeur est éligible. */
+  /** Motif de refus, absent quand le chauffeur est éligible. */
+  code?: CpcIneligibleCode;
+  /** Libellé fixe du motif (sans date), absent quand le chauffeur est éligible. */
+  label?: string;
+  /** Raison lisible, absente quand le chauffeur est éligible. Peut contenir la date d'expiration. */
   reason?: string;
+}
+
+function refuse(code: CpcIneligibleCode, reason?: string): DriverCpcEligibility {
+  const label = CPC_INELIGIBLE_LABELS[code];
+  return { eligible: false, code, label, reason: reason ?? label };
 }
 
 export function normalizeCpcStatus(value: string | null | undefined): string {
@@ -58,17 +82,17 @@ export function getDriverCpcEligibility(
   if (isCpcStatusValid(driver.cpcStatus)) {
     // Le statut enregistré n'est recalculé par aucune tâche planifiée : une garde
     // réglementaire juge la date quand elle existe.
+    // Une formation datée du futur (import SQL) ne prouve rien : inéligible.
+    const trained = toExpiryDateOnly(driver.cpcTrainingDate);
+    if (trained && daysBetweenDateOnly(trained, today) > 0) return refuse("FUTURE_DATE");
     const expiry = cpcExpiryDayOf(driver.cpcTrainingDate);
     if (expiry && isExpiredOn(expiry, today)) {
-      return { eligible: false, reason: `Formation CPC expirée le ${formatFr(expiry)}.` };
+      return refuse("EXPIRED", `Formation CPC expirée le ${formatFr(expiry)}.`);
     }
     return { eligible: true };
   }
   const status = (driver.cpcStatus || "").trim();
-  return {
-    eligible: false,
-    reason: status
-      ? `CPC non valide (statut : ${status}). Un chauffeur au statut FORMÉ est requis.`
-      : "CPC non renseigné. Un chauffeur au statut FORMÉ est requis.",
-  };
+  return status
+    ? refuse("NOT_VALID", `CPC non valide (statut : ${status}). Un chauffeur au statut FORMÉ est requis.`)
+    : refuse("MISSING");
 }

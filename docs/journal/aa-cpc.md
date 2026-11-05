@@ -25,3 +25,10 @@
 - Comment : `server/lib/driver-cpc-input.ts` (message et test de date futur partagés), liste explicite `SCHEMA_MESSAGES` pour distinguer les messages personnalisés, `toFieldErrors` de `shared/errors.ts` pour le détail.
 - Pourquoi : le texte Zod par défaut (anglais) ne doit jamais atteindre l'écran.
 - Tester : `tests/contract/mission-driver-cpc-status.contract.test.ts` (4 échecs sur 27 sans le correctif).
+
+## 2026-11-05 — Éligibilité CPC calculée par le serveur pour les missions, mineurs de #333
+
+- Quoi : `assignment.driver.cpcEligible` et `cpcIneligibleReason` (libellé fixe, sans date) sur GET /api/missions et GET /api/missions/:id ; `cpcTrainingDate` retirée du payload ; absents pour un client et pour la fiche d'un autre chauffeur (cloison de #127). La règle partagée renvoie un code de raison (EXPIRED, NOT_VALID, MISSING, FUTURE_DATE) ; une formation datée du futur rend le chauffeur inéligible. Les `console.*` de `drivers-management.routes.ts` passent à `moduleLogger` (le journal de GET /me ne liste plus les missions) ; une date impossible (9999-99-99) donne 400 au lieu de 500.
+- Comment : `server/lib/mission-driver-cpc.ts`, `invalidateDriverCpcDependents` (client) pour la couche 3 (la synchro temps réel `driver_updated` et `driver_cpc_updated` invalide aussi le détail de mission), `buildDriverPatchPayload` : la fiche n'envoie `cpcTrainingDate` que si elle a changé.
+- Pourquoi : le tableau de bord logistique jugeait le CPC sur le statut seul, une formation expirée passait ; l'envoi systématique de la date réécrivait le statut CPC à chaque modification de fiche.
+- Tester : `tests/contract/mission-driver-cpc-eligibility.contract.test.ts` (8 échecs sur 11 sans le correctif), `tests/contract/drivers-input-validation.contract.test.ts` (4 échecs sur 6 sans le correctif).

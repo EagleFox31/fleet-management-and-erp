@@ -2907,6 +2907,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/unit/shared/driver-cpc-eligibility.test.ts` (date absente, récente, expirée, jour J) ; `tests/unit/client/mission-wizard-rules.test.ts` ; `tests/contract/mission-driver-cpc-status.contract.test.ts` (400 sur création, PATCH, ajout d'affectation et lancement pour un chauffeur « FORMÉ » à J-800 ; FORME sans accent accepté ; `cpcStatusRecorded` exposé), vu rouge sans le correctif (6 échecs sur 7) puis vert.
 - **Leçon généralisée** : un statut dérivé que l'on stocke sans recalcul planifié devient périmé en silence ; une garde réglementaire avec expiration juge la date, pas le statut. Une règle métier a un seul module partagé : toute copie locale finit par diverger.
 
+## 2026-11-05 — Near miss : décalage J-1 à 23h30 UTC sur le calcul local du jour (cpc-training-service)
+
+- **Contexte** : le statut CPC calculé par `cpc-training-service.ts` comparait des instants (millisecondes, jour local) au lieu de jours calendaires. Détecté en relecture de #327, corrigé par #333, avant tout incident constaté.
+- **Cause racine** : le « jour courant » était pris avec les accesseurs locaux de `Date` et une division en millisecondes. Entre 23h00 et minuit UTC, le résultat basculait d'un jour : -1 jour restant le dernier jour valable, donc une formation encore valable passait « À FORMER », et une date future donnait FORMÉ sans formation faite. Le défaut ne se voyait qu'à certaines heures, aucun test à heure réelle ne pouvait le révéler.
+- **Classification** : near miss, erreur de calcul de date dépendante de l'heure ; régression réglementaire évitée (détecté avant déploiement).
+- **Résolution** : jour UTC unique via `shared/constants/expiry-day.ts` (`todayUtcDateOnly`, `addDaysToDateOnly`, `isExpiredOn`), seule source des échéances ; le service n'a plus de calcul local ; date de formation future refusée à la saisie (#333) et inéligible dans la règle partagée.
+- **Prévention vérifiable** : garde-fou `tests/unit/server/expiry-day-local-math-hygiene.test.ts` (échoue sur tout accesseur local de date sur les chemins d'échéance, liste gelée) ; `tests/unit/server/cpc-training-service.test.ts` à heure simulée 23h30 UTC (le dernier jour valable reste valable) ; `tests/unit/shared/driver-cpc-eligibility-codes.test.ts` (FORMÉ à J+30 inéligible).
+- **Leçon généralisée** : une échéance est une date sans heure, comparée en jours calendaires UTC par un seul module. Tout calcul de durée en millisecondes ou en jour local est un défaut latent qui ne se déclenche qu'à certaines heures : le test doit simuler l'heure (23h30 UTC), pas attendre qu'elle arrive.
+
 
 ## 2026-11-05 — Contrôle de lien : la référence était le dossier visé lui-même
 
