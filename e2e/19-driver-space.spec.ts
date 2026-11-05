@@ -421,7 +421,7 @@ test.describe("DRV2-6 : fiche chauffeur, mise à jour du CPC", () => {
     try {
       await atelier.goto(`/drivers/${target.driverId}`, { waitUntil: "domcontentloaded" });
       // La route /drivers/:id est réservée à DRIVER_MANAGER_ROLES : la direction n'atteint pas la fiche.
-      await expect(atelier.getByText("Accès refusé")).toBeVisible({ timeout: 60_000 });
+      await expect(atelier.getByText("Accès refusé", { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(atelier.getByTestId(`btn-update-cpc-${target.driverId}`)).toHaveCount(0);
     } finally {
       await atelier.context().close();

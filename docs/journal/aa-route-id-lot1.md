@@ -162,7 +162,42 @@
   - Les 3 GET sur `<id>abc` : 400.
   - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
   - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
+
+## Lot 11 — ids de filtre lus dans `req.query`
+
+- Quoi : `parseQueryId(value, message)` dans `server/lib/route-id.ts`. Absent ou vide : pas de filtre. Sinon même lecture que `parseRouteId` (400) ; une valeur répétée (tableau) est refusée. `queryIdOrNaN` est son pendant pour `server/routes.ts` (gelé), cantonné par un test.
+- Cliquet `query-id-parse-hygiene` : conversion lâche (`parseInt`, `Number.parseInt`, `Number`, avec ou sans `String(…)`) d'un paramètre de requête nommé `id`, `…Id` ou `…By`, lu directement ou par une variable liée depuis `req.query`. Rouge avant le correctif : `server/api` 8 lectures sur 6 fichiers, `server/routes.ts` 5. Gel : vide et 0.
+- Comment :
+  - `server/api` : `billing` (`GET /invoices`, `/invoices/summary`), `fuel-card` (`/history`), `operations` (`/missions`), `purchase-orders` (`supplierId`, `createdBy`), `supplier-invoices`, `document-renewals` (`/requests`). Les catch de `billing` et `fuel-card` reçoivent `next` et relaient les AppError ; leurs `console.error` sont migrés vers `log.error`.
+  - `server/routes.ts`, en place : `queryIdOrNaN` puis `if (Number.isNaN(x)) return res.status(400)` sur `stock-movements`, `fuel-records`, `consumption-history`, `tire-inspections`, `tire-rotations`. Aucune route ajoutée.
+  - Contrat modifié : `client-read-scope-tires`, `?vehicleId=B&vehicleId=A` passait en 403 (le premier paramètre faisait foi) ; il est désormais refusé en 400. Aucune donnée renvoyée dans les deux cas.
+  - Côté client : les filtres envoyés sont numériques et gardés (`enabled`, `?? undefined`) ; aucun écran n'envoie `all` ou `null`.
+- Tester : `route-id-strict-lot11`, 13 filtres × 3 cas (`12abc` → 400 et son message, hors int4 → 400, id bien formé → 200).
+  - Ancien code : 24 rouges sur 39 (les 2 cas hors int4 de `fuel-records` étaient déjà refusés). Correctif : 39 verts, aucune donnée créée hors du compte admin.
+  - tsc : 0 erreur. Unitaires : 2448 verts. 64 contrats du périmètre (facturation, achats, carburant, pneus, missions, renouvellements, ids) : 825 verts.
+
+## Lot 12 — 500 de la facturation, portée des cliquets d'id
+
+- Quoi : trois points de relecture des lots 10 et 11.
+  - `billing.routes.ts` : les 7 lectures répondaient `{ error: error.message }` en 500 (AGENTS §10). Elles relaient désormais au gestionnaire central par `next(withLogContext(isAppError(e) ? e : new AppError(500, …, { cause }), { event }))`. `getErrorMessage`, les `console.error` restants et le logger local sont retirés ; la trace est tenue par le gestionnaire central, avec le même libellé d'événement.
+  - Cliquets `route-id-parse-hygiene` et `query-id-parse-hygiene` : repérage partagé (`tests/support/request-id-scan.ts`).
+    - Une variable liée est rattachée à sa déclaration par le vérificateur TypeScript (un fichier, sans lib), au lieu du bloc `parent.parent.parent`. Un nom masqué (`for (const { id } of rows)`, paramètre homonyme) n'est plus compté.
+    - La requête est `req` ou le premier paramètre du handler (`(request, res) =>`).
+    - Conversions vues : `parseInt`, `parseFloat`, `Number`, `Number.parseInt`, `Number.parseFloat`, `+` unaire, avec ou sans `String(…)`.
+    - Cliquet query : nom d'id `id`, `…Id`, `…edBy` ; `sortBy`, `groupBy`, `orderBy` ne sont plus pris.
+  - `server/routes.ts` : `isNaN` mort retiré sur `stock-movements` (déjà refusé par `queryIdOrNaN`).
+- Tester :
+  - `error-500-relay-hygiene` couvre `billing` : rouge sur l'ancien code (500 locale, `console.*`), vert après.
+  - Contrat `billing-error-details` : 7 routes, 500 générique avec référence, sans le message du service. Il passait déjà avant (garde de sortie du gestionnaire) : non-régression.
+  - Nouveaux cas des cliquets : 4 rouges avec l'ancienne implémentation (autre nom de requête, `String(…)`, variable liée sous un autre nom, masquage par paramètre).
+  - Le cliquet query réécrit retrouve sur le code d'avant le lot 11 les mêmes comptes (8 / 5). Les gels n'ont pas bougé.
+  - tsc : 0 erreur. Unitaires : 2453 verts. 23 contrats (facturation, ids, stock) : 239 verts.
 ### Lot 9 — complément : lecture des profils par la direction et le secrétariat
 
 - Quoi : décision métier. `GET /api/users/:id` est ouvert en lecture des autres profils à `admin`, `management` et `secretary` ; les autres rôles ne lisent que leur profil, le client reste cloisonné. La réponse garde ses 8 champs.
 - Tester : le contrat lot 9 ajoute management et secretary sur le profil d'un technicien (200, 8 champs) et un technicien sur le profil d'un autre (403). Rouge sur l'ancien code (1 échec) et sur une mutation qui ajoute `technician` aux lecteurs (2 échecs), vert après. tsc 0 erreur ; 1463 unitaires serveur ; 6 contrats voisins, 134 verts.
+
+### Lot 12 — complément : chemins Windows dans le repérage partagé
+
+- Quoi : `singleFileChecker` comparait le nom de fichier brut à celui que `createProgram` normalise en `/`. Sous Windows (chemins en `\`), aucun fichier n'était trouvé : les conversions de variables liées n'étaient pas comptées. Le nom est normalisé en `/` avant usage. La docstring liste les limites, dont l'alias `const r = req` qui n'est pas suivi.
+- Tester : cas unitaire avec un chemin en `\`, rouge sans le correctif, vert avec. Mutation `const { id: rid } = req.params; Number(rid)` dans `billing.routes.ts` : non vue avant, vue après (`billing.routes.ts: 1`).
