@@ -43,4 +43,13 @@ describe("users : au moins un administrateur actif, init-database et migration j
     expect(sql).toContain("ERRCODE = 'check_violation'");
     expect(sql).not.toMatch(/\bUPDATE users|\bDELETE FROM|\bINSERT /);
   });
+
+  it("clé de verrou distincte de celle de la garde de route (fleetmaster_last_admin) : pas d'attente croisée", () => {
+    const sql = fromMigration();
+    // La garde de route tient son verrou (session) pendant l'écriture, sur une autre connexion : même clé = attente sans fin.
+    expect(sql).toContain("hashtext('fleetmaster_last_active_admin')");
+    expect(sql).not.toContain("hashtext('fleetmaster_last_admin')");
+    // Même définition d'« actif » que la garde : rôle admin et compte non supprimé.
+    expect(sql).toContain("u.role = 'admin' AND u.deleted_at IS NULL");
+  });
 });
