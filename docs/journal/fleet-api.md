@@ -435,6 +435,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : relecture de #340. La référence était `vehicle-<id>` lui-même : remplacé par une jonction, il se résolvait dehors avec le candidat et le contrôle passait.
 - **Preuve** : intégration `workflow-document-transfer` (jonction `vehicle-<id>` : rien copié dehors, document non transféré) et contrat `vehicle-documents-upload-path` (400 « Dossier de destination invalide »), rouges sur la version précédente, verts après.
 
+## 2026-11-05 — Suppressions de server/api : borne qui résout les liens
+- **Quoi** : `scanFileAccesses` prend en option le jeu de bornes acceptées (`LINK_RESOLVING_BOUND_CALLS`). Garde `upload-delete-hygiene` : toute suppression (`unlink`, `rm`, `rmdir`) d'une route de `server/api` passe par `uploadedFileCandidates`, `settlementProofPath` ou `existingUploadedFile` ; `isInsideDirectory` seul est refusé. Deux exceptions gelées (multer, `req.file.path`), chacune avec sa raison et sa condition de dégel.
+- **Pourquoi** : `stored-path-hygiene` accepte la borne lexicale, qu'un lien sous `uploads/` passe (AGENTS §9).
+- **Preuve** : suppression bornée lexicalement injectée dans une route : la nouvelle garde échoue, `stored-path-hygiene` passe ; cas synthétiques strict et défaut ; tsc 0, unitaires verts.
 ## 2026-11-05 — Justificatifs téléversés liés à l'écriture
 - **Quoi** : règlement fournisseur (`POST /:id/settlements`) et récépissé de renouvellement (`POST /requests/:id/receipt`) suppriment le fichier dans le `finally` tant qu'aucune écriture validée ne le référence (`proofRecorded`, `receiptRecorded`). Diffusion du règlement au mieux (`log.error`).
 - **Pourquoi** : une diffusion qui levait rendait 500 et supprimait le justificatif d'un règlement créé ; un identifiant invalide laissait un fichier orphelin.
