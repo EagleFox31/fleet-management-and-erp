@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { partRequirements, parts, purchaseOrders, workOrders } from "../../shared/schema";
 import { beat, loginThroughForm } from "./helpers";
-import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_PART, DEMO_RECEPTION } from "./seed-demo";
+import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_PART, DEMO_RECEPTION, seedDemo } from "./seed-demo";
 
 /**
  * Démo « magasinier » : réceptionner la commande fournisseur (entrée en stock), puis sortir la pièce
@@ -14,7 +14,10 @@ async function stock(): Promise<number> {
   return row.quantity;
 }
 
-test.beforeAll(() => assertLocalDatabase());
+test.beforeAll(async () => {
+  assertLocalDatabase();
+  await seedDemo();
+});
 
 test("démo magasinier : réception d'une commande, entrée en stock, sortie vers l'atelier", async ({ page }) => {
   test.setTimeout(150_000);
@@ -39,8 +42,9 @@ test("démo magasinier : réception d'une commande, entrée en stock, sortie ver
   await page.getByRole("link", { name: "Demandes de pièces" }).first().click();
   await beat(page, 1500);
   const viewWo = page.getByTestId(`btn-view-wo-${wo.id}`);
-  if (await viewWo.isVisible().catch(() => false)) await viewWo.click();
-  else await page.goto(`/maintenance/work-orders/${wo.id}`);
+  // La carte de l'OT « en attente de pièces » doit être présente : pas de repli par URL.
+  await expect(viewWo).toBeVisible({ timeout: 30_000 });
+  await viewWo.click();
   await page.getByRole("tab", { name: /Pièces/ }).click();
   await expect(page.getByText("Sortir du stock").first()).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
