@@ -14,7 +14,7 @@
  * le journal de trésorerie (T1) n'est pas branché ; `treasuryEntryId` reste alors `null`.
  */
 import { z } from "zod";
-import { bodyIdSchema, isoDateSchema, isoDateTimeSchema } from "./common";
+import { bodyIdSchema, idSchema, isoDateSchema, isoDateTimeSchema } from "./common";
 
 export const MISSION_BUDGETS_PATH = "/api/mission-budgets";
 export const MISSION_BUDGETS_DAILY_NEED_PATH = "/api/mission-budgets/daily-need";
@@ -132,6 +132,8 @@ export const missionBudgetsQuerySchema = z
   .object({
     date: isoDateSchema.optional(),
     status: z.enum(MISSION_BUDGET_STATUSES).optional(),
+    /** Budget d'une mission (fiche mission, L1f) : au plus un élément, un budget par mission. */
+    missionId: idSchema.optional(),
   })
   .strict();
 
