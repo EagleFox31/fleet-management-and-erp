@@ -1,6 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { assignments, drivers, missions } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -108,5 +108,24 @@ describe("création de mission avec affectation", { timeout: 120000 }, () => {
     expect(found.map((m) => m.id)).not.toContain(res.body?.id);
     const refused = orderNumbers[orderNumbers.length - 1];
     expect(await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, refused))).toHaveLength(0);
+  });
+
+  it("l'insertion de l'affectation échoue dans la transaction : 500 et aucune mission (pas d'orpheline)", async () => {
+    const vehicleId = await vehicle();
+    const driverId = await driver();
+    const trigger = `c7_fail_${vehicleId}`;
+    // Échec réel côté base, après l'INSERT de la mission : un déclencheur refuse cette affectation-là.
+    await pool.query(`CREATE OR REPLACE FUNCTION ${trigger}() RETURNS trigger AS $$ BEGIN
+      IF NEW.vehicle_id = ${vehicleId} THEN RAISE EXCEPTION 'affectation refusée par le test'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER ${trigger} BEFORE INSERT ON assignments FOR EACH ROW EXECUTE FUNCTION ${trigger}()`);
+    try {
+      const res = await create({ status: "planned", assignment: { vehicleId, driverId } });
+      expect(res.status).toBe(500);
+      const refused = orderNumbers[orderNumbers.length - 1];
+      expect(await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, refused))).toHaveLength(0);
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS ${trigger} ON assignments`);
+      await pool.query(`DROP FUNCTION IF EXISTS ${trigger}()`);
+    }
   });
 });
