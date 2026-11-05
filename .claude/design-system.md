@@ -245,3 +245,9 @@ Chaque entrée = fond + bordure colorés selon le statut cible, avec icône rond
   <p className="text-[10px] font-bold tracking-widest uppercase text-gray-400">Label</p>
 </div>
 ```
+
+## Couleurs : jetons, pas palette
+
+- Texte et surfaces passent par les jetons (`text-foreground`, `text-muted-foreground`, `text-primary-text`, `text-destructive-text`, `bg-card`, `bg-background`...), pas par la palette Tailwind (`text-red-600`, `bg-green-50`) ni par `bg-white` / `text-black`. Le contraste des jetons est verifie (`scripts/contrast-semantic-text.mjs`).
+- Cliquet : `tests/unit/client/no-tailwind-palette-in-ui.test.ts` fige le compte par fichier ; un compte baisse impose d'abaisser la liste dans le meme commit.
+- Mode sombre : **non supporte**. Il n'y a ni `ThemeProvider` ni bascule ; la classe `dark` n'est jamais posee. Les variantes `dark:` existantes sont inertes et `CardShell` pose `bg-white`. Passer aux jetons prepare un mode sombre sans le promettre ; l'activer est une decision produit.
