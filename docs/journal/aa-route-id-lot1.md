@@ -84,7 +84,8 @@
   - 11 d'entre elles passent par `canAccessOwned` : documents de véhicule, téléchargement de document, planifications, OT, carburant, kilométrage et son historique, historique de statut, pneus du véhicule, documents de workflow.
   - `GET /api/work-orders/:id` (`Number`) acceptait `1e0`.
 - Comment :
-  - `ROUTES_TS_FROZEN = 2`. Restent PATCH users (#379) et toggle admin-users (#375).
+  - `ROUTES_TS_FROZEN = 2` : les deux lectures de la forme `parseInt(req.params…)` qui restent sont PATCH users (#379) et toggle admin-users (#375).
+  - Le cliquet ne voit pas les lectures qui passent par une variable : `GET /api/vehicles/:id` (`parseInt(idOrRegistration)`, id ou immatriculation) lit encore de façon lâche. Elle est confiée au lot 9, avec `GET /api/users/:id`, monté avec `authenticate` seul.
   - `generate-work-order` était déjà couvert au lot 6.
 - Pourquoi : un client propriétaire du véhicule `<id>` qui demandait `<id>abc` recevait les données du véhicule `<id>` au lieu d'un 400.
 - Tester :
