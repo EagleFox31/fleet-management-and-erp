@@ -66,3 +66,6 @@
 ## 2026-11-05 03:03 — c7 : PR doc « Suivis » (doublons LESSONS)
 - docs/lessons-suivis-doublon : la ligne « Suivis » du conflit de planning figurait deux fois dans son entrée et en copies dans deux entrées sans rapport (trigger SQL, justificatif fournisseur). Il n'en reste qu'une, la plus récente, dans l'entrée du conflit de planning.
 - PR ouvertes : #353 (id strict, relue par 0a), #354 (message de lancement chauffeur, relue). Stack de test c7test à arrêter en fin de session.
+
+## 2026-11-05 03:34 — c7 : lot 3 du cliquet parseInt(req.params), parts-catalog
+- #362 fusionnée. Branche fix/strict-id-parts-catalog empilée sur origin/fix/strict-id-parser (#360). 3 lectures de parts-catalog.routes.ts passées à parseRouteId, contrainte ([0-9]+) retirée de ces 3 chemins (sinon « 1abc » tombait en 404 du routeur) ; liste gelée -3 ; contrat parts-catalog-strict-id (rouge 3/6 sans correctif). c7test gardée (Postgres local).

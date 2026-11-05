@@ -34,7 +34,6 @@ const FROZEN: Record<string, number> = {
   "fuel-card.routes.ts": 2,
   "missions.routes.ts": 1,
   "part-requirements.routes.ts": 3,
-  "parts-catalog.routes.ts": 3,
   "purchase-orders.routes.ts": 2,
   "supplier-invoices.routes.ts": 10,
   "suppliers.routes.ts": 8,
