@@ -3040,6 +3040,14 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
 - **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
 
+## 2026-11-05 — Compteur de verrouillage : écriture hors du verrou de clé, mise à jour perdue
+
+- **Contexte** : `tests/contract/auth-login-unavailable.contract.test.ts` échouait par intermittence en CI (« expected 2 to be 1 ») : un seul mauvais mot de passe, juste après une connexion réussie, comptait deux échecs.
+- **Cause racine** : `DbLockoutStore.reserve` et `confirmFailure` lisent puis écrivent le compteur sous le verrou consultatif de la clé, mais `reset` (DELETE après un 2xx) et `release` (UPDATE après une 400/5xx) écrivaient sans ce verrou. Le garde lance ces écritures sur `finish` sans les attendre : le DELETE du succès précédent s'intercalait entre la lecture et l'upsert de la réservation suivante, qui réécrivait l'ancien compteur + 1. Le test dormait 500 ms au lieu d'attendre la fin de ces écritures.
+- **Classification** : concurrence (mise à jour perdue), plus attente fixe dans un test.
+- **Résolution** : `reset` et `release` passent par `underKeyLock`, la même transaction sous verrou de clé que les lectures-écritures. Le contrat attend l'état stable du garde (compteur stocké = miroir `users`) avant de lire et après chaque connexion, au lieu d'un délai fixe.
+- **Prévention vérifiable** : `tests/integration/login-lockout-db-store.test.ts` (« reset » et « release » attendent le verrou de la clé tenu par une autre transaction, rouges avant le correctif).
+- **Leçon généralisée** : un verrou consultatif ne protège que les écritures qui le prennent. Quand un état est lu puis réécrit sous verrou, toute autre écriture du même état passe par ce verrou, y compris les DELETE et les décréments « atomiques ». Dans un test, attendre une condition observable plutôt qu'un délai.
 ## 2026-11-05 — Cloison client : l'étranger et l'inexistant se répondent à l'identique (complète #255)
 
 ### Contexte

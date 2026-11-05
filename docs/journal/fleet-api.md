@@ -481,3 +481,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `parseRouteId` (`server/lib/route-id.ts`) : chiffres seuls, 1 à l'int4, sinon 400. `parseMissionId`, coûts de mission et justificatif de règlement l'utilisent ; `MAX_DB_INTEGER_ID` y vit (réexporté par `work-order-scope`). Garde `route-id-parse-hygiene` : cliquet par fichier sur `parseInt(req.params` / `Number(req.params` dans `server/api` (53 occurrences gelées, 18 fichiers).
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
+
+## 2026-11-05 — Compteur de verrouillage : toutes les écritures sous le verrou de clé
+- **Quoi** : `DbLockoutStore.reset` et `release` passent par `underKeyLock`, la transaction sous verrou consultatif déjà utilisée par `reserve` et `confirmFailure`. Dans `auth-login-unavailable`, l'attente fixe de 500 ms est remplacée par l'attente de l'état stable du garde ; l'import en double est retiré.
+- **Pourquoi** : test instable en CI. Une réservation lue avant le DELETE du succès précédent réécrivait l'ancien compteur + 1.
+- **Preuve** : intégration `login-lockout-db-store`, nouveaux cas rouges avant le correctif et verts après ; contrats du verrouillage verts sur trois passes.
