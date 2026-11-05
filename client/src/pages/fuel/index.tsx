@@ -249,7 +249,19 @@ export default function FuelPage() {
       toast({ title: "Erreur recharge", description: invalid, variant: "destructive" });
       return;
     }
+    // Compte choisi puis retiré de la liste (désactivé, drapeau coupé, liste en erreur) : on n'envoie pas
+    // la recharge sans compte source à l'insu de l'utilisateur.
+    const sourceChosen = rechargeForm.sourceAccountId !== NO_SOURCE_ACCOUNT;
     const source = Number(rechargeForm.sourceAccountId);
+    if (sourceChosen && !sourceAccounts.some((a) => a.id === source)) {
+      setRechargeForm((prev) => ({ ...prev, sourceAccountId: NO_SOURCE_ACCOUNT }));
+      toast({
+        title: "Compte source indisponible",
+        description: "Le compte choisi n'est plus proposé. Choisissez un autre compte ou « Non précisé », puis validez.",
+        variant: "destructive",
+      });
+      return;
+    }
     submitRecharge({
       amount,
       quantity,
@@ -259,7 +271,7 @@ export default function FuelPage() {
       paymentMode: rechargeForm.paymentMode,
       orderNumber: rechargeForm.orderNumber || undefined,
       notes: rechargeForm.notes || undefined,
-      sourceAccountId: Number.isInteger(source) && sourceAccounts.some((a) => a.id === source) ? source : undefined,
+      sourceAccountId: sourceChosen ? source : undefined,
     });
   };
 
@@ -969,7 +981,7 @@ export default function FuelPage() {
 
             {sourceAccounts.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-gray-500 mb-1">Compte qui paie la recharge (optionnel)</p>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Compte qui paie la recharge (optionnel)</p>
                 <Select
                   value={rechargeForm.sourceAccountId}
                   onValueChange={(value) => setRechargeForm((prev) => ({ ...prev, sourceAccountId: value }))}
@@ -986,7 +998,7 @@ export default function FuelPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="mt-1 text-[11px] text-gray-500">
+                <p className="mt-1 text-[11px] text-muted-foreground">
                   Le compte choisi est débité du même montant au journal de trésorerie.
                 </p>
               </div>
