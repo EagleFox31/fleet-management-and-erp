@@ -320,6 +320,25 @@ describe("Transitions requested -> approved -> disbursed", { timeout: 120000 }, 
 });
 
 describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
+  it("détail GET /:id : rôles de lecture 200, égal à la saisie ; autres 403 ; anonyme 401 ; inconnu 404 ; id non strict 400", async () => {
+    const created = await call("POST", MISSION_BUDGETS_PATH, "logistics", body(await newMission()));
+    expect(created.status).toBe(201);
+    const path = missionBudgetPath(created.body.id);
+    for (const role of ["logistics", "management", "admin"]) {
+      const res = await call("GET", path, role);
+      expect(res.status, role).toBe(200);
+      expect(missionBudgetSchema.parse(res.body), role).toEqual(missionBudgetSchema.parse(created.body));
+    }
+    for (const role of ["secretary", "technician", "driver", "client"]) {
+      expect((await call("GET", path, role)).status, role).toBe(403);
+    }
+    expect((await call("GET", path)).status).toBe(401);
+    expect((await call("GET", missionBudgetPath(2_000_000_000), "admin")).status).toBe(404);
+    for (const raw of [`${created.body.id}abc`, "0", "2147483648"]) {
+      expect((await call("GET", `${MISSION_BUDGETS_PATH}/${raw}`, "admin")).status, raw).toBe(400);
+    }
+  });
+
   it("lecture : logistique, direction, administrateur ; 403 pour secrétariat, technicien, client", async () => {
     for (const role of ["logistics", "management", "admin"]) {
       expect((await call("GET", `${MISSION_BUDGETS_PATH}?date=${DAY}`, role)).status, role).toBe(200);
