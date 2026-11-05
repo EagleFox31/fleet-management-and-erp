@@ -516,7 +516,7 @@ export default function ReportsIndex() {
     // CONTRÔLE DE SÉCURITÉ : Vérifier les permissions avant génération
     if ((reportType === "maintenance-costs" || reportType === "fuel-consumption") && !isFinancialDataAuthorized) {
       toast({
-        title: "🔒 Accès refusé",
+        title: "Accès refusé",
         description: "Vous n'avez pas l'autorisation d'accéder aux données financières.",
         variant: "destructive",
       });
@@ -528,7 +528,7 @@ export default function ReportsIndex() {
       (reportType === "technician-performance" && !canReadTechnicianReport(user?.role))
     ) {
       toast({
-        title: "🔒 Accès refusé", 
+        title: "Accès refusé", 
         description: "Ce rapport n'est pas disponible pour votre rôle utilisateur.",
         variant: "destructive",
       });
@@ -562,14 +562,14 @@ export default function ReportsIndex() {
 
       if (success) {
         toast({
-          title: "✅ Rapport généré",
+          title: "Rapport généré",
           description: "Le fichier PDF a été téléchargé avec succès.",
         });
       }
     } catch (error) {
       console.error("Erreur génération rapport:", error);
       toast({
-        title: "❌ Erreur",
+        title: "Erreur",
         description: userMessageOf(error, "Une erreur est survenue lors de la génération du rapport."),
         variant: "destructive",
       });

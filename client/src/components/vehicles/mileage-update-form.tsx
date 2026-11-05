@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Route } from "lucide-react";
 
 interface MileageUpdateFormProps {
   vehicleId: number;
@@ -72,7 +73,7 @@ export function MileageUpdateForm({ vehicleId, currentMileage, registrationNumbe
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">🛣️ Mise à jour kilométrage</CardTitle>
+        <CardTitle className="text-lg"><Route className="inline h-5 w-5 mr-2 align-text-bottom" aria-hidden />Mise à jour kilométrage</CardTitle>
         <CardDescription>
           Véhicule: <span className="font-semibold">{registrationNumber}</span>
           {currentMileage !== undefined && (

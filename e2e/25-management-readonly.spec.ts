@@ -75,7 +75,7 @@ test.describe("Profil direction : lecture des tableaux de bord, écritures refus
     expect((await dashboard).status(), "GET /api/management/dashboard").toBe(200);
     await expect(page.getByTestId("kpi-tiles")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("tab", { name: /Vue d'ensemble/ })).toBeVisible();
-    await expect(page.getByText("Accès refusé")).toHaveCount(0);
+    await expect(page.getByText("Accès refusé", { exact: true })).toHaveCount(0);
   });
 
   test("KPI et tableaux de bord lus par l'API", async ({ page }) => {
