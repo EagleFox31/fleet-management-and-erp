@@ -18,6 +18,7 @@ const repoDir = fileURLToPath(new URL("../../..", import.meta.url));
 
 const EMITTERS: Record<string, { cost: number; staff: number }> = {
   "server/api/part-requirements.routes.ts": { cost: 2, staff: 1 },
+  "server/api/parts-used.routes.ts": { cost: 1, staff: 0 },
   "server/api/technician-work-orders.routes.ts": { cost: 1, staff: 0 },
   "server/api/work-order-items.routes.ts": { cost: 0, staff: 1 },
   "server/api/work-order-parts.routes.ts": { cost: 5, staff: 1 },

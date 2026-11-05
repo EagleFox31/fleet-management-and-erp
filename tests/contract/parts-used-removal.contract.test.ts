@@ -18,6 +18,7 @@ let baseUrl = "";
 const ids = createIdBag();
 const workOrderIds: number[] = [];
 const previousBroadcast = (global as any).broadcastUpdate;
+const broadcasts: Array<{ type: string; data: any }> = [];
 
 async function sessionOf(role: TestUserRole) {
   const user = await createTestUser({ role });
@@ -57,7 +58,9 @@ async function stockOf(partId: number) {
 }
 
 beforeAll(async () => {
-  (global as any).broadcastUpdate = () => {};
+  (global as any).broadcastUpdate = (type: string, data: unknown) => {
+    broadcasts.push({ type, data });
+  };
   server = createServer(await getContractApp());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -190,25 +193,50 @@ describe("DELETE /api/parts-used/:id : atomicité, rôles, statut de l'OT", () =
     expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
   });
 
+  it.each(["client", "driver"] as const)("%s : 403, ligne et stock intacts", async (role) => {
+    const actor = await sessionOf(role);
+    const { part, used } = await partUsedOnWorkOrder();
+    const res = await remove(used.id, actor.cookie);
+    expect(res.status).toBe(403);
+    expect(await stockOf(part.id)).toBe(5);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
+  });
+
+  it("la trame part_used_removed vise le personnel hors chauffeur et client, sans montant", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { workOrder, used } = await partUsedOnWorkOrder();
+    broadcasts.length = 0;
+    expect((await remove(used.id, chef.cookie)).status).toBe(204);
+    const frames = broadcasts.filter((b) => b.type === "part_used_removed" && b.data?.workOrderId === workOrder.id);
+    expect(frames).toHaveLength(1);
+    const { scope } = frames[0].data;
+    expect(scope.type).toBe("roles");
+    expect(scope.roles).toContain("warehouse");
+    expect(scope.roles).not.toContain("client");
+    expect(scope.roles).not.toContain("driver");
+    expect(JSON.stringify(frames[0].data)).not.toMatch(/unitPrice/i);
+  });
+
   it("crédit en échec : tout est annulé (la ligne reste), réponse 500 sans détail technique", async () => {
     const chef = await sessionOf("workshop_manager");
     const { part, workOrder, used } = await partUsedOnWorkOrder();
-    // Déclencheur local au test : refuse tout mouvement d'entrée de cet OT.
+    // Déclencheur local au test, nommé d'après l'OT : refuse tout mouvement d'entrée de cet OT.
+    const trigger = `test_refuse_credit_${workOrder.id}`;
     await db.execute(sql.raw(`
-      CREATE OR REPLACE FUNCTION test_refuse_parts_used_credit() RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION ${trigger}() RETURNS trigger AS $$
       BEGIN
         IF NEW.work_order_id = ${workOrder.id} THEN RAISE EXCEPTION 'TEST refus du credit'; END IF;
         RETURN NEW;
       END $$ LANGUAGE plpgsql;
-      DROP TRIGGER IF EXISTS test_refuse_parts_used_credit ON parts_stock_movements;
-      CREATE TRIGGER test_refuse_parts_used_credit BEFORE INSERT ON parts_stock_movements
-        FOR EACH ROW EXECUTE FUNCTION test_refuse_parts_used_credit();`));
+      DROP TRIGGER IF EXISTS ${trigger} ON parts_stock_movements;
+      CREATE TRIGGER ${trigger} BEFORE INSERT ON parts_stock_movements
+        FOR EACH ROW EXECUTE FUNCTION ${trigger}();`));
     try {
       const res = await remove(used.id, chef.cookie);
       expect(res.status).toBe(500);
       expect(JSON.stringify(await res.json())).not.toMatch(/TEST refus|trigger|parts_stock_movements/i);
     } finally {
-      await db.execute(sql.raw("DROP TRIGGER IF EXISTS test_refuse_parts_used_credit ON parts_stock_movements; DROP FUNCTION IF EXISTS test_refuse_parts_used_credit();"));
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger} ON parts_stock_movements; DROP FUNCTION IF EXISTS ${trigger}();`));
     }
     expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
     expect(await stockOf(part.id)).toBe(5);

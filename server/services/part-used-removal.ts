@@ -25,7 +25,9 @@ export async function removePartUsed(id: number, actorUserId?: number): Promise<
         .select({ workOrderStatus: workOrders.status })
         .from(partsUsed)
         .innerJoin(workOrders, eq(workOrders.id, partsUsed.workOrderId))
-        .where(eq(partsUsed.id, id));
+        .where(eq(partsUsed.id, id))
+        // OT verrouillé : une clôture simultanée attend la fin du retrait (ou l'inverse).
+        .for("update", { of: workOrders });
       if (!current) throw new AppError(404, "Pièce utilisée introuvable");
       if (CLOSED_WORK_ORDER_STATUSES.has(current.workOrderStatus)) {
         throw new AppError(

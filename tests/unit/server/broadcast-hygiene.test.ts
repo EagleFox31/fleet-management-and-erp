@@ -68,6 +68,7 @@ const OPAQUE_SCOPES: Record<string, number> = {
   "server/api/fuel-vouchers.routes.ts": 1,
   "server/api/part-requirements.routes.ts": 3,
   "server/api/parts-catalog.routes.ts": 1,
+  "server/api/parts-used.routes.ts": 1,
   "server/api/technician-work-orders.routes.ts": 1,
   "server/api/time-tracking.routes.ts": 1,
   "server/api/vehicle-document-types.routes.ts": 1,

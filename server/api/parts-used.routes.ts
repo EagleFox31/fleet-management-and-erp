@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { STAFF_ROLES } from "@shared/constants/roles";
+import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { isStockIssuer } from "../middleware/auth";
 import { parseRouteId } from "../lib/route-id";
 import { removePartUsed } from "../services/part-used-removal";
@@ -19,7 +19,7 @@ router.delete("/:id", isStockIssuer, async (req, res, next) => {
       broadcastUpdate("part_used_removed", {
         entity: "work_order",
         entityId: removal.workOrderId,
-        scope: { type: "roles", roles: [...STAFF_ROLES] },
+        scope: workOrderCostScope(),
         partUsedId: removal.partUsedId,
         workOrderId: removal.workOrderId,
         partId: removal.partId,
