@@ -235,7 +235,7 @@ router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Reques
     // Lecture stricte : `parseInt("12abc")` vaudrait 12 et viserait une autre mission.
     const raw = req.params.id;
     const missionId = /^\d+$/.test(raw) ? Number(raw) : NaN;
-    assertValidDbId(missionId, "ID de mission invalide.");
+    assertValidDbId(missionId, "Identifiant de mission invalide.");
     const costs = await operationsService.calculateMissionCosts(missionId, req.user);
     res.json(costs);
   } catch (error: any) {
