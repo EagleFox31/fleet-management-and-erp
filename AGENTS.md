@@ -353,7 +353,8 @@ Notes :
   (`server/lib/settlement-proof.ts`), validé dès l'écriture. Sinon ils figurent
   dans la liste gelée de `tests/unit/server/stored-path-hygiene.test.ts`, avec la raison
   pour laquelle leur chemin ne vient pas de la base (multer, fichiers livrés, sauvegardes).
-  Revue faite le 3 novembre 2026. Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
+  Revue faite le 3 novembre 2026, reprise le 5 novembre 2026 (`routes.ts`, rapports, preuves de
+  renouvellement : aucun accès non borné ; les rapports n'accèdent pas au disque). Depuis le 5 novembre 2026, `uploadedFileCandidates` résout
   aussi les liens (`realPathStaysInside`) : un lien symbolique ou une jonction sous `uploads/`
   qui mène dehors est refusé, de même qu'un lien pendant ou un fichier absent derrière un lien
   sortant (une écriture le suivrait). `settlementProofPath` et les deux destinations d'écriture
@@ -362,9 +363,15 @@ Notes :
   tout `mkdir`, avec pour référence la racine possédée (`uploads/documents`) : un dossier
   calculé depuis un id (`vehicle-<id>`) ne sert jamais de référence, car s'il est lui-même un
   lien il se résout et passe. Une borne lexicale seule (`isInsideDirectory`) ne suffit plus
-  pour un accès disque neuf.
+  pour un accès disque neuf. Pour une suppression dans `server/api`, c'est vérifié :
+  `tests/unit/server/upload-delete-hygiene.test.ts` exige une borne qui résout les liens.
+  Une route multer de `server/api` suit le patron drapeau + `finally` : vérifié par
+  `tests/unit/server/multer-lifecycle-hygiene.test.ts`.
   Risque résiduel accepté : un lien créé entre le contrôle et l'accès, ce qui suppose déjà
   un accès au disque.
+  Un fichier reçu par multer n'est gardé que si une écriture validée le référence : drapeau
+  posé après l'écriture, suppression dans le `finally` tant qu'il est faux, diffusions au mieux
+  (patron de #178, LESSONS_LEARNED du 5 novembre 2026).
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la
@@ -418,6 +425,8 @@ sessions d'acquisition qu'il a créées.
 - Saisie d'exploitation sur un véhicule (kilométrage, position) : `isStaff`. Un
   client consulte son véhicule, il ne saisit rien dessus.
 - Objet isolé : `canAccessOwned(req.user, () => propriétaire)` → 403 hors périmètre.
+  Exception : un ordre de travail hors périmètre répond 404, comme un OT inexistant
+  (`assertWorkOrderReadable`), pour ne pas laisser énumérer les OT des autres.
 - Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).
 - Source : `server/lib/client-scope.ts`. Test de référence :
   `tests/contract/vehicle-documents-client-scope.contract.test.ts`.

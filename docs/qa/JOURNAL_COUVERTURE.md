@@ -2376,3 +2376,42 @@ soumission sans doublon.
 - **Comment tester (QA)** : seed puis `E2E_DEMO=1 E2E_RECORD=1` sur la spec, base locale ; attendu 1 passed, 2 passages.
 - **RAIDER** : I (purge), E (garde de base) ; ne s'applique pas : code produit.
 - **Reste / risques** : l'assignation ne démarre pas l'OT (il reste « En attente » et seul « Voir OT » reste dans la liste) ; démarrage par le détail uniquement.
+
+## 2026-11-05T01:26:11+01:00 — Démo magasinier (lot 3)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-3` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : réception d'une commande fournisseur confirmée (code de livraison), entrée en stock, puis sortie de la pièce depuis l'onglet Pièces de l'OT en attente.
+- **Comment** : `e2e/demo/06-magasinier.spec.ts` ; seed : fournisseur, commande DEMO-BC-001, OT en attente de pièces et sa demande liée ; purge des factures fournisseur générées par la réception. Ouverture de la commande par le bouton œil de la ligne (le numéro n'est pas un lien).
+- **Comment tester (QA)** : seed puis `E2E_DEMO=1 E2E_RECORD=1` sur la spec, base locale fleet_test ; attendu 1 passed, 2 passages (verts, 16 à 17 s).
+- **RAIDER** : I (purge et recréation à chaque seed), E (garde de base) ; ne s'applique pas : code produit.
+- **Reste / risques** : le magasinier n'a pas de lien vers les ordres de travail : accès par la carte « en attente de pièces » de Demandes de pièces, repli par URL directe si elle est absente.
+
+## 2026-11-05T01:41:28+01:00 — Démo magasinier : ouverture par le lien du numéro (suite de #332)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-3` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : la spec 06 ouvre la commande par le lien du numéro (ligne cliquable depuis #332) ; toast asserté en exact (garde toast-title-exact-hygiene) ; README : parcours du magasinier.
+- **Comment tester (QA)** : seed puis spec, 2 passages verts (16,8 s et 17,1 s) ; `npm run check` 0 erreur ; unitaires 202 fichiers / 2335 tests verts.
+- **RAIDER** : D (garde d'hygiène des e2e respectée) ; ne s'applique pas : code produit.
+- **Reste / risques** : spec 07 direction en cours de mise au point (tableau de bord et rapports via onglets).
+
+## 2026-11-05T01:45:20+01:00 — Démo direction (lot 3)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-3` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : connexion direction, tuiles du tableau de bord, corridors CEMAC, rapports (board pack par le menu, puis onglets trésorerie et audit flotte/TCO).
+- **Comment** : `e2e/demo/07-direction.spec.ts` ; seed : compte direction1. Les rapports affichent 0 FCFA faute de données de période : la démo montre la navigation, pas des chiffres.
+- **Comment tester (QA)** : seed puis spec, 2 passages verts (21,5 s et 21,1 s).
+- **RAIDER** : E (garde de base) ; ne s'applique pas : code produit.
+- **Reste / risques** : rapports vides (aucune facture de la période) ; un seed de facturation donnerait une démo plus parlante.
+
+## 2026-11-05T02:10:00+01:00 — Démos : specs autonomes et assertions dures (réserves de relecture de #331)
+
+- **Agent** : b7 (fleet-testeur) · **Branche** : `feat/e2e-demo-profils-3` · **Commit** : voir `git log`
+- **Statut** : fait
+- **Quoi** : chaque spec de démo (01 à 07) rejoue `seedDemo()` en `beforeAll` et devient autonome ; la spec magasinier exige la carte de l'OT en attente de pièces (plus de repli par URL) ; la spec direction cible le bouton « Rapports Direction » par son rôle.
+- **Comment** : `e2e/demo/01..07-*.spec.ts` ; le seed est idempotent, donc le rejeu est sans effet de bord.
+- **Comment tester (QA)** : `E2E_DEMO=1` sur `e2e/demo`, 2 passages de 7 specs verts avec rejeu du seed entre les deux (3,7 min chacun) ; `npm run check` à 0 erreur ; unitaires 202 fichiers / 2335 tests verts.
+- **RAIDER** : I (specs rejouables seules) ; D (assertions dures) ; ne s'applique pas : code produit.
+- **Reste / risques** : facture de période pour les rapports de direction et paiement de facture dans la PR suivante.

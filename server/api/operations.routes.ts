@@ -8,6 +8,7 @@ import { withLogContext } from "../lib/error-log-context";
 import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
+import { assertValidDbId } from "../lib/work-order-scope";
 
 const log = moduleLogger("operations");
 const router = Router();
@@ -231,8 +232,11 @@ router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Requ
  */
 router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const costs = await operationsService.calculateMissionCosts(parseInt(id), req.user);
+    // Lecture stricte : `parseInt("12abc")` vaudrait 12 et viserait une autre mission.
+    const raw = req.params.id;
+    const missionId = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    assertValidDbId(missionId, "Identifiant de mission invalide.");
+    const costs = await operationsService.calculateMissionCosts(missionId, req.user);
     res.json(costs);
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error calculating mission costs:" }));

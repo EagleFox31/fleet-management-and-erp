@@ -49,3 +49,33 @@
 
 ## 2026-11-05 03:30 — c7 : #339 poussée par merge de main (sans réécriture)
 - Branche distante fix/mission-status-planning-clash : merge de origin/main + commit des réserves (lecture périmée, 409 de POST / par next). Base de #339 = main. Contrats mission 222 / npm test 2413 / check 0 vérifiés sur l'arbre rebasé identique. En attente de relecture de 0a.
+
+## 2026-11-05 04:05 — c7 : PATCH de dates sans affectation vivante prend le verrou et l'empreinte
+- Branche fix/mission-patch-dates-lock (empilée sur #339 non fusionnée à l'heure de la branche) : le PATCH qui change les dates prend aussi le FOR UPDATE de la mission et compare l'empreinte (condition `|| datesChanged`), sinon un POST /:id/assignments concurrent contrôlait sur les anciennes dates. Contrat déterministe ajouté (rouge sans le correctif). waitForBlockedWriter filtre sur pg_blocking_pids du pid qui tient le verrou.
+
+## 2026-11-05 04:40 — c7 : analyse findPlanningClash(db) close, #346 en attente de base
+- Lectures indicatives l.1782 (launch-readiness) et l.3019 (validation de lancement de PUT /status) : lecture seule, aucune écriture, aucun écran ne s'en sert comme garantie (canLaunch colore seulement le panneau). Conclusion transmise à 0a : « rien à faire ».
+- #339 fusionnée (bbdd824). #346 (fix/mission-patch-dates-lock, relue OK par 0a) attend que l'utilisatrice repasse sa base sur main (`gh pr edit 346 --base main`) et la passe en ready ; je ne touche pas à la base. Test DB c7test arrêté. Rien d'autre en cours.
+## 2026-11-05 05:10 — c7 : entrée LESSONS « ordre de verrouillage unique des missions »
+- Branche docs/lessons-ordre-verrous-missions (depuis origin/main) : nouvelle entrée en fin de LESSONS_LEARNED (ligne mission FOR UPDATE, empreinte, advisory triés). Petite PR doc ; « mr » à 0a ensuite. #346 reste en attente de la décision de l'utilisatrice sur sa base.
+
+## 2026-11-05 03:20 — c7 : #346 mis à jour, message de lancement chauffeur, validation stricte de l'identifiant de mission
+- #346 : origin/main fusionné dans fix/mission-patch-dates-lock (f555fcba), poussé sans force ; contrats mission verts.
+- fix/driver-status-error-message : AppError sans fieldErrors, message borné à 300 caractères (looksTechnical), conflit et budget en tête, consigne « Contactez l'exploitation » pour le chauffeur, toast via userMessageOf. Poussée, PR à ouvrir.
+- fix/mission-id-strict : parseMissionId unique (garde et handlers), contrat + garde unitaire + entrée LESSONS.
+## 2026-11-05 03:03 — c7 : PR doc « Suivis » (doublons LESSONS)
+- docs/lessons-suivis-doublon : la ligne « Suivis » du conflit de planning figurait deux fois dans son entrée et en copies dans deux entrées sans rapport (trigger SQL, justificatif fournisseur). Il n'en reste qu'une, la plus récente, dans l'entrée du conflit de planning.
+- PR ouvertes : #353 (id strict, relue par 0a), #354 (message de lancement chauffeur, relue). Stack de test c7test à arrêter en fin de session.
+
+## 2026-11-05 03:19 — c7 : réserves de #354 (fonction pure du message de lancement)
+- #353 et #354 fusionnées, #358 aussi. Branche fix/launch-message-followup : launchRefusalMessage extraite (continue au lieu de break), test unitaire, cas toast client, entrée LESSONS. PR à ouvrir, « mr » à 0a. Stack c7test à garder jusqu'à la fin de cette PR.
+
+## 2026-11-05 — B1 garde de réservation OT : rôle avant lecture (fix/booking-guard-role-first, base main) ; état de session c7
+- Garde de réservation : contrôle de rôle (mêmes gardes que les routes d'écriture) avant la première lecture ; contrat client/chauffeur 403 rouge avant, vert après ; LESSONS ajoutée.
+- État : #373 mineurs poussés et fusionnés dans #375 ; #378 mineurs poussés (JSDoc, cas sans propriétaire) ; B1 à relire (« mr » envoyé).
+- À venir après fusion de #379 : compléter la garde toggle, voir #375.
+- Stack de test c7test à arrêter en fin de session ; chore/recensement-229 locale, en attente de l'utilisatrice.
+## 2026-11-05 — assertWorkOrderReadable : même réponse hors périmètre et inexistant (fix/work-order-scope-uniform-404, base main)
+- Un client sur l'OT d'un autre client recevait 403, sur un OT inexistant 404 : l'écart permettait d'énumérer les OT. Désormais 404, même message, dans les deux cas ; le personnel est inchangé.
+- Convention retenue : 404 pour les OT (écart assumé avec le 403 de `canAccessOwned` ailleurs), noté dans AGENTS §11 et dans le JSDoc du helper.
+- Contrats adaptés (a5-role-guards, work-order-detail-client-scope, work-order-reads-client-scope) : comparaison explicite statut, message et code avec un OT inexistant.
