@@ -44,8 +44,9 @@ export class VehicleStatusService {
 
       return result;
     } catch (error) {
-      console.error('Error getting fleet statistics:', error);
-      return { operational: 0, maintenance: 0, outOfService: 0 };
+      // Une panne de lecture ne se déguise pas en flotte vide : le recalcul des KPI écrirait des zéros.
+      log.error({ err: error }, "Error getting fleet statistics");
+      throw new AppError(500, "Lecture de l'état de la flotte impossible.", { cause: error });
     }
   }
 
