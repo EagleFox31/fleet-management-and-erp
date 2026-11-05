@@ -67,21 +67,21 @@ describe("justificatif de règlement : liens résolus", () => {
 describe("nom disque du justificatif téléversé : toujours accepté à la relecture", () => {
   it.each([
     ["nom simple", "facture.pdf", /^facture-U\.pdf$/],
-    ["espace dans l'extension", "scan.p f", /^scan-U\.p_f$/],
-    ["extension longue", "a.verylongextension", /^a-U\.verylonge$/],
+    ["espace dans l'extension", "scan.p f", /^scan-U\.pdf$/],
+    ["extension longue", "a.verylongextension", /^a-U\.pdf$/],
     ["accents et espaces", "Reçu été 2026.PDF", /^Re_u__t__2026-U\.pdf$/],
     ["séparateurs", "../../x/y.pdf", /^\.\._\.\._x_y-U\.pdf$/],
-    ["séparateur Windows", "..\\a.png", /^\.\._a-U\.png$/],
-    ["espace final", "Facture.PDF ", /^Facture-U\.pdf_$/],
-    ["copie numérotée", "scan.pdf(1)", /^scan-U\.pdf_1_$/],
-    ["accent dans l'extension", "reçu.pdé", /^re_u-U\.pd_$/],
-    ["sans extension", "justificatif", /^justificatif-U\.bin$/],
-    ["point final", "a.", /^a-U\.bin$/],
-    ["vide", "", /^proof-U\.bin$/],
-    ["absent", undefined, /^proof-U\.bin$/],
+    ["séparateur Windows", "..\\a.png", /^\.\._a-U\.pdf$/],
+    ["espace final", "Facture.PDF ", /^Facture-U\.pdf$/],
+    ["copie numérotée", "scan.pdf(1)", /^scan-U\.pdf$/],
+    ["accent dans l'extension", "reçu.pdé", /^re_u-U\.pdf$/],
+    ["sans extension", "justificatif", /^justificatif-U\.pdf$/],
+    ["point final", "a.", /^a-U\.pdf$/],
+    ["vide", "", /^proof-U\.pdf$/],
+    ["absent", undefined, /^proof-U\.pdf$/],
     ["nom très long", `${"x".repeat(300)}.pdf`, /^x{40}-U\.pdf$/],
   ])("%s", (_label, original, expected) => {
-    const name = settlementProofFileName(original as string | undefined, "U");
+    const name = settlementProofFileName(original as string | undefined, "U", "application/pdf");
     expect(name).toMatch(expected);
     expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
   });

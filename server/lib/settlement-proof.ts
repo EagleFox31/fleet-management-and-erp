@@ -45,27 +45,15 @@ export function settlementProofContentType(proofPath: string): string {
  * `isSettlementProofReference`, quel que soit le nom d'origine. `unique` (horodatage + aléa) évite
  * les collisions.
  */
-export function settlementProofFileName(originalName: string | null | undefined, unique: string, mimeType?: string): string {
+export function settlementProofFileName(originalName: string | null | undefined, unique: string, mimeType: string): string {
   const original = originalName || "proof";
-  // Type déclaré connu : son extension, jamais celle du nom d'origine (un « .html » ne s'écrit pas en .html).
-  if (mimeType !== undefined) {
-    const baseOnly = original
-      .slice(0, original.length - path.extname(original).length)
-      .replace(/[^a-zA-Z0-9._-]/g, "_")
-      .slice(0, 40);
-    const known = Object.hasOwn(SETTLEMENT_PROOF_EXTENSION_BY_MIME, mimeType) ? SETTLEMENT_PROOF_EXTENSION_BY_MIME[mimeType] : ".bin";
-    return `${baseOnly || "proof"}-${unique}${known}`;
-  }
-  const extension = path
-    .extname(original)
-    .toLowerCase()
-    .replace(/[^a-z0-9.]/g, "_")
-    .slice(0, 10);
   const baseName = original
     .slice(0, original.length - path.extname(original).length)
     .replace(/[^a-zA-Z0-9._-]/g, "_")
     .slice(0, 40);
-  return `${baseName || "proof"}-${unique}${extension.length > 1 ? extension : ".bin"}`;
+  // L'extension vient du type déclaré, jamais du nom d'origine (un « .html » ne s'écrit pas en .html).
+  const extension = Object.hasOwn(SETTLEMENT_PROOF_EXTENSION_BY_MIME, mimeType) ? SETTLEMENT_PROOF_EXTENSION_BY_MIME[mimeType] : ".bin";
+  return `${baseName || "proof"}-${unique}${extension}`;
 }
 
 export function isSettlementProofReference(value: unknown): value is string {

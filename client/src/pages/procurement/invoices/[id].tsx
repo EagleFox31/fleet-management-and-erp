@@ -2,7 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
   FileText, CheckCircle, DollarSign, AlertTriangle, XCircle, Package,
-  ArrowLeft, Calendar, Building2, Clock, CreditCard,
+  ArrowLeft, Calendar, Building2, Clock, CreditCard, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -779,12 +779,11 @@ export default function SupplierInvoiceDetailsPage() {
                           {settlement.proofReference ? (
                             <a
                               href={`/api/supplier-invoices/${invoiceId}/settlements/${settlement.id}/proof`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-indigo-600 hover:text-indigo-700 underline underline-offset-2 text-xs font-medium"
+                              className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 underline underline-offset-2 text-xs font-medium"
                               data-testid={`link-proof-${settlement.id}`}
                             >
-                              Voir preuve
+                              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                              Télécharger la preuve
                             </a>
                           ) : (
                             <span className="text-xs text-red-500">Manquante</span>
