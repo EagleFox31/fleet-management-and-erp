@@ -177,7 +177,7 @@ export function PremiumDataTable<T>({
                 key={rowKey(row, rowIndex)}
                 className={cn(
                   excelHeader
-                    ? "border-b border-gray-200 hover:bg-blue-50/40"
+                    ? "border-b border-gray-200 hover:bg-muted/50"
                     : "border-b border-gray-50 last:border-0 hover:bg-gray-50/60",
                   "transition-colors",
                   onRowClick ? "cursor-pointer" : undefined,
