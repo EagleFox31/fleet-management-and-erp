@@ -522,3 +522,24 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `upload.ts` n'accepte qu'un type MIME déclaré en propre (`Object.hasOwn`). `sendUploadedFile` classe l'échec d'envoi : interruption client (info, sans réponse), introuvable (404), autre (500). Contrat `uploaded-documents-download-headers` : id inconnu, chemin stocké hors de `uploads/`, fichier absent. `partId` du catalogue de pannes et plein de la clé d'anomalie carburant bornés à l'int4. Cliquet `zod-id-range-hygiene` étendu à `shared/schema.ts`, borne exigée `MAX_DB_INTEGER_ID`.
 - **Pourquoi** : `constructor` comme type MIME remontait au prototype. Un fichier disparu entre le contrôle et l'envoi répondait 500, et une interruption côté client était journalisée en erreur. Deux ids hors plage répondaient encore 500.
 - **Preuve** : unitaires rouges sur l'ancien `upload.ts` (2 cas) ; contrats `fault-catalog-lifecycle` et `fuel-anomalies` rouges en 500 sur l'ancien schéma, verts après.
+## 2026-11-05 — Budget de mission (L1, drapeau finance)
+- **Quoi** :
+  - table `mission_budgets`, une par mission (`shared/schema.ts`, `MISSION_BUDGETS_SQL` et la migration jumelle `20261105_mission_budgets.sql`), avec les colonnes d'audit et `treasury_entry_id` nullable, sans effet avant T1 ;
+  - contrat `shared/contracts/mission-budgets.ts` ;
+  - routeur `server/api/mission-budgets.routes.ts`, derrière `requireFeature("finance")` :
+    - saisie : logistique et administrateur ;
+    - approbation et décaissement : direction et administrateur ;
+    - lecture : les trois ;
+    - besoin du jour : `GET /api/mission-budgets/daily-need?date=`, somme en base, au total et par statut.
+- **Comment** :
+  - le prix du litre est celui de la date du budget (`getFuelPriceAt`), figé à la saisie ;
+  - `computeMissionBudget` calcule en centimes entiers ;
+  - le client n'écrit ni le prix, ni les montants calculés, ni le statut (schéma `.strict()`) ;
+  - une transition est un UPDATE conditionnel sur le statut attendu : un rejeu reçoit 409, sans double écriture ;
+  - l'unicité de la mission est tenue par une contrainte, avec 409 en cas de conflit.
+- **Pourquoi** : lot L1 du plan trésorerie et opérations. Le FDR est saisi librement ; le barème par destination fera l'objet d'un lot séparé (L1b).
+- **Preuve** :
+  - contrat `mission-budgets` rouge sur l'ancien code (8/10), vert après (10/10) ;
+  - unitaires de calcul et de saisie (7) ;
+  - test de dérive entre init-database, la migration et Drizzle (4) ;
+  - `tsc` : 0 erreur.

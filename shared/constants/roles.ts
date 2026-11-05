@@ -163,6 +163,11 @@ export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
+/** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve et décaisse. */
+export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
 /**
  * Demandes de renouvellement de documents : création et rapprochement (secrétariat,
  * logistique, atelier). Source unique de `isDocumentRenewalWriter` (middleware) et
