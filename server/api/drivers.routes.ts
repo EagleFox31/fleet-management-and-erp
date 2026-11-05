@@ -4,6 +4,7 @@ import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
+import { driverEventScopes, driverUserIdOf } from "../lib/driver-realtime";
 import { DRIVER_CPC_FORBIDDEN_MESSAGE, redactDriverPersonalData } from "../lib/driver-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
@@ -12,7 +13,7 @@ const log = moduleLogger("drivers");
 
 const router = Router();
 
-const broadcastDriverCpcUpdate = (
+const broadcastDriverCpcUpdate = async (
   eventType: string,
   payload: Record<string, unknown>,
   options?: {
@@ -26,18 +27,26 @@ const broadcastDriverCpcUpdate = (
     return;
   }
 
-  broadcastUpdate(eventType, {
-    version: 1,
-    entity: "driver",
-    entityId: options?.driverId ?? null,
-    payload,
-    scope: { type: "broadcast" },
-    actor: {
-      userId: options?.actorUserId ?? null,
-      role: options?.actorRole ?? null,
-    },
-    emittedAt: new Date().toISOString(),
-  });
+  // Appelée en `void` : une exception ne doit jamais devenir un rejet non géré.
+  try {
+    const driverUserId = options?.driverId ? await driverUserIdOf(options.driverId) : null;
+    for (const scope of driverEventScopes(driverUserId)) {
+      broadcastUpdate(eventType, {
+        version: 1,
+        entity: "driver",
+        entityId: options?.driverId ?? null,
+        payload,
+        scope,
+        actor: {
+          userId: options?.actorUserId ?? null,
+          role: options?.actorRole ?? null,
+        },
+        emittedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    log.error({ err, driverId: options?.driverId ?? null, eventType }, "Diffusion temps réel chauffeur impossible");
+  }
 };
 
 /**
@@ -120,7 +129,7 @@ router.post("/:id/update-cpc", (req, res, next) => {
       parsedCpcDate
     );
 
-    broadcastDriverCpcUpdate(
+    void broadcastDriverCpcUpdate(
       "driver_cpc_updated",
       {
         driverId,
@@ -177,7 +186,7 @@ router.post("/sync-cpc-statuses", isDriverManager, async (req, res, next) => {
   try {
     const result = await cpcTrainingService.syncAllCPCStatuses();
 
-    broadcastDriverCpcUpdate(
+    void broadcastDriverCpcUpdate(
       "driver_cpc_statuses_synced",
       {
         result,
