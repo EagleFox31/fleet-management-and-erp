@@ -270,6 +270,48 @@ async function seedClientInvoices(): Promise<void> {
   ]);
 }
 
+export const DEMO_TCO = { orderNumber: "DEMO-TCO-001", invoiceNumber: "DEMO-FAC-003", amountHT: 800_000, amountTTC: 953_400 } as const;
+
+/** Mission terminée de la période, affectée à un camion et facturée : alimente l'audit flotte et TCO. */
+async function seedFleetAudit(vehicleId: number): Promise<void> {
+  const old = await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, DEMO_TCO.orderNumber));
+  if (old.length > 0) {
+    const ids = old.map((m) => m.id);
+    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, ids));
+    await db.delete(assignments).where(inArray(assignments.missionId, ids));
+    await db.delete(missions).where(inArray(missions.id, ids));
+  }
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const now = new Date();
+  const [mission] = await db
+    .insert(missions)
+    .values({
+      clientId: client.id,
+      orderNumber: DEMO_TCO.orderNumber,
+      pickupAddress: "Douala, port",
+      deliveryAddress: "Yaoundé, entrepôt central",
+      pickupDate: new Date(now.getTime() - 2 * 86_400_000),
+      deliveryDate: now,
+      actualDistance: 240,
+      status: "completed",
+    })
+    .returning({ id: missions.id });
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId, status: "completed", completedAt: now });
+  const today = now.toISOString().slice(0, 10);
+  await db.insert(clientInvoices).values({
+    invoiceNumber: DEMO_TCO.invoiceNumber,
+    missionId: mission.id,
+    clientId: client.id,
+    invoiceDate: today,
+    dueDate: today,
+    amountHT: String(DEMO_TCO.amountHT),
+    vatAmount: "153400",
+    amountTTC: String(DEMO_TCO.amountTTC),
+    balance: "0",
+    status: "paid",
+  });
+}
+
 async function seedLogistics(): Promise<void> {
   await ensureUser(DEMO_ACCOUNTS.logistics);
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
@@ -342,6 +384,7 @@ export async function seedDemo(): Promise<void> {
   await ensureVehicle(DEMO_VEHICLES.clientB1, "Premium", clientBId);
   const workshopVehicleId = await ensureVehicle(DEMO_VEHICLES.workshop, "T480", null);
   const secretaryVehicleId = await ensureVehicle(DEMO_VEHICLES.secretary, "Kerax", null);
+  await seedFleetAudit(secretaryVehicleId);
 
   await db
     .insert(parts)
