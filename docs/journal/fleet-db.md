@@ -85,3 +85,11 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : un CHECK écrit seulement dans CREATE TABLE IF NOT EXISTS n'existe pas sur une base poussée par drizzle-kit et un push --force le retire.
 - **Preuves** : Postgres local jetable (ports 62432/62433), schéma par drizzle-kit push --force : les six contraintes présentes et validées avant tout init-database, INSERT category='road' rejeté (qhse_inspection_criteria_category_check). Contrat qhse-inspections 6/6, intégration cdc-schema-idempotence 13/13, unitaires 2726 verts, tsc 0 erreur. Filtre Douala : rouge avec l'ancien calcul UTC, vert après.
 - **Reste / risques** : aucune donnée réécrite ; une base où des lignes violent un CHECK garde la contrainte NOT VALID, signalée au démarrage.
+
+## 2026-11-05T15:40:00+01:00 — QHSE lot Q1 : fusion de main (T1, O1) dans #462, test 403 chauffeur sans fiche
+
+- **Quoi** : `git merge origin/main` (sans rebase ni force-push) sur `feat/qhse-inspections` ; ajout au contrat qhse-inspections du cas compte `driver` sans fiche chauffeur → 403 sur `GET /api/qhse/inspections/:id` (contrôle existant et id absent).
+- **Comment** : conflits résolus en gardant les deux côtés : `shared/constants/roles.ts` (`INVENTORY_MANAGER_ROLES` puis groupes QHSE), `shared/schema.ts` (tables `treasury_*` puis `qhse_*`). `init-database.ts`, `api/index.ts`, `tests/support/cleanup.ts` fusionnés automatiquement, relus (montages trésorerie, opérations, QHSE présents ; suppressions QHSE et trésorerie avant les utilisateurs).
+- **Pourquoi** : #462 n'était plus fusionnable après #461 et #465.
+- **Preuves** : tsc 0 erreur ; unitaires 252 fichiers, 2796 verts ; Postgres local jetable (ports 57320/57433, supprimé ensuite), schéma par drizzle-kit push --force : intégration cleanup-users-fk-coverage + cdc-schema-idempotence 16/16, contrat qhse-inspections 6/6 ; nouvelle assertion rouge si l'on attend 200, verte à 403.
+- **Reste / risques** : aucun effet en base partagée ; aucune migration nouvelle.

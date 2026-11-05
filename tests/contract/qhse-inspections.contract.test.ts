@@ -191,6 +191,9 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
     const none = await call("GET", cookie.driverNoProfile, "/api/qhse/inspections");
     expect(none.status).toBe(200);
     expect(none.body.total).toBe(0);
+    // Détail pour un compte chauffeur sans fiche : 403 sur un contrôle existant comme sur un id absent.
+    expect((await call("GET", cookie.driverNoProfile, `/api/qhse/inspections/${created.body.id}`)).status).toBe(403);
+    expect((await call("GET", cookie.driverNoProfile, "/api/qhse/inspections/2147483647")).status).toBe(403);
     // Détail côté personnel : 200, absent 404.
     expect((await call("GET", cookie.logistics, `/api/qhse/inspections/${byManagement.body.id}`)).status).toBe(200);
     expect((await call("GET", cookie.logistics, "/api/qhse/inspections/2147483647")).status).toBe(404);
