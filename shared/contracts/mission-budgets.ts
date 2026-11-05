@@ -59,6 +59,15 @@ export function isBudgetDateInWindow(budgetDate: string, today: string): boolean
 export const missionBudgetTransitionRequestSchema = z.object({ expectedUpdatedAt: isoDateTimeSchema }).strict();
 export type MissionBudgetTransitionRequest = z.infer<typeof missionBudgetTransitionRequestSchema>;
 
+/**
+ * Décaissement (L1c) : la version lue, et le compte de trésorerie (banque ou caisse) d'où sort
+ * l'argent. Sans compte, le décaissement reste un marquage, rien n'est écrit au journal.
+ */
+export const missionBudgetDisburseRequestSchema = missionBudgetTransitionRequestSchema
+  .extend({ treasuryAccountId: bodyIdSchema.nullish() })
+  .strict();
+export type MissionBudgetDisburseRequest = z.infer<typeof missionBudgetDisburseRequestSchema>;
+
 const amountSchema = z.number().finite().min(0).max(MISSION_BUDGET_MAX_AMOUNT);
 
 const missionBudgetFields = z.object({

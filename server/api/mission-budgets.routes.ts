@@ -4,6 +4,7 @@ import {
   dailyNeedQuerySchema,
   dailyNeedResponseSchema,
   missionBudgetSchema,
+  missionBudgetDisburseRequestSchema,
   missionBudgetTransitionRequestSchema,
   missionBudgetsQuerySchema,
   missionBudgetsResponseSchema,
@@ -93,8 +94,12 @@ const transition =
   async (req, res, next) => {
     try {
       const id = budgetId(req.params.id);
-      const { expectedUpdatedAt } = missionBudgetTransitionRequestSchema.parse(req.body ?? {});
-      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action, expectedUpdatedAt)));
+      // Approuver n'accepte que la version ; décaisser accepte aussi le compte de trésorerie (L1c).
+      const { expectedUpdatedAt, treasuryAccountId } =
+        action === "disburse"
+          ? missionBudgetDisburseRequestSchema.parse(req.body ?? {})
+          : { ...missionBudgetTransitionRequestSchema.parse(req.body ?? {}), treasuryAccountId: null };
+      res.json(missionBudgetSchema.parse(await transitionMissionBudget(id, req.user!.id, action, expectedUpdatedAt, treasuryAccountId)));
     } catch (error) {
       next(error);
     }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
 import type { TreasuryCategory, TreasuryDirection } from "@shared/contracts/treasury";
-import { treasuryEntries, type FuelRecord, type SupplierInvoiceSettlement } from "@shared/schema";
+import { treasuryEntries, type FuelRecord, type MissionBudgetRow, type SupplierInvoiceSettlement } from "@shared/schema";
 import { AppError } from "../lib/app-error";
 import { isFeatureEnabled } from "../lib/feature-flags";
 import { moduleLogger } from "../lib/logger";
@@ -15,7 +15,8 @@ const log = moduleLogger("treasury-links");
  * Écritures de trésorerie posées par une autre opération (lots T2 et T3), toujours dans la
  * transaction de cette opération : si elle échoue, l'écriture est annulée avec elle.
  *
- * Rejeu : chaque ligne porte une clé dérivée de sa source (`fuel:<id>`, `settlement:<id>`) et
+ * Rejeu : chaque ligne porte une clé dérivée de sa source (`fuel:<id>`, `settlement:<id>`,
+ * `mission-budget:<id>:<poste>`) et
  * s'insère en `ON CONFLICT DO NOTHING` : rejouer l'opération ne crée jamais de seconde ligne.
  *
  * Verrous : aucun verrou n'est pris ici. Côté carburant, l'appelant tient déjà `lockFuelCard` ;
@@ -215,4 +216,42 @@ export async function reverseSupplierSettlement(tx: DbExecutor, settlementId: nu
     supplierSettlementId: settlementId,
     requestKey: `${settlementKey(settlementId)}:reject`,
   });
+}
+
+const missionBudgetKey = (id: number, line: "carburant" | "fdr") => `mission-budget:${id}:${line}`;
+
+/**
+ * Décaissement d'un budget de mission (L1c), dans la transaction de la transition `disbursed` :
+ * deux sorties du compte choisi, liées à la mission — carburant, puis FDR et frais annexes.
+ * Sans compte : rien n'est écrit (le décaissement reste un marquage). Compte demandé sans drapeau
+ * `finance` : 409. Banque ou caisse seulement, jamais la carte carburant : 400.
+ * Renvoie l'écriture à retenir sur le budget (FDR, sinon carburant), ou `null` si rien n'est écrit.
+ */
+export async function linkMissionBudgetDisbursement(
+  tx: DbExecutor,
+  budget: MissionBudgetRow,
+  accountId: number | null | undefined,
+  userId: number,
+): Promise<number | null> {
+  if (!accountId) return null;
+  if (!isFeatureEnabled("finance")) throw new AppError(409, "La trésorerie n'est pas activée : laissez le compte de trésorerie vide.");
+  const account = await requireActiveAccount(tx as never, accountId);
+  if (account.kind !== "bank" && account.kind !== "cash") {
+    throw new AppError(400, "Un budget de mission se décaisse d'une banque ou d'une caisse.");
+  }
+  const base = { accountId: account.id, direction: "out" as const, entryDate: today(), missionId: budget.missionId };
+  const lines = [
+    { key: missionBudgetKey(budget.id, "fdr"), amount: toTreasuryAmount(Number(budget.fdrAmount) + Number(budget.extrasAmount)), label: "Budget de mission : FDR et frais annexes", category: "fdr" as const },
+    { key: missionBudgetKey(budget.id, "carburant"), amount: toTreasuryAmount(budget.fuelAmount), label: "Budget de mission : carburant", category: "carburant" as const },
+  ];
+  let retained: number | null = null;
+  for (const line of lines) {
+    if (!line.amount) continue;
+    await insertLinked(tx, userId, { ...base, amount: line.amount, label: line.label, category: line.category, requestKey: line.key });
+    if (retained !== null) continue;
+    // Rejeu : la ligne déjà écrite sous cette clé est retenue.
+    const res = await tx.execute(sql`SELECT id FROM treasury_entries WHERE request_key = ${line.key}`);
+    retained = Number((res.rows[0] as { id: number }).id);
+  }
+  return retained;
 }

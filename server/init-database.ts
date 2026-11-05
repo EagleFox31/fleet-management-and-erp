@@ -1224,6 +1224,34 @@ BEGIN
   END IF;
 END $$;`;
 
+// Lien trésorerie du budget de mission (L1c) — jumelle de server/db/migrations/20261105_mission_budgets_treasury.sql.
+// Après MISSION_BUDGETS_SQL ; treasury_entries est créée plus tôt par applyCdcSchema.
+export const MISSION_BUDGETS_TREASURY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+DO $$
+BEGIN
+  IF to_regclass('mission_budgets') IS NULL OR to_regclass('treasury_entries') IS NULL THEN
+    RETURN;
+  END IF;
+  -- Posée NOT VALID puis validée : une valeur orpheline laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Nom identique à shared/schema.ts.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_treasury_entry_id_treasury_entries_id_fk') THEN
+    ALTER TABLE mission_budgets ADD CONSTRAINT mission_budgets_treasury_entry_id_treasury_entries_id_fk
+      FOREIGN KEY (treasury_entry_id) REFERENCES treasury_entries(id) NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+             AND conname = 'mission_budgets_treasury_entry_id_treasury_entries_id_fk' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_budgets VALIDATE CONSTRAINT mission_budgets_treasury_entry_id_treasury_entries_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'mission_budgets : treasury_entry_id orphelins, mission_budgets_treasury_entry_id_treasury_entries_id_fk laissée NOT VALID';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'lien trésorerie de mission_budgets non réconcilié : verrou de table indisponible';
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1431,6 +1459,8 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   // Posées par MISSION_DESTINATIONS_SQL (lot L1b).
   'mission_destinations_amounts_check',
   'mission_destinations_code_unique',
+  // Posée par MISSION_BUDGETS_TREASURY_SQL (lot L1c).
+  'mission_budgets_treasury_entry_id_treasury_entries_id_fk',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -1944,6 +1974,8 @@ export async function initializeDatabase() {
     await pool.query(MISSION_BUDGETS_SQL);
     // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
     await pool.query(MISSION_DESTINATIONS_SQL);
+    // Lien trésorerie du budget (L1c) — jumelle de server/db/migrations/20261105_mission_budgets_treasury.sql.
+    await pool.query(MISSION_BUDGETS_TREASURY_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);
