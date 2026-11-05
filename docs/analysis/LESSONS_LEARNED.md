@@ -3007,3 +3007,10 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : la garde rejoue d'abord la garde de rôle de la route protégée (POST : atelier ; PATCH : technicien compris), puis lit.
 - **Prévention vérifiable** : cas `contrôle de rôle avant lecture` dans `tests/contract/work-order-booking-guard.contract.test.ts` (client et chauffeur : 403), rouge avant le correctif.
 - **Leçon généralisée** : un middleware monté sur un préfixe vérifie le rôle avant sa première lecture en base.
+
+## 2026-11-05 — Une route publique répond par une liste blanche de clés
+
+- **Contexte** : un point d'entrée sans session renvoyait un descriptif complet de l'API.
+- **Cause racine** : le handler public et le détail partageaient la même réponse ; rien n'épinglait ce qu'une route publique a le droit de renvoyer.
+- **Prévention** : une route publique répond par une liste blanche de clés, épinglée par un contrat (`tests/contract/health.contract.test.ts`) ; tout détail passe par un chemin distinct sous garde de rôle.
+- **Leçon** : le contenu d'une réponse sans session se décide et se teste explicitement, comme un droit d'accès.
