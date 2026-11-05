@@ -140,3 +140,19 @@
   - Ancien code : 12 rouges (200, 201, 404, 500 ; `GET /api/users/:id` à 401). Correctif : 12 verts.
   - Ménage par préfixe de titre (`TEST lot 9`) : 0 résidu.
   - tsc : 0 erreur. Unitaires : 2441 verts. 50 contrats du périmètre : 793 verts.
+
+## Lot 10 — `billing.routes.ts` et forme déstructurée dans le cliquet
+
+- Quoi : `route-id-parse-hygiene` voit maintenant une lecture qui passe par une variable : `const { id } = req.params; parseInt(id)`, `const raw = req.params.id; Number(raw)`. Il ne relevait que la lecture directe `parseInt(req.params…)`.
+- Relevé du nouveau motif sur `server/api` : `billing.routes.ts`, et seulement lui, avec 6 conversions sur 4 routes (`GET /invoices/:id`, `POST` et `GET /invoices/:id/payments`, `GET /invoices/:id/pdf`). Le cliquet était rouge avant le correctif.
+- Comment :
+  - `parseRouteId(req.params.id, "Identifiant de facture invalide.")`, une lecture par route. Sur `POST /payments`, elle a lieu avant le corps.
+  - Les 3 GET reçoivent `next` et relaient les AppError. Leurs `console.error` sont migrés vers `moduleLogger("billing")`, aucun n'est supprimé. La réponse 500 des autres erreurs n'a pas changé.
+  - Comptage par bloc de déclaration : un nom homonyme dans un autre handler n'est pas compté, mais le masquage par une déclaration interne n'est pas suivi.
+- Tester : `route-id-strict-lot10`, 6 cas.
+  - `POST /payments` sur `<id>abc` : 400, aucun paiement, ligne de facture identique.
+  - `POST /payments` sur un id hors de l'int4 : 400.
+  - Témoin : un paiement sur un id valide est enregistré.
+  - Les 3 GET sur `<id>abc` : 400.
+  - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
+  - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
