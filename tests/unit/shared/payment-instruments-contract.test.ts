@@ -7,6 +7,7 @@ import {
   PAYMENT_INSTRUMENT_STATUS_LABELS,
   closePaymentInstrumentSchema,
   createPaymentInstrumentSchema,
+  paymentInstrumentCounterparty,
   listPaymentInstrumentsQuerySchema,
   payPaymentInstrumentSchema,
   paymentInstrumentAlert,
@@ -83,5 +84,17 @@ describe("schémas de saisie", () => {
     expect(listPaymentInstrumentsQuerySchema.parse({ alertDays: "15" }).alertDays).toBe(15);
     expect(listPaymentInstrumentsQuerySchema.safeParse({ alertDays: "999" }).success).toBe(false);
     expect(listPaymentInstrumentsQuerySchema.safeParse({ status: "lost" }).success).toBe(false);
+  });
+});
+
+describe("paymentInstrumentCounterparty", () => {
+  const names = { drawer: "TIREUR", drawee: "SECOND" };
+  it.each([
+    ["traite", "outgoing", "TIREUR"],
+    ["traite", "incoming", "SECOND"],
+    ["cheque", "outgoing", "SECOND"],
+    ["cheque", "incoming", "TIREUR"],
+  ] as const)("%s %s : %s", (kind, direction, expected) => {
+    expect(paymentInstrumentCounterparty({ kind, direction, ...names })).toBe(expected);
   });
 });

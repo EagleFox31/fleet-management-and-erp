@@ -5,6 +5,7 @@ import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import { PAYMENT_INSTRUMENTS_PATH, paymentInstrumentAlert } from "../../shared/contracts/payment-instruments";
 import { TREASURY_BASE_PATH } from "../../shared/contracts/treasury";
 import { db } from "../../server/db";
+import { paymentInstrumentsService } from "../../server/services/payment-instruments-service";
 import { paymentInstruments, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { leakText, TECHNICAL } from "../support/api-error";
 import { getContractApp } from "../support/app";
@@ -198,13 +199,54 @@ describe("traites et chèques : paiement au journal", { timeout: 120000 }, () =>
     expect((await call("POST", at(p.id, "/status"), "secretary", { status: "bounced" })).status).toBe(409);
   });
 
-  it("à encaisser : écriture d'entrée, contrepartie = tiré", async () => {
+  it("à encaisser : écriture d'entrée ; contrepartie = émetteur du chèque reçu, tiré de la traite tirée", async () => {
     const account = await newAccount("I");
-    const p = await create("I1", { kind: "cheque", direction: "incoming", drawer: "TAY", drawee: "CLIENT SA" });
-    const paid = await call("POST", at(p.id, "/pay"), "secretary", { accountId: account.id, paidAt: today });
-    expect(paid.status).toBe(200);
-    const [entry] = await db.select().from(treasuryEntries).where(eq(treasuryEntries.id, paid.body.instrument.treasuryEntryId));
-    expect(entry).toMatchObject({ direction: "in", category: "encaissement_client", counterpartyLabel: "CLIENT SA" });
+    const cases = [
+      { tag: "I1", extra: { kind: "cheque", direction: "incoming", drawer: "CLIENT SA", drawee: "TAY" }, counterparty: "CLIENT SA" },
+      { tag: "I2", extra: { kind: "traite", direction: "incoming", drawer: "TAY", drawee: "CLIENT SA" }, counterparty: "CLIENT SA" },
+      { tag: "I3", extra: { kind: "cheque", direction: "outgoing", drawer: "TAY", drawee: "GARAGE SARL" }, counterparty: "GARAGE SARL" },
+    ];
+    for (const c of cases) {
+      const p = await create(c.tag, c.extra);
+      const paid = await call("POST", at(p.id, "/pay"), "secretary", { accountId: account.id, paidAt: today });
+      expect(paid.status, c.tag).toBe(200);
+      const [entry] = await db.select().from(treasuryEntries).where(eq(treasuryEntries.id, paid.body.instrument.treasuryEntryId));
+      expect(entry.counterpartyLabel, c.tag).toBe(c.counterparty);
+      expect(entry.direction, c.tag).toBe(c.extra.direction === "incoming" ? "in" : "out");
+    }
+  });
+
+  it("paiement daté après aujourd'hui (Douala) : 422, rien n'est écrit", async () => {
+    const account = await newAccount("F");
+    const p = await create("F1");
+    const res = await call("POST", at(p.id, "/pay"), "secretary", { accountId: account.id, paidAt: shift(1) });
+    expect(res.status).toBe(422);
+    expect(leakText(res.body)).not.toMatch(TECHNICAL);
+    expect(await db.select().from(treasuryEntries).where(eq(treasuryEntries.requestKey, `instrument:${p.id}`))).toHaveLength(0);
+  });
+
+  it("clôture rejouée : mêmes observations 200 ; autres observations 409, l'original est conservé", async () => {
+    const p = await create("O1");
+    expect((await call("POST", at(p.id, "/status"), "secretary", { status: "bounced", observations: "Provision insuffisante" })).status).toBe(200);
+    const same = await call("POST", at(p.id, "/status"), "secretary", { status: "bounced", observations: "Provision insuffisante" });
+    expect(same.status).toBe(200);
+    expect(same.body.replayed).toBe(true);
+    expect((await call("POST", at(p.id, "/status"), "secretary", { status: "bounced" })).body.replayed).toBe(true);
+    expect((await call("POST", at(p.id, "/status"), "secretary", { status: "bounced", observations: "Autre motif" })).status).toBe(409);
+    const [row] = await db.select().from(paymentInstruments).where(eq(paymentInstruments.id, p.id));
+    expect(row.observations).toBe("Provision insuffisante");
+  });
+
+  it("violation de CHECK en base : message choisi par la contrainte", async () => {
+    const p = await create("K2");
+    const userId = (await db.select().from(paymentInstruments).where(eq(paymentInstruments.id, p.id)))[0].createdBy!;
+    await expect(paymentInstrumentsService.update(userId, p.id, { amount: "-1" } as never)).rejects.toMatchObject({
+      status: 422,
+      message: "Le montant doit être positif.",
+    });
+    await expect(
+      paymentInstrumentsService.create(userId, { ...draft("K3"), direction: "outgoing", dueDate: shift(-31) } as never),
+    ).rejects.toMatchObject({ status: 422, message: "L'échéance ne peut pas précéder la date d'émission." });
   });
 
   it("paiements concurrents : une seule écriture", async () => {

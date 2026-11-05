@@ -25,4 +25,13 @@
 
 **Écart assumé (temps réel)** : aucun événement WebSocket pour l'instant. Il n'existe pas encore d'écran de trésorerie (T1 non plus). Les cliquets du catalogue (`realtime-catalog-wiring`, `realtime-invalidation-keys`) exigent un consommateur client pour chaque événement. L'événement `payment_instrument_changed` (invalidation des échéances et des comptes) arrivera avec l'écran, dans le même lot.
 
-**Preuves** : `tests/contract/payment-instruments.contract.test.ts` (13 tests), `tests/unit/shared/payment-instruments-contract.test.ts` (8), `tests/integration/treasury-schema-reconcile.test.ts`, `tests/unit/server/treasury-schema-drift.test.ts`.
+**Near miss (ordre de création)** : au merge du lot T2/T3, ses blocs `DO $` de réconciliation se sont retrouvés avant le `CREATE TABLE payment_instruments`. Sur une base neuve, la réconciliation aurait visé une table absente. Cause : deux lots ajoutaient au même tableau `TREASURY_SCHEMA_STATEMENTS` sans règle d’ordre. Prévention vérifiable : `tests/unit/server/treasury-schema-drift.test.ts` exige que tout `CREATE` précède le premier `DO $`. Leçon : dans un tableau d’instructions de bootstrap, une table nouvelle se place avec les créations, pas en fin de tableau.
+
+**Relecture (réserves levées)** :
+- violation de CHECK : le message dépend du nom de la contrainte (dates, montant), un message neutre sinon ;
+- date de paiement postérieure à aujourd’hui (Douala) : 422 ;
+- contrepartie au journal par `paymentInstrumentCounterparty` : le tireur pour une traite à payer et un chèque reçu, le second nom sinon ;
+- une trace `moduleLogger("payment-instruments")` par paiement (`instrumentId`, `accountId`, `entryId`, `userId`, `requestId`) ;
+- clôture rejouée avec d’autres observations : 409, l’original est conservé.
+
+**Preuves** : `tests/contract/payment-instruments.contract.test.ts` (17 tests), `tests/unit/shared/payment-instruments-contract.test.ts` (12), `tests/integration/treasury-schema-reconcile.test.ts`, `tests/unit/server/treasury-schema-drift.test.ts`.

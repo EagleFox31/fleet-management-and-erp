@@ -157,3 +157,15 @@ export function paymentInstrumentAlert(
   if (daysUntilDue < 0) return "overdue";
   return daysUntilDue <= alertDays ? "due_soon" : "none";
 }
+
+/**
+ * Contrepartie inscrite au journal lors du paiement. Traite : le tireur est le créancier, le tiré le
+ * débiteur ; chèque : le tireur est l'émetteur, le second nom le bénéficiaire. La contrepartie est
+ * donc le tireur pour une traite à payer et un chèque reçu, le second nom sinon.
+ */
+export function paymentInstrumentCounterparty(
+  instrument: Pick<PaymentInstrument, "kind" | "direction" | "drawer" | "drawee">,
+): string {
+  const drawerIsCounterparty = (instrument.kind === "traite") === (instrument.direction === "outgoing");
+  return drawerIsCounterparty ? instrument.drawer : instrument.drawee;
+}

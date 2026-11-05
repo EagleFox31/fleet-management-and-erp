@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
 import {
   PAYMENT_INSTRUMENT_KIND_LABELS,
+  paymentInstrumentCounterparty,
   type ClosePaymentInstrumentInput,
   type CreatePaymentInstrumentInput,
   type ListPaymentInstrumentsQuery,
@@ -17,7 +18,10 @@ import {
 import { paymentInstruments, treasuryEntries } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { requireActiveAccount } from "./treasury-service";
+
+const log = moduleLogger("payment-instruments");
 
 /**
  * Traites et chèques (lot T4). Une échéance naît « en attente » ; « payée » écrit au journal de
@@ -91,13 +95,21 @@ async function byId(ex: Executor, id: number, now: Date): Promise<PaymentInstrum
 }
 
 /** Verrouille la ligne pour la durée de la transaction : deux paiements concurrents se sérialisent. */
-async function lockRow(ex: Executor, id: number): Promise<{ status: PaymentInstrumentStatus; issueDate: string; dueDate: string }> {
+async function lockRow(
+  ex: Executor,
+  id: number,
+): Promise<{ status: PaymentInstrumentStatus; issueDate: string; dueDate: string; observations: string | null }> {
   const res = await ex.execute(sql`
-    SELECT status, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, to_char(due_date, 'YYYY-MM-DD') AS due_date
+    SELECT status, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, to_char(due_date, 'YYYY-MM-DD') AS due_date, observations
     FROM payment_instruments WHERE id = ${id} FOR UPDATE`);
   const row = res.rows[0] as Row | undefined;
   if (!row) throw new AppError(404, NOT_FOUND);
-  return { status: row.status as PaymentInstrumentStatus, issueDate: String(row.issue_date), dueDate: String(row.due_date) };
+  return {
+    status: row.status as PaymentInstrumentStatus,
+    issueDate: String(row.issue_date),
+    dueDate: String(row.due_date),
+    observations: (row.observations as string | null) ?? null,
+  };
 }
 
 function pgCode(error: unknown): string | undefined {
@@ -105,10 +117,24 @@ function pgCode(error: unknown): string | undefined {
   return e?.code ?? e?.cause?.code;
 }
 
+function pgConstraint(error: unknown): string | undefined {
+  const e = error as { constraint?: string; cause?: { constraint?: string } };
+  return e?.constraint ?? e?.cause?.constraint;
+}
+
+/** Violation de CHECK : message choisi par le nom de la contrainte, jamais par défaut celui des dates. */
+const CHECK_MESSAGES: Record<string, string> = {
+  payment_instruments_dates_check: DUE_BEFORE_ISSUE,
+  payment_instruments_amount_check: "Le montant doit être positif.",
+};
+const INVALID_VALUE = "Une valeur saisie n'est pas acceptée pour cette échéance.";
+
 function mapDbError(error: unknown): never {
   const code = pgCode(error);
   if (code === "23503") throw new AppError(422, BAD_LINK, { cause: error });
-  if (code === "23514") throw new AppError(422, DUE_BEFORE_ISSUE, { cause: error });
+  if (code === "23514") {
+    throw new AppError(422, CHECK_MESSAGES[pgConstraint(error) ?? ""] ?? INVALID_VALUE, { cause: error });
+  }
   throw error;
 }
 
@@ -237,8 +263,9 @@ export const paymentInstrumentsService = {
    * encaisser) et le statut, dans une transaction. Rejouée avec le même compte et la même date :
    * l'état existant, `replayed: true` ; payée autrement : 409.
    */
-  async pay(userId: number, id: number, input: PayPaymentInstrumentInput, now: Date = new Date()) {
+  async pay(userId: number, id: number, input: PayPaymentInstrumentInput, now: Date = new Date(), requestId?: string) {
     let replayed = false;
+    if (input.paidAt > today(now)) throw new AppError(422, "La date de paiement ne peut pas être postérieure à aujourd'hui.");
     try {
       await db.transaction(async (tx) => {
         const ex = tx as unknown as Executor;
@@ -265,7 +292,7 @@ export const paymentInstrumentsService = {
             direction: outgoing ? "out" : "in",
             amount: instrument.amount,
             category: outgoing ? "reglement_fournisseur" : "encaissement_client",
-            counterpartyLabel: outgoing ? instrument.drawer : instrument.drawee,
+            counterpartyLabel: paymentInstrumentCounterparty(instrument),
             vehicleId: instrument.vehicleId,
             clientId: instrument.clientId,
             supplierId: instrument.supplierId,
@@ -278,6 +305,10 @@ export const paymentInstrumentsService = {
           .update(paymentInstruments)
           .set({ status: "paid", paidAt: input.paidAt, treasuryEntryId: entry.id, updatedBy: userId, updatedAt: new Date() })
           .where(sql`${paymentInstruments.id} = ${id}`);
+        log.info(
+          { instrumentId: id, accountId: input.accountId, entryId: entry.id, userId, requestId },
+          "Traite ou chèque payé au journal",
+        );
       });
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -287,12 +318,18 @@ export const paymentInstrumentsService = {
     return { instrument, replayed };
   },
 
-  /** Rejetée ou annulée, depuis « en attente ». Même statut demandé deux fois : sans effet. */
+  /**
+   * Rejetée ou annulée, depuis « en attente ». Même statut et mêmes observations demandés deux fois :
+   * sans effet ; même statut avec d'autres observations : 409, rien n'est perdu en silence.
+   */
   async close(userId: number, id: number, input: ClosePaymentInstrumentInput, now: Date = new Date()) {
     let replayed = false;
     await db.transaction(async (tx) => {
       const current = await lockRow(tx as unknown as Executor, id);
       if (current.status === input.status) {
+        if (input.observations && input.observations !== current.observations) {
+          throw new AppError(409, "Cette échéance est déjà clôturée avec d'autres observations.");
+        }
         replayed = true;
         return;
       }

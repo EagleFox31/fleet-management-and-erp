@@ -81,7 +81,7 @@ router.post(
     const id = parseRouteId(req.params.id, BAD_ID);
     const input = payPaymentInstrumentSchema.parse(req.body);
     const audit = { updatedBy: req.user!.id };
-    const { instrument, replayed } = await paymentInstrumentsService.pay(audit.updatedBy, id, input);
+    const { instrument, replayed } = await paymentInstrumentsService.pay(audit.updatedBy, id, input, new Date(), req.requestId);
     res.json({ instrument, replayed });
   }),
 );
