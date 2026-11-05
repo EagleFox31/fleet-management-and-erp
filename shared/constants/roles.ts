@@ -160,6 +160,10 @@ export function canWriteFuelPrice(role: string | null | undefined): boolean {
 /** Mouvements de pneus (`GET /api/tires/movements`), lecture seule. */
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 
+/** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
+export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
