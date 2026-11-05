@@ -58,3 +58,20 @@
 - Correctif de méthode : les deux GET d'OT, d'abord notés comme masqués par `GET /api/work-orders/:id`, sont vivants (`:id` = un seul segment). Ils sont corrigés et non supprimés (voir LESSONS, 2026-11-05).
 - Tester : `route-id-strict-lot5` compte 15 cas. Sur l'ancien code, 15 rouges. Le correctif les rend verts. `former-storage-stubs` reste vert.
 - Hors périmètre : PATCH users (b7) et toggle admin-users (c7, #375).
+
+## Lot 6 — écritures de `server/routes.ts` (en place)
+
+- Quoi : `routeIdOrNaN` remplace `parseInt` / `Number` sur 11 écritures.
+  - Véhicules : PATCH, restore, mileage/sync, POST tires.
+  - Planifications : generate-work-order, PATCH.
+  - PATCH work-orders, fuel-records et tires.
+  - PATCH vehicle-tires et vehicle-tires/remove.
+- Détails :
+  - `mileage/sync` n'avait aucun contrôle : il reçoit le 400 « ID de véhicule invalide ».
+  - `generate-work-order` (`Number`) acceptait `1e0` et `" 7 "`.
+- Comment : `ROUTES_TS_FROZEN = 28` (39 au lot 5). `POST /api/parts/:id/update-stock` est déjà strict : la route est `:id([0-9]+)` dans `parts-catalog.routes.ts`, donc hors lot.
+- Pourquoi : `PATCH /api/vehicles/<id>abc` modifiait le véhicule `<id>`, et `restore` le restaurait.
+- Tester : `route-id-strict-lot6` couvre 14 cas, dont 3 vérifient que l'objet reste intact (véhicule modifié, véhicule restauré, plein modifié).
+  - Ancien code : 14 rouges. Correctif : 14 verts.
+  - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
+- Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
