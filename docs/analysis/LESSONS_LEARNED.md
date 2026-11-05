@@ -3147,7 +3147,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 
 ## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
 
-- **Contexte** : après l'incident du `git checkout -- .` (entrée précédente), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
+- **Contexte** : après l'incident du `git checkout -- .` (entrée « Modifications non commitées perdues : `cd` en échec… », même date), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
 - **Cause racine** : `core.autocrlf=true` sur les postes Windows. Les blobs du dépôt sont en LF, l'arbre de travail est le plus souvent en CRLF. Un outil qui réécrit un fichier en LF, ou un fichier recopié depuis un autre worktree, fait apparaître toutes ses lignes comme changées, alors que le texte est identique.
 - **Classification** : near miss, diagnostic erroné possible (conclure à une perte, ou restaurer et écraser un travail réel).
 - **Résolution** : aucune perte réelle. Les fichiers concernés sont alignés sur les fins de ligne de leur blob HEAD.
