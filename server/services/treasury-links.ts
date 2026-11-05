@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
 import type { TreasuryCategory, TreasuryDirection } from "@shared/contracts/treasury";
-import { treasuryEntries, type FuelRecord, type SupplierInvoiceSettlement } from "@shared/schema";
+import { treasuryEntries, type FuelRecord, type MissionBudgetRow, type SupplierInvoiceSettlement } from "@shared/schema";
 import { AppError } from "../lib/app-error";
 import { isFeatureEnabled } from "../lib/feature-flags";
 import { moduleLogger } from "../lib/logger";
@@ -15,7 +15,8 @@ const log = moduleLogger("treasury-links");
  * Écritures de trésorerie posées par une autre opération (lots T2 et T3), toujours dans la
  * transaction de cette opération : si elle échoue, l'écriture est annulée avec elle.
  *
- * Rejeu : chaque ligne porte une clé dérivée de sa source (`fuel:<id>`, `settlement:<id>`) et
+ * Rejeu : chaque ligne porte une clé dérivée de sa source (`fuel:<id>`, `settlement:<id>`,
+ * `mission-budget:<id>:<poste>`) et
  * s'insère en `ON CONFLICT DO NOTHING` : rejouer l'opération ne crée jamais de seconde ligne.
  *
  * Verrous : aucun verrou n'est pris ici. Côté carburant, l'appelant tient déjà `lockFuelCard` ;
@@ -48,11 +49,14 @@ type LinkedLine = {
   supplierSettlementId?: number | null;
 };
 
-async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedLine): Promise<void> {
-  await tx
+/** Vrai si la ligne est écrite, faux si sa clé était déjà prise (rejeu). */
+async function insertLinked(tx: DbExecutor, userId: number | null, line: LinkedLine): Promise<boolean> {
+  const inserted = await tx
     .insert(treasuryEntries)
     .values({ ...line, createdBy: userId, updatedBy: userId })
-    .onConflictDoNothing({ target: treasuryEntries.requestKey });
+    .onConflictDoNothing({ target: treasuryEntries.requestKey })
+    .returning({ id: treasuryEntries.id });
+  return inserted.length > 0;
 }
 
 async function activeFuelCardAccountId(tx: DbExecutor): Promise<number | null> {
@@ -215,4 +219,85 @@ export async function reverseSupplierSettlement(tx: DbExecutor, settlementId: nu
     supplierSettlementId: settlementId,
     requestKey: `${settlementKey(settlementId)}:reject`,
   });
+}
+
+const missionBudgetKey = (id: number, line: "carburant" | "fdr") => `mission-budget:${id}:${line}`;
+
+/**
+ * Décaissement d'un budget de mission (L1c), dans la transaction de la transition `disbursed` :
+ * deux sorties du compte choisi, liées à la mission — carburant, puis FDR et frais annexes.
+ * Finance active : compte obligatoire (400 sans compte), sinon le décaissement ne laisserait aucune
+ * trace à contre-passer. Finance coupée : sans compte, simple marquage ; compte demandé, 409.
+ * Banque ou caisse seulement, jamais la carte carburant : 400.
+ * Renvoie l'écriture à retenir sur le budget (FDR, sinon carburant), ou `null` si rien n'est écrit.
+ */
+export async function linkMissionBudgetDisbursement(
+  tx: DbExecutor,
+  budget: MissionBudgetRow,
+  accountId: number | null | undefined,
+  userId: number,
+): Promise<number | null> {
+  if (!accountId) {
+    if (isFeatureEnabled("finance")) throw new AppError(400, "Choisissez le compte de trésorerie d'où sort l'argent du budget.");
+    return null;
+  }
+  if (!isFeatureEnabled("finance")) throw new AppError(409, "La trésorerie n'est pas activée : laissez le compte de trésorerie vide.");
+  const account = await requireActiveAccount(tx as never, accountId);
+  if (account.kind !== "bank" && account.kind !== "cash") {
+    throw new AppError(400, "Un budget de mission se décaisse d'une banque ou d'une caisse.");
+  }
+  const base = { accountId: account.id, direction: "out" as const, entryDate: today(), missionId: budget.missionId };
+  const lines = [
+    { key: missionBudgetKey(budget.id, "fdr"), amount: toTreasuryAmount(Number(budget.fdrAmount) + Number(budget.extrasAmount)), label: "Budget de mission : FDR et frais annexes", category: "fdr" as const },
+    { key: missionBudgetKey(budget.id, "carburant"), amount: toTreasuryAmount(budget.fuelAmount), label: "Budget de mission : carburant", category: "carburant" as const },
+  ];
+  let retained: number | null = null;
+  for (const line of lines) {
+    if (!line.amount) continue;
+    await insertLinked(tx, userId, { ...base, amount: line.amount, label: line.label, category: line.category, requestKey: line.key });
+    if (retained !== null) continue;
+    // Rejeu : la ligne déjà écrite sous cette clé est retenue.
+    const res = await tx.execute(sql`SELECT id FROM treasury_entries WHERE request_key = ${line.key}`);
+    retained = Number((res.rows[0] as { id: number }).id);
+  }
+  return retained;
+}
+
+/**
+ * Mission annulée après décaissement (L1d) : le reliquat non justifié de chaque ligne décaissée revient
+ * au compte d'où il est sorti, par une entrée « in » de clé `<clé>:reverse`. Rejouable : une clé déjà
+ * prise n'écrit rien. Sans ligne au journal (décaissement sans compte, ou budget non décaissé) : rien.
+ * Comme `reverseFuelLink`, indépendant du drapeau : une sortie déjà écrite se contre-passe toujours.
+ * Renvoie le nombre de lignes de contre-passation écrites : 0 sur un rejeu.
+ */
+export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetIds: number[], userId: number | null): Promise<number> {
+  if (budgetIds.length === 0) return 0;
+  const keys = budgetIds.flatMap((id) => [missionBudgetKey(id, "fdr"), missionBudgetKey(id, "carburant")]);
+  const res = await tx.execute(sql`
+    SELECT request_key, account_id, amount::text AS amount, category, label, mission_id
+    FROM treasury_entries WHERE request_key IN (${sql.join(keys.map((k) => sql`${k}`), sql`, `)})
+    ORDER BY request_key`);
+  const lines = res.rows as Array<{
+    request_key: string; account_id: number; amount: string; category: TreasuryCategory; label: string; mission_id: number | null;
+  }>;
+  let reversed = 0;
+  for (const line of lines) {
+    // Dépenses justifiées conservées. Aucune pièce justificative n'existe encore sur le budget :
+    // justifié = 0, le reliquat est le montant décaissé.
+    const justified = 0;
+    const amount = toTreasuryAmount(Number(line.amount) - justified);
+    if (!amount) continue;
+    const written = await insertLinked(tx, userId, {
+      accountId: Number(line.account_id),
+      direction: "in",
+      amount,
+      entryDate: today(),
+      label: `Contre-passation (mission annulée) : ${line.label}`,
+      category: line.category,
+      missionId: line.mission_id,
+      requestKey: `${line.request_key}:reverse`,
+    });
+    if (written) reversed += 1;
+  }
+  return reversed;
 }

@@ -616,3 +616,76 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - migration jouée deux fois sur la base locale sans erreur, et contrainte validée ;
   - avec un budget orphelin, dans une transaction annulée ensuite, la contrainte reste NOT VALID et le démarrage n'est pas bloqué ;
   - `tsc` : 0 erreur ; unitaires 2860 ; contrat `mission-budgets` 20/20 ; ménage des clés étrangères 3/3.
+
+## 2026-11-05 — Budget de mission (L1c) : décaissement au journal de trésorerie
+
+- **Quoi** : un décaissement avec un compte de trésorerie écrit deux sorties au journal, liées à la mission : FDR + frais annexes, et carburant. Le budget retient la ligne FDR (`treasury_entry_id`).
+- **Comment** :
+  - `treasuryAccountId` est facultatif au décaissement, selon la règle T3 des règlements. Sans compte, seul le marquage est fait. Si le drapeau finance est coupé : 409. Compte inconnu : 404. Compte désactivé : 409. Carte carburant : 400 ;
+  - `linkMissionBudgetDisbursement` (`treasury-links.ts`) s'exécute dans la transaction de la transition, après l'UPDATE conditionnel. Les clés sont `mission-budget:<id>:fdr` et `:carburant`, écrites par `insertLinked` : un rejeu n'écrit rien. Une ligne à montant nul est omise ;
+  - la FK `mission_budgets_treasury_entry_id_treasury_entries_id_fk` est posée NOT VALID puis validée, avec un WARNING en repli. Migration `20261105_mission_budgets_treasury.sql`, jumelle de `MISSION_BUDGETS_TREASURY_SQL`. Elle est listée dans `CDC_RECONCILED_CONSTRAINTS` ;
+  - `cleanup.ts` détache `treasury_entry_id` avant de supprimer des écritures.
+- **Pourquoi** : l'argent remis pour une mission doit apparaître au journal de trésorerie, sur le compte d'où il sort.
+- **Suites connues** :
+  - **mission annulée (décision 0a, lot L1d)** :
+    - avant décaissement, l'annulation se fait sans mouvement ;
+    - après décaissement, le reliquat (décaissé − justifié) est contre-passé vers le compte source, par des clés `:reverse` sur le modèle de `reverseFuelLink` ;
+    - le service est appelé dans la transaction de l'annulation ;
+    - justifié = 0 tant que le lot justificatifs n'existe pas ;
+  - écran : choix du compte au décaissement.
+- **Preuve** : `tsc` : 0 erreur ; unitaires 2865 (2 ignorés) ; contrats complets 2508/2508, dont `mission-budgets` et trésorerie 53/53 ; intégration 351/352. Le seul échec, `lot-recette-schema-idempotence`, compare des compteurs `pg_stat` globaux sur des tables partagées ; rejoué seul avec le code L1c, il passe (2/2) : le second démarrage n'écrit rien.
+
+## 2026-11-05 — Budget de mission (L1c) : suites de la relecture
+
+- **Quoi** : quatre réserves de la relecture levées avant fusion, plus la lecture par le secrétariat.
+  - le décaissement a ses propres rôles, et qui décaisse lit le budget ;
+  - le compte source est obligatoire quand la finance est active ;
+  - les migrations L1b et L1c bornent leur attente de verrou ;
+  - la règle de solde est écrite.
+- **Comment** :
+  - `MISSION_BUDGET_DISBURSE_ROLES` = admin, secrétariat, logistique (`shared/constants/roles.ts`), mêmes rôles que `FUEL_RECHARGE_SOURCE_ROLES` mais déclarés à part. `POST /api/mission-budgets/:id/disburse` passe de `MISSION_BUDGET_APPROVE_ROLES` à cette liste. L'approbation reste admin et direction ;
+  - `MISSION_BUDGET_READ_ROLES` gagne le secrétariat : la lecture (liste, détail, besoin du jour, destinations) couvre exactement saisie ∪ approbation ∪ décaissement, ce que fige un test unitaire ;
+  - `linkMissionBudgetDisbursement` : finance active et aucun compte, 400 « Choisissez le compte de trésorerie… ». L'erreur est levée dans la transaction : le budget reste approuvé. Finance coupée : comportement inchangé (sans compte, simple marquage ; compte demandé, 409) ;
+  - `SET LOCAL lock_timeout = '5s';` après le verrou consultatif, dans `20261105_mission_destinations.sql`, `20261105_mission_budgets_treasury.sql` et leurs jumelles `MISSION_DESTINATIONS_SQL`, `MISSION_BUDGETS_TREASURY_SQL`. C'est la forme de `DOCUMENT_RENEWAL_RECEIPT_SQL` ; même effet que `set_config('lock_timeout','5s',true)`.
+- **Pourquoi** :
+  - la direction, qui approuve, écrivait au journal sans être dans `TREASURY_WRITE_ROLES`, et ceux qui tiennent la caisse étaient refusés. Qui approuve ne décaisse pas ;
+  - sans compte, un décaissement ne laissait aucune trace au journal, donc rien à contre-passer à l'annulation (L1d) ;
+  - un démarrage ne doit pas rester bloqué derrière une transaction longue sur `mission_budgets`.
+- **Règle de solde** : solde négatif autorisé, comme T2/T3. Un décaissement n'est pas refusé parce que le compte source passerait sous zéro. Aucun événement de trésorerie n'est émis pour ce lot : accepté par 0a.
+- **Preuve** :
+  - contrat `mission-budgets` : au décaissement, direction, technicien, chauffeur et client 403 ; secrétariat et logistique 200 ; sans compte (absent ou `null`) 400, budget resté approuvé, journal vide. En lecture, secrétariat 200 (liste, besoin du jour, détail après décaissement) ;
+  - tests unitaires : `lock_timeout` présent dans les SQL L1b et L1c ; lecture = saisie ∪ approbation ∪ décaissement ; seul l'administrateur approuve et décaisse ;
+  - `tsc` : 0 erreur ; unitaires 2880 ; contrats complets 2531/2531 ; intégration 352/352 ; contrats `mission-budgets`, trésorerie et moyens de paiement 71/71 après l'ajout de la lecture.
+
+## 2026-11-05 — Budget de mission (L1d) : contre-passation à l'annulation de la mission
+
+- **Quoi** : une mission annulée après décaissement rend au compte source le reliquat de chaque ligne décaissée. Une mission annulée avant décaissement ne produit aucun mouvement.
+- **Comment** :
+  - `reverseMissionBudgetDisbursements(tx, budgetIds, userId)` (`treasury-links.ts`) relit les sorties `mission-budget:<id>:fdr` et `:carburant`. Pour chacune, elle écrit une entrée `in` du même compte, de la même catégorie et liée à la même mission, de clé `<clé>:reverse`, via `insertLinked`. Un rejeu n'écrit rien. Elle suit le modèle de `reverseFuelLink` : elle est indépendante du drapeau finance, car une sortie déjà écrite se contre-passe toujours ;
+  - montant = décaissé − justifié. Justifié vaut 0 tant que le lot des justificatifs n'existe pas ; un reliquat nul n'écrit rien ;
+  - `onMissionStatusChange(tx, missionId, nextStatus, userId)` (`mission-budgets-service.ts`) n'agit que sur `cancelled`. Elle vise les budgets `disbursed` de la mission ;
+  - `missions.routes.ts` (gelé) reçoit un seul appel, après l'UPDATE de la mission, dans la transaction de `PUT /api/missions/:id/status`. Aucune logique n'y est ajoutée ;
+  - le budget reste `disbursed`, figé avec sa mission (`lockOpenMission`).
+- **Pourquoi** : décision 0a, faute d'arbitrage de la cliente. L'argent remis pour une mission qui n'a pas lieu revient au compte d'où il est sorti, et le journal le montre.
+- **Rétroactif** : un budget décaissé avant L1c n'a aucune ligne au journal. Son annulation n'écrit rien.
+- **Suites connues** : quand les justificatifs existeront, `justified` lira leur somme ; aucun événement trésorerie dans ce lot, comme L1c.
+- **Preuve** :
+  - contrat `mission-budgets`, 3 cas L1d :
+    - après décaissement par la logistique, 4 lignes : chaque `:reverse` est `in`, de même montant, compte, catégorie et mission ; le rejeu de l'annulation et du service n'ajoute rien ;
+    - avant décaissement, et budget décaissé avant L1c : aucun mouvement ;
+    - les autres statuts ne contre-passent rien ;
+  - `tsc` 0 ; contrats `mission-budgets`, trésorerie, moyens de paiement et missions 76/76.
+
+## 2026-11-05 — Budget de mission (L1d) : réserves de relecture levées
+
+- **Quoi** : clôture et annulation concurrentes ne passent plus toutes les deux ; un rejeu ne réécrit ni la date d'annulation ni le journal applicatif.
+- **Comment** :
+  - `PUT /api/missions/:id/status` : UPDATE conditionné au statut lu, 409 sur 0 ligne, avant `onMissionStatusChange`. `cancelledAt` et `completedAt` ne sont écrits qu'au premier passage. Le fichier gelé ne reçoit que ces deux lignes ;
+  - `insertLinked` renvoie vrai si la ligne est écrite. `reverseMissionBudgetDisbursements` compte les lignes écrites, donc 0 sur un rejeu ;
+  - la docstring « Besoin du jour » est remise au-dessus de `dailyNeed`.
+- **Pourquoi** : relecture sécurité de #491. Statut lu hors verrou et effet argent sur la transition, voir `docs/analysis/LESSONS_LEARNED.md` (near miss du 2026-11-05).
+- **Preuve** : 3 contrats de plus :
+  - cas déterministe 409, rouge sans le correctif ;
+  - `Promise.all` clôture + annulation ;
+  - drapeau finance coupé après un décaissement au journal : contre-passation quand même.
+  - Le rejeu de l'annulation garde `cancelledAt` ; `mission-budgets` 34/34.

@@ -8,7 +8,8 @@ import {
   type ClientInvoice,
   type ClientPayment
 } from "@shared/schema";
-import { eq, desc, and, sql, gte, lte, inArray, gt, lt } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte, inArray, gt, lt, ne } from "drizzle-orm";
+import { CANCELLED_CLIENT_INVOICE_STATUS } from "@shared/constants/client-invoices";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 
@@ -465,7 +466,7 @@ export class ClientBillingService {
    * Rapport facturation par client
    */
   async getClientBillingReport(clientName: string, year: number, month?: number) {
-    console.log(`Generating billing report for ${clientName} - ${month ? `${month}/` : ''}${year}`);
+    log.info({ clientName, year, month }, "Rapport de facturation client");
 
     // Récupérer le client
     const [client] = await db
@@ -488,11 +489,11 @@ export class ClientBillingService {
       };
     }
 
-    // Récupérer les factures
+    // Factures annulées exclues, comme au relevé de compte : ce n'est pas du chiffre facturé.
     const invoices = await db
       .select(publicClientInvoiceColumns)
       .from(clientInvoices)
-      .where(eq(clientInvoices.clientId, client.id));
+      .where(and(eq(clientInvoices.clientId, client.id), ne(clientInvoices.status, CANCELLED_CLIENT_INVOICE_STATUS)));
 
     // Filtrer par période
     const filteredInvoices = invoices.filter(inv => {

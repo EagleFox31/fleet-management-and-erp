@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { ClientStatementLine, ClientStatementResponse } from "@shared/contracts/client-statement";
+import { CANCELLED_CLIENT_INVOICE_STATUS } from "@shared/constants/client-invoices";
 import { db } from "../db";
 
 /**
@@ -27,14 +28,14 @@ export const clientStatementService = {
                NULL::text AS reference, NULL::text AS payment_method,
                i.amount_ttc AS debit, 0::numeric AS credit
         FROM client_invoices i
-        WHERE i.client_id = ${clientId} AND i.status <> 'cancelled'
+        WHERE i.client_id = ${clientId} AND i.status <> ${CANCELLED_CLIENT_INVOICE_STATUS}
         UNION ALL
         SELECT p.payment_date, 1, p.id, i.id, i.invoice_number,
                p.reference, p.payment_method,
                0::numeric, p.amount
         FROM client_payments p
         JOIN client_invoices i ON i.id = p.invoice_id
-        WHERE i.client_id = ${clientId} AND i.status <> 'cancelled'
+        WHERE i.client_id = ${clientId} AND i.status <> ${CANCELLED_CLIENT_INVOICE_STATUS}
       ),
       ledger AS (
         SELECT m.*, SUM(m.debit - m.credit) OVER (ORDER BY m.d, m.ord, m.mid ROWS UNBOUNDED PRECEDING) AS running

@@ -4,6 +4,7 @@
 -- Seed limité aux valeurs relevées dans le besoin logistique ; ON CONFLICT DO NOTHING ne réécrit
 -- jamais une valeur corrigée depuis. Après 20261105_mission_budgets.sql (ordre alphabétique).
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS mission_destinations (
   id serial PRIMARY KEY,
