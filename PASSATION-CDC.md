@@ -69,3 +69,8 @@
 
 ## 2026-11-05 03:34 — c7 : lot 3 du cliquet parseInt(req.params), parts-catalog
 - #362 fusionnée. Branche fix/strict-id-parts-catalog empilée sur origin/fix/strict-id-parser (#360). 3 lectures de parts-catalog.routes.ts passées à parseRouteId, contrainte ([0-9]+) retirée de ces 3 chemins (sinon « 1abc » tombait en 404 du routeur) ; liste gelée -3 ; contrat parts-catalog-strict-id (rouge 3/6 sans correctif). c7test gardée (Postgres local).
+
+## 2026-11-05 03:39 — Cliquet id strict, lot 2 : work-order-items
+- `work-order-items.routes.ts` : 4 lectures (:65, :81, :116, :153) passées à `parseRouteId` ; les handlers POST/PATCH/DELETE relaient désormais l'AppError (`next`) au lieu de la convertir en 500. Aucune contrainte de chemin retirée (il n'y en avait pas).
+- FROZEN `work-order-items.routes.ts` : 5 → 1 (reste l.222, validée localement par AppError). aa (#364) l'abaisse aussi : le second fusionné se rebase et garde les deux suppressions.
+- Contrat : `work-order-items-strict-id.contract.test.ts` (1abc, 1e3, hors int4, 0 → 400 ; inconnu → 404). Branche empilée sur #365.
