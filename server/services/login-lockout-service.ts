@@ -27,15 +27,6 @@ export const normalizeUsername = normalizeLoginIdentifier;
 
 export const isLocked = (s: LockState, now: Date): boolean => !!s.lockedUntil && s.lockedUntil.getTime() > now.getTime();
 
-/** Etat apres un echec. Un verrou expire repart de zero. Fonction pure. */
-export function nextLockState(s: LockState, now: Date, cfg: LockoutConfig): LockState {
-  const base = s.lockedUntil && !isLocked(s, now) ? EMPTY_LOCK_STATE : s;
-  const failedCount = base.failedCount + 1;
-  const lockedUntil =
-    failedCount >= cfg.maxAttempts ? new Date(now.getTime() + cfg.lockMinutes * 60_000) : base.lockedUntil;
-  return { failedCount, lockedUntil, lastFailedAt: now };
-}
-
 /**
  * Stockage du compteur. L'implementation base (un seul UPDATE ... RETURNING
  * atomique sur la table de db-1) vient apres le schema.
@@ -48,7 +39,6 @@ export interface Reservation {
 
 export interface LockoutStore {
   get(username: string): Promise<LockState>;
-  registerFailure(username: string, now: Date, cfg: LockoutConfig): Promise<LockState>;
   reset(username: string): Promise<void>;
   /**
    * Reserve la tentative AVANT le travail couteux (bcrypt), en une ecriture atomique : +1 au compteur.
@@ -79,16 +69,19 @@ export function reservedLockState(s: LockState, now: Date, cfg: LockoutConfig): 
   return { allowed: !isLocked(state, now) && failedCount <= cfg.maxAttempts, state };
 }
 
+/**
+ * Ordre de prise des verrous de cle : sans doublon, trie. Plusieurs ecrivains multi-cles prennent
+ * leurs verrous dans le meme ordre, donc ne s'interbloquent pas.
+ */
+export function lockKeyOrder(keys: string | readonly string[]): string[] {
+  return Array.from(new Set(typeof keys === "string" ? [keys] : keys)).sort();
+}
+
 /** Magasin memoire : tests et repli sans table. */
 export class MemoryLockoutStore implements LockoutStore {
   private m = new Map<string, LockState>();
   async get(u: string) {
     return this.m.get(u) ?? EMPTY_LOCK_STATE;
-  }
-  async registerFailure(u: string, now: Date, cfg: LockoutConfig) {
-    const next = nextLockState(this.m.get(u) ?? EMPTY_LOCK_STATE, now, cfg);
-    this.m.set(u, next);
-    return next;
   }
   async reset(u: string) {
     this.m.delete(u);

@@ -5,6 +5,7 @@ import { DbLockoutStore, storedLockoutKey } from "../../server/services/login-lo
 import { initializeDatabase } from "../../server/init-database";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
+import { failLogin } from "../support/lockout";
 
 // Nom reserve a ce fichier : seule cette ligne est creee puis nettoyee.
 const U = "lot-be1-lockout-probe";
@@ -25,11 +26,11 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
     await pool.query("DELETE FROM login_attempts_by_username WHERE username_normalized = ANY($1)", [[U, storedLockoutKey(U)]]);
   });
 
-  it("10 echecs simultanes : compteur exact, un seul blocage audite", async () => {
+  it("echecs confirmes simultanes jusqu'au seuil : compteur exact, un seul blocage audite", async () => {
     const now = new Date();
-    await Promise.all(Array.from({ length: 10 }, () => store.registerFailure(U, now, cfg)));
+    await Promise.all(Array.from({ length: cfg.maxAttempts }, () => failLogin(store, U, now, cfg)));
     const s = await store.get(U);
-    expect(s.failedCount).toBe(10);
+    expect(s.failedCount).toBe(cfg.maxAttempts);
     expect(s.lockedUntil!.getTime()).toBeGreaterThan(now.getTime());
     expect(audits.filter((a) => a.action === "lock")).toHaveLength(1);
   });
@@ -49,7 +50,7 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
 
   it("verrou expire : le prochain echec repart a 1 ; reset supprime la ligne", async () => {
     const later = new Date(Date.now() + 16 * 60_000);
-    const s = await store.registerFailure(U, later, cfg);
+    const s = await failLogin(store, U, later, cfg);
     expect(s.failedCount).toBe(1);
     expect(s.lockedUntil).toBeNull();
     await store.reset(U);

@@ -499,3 +499,12 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
 - **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
 - **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.
+
+## 2026-11-05 — Verrouillage de connexion : suite de la relecture du déverrouillage admin
+- **Quoi** : `registerFailure` est retiré de `LockoutStore` et des deux stores, avec `nextLockState`, son seul usage. Les tests produisent un échec par le vrai chemin, `failLogin` (`tests/support/lockout.ts` : reserve puis confirmFailure). L'ordre des verrous de clé devient une fonction pure, `lockKeyOrder`, testée en unitaire. Le « reste ouvert » de LESSONS mentionne aussi `reserve`.
+- **Pourquoi** : `registerFailure` écrivait sans verrou de clé et n'avait aucun appelant en production. Les tests s'en servaient comme raccourci, sans passer par le chemin réel. Quand on inversait le tri des clés, aucun test ne passait au rouge.
+- **Preuve** : intégration du verrouillage 13/13, contrats 32/32, unitaires 2583. Si on inverse le tri dans `lockKeyOrder`, le test échoue.
+## 2026-11-05 — Garde-fou : verrou de clé du compteur de verrouillage
+- **Quoi** : le test `tests/unit/server/lockout-key-lock-hygiene.test.ts` vérifie deux choses. La clé `fleet-lockout:` n'est verrouillée qu'à un seul endroit de `server/`, dans `underKeyLock`. Et seul le store écrit `login_attempts_by_username`, à une exception près, nommée : la reprise M3 au démarrage.
+- **Pourquoi** : les deux corrections du compteur (5 novembre) venaient d'écritures faites hors du verrou de clé. Un second endroit qui prendrait ce verrou pourrait l'appliquer dans un autre ordre, ou sur une autre forme de clé.
+- **Preuve** : vert sur main. Il passe au rouge si l'on ajoute une deuxième occurrence de la clé, ou un écrivain de la table hors du store. Unitaires 2612.
