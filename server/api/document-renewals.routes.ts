@@ -28,7 +28,7 @@ import { renewalReceiptErrorOf, withoutDiskPaths } from "../lib/renewal-receipts
 import { nameSchema, optionalText } from "@shared/contracts/document-renewal-centers";
 import { resolveRenewalCenter } from "../lib/document-renewal-center-resolver";
 import { AppError } from "../lib/app-error";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { syncVehicleDocumentMirror } from "../lib/vehicle-document-mirror";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated as broadcastSharedAlertCreated, type BroadcastableAlert } from "../lib/alert-broadcast";
@@ -324,12 +324,12 @@ router.get("/requests", async (req, res, next) => {
       return res.status(403).json({ message: "Accès non autorisé" });
     }
 
-    const vehicleId = req.query.vehicleId ? Number.parseInt(String(req.query.vehicleId), 10) : null;
+    const vehicleId = parseQueryId(req.query.vehicleId, "ID de véhicule invalide");
     const status = String(req.query.status || "").trim();
     const statusFilter = (REQUEST_STATUSES as readonly string[]).includes(status) ? status : null;
 
     const conditions = [sql`1=1`];
-    if (vehicleId && Number.isInteger(vehicleId) && vehicleId > 0) {
+    if (vehicleId !== undefined) {
       conditions.push(eq(documentRenewalRequests.vehicleId, vehicleId));
     }
     if (statusFilter) {

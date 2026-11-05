@@ -162,3 +162,16 @@
   - Les 3 GET sur `<id>abc` : 400.
   - Ancien code : 5 rouges ; un paiement était enregistré sur la facture `<id>`, et un id hors de l'int4 donnait 500. Correctif : 6 verts, 0 résidu (cascade facture).
   - tsc : 0 erreur. Unitaires : 2442 verts. 5 contrats de facturation : 33 verts.
+
+## Lot 11 — ids de filtre lus dans `req.query`
+
+- Quoi : `parseQueryId(value, message)` dans `server/lib/route-id.ts`. Absent ou vide : pas de filtre. Sinon même lecture que `parseRouteId` (400) ; une valeur répétée (tableau) est refusée. `queryIdOrNaN` est son pendant pour `server/routes.ts` (gelé), cantonné par un test.
+- Cliquet `query-id-parse-hygiene` : conversion lâche (`parseInt`, `Number.parseInt`, `Number`, avec ou sans `String(…)`) d'un paramètre de requête nommé `id`, `…Id` ou `…By`, lu directement ou par une variable liée depuis `req.query`. Rouge avant le correctif : `server/api` 8 lectures sur 6 fichiers, `server/routes.ts` 5. Gel : vide et 0.
+- Comment :
+  - `server/api` : `billing` (`GET /invoices`, `/invoices/summary`), `fuel-card` (`/history`), `operations` (`/missions`), `purchase-orders` (`supplierId`, `createdBy`), `supplier-invoices`, `document-renewals` (`/requests`). Les catch de `billing` et `fuel-card` reçoivent `next` et relaient les AppError ; leurs `console.error` sont migrés vers `log.error`.
+  - `server/routes.ts`, en place : `queryIdOrNaN` puis `if (Number.isNaN(x)) return res.status(400)` sur `stock-movements`, `fuel-records`, `consumption-history`, `tire-inspections`, `tire-rotations`. Aucune route ajoutée.
+  - Contrat modifié : `client-read-scope-tires`, `?vehicleId=B&vehicleId=A` passait en 403 (le premier paramètre faisait foi) ; il est désormais refusé en 400. Aucune donnée renvoyée dans les deux cas.
+  - Côté client : les filtres envoyés sont numériques et gardés (`enabled`, `?? undefined`) ; aucun écran n'envoie `all` ou `null`.
+- Tester : `route-id-strict-lot11`, 13 filtres × 3 cas (`12abc` → 400 et son message, hors int4 → 400, id bien formé → 200).
+  - Ancien code : 24 rouges sur 39 (les 2 cas hors int4 de `fuel-records` étaient déjà refusés). Correctif : 39 verts, aucune donnée créée hors du compte admin.
+  - tsc : 0 erreur. Unitaires : 2448 verts. 64 contrats du périmètre (facturation, achats, carburant, pneus, missions, renouvellements, ids) : 825 verts.

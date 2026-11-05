@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { procurementService } from "../services/procurement-service";
 import { z } from "zod";
 import { AppError, isAppError } from "../lib/app-error";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
@@ -144,8 +144,8 @@ router.get("/", requireAuth, async (req: Request, res: Response, next: NextFunct
 
     const orders = await procurementService.getPurchaseOrders({
       status: status as string | undefined,
-      supplierId: supplierId ? parseInt(supplierId as string) : undefined,
-      createdBy: createdBy ? parseInt(createdBy as string) : undefined,
+      supplierId: parseQueryId(supplierId, "ID fournisseur invalide"),
+      createdBy: parseQueryId(createdBy, "ID d'utilisateur invalide"),
       dateFrom: dateFrom as string | undefined,
       dateTo: dateTo as string | undefined,
     });

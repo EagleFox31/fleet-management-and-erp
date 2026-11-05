@@ -26,5 +26,21 @@ export function routeIdOrNaN(value: unknown): number {
   return id;
 }
 
+/**
+ * Identifiant de filtre lu dans `req.query` : absent ou vide, pas de filtre (`undefined`) ;
+ * sinon même lecture que `parseRouteId` (`AppError(400, message)`). Une valeur répétée
+ * (`?vehicleId=1&vehicleId=2`, un tableau) est refusée.
+ */
+export function parseQueryId(value: unknown, message: string): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  return parseRouteId(value, message);
+}
+
+/** Même lecture que `parseQueryId`, sans lever : `NaN` si l'id est invalide. Réservé à `server/routes.ts` (gelé). */
+export function queryIdOrNaN(value: unknown): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  return routeIdOrNaN(value);
+}
+
 /** Message commun aux routes qui lisent un id de mission (`missions`, `operations`). */
 export const MISSION_ID_INVALID_MESSAGE = "Identifiant de mission invalide.";

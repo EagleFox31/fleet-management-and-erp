@@ -8,7 +8,7 @@ import { withLogContext } from "../lib/error-log-context";
 import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
-import { parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
+import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
 
 const log = moduleLogger("operations");
 const router = Router();
@@ -166,7 +166,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
     const filters: any = {};
 
     if (status) filters.status = status as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
 

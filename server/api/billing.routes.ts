@@ -7,7 +7,7 @@ import { authorize } from "../middleware/auth";
 import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 import { isAppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-import { parseRouteId } from "../lib/route-id";
+import { parseQueryId, parseRouteId } from "../lib/route-id";
 
 const log = moduleLogger("billing");
 
@@ -223,7 +223,7 @@ router.post("/invoices/generate", canAccessBilling, async (req: Request, res: Re
  * GET /api/billing/invoices
  * Liste factures clients avec filtres
  */
-router.get("/invoices", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName, clientId, status, startDate, endDate } = req.query;
 
@@ -236,7 +236,7 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
     } = {};
 
     if (clientName) filters.clientName = clientName as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (status) filters.status = status as string;
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
@@ -245,7 +245,8 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
 
     res.json(result);
   } catch (error: unknown) {
-    console.error("Error fetching invoices:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Error fetching invoices");
     res.status(500).json({ error: getErrorMessage(error) });
   }
 });
@@ -254,7 +255,7 @@ router.get("/invoices", canAccessBilling, async (req: Request, res: Response) =>
  * GET /api/billing/invoices/summary
  * Résumé agrégé des factures clients (pour KPI dashboard)
  */
-router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Response) => {
+router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName, clientId, status, startDate, endDate } = req.query;
 
@@ -267,7 +268,7 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
     } = {};
 
     if (clientName) filters.clientName = clientName as string;
-    if (clientId) filters.clientId = parseInt(clientId as string);
+    if (clientId) filters.clientId = parseQueryId(clientId, "Identifiant client invalide");
     if (status) filters.status = status as string;
     if (startDate) filters.startDate = new Date(startDate as string);
     if (endDate) filters.endDate = new Date(endDate as string);
@@ -275,7 +276,8 @@ router.get("/invoices/summary", canAccessBilling, async (req: Request, res: Resp
     const result = await clientBillingService.getClientInvoices(filters);
     res.json(result.summary);
   } catch (error: unknown) {
-    console.error("Error fetching invoices summary:", error);
+    if (isAppError(error)) return next(error);
+    log.error({ err: error, requestId: req.requestId }, "Error fetching invoices summary");
     res.status(500).json({ error: getErrorMessage(error) });
   }
 });
