@@ -3,6 +3,7 @@ import { db } from "../../server/db";
 import { inArray } from "drizzle-orm";
 import { fuelRecords, purchaseOrderLines, purchaseOrders } from "../../shared/schema";
 import { PROCUREMENT_ROLES, STAFF_ROLES } from "../../shared/constants/roles";
+import { normalizeScope, resolveRecipients } from "../../server/lib/realtime-scope";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestSupplier } from "../support/factories";
@@ -14,15 +15,16 @@ import { uniqueTestToken } from "../support/ids";
  * `server/lib/realtime-scope.ts` (fermée par défaut). Attendu : les rôles de lecture les reçoivent,
  * ni un client, ni un chauffeur, ni un technicien.
  */
-type Scope = { type: string; userIds?: number[]; roles?: string[] };
-type Captured = { eventType: string; scope?: Scope };
+type Scope = unknown;
+type Captured = { eventType: string; scope?: Scope; payload?: any };
 
+const ROLES = ["admin","secretary","warehouse","logistics","workshop_manager","technician","driver","client","management"];
 const reaches = (scope: Scope | undefined, role: string, userId: number): boolean => {
-  if (!scope) return false;
-  if (scope.type === "broadcast") return true;
-  if (scope.type === "user") return (scope.userIds ?? []).includes(userId);
-  if (scope.type === "roles") return (scope.roles ?? []).map((r) => r.trim().toLowerCase()).includes(role);
-  return false;
+  const index = {
+    byUser: new Map([[userId, new Set(["s"])]]),
+    byRole: new Map(ROLES.filter((r) => r === role).map((r) => [r, new Set(["s"])])),
+  };
+  return resolveRecipients(normalizeScope(scope, null), index).size > 0;
 };
 
 const ACTORS = {
@@ -34,6 +36,7 @@ const ACTORS = {
   technician: "technician",
   driver: "driver",
   client: "client",
+  management: "management",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -49,13 +52,13 @@ const recipients = (prefix: string): Actor[] => {
   const frames = captured.filter((f) => f.eventType.startsWith(prefix));
   expect(frames.length, `trame ${prefix}* émise`).toBeGreaterThan(0);
   return (Object.keys(ACTORS) as Actor[]).filter((a) =>
-    frames.every((f) => reaches(f.scope, ACTORS[a], session.userIdOf(a))),
+    frames.some((f) => reaches(f.scope, ACTORS[a], session.userIdOf(a))),
   );
 };
 
 beforeAll(async () => {
   (global as any).broadcastUpdate = (eventType: string, data: any) => {
-    captured.push({ eventType, scope: data?.scope });
+    captured.push({ eventType, scope: data?.scope, payload: data?.payload });
   };
   session = await startContractActors<Actor>(ACTORS, ids.userIds);
   const supplier = await createTestSupplier();
@@ -82,7 +85,13 @@ describe("portée des trames d'argent", { timeout: 120000 }, () => {
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     if (res.body?.invoice?.id) ids.invoiceIds.push(res.body.invoice.id);
-    expect(recipients("supplier_invoice_").sort()).toEqual(["admin", "logistics", "secretary", "warehouse"]);
+    expect(recipients("supplier_invoice_").sort()).toEqual(["admin", "logistics", "management", "secretary", "warehouse"]);
+    // La direction ne reçoit que la trame réduite aux identifiants (son tableau de bord se rafraîchit, sans la facture).
+    const mgmt = captured.filter(
+      (f) => f.eventType.startsWith("supplier_invoice_") && reaches(f.scope, "management", session.userIdOf("management")),
+    );
+    expect(mgmt.length).toBeGreaterThan(0);
+    for (const frame of mgmt) expect(Object.keys(frame.payload).sort()).toEqual(["invoiceId", "purchaseOrderId"]);
   });
 
   it("commande fournisseur : rôles d'approvisionnement seulement", async () => {

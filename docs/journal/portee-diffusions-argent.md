@@ -10,3 +10,9 @@ Les trames des factures fournisseur, des commandes fournisseur et de la carte ca
 
 ## Pourquoi
 Un événement n'a pas à atteindre un profil qui ne lit pas la ressource. Mutation vue rouge : remettre un broadcast sur la carte carburant fait échouer le contrat.
+
+## Suite (relecture sécurité)
+
+- La direction reçoit une trame réduite aux identifiants pour les événements de facture fournisseur (son tableau de bord en dépend) ; la facture et le règlement restent réservés aux rôles de lecture.
+- Le contrat résout les destinataires avec le résolveur réel (`normalizeScope`, `resolveRecipients`).
+- Les listes de rôles des factures et commandes dérivent de `PROCUREMENT_ROLES`.

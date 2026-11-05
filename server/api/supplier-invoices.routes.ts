@@ -8,6 +8,7 @@ import { AppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { storage } from "../storage";
 import { supplierManagementService } from "../services/supplier-management-service";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
@@ -42,7 +43,7 @@ type InvoiceWorkflowScope = "parts" | "non_parts" | "none";
 type UserRole = "admin" | "secretary" | "warehouse" | "logistics" | "workshop_manager" | "technician" | string;
 
 // Aligné sur la garde de montage (PROCUREMENT_ROLES) : le chef d'atelier ne voit pas les factures fournisseur.
-const INVOICE_READ_ROLES: readonly UserRole[] = ["admin", "secretary", "warehouse", "logistics"];
+const INVOICE_READ_ROLES: readonly UserRole[] = PROCUREMENT_ROLES;
 const INVOICE_CREATE_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_APPROVAL_ROLES: readonly UserRole[] = ["admin", "secretary"];
 const INVOICE_PAYMENT_ROLES: readonly UserRole[] = ["admin", "secretary"];
@@ -90,6 +91,13 @@ function broadcastSupplierInvoiceUpdate(
       triggeredBy: data.triggeredBy ?? null,
     },
     scope: { type: "roles", roles: [...INVOICE_READ_ROLES] },
+  });
+  // La direction ne lit pas la facture : trame réduite aux identifiants, qui suffit à rafraîchir son tableau de bord.
+  broadcastUpdate(eventType, {
+    entity: "supplier_invoice",
+    entityId: invoiceId,
+    payload: { invoiceId, purchaseOrderId },
+    scope: { type: "roles", roles: ["management"] },
   });
 }
 

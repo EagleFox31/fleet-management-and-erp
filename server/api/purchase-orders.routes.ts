@@ -17,7 +17,7 @@ type PurchaseOrderScope = "parts" | "non_parts";
 
 const PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary"] as const;
 const NON_PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary", "logistics"] as const;
-const ANY_PROCUREMENT_ROLES = ["admin", "warehouse", "secretary", "logistics"] as const;
+const ANY_PROCUREMENT_ROLES = PROCUREMENT_ROLES;
 const DELIVERY_RECORD_ROLES = ["admin", "warehouse"] as const;
 
 const SCOPE_LABELS: Record<PurchaseOrderScope, string> = {
