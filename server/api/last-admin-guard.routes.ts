@@ -55,6 +55,13 @@ async function guardRemoval(req: Request, res: Response, next: NextFunction): Pr
   }
 }
 
+/** Désactivation (`isActive: false`) : même effet qu'une suppression pour le décompte des admins actifs. */
+router.patch("/admin/users/:id/toggle", authenticate, isAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  if (req.body?.isActive !== false) return next();
+  // Se désactiver soi-même est déjà refusé par `admin-users-guard`, monté avant ce routeur.
+  return guardRemoval(req, res, next);
+});
+
 router.delete("/users/:id", authenticate, isAdmin, guardRemoval);
 router.delete("/admin/users/:id", authenticate, isAdmin, guardRemoval);
 
