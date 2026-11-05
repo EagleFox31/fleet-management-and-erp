@@ -180,8 +180,9 @@ describe("GET /api/vehicles/:id/tires (jointure sur le véhicule entier)", () =>
     // Lignes de jointure Drizzle : { vehicle_tires, tires, vehicles } (forme lue par vehicles/[id].tsx).
     const row = res.body.find((r: any) => r.vehicle_tires?.id === vehicleTireId);
     expect(row, "le pneu monté doit figurer dans la réponse").toBeDefined();
-    // Le prix du pneu (autre objet) n'est pas concerné.
-    expect(Number(row.tires.purchasePrice)).toBe(1234);
+    // Le prix du pneu suit sa propre règle (tire-price-scope) : visible du catalogue, absent du chauffeur et du client.
+    if (role === "driver" || role === "client") expect("purchasePrice" in row.tires).toBe(false);
+    else expect(Number(row.tires.purchasePrice)).toBe(1234);
     if (ALLOWED.includes(role)) expect(Number(row.vehicles.purchasePrice)).toBe(Number(PRICE));
     else {
       expect(row.vehicles.purchasePrice).toBeNull();
