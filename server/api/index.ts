@@ -38,6 +38,7 @@ import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
 import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
+import maintenanceCostGuardRoutes from "./maintenance-cost-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
@@ -157,6 +158,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
   apiRouter.use(adminUsersGuardRoutes);
   apiRouter.use(lastAdminGuardRoutes);
+  // Coût de maintenance : hors chauffeur et client (garde, la route reste dans routes.ts).
+  apiRouter.use(maintenanceCostGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
   apiRouter.use(uploadedDocumentsRoutes);

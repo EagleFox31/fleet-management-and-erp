@@ -101,10 +101,13 @@ const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [];
  * `routes.ts` écrit `deletedAt` et révoque l'accès.
  * `PATCH /api/users/:id` (rôle), `DELETE /api/users/:id` et `DELETE /api/admin/users/:id` : `last-admin-guard.routes.ts`
  * refuse de retirer le dernier administrateur actif, `routes.ts` écrit.
+ * `GET /api/statistics/maintenance-cost/:period` : `maintenance-cost-guard.routes.ts` réserve le coût
+ * à `WORK_ORDER_COST_READ_ROLES`, `routes.ts` le calcule.
  */
 const CHAINED_GUARD_ROUTES: string[] = [
   "DELETE /api/admin/users/:p",
   "DELETE /api/users/:p",
+  "GET /api/statistics/maintenance-cost/:p",
   "PATCH /api/admin/users/:p/toggle",
   "PATCH /api/users/:p",
 ];
