@@ -3215,6 +3215,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - `tests/unit/client/realtime-satellites.test.ts` : les émetteurs `broadcast?.(` sont recensés ;
   - `e2e/26-mission-budget-panel.spec.ts` : trame reçue par l'autre rôle à chaque étape.
 - **Leçon généralisée** : un test d'événement temps réel vérifie la portée comme le serveur la lit, ou la trame chez un destinataire, jamais le seul appel de l'émetteur. Les autres appels de diffusion sans portée n'ont pas été recensés ici : audit à mener dans un lot dédié.
+## 2026-11-05 — Test d'idempotence instable : les statistiques Postgres ne sont pas un témoin d'écriture
+
+- **Contexte** : `tests/integration/lot-recette-schema-idempotence.test.ts` vérifie qu'un second `initializeDatabase()` n'écrit aucune ligne. Il a échoué en CI sur #496, sans lien avec la PR, puis est repassé sans changement.
+- **Cause racine** : le test comparait `n_tup_ins/upd/del` de `pg_stat_user_tables` avant et après. `pg_stat_force_next_flush()` ne vide que les statistiques de la connexion appelante. Les écritures faites par les autres connexions du pool pendant le premier démarrage arrivaient en différé, parfois entre les deux lectures : l'écart venait du premier démarrage, pas du second.
+- **Classification** : test instable, témoin asynchrone pris pour un état. Aucune régression produit.
+- **Résolution** : instantané déterministe par table, `count(*)` et `md5(string_agg(xmin::text ORDER BY xmin::text, ctid))`. Toute écriture validée (INSERT, UPDATE même à valeur égale, DELETE) change le nombre de lignes ou un `xmin`, quelle que soit la connexion. Le tri par `xmin::text` puis `ctid` rend l'empreinte indépendante de l'ordre de parcours.
+- **Limite assumée** : une écriture annulée (ROLLBACK) ne laisse aucune version visible et n'est pas détectée. C'est voulu : le contrat porte sur l'état validé.
+- **Prévention vérifiable** : garde-fou négatif dans le même fichier. Un `UPDATE … SET label = label` validé entre deux instantanés doit être détecté, sur `vehicle_document_types` seulement. Si l'instantané cessait de voir les écritures, ce cas passerait au rouge. Le test a passé 30 exécutions locales consécutives.
+- **Leçon généralisée** : pour prouver l'absence d'écriture, comparer l'état (lignes, `xmin`), jamais des compteurs statistiques. Ceux-ci sont asynchrones et propres à chaque connexion. Un témoin d'absence doit toujours avoir son cas négatif : un instantané qui ne voit rien passe tous les tests d'idempotence.
 ## 2026-11-05 — Mutant de SQL d'init neutralisé par la migration jumelle (L2, #497)
 
 - **Contexte** : L2 pose `maintenance_schedules.updated_at` et le déclencheur `trg_maintenance_schedules_touch`. Le SQL vit dans `VEHICLE_LIFECYCLE_SQL` (`server/init-database.ts`) et dans sa migration jumelle `server/db/migrations/20261105_vehicle_lifecycle.sql`.
