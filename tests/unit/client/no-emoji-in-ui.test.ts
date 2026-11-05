@@ -25,9 +25,13 @@ const GELES: Record<string, number> = {
   "client/src/components/dashboard/overdue-orders-alert.tsx": 1,
   "client/src/components/management/executive-corridor-map.tsx": 1,
   "client/src/components/ui/playful-error-messages.tsx": 22,
+  "client/src/hooks/use-workflow-persistence.ts": 2, // console.* seulement (hors ecran)
+  "client/src/lib/form-drafts.ts": 1, // commentaire seulement
   "client/src/pages/inventory/[id].tsx": 1,
   "client/src/pages/procurement/invoices/index.tsx": 1,
   "client/src/pages/procurement/orders/[id].tsx": 1,
+  "client/src/pages/settings.tsx": 7, // console.* seulement (hors ecran)
+  "client/src/pages/technician/fleet-status.tsx": 9, // console.* seulement (hors ecran)
 };
 
 describe("aucun nouvel emoji dans client/src", () => {
