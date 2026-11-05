@@ -165,6 +165,16 @@ export const REALTIME_EVENTS = {
     scope: { type: "roles", roles: GPS_VIEW_ROLES },
     invalidates: ["/api/vehicle-positions"],
   } as EventDefinition<{ vehicleId: number }>,
+  // Véhicule retiré de la flotte (physiquement ou en douceur) ou remis : listes, fiche, plans de
+  // maintenance et renouvellements désactivés ou réactivés. Tout le personnel lit les véhicules.
+  vehicle_deleted: {
+    scope: { type: "roles", roles: STAFF_ROLES },
+    invalidates: ["/api/vehicles", "/api/document-renewals/requests"],
+  } as EventDefinition<{ id: number; vehicleId: number }>,
+  vehicle_restored: {
+    scope: { type: "roles", roles: STAFF_ROLES },
+    invalidates: ["/api/vehicles", "/api/document-renewals/requests"],
+  } as EventDefinition<{ id: number; vehicleId: number }>,
   // Import Excel appliqué : véhicules, ordres de travail et KPI changent. Sans toast.
   import_batch_applied: {
     // Tout le personnel lit les véhicules et les ordres de travail (AGENTS.md section 11) ;

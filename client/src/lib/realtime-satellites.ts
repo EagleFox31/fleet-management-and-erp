@@ -183,6 +183,9 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   vehicle_updated: ["vehicleStatus"],
   vehicle_status_changed: ["vehicleStatus"],
   vehicle_mileage_updated: ["vehicleOperations"],
+  // Retrait ou remise : compteurs de flotte, plans de maintenance, échéances, missions.
+  vehicle_deleted: ["vehicleStatus", "vehicleOperations", "documents", "missions"],
+  vehicle_restored: ["vehicleStatus", "vehicleOperations", "documents", "missions"],
   vehicle_maintenance_position_updated: ["vehicleOperations"],
   mission_created: ["missions"],
   mission_updated: ["missions"],

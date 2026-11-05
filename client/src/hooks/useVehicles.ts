@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { invalidateVehicleLifecycleQueries } from "@/lib/vehicle-lifecycle-cache";
 import { vehiclesService } from "@/services/vehiclesService";
 
 export function useVehicles() {
@@ -71,8 +72,8 @@ export function useDeleteVehicle() {
     mutationFn: async (id: number) => {
       await apiRequest("DELETE", `/api/vehicles/${id}`);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/vehicles'] });
+    onSuccess: (_, id) => {
+      invalidateVehicleLifecycleQueries(queryClient, "vehicle_deleted", id);
     },
   });
 }

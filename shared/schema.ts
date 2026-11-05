@@ -115,6 +115,8 @@ export const vehicles = pgTable("vehicles", {
   lastMaintenanceDate: date("last_maintenance_date"), // Date dernière maintenance pour calculs
   createdAt: timestamp("created_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete
+  // Auteur de la suppression douce, remis à NULL par la restauration (server/services/vehicle-lifecycle-service.ts).
+  deletedBy: integer("deleted_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 // Table pour persister l'état des workflows d'acquisition de véhicules
@@ -174,6 +176,7 @@ export const vehicleTankCapacitySchema = z
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   id: true,
   createdBy: true,
+  deletedBy: true,
   createdAt: true,
 }).extend({
   purchaseDate: z.string().optional().transform((val) => val ? val : undefined),
@@ -2308,3 +2311,23 @@ export const insertQhseInspectionSchema = createInsertSchema(qhseInspections).om
 });
 export type QhseInspectionCriterionRow = typeof qhseInspectionCriteria.$inferSelect;
 export type QhseInspectionRow = typeof qhseInspections.$inferSelect;
+
+/**
+ * Journal des désactivations posées par la suppression douce d'un véhicule : une ligne par élément
+ * désactivé, avec l'état d'avant. La restauration ne rejoue que ces lignes, et seulement si
+ * l'élément est encore dans l'état posé par la suppression (une modification ultérieure prime).
+ */
+export const vehicleDeletionEffects = pgTable("vehicle_deletion_effects", {
+  id: serial("id").primaryKey(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  tableName: text("table_name").notNull(),
+  rowId: integer("row_id").notNull(),
+  columnName: text("column_name").notNull(),
+  previousValue: jsonb("previous_value").notNull(),
+  appliedValue: jsonb("applied_value").notNull(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("vehicle_deletion_effects_row_key").on(table.vehicleId, table.tableName, table.rowId, table.columnName),
+]);
+export type VehicleDeletionEffect = typeof vehicleDeletionEffects.$inferSelect;

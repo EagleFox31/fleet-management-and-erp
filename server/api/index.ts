@@ -2,6 +2,7 @@ import { Router, RequestHandler, type Request, type Response, type NextFunction 
 import warehouseRoutes from "./warehouse.routes";
 import fuelCardRoutes from "./fuel-card.routes";
 import vehiclesRoutes from "./vehicles.routes";
+import vehicleLifecycleRoutes from "./vehicle-lifecycle.routes";
 import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
@@ -162,6 +163,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/warehouse", isStaff, warehouseRoutes);
   apiRouter.use("/fuel-card", isStaff, fuelCardRoutes);
   apiRouter.use("/vehicles", vehiclesRoutes);
+  apiRouter.use("/vehicles", vehicleLifecycleRoutes);
   apiRouter.use("/drivers", isStaff, driversRoutes);
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
