@@ -5,9 +5,12 @@
  * - Ancienneté = jours écoulés depuis le dépôt chez le client (`daysSinceDeposit`), à Africa/Douala.
  *   Tranches bornes incluses : 0 à 30, 31 à 60, 61 à 90, plus de 90 jours. Une facture pas encore
  *   déposée n'a pas d'ancienneté : elle va dans `notDeposited`.
- * - Montants par tranche : TTC de la facture et net à payer (TTC moins retenues, figées au dépôt).
- *   Ce sont les montants de la facture, sans déduction d'un éventuel règlement partiel : même base
- *   que la liste des factures en attente.
+ * - Montants par tranche :
+ *   - `amountDue` : reste dû, TTC moins les règlements enregistrés (`balanceDue` de la liste). C'est
+ *     le montant à relancer ; cohérent avec le solde du relevé client.
+ *   - `amountTtc` : TTC facturé, sans déduction, pour la transparence.
+ *   - `netPayable` : TTC moins retenues (figées au dépôt), sans déduction des règlements. Un « net
+ *     restant » (retenues et règlements) n'est pas couvert : point ouvert.
  * - Sommes faites en centimes entiers : `total` = somme exacte des tranches.
  * Lecture seule, aucun paramètre. Drapeau `finance`. Rôles : `FINANCE_RECEIVABLE_READ_ROLES`.
  */
@@ -24,6 +27,7 @@ export const financeReceivablesAgingQuerySchema = z.object({}).strict();
 
 export const agingAmountsSchema = z.object({
   count: z.number().int().min(0),
+  amountDue: z.number(),
   amountTtc: z.number().min(0),
   netPayable: z.number(),
 });

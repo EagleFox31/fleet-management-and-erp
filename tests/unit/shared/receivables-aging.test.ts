@@ -18,6 +18,7 @@ function item(over: Partial<InvoiceAwaitingPayment>): InvoiceAwaitingPayment {
     withholdingFrozen: true,
     depositedAt: "2026-01-01",
     daysSinceDeposit: 0,
+    balanceDue: 119.25,
     ...over,
   };
 }
@@ -42,19 +43,19 @@ describe("buildReceivablesAging", () => {
   it("aucune facture : totaux à zéro, aucune ligne", () => {
     const r = financeReceivablesAgingResponseSchema.parse(buildReceivablesAging([], "2026-11-05"));
     expect(r.byClient).toEqual([]);
-    expect(r.totals.total).toEqual({ count: 0, amountTtc: 0, netPayable: 0 });
+    expect(r.totals.total).toEqual({ count: 0, amountDue: 0, amountTtc: 0, netPayable: 0 });
   });
 
-  it("sommes exactes en centimes, total = somme des tranches", () => {
+  it("sommes exactes en centimes, reste dû distinct du TTC, total = somme des tranches", () => {
     const items = [
-      item({ amountTtc: 0.1, netPayable: 0.1, daysSinceDeposit: 1 }),
-      item({ amountTtc: 0.2, netPayable: 0.2, daysSinceDeposit: 2 }),
-      item({ amountTtc: 0.7, netPayable: 0.5, daysSinceDeposit: null }),
+      item({ amountTtc: 0.1, netPayable: 0.1, balanceDue: 0.05, daysSinceDeposit: 1 }),
+      item({ amountTtc: 0.2, netPayable: 0.2, balanceDue: 0.2, daysSinceDeposit: 2 }),
+      item({ amountTtc: 0.7, netPayable: 0.5, balanceDue: 0.7, daysSinceDeposit: null }),
     ];
     const r = buildReceivablesAging(items, "2026-11-05");
-    expect(r.totals.days0to30).toEqual({ count: 2, amountTtc: 0.3, netPayable: 0.3 });
-    expect(r.totals.notDeposited).toEqual({ count: 1, amountTtc: 0.7, netPayable: 0.5 });
-    expect(r.totals.total).toEqual({ count: 3, amountTtc: 1, netPayable: 0.8 });
+    expect(r.totals.days0to30).toEqual({ count: 2, amountDue: 0.25, amountTtc: 0.3, netPayable: 0.3 });
+    expect(r.totals.notDeposited).toEqual({ count: 1, amountDue: 0.7, amountTtc: 0.7, netPayable: 0.5 });
+    expect(r.totals.total).toEqual({ count: 3, amountDue: 0.95, amountTtc: 1, netPayable: 0.8 });
   });
 
   it("clients triés par nom, facture sans client en dernier", () => {

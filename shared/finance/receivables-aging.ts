@@ -22,6 +22,7 @@ export function agingBucketOf(daysSinceDeposit: number | null): AgingBucket {
 
 interface Cents {
   count: number;
+  due: number;
   ttc: number;
   net: number;
 }
@@ -31,20 +32,21 @@ type CentsRow = Record<AgingBucket | "total", Cents>;
 const toCents = (v: number): number => Math.round(v * 100);
 
 function emptyRow(): CentsRow {
-  const row = { total: { count: 0, ttc: 0, net: 0 } } as CentsRow;
-  for (const b of AGING_BUCKETS) row[b] = { count: 0, ttc: 0, net: 0 };
+  const row = { total: { count: 0, due: 0, ttc: 0, net: 0 } } as CentsRow;
+  for (const b of AGING_BUCKETS) row[b] = { count: 0, due: 0, ttc: 0, net: 0 };
   return row;
 }
 
 function addItem(row: CentsRow, bucket: AgingBucket, item: InvoiceAwaitingPayment): void {
   for (const cell of [row[bucket], row.total]) {
     cell.count += 1;
+    cell.due += toCents(item.balanceDue);
     cell.ttc += toCents(item.amountTtc);
     cell.net += toCents(item.netPayable);
   }
 }
 
-const amounts = (c: Cents): AgingAmounts => ({ count: c.count, amountTtc: c.ttc / 100, netPayable: c.net / 100 });
+const amounts = (c: Cents): AgingAmounts => ({ count: c.count, amountDue: c.due / 100, amountTtc: c.ttc / 100, netPayable: c.net / 100 });
 
 function toRow(row: CentsRow): AgingRow {
   return {
