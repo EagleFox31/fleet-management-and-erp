@@ -2,6 +2,10 @@ import { and, eq, gte, inArray, ne, count, sql } from "drizzle-orm";
 import { db } from "../db";
 import { vehicles, statusHistory, workOrders, fleetKpiCache, users } from "@shared/schema";
 import { describeStatusChange } from "@shared/constants/vehicle-status";
+import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("vehicle-status-service");
 
 export class VehicleStatusService {
   
@@ -394,8 +398,7 @@ export class VehicleStatusService {
   }
 
   /**
-   * Recalcule et persiste les KPI côté application
-   * (fallback quand la fonction SQL calculate_fleet_kpi() est absente)
+   * Recalcule et persiste les KPI côté application (seul calcul : aucune fonction SQL dédiée)
    */
   private async recalculateAndPersistKpiFallback(): Promise<void> {
     const fleetStats = await this.getFleetStatistics();
@@ -499,25 +502,14 @@ export class VehicleStatusService {
   }
 
   /**
-   * Force le recalcul des KPI (fonction SQL si disponible, sinon fallback applicatif)
+   * Force le recalcul des KPI. Un échec remonte à l'appelant : le cache n'est pas réputé à jour.
    */
   async forceRecalculateKPI(): Promise<void> {
     try {
-      await db.execute(sql`SELECT calculate_fleet_kpi()`);
-      return;
-    } catch (error) {
-      const pgError = error as { code?: string };
-      if (pgError?.code === "42883") {
-        console.warn("Fonction SQL calculate_fleet_kpi() absente, fallback applicatif activé.");
-      } else {
-        console.warn("Échec recalcul KPI via SQL, fallback applicatif activé.", error);
-      }
-    }
-
-    try {
       await this.recalculateAndPersistKpiFallback();
-    } catch (fallbackError) {
-      console.error("Error forcing KPI recalculation (fallback):", fallbackError);
+    } catch (error) {
+      log.error({ err: error }, "Error forcing KPI recalculation");
+      throw new AppError(500, "Le recalcul des indicateurs de flotte a échoué.", { cause: error });
     }
   }
 
