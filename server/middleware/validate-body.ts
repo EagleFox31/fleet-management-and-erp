@@ -73,7 +73,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Valide le corps d'une écriture, à placer après la garde de rôle :
  * `router.post("/", isAdmin, validateBody(insertXSchema), handler)`.
  *
- * - Ordre : garde de rôle, puis `ownedBy` si l'objet est possédé, puis `validateBody`, puis le handler.
+ * - Ordre : garde de rôle, puis `validateBody`, puis le handler (contrôle `canAccessOwned` si l'objet est possédé).
  * - Les champs que seul le serveur écrit (`SERVER_FIELDS`, moins `keep`, plus `serverFields`) sont
  *   retirés avant validation, en silence : un client qui renvoie l'objet lu (avec `id`, `createdAt`)
  *   ne reçoit pas de 400, et ces valeurs n'atteignent jamais la base.
