@@ -4,7 +4,7 @@ import { ROUTE_ID_OUT_OF_RANGE_MESSAGE } from "../../server/middleware/route-id-
 import { startContractSession } from "../support/contract-session";
 
 /**
- * Filet des ids hors int4 (server/app.ts) : un id au-delà de MAX_DB_INTEGER_ID répondait 500 après
+ * Filet des ids hors int4 (server/api/index.ts, devant tous les routeurs /api) : un id au-delà de MAX_DB_INTEGER_ID répondait 500 après
  * une erreur Postgres 22003. Il répond désormais 400 avant toute
  * route, qu'elle vienne de server/api ou de routes.ts.
  */
@@ -29,6 +29,15 @@ describe("id de route hors int4 : 400 avant la base", () => {
   for (const [label, prefix] of ROUTES) {
     it(`${label} : 99999999999 et MAX+1 → 400 lisible, jamais 500`, async () => {
       for (const id of ["99999999999", OUT_OF_RANGE]) {
+        const res = await session.call("GET", prefix + id);
+        expect(res.status, id).toBe(400);
+        expect(res.body.message).toBe(ROUTE_ID_OUT_OF_RANGE_MESSAGE);
+      }
+    });
+
+    it(`${label} : variantes lues par parseInt (encodée, suffixe, signe, décimale) → 400, jamais 500`, async () => {
+      const encoded = "99999999999".split("").map((c) => `%${c.charCodeAt(0).toString(16)}`).join("");
+      for (const id of [encoded, "99999999999abc", "-99999999999", "+99999999999", "99999999999.5"]) {
         const res = await session.call("GET", prefix + id);
         expect(res.status, id).toBe(400);
         expect(res.body.message).toBe(ROUTE_ID_OUT_OF_RANGE_MESSAGE);

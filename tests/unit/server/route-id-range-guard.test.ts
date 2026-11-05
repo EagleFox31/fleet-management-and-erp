@@ -30,13 +30,28 @@ describe("routeIdRangeGuard : id de route hors int4", () => {
     expect(hasOutOfRangeNumericSegment("/work-orders/12/part-requirements/99999999999999999999")).toBe(true);
   });
 
-  it("segments non numériques ignorés (texte, mixte, signe, décimal)", () => {
+  it("variantes lues par parseInt : encodée, suffixe, signe, décimale, espace → refusées", () => {
+    for (const path of [
+      "/drivers/%39%39%39%39%39%39%39%39%39%39%39",
+      "/vehicles/check/99999999999AB",
+      "/drivers/99999999999abc",
+      "/drivers/-99999999999",
+      "/drivers/+99999999999",
+      "/drivers/99999999999.5",
+      "/drivers/%2099999999999",
+    ]) {
+      expect(hasOutOfRangeNumericSegment(path), path).toBe(true);
+      expect(run(path), path).toBeInstanceOf(AppError);
+    }
+  });
+
+  it("segments sans entier de tête hors plage ignorés", () => {
     for (const path of [
       "/workflows/acquisition-1730000000000-abc/documents",
-      "/vehicles/check/99999999999AB",
-      "/drivers/-99999999999",
-      "/drivers/99999999999.5",
       "/statistics/maintenance-cost/year",
+      "/drivers/-12",
+      "/drivers/12.5",
+      "/drivers/%E0%A4%A",
       "/",
       "",
     ]) {

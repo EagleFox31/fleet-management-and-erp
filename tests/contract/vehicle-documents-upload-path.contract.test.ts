@@ -89,7 +89,7 @@ describe("POST /api/vehicles/:vehicleId/documents — identifiant hors chiffres"
     expect(fs.existsSync(suffixedDir())).toBe(false);
   });
 
-  // Hors int4 : refusé plus tôt par le filet de server/app.ts (route-id-range-guard), même 400.
+  // Hors int4 : refusé plus tôt par le filet de server/api/index.ts (route-id-range-guard), même 400.
   it.each([
     ["007", "ID de véhicule invalide"],
     ["99999999999", ROUTE_ID_OUT_OF_RANGE_MESSAGE],
