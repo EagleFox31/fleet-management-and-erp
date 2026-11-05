@@ -83,3 +83,9 @@
 - Lecture verrouillante (FOR SHARE) des autres administrateurs actifs à la place du NOT EXISTS ; test d'intégration « isolation REPEATABLE READ couverte » (rouge avec l'ancien SQL, vert ensuite).
 - Tests de mise à jour et suppression en masse : refus. Nettoyage de test passé en transaction (SET LOCAL), plus de fuite dans le pool.
 - Suite : le refus du trigger donne un 500 sur les catch locaux de routes.ts tant que la garde #379 n'est pas devant : à traiter dans le complément #375. Puis reprise de la PR santé de b7 (fix/health-minimal-public).
+
+## 2026-11-05 05:45 — c7 : état et file de tâches
+
+- #381 (fix/booking-guard-role-first) : main fusionné (b97349eb), attend CI et ready. #386 (fix/last-admin-db-trigger, 4bb6f764) : relue, mineurs à traiter.
+- Ordre fixé par 0a : (A) PR santé de b7, branche fix/health-minimal-public (worktree agent-a5880f2fbf922de2e) : GET /api/health public = statut et version, détail derrière isAdmin, contrats anonyme / staff non admin / admin, texte neutre ; (B) #386 : 40P01 et 40001 vers 409 « Opération en cours, réessayez » dans toHttpError + test unitaire, test unitaire de la branche isLastActiveAdminViolation, test « admin déjà inactif » (ghost), description de PR corrigée (traduction HTTP par route : complément #375), documenter la réparation manuelle si le test RR meurt ; (C) complément #375 après fusion de #379 : traduction sur les 4 routes (PATCH users, DELETE users, admin/users, toggle), storage.updateUser/deleteUser qui avalent l'erreur, un contrat par route, constante de message commune avec #379.
+- c7test (55432/55433) : trigger retiré ; un redémarrage depuis #386 le repose. À arrêter en fin de session.
