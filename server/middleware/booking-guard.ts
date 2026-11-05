@@ -40,6 +40,7 @@ const sameSlot = (a: SlotFields, b: SlotFields) =>
  */
 function passesRoleGuard(guard: RequestHandler, req: Request, res: Response): Promise<boolean> {
   return new Promise((resolve, reject) => {
+    res.once("finish", () => resolve(false));
     res.once("close", () => resolve(false));
     Promise.resolve(guard(req, res, (error?: unknown) => (error ? reject(error) : resolve(true)))).catch(reject);
   });

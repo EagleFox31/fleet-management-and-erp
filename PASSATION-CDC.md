@@ -73,5 +73,5 @@
 ## 2026-11-05 — B1 garde de réservation OT : rôle avant lecture (fix/booking-guard-role-first, base main) ; état de session c7
 - Garde de réservation : contrôle de rôle (mêmes gardes que les routes d'écriture) avant la première lecture ; contrat client/chauffeur 403 rouge avant, vert après ; LESSONS ajoutée.
 - État : #373 mineurs poussés et fusionnés dans #375 ; #378 mineurs poussés (JSDoc, cas sans propriétaire) ; B1 à relire (« mr » envoyé).
-- À venir après fusion de #379 : sur #375, `assertNotLastActiveAdmin(res, id)` dans la garde toggle quand elle désactive (handler async, erreurs vers next), cas concurrents toggle/DELETE et toggle/toggle dans last-active-admin-guard.contract ; vérifier le route-id.ts identique au rebase.
+- À venir après fusion de #379 : compléter la garde toggle, voir #375.
 - Stack de test c7test à arrêter en fin de session ; chore/recensement-229 locale, en attente de l'utilisatrice.
