@@ -40,11 +40,14 @@ import {
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { cn, formatPrice } from "@/lib/utils";
 import { useFuelCard } from "@/hooks/useFuelCard";
-import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { differenceInCalendarDays, startOfDay, format } from "date-fns";
 import { fr } from "date-fns/locale";
 
 // ── Mission blockers ───────────────────────────────────────────────────────
+
+function normalizeCpc(v: string | null | undefined): string {
+  return (v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+}
 
 function getMissionBlockers(mission: any): string[] {
   const blockers: string[] = [];
@@ -60,12 +63,8 @@ function getMissionBlockers(mission: any): string[] {
 
   if (status === "assigned" || status === "in_progress") {
     if (assignment?.driver) {
-      // Le payload mission ne porte pas encore la date de formation : le statut seul fait foi ici.
-      const cpc = getDriverCpcEligibility({
-        cpcStatus: assignment.driver.cpcStatus,
-        cpcTrainingDate: assignment.driver.cpcTrainingDate,
-      });
-      if (!cpc.eligible) {
+      const cpc = normalizeCpc(assignment.driver.cpcStatus);
+      if (cpc !== "FORME") {
         blockers.push(`CPC chauffeur invalide (${assignment.driver.cpcStatus || "non défini"})`);
       }
     } else {
