@@ -31,6 +31,7 @@ interface InvoiceRow {
   client_name: string | null;
   amount_ht: string;
   amount_ttc: string;
+  balance: string;
   deposited_at: string | null;
   withholding_vat_amount: string | null;
   withholding_is_amount: string | null;
@@ -81,6 +82,7 @@ function toItem(row: InvoiceRow, today: string): InvoiceAwaitingPayment {
     withholdingFrozen: frozen,
     depositedAt: row.deposited_at,
     daysSinceDeposit: daysSinceDeposit(row.deposited_at, today),
+    balanceDue: num(row.balance),
   };
 }
 
@@ -88,7 +90,7 @@ function toItem(row: InvoiceRow, today: string): InvoiceAwaitingPayment {
 const SELECT_INVOICES = sql`
   SELECT i.id, i.invoice_number, i.invoice_date::text AS invoice_date, i.status,
          c.id AS client_id, c.name AS client_name,
-         i.amount_ht, i.amount_ttc, i.deposited_at::text AS deposited_at,
+         i.amount_ht, i.amount_ttc, i.balance, i.deposited_at::text AS deposited_at,
          i.withholding_vat_amount, i.withholding_is_amount, i.net_payable,
          c.withholding_vat_rate, c.withholding_is_rate, COALESCE(c.withholding_is_base, 'ht') AS withholding_is_base
   FROM client_invoices i

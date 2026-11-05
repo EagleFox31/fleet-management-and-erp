@@ -41,8 +41,8 @@ export const VEHICLE_REFERENCES_NOT_ACTIVITY: Readonly<Record<string, string>> =
  * `stampColumn` : horodatage que tout écrivain de la table renouvelle. La suppression le pose et
  * le journalise ; la restauration ne rouvre la ligne que s'il n'a pas bougé, ce qui distingue
  * « rejeté par la suppression » de « rejeté à la main pendant le retrait » (même valeur).
- * Sans horodatage (`maintenance_schedules` n'en a pas), seule la valeur est comparée : un plan
- * désactivé à la main pendant le retrait est réactivé par la restauration. Limite assumée.
+ * `maintenance_schedules.updated_at` est renouvelé par un déclencheur (init-database) : un plan
+ * désactivé à la main pendant le retrait le reste après la restauration.
  */
 export const VEHICLE_DEACTIVATIONS: readonly {
   table: string;
@@ -51,6 +51,6 @@ export const VEHICLE_DEACTIVATIONS: readonly {
   applied: string | boolean;
   stampColumn?: string;
 }[] = [
-  { table: "maintenance_schedules", column: "is_active", activeValues: [true], applied: false },
+  { table: "maintenance_schedules", column: "is_active", activeValues: [true], applied: false, stampColumn: "updated_at" },
   { table: "document_renewal_requests", column: "status", activeValues: ["pending", "in_progress"], applied: "rejected", stampColumn: "updated_at" },
 ];

@@ -22,6 +22,7 @@ let baseUrl = "";
 const ids = createIdBag();
 const cookies = new Map<string, string>();
 let clientId = 0;
+let clientName = "";
 const origin = uniqueTestToken("orig");
 const destination = uniqueTestToken("dest");
 
@@ -66,6 +67,7 @@ beforeAll(async () => {
   const client = await createTestClient();
   ids.clientIds.push(client.id);
   clientId = client.id;
+  clientName = client.name;
 }, 180000);
 afterAll(async () => {
   await db.delete(tariffGrid).where(eq(tariffGrid.origin, origin));
@@ -178,6 +180,53 @@ describe("grille tarifaire", { timeout: 120000 }, () => {
     expect((await call("DELETE", `${TARIFF_GRID_PATH}/99999999`, "admin")).status).toBe(404);
     const list = tariffListResponseSchema.parse((await call("GET", `${TARIFF_GRID_PATH}?activeOnly=false`, "admin")).body);
     expect(list.rows.find((r) => r.id === created.body.id)?.active).toBe(false);
+  });
+});
+
+describe("liste paginée et nom du client", { timeout: 120000 }, () => {
+  const page = async (query: string) => (await call("GET", TARIFF_GRID_PATH + "?" + query, "admin"));
+
+  it("pages disjointes, ordre stable, total du filtre, plafond de page refusé", async () => {
+    for (const cargoType of ["Pg1", "Pg2", "Pg3", "Pg4", "Pg5"]) {
+      expect((await call("POST", TARIFF_GRID_PATH, "admin", tariff({ clientId, cargoType }))).status, cargoType).toBe(201);
+    }
+    const all = tariffListResponseSchema.parse((await page("clientId=" + clientId + "&limit=200")).body);
+    expect(all.total).toBe(all.rows.length);
+    expect(all.total).toBeGreaterThanOrEqual(5);
+    const seen: number[] = [];
+    for (let offset = 0; offset < all.total; offset += 2) {
+      const p = tariffListResponseSchema.parse((await page("clientId=" + clientId + "&limit=2&offset=" + offset)).body);
+      expect(p).toMatchObject({ total: all.total, limit: 2, offset });
+      expect(p.rows.length).toBeLessThanOrEqual(2);
+      seen.push(...p.rows.map((r) => r.id));
+    }
+    expect(seen).toEqual(all.rows.map((r) => r.id));
+    expect(new Set(seen).size).toBe(seen.length);
+    const past = tariffListResponseSchema.parse((await page("clientId=" + clientId + "&limit=2&offset=" + (all.total + 10))).body);
+    expect(past.rows).toEqual([]);
+    expect(past.total).toBe(all.total);
+  });
+
+  it("sans paramètre : page par défaut de 50 ; limite hors bornes ou décalage négatif refusés en 400", async () => {
+    const def = tariffListResponseSchema.parse((await page("")).body);
+    expect(def).toMatchObject({ limit: 50, offset: 0 });
+    expect(def.rows.length).toBeLessThanOrEqual(50);
+    for (const bad of ["limit=0", "limit=201", "limit=abc", "offset=-1"]) {
+      expect((await page(bad)).status, bad).toBe(400);
+    }
+  });
+
+  it("création, modification et désactivation renvoient le nom du client (null pour un tarif générique)", async () => {
+    const created = await call("POST", TARIFF_GRID_PATH, "admin", tariff({ clientId, cargoType: "Nom1" }));
+    expect(created.status).toBe(201);
+    expect(created.body.clientName).toBe(clientName);
+    const updated = await call("PUT", TARIFF_GRID_PATH + "/" + created.body.id, "admin", tariff({ clientId, cargoType: "Nom1", unitPrice: 120 }));
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200);
+    expect(updated.body.clientName).toBe(clientName);
+    const off = await call("DELETE", TARIFF_GRID_PATH + "/" + created.body.id, "admin");
+    expect(off.body.clientName).toBe(clientName);
+    const generic = await call("POST", TARIFF_GRID_PATH, "admin", tariff({ cargoType: "Nom2" }));
+    expect(generic.body.clientName).toBeNull();
   });
 });
 

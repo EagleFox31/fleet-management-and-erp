@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { periodsOverlap, pickTariff, tariffBodySchema } from "../../../shared/contracts/tariff-grid";
+import { periodsOverlap, pickTariff, tariffBodySchema, tariffListQuerySchema, tariffListResponseSchema } from "../../../shared/contracts/tariff-grid";
 
 const base = {
   id: 1,
@@ -60,5 +60,19 @@ describe("tariffBodySchema", () => {
     expect(tariffBodySchema.safeParse({ ...ok, unitPrice: 10.5 }).success).toBe(false);
     expect(tariffBodySchema.safeParse({ ...ok, validFrom: "2026-02-30" }).success).toBe(false);
     expect(tariffBodySchema.safeParse({ ...ok, origin: " " }).success).toBe(false);
+  });
+});
+
+describe("liste paginée", () => {
+  it("la requête borne limit (1-200) et offset (>= 0) et convertit les chaînes", () => {
+    expect(tariffListQuerySchema.parse({ limit: "25", offset: "50" })).toMatchObject({ limit: 25, offset: 50 });
+    expect(tariffListQuerySchema.parse({})).toEqual({});
+    for (const bad of [{ limit: "0" }, { limit: "201" }, { limit: "x" }, { offset: "-1" }]) {
+      expect(tariffListQuerySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it("la réponse exige total, limit et offset", () => {
+    expect(tariffListResponseSchema.safeParse({ rows: [] }).success).toBe(false);
+    expect(tariffListResponseSchema.safeParse({ rows: [], total: 0, limit: 50, offset: 0 }).success).toBe(true);
   });
 });

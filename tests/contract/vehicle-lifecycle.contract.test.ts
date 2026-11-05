@@ -1,6 +1,7 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
+import { VEHICLE_LIFECYCLE_SQL } from "../../server/init-database";
 import {
   assignments,
   documentRenewalRequests,
@@ -234,6 +235,41 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
     expect(res.body.result).toEqual({ vehicleId: v.id, restored: true, reactivated: 1 });
     expect(await renewalStatus(byDeletion.id)).toBe("pending");
     expect(await renewalStatus(byHand.id)).toBe("rejected");
+  });
+
+  it("plan désactivé à la main pendant le retrait : même valeur, mais pas réactivé (le déclencheur renouvelle updated_at)", async () => {
+    const v = await vehicle();
+    const byDeletion = await addSchedule(v.id, true);
+    const byHand = await addSchedule(v.id, true);
+    expect((await asAdmin("DELETE", `/api/vehicles/${v.id}`)).status).toBe(200);
+    expect(await scheduleActive(byHand.id)).toBe(false);
+
+    // Écrivain qui ne touche que is_active (SQL brut : l'ORM ne prouve rien, seul le déclencheur renouvelle updated_at).
+    await db.execute(sql`UPDATE maintenance_schedules SET is_active = false WHERE id = ${byHand.id}`);
+
+    const res = await asAdmin("POST", `/api/vehicles/${v.id}/restore`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toEqual({ vehicleId: v.id, restored: true, reactivated: 1 });
+    expect(await scheduleActive(byDeletion.id)).toBe(true);
+    expect(await scheduleActive(byHand.id)).toBe(false);
+  });
+
+  it("SQL du cycle de vie rejoué : plan antérieur laissé à NULL, déclencheur unique", async () => {
+    const v = await vehicle();
+    const legacy = await addSchedule(v.id, true);
+    // Plan antérieur à la colonne : NULL, posé hors déclencheur (qui ne joue que sur UPDATE).
+    await db.execute(sql`ALTER TABLE maintenance_schedules DISABLE TRIGGER trg_maintenance_schedules_touch`);
+    try {
+      await db.execute(sql`UPDATE maintenance_schedules SET updated_at = NULL WHERE id = ${legacy.id}`);
+    } finally {
+      await db.execute(sql`ALTER TABLE maintenance_schedules ENABLE TRIGGER trg_maintenance_schedules_touch`);
+    }
+    await pool.query(VEHICLE_LIFECYCLE_SQL);
+    await pool.query(VEHICLE_LIFECYCLE_SQL);
+    const [row] = await db.select({ u: maintenanceSchedules.updatedAt }).from(maintenanceSchedules).where(eq(maintenanceSchedules.id, legacy.id));
+    expect(row.u).toBeNull();
+    const triggers = await db.execute(sql`SELECT count(*)::int AS n FROM pg_trigger WHERE tgname = 'trg_maintenance_schedules_touch' AND NOT tgisinternal`);
+    expect((triggers.rows[0] as { n: number }).n).toBe(1);
   });
 
   it("un second appel sur un véhicule actif ne change rien (200, restored: false, aucune trame)", async () => {

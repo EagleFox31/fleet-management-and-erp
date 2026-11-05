@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tariffBodyOf } from "@/components/operations/tariff-grid-table";
+import { pageRangeLabel, tariffBodyOf } from "@/components/operations/tariff-grid-table";
 import { tariffBodySchema } from "@shared/contracts/tariff-grid";
 import { canWriteTariffGrid } from "@shared/constants/roles";
 
@@ -24,5 +24,13 @@ describe("grille tarifaire (écran)", () => {
   });
   it("écriture : admin et direction seulement", () => {
     expect(["admin", "management", "secretary", "logistics", null].map(canWriteTariffGrid)).toEqual([true, true, false, false, false]);
+  });
+});
+
+describe("pageRangeLabel", () => {
+  it("première page, dernière page partielle, liste vide", () => {
+    expect(pageRangeLabel({ total: 130, limit: 50, offset: 0 })).toBe("1-50 sur 130");
+    expect(pageRangeLabel({ total: 130, limit: 50, offset: 100 })).toBe("101-130 sur 130");
+    expect(pageRangeLabel({ total: 0, limit: 50, offset: 0 })).toBe("0 sur 0");
   });
 });
