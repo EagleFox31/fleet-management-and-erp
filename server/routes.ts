@@ -2678,10 +2678,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const partId = queryIdOrNaN(req.query.partId);
       if (Number.isNaN(partId)) return res.status(400).json({ message: "ID de pièce invalide" });
       
-      if (partId && isNaN(partId)) {
-        return res.status(400).json({ message: "ID de pièce invalide" });
-      }
-      
       if (partId) {
         // Get stock history for specific part
         const stockHistory = await storage.getPartStockHistory(partId);

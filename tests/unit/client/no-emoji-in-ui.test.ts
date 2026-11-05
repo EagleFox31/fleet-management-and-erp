@@ -20,7 +20,6 @@ const scan = (src: string) =>
 // Cliquet : lignes avec emoji par fichier a l'introduction du garde-fou (dette a migrer vers lucide-react).
 // Le compte d'un fichier ne peut que baisser ; un nouveau fichier ne peut pas en recevoir ; un fichier assaini sort de la liste.
 const GELES: Record<string, number> = {
-  "client/src/components/ui/playful-error-messages.tsx": 24,
   "client/src/hooks/use-workflow-persistence.ts": 2, // console.* seulement (hors ecran)
   "client/src/lib/form-drafts.ts": 1, // commentaire seulement
   "client/src/pages/settings.tsx": 7, // console.* seulement (hors ecran)
