@@ -143,8 +143,7 @@ describe("GET /api/billing/pending-invoices : contenu", () => {
     expect(rows.find((r) => r.clientId === clientB)).toMatchObject({ operationCount: 1, oldestOperationDate: "2002-12-31" });
   });
 
-  // Défaut produit signalé : le service renvoie toujours amount = 0 alors que les missions portent
-  // `agreed_price` (#487, #498). À écrire avec le correctif, sans figer le zéro actuel.
+  // Le montant porte désormais des prix : valeurs vérifiées ci-dessous, y compris les cas sans prix et à zéro.
   it("amount somme les prix convenus des seules opérations à facturer (facture annulée comprise, facture active exclue)", async () => {
     const a = (await pending()).find((r) => r.clientId === clientA);
     expect(a?.amount).toBe(375000);
