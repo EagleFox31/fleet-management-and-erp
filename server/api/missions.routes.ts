@@ -1714,7 +1714,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
     const vehicleOperational = hasVehicle && missionAssignment?.vehicleStatus === "operational";
 
-    const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost));
+    const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing, present: presentLaunchReadiness } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost), req.user?.role);
     const fuelBudgetValue = missionBudgetPlan.fuelBudget;
     const roadExpensesBudgetValue = missionBudgetPlan.roadExpensesBudget;
     const contingencyBudgetValue = missionBudgetPlan.contingencyBudget;
@@ -1984,7 +1984,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
 
     const blockingFailures = checks.filter((check) => check.blocking && !check.passed);
 
-    return res.status(200).json({
+    return res.status(200).json(presentLaunchReadiness({
       missionId: mission.id,
       missionStatus: mission.status,
       canLaunch: blockingFailures.length === 0,
@@ -2016,7 +2016,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
       },
       budgetSuggestion: missionBudgetSuggestion,
       openRenewalRequests,
-    });
+    }));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Get mission launch readiness error");
@@ -3097,7 +3097,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
 
       if (targetAssignments.length > 0) {
-        const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost));
+        const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing, fuelShortfallMotif } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost), req.user?.role);
         const fuelBudget = missionBudgetPlan.fuelBudget;
         const roadExpensesBudget = missionBudgetPlan.roadExpensesBudget;
         const contingencyBudget = missionBudgetPlan.contingencyBudget;
@@ -3108,7 +3108,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           const fuelBalance = await fuelCardService.getCurrentBalance();
           if (fuelBalance.balance < fuelBudget) {
             launchErrors.push(
-              `Solde carte carburant insuffisant (${Math.round(fuelBalance.balance)} FCFA < ${Math.round(fuelBudget)} FCFA).`,
+              fuelShortfallMotif(fuelBalance.balance, fuelBudget),
             );
           }
         }

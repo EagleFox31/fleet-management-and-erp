@@ -28,6 +28,7 @@ const invoiceIds: number[] = [];
 let clientA = 0;
 let clientB = 0;
 let clientC = 0;
+let clientD = 0;
 let clientAName = "";
 
 async function pending(): Promise<PendingInvoice[]> {
@@ -38,7 +39,7 @@ async function pending(): Promise<PendingInvoice[]> {
   return parsed.data!;
 }
 
-type MissionSeed = { clientId: number | null; status: (typeof missions.$inferInsert)["status"]; completedAt?: Date; deliveryDate?: Date };
+type MissionSeed = { clientId: number | null; status: (typeof missions.$inferInsert)["status"]; completedAt?: Date; deliveryDate?: Date; agreedPrice?: string };
 
 async function seedMission(m: MissionSeed): Promise<number> {
   const [row] = await db
@@ -51,6 +52,7 @@ async function seedMission(m: MissionSeed): Promise<number> {
       status: m.status,
       completedAt: m.completedAt,
       deliveryDate: m.deliveryDate,
+      agreedPrice: m.agreedPrice,
     })
     .returning({ id: missions.id });
   missionIds.push(row.id);
@@ -91,32 +93,35 @@ beforeAll(async () => {
   expect(login.status).toBe(200);
   cookie = login.headers.get("set-cookie")!.split(";")[0];
 
-  const [ca, cb, cc] = [await createTestClient(), await createTestClient(), await createTestClient()];
-  ids.clientIds.push(ca.id, cb.id, cc.id);
-  [clientA, clientB, clientC] = [ca.id, cb.id, cc.id];
+  const [ca, cb, cc, cd] = [await createTestClient(), await createTestClient(), await createTestClient(), await createTestClient()];
+  ids.clientIds.push(ca.id, cb.id, cc.id, cd.id);
+  [clientA, clientB, clientC, clientD] = [ca.id, cb.id, cc.id, cd.id];
   clientAName = ca.name;
 
   // Client A : trois opérations à facturer.
-  await seedMission({ clientId: clientA, status: "completed", completedAt: at("2003-02-10") });
+  await seedMission({ clientId: clientA, status: "completed", completedAt: at("2003-02-10"), agreedPrice: "250000" });
   // Livrée sans date de fin : la date de livraison sert de date d'opération.
   await seedMission({ clientId: clientA, status: "delivered", deliveryDate: at("2003-01-20") });
   // Facture annulée : l'opération redevient à facturer.
-  const cancelledInvoice = await seedMission({ clientId: clientA, status: "completed", completedAt: at("2003-03-01") });
+  const cancelledInvoice = await seedMission({ clientId: clientA, status: "completed", completedAt: at("2003-03-01"), agreedPrice: "125000" });
   await invoice(clientA, cancelledInvoice, "cancelled");
   // Exclues : facture active (en attente, payée), mission non terminée ou annulée.
-  const pendingInvoice = await seedMission({ clientId: clientA, status: "completed", completedAt: at("2002-01-01") });
+  const pendingInvoice = await seedMission({ clientId: clientA, status: "completed", completedAt: at("2002-01-01"), agreedPrice: "900000" });
   await invoice(clientA, pendingInvoice, "pending");
-  const paidInvoice = await seedMission({ clientId: clientA, status: "delivered", completedAt: at("2002-01-02") });
+  const paidInvoice = await seedMission({ clientId: clientA, status: "delivered", completedAt: at("2002-01-02"), agreedPrice: "800000" });
   await invoice(clientA, paidInvoice, "paid");
-  await seedMission({ clientId: clientA, status: "in_progress", completedAt: at("2002-01-03") });
-  await seedMission({ clientId: clientA, status: "cancelled", completedAt: at("2002-01-04") });
+  await seedMission({ clientId: clientA, status: "in_progress", completedAt: at("2002-01-03"), agreedPrice: "700000" });
+  await seedMission({ clientId: clientA, status: "cancelled", completedAt: at("2002-01-04"), agreedPrice: "600000" });
 
   // Client B : une opération, plus ancienne que celles de A.
-  await seedMission({ clientId: clientB, status: "completed", completedAt: at("2002-12-31") });
+  await seedMission({ clientId: clientB, status: "completed", completedAt: at("2002-12-31"), agreedPrice: "0" });
 
   // Client C : tout est facturé (facture partiellement réglée comprise).
   const partial = await seedMission({ clientId: clientC, status: "completed", completedAt: at("2003-01-05") });
   await invoice(clientC, partial, "partial");
+
+  // Client D : une seule opération, sans prix convenu.
+  await seedMission({ clientId: clientD, status: "completed", completedAt: at("2002-11-30") });
 
   // Mission terminée sans client : ignorée, sans faire échouer la lecture.
   await seedMission({ clientId: null, status: "completed", completedAt: at("2002-06-01") });
@@ -138,9 +143,21 @@ describe("GET /api/billing/pending-invoices : contenu", () => {
     expect(rows.find((r) => r.clientId === clientB)).toMatchObject({ operationCount: 1, oldestOperationDate: "2002-12-31" });
   });
 
-  // Défaut produit signalé : le service renvoie toujours amount = 0 alors que les missions portent
-  // `agreed_price` (#487, #498). À écrire avec le correctif, sans figer le zéro actuel.
-  it.todo("amount = somme des prix convenus (agreed_price) des opérations à facturer du client");
+  // Le montant porte désormais des prix : valeurs vérifiées ci-dessous, y compris les cas sans prix et à zéro.
+  it("amount somme les prix convenus des seules opérations à facturer (facture annulée comprise, facture active exclue)", async () => {
+    const a = (await pending()).find((r) => r.clientId === clientA);
+    expect(a?.amount).toBe(375000);
+  });
+
+  it("une opération sans prix n'est pas valorisée à 0 : elle est comptée à part", async () => {
+    const rows = await pending();
+    expect(rows.find((r) => r.clientId === clientA)?.missionsWithoutPrice).toBe(1);
+    expect(rows.find((r) => r.clientId === clientD)).toMatchObject({ operationCount: 1, amount: 0, missionsWithoutPrice: 1 });
+  });
+
+  it("un prix convenu à 0 est un prix : non signalé sans prix", async () => {
+    expect((await pending()).find((r) => r.clientId === clientB)).toMatchObject({ amount: 0, missionsWithoutPrice: 0 });
+  });
 
   it("un client dont toutes les opérations sont facturées n'apparaît pas", async () => {
     const rows = await pending();

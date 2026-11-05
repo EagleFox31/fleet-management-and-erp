@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { inArray } from "drizzle-orm";
 import { drivers, tires } from "../../shared/schema";
-import { MISSION_EVENT_ROLES, STAFF_ROLES, SUPPLIER_READ_ROLES } from "../../shared/constants/roles";
+import { MISSION_EVENT_ROLES, PART_CATALOG_EVENT_ROLES, SUPPLIER_READ_ROLES } from "../../shared/constants/roles";
 import { getDefaultTireFormValues } from "../../shared/tire-form";
 import { normalizeScope, resolveRecipients } from "../../server/lib/realtime-scope";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -84,7 +84,7 @@ describe("portée des trames fournisseurs, pneus, chauffeurs", { timeout: 120000
     expect(got).not.toContain("driver");
   });
 
-  it("pneu : personnel seulement, ni client", async () => {
+  it("pneu : personnel hors chauffeur, ni client (prix d'achat)", async () => {
     const res = await session.call("POST", "/api/tires", {
       actor: "warehouse",
       body: {
@@ -105,7 +105,7 @@ describe("portée des trames fournisseurs, pneus, chauffeurs", { timeout: 120000
     for (const eventType of new Set(tireEvents)) {
       const got = recipients(eventType);
       expect(got).not.toContain("client");
-      expect(got.sort()).toEqual(actorsOfRoles(STAFF_ROLES).sort());
+      expect(got.sort()).toEqual(actorsOfRoles(PART_CATALOG_EVENT_ROLES).sort());
     }
   });
 

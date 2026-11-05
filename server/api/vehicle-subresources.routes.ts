@@ -3,6 +3,7 @@ import { isAnyUser } from "../middleware/auth";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
+import { redactTirePrice } from "../lib/tire-price-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { mileageService } from "../services/mileage-service";
 import { tiresService } from "../services/tires-service-simplified";
@@ -84,8 +85,11 @@ router.get("/:vehicleId/tires", isAnyUser, async (req, res, next) => {
   try {
     const id = parseRouteId(req.params.vehicleId, INVALID_ID);
     await assertVehicleSubresourcesReadable(req, id);
-    // La jointure renvoie le véhicule entier : le prix d'achat en est retiré pour les rôles non autorisés.
-    return res.status(200).json(redactVehiclePriceDeep(req.user, await tiresService.getVehicleTires(id)));
+    // La jointure renvoie le véhicule entier et la fiche pneu entière : chaque prix d'achat est retiré
+    // de sa propre partie (redactTirePrice sur toute la réponse supprimerait aussi celui du véhicule).
+    const rows = await tiresService.getVehicleTires(id);
+    const redacted = rows.map((row) => ({ ...row, tires: redactTirePrice(req.user?.role, row.tires) }));
+    return res.status(200).json(redactVehiclePriceDeep(req.user, redacted));
   } catch (error) {
     return next(failure("Lecture des pneus du véhicule impossible", error));
   }
