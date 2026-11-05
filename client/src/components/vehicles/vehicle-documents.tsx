@@ -618,7 +618,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
             <Loader2 className="h-6 w-6 animate-spin text-green-600" />
           </div>
         ) : error ? (
-          <div className="bg-destructive/10 p-4 rounded-md flex items-center text-destructive">
+          <div className="bg-destructive/10 p-4 rounded-md flex items-center text-destructive-text">
             <AlertCircle className="h-5 w-5 mr-2" />
             Erreur lors du chargement des documents. Veuillez réessayer.
           </div>
