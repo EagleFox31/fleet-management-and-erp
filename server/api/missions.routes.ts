@@ -2616,7 +2616,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
     // Empreinte de ce qui a été lu avant la transaction (créneau et affectations vivantes).
     const readKey = planningStateKey({ pickupDate: existingMission.pickupDate, deliveryDate: existingMission.deliveryDate, rows: liveAssignments });
     const updatedMission = await db.transaction(async (tx) => {
-      if (planningTargets.length > 0 || assignmentProvided) {
+      if (planningTargets.length > 0 || assignmentProvided || datesChanged) {
         // Même ordre que POST /:id/assignments : ligne mission d'abord, verrous consultatifs ensuite
         // (l'ordre inverse interbloquerait un PATCH et un ajout d'affectation sur la même mission).
         await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).for("update");
