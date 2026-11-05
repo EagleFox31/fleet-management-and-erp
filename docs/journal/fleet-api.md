@@ -482,6 +482,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : trois parseurs stricts écrits à la main en une journée ; `parseInt("12abc")` vise un autre objet.
 - **Preuve** : unitaires 2437 verts (cas lâches 400, motif et commentaires) ; contrats `mission-id-strict`, `operations-driver-scope`, `supplier-settlement-proof-path` verts (54).
 
+## 2026-11-05 — Justificatif de règlement fournisseur : téléchargement forcé, extension tirée du type
+- **Quoi** : `GET /api/supplier-invoices/:id/settlements/:settlementId/proof` sert le fichier en `attachment` avec `nosniff`, et choisit son type d'après l'extension sur disque, en liste blanche (`settlementProofContentType`). Toute autre extension part en `application/octet-stream`. Au dépôt, l'extension vient du type déclaré (`SETTLEMENT_PROOF_EXTENSION_BY_MIME`), plus du nom d'origine. Le filtre de dépôt lit la même table.
+- **Pourquoi** : même forme que le justificatif de renouvellement. Un nom d'origine en `.html` déclaré PDF était écrit en `.html`, puis servi en ligne sur l'origine de l'application.
+- **Preuve** : contrat `supplier-settlement-proof-path` rouge 8/18 avant, vert 18/18 après. Avec les autres contrats de règlement : 31/31. Unitaires `settlement-proof` 41, et une mutation de la liste blanche tuée.
 ## 2026-11-05 — Filet des ids de route hors int4
 - **Quoi** : `routeIdRangeGuard` monté en tête de `apiRouter` (`server/api/index.ts`) : segment dont l'entier de tête (après décodage, signe admis) dépasse `MAX_DB_INTEGER_ID` → `AppError(400, "Identifiant invalide.")`, pour `server/api` comme pour `routes.ts`. Inscrit dans la liste blanche du garde-fou des middlewares (sans base), retiré des attendus. Le contrat d'upload de document véhicule attend ce message pour un id hors plage (même 400).
 - **Pourquoi** : un id hors plage répondait 500 après une erreur base 22003.
@@ -495,3 +499,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `underKeyLock` prend une ou plusieurs clés, verrouillées dans l'ordre. `unlockUser` remet à zéro le miroir `users` et supprime les compteurs de toutes ses clés dans une même transaction sous verrou. `reset` met désormais à jour son miroir dans sa transaction.
 - **Pourquoi** : un déverrouillage pendant une réservation en cours pouvait être effacé par la réécriture de l'ancien compteur + 1.
 - **Preuve** : intégration `login-lockout-db-store` 7/8 sur le store d'origine, 8/8 après le correctif. Contrats du verrouillage verts.
+
+## 2026-11-05 — Garde-fou : verrou de clé du compteur de verrouillage
+- **Quoi** : le test `tests/unit/server/lockout-key-lock-hygiene.test.ts` vérifie deux choses. La clé `fleet-lockout:` n'est verrouillée qu'à un seul endroit de `server/`, dans `underKeyLock`. Et seul le store écrit `login_attempts_by_username`, à une exception près, nommée : la reprise M3 au démarrage.
+- **Pourquoi** : les deux corrections du compteur (5 novembre) venaient d'écritures faites hors du verrou de clé. Un second endroit qui prendrait ce verrou pourrait l'appliquer dans un autre ordre, ou sur une autre forme de clé.
+- **Preuve** : vert sur main. Il passe au rouge si l'on ajoute une deuxième occurrence de la clé, ou un écrivain de la table hors du store. Unitaires 2612.

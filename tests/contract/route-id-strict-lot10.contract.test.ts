@@ -2,6 +2,7 @@ import { createServer, type Server } from "http";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { ROUTE_ID_OUT_OF_RANGE_MESSAGE } from "../../server/middleware/route-id-range-guard";
 import { clientInvoices, clientPayments } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -84,7 +85,7 @@ describe("ids de route (lot 10) : factures client, paiement intact", { timeout: 
   });
 
   it("POST .../payments sur un id hors de l'int4 : 400", async () => {
-    expect(await call("POST", "/api/billing/invoices/99999999999/payments", payment())).toEqual({ status: 400, message: MESSAGE });
+    expect(await call("POST", "/api/billing/invoices/99999999999/payments", payment())).toEqual({ status: 400, message: ROUTE_ID_OUT_OF_RANGE_MESSAGE });
   });
 
   it("témoin : POST /api/billing/invoices/<id>/payments enregistre le paiement", async () => {

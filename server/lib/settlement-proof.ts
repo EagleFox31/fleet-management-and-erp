@@ -15,23 +15,45 @@ function isProofFileName(name: string): boolean {
   return /^[A-Za-z0-9._-]{1,128}$/.test(name) && name !== "." && name !== "..";
 }
 
+/** Types acceptés au téléversement et extension écrite sur disque pour chacun. */
+export const SETTLEMENT_PROOF_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+};
+
+/** Type servi selon l'extension sur disque ; toute autre extension part en `application/octet-stream`. */
+export const SETTLEMENT_PROOF_CONTENT_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ".pdf": "application/pdf",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+export function settlementProofContentType(proofPath: string): string {
+  const extension = path.extname(proofPath).toLowerCase();
+  return Object.hasOwn(SETTLEMENT_PROOF_CONTENT_TYPE_BY_EXTENSION, extension)
+    ? SETTLEMENT_PROOF_CONTENT_TYPE_BY_EXTENSION[extension]
+    : "application/octet-stream";
+}
+
 /**
  * Nom disque d'un justificatif téléversé : base et extension réduites aux caractères admis par
  * `isSettlementProofReference`, quel que soit le nom d'origine. `unique` (horodatage + aléa) évite
  * les collisions.
  */
-export function settlementProofFileName(originalName: string | null | undefined, unique: string): string {
+export function settlementProofFileName(originalName: string | null | undefined, unique: string, mimeType: string): string {
   const original = originalName || "proof";
-  const extension = path
-    .extname(original)
-    .toLowerCase()
-    .replace(/[^a-z0-9.]/g, "_")
-    .slice(0, 10);
   const baseName = original
     .slice(0, original.length - path.extname(original).length)
     .replace(/[^a-zA-Z0-9._-]/g, "_")
     .slice(0, 40);
-  return `${baseName || "proof"}-${unique}${extension.length > 1 ? extension : ".bin"}`;
+  // L'extension vient du type déclaré, jamais du nom d'origine (un « .html » ne s'écrit pas en .html).
+  const extension = Object.hasOwn(SETTLEMENT_PROOF_EXTENSION_BY_MIME, mimeType) ? SETTLEMENT_PROOF_EXTENSION_BY_MIME[mimeType] : ".bin";
+  return `${baseName || "proof"}-${unique}${extension}`;
 }
 
 export function isSettlementProofReference(value: unknown): value is string {
