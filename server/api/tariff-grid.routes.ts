@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { idSchema } from "@shared/contracts/common";
-import { TARIFF_GRID_ROLES } from "@shared/constants/roles";
+import { TARIFF_GRID_READ_ROLES, TARIFF_GRID_WRITE_ROLES } from "@shared/constants/roles";
 import { tariffBodyShape, tariffListQuerySchema, tariffSuggestQuerySchema } from "@shared/contracts/tariff-grid";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
@@ -15,7 +15,7 @@ const bodySchema = z.object(tariffBodyShape).strict();
 
 const userIdOf = (req: unknown) => (req as { user: { id: number } }).user.id;
 
-router.get("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_ROLES]), async (req, res, next) => {
+router.get("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_READ_ROLES]), async (req, res, next) => {
   try {
     const query = tariffListQuerySchema.safeParse(req.query);
     if (!query.success) throw new AppError(400, "Filtre invalide.");
@@ -26,7 +26,7 @@ router.get("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_
 });
 
 /** Suggestion de prix : lecture seule, ne modifie ni la mission ni la facture. */
-router.get("/tariff-grid/suggest", requireFeature("pricing"), authorize([...TARIFF_GRID_ROLES]), async (req, res, next) => {
+router.get("/tariff-grid/suggest", requireFeature("pricing"), authorize([...TARIFF_GRID_READ_ROLES]), async (req, res, next) => {
   try {
     const query = tariffSuggestQuerySchema.safeParse(req.query);
     if (!query.success) throw new AppError(400, "Paramètres de suggestion invalides.");
@@ -36,7 +36,7 @@ router.get("/tariff-grid/suggest", requireFeature("pricing"), authorize([...TARI
   }
 });
 
-router.post("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_ROLES]), async (req, res, next) => {
+router.post("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_WRITE_ROLES]), async (req, res, next) => {
   try {
     const body = bodySchema.safeParse(req.body);
     if (!body.success) throw new AppError(400, "Données de tarif invalides.");
@@ -46,7 +46,7 @@ router.post("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID
   }
 });
 
-router.put("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_ROLES]), async (req, res, next) => {
+router.put("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_WRITE_ROLES]), async (req, res, next) => {
   try {
     const id = idSchema.safeParse(req.params.id);
     const body = bodySchema.safeParse(req.body);
@@ -58,7 +58,7 @@ router.put("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_G
 });
 
 /** Désactive le tarif (historique conservé). */
-router.delete("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_ROLES]), async (req, res, next) => {
+router.delete("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_WRITE_ROLES]), async (req, res, next) => {
   try {
     const id = idSchema.safeParse(req.params.id);
     if (!id.success) throw new AppError(400, "Tarif invalide.");

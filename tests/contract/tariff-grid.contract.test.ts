@@ -74,17 +74,22 @@ afterAll(async () => {
 });
 
 describe("grille tarifaire", { timeout: 120000 }, () => {
-  it("rôles : 401 sans session, 403 hors admin et direction, lecture et écriture ouvertes à ces deux rôles", async () => {
+  it("rôles : lecture admin, direction, secrétariat et logistique ; écriture admin et direction ; le reste 403", async () => {
     expect((await call("GET", TARIFF_GRID_PATH)).status).toBe(401);
-    for (const role of ["logistics", "secretary", "technician", "client"]) {
+    for (const role of ["technician", "client"]) {
       expect((await call("GET", TARIFF_GRID_PATH, role)).status).toBe(403);
-      expect((await call("POST", TARIFF_GRID_PATH, role, tariff())).status).toBe(403);
       expect((await call("GET", suggestPath(), role)).status).toBe(403);
     }
-    for (const role of ["admin", "management"]) {
+    for (const role of ["admin", "management", "secretary", "logistics"]) {
       const res = await call("GET", TARIFF_GRID_PATH, role);
       expect(res.status).toBe(200);
       tariffListResponseSchema.parse(res.body);
+      expect((await call("GET", suggestPath(), role)).status).toBe(200);
+    }
+    for (const role of ["secretary", "logistics", "technician", "client"]) {
+      expect((await call("POST", TARIFF_GRID_PATH, role, tariff())).status).toBe(403);
+      expect((await call("PUT", TARIFF_GRID_PATH + "/1", role, tariff())).status).toBe(403);
+      expect((await call("DELETE", TARIFF_GRID_PATH + "/1", role)).status).toBe(403);
     }
   });
 
@@ -94,6 +99,7 @@ describe("grille tarifaire", { timeout: 120000 }, () => {
       { id: 5 },
       { pricingUnit: "kg" },
       { unitPrice: -1 },
+      { unitPrice: 10.5 },
       { validFrom: "2026-02-30" },
       { validFrom: "2026-05-01", validTo: "2026-04-01" },
       { origin: "  " },
@@ -148,8 +154,19 @@ describe("grille tarifaire", { timeout: 120000 }, () => {
     const out = await call("GET", suggestPath().replace("2026-06-01", "2020-01-01"), "admin");
     expect(out.body.suggestion).toBeNull();
     expect((await call("GET", `${TARIFF_SUGGEST_PATH}?destination=x`, "admin")).status).toBe(400);
+    expect((await call("GET", `${TARIFF_SUGGEST_PATH}?origin=${origin}&destination=${destination}`, "admin")).status).toBe(200);
     const after = await db.select().from(tariffGrid).where(eq(tariffGrid.origin, origin));
     expect(after).toEqual(before);
+  });
+
+  it("un tarif désactivé ne bloque plus sa période (création et réactivation)", async () => {
+    const first = await call("POST", TARIFF_GRID_PATH, "admin", tariff({ cargoType: "Riz", validFrom: "2024-01-01", validTo: "2024-12-31" }));
+    expect(first.status).toBe(201);
+    expect((await call("DELETE", `${TARIFF_GRID_PATH}/${first.body.id}`, "admin")).status).toBe(200);
+    const again = await call("POST", TARIFF_GRID_PATH, "admin", tariff({ cargoType: "Riz", validFrom: "2024-01-01", validTo: "2024-12-31", unitPrice: 80 }));
+    expect(again.status).toBe(201);
+    const reactivate = tariff({ cargoType: "Riz", validFrom: "2024-01-01", validTo: "2024-12-31", active: true });
+    expect((await call("PUT", `${TARIFF_GRID_PATH}/${first.body.id}`, "admin", reactivate)).status).toBe(409);
   });
 
   it("désactivation : l'historique reste, le tarif n'est plus suggéré", async () => {

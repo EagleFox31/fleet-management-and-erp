@@ -33,6 +33,9 @@ describe("O3 : tariff_grid, init-database, migration jumelle et Drizzle", () => 
     expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS tariff_grid (");
     expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS tariff_grid_key_unique");
+    expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
+    expect(sql).toContain("unit_price numeric(15,0)");
+    expect(sql).toContain("WHERE active;");
     expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
   });
 

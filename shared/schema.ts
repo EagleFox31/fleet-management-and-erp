@@ -417,7 +417,7 @@ export const parts = pgTable("parts", {
   minQuantity: integer("min_quantity").notNull().default(5),
   unit: text("unit").notNull().default("pièce"),
   location: text("location"),
-  unitPrice: numeric("unit_price", { precision: 15, scale: 2 }).notNull().default("0"),
+  unitPrice: numeric("unit_price", { precision: 15, scale: 0 }).notNull().default("0"),
   // Rattachement fournisseur: `supplierId` est la vérité. `supplier` (nom en clair)
   // est conservé en transition pour l'affichage des pièces non encore rattachées
   // et pour la reprise historique. Ne plus l'utiliser comme clé de regroupement.
@@ -1664,7 +1664,7 @@ export const tariffGrid = pgTable("tariff_grid", {
     sql`(lower(${table.destination}))`,
     sql`(lower(${table.cargoType}))`,
     sql`(${table.validFrom})`,
-  ),
+  ).where(sql`${table.active}`),
 ]);
 export type TariffGridRow = typeof tariffGrid.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;

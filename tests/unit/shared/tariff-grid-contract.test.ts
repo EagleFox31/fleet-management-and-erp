@@ -57,6 +57,7 @@ describe("tariffBodySchema", () => {
     expect(tariffBodySchema.safeParse(ok).success).toBe(true);
     expect(tariffBodySchema.safeParse({ ...ok, pricingUnit: "kg" }).success).toBe(false);
     expect(tariffBodySchema.safeParse({ ...ok, unitPrice: -1 }).success).toBe(false);
+    expect(tariffBodySchema.safeParse({ ...ok, unitPrice: 10.5 }).success).toBe(false);
     expect(tariffBodySchema.safeParse({ ...ok, validFrom: "2026-02-30" }).success).toBe(false);
     expect(tariffBodySchema.safeParse({ ...ok, origin: " " }).success).toBe(false);
   });

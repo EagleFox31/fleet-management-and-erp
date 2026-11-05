@@ -19,3 +19,10 @@ désactivation) et `GET /api/tariff-grid/suggest` en lecture seule. Drapeau `pri
 
 ## Pourquoi
 Le prix suggéré ne doit jamais s'appliquer seul à une facture : l'écran (lot 2) proposera, l'utilisateur décide.
+
+## Réserves de relecture (corrigées)
+- Rôles séparés : lecture admin, direction, secrétariat, logistique (taux clients en lecture seule) ; écriture admin et direction.
+- `SET LOCAL lock_timeout = '5s'` en tête du SQL (création et réconciliation).
+- Prix XAF entier : `numeric(15,0)` et `z.number().int()`.
+- Chevauchement : seuls les tarifs actifs comptent ; l'index unique devient partiel (`WHERE active`), un tarif désactivé libère sa période. Réactiver un tarif qui chevauche un actif : 409.
+- Date par défaut de la suggestion : jour calendaire de Douala (`Africa/Douala`), plus UTC.

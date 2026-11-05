@@ -56,7 +56,7 @@ const valuesOf = (body: TariffBody) => ({
   destination: body.destination,
   cargoType: body.cargoType ?? "",
   pricingUnit: body.pricingUnit,
-  unitPrice: body.unitPrice.toFixed(2),
+  unitPrice: String(body.unitPrice),
   validFrom: body.validFrom,
   validTo: body.validTo ?? null,
   active: body.active ?? true,
@@ -69,6 +69,7 @@ function periodOrder(body: TariffBody) {
 
 /** Refuse le chevauchement de périodes pour la même clé (client, trajet, marchandise). Appelé sous verrou. */
 async function assertNoOverlap(tx: Pick<typeof db, "select">, body: TariffBody, ignoreId?: number) {
+  if (body.active === false) return; // un tarif inactif ne bloque rien et n'est pas bloqué
   const same = await tx
     .select()
     .from(tariffGrid)
@@ -78,6 +79,7 @@ async function assertNoOverlap(tx: Pick<typeof db, "select">, body: TariffBody, 
         sql`lower(${tariffGrid.origin}) = lower(${body.origin})`,
         sql`lower(${tariffGrid.destination}) = lower(${body.destination})`,
         sql`lower(${tariffGrid.cargoType}) = lower(${body.cargoType ?? ""})`,
+        eq(tariffGrid.active, true),
         ignoreId ? ne(tariffGrid.id, ignoreId) : undefined,
       ),
     );
@@ -135,7 +137,8 @@ export async function suggestTariff(query: {
   cargoType?: string;
   date?: string;
 }): Promise<TariffSuggestion> {
-  const date = query.date ?? new Date().toISOString().slice(0, 10);
+  // Jour calendaire de Douala, pas celui d'UTC : après 23h à Douala, UTC est déjà la veille.
+  const date = query.date ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Douala" }).format(new Date());
   const rows = await listTariffs({ activeOnly: true });
   return { suggestion: pickTariff(rows, { ...query, date }) };
 }

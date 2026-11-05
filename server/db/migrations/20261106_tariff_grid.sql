@@ -3,6 +3,7 @@
 -- Chevauchement de périodes refusé par le service (409) ; l'index unique n'attrape que le doublon exact.
 -- Index unique : un client NULL (tarif générique) compte comme un client (COALESCE), les NULL étant distincts en PostgreSQL.
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS tariff_grid (
   id serial PRIMARY KEY,
@@ -11,7 +12,7 @@ CREATE TABLE IF NOT EXISTS tariff_grid (
   destination text NOT NULL,
   cargo_type text NOT NULL DEFAULT '',
   pricing_unit text NOT NULL,
-  unit_price numeric(15,2) NOT NULL,
+  unit_price numeric(15,0) NOT NULL,
   valid_from date NOT NULL,
   valid_to date,
   active boolean NOT NULL DEFAULT true,
@@ -26,7 +27,8 @@ CREATE TABLE IF NOT EXISTS tariff_grid (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS tariff_grid_key_unique
-  ON tariff_grid ((CASE WHEN client_id IS NULL THEN 0 ELSE client_id END), (lower(origin)), (lower(destination)), (lower(cargo_type)), (valid_from));
+  ON tariff_grid ((CASE WHEN client_id IS NULL THEN 0 ELSE client_id END), (lower(origin)), (lower(destination)), (lower(cargo_type)), (valid_from))
+  WHERE active;
 
 DO $$
 DECLARE

@@ -19,7 +19,7 @@ export const PRICING_UNIT_LABELS: Record<PricingUnit, string> = {
 
 const day = isoDateSchema;
 const place = z.string().trim().min(1).max(120);
-const unitPrice = z.number().finite().min(0).max(9_999_999_999_999);
+const unitPrice = z.number().int().min(0).max(9_999_999_999_999);
 
 /** Champs saisissables : jamais d'id, d'auteur ni d'horodatage (posés par le serveur). */
 export const tariffBodyShape = {
