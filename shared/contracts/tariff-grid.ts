@@ -53,12 +53,22 @@ export const tariffRowSchema = z.object({
 });
 export type TariffRow = z.infer<typeof tariffRowSchema>;
 
-export const tariffListResponseSchema = z.object({ rows: z.array(tariffRowSchema) });
+/** Pagination de la liste : `rows` reste la page courante, `total` compte toutes les lignes du filtre. */
+export const TARIFF_PAGE_SIZE_DEFAULT = 50;
+export const TARIFF_PAGE_SIZE_MAX = 200;
+export const tariffListResponseSchema = z.object({
+  rows: z.array(tariffRowSchema),
+  total: z.number().int().min(0),
+  limit: z.number().int().min(1).max(TARIFF_PAGE_SIZE_MAX),
+  offset: z.number().int().min(0),
+});
 export type TariffListResponse = z.infer<typeof tariffListResponseSchema>;
 
 export const tariffListQuerySchema = z.object({
   clientId: idSchema.optional(),
   activeOnly: z.enum(["true", "false"]).optional(),
+  limit: z.coerce.number().int().min(1).max(TARIFF_PAGE_SIZE_MAX).optional(),
+  offset: z.coerce.number().int().min(0).max(1_000_000).optional(),
 });
 
 export const tariffSuggestQuerySchema = z.object({
