@@ -112,7 +112,8 @@ const checkRolePermission = (
 };
 
 const getValidationRolesByScope = (scope: InvoiceWorkflowScope): readonly UserRole[] => {
-  if (scope === "parts") return ["admin", "warehouse", "workshop_manager"];
+  // Pas de chef d'atelier : la garde de montage (PROCUREMENT_ROLES) le refuse avant.
+  if (scope === "parts") return ["admin", "warehouse"];
   if (scope === "non_parts") return ["admin", "secretary", "logistics"];
   return ["admin", "secretary"];
 };
