@@ -330,7 +330,7 @@ describe("téléchargement d'un document de workflow : nom d'origine dans l'en-t
     const document = await seedWorkflowDocument("B", "cd-unicode.pdf", original);
     const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
     expect(download.status).toBe(200);
-    expect(download.headers.get("content-disposition")).toMatch(/^inline;/);
+    expect(download.headers.get("content-disposition")).toMatch(/^attachment;/);
     expect(filenameOf(download.headers.get("content-disposition"))).toBe(original);
   });
 
@@ -353,6 +353,6 @@ describe("téléchargement d'un document de workflow : nom d'origine dans l'en-t
     const document = await seedWorkflowDocument("B", "cd-ascii.pdf", "facture-2026.pdf");
     const download = await call("GET", `/api/workflows/documents/${document.id}`, { actor: "clientB" });
     expect(download.status).toBe(200);
-    expect(download.headers.get("content-disposition")).toBe('inline; filename="facture-2026.pdf"');
+    expect(download.headers.get("content-disposition")).toBe('attachment; filename="facture-2026.pdf"');
   });
 });
