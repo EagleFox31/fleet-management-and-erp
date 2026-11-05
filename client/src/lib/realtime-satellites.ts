@@ -114,7 +114,7 @@ export const SATELLITE_GROUPS = {
     prefixes: ["/api/fuel-records/vehicle/"],
   },
   /** Chiffre d'affaires (factures client). */
-  clientMoney: { keys: [MANAGEMENT_DASHBOARD, "/api/finance/invoices-awaiting-payment"] },
+  clientMoney: { keys: [MANAGEMENT_DASHBOARD, "/api/finance/invoices-awaiting-payment", "/api/finance/withholdings"] },
   /** Dettes fournisseurs (factures fournisseur et règlements). */
   supplierMoney: {
     keys: [

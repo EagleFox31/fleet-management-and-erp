@@ -9,3 +9,13 @@
 **Pourquoi.** Plusieurs gardes ont été resserrées (fournisseurs, commandes, factures fournisseur, export Word, prix d'achat du véhicule, données personnelles des chauffeurs, cloison client). L'ancienne page n'était plus fidèle.
 
 **Comment tester.** Ouvrir le fichier dans un navigateur : choisir chaque profil, vérifier le décompte et les cartes ; ouvrir `#client` sur un téléphone (390 px, aucun défilement horizontal) ; basculer en mode sombre du système. Aucune ressource externe hors Google Fonts, aucun emoji.
+
+## 2026-11-05 — Écran Retenues à la source (lecture seule)
+
+**Quoi.** Écran `/finance/withholdings` : filtres période et client, totaux, récapitulatif par client, détail par facture. Entrée de menu et route pour les rôles de lecture des créances, derrière le drapeau `finance`. La clé `/api/finance/withholdings` est un satellite du groupe `clientMoney` (dépôt de facture, taux de retenue).
+
+**Comment.** Composant `client/src/components/finance/withholdings-summary.tsx`, déclaré dans `lot-screens.ts` et `lot-screen-components.ts`. Contrat `shared/contracts/finance-withholdings.ts` via `useContractQuery`. Texte d'aide : la période porte sur la date de dépôt chez le client.
+
+**Pourquoi.** Déclaration fiscale et rapprochement des attestations de retenue.
+
+**Comment tester.** Ouvrir l'écran avec un compte admin, direction, secrétariat ou logistique (drapeau finance actif) : mois en cours par défaut, aucune action. Autre rôle : pas de menu, route introuvable. Tests : `tests/unit/client/withholdings-summary.test.ts`.

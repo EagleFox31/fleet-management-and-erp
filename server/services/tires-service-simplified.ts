@@ -12,6 +12,7 @@ import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
+import { STAFF_ROLES } from "@shared/constants/roles";
 const log = moduleLogger("tires");
 
 const createdByUser = alias(users, "tires_created_by_user");
@@ -49,7 +50,7 @@ function broadcastTireUpdate(
     entity: eventType.startsWith("vehicle_tire") ? "vehicle_tire" : "tire",
     entityId,
     payload,
-    scope: { type: "broadcast" },
+    scope: { type: "roles", roles: [...STAFF_ROLES] },
   });
 }
 

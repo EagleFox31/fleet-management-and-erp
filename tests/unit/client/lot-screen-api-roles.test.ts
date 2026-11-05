@@ -133,6 +133,8 @@ const SCREEN_APIS: Record<string, Declaration> = {
     ],
   },
   "pending-invoices": { apis: [{ file: "pending-invoices.routes.ts", path: "/billing/pending-invoices" }] },
+  // Lecture seule pour tous les rôles de lecture : aucune écriture.
+  "finance-withholdings": { apis: [{ file: "finance-receivables.routes.ts", path: "/finance/withholdings" }] },
   // Direction en lecture seule ; dépôt réservé à admin et secrétariat.
   "invoices-awaiting-payment": {
     apis: [{ file: "finance-receivables.routes.ts", path: "/finance/invoices-awaiting-payment" }],
