@@ -20,6 +20,8 @@ import {
   tireInspections,
   tireRotationDetails,
   tireRotations,
+  treasuryAccounts,
+  treasuryEntries,
   vehicleAcquisitionWorkflows,
   vehicleTires,
   users,
@@ -210,6 +212,15 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
   await db.delete(missions).where(inArray(missions.createdBy, testUsers));
+  // Journal de trésorerie saisi par un compte de test : écritures d'abord (elles référencent les
+  // comptes), y compris celles posées sur un compte créé par un compte de test, puis les comptes.
+  const testTreasuryAccounts = db
+    .select({ id: treasuryAccounts.id })
+    .from(treasuryAccounts)
+    .where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
+  await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts));
+  await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
+  await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
   // Même cas que cleanupCreated : historique de statut tracé par un compte de test orphelin.
   await db.delete(statusHistory).where(inArray(statusHistory.updatedById, testUsers));
   // Réduit la fenêtre de course avec les alertes écrites en tâche de fond.
