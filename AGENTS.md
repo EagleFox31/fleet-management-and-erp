@@ -362,7 +362,10 @@ Notes :
   tout `mkdir`, avec pour référence la racine possédée (`uploads/documents`) : un dossier
   calculé depuis un id (`vehicle-<id>`) ne sert jamais de référence, car s'il est lui-même un
   lien il se résout et passe. Une borne lexicale seule (`isInsideDirectory`) ne suffit plus
-  pour un accès disque neuf.
+  pour un accès disque neuf. Pour une suppression dans `server/api`, c'est vérifié :
+  `tests/unit/server/upload-delete-hygiene.test.ts` exige une borne qui résout les liens.
+  Une route multer de `server/api` suit le patron drapeau + `finally` : vérifié par
+  `tests/unit/server/multer-lifecycle-hygiene.test.ts`.
   Risque résiduel accepté : un lien créé entre le contrôle et l'accès, ce qui suppose déjà
   un accès au disque.
   Un fichier reçu par multer n'est gardé que si une écriture validée le référence : drapeau

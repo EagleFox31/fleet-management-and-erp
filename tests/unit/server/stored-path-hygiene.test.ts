@@ -14,8 +14,6 @@ import { fileAccessKey, renamedAccessImports, scanFileAccesses, type FileAccessS
 const UNBOUNDED_FROZEN: Record<string, string> = {
   "server/api/document-renewals.routes.ts:removeUploadedProof:unlinkSync":
     "req.file.path : fichier que multer vient d'écrire pour cette requête, jamais une valeur de la base",
-  "server/api/supplier-invoices.routes.ts:removeUploadedProof:unlinkSync":
-    "req.file.path : fichier que multer vient d'écrire pour cette requête, jamais une valeur de la base",
   "server/services/workflow-document-service.ts:saveWorkflowDocument:rmSync":
     "nettoie le fichier que la même fonction vient d'écrire (sessionId contrôlé par isSafePathSegment)",
   "server/services/workflow-document-service.ts:cleanupAbandonedWorkflowDocuments:rmSync":
