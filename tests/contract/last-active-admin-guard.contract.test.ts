@@ -332,7 +332,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     expect(await listActiveAdminIds()).toHaveLength(1);
   });
 
-  it("le dernier admin actif ne se désactive pas (400) : il reste actif", async (ctx) => {
+  it("un admin ne se désactive pas lui-même (400, garde d'auto-désactivation) : il reste actif", async (ctx) => {
     await isolateAdmins();
     const a = await newAdmin();
     const b = await newAdmin();
