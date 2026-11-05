@@ -43,7 +43,6 @@ import {
   vehicles,
 } from "@shared/schema";
 import { withLogContext } from "../lib/error-log-context";
-import { parseRouteId } from "../lib/route-id";
 import { canAccessOwned, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
 
 const log = moduleLogger("document-renewals");
