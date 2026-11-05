@@ -13,7 +13,7 @@
 | carte CPC : foreground sur carte | - | 19,76 / 17,13 |
 | carte CPC : muted-foreground sur carte | - | 4,80 / 6,99 |
 
-Le texte `text-destructive` n'existe plus : il est remplace par `--destructive-text`, jeton propre qui ne depend pas de `--destructive`. Aucun texte n'est degrade par l'assombrissement ; seuls les teintes `/10`, bordures et anneaux deviennent legerement plus soutenus en mode clair.
+Le texte `text-destructive` n'existe plus : il est remplace par `--destructive-text`, jeton propre qui ne depend pas de `--destructive`. Une exception : `muted-foreground` sur `bg-destructive/5` (error-boundary) passait de 4,499 a 4,42 en clair ; ce paragraphe passe en `text-foreground`. Autrement, aucun texte n'est degrade ; seuls les teintes `/10`, bordures et anneaux deviennent legerement plus soutenus en mode clair.
 
 ## Pourquoi
 Rouge clair `60,2 %` : blanc dessus 3,60 < 4,5 (AA). Les 3 `hover:text-destructive` (users-table, settings, workflow-documents-viewer) a verifier a l'oeil.

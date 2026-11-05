@@ -65,7 +65,7 @@ export class ErrorBoundary extends React.Component<
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="text-center text-sm text-muted-foreground"
+                  className="text-center text-sm text-foreground"
                 >
                   Une erreur inattendue s'est produite dans l'application. 
                   Ne vous inquiétez pas, ce n'est probablement qu'un petit problème temporaire.
