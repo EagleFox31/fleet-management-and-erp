@@ -28,13 +28,10 @@ const LOOSE_PARAM_READ = /\b(?:Number\.)?parseInt\(\s*req\.params\b|\bNumber\(\s
 const FROZEN: Record<string, number> = {
   "admin-users-guard.routes.ts": 1,
   "document-renewals.routes.ts": 1,
-  "drivers-management.routes.ts": 1,
-  "drivers.routes.ts": 2,
   "fuel-card.routes.ts": 2,
   "part-requirements.routes.ts": 3,
   "parts-catalog.routes.ts": 3,
   "supplier-invoices.routes.ts": 5,
-  "suppliers.routes.ts": 1,
   "vehicles.routes.ts": 2,
   "work-order-items.routes.ts": 4,
   "work-order-parts.routes.ts": 5,
