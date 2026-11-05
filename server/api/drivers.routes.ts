@@ -27,20 +27,25 @@ const broadcastDriverCpcUpdate = async (
     return;
   }
 
-  const driverUserId = options?.driverId ? await driverUserIdOf(options.driverId) : null;
-  for (const scope of driverEventScopes(driverUserId)) {
-    broadcastUpdate(eventType, {
-      version: 1,
-      entity: "driver",
-      entityId: options?.driverId ?? null,
-      payload,
-      scope,
-      actor: {
-        userId: options?.actorUserId ?? null,
-        role: options?.actorRole ?? null,
-      },
-      emittedAt: new Date().toISOString(),
-    });
+  // Appelée en `void` : une exception ne doit jamais devenir un rejet non géré.
+  try {
+    const driverUserId = options?.driverId ? await driverUserIdOf(options.driverId) : null;
+    for (const scope of driverEventScopes(driverUserId)) {
+      broadcastUpdate(eventType, {
+        version: 1,
+        entity: "driver",
+        entityId: options?.driverId ?? null,
+        payload,
+        scope,
+        actor: {
+          userId: options?.actorUserId ?? null,
+          role: options?.actorRole ?? null,
+        },
+        emittedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    log.error({ err, driverId: options?.driverId ?? null, eventType }, "Diffusion temps réel chauffeur impossible");
   }
 };
 

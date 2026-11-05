@@ -118,6 +118,18 @@ describe("portée des trames fournisseurs, pneus, chauffeurs", { timeout: 120000
     const driverId = res.body.id as number;
     driverIds.push(driverId);
 
+    const concerned = (eventType: string) => {
+      const got = recipients(eventType);
+      expect(got, eventType).toContain("driver");
+      expect(got, eventType).not.toContain("other_driver");
+      expect(got, eventType).not.toContain("client");
+      expect(got.filter((a) => a !== "driver").sort(), eventType).toEqual(actorsOfRoles(MISSION_EVENT_ROLES).sort());
+    };
+    concerned("driver_created");
+    const upd = await session.call("PATCH", `/api/drivers/${driverId}`, { actor: "admin", body: { firstName: "Test2" } });
+    expect(upd.status, JSON.stringify(upd.body)).toBeLessThan(300);
+    concerned("driver_updated");
+
     captured.length = 0;
     const cpc = await session.call("POST", `/api/drivers/${driverId}/update-cpc`, {
       actor: "admin",
