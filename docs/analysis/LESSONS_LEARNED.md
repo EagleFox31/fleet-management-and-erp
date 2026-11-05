@@ -2978,3 +2978,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : `parseMissionId` est la seule lecture de `:id` (chiffres seuls, entier sûr, positif, sinon 400 via `AppError`) ; la garde l'appelle et tous les handlers l'utilisent.
 - **Prévention vérifiable** : `tests/contract/mission-id-strict.contract.test.ts` (rouge avant, vert après) ; `tests/unit/server/router-param-strict.test.ts` échoue si un `router.param` fait un `return next()` nu.
 - **Leçon généralisée** : une garde refuse ce qu'elle ne sait pas lire (fail closed). Un paramètre se lit en un seul endroit, la garde et les handlers partagent la même fonction ; tout nouveau `router.param` suit ce contrat.
+
+## 2026-11-05 — Cliquet textuel contourné par une fonction enveloppe (near miss)
+
+- **Contexte** : le cliquet `route-id-parse-hygiene` (lot 1 de #360) comptait les `parseInt(req.params…)` dans `server/api`. Le fichier `drivers-management.routes.ts` en était sorti avec 0, alors que `parseDriverId(req.params.id)` faisait `Number.parseInt` et lisait `"1abc"` comme 1. De ce fait, `DELETE /api/drivers/<id>abc` supprimait le chauffeur `<id>`. Le même défaut existait dans `parseClientId`, `parseAlertId` et `idParam` (`server/lib/route-helpers.ts`, 21 appels).
+- **Cause racine** : le garde-fou cherchait une forme textuelle de l'appel, pas le comportement. Une fonction intermédiaire suffisait à le rendre aveugle.
+- **Classification** : garde-fou incomplet, faux négatif structurel ; sécurité et intégrité (mauvais objet visé).
+- **Résolution** : tous ces parseurs délèguent à `parseRouteId`. Le service CPC répond 404 au lieu de 500 pour un chauffeur absent.
+- **Prévention vérifiable** : le cliquet lit l'AST. Il compte chaque appel `f(req.params…)` vers une fonction locale, ou importée par chemin relatif, qui convertit (`parseInt`, `Number`) sans appeler `parseRouteId`. Il est rouge par mutation : avec l'ancien `parseDriverId`, drivers-management passe à 5 ; avec l'ancien `idParam`, fault-catalog passe à 6. Le contrat `tests/contract/route-id-strict-lot4.contract.test.ts` couvre ces routes.
+- **Leçon généralisée** : un cliquet qui interdit une construction doit suivre les fonctions qui l'enveloppent, sinon il ne mesure que le style. Avant de déclarer un fichier propre, prouver par mutation qu'une variante enveloppée le rend rouge.

@@ -8,6 +8,7 @@ import {
 } from "@shared/contracts/document-renewal-centers";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { assertCenterNameFree, cleanCenterName, DUPLICATE_CENTER_MESSAGE, isUniqueViolation } from "../lib/document-renewal-center-resolver";
 import { broadcastCenterChanged } from "../lib/document-renewal-center-events";
 import { moduleLogger } from "../lib/logger";
@@ -26,10 +27,13 @@ const CENTER_COLUMNS = {
   isActive: documentRenewalCenters.isActive,
 };
 
+/** Un id mal formé ne peut désigner aucun centre : 404, comme un id absent (contrat existant). */
 function parseCenterId(raw: string): number {
-  const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) throw new AppError(404, "Centre agréé introuvable.");
-  return id;
+  try {
+    return parseRouteId(raw, "Centre agréé introuvable.");
+  } catch {
+    throw new AppError(404, "Centre agréé introuvable.");
+  }
 }
 
 const EDITABLE_FIELDS = ["name", "documentType", "accreditationNumber", "address", "contact"];
