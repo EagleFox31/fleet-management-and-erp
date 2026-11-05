@@ -29,6 +29,7 @@ import {
   FINANCE_RECEIVABLE_READ_ROLES,
   FUEL_READ_ROLES,
   MISSION_OPERATIONS_READ_ROLES,
+  TARIFF_GRID_READ_ROLES,
   PENDING_INVOICE_ROLES,
   STAFF_ROLES,
   TIME_TRACKING_READ_ROLES,
@@ -156,6 +157,11 @@ export const LOT_SCREENS: readonly LotScreen[] = [
     id: "mission-operations", path: "/operations/tracking", title: "Suivi des opérations", task: "O1", feature: "operations-tracking",
     description: "Suivi des opérations par client : conteneur, BL, dates, durée, facturation.",
     roles: MISSION_OPERATIONS_READ_ROLES, menu: { group: "top", label: "Suivi des opérations", icon: ClipboardList },
+  },
+  {
+    id: "tariff-grid", path: "/operations/tariffs", title: "Grille tarifaire", task: "O3", feature: "pricing",
+    description: "Prix suggérés par client, trajet et marchandise, avec période de validité.",
+    roles: TARIFF_GRID_READ_ROLES, menu: { group: "top", label: "Grille tarifaire", icon: Tag },
   },
   // Entrée de menu en attente de l'alignement des menus (écarts n°2, 6 et 8).
   {

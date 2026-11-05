@@ -19,6 +19,7 @@ import {
   InvoicesAwaitingPaymentScreen,
   MissionOperationsScreen,
   PendingInvoicesScreen,
+  TariffGridScreen,
   TimeTrackingScreen,
   TireMovementsScreen,
 } from "@/pages/lot/screens";
@@ -43,4 +44,5 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "pending-invoices": PendingInvoicesScreen,
   "invoices-awaiting-payment": InvoicesAwaitingPaymentScreen,
   "mission-operations": MissionOperationsScreen,
+  "tariff-grid": TariffGridScreen,
 };
