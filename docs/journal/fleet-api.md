@@ -580,3 +580,17 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - même ordre de verrous partout (mission, puis budget) : une correction et une approbation simultanées ne s'interbloquent pas.
 - **Pourquoi** : on pouvait encore décaisser le budget d'une mission annulée ; une annulation concurrente attend désormais l'écriture du budget, ou la précède et la fait refuser.
 - **Preuve** : contrat `mission-budgets` 16/16, dont « mission close après la saisie » (correction, approbation, décaissement 409, budget intact) ; `tsc` : 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1b) : barème par destination
+- **Quoi** :
+  - table `mission_destinations` (code, libellé, litres, FDR, active) : liste fermée, semée avec les cinq destinations relevées ;
+  - `GET /api/mission-budgets/destinations` : destinations actives, mêmes rôles de lecture que les budgets ;
+  - saisie : `destinationId` facultatif ; il pré-remplit litres et FDR absents du corps, une valeur saisie l'emporte ; sans destination, litres et FDR restent requis ;
+  - destination retirée ou inconnue : 400 ; correction : changer ou retirer la destination ne réécrit pas les montants.
+- **Comment** :
+  - migration jumelle de `MISSION_DESTINATIONS_SQL`, appliquée après `MISSION_BUDGETS_SQL` et avant le relevé des contraintes ;
+  - `mission_destinations_amounts_check` (NOT VALID puis VALIDATE) et `mission_destinations_code_unique` réconciliées avant le seed, qui en dépend (`ON CONFLICT (code) DO NOTHING`) ;
+  - le pré-remplissage se fait dans la transaction de saisie, après le verrou de la mission ;
+  - `tests/support/cleanup.ts` supprime les destinations écrites par un compte de test, après avoir détaché les budgets qui les visent.
+- **Pourquoi** : choix à la main dans une liste fermée, sans rapprochement automatique avec l'adresse de la mission ; le seed ne réécrit jamais une valeur corrigée depuis.
+- **Preuve** : contrat `mission-budgets` 20/20 (liste par rôle, retirée absente, pré-remplissage, valeur saisie prioritaire, 400, correction) ; unitaires du schéma et du contrat 22/22 ; `tsc` : 0 erreur.
