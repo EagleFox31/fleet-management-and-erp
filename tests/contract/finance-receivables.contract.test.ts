@@ -309,4 +309,21 @@ describe("fiche client /api/clients : taux de retenue réservés à la lecture f
     expect(one.status).toBe(200);
     expect(one.body).toMatchObject({ withholdingIsBase: "ttc", withholdingUpdatedBy: userIds.get("secretary") });
   });
+
+  // Les taux ne s'écrivent que par PATCH /api/finance/clients/:id/withholding : la fiche les ignore.
+  it.each(["admin", "secretary", "logistics"])("%s : PATCH de la fiche ignore les taux envoyés", async (role) => {
+    const clientId = await newClient("ttc");
+    const rates = (body: Record<string, unknown>) => Object.fromEntries(FINANCE_KEYS.map((k) => [k, body[k]]));
+    const before = rates((await call("GET", `/api/clients/${clientId}`, "admin")).body);
+    const forged = { withholdingVatRate: 0, withholdingIsRate: 0, withholdingIsBase: "ht", withholdingUpdatedBy: userIds.get(role) };
+    const name = `Client fiche ${role} ${Date.now()}`;
+    const res = await call("PATCH", `/api/clients/${clientId}`, role, { name, ...forged });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe(name);
+    expect((await call("PATCH", `/api/clients/${clientId}`, role, forged)).status).toBe(400);
+    const after = (await call("GET", `/api/clients/${clientId}`, "admin")).body;
+    expect(after.name).toBe(name);
+    expect(rates(after)).toEqual(before);
+    expect(before).toMatchObject({ withholdingIsBase: "ttc", withholdingUpdatedBy: userIds.get("secretary") });
+  });
 });

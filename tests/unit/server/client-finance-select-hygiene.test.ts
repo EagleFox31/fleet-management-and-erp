@@ -12,9 +12,10 @@ import {
 /**
  * Champs finance (lot F1) : taux de retenue de `clients`, retenues et net figés de `client_invoices`.
  *
- * Une lecture entière de ces tables (`select()` vide, `{ client: clients }`, `getTableColumns(...)`,
- * `returning()` vide après insert, update ou delete, `db.query.clients`, `with: { client: true }`,
- * `SELECT *` / `c.*` en SQL brut) ramène ces colonnes ; si le résultat atteint une réponse ou une trame, elles
+ * Une lecture entière de ces tables (`select()` / `selectDistinct()` vides, `{ client: clients }` ou
+ * `{ clients }`, `getTableColumns(...)`, un `alias(clients, ...)` lu entier, `returning()` vide après
+ * insert, update ou delete, `db.query.clients`, `with: { client: true }`, `SELECT *` / `c.*` /
+ * `row_to_json(c)` en SQL brut, table nommée ou interpolée `${clients}`) ramène ces colonnes ; si le résultat atteint une réponse ou une trame, elles
  * fuient vers des rôles sans lecture finance. Passer par `publicClientColumns` /
  * `publicClientInvoiceColumns` (`server/lib/client-public-columns.ts`).
  *
@@ -44,34 +45,52 @@ function serverSources(dir: string): string[] {
   });
 }
 
+const SELECT_METHODS = [".select(", ".selectDistinct(", ".selectDistinctOn("] as const;
+
+/** Projection du dernier `select` / `selectDistinct` / `selectDistinctOn` avant `position`. */
 function selectArgument(source: string, position: number): string | null {
-  const start = source.lastIndexOf(".select(", position);
+  const [start, method] = SELECT_METHODS.map((m) => [source.lastIndexOf(m, position), m] as const).sort((a, b) => b[0] - a[0])[0];
   if (start < 0) return null;
   let depth = 0;
-  for (let i = start + ".select".length; i < source.length; i++) {
+  for (let i = start + method.length - 1; i < source.length; i++) {
     if (source[i] === "(") depth++;
     else if (source[i] === ")") {
       depth--;
-      if (depth === 0) return source.slice(start + ".select(".length, i);
+      if (depth !== 0) continue;
+      const argument = source.slice(start + method.length, i);
+      // `selectDistinctOn([colonnes], projection?)` : seule la projection compte.
+      return method === ".selectDistinctOn(" ? argument.replace(/^\s*\[[^\]]*\]\s*,?/, "") : argument;
     }
   }
   return null;
 }
 
+/** `const c = alias(clients, "c")` : `c` se lit comme la table. */
+function aliasesOf(source: string): [string, string][] {
+  const found: [string, string][] = [];
+  const declared = /\b([A-Za-z_$][\w$]*)\s*=\s*alias\(\s*(clients|clientInvoices)\s*,/g;
+  for (let m = declared.exec(source); m; m = declared.exec(source)) found.push([m[1], `alias:${m[2]}`]);
+  return found;
+}
+
 const isWholeRow = (argument: string, table: string) =>
   argument.trim() === "" ||
   new RegExp(`:\\s*${table}\\s*[,}\\n]`).test(argument) ||
+  // Forme abrégée : `{ m: missions, c }` vaut `{ c: c }`.
+  new RegExp(`(?:^|[{,])\\s*${table}\\s*(?:[,}]|$)`).test(argument) ||
   new RegExp(`getTableColumns\\(\\s*${table}\\s*\\)`).test(argument);
 
 export function findWholeReads(source: string, key: string): string[] {
   const found: string[] = [];
-  for (const table of TABLES) {
+  const targets: [string, string][] = [...TABLES.map((t): [string, string] => [t, t]), ...aliasesOf(source)];
+  for (const [table, label] of targets) {
     let ordinal = 0;
-    const fromTable = new RegExp(`\\.(?:from|leftJoin|innerJoin|rightJoin)\\(\\s*${table}\\s*[,)]`, "g");
+    const fromTable = new RegExp(`\\.(?:from|leftJoin|innerJoin|rightJoin|fullJoin)\\(\\s*${table}\\s*[,)]`, "g");
     for (let m = fromTable.exec(source); m; m = fromTable.exec(source)) {
       const argument = selectArgument(source, m.index);
-      if (argument !== null && isWholeRow(argument, table)) found.push(`${key}#${table}#${++ordinal}`);
+      if (argument !== null && isWholeRow(argument, table)) found.push(`${key}#${label}#${++ordinal}`);
     }
+    if (label !== table) continue;
     let returning = 0;
     const write = new RegExp(`\\.(?:insert|update|delete)\\(\\s*${table}\\s*\\)[^;]*?\\.returning\\(\\s*\\)`, "g");
     for (let m = write.exec(source); m; m = write.exec(source)) found.push(`${key}#${table}#returning#${++returning}`);
@@ -91,12 +110,17 @@ export function findWholeReads(source: string, key: string): string[] {
 const SQL_TABLES = ["clients", "client_invoices"] as const;
 const NOT_ALIAS = new Set(["where", "on", "join", "left", "right", "inner", "full", "cross", "group", "order", "limit", "for", "as", "using"]);
 
-/** SQL brut (`sql\`...\``, `pool.query("...")`) : `SELECT *`, `c.*` ou `clients.*` sur ces tables. */
+/**
+ * SQL brut (`sql\`...\``, `pool.query("...")`) sur ces tables, nommées en clair ou interpolées
+ * (`${clients}`) : `SELECT *`, `c.*` / `clients.*`, ou la ligne entière passée à `row_to_json`,
+ * `to_json(b)` ou `json(b)_agg`.
+ */
 export function findWholeSqlReads(source: string, key: string): string[] {
   const found: string[] = [];
   const counts: Record<string, number> = {};
   const literals = source.match(/`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g) ?? [];
-  for (const literal of literals) {
+  for (const raw of literals) {
+    const literal = raw.replace(/\$\{\s*clients\s*\}/g, "clients").replace(/\$\{\s*clientInvoices\s*\}/g, "client_invoices");
     for (const table of SQL_TABLES) {
       const from = new RegExp(`\\b(?:FROM|JOIN)\\s+"?${table}"?(?:\\s+(?:AS\\s+)?([a-z_][a-z0-9_]*))?`, "gi");
       const names = new Set<string>([table]);
@@ -107,7 +131,11 @@ export function findWholeSqlReads(source: string, key: string): string[] {
       }
       if (!mentioned) continue;
       const star = /\bSELECT\s+(?:DISTINCT\s+)?\*/i.test(literal) ||
-        [...names].some((n) => new RegExp(`(?:^|[^\\w.])"?${n}"?\\.\\*`).test(literal));
+        [...names].some(
+          (n) =>
+            new RegExp(`(?:^|[^\\w.])"?${n}"?\\.\\*`).test(literal) ||
+            new RegExp(`\\b(?:row_to_json|to_jsonb?|jsonb?_agg)\\(\\s*"?${n}"?\\s*[,)]`, "i").test(literal),
+        );
       if (star) found.push(`${key}#sql:${table}#${(counts[table] = (counts[table] ?? 0) + 1)}`);
     }
   }
@@ -153,5 +181,27 @@ describe("lectures entières de clients / client_invoices (champs finance)", () 
     expect(findWholeReads("sql`SELECT count(*) FROM client_invoices i`", "a")).toEqual([]);
     expect(findWholeReads("sql`SELECT m.* FROM missions m JOIN clients c ON c.id = m.client_id`", "a")).toEqual([]);
     expect(findWholeReads("db.query.missions.findMany({ with: { client: { columns: { id: true } } } })", "a")).toEqual([]);
+  });
+
+  it("le détecteur repère table interpolée, selectDistinct, alias et ligne passée à row_to_json", () => {
+    expect(findWholeReads("db.execute(sql`SELECT * FROM ${clients} WHERE id = ${id}`)", "a")).toEqual(["a#sql:clients#1"]);
+    expect(findWholeReads("sql`SELECT ${clientInvoices}.* FROM ${clientInvoices}`", "a")).toEqual(["a#sql:client_invoices#1"]);
+    expect(findWholeReads("db.selectDistinct().from(clients)", "a")).toEqual(["a#clients#1"]);
+    expect(findWholeReads("db.selectDistinct({ c: clients }).from(clients)", "a")).toEqual(["a#clients#1"]);
+    expect(findWholeReads("db.selectDistinctOn([clients.name]).from(clients)", "a")).toEqual(["a#clients#1"]);
+    expect(findWholeReads("const c = alias(clients, \"c\");\ndb.select().from(missions).leftJoin(c, eq(c.id, x))", "a")).toEqual([
+      "a#alias:clients#1",
+    ]);
+    expect(findWholeReads("const c = alias(clients, \"c\");\ndb.select({ m: missions, c }).from(missions).innerJoin(c, eq(c.id, x))", "a")).toEqual([
+      "a#alias:clients#1",
+    ]);
+    expect(findWholeReads("db.select({ clients }).from(clients)", "a")).toEqual(["a#clients#1"]);
+    expect(findWholeReads("sql`SELECT row_to_json(c) FROM clients c`", "a")).toEqual(["a#sql:clients#1"]);
+    expect(findWholeReads("sql`SELECT json_agg(i) FROM client_invoices i`", "a")).toEqual(["a#sql:client_invoices#1"]);
+    // Projections nommées : sans effet.
+    expect(findWholeReads("sql`SELECT ${clients.id}, ${clients.name} FROM ${clients}`", "a")).toEqual([]);
+    expect(findWholeReads("db.selectDistinctOn([clients.name], { id: clients.id }).from(clients)", "a")).toEqual([]);
+    expect(findWholeReads("const c = alias(clients, \"c\");\ndb.select({ id: c.id }).from(c)", "a")).toEqual([]);
+    expect(findWholeReads("sql`SELECT json_build_object('id', c.id) FROM clients c`", "a")).toEqual([]);
   });
 });

@@ -78,6 +78,19 @@
 - `server/storage.ts` (`deleteVehicle`) supprime les pleins du véhicule sans `reverseFuelLink`. Les écritures de trésorerie restent, avec un lien `fuel_record_id` à NULL. Hors de cette PR.
 - Les FK `client_id` et `supplier_id` de `treasury_entries` restent sans `ON DELETE` : aucune suppression ne les vise (avis de l'audit).
 
+## 5 novembre 2026, suppression définitive d'un véhicule
+
+### Quoi
+- `storage.deleteVehicle` contre-passe les écritures de trésorerie des pleins du véhicule avant de les supprimer, comme le fait la suppression unitaire d'un plein. Le solde net redevient nul sur la carte, et sur la source pour une recharge.
+- La suppression se fait en une seule transaction : un échec n'en laisse aucune partie appliquée.
+
+### Comment
+- Sous `lockFuelCard`, `reverseFuelLink(tx, pleinId, acteur)` est appelé pour chaque plein, puis viennent les suppressions dans l'ordre des clés étrangères. Les `console.*` de la méthode sont migrés vers `moduleLogger("storage")`.
+- La méthode n'a aujourd'hui aucun appelant. La route DELETE véhicule passe par `vehicle-deletion-service-trigger`, et `fuel_records.vehicle_id` reste en NO ACTION : un véhicule qui a des pleins y est refusé. Le correctif évite qu'un futur appelant crée des écritures orphelines.
+
+### Suites connues
+- `backup-import-service.ts` (restauration de sauvegarde) supprime tous les pleins sans toucher à la trésorerie : les écritures restent, avec `fuel_record_id` à NULL. Une PR séparée suivra ; l'option (inclure `treasury_*` dans la sauvegarde, ou contre-passer) est soumise avant de coder.
+
 ## 5 novembre 2026, écran du compte source d'une recharge
 
 ### Quoi
@@ -95,3 +108,20 @@
 ### Pourquoi
 - `GET /api/treasury/accounts` ne montre à la logistique que la carte : sans cette route, la dérogation ne pouvait pas servir à l'écran.
 - Aucun solde n'est exposé : la logistique choisit un compte, elle ne lit pas la trésorerie.
+
+## 5 novembre 2026, restauration de sauvegarde et trésorerie
+
+### Quoi
+- Quand le drapeau `finance` est actif et que `treasury_entries` contient au moins une écriture liée à un plein (`fuel_record_id` renseigné), `restoreBackup` refuse la restauration avec un 409. Le message dit à l'écran qu'aucune donnée n'a été modifiée.
+- Sans le drapeau, ou s'il n'existe aucune écriture liée, le comportement ne change pas.
+
+### Comment
+- `assertRestoreKeepsTreasuryConsistent(tx)` s'exécute dans la transaction de restauration, après la coupure des effets des triggers et avant la première suppression. Il prend `lockFuelCard`, ce qui sérialise le contrôle avec les écritures de plein concurrentes.
+- Tests unitaires : 409 sans aucune suppression puis ROLLBACK ; restauration acceptée sans écriture liée ; sans finance, ni verrou ni contrôle.
+- Test de contrat : la route `POST /api/admin/import-backup` répond 409 avec le message lisible, et le véhicule, le plein et l'écriture restent en place. Sans finance, le contrôle laisse passer. La route n'est appelée qu'une fois le refus prouvé, faute de quoi elle viderait la base partagée.
+
+### Pourquoi
+- La sauvegarde ne contient ni la trésorerie ni les règlements. Restaurer effacerait les pleins sous leurs écritures. Les restaurer avec la sauvegarde (option A) effacerait les écritures des règlements, qui restent en base. Les contre-passer (option B) donnerait des soldes faux, car la source bancaire d'une recharge restaurée est inconnue. Une restauration ne doit pas réécrire l'argent réel : un refus est sûr et réversible.
+
+### Suites connues
+- La restauration complète, avec la trésorerie et les règlements fournisseur dans la sauvegarde, et réconciliée avec ce qui existe, reste un chantier à part, à ouvrir s'il est voulu. Tant qu'il n'est pas fait, une base qui a des écritures de plein ne peut pas être restaurée avec le drapeau finance actif.

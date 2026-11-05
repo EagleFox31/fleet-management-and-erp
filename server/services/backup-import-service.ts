@@ -4,9 +4,12 @@ import { pinForRestore } from "../lib/user-pin";
 import { passwordForRestore } from "../lib/user-password";
 import { moduleLogger } from "../lib/logger";
 import { alerts, fuelRecords, maintenanceSchedules, parts, users, vehicles, workOrders } from "@shared/schema";
+import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { suppressSideEffects } from "../lib/suppress-side-effects";
+import { isFeatureEnabled } from "../lib/feature-flags";
+import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
 
 /**
  * Restauration d'une sauvegarde JSON (`backup/fleet-backup-*.json`), déplacée de `server/routes.ts`.
@@ -64,10 +67,32 @@ export async function usersWithSafeSecrets(list: NonNullable<BackupData["users"]
   );
 }
 
+export const RESTORE_TREASURY_CONFLICT_MESSAGE =
+  "Restauration impossible : des pleins ou des recharges sont déjà écrits au journal de trésorerie. " +
+  "Les effacer laisserait la trésorerie sans pièce justificative. Aucune donnée n'a été modifiée.";
+
+/**
+ * La sauvegarde ne contient pas la trésorerie : restaurer effacerait les pleins sous leurs écritures
+ * (fuel_record_id passe à NULL), sans contre-passation. Drapeau finance actif et écriture liée à un
+ * plein : refus 409 avant toute écriture. Sans finance, ou sans écriture liée, rien ne change.
+ * Le verrou de carte sérialise le contrôle avec les écritures de plein concurrentes.
+ */
+export async function assertRestoreKeepsTreasuryConsistent(tx: DbExecutor): Promise<void> {
+  if (!isFeatureEnabled("finance")) return;
+  await lockFuelCard(tx);
+  const res = await tx.execute(
+    sql`SELECT EXISTS (SELECT 1 FROM treasury_entries WHERE fuel_record_id IS NOT NULL) AS linked`,
+  );
+  if ((res.rows[0] as { linked: boolean } | undefined)?.linked) {
+    throw new AppError(409, RESTORE_TREASURY_CONFLICT_MESSAGE);
+  }
+}
+
 export async function restoreBackup(data: BackupData): Promise<BackupImportStats> {
   const importedUsers = data.users?.length ? await usersWithSafeSecrets(data.users) : [];
   return db.transaction(async (tx) => {
     await suppressSideEffects(tx);
+    await assertRestoreKeepsTreasuryConsistent(tx);
 
     // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
     await tx.delete(alerts);
