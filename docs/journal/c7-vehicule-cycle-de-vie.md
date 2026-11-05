@@ -181,7 +181,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - SQL dans `VEHICLE_LIFECYCLE_SQL` et sa jumelle `20261105_vehicle_lifecycle.sql`, avec deux blocs DO bornés.
 - **Idempotence** :
   - colonne posée sous garde `information_schema` ;
-  - `CREATE OR REPLACE TRIGGER` (garde-fou `init-database-concurrency`), seulement s'il est absent de `pg_trigger`, au lieu d'un DROP/CREATE à chaque démarrage : une base convergée ne reprend aucun verrou de table ;
+  - `CREATE OR REPLACE TRIGGER` (garde-fou `init-database-concurrency`), seulement s'il est absent de `pg_trigger`, au lieu d'un DROP/CREATE à chaque démarrage : une base convergée ne reprend aucun verrou de table. Seule la fonction `fn_maintenance_schedules_touch` est redéfinie à chaque démarrage (`CREATE OR REPLACE FUNCTION`, écriture de catalogue, ni ligne ni verrou de table), comme les autres fonctions de l'init ;
   - déclencheur posé seulement si la colonne existe : sinon, tout UPDATE de plan échouerait.
 - **Preuve automatisée** :
   - `vehicle-lifecycle.contract` :
@@ -196,3 +196,14 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - la migration jumelle, rejouée au démarrage, restaurait la fonction.
   - Correctif : le cas écrit en SQL brut, et le mutant porte sur les deux jumeaux.
   - Leçon : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise.
+- **Régression rattrapée par la CI (19:33)** :
+  - `PATCH /api/maintenance-schedules/:id` répondait 500 sur la fiche entière renvoyée par le formulaire : `updatedAt` revenait en chaîne et Drizzle attend une date (`value.toISOString is not a function`).
+  - Cause : la nouvelle colonne apparaît dans les lectures, donc dans le corps renvoyé tel quel. La route n'ignorait que `id` et `createdAt`.
+  - Correctif : `updatedAt` est ignoré comme `createdAt` (ligne modifiée en place dans `routes.ts`, aucune ajoutée). Le déclencheur reste seul à poser l'horodatage.
+  - Preuve : `secondary-routes-validation.contract` envoie un `updatedAt` périmé en chaîne ; le PATCH répond 200 et l'horodatage est renouvelé.
+  - Leçon : seuls les contrats « liés » avaient tourné en local. Une colonne ajoutée à une table modifiable par fiche entière impose la suite de contrats complète avant de livrer, pas un filtre.
+- **Dérogation `server/storage.ts`** : une ligne ajoutée (`updatedAt: maintenanceSchedules.updatedAt` dans la sélection des plans avec véhicule). Elle est imposée par le type `MaintenanceScheduleWithVehicle`, dérivé de la table : sans elle, `npm run check` échoue. Aucune méthode nouvelle, aucun bouchon touché.
+- **Réserves de relecture de #497 (R1 à R4)** :
+  - le WARNING du bloc `updated_at` décrit l'effet réel d'un verrou indisponible : lecture et écriture des plans, suppression douce et restauration en échec jusqu'au démarrage suivant ;
+  - la phrase « une base convergée n'écrit rien » est nuancée (fonction redéfinie à chaque démarrage) ;
+  - la leçon des mutants jumeaux est reportée dans `docs/analysis/LESSONS_LEARNED.md`.

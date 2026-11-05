@@ -3195,3 +3195,12 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
   - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
 - **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
+
+## 2026-11-05 — Mutant de SQL d'init neutralisé par la migration jumelle (L2, #497)
+
+- **Contexte** : L2 pose `maintenance_schedules.updated_at` et le déclencheur `trg_maintenance_schedules_touch`. Le SQL vit dans `VEHICLE_LIFECYCLE_SQL` (`server/init-database.ts`) et dans sa migration jumelle `server/db/migrations/20261105_vehicle_lifecycle.sql`.
+- **Cause racine** : le mutant « corps du déclencheur vidé » ne portait que sur `init-database.ts`. Le répertoire `migrations/` est rejoué au démarrage après l'init : la migration jumelle redéfinissait la fonction intacte, et le mutant survivait sans que le test soit en cause. Une écriture Drizzle dans le test renouvelait en plus `updated_at` d'elle-même et masquait l'absence du déclencheur.
+- **Classification** : faux vert de mutation, outillage de test. C'est un near miss : relevé avant livraison.
+- **Résolution** : le mutant porte sur les deux jumeaux. Le cas de contrat écrit en SQL brut, pour que seul le déclencheur renouvelle l'horodatage. Le mutant passe alors au rouge.
+- **Prévention vérifiable** : `tests/unit/server/vehicle-lifecycle-schema.test.ts` exige des jumeaux identiques, donc un mutant d'un seul jumeau échoue d'abord là. Le contrat `vehicle-lifecycle` (« plan désactivé à la main pendant le retrait ») écrit en SQL brut.
+- **Leçon généralisée** : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise. Un test qui prouve un déclencheur écrit en SQL brut, jamais par l'ORM : l'ORM peut poser lui-même la valeur attendue.

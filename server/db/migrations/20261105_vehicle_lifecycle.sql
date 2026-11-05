@@ -50,7 +50,7 @@ BEGIN
     ALTER TABLE maintenance_schedules ALTER COLUMN updated_at SET DEFAULT now();
   END IF;
 EXCEPTION WHEN lock_not_available THEN
-  RAISE WARNING 'maintenance_schedules.updated_at non ajoutée, verrou de table indisponible sous 5 s : un plan désactivé à la main pendant un retrait sera réactivé par la restauration';
+  RAISE WARNING 'maintenance_schedules.updated_at non ajoutée, verrou de table indisponible sous 5 s : lecture et écriture des plans, suppression douce et restauration en échec jusqu''au prochain démarrage';
 END $$;
 DO $$
 BEGIN
