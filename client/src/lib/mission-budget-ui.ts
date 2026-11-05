@@ -11,6 +11,7 @@ import {
 } from "@shared/constants/roles";
 import {
   MISSION_STATUSES_WITHOUT_BUDGET,
+  type DailyNeed,
   type MissionBudget,
   type MissionBudgetExpenses,
   type MissionBudgetExpenseLine,
@@ -48,6 +49,22 @@ export function missionBudgetActions(
     disburse: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "approved",
     expenses: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "disbursed",
   };
+}
+
+/** Couleur du badge de statut, partagée par la fiche mission et la page « Besoin du jour ». */
+export const MISSION_BUDGET_STATUS_CLASSES: Record<MissionBudget["status"], string> = {
+  requested: "bg-warning/15 text-warning-text",
+  approved: "bg-primary/10 text-primary-text",
+  disbursed: "bg-success/15 text-success",
+};
+
+/**
+ * Reste à décaisser d'une date : budgets demandés et approuvés, pas encore sortis.
+ * Le besoin du jour totalise tous les statuts ; la trésorerie lit surtout ce reste.
+ */
+export function toDisburseOf(need: Pick<DailyNeed, "byStatus"> | undefined): number {
+  if (!need) return 0;
+  return (need.byStatus.requested?.totalAmount ?? 0) + (need.byStatus.approved?.totalAmount ?? 0);
 }
 
 /** Reste à justifier d'une ligne, 0 si la ligne est absente (rien décaissé dessus). */

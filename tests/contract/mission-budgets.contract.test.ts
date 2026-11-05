@@ -9,6 +9,7 @@ import {
   missionBudgetDisbursePath,
   missionBudgetPath,
   missionBudgetSchema,
+  missionBudgetsResponseSchema,
   MISSION_DESTINATIONS_PATH,
   missionDestinationsResponseSchema,
 } from "../../shared/contracts/mission-budgets";
@@ -389,6 +390,16 @@ describe("Lecture et besoin du jour", { timeout: 120000 }, () => {
     expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=${without}`, "management")).body).toEqual([]);
     expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=abc`, "management")).status).toBe(400);
     expect((await call("GET", `${MISSION_BUDGETS_PATH}?missionId=${withBudget}`, "technician")).status).toBe(403);
+  });
+
+  it("liste (page Besoin du jour, L1f-2) : chaque budget porte le numéro de commande de sa mission ; champs du budget inchangés", async () => {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
+    const [mission] = await db.select({ orderNumber: missions.orderNumber }).from(missions).where(eq(missions.id, missionId));
+    const res = await call("GET", `${MISSION_BUDGETS_PATH}?date=${created.budgetDate}`, "management");
+    expect(res.status).toBe(200);
+    const row = missionBudgetsResponseSchema.parse(res.body).find((r) => r.id === created.id);
+    expect(row).toEqual({ ...created, missionOrderNumber: mission.orderNumber });
   });
 
   it("le besoin du jour somme les budgets de la date, au total et par statut", async () => {

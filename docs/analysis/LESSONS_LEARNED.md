@@ -3232,3 +3232,17 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Résolution** : le mutant porte sur les deux jumeaux. Le cas de contrat écrit en SQL brut, pour que seul le déclencheur renouvelle l'horodatage. Le mutant passe alors au rouge.
 - **Prévention vérifiable** : `tests/unit/server/vehicle-lifecycle-schema.test.ts` exige des jumeaux identiques, donc un mutant d'un seul jumeau échoue d'abord là. Le contrat `vehicle-lifecycle` (« plan désactivé à la main pendant le retrait ») écrit en SQL brut.
 - **Leçon généralisée** : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise. Un test qui prouve un déclencheur écrit en SQL brut, jamais par l'ORM : l'ORM peut poser lui-même la valeur attendue.
+
+## 2026-11-05 — Cloison « véhicule retiré » appliquée par chemin, pas par filtre ni par liste (L1 puis L1b)
+
+- **Contexte** : L1 ferme `GET /api/fuel-records/vehicle/:id` au client propriétaire d'un véhicule retiré. Les mêmes pleins restaient lisibles par `GET /api/fuel-records?vehicleId=` et `/consumption-history?vehicleId=`, encore en `canAccessOwned` seul dans `routes.ts`.
+- **Cause racine** : la règle « retiré » est appliquée route par route. Chaque entrée qui expose la même donnée (chemin, filtre de requête, liste, agrégat) porte son propre contrôle, et rien ne force à les aligner.
+- **Classification** : contrôle d'accès incomplet (cloison client). Near miss : le trou était documenté comme limite de L1, puis fermé par L1b avant la mise en production.
+- **Résolution (L1b)** : les deux filtres passent par `assertVehicleSubresourcesReadable`, comme l'historique OT, les plans par véhicule et le téléchargement d'un document. Le contrat `vehicle-history-retired-scope` joue le même acteur sur chaque entrée qui expose un plein : chemin, filtre et agrégat. Six mutants « garde retirée » rougissent tous.
+- **Reste (L1c)** : l'audit L1b recense quatre listes encore ouvertes au propriétaire d'un véhicule retiré, filtrées sur `ownerId` sans `deleted_at` :
+  - `vehicles/all-with-status` et les documents expirés ;
+  - `vehicles/documents/all` ;
+  - `vehicle-tires` ;
+  - `work-orders`.
+- **Prévention vérifiable** : pour toute donnée rattachée au véhicule, le contrat joue le même acteur sur chaque entrée : chemin, filtre, liste, agrégat et fichier. À prévoir en L1c : un prédicat partagé (`owner_id = ? AND deleted_at IS NULL`), plus un cas « aucune liste ne renvoie l'id retiré ».
+- **Leçon généralisée** : fermer une donnée, c'est fermer toutes ses entrées. Recenser d'abord chaque chemin, filtre, liste et export qui la renvoient, puis prouver la fermeture sur chacun avec le même acteur.

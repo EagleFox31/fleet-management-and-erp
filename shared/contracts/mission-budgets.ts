@@ -137,7 +137,14 @@ export const missionBudgetsQuerySchema = z
   })
   .strict();
 
-export const missionBudgetsResponseSchema = z.array(missionBudgetSchema);
+/**
+ * Élément de la liste : le budget et le numéro de commande de sa mission (page « Besoin du jour », L1f-2).
+ * Optionnel : une réponse de création ou de transition n'en porte pas, l'écran l'écrit tel quel dans la liste.
+ */
+export const missionBudgetListItemSchema = missionBudgetSchema.extend({ missionOrderNumber: z.string().optional() });
+export type MissionBudgetListItem = z.infer<typeof missionBudgetListItemSchema>;
+
+export const missionBudgetsResponseSchema = z.array(missionBudgetListItemSchema);
 
 export const dailyNeedQuerySchema = z.object({ date: isoDateSchema }).strict();
 

@@ -45,6 +45,7 @@ import {
 } from "@shared/schema";
 import { withLogContext } from "../lib/error-log-context";
 import { canAccessOwned, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
+import { vehicleReadableBy } from "../lib/vehicle-retired";
 
 const log = moduleLogger("document-renewals");
 const router = Router();
@@ -395,6 +396,7 @@ router.get("/requests/:id/proof", async (req, res, next) => {
         proofFilePath: documentRenewalRequests.proofFilePath,
         proofFileName: documentRenewalRequests.proofFileName,
         ownerId: vehicles.ownerId,
+        deletedAt: vehicles.deletedAt,
       })
       .from(documentRenewalRequests)
       .leftJoin(vehicles, eq(vehicles.id, documentRenewalRequests.vehicleId))
@@ -403,8 +405,8 @@ router.get("/requests/:id/proof", async (req, res, next) => {
     if (!row) {
       throw new AppError(404, "Demande introuvable");
     }
-    // Cloison client (AGENTS.md §11) : sans effet tant que le client n'est pas lecteur, garde si la liste s'ouvre.
-    if (!(await canAccessOwned(req.user, async () => row.ownerId))) {
+    // Cloison client (AGENTS.md §11), véhicule retiré compris : sans effet tant que le client n'est pas lecteur, garde si la liste s'ouvre.
+    if (!(await canAccessOwned(req.user, async () => row.ownerId)) || !vehicleReadableBy(req.user?.role, row)) {
       throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
     }
 

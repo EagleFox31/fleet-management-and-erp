@@ -750,3 +750,30 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - unitaires 2954/2954, dont `mission-budget-ui` 6/6 et le garde-fou des satellites, qui voit maintenant les appels `broadcast?.(` ;
   - e2e `26-mission-budget-panel` 2/2 sur la base locale : trame reçue par un second compte de rôle différent à chaque étape, technicien sans onglet ;
   - 3 mutants sur 3 tués (portée retirée, filtre retiré, satellite retiré) ; typage 0 erreur.
+
+## 2026-11-05 — Budget de mission (L1f-2) : page « Besoin du jour »
+
+- **Quoi** : écran `/finance/mission-budgets`, entrée de menu « Besoin du jour », en lecture seule, pour la logistique, la direction, le secrétariat et l'administrateur (drapeau finance). Pour une date (aujourd'hui par défaut), il affiche :
+  - les totaux : budgets, carburant, FDR, frais annexes, total ;
+  - le reste à décaisser (demandés + approuvés) ;
+  - un compteur par statut ;
+  - le détail par mission. Une ligne mène à la fiche mission, où se font les actions.
+- **Comment** :
+  - écran déclaré dans `client/src/config/lot-screens.ts`, rôles `MISSION_BUDGET_READ_ROLES` (ceux des routes lues) ;
+  - composant `client/src/components/finance/mission-budgets-daily-need.tsx` ;
+  - `GET /api/mission-budgets` : champ additif optionnel `missionOrderNumber` (jointure `missions`), pour nommer la mission sans requête par ligne ;
+  - `GET /api/mission-budgets/daily-need` : inchangé ;
+  - temps réel par la table des satellites posée en L1f-1 (`mission_budget_updated` invalide la liste et le besoin du jour) ;
+  - couleurs des statuts partagées avec le panneau (`MISSION_BUDGET_STATUS_CLASSES`).
+- **Pourquoi** : lot L1f validé par l'orchestrateur. Le secrétariat prépare les décaissements du jour sans ouvrir chaque mission.
+- **Preuve** :
+  - contrat `mission-budgets` 41/41, dont un cas ajouté : chaque élément de la liste porte le numéro de commande de sa mission ;
+  - unitaires 2984 :
+    - `toDisburseOf` exclut les budgets décaissés ;
+    - garde-fous des écrans du lot (rôles écran = rôles route ; table des composants) ;
+  - e2e `27-mission-budgets-daily-need` 2/2 sur la base locale :
+    - totaux exacts sur une date isolée ;
+    - approbation par la direction : trame reçue par le secrétariat, écran mis à jour sans rechargement ;
+    - technicien sans page ni menu ;
+  - 3 mutants sur 3 tués (jointure retirée, décaissés comptés, technicien ajouté à l'écran) ;
+  - typage 0 erreur.
