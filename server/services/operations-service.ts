@@ -12,10 +12,10 @@ import {
 import { eq, asc, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
-
-const log = moduleLogger("operations-service");
 import { canReadPurchasePrice, type PriceReader } from "../lib/vehicle-price-scope";
 import { driverLiveAssignmentFilter, missionsOfDriversFilter, pickMissionAssignment } from "../lib/driver-scope";
+
+const log = moduleLogger("operations-service");
 
 /**
  * Service Opérations & Missions
