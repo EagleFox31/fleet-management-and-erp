@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../../server/db", () => ({ db: {}, pool: {} }));
 
 import { AppError } from "../../../server/lib/app-error";
-import { holdLastAdminLock, type LockClient, type LockPool } from "../../../server/lib/last-admin";
+import { holdLastAdminLock, LOCK_FALLBACK_MS, type LockClient, type LockPool } from "../../../server/lib/last-admin";
 
 function fakeClient(failOn?: (sql: string) => Error | undefined) {
   const queries: string[] = [];
@@ -25,8 +25,12 @@ function fakeClient(failOn?: (sql: string) => Error | undefined) {
 }
 
 function fakeRes() {
-  const emitter = new EventEmitter() as EventEmitter & { writableEnded: boolean };
+  const emitter = new EventEmitter() as EventEmitter & { writableEnded: boolean; end: (...a: unknown[]) => unknown };
   emitter.writableEnded = false;
+  emitter.end = () => {
+    emitter.writableEnded = true;
+    return emitter;
+  };
   return emitter;
 }
 
@@ -125,5 +129,38 @@ describe("holdLastAdminLock", () => {
     expect(error.status).toBe(409);
     expect(error.message).toBe("Opération en cours sur les administrateurs, réessayez.");
     expect(releases).toEqual([timeout]);
+  });
+
+  it("(4) socket détruite : pas de libération au délai court, libération dès res.end", async () => {
+    const { pool, queries, releases } = fakeClient();
+    const res = fakeRes() as ReturnType<typeof fakeRes> & { destroyed: boolean };
+    res.destroyed = true;
+    await holdLastAdminLock(res as never, { pool });
+    res.emit("close");
+    vi.advanceTimersByTime(20000); // bien au-delà de l'ancien minuteur de 5 s : écriture aval encore en cours
+    await flush();
+    expect(queries.some((q) => q.includes("pg_advisory_unlock"))).toBe(false);
+    expect(releases).toHaveLength(0);
+    res.end();
+    await flush();
+    expect(queries.some((q) => q.includes("pg_advisory_unlock"))).toBe(true);
+    expect(releases).toHaveLength(1);
+    res.end();
+    vi.advanceTimersByTime(60000);
+    await flush();
+    expect(releases).toHaveLength(1);
+  });
+
+  it("(4) filet long : sans res.end ni finish, libération au bout de LOCK_FALLBACK_MS", async () => {
+    const { pool, releases } = fakeClient();
+    const res = fakeRes() as ReturnType<typeof fakeRes> & { destroyed: boolean };
+    res.destroyed = true;
+    await holdLastAdminLock(res as never, { pool });
+    vi.advanceTimersByTime(LOCK_FALLBACK_MS - 1);
+    await flush();
+    expect(releases).toHaveLength(0);
+    vi.advanceTimersByTime(2);
+    await flush();
+    expect(releases).toHaveLength(1);
   });
 });

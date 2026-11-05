@@ -251,7 +251,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     });
     const [, rb] = await Promise.all([aborted, call("DELETE", `/api/users/${a.id}`, { cookie: b.cookie })]);
     expect([204, 400, 401, 403]).toContain(rb.status);
-    // la garde reste cohérente et le verrou est rendu : une nouvelle requête aboutit sans attendre 15 s
+    // la garde reste cohérente et le verrou est rendu : une nouvelle requête aboutit sans attendre le filet de 30 s (libération à res.end)
     expect((await listActiveAdminIds()).length).toBeGreaterThanOrEqual(1);
     // une opération qui prend le verrou aboutit (au plus après le délai de secours, si finish n'est pas venu)
     const probe = await newAdmin();

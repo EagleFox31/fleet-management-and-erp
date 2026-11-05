@@ -34,14 +34,16 @@ export interface LockClient {
 export interface LockPool {
   connect(): Promise<LockClient>;
 }
-export type LockResponse = Pick<Response, "once" | "writableEnded" | "writableFinished" | "destroyed">;
+export type LockResponse = Pick<Response, "once" | "end" | "writableEnded" | "writableFinished" | "destroyed">;
 
 /**
- * Délai de secours : le verrou est lâché même si `finish` n'arrive jamais après une coupure.
- * Inférieur au statement_timeout (10 s) des demandeurs en attente, pour qu'une coupure ne les
- * fasse pas passer en 409.
+ * Filet ultime : le verrou est lâché même si ni `res.end` ni `finish` n'arrivent. Il doit dépasser
+ * le pire temps de l'écriture aval (pool saturé compris) : on accepte de perdre en disponibilité
+ * (les demandeurs en attente passent en 409 au bout de 10 s), jamais en intégrité (deux admins
+ * retirés en parallèle). Un minuteur lié à la socket ne sert donc pas de libération normale :
+ * la libération normale est l'appel de `res.end`, qui suit l'écriture aval.
  */
-export const LOCK_FALLBACK_MS = 5000;
+export const LOCK_FALLBACK_MS = 30000;
 export const ADMIN_BUSY_MESSAGE = "Opération en cours sur les administrateurs, réessayez.";
 
 export async function holdLastAdminLock(
@@ -75,8 +77,19 @@ export async function holdLastAdminLock(
     if ((err as { code?: string } | null)?.code === "57014") throw new AppError(409, ADMIN_BUSY_MESSAGE, { cause: err });
     throw err;
   }
-  // Coupure du client : l'écriture aval peut tourner encore. On n'attend que `finish`, avec un
-  // minuteur de secours, et on ne libère sur `close` que si la réponse est déjà terminée.
+  // La route appelle `res.end` après son écriture, même si la socket est détruite (où `finish` peut
+  // ne jamais venir) : c'est le point de libération fiable. On restaure `end` d'origine ensuite.
+  const originalEnd = res.end;
+  res.end = function wrappedEnd(this: unknown, ...args: unknown[]) {
+    try {
+      return (originalEnd as (...a: unknown[]) => unknown).apply(res, args);
+    } finally {
+      if (res.end === wrappedEnd) res.end = originalEnd;
+      release();
+    }
+  } as typeof res.end;
+  // Coupure du client : l'écriture aval peut tourner encore. `close` sur socket détruite ne libère
+  // pas avant `res.end` ; seul le filet long (LOCK_FALLBACK_MS) couvre une réponse jamais terminée.
   const onClose = () => {
     if (res.writableEnded) return release();
     if (timer) return;
