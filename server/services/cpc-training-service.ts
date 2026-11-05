@@ -1,7 +1,26 @@
 import { db } from "../db";
 import { drivers, type Driver } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { CPC_VALIDITY_DAYS } from "@shared/constants/driver-cpc-eligibility";
+import { cpcExpiryDayOf } from "@shared/constants/driver-cpc-eligibility";
+import { addDaysToDateOnly, daysBetweenDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("cpc-training");
+
+/** Marge d'alerte avant expiration, en jours (decision metier en attente : ne pas modifier ici). */
+const CPC_ALERT_MARGIN_DAYS = 59;
+
+/**
+ * Expiration et jours restants d'une formation CPC, en jour calendaire UTC.
+ * Date absente : pas d'expiration, 0 jour restant.
+ */
+export function computeCpcExpiry(
+  cpcTrainingDate: string | Date | null | undefined,
+  today: string = todayUtcDateOnly(),
+): { expiryDay: string | null; daysRemaining: number } {
+  const expiryDay = cpcExpiryDayOf(cpcTrainingDate);
+  return { expiryDay, daysRemaining: expiryDay ? daysBetweenDateOnly(expiryDay, today) : 0 };
+}
 
 /**
  * Service CPC & Formations
@@ -28,18 +47,11 @@ export class CPCTrainingService {
   calculateCPCStatus(cpcDate: string | null): 'FORMÉ' | 'À FORMER' | 'NON FORMÉ' {
     if (!cpcDate) return 'NON FORMÉ';
     
-    const now = new Date();
-    const trainingDate = new Date(cpcDate);
-    
-    // Date d'expiration = date formation + 731 jours
-    const expiryDate = new Date(trainingDate);
-    expiryDate.setDate(expiryDate.getDate() + CPC_VALIDITY_DAYS);
-    
-    // Date d'alerte = aujourd'hui + 59 jours
-    const alertDate = new Date(now);
-    alertDate.setDate(alertDate.getDate() + 59);
-    
-    return expiryDate > alertDate ? 'FORMÉ' : 'À FORMER';
+    const expiryDay = cpcExpiryDayOf(cpcDate);
+    // Date illisible : meme issue que le calcul d'origine (comparaison fausse), a former.
+    if (!expiryDay) return 'À FORMER';
+    const alertDay = addDaysToDateOnly(todayUtcDateOnly(), CPC_ALERT_MARGIN_DAYS);
+    return alertDay !== null && expiryDay > alertDay ? 'FORMÉ' : 'À FORMER';
   }
   
   /**
@@ -47,16 +59,12 @@ export class CPCTrainingService {
    * Exploite: 27 chauffeurs avec firstName, lastName
    */
   async getAllDriversStatus() {
-    console.log("Fetching all drivers with CPC status...");
+    log.debug("Lecture des statuts CPC de tous les chauffeurs");
     
     const allDrivers = await db.select().from(drivers);
     
     return allDrivers.map(driver => {
-      const expiryDate = driver.cpcTrainingDate ? 
-        new Date(new Date(driver.cpcTrainingDate).getTime() + CPC_VALIDITY_DAYS * 24 * 60 * 60 * 1000) : null;
-      
-      const daysRemaining = expiryDate ? 
-        Math.floor((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+      const { expiryDay, daysRemaining } = computeCpcExpiry(driver.cpcTrainingDate);
       
       return {
         id: driver.id,
@@ -76,7 +84,7 @@ export class CPCTrainingService {
         cpcStatusRecorded: driver.cpcStatus ?? null,
         cpcTrainingDate: driver.cpcTrainingDate,
         cpcStatusUpdatedAt: driver.cpcStatusUpdatedAt,
-        expiryDate: expiryDate ? expiryDate.toISOString() : null,
+        expiryDate: expiryDay ? `${expiryDay}T00:00:00.000Z` : null,
         daysRemaining,
         isActive: driver.isActive,
         createdAt: driver.createdAt,
@@ -88,12 +96,12 @@ export class CPCTrainingService {
    * Alertes formations CPC (59 jours avant expiration)
    */
   async getExpiringCPCAlerts() {
-    console.log("Fetching expiring CPC alerts...");
+    log.debug("Lecture des alertes CPC");
     
     const statuses = await this.getAllDriversStatus();
     const alerts = statuses.filter(s => s.cpcStatus === 'À FORMER' && s.isActive);
     
-    console.log(`Found ${alerts.length} drivers requiring CPC training renewal`);
+    log.info({ count: alerts.length }, "Chauffeurs a former (CPC)");
     return alerts;
   }
   
@@ -101,7 +109,7 @@ export class CPCTrainingService {
    * Mise à jour certification CPC
    */
   async updateCPCCertification(driverId: number, newDate: Date) {
-    console.log(`Updating CPC certification for driver ${driverId} to ${newDate}`);
+    log.info({ driverId, newDate: newDate.toISOString() }, "Mise a jour de la certification CPC");
     
     const dateStr = newDate.toISOString().split('T')[0];
     const newStatus = this.calculateCPCStatus(dateStr);
@@ -120,7 +128,7 @@ export class CPCTrainingService {
       throw new Error(`Chauffeur ${driverId} non trouvé`);
     }
     
-    console.log(`CPC certification updated for driver ${driverId}, new status: ${newStatus}`);
+    log.info({ driverId, newStatus }, "Certification CPC mise a jour");
     return updated;
   }
   
@@ -128,7 +136,7 @@ export class CPCTrainingService {
    * Statistiques formations par statut
    */
   async getCPCStatistics() {
-    console.log("Calculating CPC statistics...");
+    log.debug("Calcul des statistiques CPC");
     
     const statuses = await this.getAllDriversStatus();
     const activeDrivers = statuses.filter(s => s.isActive);
@@ -141,7 +149,7 @@ export class CPCTrainingService {
       inactiveDrivers: statuses.filter(s => !s.isActive).length
     };
     
-    console.log("CPC statistics calculated:", stats);
+    log.info({ stats }, "Statistiques CPC calculees");
     return stats;
   }
   
@@ -149,7 +157,7 @@ export class CPCTrainingService {
    * Récupère un chauffeur avec son statut CPC
    */
   async getDriverWithCPCStatus(driverId: number) {
-    console.log(`Fetching driver ${driverId} with CPC status...`);
+    log.debug({ driverId }, "Lecture du chauffeur avec statut CPC");
     
     const [driver] = await db
       .select()
@@ -160,11 +168,8 @@ export class CPCTrainingService {
       throw new Error(`Chauffeur ${driverId} non trouvé`);
     }
     
-    const expiryDate = driver.cpcTrainingDate ? 
-      new Date(new Date(driver.cpcTrainingDate).getTime() + CPC_VALIDITY_DAYS * 24 * 60 * 60 * 1000) : null;
-    
-    const daysRemaining = expiryDate ? 
-      Math.floor((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+    const { expiryDay, daysRemaining } = computeCpcExpiry(driver.cpcTrainingDate);
+    const expiryDate = expiryDay ? new Date(`${expiryDay}T00:00:00.000Z`) : null;
     
     return {
       ...driver,
@@ -179,7 +184,7 @@ export class CPCTrainingService {
    * Utile pour maintenance ou après import de données
    */
   async syncAllCPCStatuses() {
-    console.log("Synchronizing all CPC statuses...");
+    log.info("Synchronisation des statuts CPC");
     
     const allDrivers = await db.select().from(drivers);
     let updated = 0;
@@ -200,7 +205,7 @@ export class CPCTrainingService {
       }
     }
     
-    console.log(`Synchronized ${updated} CPC statuses out of ${allDrivers.length} drivers`);
+    log.info({ updated, total: allDrivers.length }, "Statuts CPC synchronises");
     return { total: allDrivers.length, updated };
   }
 }
