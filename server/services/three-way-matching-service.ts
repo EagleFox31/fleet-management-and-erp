@@ -14,6 +14,7 @@ import {
 import { eq, and, desc, sql, gte, lte, or, lt, ne, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
 import { isSettlementProofReference } from "../lib/settlement-proof";
+import { linkSupplierSettlement, reverseSupplierSettlement } from "./treasury-links";
 import type { DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
 
 /**
@@ -751,6 +752,8 @@ export class ThreeWayMatchingService {
       paymentDate: string;
       valueDate?: string;
       treasuryAccount?: string;
+      /** Compte du journal de trésorerie (lot T3) : la sortie y est écrite dans la même transaction. */
+      treasuryAccountId?: number;
       proofReference?: string;
       notes?: string;
     }
@@ -837,6 +840,7 @@ export class ThreeWayMatchingService {
           paymentDate: data.paymentDate,
           valueDate: data.valueDate || null,
           treasuryAccount: data.treasuryAccount || null,
+          treasuryAccountId: data.treasuryAccountId ?? null,
           proofReference: normalizedProofReference,
           status: "recorded",
           recordedBy,
@@ -845,6 +849,9 @@ export class ThreeWayMatchingService {
           updatedAt: new Date(),
         })
         .returning();
+
+      // Sortie au journal de trésorerie (lot T3) : un refus ici annule aussi le règlement.
+      await linkSupplierSettlement(tx, settlement, invoice, recordedBy);
 
       return { settlement, invoice, replayed: false };
     });
@@ -951,12 +958,17 @@ export class ThreeWayMatchingService {
       throw new AppError(404, "Ce règlement n'existe plus.");
     }
 
-    // Compare-and-set : seul le passage recorded -> rejected écrit.
-    const [updated] = await db
-      .update(supplierInvoiceSettlements)
-      .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })
-      .where(and(eq(supplierInvoiceSettlements.id, settlementId), eq(supplierInvoiceSettlements.status, "recorded")))
-      .returning();
+    // Compare-and-set : seul le passage recorded -> rejected écrit. La contre-passation au journal
+    // de trésorerie (lot T3) est dans la même transaction : pas de rejet sans elle, ni l'inverse.
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(supplierInvoiceSettlements)
+        .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })
+        .where(and(eq(supplierInvoiceSettlements.id, settlementId), eq(supplierInvoiceSettlements.status, "recorded")))
+        .returning();
+      if (row) await reverseSupplierSettlement(tx, settlementId, rejectedBy);
+      return row;
+    });
     if (updated) {
       return { settlement: updated, replayed: false };
     }

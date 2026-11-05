@@ -4,7 +4,7 @@ import { db } from "../../server/db";
 import { fuelCardService } from "../../server/services/fuel-card-service";
 import { assignments, fuelRecords, missions } from "../../shared/schema";
 import { apiErrorProblems } from "../support/api-error";
-import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { cleanupCreated, createIdBag, deleteTreasuryEntriesOfMissions } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
 import type { DbExecutor } from "../../server/lib/fuel-card-lock";
@@ -83,6 +83,7 @@ afterAll(async () => {
     await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   }
   if (missionIds.length > 0) {
+    await deleteTreasuryEntriesOfMissions(missionIds);
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }

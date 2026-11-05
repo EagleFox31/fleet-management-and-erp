@@ -66,7 +66,7 @@ router.get("/balance", async (_req, res) => {
 // Rôles autorisés: admin, logistics, secretary
 router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
-    const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes } = req.body;
+    const { amount, quantity, unitPrice, priceSource, date, paymentMode, orderNumber, notes, sourceAccountId } = req.body;
 
     const amountValue = Number.parseFloat(String(amount));
     const quantityValue = quantity !== undefined && quantity !== null
@@ -80,6 +80,12 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
 
     if (!Number.isFinite(amountValue) || amountValue <= 0 || !date || !paymentMode || (!hasQuantity && !hasUnitPrice)) {
       return res.status(400).json({ message: "Données de recharge incomplètes" });
+    }
+    // Compte de trésorerie qui paie la recharge (facultatif, lot T2).
+    const sourceAccountValue =
+      sourceAccountId === undefined || sourceAccountId === null || sourceAccountId === "" ? null : Number(sourceAccountId);
+    if (sourceAccountValue !== null && (!Number.isInteger(sourceAccountValue) || sourceAccountValue <= 0)) {
+      return res.status(400).json({ message: "Compte source de la recharge invalide" });
     }
 
     const resolvedQuantity = hasQuantity
@@ -101,7 +107,8 @@ router.post("/recharge", isFuelCardManager, async (req, res, next) => {
       paymentMode,
       orderNumber,
       notes,
-      userId: (req as any).session.userId
+      userId: (req as any).session.userId,
+      sourceAccountId: sourceAccountValue,
     });
 
     broadcastFuelCardUpdate(

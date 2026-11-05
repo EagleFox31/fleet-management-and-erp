@@ -79,7 +79,11 @@ describe("journal de tresorerie", { timeout: 120000 }, () => {
   it("sans session 401, hors lecture 403, saisie reservee a admin et secretariat", async () => {
     const list = `${TREASURY_BASE_PATH}/accounts`;
     expect((await call("GET", list)).status).toBe(401);
-    for (const role of ["technician", "client", "logistics"]) expect((await call("GET", list, role)).status, role).toBe(403);
+    for (const role of ["technician", "client"]) expect((await call("GET", list, role)).status, role).toBe(403);
+    // Logistique (lot T2) : lecture limitée aux comptes carte carburant.
+    const logistics = await call("GET", list, "logistics");
+    expect(logistics.status).toBe(200);
+    expect(logistics.body.every((a: { kind: string }) => a.kind === "fuel_card")).toBe(true);
     for (const role of ["admin", "secretary", "management"]) expect((await call("GET", list, role)).status, role).toBe(200);
     const body = { code: `T1${suffix}W`, label: "x", kind: "cash" };
     expect((await call("POST", list, "management", body)).status).toBe(403);
