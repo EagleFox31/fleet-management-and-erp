@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { servedContentType, UNTRUSTED_CONTENT_TYPE } from "../../../server/lib/uploaded-file-response";
+import { sendFailureOutcome, servedContentType, UNTRUSTED_CONTENT_TYPE } from "../../../server/lib/uploaded-file-response";
 
 describe("servedContentType : type servi pour un fichier téléversé", () => {
   it.each([
@@ -20,7 +20,29 @@ describe("servedContentType : type servi pour un fichier téléversé", () => {
     ["", "uploads/a/doc.pdf"],
     [null, "uploads/a/doc.pdf"],
     [undefined, "uploads/a/doc.pdf"],
+    ["constructor", "uploads/a/doc.pdf"],
+    ["__proto__", "uploads/a/doc.pdf"],
+    ["hasOwnProperty", "uploads/a/doc.pdf"],
   ])("%s pour %s -> octet-stream", (declared, path) => {
     expect(servedContentType(declared, path)).toBe(UNTRUSTED_CONTENT_TYPE);
+  });
+});
+
+describe("sendFailureOutcome : échec de sendFile après contrôle d'existence", () => {
+  it.each([
+    [{ code: "ECONNABORTED" }, false, "aborted"],
+    [{ code: "ECONNRESET" }, false, "aborted"],
+    [{ code: "EPIPE" }, false, "aborted"],
+    [new Error("en cours d'envoi"), true, "aborted"],
+    [{ code: "ENOENT" }, true, "aborted"],
+    [{ code: "ENOENT" }, false, "not-found"],
+    [{ code: "ENOTDIR" }, false, "not-found"],
+    [{ status: 404 }, false, "not-found"],
+    [{ statusCode: 404 }, false, "not-found"],
+    [{ code: "EACCES" }, false, "failed"],
+    [new Error("inattendu"), false, "failed"],
+    [undefined, false, "failed"],
+  ])("%o, en-têtes envoyés %s -> %s", (err, headersSent, expected) => {
+    expect(sendFailureOutcome(err, headersSent)).toBe(expected);
   });
 });

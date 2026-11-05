@@ -11,8 +11,10 @@ import { sourceFiles } from "../../support/route-guard-scan";
  * `bodyIdSchema` pour un corps JSON, `shared/contracts/common.ts`). Le filet `routeIdRangeGuard`
  * ne lit que le chemin : sans borne, `?vehicleId=2147483648` atteint la base (22003) et répond 500.
  *
- * Cliquet sur `server/api` et `shared/contracts` : une propriété dont le nom désigne un id
- * (`id`, `…Id`, `…Ids`, `…edBy`) déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`.
+ * Cliquet sur `server/api`, `shared/contracts` et `shared/schema.ts` : une propriété dont le nom
+ * désigne un id (`id`, `…Id`, `…Ids`, `…edBy`) déclarée par `z.number()` ou `z.coerce.number()`
+ * sans `.max(MAX_DB_INTEGER_ID)` (ou sa valeur littérale). Un autre `.max(` ne compte pas : une
+ * borne plus large laisserait passer la valeur jusqu'à la base.
  * Les schémas de réponse sont comptés aussi : les borner ne coûte rien et garde la règle simple.
  * Limites : un id déclaré par un schéma intermédiaire (`const x = z.number(); { vehicleId: x }`)
  * ou sous un nom hors motif (`owner`, `client`) n'est pas vu.
@@ -21,6 +23,7 @@ import { sourceFiles } from "../../support/route-guard-scan";
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 const ID_NAME = /^(?:ids?|\w*Ids?|\w+edBy)$/;
 const LOOSE_NUMBER = /\bz\.(?:coerce\.)?number\(/;
+const INT4_BOUND = /\.max\((?:MAX_DB_INTEGER_ID|2147483647)\b/;
 
 /**
  * Relevé du 5 novembre 2026 : uniquement des schémas de réponse (aucune valeur reçue du client).
@@ -55,7 +58,7 @@ function countUnboundedIdFields(source: string, fileName = "x.ts"): number {
     if (ts.isPropertyAssignment(node)) {
       const name = ts.isIdentifier(node.name) || ts.isStringLiteral(node.name) ? node.name.text : "";
       const init = node.initializer.getText(sf).replace(/\s+/g, "");
-      if (ID_NAME.test(name) && LOOSE_NUMBER.test(init) && !init.includes(".max(")) count += 1;
+      if (ID_NAME.test(name) && LOOSE_NUMBER.test(init) && !INT4_BOUND.test(init)) count += 1;
     }
     ts.forEachChild(node, visit);
   };
@@ -65,11 +68,14 @@ function countUnboundedIdFields(source: string, fileName = "x.ts"): number {
 
 function actualCounts(): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const dir of ["server/api", "shared/contracts"]) {
-    for (const file of sourceFiles(join(ROOT, dir))) {
-      const n = countUnboundedIdFields(readFileSync(file, "utf8"), file);
-      if (n > 0) counts[relative(ROOT, file).replace(/\\/g, "/")] = n;
-    }
+  const files = [
+    ...sourceFiles(join(ROOT, "server/api")),
+    ...sourceFiles(join(ROOT, "shared/contracts")),
+    join(ROOT, "shared/schema.ts"),
+  ];
+  for (const file of files) {
+    const n = countUnboundedIdFields(readFileSync(file, "utf8"), file);
+    if (n > 0) counts[relative(ROOT, file).replace(/\\/g, "/")] = n;
   }
   return counts;
 }
@@ -91,12 +97,14 @@ describe("ids Zod bornés à l'int4 (query et corps)", () => {
         .number()
         .int(),
       tireId: z.coerce.number().int().positive().max(2147483647),
+      ownerId: z.number().int().max(MAX_DB_INTEGER_ID, "x"),
+      partId: z.number().int().max(9999999999),
       clientId: z.coerce.number({ invalid_type_error: "x" }).int(),
       userId: bodyIdSchema,
       quantity: z.number(),
       sortBy: z.number(),
     });`;
-    expect(countUnboundedIdFields(src)).toBe(4);
+    expect(countUnboundedIdFields(src)).toBe(5);
   });
 
   it("server/api et shared/contracts : aucun nouvel id Zod non borné", () => {

@@ -200,6 +200,14 @@ describe("CAT2 : pièces associées à une panne", { timeout: 60000 }, () => {
     expect((await call("DELETE", `/api/fault-catalog/${faultId}/parts/${created.body.id}`, { actor: "admin" })).status).toBe(404);
   });
 
+  it("pièce hors plage int4 : 400 sur partId, rien d'écrit", async () => {
+    const faultId = await createFault();
+    const res = await call("POST", `/api/fault-catalog/${faultId}/parts`, { actor: "admin", body: { partId: 2147483648 } });
+    expect(res.status).toBe(400);
+    expect((res.body?.errors ?? []).map((error: { field?: string }) => error.field)).toContain("partId");
+    expect(await linksOf(faultId)).toHaveLength(0);
+  });
+
   it.each(["technician", "warehouse"] as const)("%s n'écrit pas (403), sans session 401", async (actor) => {
     const faultId = await createFault();
     const partId = await newPartId();

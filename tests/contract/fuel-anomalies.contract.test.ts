@@ -106,6 +106,11 @@ describe("PATCH /api/fuel-card/anomalies/:id", { timeout: 120000 }, () => {
     expect((await patch(fuelAnomalyPath("consumption-gap:999999999"), { status: "open" }, "logistics")).status).toBe(404);
   });
 
+  it("refuse un plein hors plage int4 dans la cle (400, pas 500)", async () => {
+    expect((await patch(fuelAnomalyPath("consumption-gap:2147483648"), { status: "open" }, "logistics")).status).toBe(400);
+    expect((await patch(fuelAnomalyPath("consumption-gap:99999999999999999999"), { status: "open" }, "logistics")).status).toBe(400);
+  });
+
   it("drapeau coupe : 404 normalise", async () => {
     process.env.FEATURE_FLAGS = "fuel-anomalies=off";
     try {
