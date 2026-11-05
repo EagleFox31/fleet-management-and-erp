@@ -115,7 +115,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
       "mission_created_from_fuel",
       {
         fuelRecordId,
-        result,
+        result: redactMissionPrice(null, result),
       },
       {
         missionId,

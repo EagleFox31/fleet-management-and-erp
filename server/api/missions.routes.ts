@@ -2074,7 +2074,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
 
     if (validatedData.tariffGridId != null) {
       const [tariff] = await db
-        .select({ id: tariffGrid.id, clientId: tariffGrid.clientId, active: tariffGrid.active, validFrom: tariffGrid.validFrom, validTo: tariffGrid.validTo })
+        .select({ id: tariffGrid.id, clientId: tariffGrid.clientId, active: tariffGrid.active, validFrom: tariffGrid.validFrom, validTo: tariffGrid.validTo, origin: tariffGrid.origin, destination: tariffGrid.destination, cargoType: tariffGrid.cargoType })
         .from(tariffGrid)
         .where(eq(tariffGrid.id, validatedData.tariffGridId))
         .limit(1);
@@ -2087,6 +2087,15 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       }
       if (tariff.validFrom > douala || (tariff.validTo !== null && tariff.validTo < douala)) {
         throw new AppError(400, "Ce tarif ne couvre pas la date de la mission.");
+      }
+      // Même rapprochement que la suggestion : lieu entier ou ville (texte avant la première virgule), marchandise exacte ou tarif générique.
+      const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+      const matchesPlace = (tariffPlace: string, address: string) => same(tariffPlace, address) || same(tariffPlace, address.split(",")[0]);
+      if (!matchesPlace(tariff.origin, validatedData.pickupAddress) || !matchesPlace(tariff.destination, validatedData.deliveryAddress)) {
+        throw new AppError(400, "Ce tarif ne correspond pas au trajet de la mission.");
+      }
+      if (tariff.cargoType !== "" && !same(tariff.cargoType, String((validatedData.cargo as { description?: string } | null | undefined)?.description ?? ""))) {
+        throw new AppError(400, "Ce tarif ne correspond pas à la marchandise de la mission.");
       }
     }
 
@@ -2284,6 +2293,9 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         orderNumber: missions.orderNumber,
         weight: missions.weight,
         pickupDate: missions.pickupDate,
+        pickupAddress: missions.pickupAddress,
+        deliveryAddress: missions.deliveryAddress,
+        cargo: missions.cargo,
         deliveryDate: missions.deliveryDate,
         estimatedFuelCost: missions.estimatedFuelCost,
         workflowData: missions.workflowData,
@@ -2317,6 +2329,16 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
     const missionUpdates: Record<string, any> = {
       updatedAt: new Date(),
     };
+    // Le tarif repris ne vaut que pour le trajet, la marchandise et la date qui l'ont fait choisir : le prix reste, le lien tombe.
+    const nextPickup = payload.pickupDate ? new Date(payload.pickupDate).getTime() : null;
+    const tariffKeyChanged =
+      (payload.pickupDate !== undefined && nextPickup !== (existingMission.pickupDate ? new Date(existingMission.pickupDate).getTime() : null)) ||
+      (payload.pickupAddress !== undefined && payload.pickupAddress !== existingMission.pickupAddress) ||
+      (payload.deliveryAddress !== undefined && payload.deliveryAddress !== existingMission.deliveryAddress) ||
+      (payload.cargoDescription !== undefined && (payload.cargoDescription ?? null) !== ((existingMission.cargo as { description?: string } | null)?.description ?? null));
+    if (tariffKeyChanged) {
+      missionUpdates.tariffGridId = null;
+    }
 
     if (payload.orderNumber !== undefined) missionUpdates.orderNumber = payload.orderNumber;
     if (payload.missionType !== undefined) missionUpdates.missionType = payload.missionType;

@@ -28,3 +28,8 @@ inscriptible aujourd'hui. PR séparée.
 - R1 : `server/lib/mission-price-scope.ts` expurge `agreedPrice` / `tariffGridId` (clés à null) pour les non-lecteurs de la grille ; appliqué aux routes operations, au PUT status et à la trame WS (jamais de prix en diffusion).
 - R2 : le tarif cité à la création doit être actif, du client (ou générique) et couvrir la date de prise en charge ; l'écran détache le tarif repris si client, trajet, marchandise ou date changent.
 - Mineurs : `AppError` au lieu de `res.status(400)`, `useSingleFlightMutate` sur la création, `ADD COLUMN` testé via `information_schema` avant de verrouiller.
+
+## Revue #487 : seconde série
+- PATCH d'une mission : si la date de prise en charge, un lieu ou la marchandise change réellement, `tariff_grid_id` retombe à NULL et le prix reste ; une valeur inchangée garde le lien.
+- POST : le tarif cité doit correspondre au trajet (lieu entier ou ville, sans casse) et à la marchandise (exacte, ou tarif générique), comme la suggestion.
+- Trame `mission_created_from_fuel` expurgée par `redactMissionPrice`.

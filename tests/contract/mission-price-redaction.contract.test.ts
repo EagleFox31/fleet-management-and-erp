@@ -1,5 +1,5 @@
 import { inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { assignments, drivers, missions } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -20,6 +20,9 @@ const driverIds: number[] = [];
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 const call = (...args: Parameters<typeof session.call>) => session.call(...args);
 let mission: { id: number };
+let upcoming: { id: number };
+let driverRowId = 0;
+let vehicleRowId = 0;
 
 const rowOf = (body: unknown, id: number) =>
   (body as any[]).map((m) => m.mission ?? m).find((m) => m.id === id);
@@ -31,8 +34,10 @@ beforeAll(async () => {
     .values({ userId: session.userIdOf("driver"), firstName: "TEST", lastName: uniqueTestToken("drv"), cpcStatus: "FORME" } as any)
     .returning();
   driverIds.push(d.id);
+  driverRowId = d.id;
   const v = await createTestVehicle();
   ids.vehicleIds.push(v.id);
+  vehicleRowId = v.id;
   const [m] = await db
     .insert(missions)
     .values({
@@ -46,6 +51,13 @@ beforeAll(async () => {
   mission = m;
   missionIds.push(m.id);
   await db.insert(assignments).values({ missionId: m.id, vehicleId: v.id, driverId: d.id, status: "in_progress" } as any);
+  const [u] = await db
+    .insert(missions)
+    .values({ orderNumber: uniqueTestToken("PRU"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "assigned", agreedPrice: "98000" } as any)
+    .returning();
+  upcoming = u;
+  missionIds.push(u.id);
+  await db.insert(assignments).values({ missionId: u.id, vehicleId: v.id, driverId: d.id, status: "accepted" } as any);
 }, 120000);
 
 afterAll(async () => {
@@ -59,7 +71,7 @@ afterAll(async () => {
 }, 120000);
 
 describe("prix convenu : lignes de mission entières", { timeout: 180000 }, () => {
-  it("GET /api/operations/missions : l'admin voit le prix, technicien et chauffeur reçoivent null", async () => {
+  it("GET /api/operations/missions : l'admin les voit, technicien et chauffeur reçoivent null", async () => {
     const admin = await call("GET", "/api/operations/missions", { actor: "admin" });
     expect(rowOf(admin.body, mission.id)?.agreedPrice).toBe("125000");
     for (const actor of ["technician", "driver"] as const) {
@@ -71,6 +83,37 @@ describe("prix convenu : lignes de mission entières", { timeout: 180000 }, () =
         expect(row.agreedPrice, actor).toBeNull();
         expect(row.tariffGridId, actor).toBeNull();
       }
+    }
+  });
+
+  it("/operations/missions/upcoming et /active : technicien et chauffeur reçoivent null, l'admin les voit", async () => {
+    for (const [path, target] of [["upcoming", upcoming], ["active", mission]] as const) {
+      const admin = await call("GET", `/api/operations/missions/${path}`, { actor: "admin" });
+      expect(rowOf(admin.body, target.id), `admin ${path}`).toBeDefined();
+      for (const actor of ["technician", "driver"] as const) {
+        const res = await call("GET", `/api/operations/missions/${path}`, { actor });
+        expect(res.status, `${actor} ${path}`).toBe(200);
+        const row = rowOf(res.body, target.id);
+        if (actor === "driver") expect(row, `chauffeur ${path}`).toBeDefined();
+        if (row) expect(row.agreedPrice ?? null, `${actor} ${path}`).toBeNull();
+      }
+    }
+  });
+
+  it("trame temps réel de création : jamais de prix, même pour le personnel", async () => {
+    const spy = vi.fn();
+    (global as any).broadcastUpdate = spy;
+    try {
+      const res = await call("POST", "/api/missions", {
+        actor: "admin",
+        body: { orderNumber: uniqueTestToken("PRW"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "planned", agreedPrice: 777000 },
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      missionIds.push(res.body.id);
+      expect(spy).toHaveBeenCalled();
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("777000");
+    } finally {
+      delete (global as any).broadcastUpdate;
     }
   });
 
