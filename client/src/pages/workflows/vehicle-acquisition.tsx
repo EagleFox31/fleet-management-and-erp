@@ -16,6 +16,7 @@ import { canWriteVehiclePurchasePrice } from '@shared/constants/roles';
 import { apiRequest } from '@/lib/queryClient';
 import { invalidateVehicleDocumentQueries } from '@/lib/vehicle-document-cache';
 import { uploadFile } from '@/lib/api';
+import { userMessageOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { normalizeDateForInput } from '@/utils/workflow-mapping';
 import { CheckCircle, Circle, Upload, AlertCircle, Truck, FileText, Wrench, Play, Save, Loader2 } from 'lucide-react';
@@ -295,7 +296,7 @@ export function VehicleAcquisitionWorkflow() {
         title: 'Document importé',
         description: `${docConfig.label} — ${file.name}`,
       });
-    } catch {
+    } catch (error) {
       setDocUploadStatus((prev) => ({ ...prev, [documentKey]: 'error' }));
       updateData((prev) => ({
         ...prev,
@@ -303,7 +304,7 @@ export function VehicleAcquisitionWorkflow() {
       }));
       toast({
         title: "Erreur d'import",
-        description: `Impossible d'importer ${docConfig.label}. Réessayez.`,
+        description: userMessageOf(error, `Impossible d'importer ${docConfig.label}. Réessayez.`),
         variant: 'destructive',
       });
     } finally {
