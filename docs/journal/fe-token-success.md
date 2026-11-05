@@ -52,3 +52,8 @@ Quatre lignes basculées sur `text-warning-text` : `client/src/components/ui/bad
 
 ### Comment tester
 `node node_modules/typescript/bin/tsc --noEmit -p .` (0 error TS) ; `npm test` ; afficher un Badge warning, le panneau d'alertes (sévérités moyenne/haute) et la légende du formulaire véhicule en clair puis en sombre.
+
+## Test instable (2 échecs vitest non identifiés)
+
+Au premier passage de `vitest run --reporter=dot` sur fix/warning-text-usages : 2 tests en échec sur 2444 (210 fichiers verts sur 212), la sortie « dot » ne nommait pas les tests. Les journaux montraient des `ReferenceError: indexedDB is not defined`, mais ce message apparaît aussi dans des passages verts : il n'est donc pas prouvé comme cause.
+Relances en reporter JSON : 3 passages supplémentaires (plus 2 passages verts antérieurs), tous à 0 échec sur 2442. Non reproduit (0 fois sur 3) : fichiers et tests en échec non retrouvés, aucune correction faite. Piste : conserver la sortie JSON dès le premier passage pour nommer l'échec si cela se reproduit.
