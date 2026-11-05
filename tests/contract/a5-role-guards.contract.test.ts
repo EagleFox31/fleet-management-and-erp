@@ -235,9 +235,13 @@ describe("A5-5 GET /api/vehicles/:id/tires : identifiant", { timeout: 60000 }, (
 });
 
 describe("A5-6 GET /api/work-orders/:id", { timeout: 60000 }, () => {
-  it("client d'un autre véhicule : 403 au contrat d'erreur", async () => {
+  it("client d'un autre véhicule : 404 au contrat d'erreur, identique à un OT inexistant", async () => {
     const res = await call("GET", `/api/work-orders/${woB}`, "clientA");
-    expect(apiErrorProblems(res.status, res.body, 403)).toEqual([]);
+    expect(apiErrorProblems(res.status, res.body, 404)).toEqual([]);
+    const missing = await call("GET", `/api/work-orders/${MISSING_ID}`, "clientA");
+    expect(missing.status).toBe(res.status);
+    expect(missing.body.message).toBe(res.body.message);
+    expect(missing.body.code).toBe(res.body.code);
   });
 
   it("le propriétaire et le personnel lisent l'OT (200)", async () => {

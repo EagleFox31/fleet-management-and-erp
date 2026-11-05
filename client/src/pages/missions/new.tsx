@@ -11,13 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save, AlertTriangle } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 import { getDriverCpcEligibility, normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
-import { driverCpcStatusOf, getStepBlockReason } from "@/lib/mission-wizard-rules";
+import { CPC_BLOCK_PREFIX, driverCpcStatusOf, getCpcBlockGuidance, getStepBlockReason } from "@/lib/mission-wizard-rules";
 
 const WORKFLOW_STEPS = [
   { number: 1, title: "Client & Mission", description: "Informations de base" },
@@ -28,6 +29,7 @@ const WORKFLOW_STEPS = [
 
 export default function NewMission() {
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
   
@@ -196,6 +198,7 @@ export default function NewMission() {
     cpcTrainingDate: selectedDriver?.cpcTrainingDate,
   });
   const isDriverCpcCompatible = !formData.driverId || driverCpc.eligible;
+  const cpcGuidance = formData.driverId ? getCpcBlockGuidance(selectedDriver, user?.role) : null;
   const stepBlockReason = getStepBlockReason({
     step: currentStep,
     clientId: formData.clientId,
@@ -723,7 +726,22 @@ export default function NewMission() {
             </div>
           )}
 
-          {stepBlockReason && (
+          {currentStep === 3 && cpcGuidance && (
+            <div
+              role="alert"
+              data-testid="cpc-block-guidance"
+              className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">{cpcGuidance.title}</p>
+                <p>{cpcGuidance.why}</p>
+                <p>{cpcGuidance.action}</p>
+              </div>
+            </div>
+          )}
+
+          {stepBlockReason && !(cpcGuidance && stepBlockReason.startsWith(CPC_BLOCK_PREFIX)) && (
             <div
               role="alert"
               data-testid="step-block-reason"
