@@ -433,7 +433,16 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : relecture de #340. La référence était `vehicle-<id>` lui-même : remplacé par une jonction, il se résolvait dehors avec le candidat et le contrôle passait.
 - **Preuve** : intégration `workflow-document-transfer` (jonction `vehicle-<id>` : rien copié dehors, document non transféré) et contrat `vehicle-documents-upload-path` (400 « Dossier de destination invalide »), rouges sur la version précédente, verts après.
 
+## 2026-11-05 — Suppressions de server/api : borne qui résout les liens
+- **Quoi** : `scanFileAccesses` prend en option le jeu de bornes acceptées (`LINK_RESOLVING_BOUND_CALLS`). Garde `upload-delete-hygiene` : toute suppression (`unlink`, `rm`, `rmdir`) d'une route de `server/api` passe par `uploadedFileCandidates`, `settlementProofPath` ou `existingUploadedFile` ; `isInsideDirectory` seul est refusé. Deux exceptions gelées (multer, `req.file.path`), chacune avec sa raison et sa condition de dégel.
+- **Pourquoi** : `stored-path-hygiene` accepte la borne lexicale, qu'un lien sous `uploads/` passe (AGENTS §9).
+- **Preuve** : suppression bornée lexicalement injectée dans une route : la nouvelle garde échoue, `stored-path-hygiene` passe ; cas synthétiques strict et défaut ; tsc 0, unitaires verts.
 ## 2026-11-05 — Justificatifs téléversés liés à l'écriture
 - **Quoi** : règlement fournisseur (`POST /:id/settlements`) et récépissé de renouvellement (`POST /requests/:id/receipt`) suppriment le fichier dans le `finally` tant qu'aucune écriture validée ne le référence (`proofRecorded`, `receiptRecorded`). Diffusion du règlement au mieux (`log.error`).
 - **Pourquoi** : une diffusion qui levait rendait 500 et supprimait le justificatif d'un règlement créé ; un identifiant invalide laissait un fichier orphelin.
 - **Preuve** : contrat `supplier-settlement-proof-lifecycle` (3 cas, 2 rouges sur main) ; contrats `supplier-settlement*` et `document-renewal*` verts (64) ; tsc 0 ; unitaires 2417 verts.
+
+## 2026-11-05 — Routes multer : garde de cycle de vie, dépôt de document véhicule
+- **Quoi** : garde `multer-lifecycle-hygiene` (route de `server/api` qui lit `req.file` : drapeau + `finally`, ou exception gelée ; import Excel en mémoire gelé). Dépôt de document véhicule passé au patron, diffusion au mieux. Règlement fournisseur : `removeUploadedProof` par `settlementProofPath`, refus 401/400 en `AppError`.
+- **Pourquoi** : récidive de #178 en #348 ; le dépôt de document véhicule avait le même défaut (diffusion qui lève : 500 et fichier d'un document enregistré supprimé).
+- **Preuve** : contrat `vehicle-documents-upload-errors` (diffusion qui lève → 201, fichier conservé), rouge avant ; contrat `supplier-settlement-proof-lifecycle` (+ 409 facture non approuvée, aucun fichier) ; garde rouge sur l'ancien dépôt de document.

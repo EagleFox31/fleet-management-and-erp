@@ -73,6 +73,9 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
   const vehicleId = Number(req.params.vehicleId);
 
   uploadVehicleDocument(req, res, async (err: unknown) => {
+    // Le fichier n'est gardé qu'une fois référencé par un document enregistré (miroir compris) :
+    // toute autre sortie le supprime dans le finally, jamais après l'écriture (patron de #178).
+    let fileRecorded = false;
     try {
       if (err instanceof AppError) throw err;
       if (err) {
@@ -88,7 +91,7 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
       const file = req.file;
       if (!file) throw new AppError(400, "Aucun fichier n'a été téléchargé");
 
-      try {
+      {
         const { name, type, description, expiryDate } = req.body;
         if (!name || !type) throw new AppError(400, "Nom et type de document requis");
         if (expiryDate && !expiryDateSchema.safeParse(expiryDate).success) {
@@ -116,7 +119,7 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
         });
         // vehicle_documents fait foi : la colonne miroir de vehicles suit le dépôt.
         // Dépôt : le miroir n'avance que si la date est plus récente (jamais de recul).
-        // Si la synchro échoue, la ligne document est retirée (le fichier l'est par le catch).
+        // Si la synchro échoue, la ligne document est retirée (le fichier l'est par le finally).
         let mirrorWritten = false;
         try {
           mirrorWritten = await syncVehicleDocumentMirror(vehicleId, document.type, document.expiryDate, "later");
@@ -128,14 +131,19 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
           }
           throw new AppError(500, "Le document n'a pas pu être enregistré. Réessayez.", { cause: syncError });
         }
-        emitDocumentDeposited(req, vehicleId, document, mirrorWritten);
+        fileRecorded = true;
+        // Diffusion au mieux : le document référence déjà le fichier, un échec ici ne touche ni à l'un ni à l'autre.
+        try {
+          emitDocumentDeposited(req, vehicleId, document, mirrorWritten);
+        } catch (broadcastError) {
+          log.error({ err: broadcastError, requestId: req.requestId, documentId: document.id }, "diffusion du dépôt de document");
+        }
         return res.status(201).json(document);
-      } catch (inner) {
-        await removeUploaded(file.path, req.requestId);
-        throw inner;
       }
     } catch (error) {
       next(error);
+    } finally {
+      if (!fileRecorded) await removeUploaded(req.file?.path, req.requestId);
     }
   });
 });

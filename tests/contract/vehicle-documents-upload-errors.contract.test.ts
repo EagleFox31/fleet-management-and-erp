@@ -104,4 +104,21 @@ describe("POST /api/vehicles/:id/documents : refus de fichier", { timeout: 12000
   it("extension et MIME cohérents : accepté (201)", async () => {
     expect((await upload("carte.pdf", "application/pdf")).status).toBe(201);
   });
+
+  it("diffusion qui lève après l'enregistrement : 201, le fichier du document reste sur le disque", async () => {
+    const g = global as { broadcastUpdate?: unknown };
+    const original = g.broadcastUpdate;
+    g.broadcastUpdate = () => {
+      throw new Error("TEST diffusion indisponible");
+    };
+    try {
+      const res = await upload("diffusion.pdf", "application/pdf");
+      expect(res.status).toBe(201);
+      const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.id, res.body.id));
+      expect(row).toBeDefined();
+      expect(fs.existsSync(row.filePath)).toBe(true);
+    } finally {
+      g.broadcastUpdate = original;
+    }
+  });
 });
