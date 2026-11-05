@@ -81,27 +81,27 @@ interface PurchaseOrderDetails {
 const statusConfig: Record<string, { label: string; color: string; icon: any; accent: string; accentBg: string; accentBorder: string }> = {
   draft:     { label: PURCHASE_ORDER_STATUS_LABELS.draft,           color: "bg-gray-100 text-gray-700 border-gray-200",       icon: FileText,     accent: "#6b7280", accentBg: "#f9fafb", accentBorder: "#e5e7eb" },
   sent:      { label: PURCHASE_ORDER_STATUS_LABELS.sent, color: "bg-blue-50 text-blue-700 border-blue-200",        icon: Send,         accent: "#2563eb", accentBg: "#eff6ff", accentBorder: "#bfdbfe" },
-  confirmed: { label: PURCHASE_ORDER_STATUS_LABELS.confirmed, color: "bg-green-50 text-green-700 border-green-200",     icon: CheckCircle,  accent: "#16a34a", accentBg: "#f0fdf4", accentBorder: "#bbf7d0" },
+  confirmed: { label: PURCHASE_ORDER_STATUS_LABELS.confirmed, color: "bg-success/10 text-success border-success/30",     icon: CheckCircle,  accent: "#16a34a", accentBg: "#f0fdf4", accentBorder: "#bbf7d0" },
   cancellation_requested: { label: PURCHASE_ORDER_STATUS_LABELS.cancellation_requested, color: "bg-orange-50 text-orange-700 border-orange-200", icon: AlertTriangle, accent: "#ea580c", accentBg: "#fff7ed", accentBorder: "#fdba74" },
-  partial:   { label: PURCHASE_ORDER_STATUS_LABELS.partial,   color: "bg-amber-50 text-amber-700 border-amber-200",     icon: Package,      accent: "#d97706", accentBg: "#fffbeb", accentBorder: "#fde68a" },
+  partial:   { label: PURCHASE_ORDER_STATUS_LABELS.partial,   color: "bg-warning/10 text-warning-text border-warning/30",     icon: Package,      accent: "#d97706", accentBg: "#fffbeb", accentBorder: "#fde68a" },
   delivered: { label: PURCHASE_ORDER_STATUS_LABELS.delivered,    color: "bg-indigo-50 text-indigo-700 border-indigo-200",  icon: Truck,        accent: "#7c3aed", accentBg: "#f5f3ff", accentBorder: "#ddd6fe" },
-  completed: { label: PURCHASE_ORDER_STATUS_LABELS.completed,              color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, accent: "#059669", accentBg: "#ecfdf5", accentBorder: "#a7f3d0" },
-  cancelled: { label: PURCHASE_ORDER_STATUS_LABELS.cancelled,               color: "bg-red-50 text-red-700 border-red-200",           icon: XCircle,      accent: "#dc2626", accentBg: "#fef2f2", accentBorder: "#fecaca" },
+  completed: { label: PURCHASE_ORDER_STATUS_LABELS.completed,              color: "bg-success/10 text-success border-success/30", icon: CheckCircle2, accent: "#059669", accentBg: "#ecfdf5", accentBorder: "#a7f3d0" },
+  cancelled: { label: PURCHASE_ORDER_STATUS_LABELS.cancelled,               color: "bg-destructive/10 text-destructive-text border-destructive/30",           icon: XCircle,      accent: "#dc2626", accentBg: "#fef2f2", accentBorder: "#fecaca" },
 };
 
 const lineStatusConfig: Record<string, { label: string; color: string; dot: string }> = {
   pending:   { label: "En attente",           color: "bg-gray-100 text-gray-600 border-gray-200",      dot: "#9ca3af" },
-  partial:   { label: "Partielle",            color: "bg-amber-50 text-amber-700 border-amber-200",    dot: "#d97706" },
+  partial:   { label: "Partielle",            color: "bg-warning/10 text-warning-text border-warning/30",    dot: "#d97706" },
   delivered: { label: "Reçue en magasin",     color: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "#7c3aed" },
-  accepted:  { label: "Validée au contrôle",  color: "bg-green-50 text-green-700 border-green-200",    dot: "#16a34a" },
-  rejected:  { label: "Refusée au contrôle",  color: "bg-red-50 text-red-700 border-red-200",          dot: "#dc2626" },
+  accepted:  { label: "Validée au contrôle",  color: "bg-success/10 text-success border-success/30",    dot: "#16a34a" },
+  rejected:  { label: "Refusée au contrôle",  color: "bg-destructive/10 text-destructive-text border-destructive/30",          dot: "#dc2626" },
 };
 
 const urgencyConfig: Record<string, { label: string; color: string; icon: any }> = {
   low:      { label: "Faible",   color: "bg-gray-100 text-gray-600",       icon: Clock },
   normal:   { label: "Normale",  color: "bg-blue-50 text-blue-600",        icon: Clock },
-  high:     { label: "Haute",    color: "bg-amber-50 text-amber-700",      icon: AlertTriangle },
-  critical: { label: "Critique", color: "bg-red-50 text-red-700",          icon: AlertTriangle },
+  high:     { label: "Haute",    color: "bg-warning/10 text-warning-text",      icon: AlertTriangle },
+  critical: { label: "Critique", color: "bg-destructive/10 text-destructive-text",          icon: AlertTriangle },
 };
 
 const lineDeliveryStatusLabel: Record<string, string> = {
@@ -361,8 +361,8 @@ export default function PurchaseOrderDetailsPage() {
     <div className="space-y-5">
 
       {/* ── Header ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
 
           {/* Retour */}
@@ -392,11 +392,11 @@ export default function PurchaseOrderDetailsPage() {
 
           {/* Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center shrink-0">
-              <ShoppingCart className="h-5 w-5 text-green-600" />
+            <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
+              <ShoppingCart className="h-5 w-5 text-success" />
             </div>
             <div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Bon de commande</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-success">Bon de commande</span>
               <h1 className="text-xl font-bold text-gray-900 leading-tight">{order.orderNumber}</h1>
               <p className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1">
                 <Calendar className="w-3 h-3" />
@@ -409,7 +409,7 @@ export default function PurchaseOrderDetailsPage() {
           <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-gray-100">
             {[
               { icon: <Building2 className="h-4 w-4 text-blue-500" />, iconBg: "bg-blue-50", label: "Fournisseur", value: supplier?.name || "N/A" },
-              { icon: <ShoppingCart className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50", label: "Total TTC", value: formatCurrency(order.totalAmountTTC) },
+              { icon: <ShoppingCart className="h-4 w-4 text-success" />, iconBg: "bg-success/10", label: "Total TTC", value: formatCurrency(order.totalAmountTTC) },
               { icon: <Package className="h-4 w-4 text-purple-500" />, iconBg: "bg-purple-50", label: "Articles", value: `${lines.length} article${lines.length > 1 ? "s" : ""}` },
             ].map((kpi) => (
               <div key={kpi.label} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-2">
@@ -436,7 +436,7 @@ export default function PurchaseOrderDetailsPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                <ClipboardList className="w-3.5 h-3.5 text-green-600" />
+                <ClipboardList className="w-3.5 h-3.5 text-success" />
               </div>
               <CardTitle className="text-base">Détails de la commande</CardTitle>
             </div>
@@ -498,8 +498,8 @@ export default function PurchaseOrderDetailsPage() {
 
             {visibleOrderNotes && (
               <div className="rounded-xl p-3" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
-                <p className="text-[10px] font-bold tracking-widest uppercase text-amber-600 mb-1">Notes</p>
-                <p className="text-sm text-amber-900 leading-relaxed" data-testid="order-notes">{visibleOrderNotes}</p>
+                <p className="text-[10px] font-bold tracking-widest uppercase text-warning-text mb-1">Notes</p>
+                <p className="text-sm text-warning-text leading-relaxed" data-testid="order-notes">{visibleOrderNotes}</p>
               </div>
             )}
 
@@ -526,7 +526,7 @@ export default function PurchaseOrderDetailsPage() {
               </div>
             ) : (order.status === "delivered" || order.status === "completed") ? (
               <div className="rounded-xl p-3" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
-                <p className="text-[12px] text-amber-800">
+                <p className="text-[12px] text-warning-text">
                   Commande réceptionnée, facture fournisseur en attente de génération.
                 </p>
               </div>
@@ -540,7 +540,7 @@ export default function PurchaseOrderDetailsPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                <ShoppingCart className="w-3.5 h-3.5 text-green-600" />
+                <ShoppingCart className="w-3.5 h-3.5 text-success" />
               </div>
               <CardTitle className="text-base">Résumé financier</CardTitle>
             </div>
@@ -553,8 +553,8 @@ export default function PurchaseOrderDetailsPage() {
 
             {Number(order.discountPercentage) > 0 && (
               <div className="flex justify-between items-center py-1.5 border-b border-gray-100">
-                <span className="text-sm text-green-600">Remise ({Number(order.discountPercentage).toFixed(1)}%)</span>
-                <span className="font-medium text-green-600">−{formatCurrency(order.discountAmount)}</span>
+                <span className="text-sm text-success">Remise ({Number(order.discountPercentage).toFixed(1)}%)</span>
+                <span className="font-medium text-success">−{formatCurrency(order.discountAmount)}</span>
               </div>
             )}
 
@@ -565,8 +565,8 @@ export default function PurchaseOrderDetailsPage() {
 
             {/* Total TTC mis en valeur */}
             <div className="mt-2 rounded-xl p-4 text-center" style={{ background: "linear-gradient(135deg, #f0fdf4, #dcfce7)", border: "1px solid #86efac" }}>
-              <p className="text-[10.5px] font-bold tracking-widest uppercase text-green-600 mb-1">Total TTC</p>
-              <p className="font-black text-green-800 text-2xl leading-none" data-testid="total-ttc">
+              <p className="text-[10.5px] font-bold tracking-widest uppercase text-success mb-1">Total TTC</p>
+              <p className="font-black text-success text-2xl leading-none" data-testid="total-ttc">
                 {formatCurrency(order.totalAmountTTC)}
               </p>
             </div>
@@ -629,7 +629,7 @@ export default function PurchaseOrderDetailsPage() {
               {canDirectCancelOrder && (
                 <Button
                   variant="outline"
-                  className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-semibold"
+                  className="border-destructive/30 text-destructive-text hover:bg-destructive/10 hover:text-destructive-text font-semibold"
                   onClick={() => handleStatusChange('cancelled')}
                   disabled={updateStatusMutation.isPending}
                   data-testid="button-status-cancelled"
@@ -704,7 +704,7 @@ export default function PurchaseOrderDetailsPage() {
                 })}
               </div>
               <p className="text-[11px] text-gray-400">
-                Cas particulier : si une partie seulement est reçue, le statut intermédiaire est <span className="font-semibold text-amber-600">Réception partielle</span>.
+                Cas particulier : si une partie seulement est reçue, le statut intermédiaire est <span className="font-semibold text-warning-text">Réception partielle</span>.
               </p>
               {order.status === "cancellation_requested" && (
                 <p className="text-[11px] text-orange-700 rounded-lg px-2.5 py-2 bg-orange-50 border border-orange-200">
@@ -724,11 +724,11 @@ export default function PurchaseOrderDetailsPage() {
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 {workflowActionRights.map((row) => (
-                  <div key={row.action} className="rounded-lg p-3 bg-white" style={{ border: "1px solid #e2e8f0" }}>
+                  <div key={row.action} className="rounded-lg p-3 bg-card" style={{ border: "1px solid #e2e8f0" }}>
                     <p className="text-[11px] font-bold text-gray-700 mb-1.5">{row.action}</p>
                     <div className="flex flex-wrap gap-1">
                       {row.roles.map((role) => (
-                        <Badge key={`${row.action}-${role}`} variant="outline" className="text-[10.5px] bg-green-50 text-green-700 border-green-200 font-medium">
+                        <Badge key={`${row.action}-${role}`} variant="outline" className="text-[10.5px] bg-success/10 text-success border-success/30 font-medium">
                           {role}
                         </Badge>
                       ))}
@@ -862,7 +862,7 @@ export default function PurchaseOrderDetailsPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-              <Package className="w-3.5 h-3.5 text-green-600" />
+              <Package className="w-3.5 h-3.5 text-success" />
             </div>
             <div>
               <CardTitle className="text-base">Articles commandés
@@ -904,7 +904,7 @@ export default function PurchaseOrderDetailsPage() {
                       <div className="space-y-0.5">
                         <div className="text-sm font-medium text-gray-800">Qté: <span className="font-bold">{line.quantityOrdered}</span></div>
                         {line.quantityReceived > 0 && (
-                          <div className="text-[11px] text-green-600 font-medium">Reçue: {line.quantityReceived}</div>
+                          <div className="text-[11px] text-success font-medium">Reçue: {line.quantityReceived}</div>
                         )}
                       </div>
                     </TableCell>

@@ -50,10 +50,10 @@ interface CPCStatistics {
 const getLicenseBadge = (licenseExpiry: string | null) => {
   const { state, days } = getDriverLicenseStatus(licenseExpiry);
   if (state === "none") return <span className="text-[10px] text-gray-400">—</span>;
-  if (state === "expired") return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />Expiré</span>;
+  if (state === "expired") return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-destructive/15 text-destructive-text inline-flex items-center gap-1"><XCircle className="w-3 h-3" />Expiré</span>;
   if (state === "soon") return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{driverLicenseDaysLabel(days!)}</span>;
   if (state === "warning") return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 inline-flex items-center gap-1"><Clock className="w-3 h-3" />{driverLicenseDaysLabel(days!)}</span>;
-  return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />Valide</span>;
+  return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success/15 text-success inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />Valide</span>;
 };
 
 export default function DriversIndex() {
@@ -94,23 +94,23 @@ export default function DriversIndex() {
   }) || [];
 
   const getStatusBadge = (status: string) => {
-    if (normalizeCpcStatus(status) === 'FORME') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />FORMÉ</span>;
+    if (normalizeCpcStatus(status) === 'FORME') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success/15 text-success inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />FORMÉ</span>;
     if (normalizeCpcStatus(status) === 'A FORMER') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />À FORMER</span>;
-    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />NON FORMÉ</span>;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-destructive/15 text-destructive-text inline-flex items-center gap-1"><XCircle className="w-3 h-3" />NON FORMÉ</span>;
   };
 
   const getUrgencyColor = (days: number) => {
-    if (days < 0) return "text-red-600";
+    if (days < 0) return "text-destructive-text";
     if (days <= 30) return "text-orange-600";
     if (days <= 59) return "text-yellow-600";
-    return "text-green-600";
+    return "text-success";
   };
 
   const getUrgencyDot = (days: number) => {
-    if (days < 0) return "bg-red-500";
+    if (days < 0) return "bg-destructive";
     if (days <= 30) return "bg-orange-500";
     if (days <= 59) return "bg-yellow-400";
-    return "bg-green-500";
+    return "bg-success";
   };
 
   async function handleCreateAccount(e: React.FormEvent) {
@@ -182,8 +182,8 @@ export default function DriversIndex() {
             value={drivers?.filter(d => normalizeCpcStatus(d.cpcStatus) === 'FORME').length || 0}
             subValue="CPC à jour"
             icon={<CheckCircle className="h-4 w-4" />}
-            iconWrapperClassName="bg-green-50 text-green-600"
-            valueClassName="text-green-600"
+            iconWrapperClassName="bg-success/10 text-success"
+            valueClassName="text-success"
           />
           <KpiTile
             label="À Former"
@@ -198,8 +198,8 @@ export default function DriversIndex() {
             value={drivers?.filter(d => normalizeCpcStatus(d.cpcStatus) === 'NON FORME').length || 0}
             subValue="Sans formation CPC"
             icon={<XCircle className="h-4 w-4" />}
-            iconWrapperClassName="bg-red-50 text-red-500"
-            valueClassName="text-red-600"
+            iconWrapperClassName="bg-destructive/10 text-destructive-text"
+            valueClassName="text-destructive-text"
           />
         </KpiGrid>
       </HeaderCard>
@@ -213,7 +213,7 @@ export default function DriversIndex() {
         {/* Liste */}
         <TabsContent value="list" className="space-y-4">
           {/* Filtres */}
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
             <div className="px-5 py-3.5 flex flex-col md:flex-row gap-3 items-start md:items-center">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
@@ -222,7 +222,7 @@ export default function DriversIndex() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   data-testid="input-search-drivers"
-                  className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-100 rounded-lg outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-400 transition-all placeholder:text-gray-400"
+                  className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-100 rounded-lg outline-none focus:ring-2 focus:ring-success focus:border-success transition-all placeholder:text-gray-400"
                 />
               </div>
               <div className="flex gap-1.5 flex-wrap">
@@ -243,10 +243,10 @@ export default function DriversIndex() {
           </div>
 
           {/* Table */}
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
             <div className="px-5 py-3.5 border-b border-gray-100 flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-green-50 flex items-center justify-center">
-                <Users className="h-3.5 w-3.5 text-green-600" />
+              <div className="w-6 h-6 rounded-md bg-success/10 flex items-center justify-center">
+                <Users className="h-3.5 w-3.5 text-success" />
               </div>
               <span className="text-sm font-semibold text-gray-800">
                 {filteredDrivers.length} chauffeur{filteredDrivers.length > 1 ? "s" : ""}
@@ -255,7 +255,7 @@ export default function DriversIndex() {
             </div>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500" />
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-success" />
               </div>
             ) : filteredDrivers.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -335,7 +335,7 @@ export default function DriversIndex() {
                             : "—"}
                         </td>
                         <td className="px-4 py-3.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${driver.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${driver.isActive ? "bg-success/15 text-success" : "bg-gray-100 text-gray-500"}`}>
                             {driver.isActive ? "Actif" : "Inactif"}
                           </span>
                         </td>
@@ -344,7 +344,7 @@ export default function DriversIndex() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                              className="h-7 w-7 text-success hover:text-success hover:bg-success/10"
                               title="Créer compte utilisateur"
                               onClick={(e) => { e.stopPropagation(); setCreateAccountDialog({ open: true, driver }); setCreateAccountForm({ email: "", pin: "", showPin: false }); }}
                             >
@@ -353,7 +353,7 @@ export default function DriversIndex() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2.5 text-xs text-gray-500 hover:text-green-700 hover:bg-green-50"
+                              className="h-7 px-2.5 text-xs text-gray-500 hover:text-success hover:bg-success/10"
                               onClick={() => setLocation(`/drivers/${driver.id}`)}
                             >
                               <Eye className="h-3.5 w-3.5 mr-1" /> Voir
@@ -373,11 +373,11 @@ export default function DriversIndex() {
         <TabsContent value="stats" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* CPC Status chart */}
-            <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-              <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+            <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+              <div className="h-0.5 bg-gradient-to-r from-success to-success" />
               <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                  <GraduationCap className="h-3.5 w-3.5 text-green-600" />
+                <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                  <GraduationCap className="h-3.5 w-3.5 text-success" />
                 </div>
                 <span className="text-sm font-semibold text-gray-800">Répartition des Statuts CPC</span>
               </div>
@@ -388,7 +388,7 @@ export default function DriversIndex() {
 
             {/* Statistiques détaillées */}
             <div className="space-y-4">
-              <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
+              <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
                 <div className="h-0.5 bg-gradient-to-r from-blue-500 to-sky-400" />
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -398,9 +398,9 @@ export default function DriversIndex() {
                 </div>
                 <div className="px-5 py-4 space-y-2">
                   {[
-                    { label: "Chauffeurs Formés", value: stats?.forme || 0, color: "text-green-600", bg: "bg-green-50", icon: CheckCircle },
+                    { label: "Chauffeurs Formés", value: stats?.forme || 0, color: "text-success", bg: "bg-success/10", icon: CheckCircle },
                     { label: "À Former (Urgent)", value: stats?.aFormer || 0, color: "text-orange-600", bg: "bg-orange-50", icon: AlertTriangle },
-                    { label: "Non Formés", value: stats?.nonForme || 0, color: "text-red-600", bg: "bg-red-50", icon: XCircle },
+                    { label: "Non Formés", value: stats?.nonForme || 0, color: "text-destructive-text", bg: "bg-destructive/10", icon: XCircle },
                     { label: "Total Chauffeurs", value: stats?.total || 0, color: "text-gray-700", bg: "bg-gray-50", icon: Users },
                   ].map(({ label, value, color, bg, icon: Icon }) => (
                     <div key={label} className={`flex items-center justify-between rounded-xl ${bg} px-4 py-3`}>
@@ -415,17 +415,17 @@ export default function DriversIndex() {
                 <div className="px-5 pb-4 pt-2 border-t border-gray-100">
                   <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-widest">Légende urgence</p>
                   <ul className="space-y-1 text-xs text-gray-500">
-                    <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500" />Formation valide (plus de 59 jours)</li>
+                    <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-success" />Formation valide (plus de 59 jours)</li>
                     <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-yellow-400" />Attention : 30 à 59 jours restants</li>
                     <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-orange-500" />Urgent : moins de 30 jours restants</li>
-                    <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500" />Critique : Formation expirée</li>
+                    <li className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-destructive" />Critique : Formation expirée</li>
                   </ul>
                 </div>
               </div>
 
               {/* Actions urgentes */}
-              <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-                <div className="h-0.5 bg-gradient-to-r from-orange-400 to-red-400" />
+              <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+                <div className="h-0.5 bg-gradient-to-r from-orange-400 to-destructive" />
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center">
                     <AlertTriangle className="h-3.5 w-3.5 text-orange-600" />
@@ -435,7 +435,7 @@ export default function DriversIndex() {
                 <div className="px-5 py-4">
                   {drivers?.filter(d => d.daysRemaining < 30 && d.isActive).length === 0 ? (
                     <div className="flex flex-col items-center py-6 text-center">
-                      <CheckCircle className="w-10 h-10 text-green-500 mb-2 opacity-60" />
+                      <CheckCircle className="w-10 h-10 text-success mb-2 opacity-60" />
                       <p className="text-sm text-gray-500">Tous les chauffeurs actifs sont à jour !</p>
                     </div>
                   ) : (
@@ -447,7 +447,7 @@ export default function DriversIndex() {
                           <div
                             key={driver.id}
                             className={`rounded-xl border px-4 py-3 ${
-                              driver.daysRemaining < 0 ? "bg-red-50 border-red-200" : "bg-orange-50 border-orange-200"
+                              driver.daysRemaining < 0 ? "bg-destructive/10 border-destructive/30" : "bg-orange-50 border-orange-200"
                             }`}
                             data-testid={`urgent-driver-${driver.id}`}
                           >
@@ -489,8 +489,8 @@ export default function DriversIndex() {
         <DialogContent className="max-w-sm rounded-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                <UserPlus className="h-4 w-4 text-green-600" />
+              <div className="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
+                <UserPlus className="h-4 w-4 text-success" />
               </div>
               Créer compte chauffeur
             </DialogTitle>
@@ -553,7 +553,7 @@ export default function DriversIndex() {
                 type="submit"
                 size="sm"
                 disabled={createAccountLoading || createAccountForm.pin.length !== 4 || !createAccountForm.email}
-                className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                className="rounded-xl bg-success hover:brightness-90 text-white"
               >
                 {createAccountLoading ? (
                   <span className="flex items-center gap-2"><span className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> Création…</span>
