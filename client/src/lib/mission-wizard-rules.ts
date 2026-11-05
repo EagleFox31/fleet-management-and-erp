@@ -5,6 +5,7 @@ export interface WizardDriver {
   cpcStatus?: string | null;
   /** Statut enregistré en base, celui que lit la garde serveur. */
   cpcStatusRecorded?: string | null;
+  cpcTrainingDate?: string | null;
 }
 
 export interface WizardStepInput {
@@ -46,7 +47,10 @@ export function getStepBlockReason(input: WizardStepInput): string | null {
         return `Le poids du cargo (${input.cargoWeight} T) dépasse le tonnage du véhicule (${input.vehicleTonnage ?? "N/A"} T).`;
       }
       if (input.driverId) {
-        const cpc = getDriverCpcEligibility({ cpcStatus: driverCpcStatusOf(input.selectedDriver) });
+        const cpc = getDriverCpcEligibility({
+          cpcStatus: driverCpcStatusOf(input.selectedDriver),
+          cpcTrainingDate: input.selectedDriver?.cpcTrainingDate,
+        });
         if (!cpc.eligible) return `Chauffeur non éligible : ${cpc.reason}`;
       }
       return null;

@@ -31,6 +31,14 @@ describe("règles de l'assistant de création de mission", () => {
     expect(getStepBlockReason({ ...base, selectedDriver: driver })).toBeNull();
   });
 
+  it("statut FORMÉ mais formation expirée : l'étape 3 est bloquée avec la date", () => {
+    const r = getStepBlockReason({
+      ...base,
+      selectedDriver: { cpcStatus: "FORMÉ", cpcStatusRecorded: "FORMÉ", cpcTrainingDate: "2020-01-01" },
+    });
+    expect(r).toContain("Formation CPC expirée le 01/01/2022");
+  });
+
   it("ancienne réponse sans statut enregistré : retombe sur le statut d'affichage", () => {
     expect(driverCpcStatusOf({ cpcStatus: "FORMÉ" })).toBe("FORMÉ");
   });

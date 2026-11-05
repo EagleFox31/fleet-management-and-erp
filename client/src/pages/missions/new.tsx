@@ -16,7 +16,7 @@ import { Package, MapPin, Truck, CheckCircle, ArrowLeft, ArrowRight, Save, Alert
 import { formatPrice } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
-import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
+import { getDriverCpcEligibility, normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { driverCpcStatusOf, getStepBlockReason } from "@/lib/mission-wizard-rules";
 
 const WORKFLOW_STEPS = [
@@ -191,7 +191,10 @@ export default function NewMission() {
     || cargoWeight <= vehicleTonnage;
   // Même règle que la garde d'affectation du serveur, sur le statut enregistré.
   const driverCpcStatus = driverCpcStatusOf(selectedDriver);
-  const driverCpc = getDriverCpcEligibility({ cpcStatus: driverCpcStatus });
+  const driverCpc = getDriverCpcEligibility({
+    cpcStatus: driverCpcStatus,
+    cpcTrainingDate: selectedDriver?.cpcTrainingDate,
+  });
   const isDriverCpcCompatible = !formData.driverId || driverCpc.eligible;
   const stepBlockReason = getStepBlockReason({
     step: currentStep,
@@ -537,7 +540,7 @@ export default function NewMission() {
                           <span className="text-gray-600 dark:text-gray-400">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
                             driverCpc.eligible ? 'bg-green-100 text-green-800' :
-                            driverCpcStatus === 'À FORMER' ? 'bg-orange-100 text-orange-800' :
+                            normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-orange-100 text-orange-800' :
                             'bg-red-100 text-red-800'
                           }`}>
                             {driverCpcStatus ?? "Non défini"}
