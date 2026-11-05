@@ -224,3 +224,37 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - contrats liés (`vehicle-subresources`, `vehicle-reads-client-scope`, `fuel-card-routes`) verts.
 - **Limite connue** : les pleins d'un véhicule retiré restent lisibles par son client propriétaire par le filtre de requête, `GET /api/fuel-records?vehicleId=` et `GET /api/fuel-records/consumption-history?vehicleId=`. Cette route en chemin ne ferme donc pas l'accès à elle seule ; les deux routes par requête relèvent de L1b.
 - **Hors périmètre** : les autres lectures en `canAccessOwned` + `getVehicleOwnerId` ont été recensées pour l'orchestrateur. Elles ne sont pas élargies sans son accord.
+
+## 2026-11-05T20:25:21+01:00 — Lectures rattachées au véhicule : filtres, historique, fichiers (L1b)
+
+- **Quoi** :
+  - Ces routes sortent de `server/routes.ts` (gelé) avec la garde `assertVehicleSubresourcesReadable` :
+    - `GET /api/work-orders/vehicle/:vehicleId` et `GET /api/maintenance-schedules/vehicle/:vehicleId`, vers `server/api/vehicle-history.routes.ts` ;
+    - `GET /api/fuel-records` et `GET /api/fuel-records/consumption-history`, vers `server/api/fuel-records.routes.ts`, avec la garde quand `?vehicleId=` est présent.
+  - B5 : `GET /api/documents/:id/download` répond 403 au client propriétaire si le véhicule est retiré.
+  - B7 : la preuve d'une demande de renouvellement ajoute la condition « véhicule non retiré » à `canAccessOwned`. Ce contrôle est sans effet aujourd'hui, puisque `VIEW_ROLES` refuse le client avant. Aucun contrat ne peut donc le distinguer pour un client.
+  - B6 : `/api/fuel-records/statistics` excluait déjà les véhicules retirés de l'agrégat client, car `getVehiclesByOwner` filtre `deleted_at`. Un cas de contrat le fige désormais.
+  - C : `assertWorkOrderReadable` est inchangé, le détail d'un OT reste lisible.
+- **Contrat de réponse** : les corps 200 sont inchangés. Une période inconnue de l'historique retombe sur le mois. Les 400 et 403 passent par `AppError`.
+- **Pourquoi** : c'est le near miss de L1. La route en chemin était fermée, mais le filtre de requête restait ouvert. Voir `docs/analysis/LESSONS_LEARNED.md`.
+- **Correction de mon hypothèse précédente** : `/api/work-orders/vehicle/:id` n'était pas masquée par `/:id`. Le contrat l'a montré : elle répondait 200 au propriétaire sur le véhicule retiré.
+- **Preuve automatisée** :
+  - `tests/contract/vehicle-history-retired-scope.contract.test.ts`, écrit d'abord. Il échouait avec 6 rouges sur le code d'origine. Il couvre :
+    - par lecture : propriétaire actif et retiré, tiers, personnel sur le retiré, anonyme, id illisible ;
+    - le balayage « toutes les entrées d'un plein » : chemin, filtre, liste, statistiques, historique, et les périodes `constructor`, `__proto__`, etc. ;
+    - B5.
+  - Mutants « garde retirée » : les 6 sont détectés.
+
+    | Mutant | Rouges |
+    |---|---|
+    | OT | 1 |
+    | Plans | 1 |
+    | Filtre des pleins | 2 |
+    | Filtre de l'historique | 2 |
+    | Téléchargement | 1 |
+    | Cloison de la liste sans filtre | 1 |
+
+  - `routes-hygiene` : 30/30. La liste gelée n'a pas été modifiée.
+- **Audit sécurité** : rien de bloquant.
+  - Mineur corrigé : `?period=constructor` répondait 500, parce qu'une clé héritée d'`Object.prototype` était lue. Les périodes passent désormais par une `Map`.
+  - Hors périmètre : quatre listes restent ouvertes au propriétaire d'un véhicule retiré. Elles sont détaillées dans la leçon et proposées en L1c.
