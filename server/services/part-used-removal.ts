@@ -4,11 +4,12 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { storage } from "../storage";
 import { partsUsed, workOrders } from "@shared/schema";
+import { PART_USED_REMOVE_BLOCKED_WO_STATUSES } from "@shared/constants/roles";
 
 const log = moduleLogger("part-used-removal");
 
 /** Un OT terminé ne perd plus de pièce : la correction passe par un ajustement de stock du magasin. */
-const CLOSED_WORK_ORDER_STATUSES: ReadonlySet<string> = new Set(["completed", "cancelled"]);
+const CLOSED_WORK_ORDER_STATUSES: ReadonlySet<string> = new Set(PART_USED_REMOVE_BLOCKED_WO_STATUSES);
 
 export type PartUsedRemoval = { partUsedId: number; workOrderId: number; partId: number; quantity: number };
 

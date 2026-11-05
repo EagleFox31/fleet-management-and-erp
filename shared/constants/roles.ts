@@ -382,10 +382,16 @@ export function canReadWorkOrderCost(role: string | null | undefined): boolean {
 }
 
 /**
+ * Porte d'entrée des gestes de stock sur un OT (`isStockIssuer` côté serveur) : sortie de
+ * pièce, bon de sortie, retrait d'une pièce posée. Source unique serveur et écran.
+ */
+export const STOCK_ISSUER_ROLES = ["admin", "warehouse", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/**
  * Retrait d'une pièce posée sur un OT (`DELETE /api/parts-used/:id`) : magasin et atelier
  * (le geste remet du stock). Le technicien est refusé. Même liste que la route serveur.
  */
-export const PART_USED_REMOVE_ROLES = ["admin", "warehouse", "workshop_manager"] as const satisfies readonly AppRole[];
+export const PART_USED_REMOVE_ROLES = STOCK_ISSUER_ROLES;
 
 /** Statuts d'OT où le retrait est refusé par le serveur (409). */
 export const PART_USED_REMOVE_BLOCKED_WO_STATUSES = ["completed", "cancelled"] as const;

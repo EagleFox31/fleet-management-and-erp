@@ -212,9 +212,8 @@ export default function WorkOrderDetails({
   const canProcessWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager' || user?.role === 'technician';
 
   // Sortir une pièce du stock, c'est le geste du magasin. Doit rester aligné
-  // sur la garde `isStockIssuer` côté serveur (admin, magasin, chef d'atelier), sinon on
-  // affiche un bouton qui fait 403. Ici le chef d'atelier est volontairement exclu : il
-  // passe par la sortie exceptionnelle ci-dessous (`canOverrideIssue`), avec motif.
+  // sur le bouton de sortie : le chef d'atelier passe la porte `isStockIssuer` côté serveur, mais
+  // il en est volontairement exclu ici : sa sortie est une dérogation motivée (`canOverrideIssue`).
   const canIssueFromStock = user?.role === 'admin' || user?.role === 'warehouse';
 
   // Le chef d'atelier n'a pas ce droit: il a une dérogation motivée, pour les
@@ -520,8 +519,8 @@ export default function WorkOrderDetails({
       apiRequest("DELETE", `/api/parts-used/${partUsedId}`),
     onSuccess: () => {
       toast({
-        title: "Pièce supprimée",
-        description: "La pièce a été supprimée de l'ordre de travail.",
+        title: "Pièce retirée",
+        description: "Pièce retirée et remise en stock.",
       });
       queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}/parts`] });
       queryClient.invalidateQueries({ queryKey: [`/api/work-orders/${workOrderId}`] });
@@ -545,7 +544,8 @@ export default function WorkOrderDetails({
   // Retrait d'une pièce posée : remet du stock, un seul envoi par clic.
   const submitRemovePart = useSingleFlightMutate(removePartMutation.mutate);
 
-  // Même règle que le serveur (DELETE /api/parts-used/:id) : rôles listés, OT ni terminé ni annulé.
+  // Corbeille des pièces posées, distincte de la sortie : tous les rôles de `STOCK_ISSUER_ROLES`
+  // (chef d'atelier compris), OT ni terminé ni annulé (DELETE /api/parts-used/:id).
   const canRemovePartUsed = canRoleRemovePartUsed(user?.role, workOrder?.status);
 
   // Mutation to start work order (pending -> in_progress)
