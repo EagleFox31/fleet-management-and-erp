@@ -3079,7 +3079,25 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
     }
 
     const needsExecutionDate = targetStatus === "in_progress" || targetStatus === "delivered" || targetStatus === "completed";
+    // Devenir « planned » ou « assigned » rend la mission active : ses affectations ne doivent pas
+    // chevaucher une autre mission active (même règle et même verrou que la création, le PATCH et l'ajout).
+    const claimsSlot = targetStatus === "planned" || targetStatus === "assigned";
     const updatedMission = await db.transaction(async (tx) => {
+      if (claimsSlot) {
+        const pairs = targetAssignments.flatMap((row) => (row.vehicleId && row.driverId ? [{ vehicleId: row.vehicleId, driverId: row.driverId }] : []));
+        await lockPlanningPairs(tx, pairs);
+        for (const row of targetAssignments) {
+          if (!row.vehicleId || !row.driverId) continue;
+          const clash = await findPlanningClash(tx, {
+            missionId,
+            pickupDate: mission.pickupDate,
+            deliveryDate: mission.deliveryDate,
+            vehicleId: row.vehicleId,
+            driverId: row.driverId,
+          });
+          if (clash) throw new AppError(409, planningClashMessage(clash));
+        }
+      }
       // Patch de workflowData appliqué à la version relue sous verrou de ligne, jamais à la copie lue en
       // tête de requête : une régularisation de plein validée entre-temps n'est plus effacée. Sans patch,
       // workflowData n'est pas réécrit du tout.
