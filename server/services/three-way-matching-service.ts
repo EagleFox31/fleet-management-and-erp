@@ -654,7 +654,8 @@ export class ThreeWayMatchingService {
     invoiceId: number,
     validatedBy: number,
     notes?: string
-  ): Promise<SupplierInvoice> {
+  ): Promise<{ invoice: SupplierInvoice; replayed: boolean }> {
+    // Compare-and-set : seule une facture reçue devient validée.
     const [updated] = await db
       .update(supplierInvoices)
       .set({
@@ -664,10 +665,40 @@ export class ThreeWayMatchingService {
         discrepancyNotes: notes,
         updatedAt: new Date(),
       })
-      .where(eq(supplierInvoices.id, invoiceId))
+      .where(
+        and(
+          eq(supplierInvoices.id, invoiceId),
+          eq(supplierInvoices.status, 'received'),
+        ),
+      )
       .returning();
 
-    return updated;
+    if (updated) {
+      return { invoice: updated, replayed: false };
+    }
+
+    const [current] = await db
+      .select()
+      .from(supplierInvoices)
+      .where(eq(supplierInvoices.id, invoiceId))
+      .limit(1);
+
+    if (!current) {
+      throw new AppError(404, "Cette facture n'existe plus.");
+    }
+    if (current.status === 'validated') {
+      return { invoice: current, replayed: true };
+    }
+    if (current.status === 'paid') {
+      throw new AppError(409, "Cette facture est déjà payée : elle ne peut plus être validée.");
+    }
+    if (current.status === 'disputed') {
+      throw new AppError(409, "Cette facture est en litige. Lever le litige avant de la valider.");
+    }
+    if (current.status === 'approved') {
+      throw new AppError(409, "Cette facture est déjà approuvée : elle ne peut plus être validée.");
+    }
+    throw new AppError(409, "Cette facture ne peut pas être validée dans son état actuel.");
   }
 
   /**
@@ -676,7 +707,7 @@ export class ThreeWayMatchingService {
   async approveInvoice(
     invoiceId: number,
     approvedBy: number
-  ): Promise<SupplierInvoice> {
+  ): Promise<{ invoice: SupplierInvoice; replayed: boolean }> {
     // La condition de statut est dans l'UPDATE : deux approbations simultanées
     // n'écrivent qu'une fois, et une facture payée ou en litige n'est jamais touchée.
     const [updated] = await db
@@ -696,7 +727,7 @@ export class ThreeWayMatchingService {
       .returning();
 
     if (updated) {
-      return updated;
+      return { invoice: updated, replayed: false };
     }
 
     const [current] = await db
@@ -710,7 +741,7 @@ export class ThreeWayMatchingService {
     }
     // Déjà approuvée : un second appel ne réécrit ni l'approbateur ni la date.
     if (current.status === 'approved') {
-      return current;
+      return { invoice: current, replayed: true };
     }
     if (current.status === 'paid') {
       throw new AppError(409, "Cette facture est déjà payée : elle ne peut plus être approuvée.");
