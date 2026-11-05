@@ -14,6 +14,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { leakText } from "../support/api-error";
+import { failLogin } from "../support/lockout";
 
 /** Niveau C, T-13 : liste des comptes verrouilles et deverrouillage admin. */
 let server: Server;
@@ -69,7 +70,7 @@ describe("/api/admin/users/locked et /unlock", { timeout: 120000 }, () => {
     const name = target.username.trim().toLowerCase();
     const now = new Date();
     for (let i = 0; i < LOCKOUT_DEFAULTS.maxAttempts; i++) {
-      await store.registerFailure(name, now, { maxAttempts: LOCKOUT_DEFAULTS.maxAttempts, lockMinutes: LOCKOUT_DEFAULTS.lockMinutes });
+      await failLogin(store, name, now, { maxAttempts: LOCKOUT_DEFAULTS.maxAttempts, lockMinutes: LOCKOUT_DEFAULTS.lockMinutes });
     }
     const list = await call("GET", LOCKED_USERS_PATH, "admin");
     expect(list.status).toBe(200);

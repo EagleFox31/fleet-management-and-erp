@@ -6,28 +6,40 @@ import { loginLockoutGuard } from "../../../server/middleware/login-lockout-guar
 import {
   EMPTY_LOCK_STATE,
   isLocked,
+  lockKeyOrder,
   lockoutConfigFromEnv,
   MemoryLockoutStore,
-  nextLockState,
 } from "../../../server/services/login-lockout-service";
+import { failLogin } from "../../support/lockout";
 
 const cfg = { maxAttempts: 5, lockMinutes: 15 };
 const t0 = new Date("2026-11-02T08:00:00Z");
 
-describe("nextLockState", () => {
-  it("verrouille au 5e echec pour 15 min", () => {
+describe("echec confirme (reservation puis confirmation)", () => {
+  it("verrouille au 5e echec pour 15 min", async () => {
+    const store = new MemoryLockoutStore();
     let s = EMPTY_LOCK_STATE;
-    for (let i = 0; i < 4; i++) s = nextLockState(s, t0, cfg);
+    for (let i = 0; i < 4; i++) s = await failLogin(store, "u", t0, cfg);
     expect(isLocked(s, t0)).toBe(false);
-    s = nextLockState(s, t0, cfg);
+    s = await failLogin(store, "u", t0, cfg);
     expect(s.failedCount).toBe(5);
     expect(s.lockedUntil!.getTime()).toBe(t0.getTime() + 15 * 60_000);
     expect(isLocked(s, new Date(t0.getTime() + 14 * 60_000))).toBe(true);
     expect(isLocked(s, new Date(t0.getTime() + 15 * 60_000))).toBe(false);
   });
-  it("un verrou expire repart de zero", () => {
-    const locked = { failedCount: 5, lockedUntil: t0, lastFailedAt: t0 };
-    expect(nextLockState(locked, new Date(t0.getTime() + 60_000), cfg).failedCount).toBe(1);
+  it("un verrou expire repart de zero", async () => {
+    const store = new MemoryLockoutStore();
+    for (let i = 0; i < 5; i++) await failLogin(store, "u", t0, cfg);
+    const s = await failLogin(store, "u", new Date(t0.getTime() + 16 * 60_000), cfg);
+    expect(s.failedCount).toBe(1);
+  });
+});
+
+describe("lockKeyOrder : ordre de prise des verrous de cle", () => {
+  it("meme ordre quel que soit l'ordre d'appel, sans doublon", () => {
+    expect(lockKeyOrder(["pwd:b", "pin:2", "pwd:a", "pwd:b"])).toEqual(["pin:2", "pwd:a", "pwd:b"]);
+    expect(lockKeyOrder(["pwd:a", "pwd:b", "pin:2"])).toEqual(lockKeyOrder(["pin:2", "pwd:b", "pwd:a"]));
+    expect(lockKeyOrder("pwd:a")).toEqual(["pwd:a"]);
   });
 });
 
