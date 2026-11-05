@@ -366,6 +366,9 @@ Notes :
   `tests/unit/server/upload-delete-hygiene.test.ts` exige une borne qui résout les liens.
   Risque résiduel accepté : un lien créé entre le contrôle et l'accès, ce qui suppose déjà
   un accès au disque.
+  Un fichier reçu par multer n'est gardé que si une écriture validée le référence : drapeau
+  posé après l'écriture, suppression dans le `finally` tant qu'il est faux, diffusions au mieux
+  (patron de #178, LESSONS_LEARNED du 5 novembre 2026).
 - `server/_archive/` et les variantes `vehicle-activation-service-*.ts` /
   `vehicle-deletion-service-*.ts` sont du code mort. Ne pas s'en inspirer.
 - Traçabilité stock : le mouvement d'entrée en stock (29 octobre 2026) et la

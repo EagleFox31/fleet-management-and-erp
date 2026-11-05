@@ -437,3 +437,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `scanFileAccesses` prend en option le jeu de bornes acceptées (`LINK_RESOLVING_BOUND_CALLS`). Garde `upload-delete-hygiene` : toute suppression (`unlink`, `rm`, `rmdir`) d'une route de `server/api` passe par `uploadedFileCandidates`, `settlementProofPath` ou `existingUploadedFile` ; `isInsideDirectory` seul est refusé. Deux exceptions gelées (multer, `req.file.path`), chacune avec sa raison et sa condition de dégel.
 - **Pourquoi** : `stored-path-hygiene` accepte la borne lexicale, qu'un lien sous `uploads/` passe (AGENTS §9).
 - **Preuve** : suppression bornée lexicalement injectée dans une route : la nouvelle garde échoue, `stored-path-hygiene` passe ; cas synthétiques strict et défaut ; tsc 0, unitaires verts.
+## 2026-11-05 — Justificatifs téléversés liés à l'écriture
+- **Quoi** : règlement fournisseur (`POST /:id/settlements`) et récépissé de renouvellement (`POST /requests/:id/receipt`) suppriment le fichier dans le `finally` tant qu'aucune écriture validée ne le référence (`proofRecorded`, `receiptRecorded`). Diffusion du règlement au mieux (`log.error`).
+- **Pourquoi** : une diffusion qui levait rendait 500 et supprimait le justificatif d'un règlement créé ; un identifiant invalide laissait un fichier orphelin.
+- **Preuve** : contrat `supplier-settlement-proof-lifecycle` (3 cas, 2 rouges sur main) ; contrats `supplier-settlement*` et `document-renewal*` verts (64) ; tsc 0 ; unitaires 2417 verts.
