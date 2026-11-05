@@ -424,7 +424,8 @@ sessions d'acquisition qu'il a créées.
   seul, qui ne connaît pas le rôle.
 - Saisie d'exploitation sur un véhicule (kilométrage, position) : `isStaff`. Un
   client consulte son véhicule, il ne saisit rien dessus.
-- Objet isolé : `canAccessOwned(req.user, () => propriétaire)` → 403 hors périmètre.
+- Objet isolé : `canAccessOwned(req.user, () => propriétaire)` ; véhicule hors périmètre : `refuseOutOfScopeVehicle(res)`
+  (404, même corps qu'un véhicule inexistant). Les autres objets (sessions d'acquisition) gardent le 403.
   Exception : un ordre de travail hors périmètre répond 404, comme un OT inexistant
   (`assertWorkOrderReadable`), pour ne pas laisser énumérer les OT des autres.
 - Liste : filtrer sur `ownerScopeOf(req.user)` (`null` = personnel, pas de filtre).

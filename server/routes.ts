@@ -51,7 +51,7 @@ import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
 import { assertWorkOrderReadable, assertValidDbId, MAX_DB_INTEGER_ID } from "./lib/work-order-scope";
 import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePrice } from "./lib/vehicle-patch-guard";
-import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
+import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE, refuseOutOfScopeVehicle, VEHICLE_NOT_FOUND_MESSAGE } from "./lib/client-scope";
 import { redactVehiclePrice, redactVehiclePriceDeep } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { vehicleDocumentationService } from "./services/vehicle-documentation-service";
@@ -1042,12 +1042,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!vehicle) {
-        return res.status(404).json({ message: "Véhicule non trouvé" });
+        return res.status(404).json({ message: VEHICLE_NOT_FOUND_MESSAGE });
       }
       
       // Vérifier les permissions : les clients ne peuvent voir que leurs véhicules
       if (user.role === 'client' && vehicle.ownerId !== user.id) {
-        return res.status(403).json({ message: "Accès non autorisé à ce véhicule" });
+        return refuseOutOfScopeVehicle(res);
       }
       
       return res.status(200).json(redactVehiclePrice({ role: normalizeRole(user.role) }, vehicle));
@@ -1300,7 +1300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const documents = await storage.getVehicleDocuments(vehicleId);
@@ -1326,7 +1326,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const documents = await storage.getVehicleDocumentsByType(vehicleId, type);
@@ -1353,7 +1353,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(document.vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return res.status(404).json({ message: "Document non trouvé" });
       }
 
       const fs = await import("fs");
@@ -1430,7 +1430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Un client ne voit que les planifications de ses véhicules (AGENTS.md §11)
       if (!(await canAccessOwned(req.user, async () => (await storage.getVehicle(vehicleId))?.ownerId))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const schedules = await preventiveMaintenanceService.getVehicleMaintenanceSchedules(vehicleId);
@@ -1824,7 +1824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const orders = await storage.getWorkOrdersByVehicleId(vehicleId);
@@ -2767,7 +2767,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
 
       
@@ -2957,7 +2957,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (vehicleId && !isNaN(vehicleId)) {
         assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+          return refuseOutOfScopeVehicle(res);
         }
         fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
       } else {
@@ -3005,7 +3005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       const currentMileage = await mileageService.getCurrentMileage(vehicleId);
       
@@ -3027,7 +3027,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       const limit = parseInt(req.query.limit as string) || 50;
       
@@ -3190,7 +3190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (vehicleId && !isNaN(vehicleId)) {
         assertValidDbId(vehicleId, "ID de véhicule invalide.");
         if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-          return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+          return refuseOutOfScopeVehicle(res);
         }
         const records = await storage.getFuelRecordsByVehicleId(vehicleId);
         allRecords = records.filter(
@@ -3641,7 +3641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "ID de véhicule invalide" });
       }
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const history = await vehicleStatusService.getVehicleStatusHistory(vehicleId);
@@ -4020,7 +4020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Un id hors entier 32 bits ferait échouer la requête SQL en 500.
       assertValidDbId(vehicleId, "ID de véhicule invalide");
       if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
+        return refuseOutOfScopeVehicle(res);
       }
       
       const vehicleTires = await tiresService.getVehicleTires(vehicleId);

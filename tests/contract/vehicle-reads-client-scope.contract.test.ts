@@ -51,15 +51,32 @@ afterAll(async () => {
 }, 60000);
 
 describe("cloison client sur les lectures d'un véhicule", { timeout: 60000 }, () => {
-  it("lecture par id : client sur le sien 200, sur un autre 403, personnel 200, anonyme 401", async () => {
+  it("lecture par id : client sur le sien 200, sur un autre 404, personnel 200, anonyme 401", async () => {
     for (const path of BY_ID) {
       const mine = await session.call("GET", path(own.id), { actor: "client" });
       expect(mine.status, path(own.id)).toBe(200);
       const theirs = await session.call("GET", path(foreign.id), { actor: "client" });
-      expect(theirs.status, path(foreign.id)).toBe(403);
+      expect(theirs.status, path(foreign.id)).toBe(404);
       const staff = await session.call("GET", path(foreign.id), { actor: "admin" });
       expect(staff.status, path(foreign.id)).toBe(200);
       expect((await session.call("GET", path(own.id), {})).status, path(own.id)).toBe(401);
+    }
+  });
+
+  it("hors périmètre ou inexistant : un client reçoit la même réponse (statut et corps)", async () => {
+    const MISSING = 2_000_000_000;
+    const paths: Array<(id: number) => string> = [
+      ...BY_ID,
+      (id) => `/api/vehicles/${id}`,
+      (id) => `/api/vehicles/${id}/documents`,
+      (id) => `/api/vehicles/${id}/maintenance-schedules`,
+    ];
+    for (const path of paths) {
+      const theirs = await session.call("GET", path(foreign.id), { actor: "client" });
+      const missing = await session.call("GET", path(MISSING), { actor: "client" });
+      expect(theirs.status, path(foreign.id)).toBe(missing.status);
+      expect(theirs.body?.message, path(foreign.id)).toBe(missing.body?.message);
+      expect(theirs.body?.code, path(foreign.id)).toBe(missing.body?.code);
     }
   });
 

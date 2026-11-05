@@ -84,18 +84,19 @@ afterAll(async () => {
 });
 
 describe("GET /api/maintenance-schedules/vehicle/:vehicleId", () => {
-  it("refuse un client sur le véhicule d'un autre client, avec le message de cloison", async () => {
+  it("véhicule d'un autre client : même réponse qu'un véhicule inexistant (404)", async () => {
     const res = await get(`/api/maintenance-schedules/vehicle/${vehicleOf.B}`, "clientA");
-    expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ code: "FORBIDDEN" });
-    expect(res.body.message).toMatch(/n'appartient pas à votre compte/);
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ code: "NOT_FOUND", message: "Véhicule non trouvé" });
     expect(res.body.requestId).toBe(res.headers.get("x-request-id"));
   });
 
-  it("refuse un client sur un véhicule inexistant (sans révéler lequel existe)", async () => {
+  it("véhicule inexistant : 404, corps identique à celui d'un véhicule hors périmètre", async () => {
     const res = await get("/api/maintenance-schedules/vehicle/2147480000", "clientA");
-    expect(res.status).toBe(403);
-    expect(res.body.message).toMatch(/n'appartient pas à votre compte/);
+    const foreign = await get(`/api/maintenance-schedules/vehicle/${vehicleOf.B}`, "clientA");
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe(foreign.body.message);
+    expect(res.body.code).toBe(foreign.body.code);
   });
 
   it("laisse un client lire les planifications de son véhicule", async () => {
