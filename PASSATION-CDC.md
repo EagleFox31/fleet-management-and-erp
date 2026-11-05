@@ -113,3 +113,14 @@
 - Un client sur l'OT d'un autre client recevait 403, sur un OT inexistant 404 : l'écart permettait d'énumérer les OT. Désormais 404, même message, dans les deux cas ; le personnel est inchangé.
 - Convention retenue : 404 pour les OT (écart assumé avec le 403 de `canAccessOwned` ailleurs), noté dans AGENTS §11 et dans le JSDoc du helper.
 - Contrats adaptés (a5-role-guards, work-order-detail-client-scope, work-order-reads-client-scope) : comparaison explicite statut, message et code avec un OT inexistant.
+
+## 2026-11-05 08:19 — c7 : #379/#388 fusionnées, #390 et traduction en cours
+- #379 (b8f2179) et #388 (6eae04b) fusionnées. #390 (fix/last-admin-toggle-guard, garde du toggle + LAG3 concurrent, 18/18 avec ou sans trigger) en relecture chez 0a : à fusionner avec main puis base main (`gh pr edit 390 --base main`).
+- #386 (fix/last-admin-db-trigger) : à fusionner avec main ; constante unique LAST_ADMIN_MESSAGE (last-admin-rule) à la place de LAST_ACTIVE_ADMIN_MESSAGE.
+- Traduction (branche locale c7-trad, issue de #386 + #390) : isAdminGuardDbRefusal dans pg-errors, storage.updateUser/deleteUser relancent, 4 routes de routes.ts passent l'erreur à next(). Contrat tests/contract/last-admin-trigger-translation.contract.test.ts (course simulée par un wrap de storage.getUser/deleteUser) : à finir (3 cas sur 4 ignorés par l'isolement des admins), puis rouge/vert, PR brouillon sur #386.
+- c7test (55432/55433) : trigger posé pour ces essais, à retirer ; arrêter la pile en fin de session.
+
+## 2026-11-05 08:34 — c7 : correction de l'entrée précédente sur le contrat de traduction
+- Correction : le contrat de traduction des refus du trigger ne laisse plus 3 cas sur 4 ignorés. L'isolement écarte désormais tous les admins actifs avant chaque cas ; les 4 cas passent (rouge sans la traduction : 404, 404, 404, 500).
+- État : traduction en PR brouillon (4 routes, un contrat par route), empilée sur la PR du trigger ; le journal de la garde porte l'entrée quoi/comment/pourquoi.
+- Reste : relecture de la PR de traduction, puis arrêt de la base de test locale en fin de session.

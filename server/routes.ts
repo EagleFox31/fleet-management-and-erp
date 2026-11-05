@@ -59,7 +59,7 @@ import { prepareColumnUpdate } from "./lib/column-validation";
 import { moduleLogger } from "./lib/logger";
 import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
-import { isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
+import { isAdminGuardDbRefusal, isCheckViolation, pgConstraintOf } from "./lib/pg-errors";
 import { closeOtherUserConnections, deleteOtherUserSessions, revokeUserAccess } from "./lib/user-sessions";
 import { isSafePathSegment, uploadedFileCandidates } from "./lib/uploaded-file";
 import { contentDisposition } from "./lib/content-disposition";
@@ -675,14 +675,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastLoginAt: updatedUser.lastLoginAt
       });
     } catch (error) {
-      if (error instanceof z.ZodError) return next(error);
+      if (error instanceof z.ZodError || isAdminGuardDbRefusal(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update user error");
       return next(new AppError(500, "Erreur serveur", { cause: error }));
     }
   });
 
   // Supprimer un utilisateur (soft delete) - Réservé aux administrateurs
-  app.delete("/api/users/:id", authenticate, isAdmin, async (req, res) => {
+  app.delete("/api/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -705,6 +705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(204).send();
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Delete user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
@@ -804,7 +805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH /api/admin/users/:id/toggle - Activer/désactiver un utilisateur
-  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res) => {
+  app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
       const { isActive } = req.body;
@@ -840,13 +841,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user: safeUser
       });
     } catch (error) {
+      if (isAdminGuardDbRefusal(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "activation ou désactivation d'un utilisateur en échec");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
 
   // DELETE /api/admin/users/:id - Supprimer définitivement un utilisateur
-  app.delete("/api/admin/users/:id", authenticate, isAdmin, async (req, res) => {
+  app.delete("/api/admin/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
 
@@ -874,7 +876,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(204).send();
     } catch (error) {
-      console.error("Delete admin user error:", error);
+      if (isAdminGuardDbRefusal(error)) return next(error);
+      log.error({ err: error, requestId: req.requestId }, "Delete admin user error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
