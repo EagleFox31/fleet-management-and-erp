@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 
 /**
@@ -7,12 +8,38 @@ import path from "path";
  *
  * Seuls les chemins sous `<root>/uploads` sont renvoyés : supprimer un document
  * ne doit jamais atteindre un fichier que l'application n'a pas déposé.
+ * Un lien symbolique (ou une jonction) sous `uploads/` qui mène dehors est refusé.
  */
 export function uploadedFileCandidates(storedPath: string | null | undefined, root = process.cwd()): string[] {
   if (!storedPath) return [];
   const uploadsDir = path.resolve(root, "uploads");
   const candidates = [path.resolve(root, storedPath), path.resolve(root, storedPath.replace(/^[/\\]+/, ""))];
-  return [...new Set(candidates)].filter((candidate) => isInsideDirectory(uploadsDir, candidate));
+  return [...new Set(candidates)].filter(
+    (candidate) => isInsideDirectory(uploadsDir, candidate) && realPathStaysInside(uploadsDir, candidate),
+  );
+}
+
+/**
+ * Le fichier existant `candidate`, liens résolus, reste sous `directory` (liens résolus aussi :
+ * un `uploads/` monté par lien reste valide). Un fichier absent n'a rien à lire ni à supprimer :
+ * accepté, la comparaison lexicale suffit. Toute autre erreur de résolution refuse.
+ * Risque résiduel : un lien créé entre ce contrôle et l'accès (accès disque requis).
+ */
+export function realPathStaysInside(directory: string, candidate: string): boolean {
+  let realCandidate: string;
+  try {
+    realCandidate = fs.realpathSync.native(candidate);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR";
+  }
+  let realDirectory: string;
+  try {
+    realDirectory = fs.realpathSync.native(directory);
+  } catch {
+    realDirectory = path.resolve(directory);
+  }
+  return isInsideDirectory(realDirectory, realCandidate);
 }
 
 /**

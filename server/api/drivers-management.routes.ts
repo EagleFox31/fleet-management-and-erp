@@ -7,6 +7,9 @@ import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { toFieldErrors } from "@shared/errors";
+import { toExpiryDateOnly } from "@shared/constants/expiry-day";
+import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
 import { randomPasswordHash } from "../lib/dummy-hash";
 // Lit aussi `cause` : Drizzle enveloppe parfois l'erreur du pilote, l'ancien test local ne voyait que `code`.
 import { isUniqueViolation } from "../lib/pg-errors";
@@ -26,6 +29,8 @@ const optionalTextField = z
     return normalized.length > 0 ? normalized : null;
   });
 
+const DATE_IMPOSSIBLE_MESSAGE = "Date inexistante : vérifiez le jour et le mois";
+
 const optionalDateField = z
   .union([z.string(), z.null(), z.undefined()])
   .transform((value) => {
@@ -37,7 +42,41 @@ const optionalDateField = z
   })
   .refine((value) => value === null || /^\d{4}-\d{2}-\d{2}$/.test(value), {
     message: "Format de date invalide (YYYY-MM-DD)",
+  })
+  // Bon format, jour inexistant (9999-99-99, 2026-02-30) : refusé ici, sinon la base le rejette en 500.
+  .refine((value) => value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value) || toExpiryDateOnly(value) === value, {
+    message: DATE_IMPOSSIBLE_MESSAGE,
   });
+
+// Une formation ne peut pas avoir eu lieu dans le futur (jour UTC). Controle de saisie seulement :
+// les imports (scripts/) et les donnees deja en base ne passent pas par ce schema.
+const pastOrTodayDateField = optionalDateField.refine(
+  (value) => !isCpcTrainingDateInFuture(value),
+  { message: CPC_TRAINING_DATE_FUTURE_MESSAGE },
+);
+
+const DRIVER_INVALID_MESSAGE = "Données chauffeur invalides";
+
+// Messages ecrits dans les schemas ci-dessous : seuls ceux-la remontent tels quels dans `message`.
+// Toute autre issue Zod (type, requis...) garde le message generique.
+const SCHEMA_MESSAGES: ReadonlySet<string> = new Set([
+  "Le prénom est requis",
+  "Le nom est requis",
+  "Format de date invalide (YYYY-MM-DD)",
+  DATE_IMPOSSIBLE_MESSAGE,
+  "Aucune donnée de mise à jour fournie",
+  CPC_TRAINING_DATE_FUTURE_MESSAGE,
+]);
+
+/** Corps 400 au contrat ApiErrorBody : détail par champ en français, jamais de texte Zod par défaut. */
+function driverValidationBody(error: z.ZodError) {
+  const custom = error.issues.find((issue) => SCHEMA_MESSAGES.has(issue.message));
+  return {
+    message: custom ? custom.message : DRIVER_INVALID_MESSAGE,
+    code: "VALIDATION" as const,
+    errors: toFieldErrors(error.issues),
+  };
+}
 
 const createDriverSchema = z.object({
   firstName: z.string().trim().min(1, "Le prénom est requis"),
@@ -50,7 +89,7 @@ const createDriverSchema = z.object({
   licenseExpiry: optionalDateField,
   hireDate: optionalDateField,
   geoTrainingDate: optionalDateField,
-  cpcTrainingDate: optionalDateField,
+  cpcTrainingDate: pastOrTodayDateField,
   isActive: z.boolean().optional(),
   userId: z.number().int().positive().nullable().optional(),
 });
@@ -143,10 +182,10 @@ router.get("/me", async (req, res) => {
       .where(driverLiveAssignmentFilter([driver.id]))
       .orderBy(desc(missions.pickupDate));
 
-    console.log(`[driver/me] userId=${userId} → driverId=${driver.id} → ${driverMissions.length} missions (statuts: ${driverMissions.map(m => m.status).join(",")||"aucune"})`);
+    log.debug({ requestId: req.requestId, driverId: driver.id, missionCount: driverMissions.length }, "Missions du chauffeur connecté lues");
     return res.status(200).json({ driver, missions: driverMissions });
   } catch (error) {
-    console.error("Get driver/me error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Lecture du chauffeur connecté en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -184,7 +223,7 @@ router.get("/:id/missions", async (req, res) => {
 
     return res.status(200).json(rows);
   } catch (error) {
-    console.error("Get driver missions error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Lecture des missions du chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -244,13 +283,10 @@ router.post("/", isDriverManager, async (req, res) => {
     }
 
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        message: "Données chauffeur invalides",
-        errors: error.errors,
-      });
+      return res.status(400).json(driverValidationBody(error));
     }
 
-    console.error("Create driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Creation du chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -333,13 +369,10 @@ router.patch("/:id", isDriverManager, async (req, res) => {
     }
 
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        message: "Données chauffeur invalides",
-        errors: error.errors,
-      });
+      return res.status(400).json(driverValidationBody(error));
     }
 
-    console.error("Update driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Mise a jour du chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -374,7 +407,7 @@ router.patch("/:id/toggle", isDriverManager, async (req, res) => {
       });
     }
 
-    console.error("Toggle driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Bascule d'activation du chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });
@@ -403,7 +436,7 @@ router.delete("/:id", isAdmin, async (req, res) => {
       driver: fullDriver,
     });
   } catch (error) {
-    console.error("Delete driver error:", error);
+    log.error({ err: error, requestId: req.requestId }, "Desactivation du chauffeur en echec");
     return res.status(500).json({ message: "Erreur serveur" });
   }
 });

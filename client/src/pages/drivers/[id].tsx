@@ -1,4 +1,7 @@
 import { useParams, useLocation } from "wouter";
+import { invalidateDriverCpcDependents } from "@/lib/driver-cpc-invalidation";
+import { buildDriverPatchPayload } from "@/lib/driver-patch-payload";
+import { userMessageOf } from "@/lib/api-error";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +12,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageDrivers } from "@shared/constants/roles";
+import { normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { driverLicenseDaysLabel, getDriverLicenseStatus } from "@/lib/driver-license-status";
 import {
   ArrowLeft, Users, CheckCircle, AlertTriangle, XCircle, CreditCard,
@@ -54,9 +58,9 @@ interface DriverMission {
 }
 
 const cpcBadge = (status: string) => {
-  if (status === "FORMÉ")
+  if (normalizeCpcStatus(status) === "FORME")
     return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />FORMÉ</span>;
-  if (status === "À FORMER")
+  if (normalizeCpcStatus(status) === "A FORMER")
     return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />À FORMER</span>;
   return <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />NON FORMÉ</span>;
 };
@@ -106,14 +110,14 @@ export default function DriverDetail() {
 
   const editMutation = useMutation({
     mutationFn: (data: Partial<DriverDetail>) =>
-      apiRequest("PATCH", `/api/drivers/${id}`, data),
+      apiRequest("PATCH", `/api/drivers/${id}`, buildDriverPatchPayload(data, driver?.cpcTrainingDate)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/drivers/${id}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      invalidateDriverCpcDependents(queryClient, id);
       setEditOpen(false);
       toast({ title: "Chauffeur mis à jour" });
     },
-    onError: () => toast({ title: "Erreur lors de la mise à jour", variant: "destructive" }),
+    onError: (error) =>
+      toast({ title: userMessageOf(error, "Erreur lors de la mise à jour"), variant: "destructive" }),
   });
 
   const openEdit = () => {
