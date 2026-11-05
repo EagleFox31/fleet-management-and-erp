@@ -229,8 +229,11 @@ export default function VehicleDocumentsPage() {
   const { user } = useAuth();
   const canReadRenewals = (DOCUMENT_RENEWAL_VIEWER_ROLES as readonly string[]).includes(String(user?.role || ""));
   const [proofBusyId, setProofBusyId] = useState<number | null>(null);
+  const proofInFlight = useRef(false);
   const handleProofDownload = async (request: RenewalRequest) => {
-    if (proofBusyId !== null) return;
+    // Le ref ferme la fenetre entre deux clics du meme rendu (l'etat ne change qu'au rendu suivant).
+    if (proofInFlight.current) return;
+    proofInFlight.current = true;
     setProofBusyId(request.id);
     try {
       await downloadRenewalProof(request);
@@ -241,6 +244,7 @@ export default function VehicleDocumentsPage() {
         variant: "destructive",
       });
     } finally {
+      proofInFlight.current = false;
       setProofBusyId(null);
     }
   };
