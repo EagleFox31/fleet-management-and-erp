@@ -9,6 +9,7 @@ import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
 import missionPriceRoutes from "./mission-price.routes";
 import fuelRecordsRoutes from "./fuel-records.routes";
+import vehicleHistoryRoutes from "./vehicle-history.routes";
 import clientsRoutes from "./clients.routes";
 import operationsRoutes from "./operations.routes";
 import billingRoutes from "./billing.routes";
@@ -161,6 +162,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(workflowsRoutes);
   // Suppression d'un plein : sous le verrou de la carte carburant, avant routes.ts.
   apiRouter.use(fuelRecordsRoutes);
+  apiRouter.use(vehicleHistoryRoutes);
 
   // Monter les routes de chaque service
   // Session is now properly propagated to all these routes

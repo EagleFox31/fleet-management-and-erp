@@ -24,10 +24,12 @@ import {
   Tag,
   Ticket,
   Milestone,
+  Wallet,
 } from "lucide-react";
 import {
   FINANCE_RECEIVABLE_READ_ROLES,
   FUEL_READ_ROLES,
+  MISSION_BUDGET_READ_ROLES,
   MISSION_OPERATIONS_READ_ROLES,
   TARIFF_GRID_READ_ROLES,
   PENDING_INVOICE_ROLES,
@@ -169,6 +171,11 @@ export const LOT_SCREENS: readonly LotScreen[] = [
     task: "F1c", feature: "finance",
     description: "Factures émises non soldées : retenues à la source, net à payer, jours depuis le dépôt.",
     roles: FINANCE_RECEIVABLE_READ_ROLES,
+  },
+  {
+    id: "mission-budgets-daily-need", path: "/finance/mission-budgets", title: "Besoin du jour", task: "L1f", feature: "finance",
+    description: "Budgets de mission d'une date : total, reste à décaisser, détail par mission.",
+    roles: MISSION_BUDGET_READ_ROLES, menu: { group: "top", label: "Besoin du jour", icon: Wallet },
   },
 ];
 

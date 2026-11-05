@@ -22,7 +22,7 @@ import { useContractQuery } from "@/lib/contract-query";
 import { userMessageOf } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
-import { formatXaf, missionBudgetActions, remainingOf } from "@/lib/mission-budget-ui";
+import { formatXaf, MISSION_BUDGET_STATUS_CLASSES, missionBudgetActions, remainingOf } from "@/lib/mission-budget-ui";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import {
@@ -49,12 +49,6 @@ import {
 
 const SOURCE_ACCOUNTS_KEY = "/api/fuel-card/source-accounts";
 const FREE_ENTRY = "free";
-
-const STATUS_CLASSES: Record<MissionBudget["status"], string> = {
-  requested: "bg-warning/15 text-warning-text",
-  approved: "bg-primary/10 text-primary-text",
-  disbursed: "bg-success/15 text-success",
-};
 
 /** Clés de la fiche : le budget de la mission (filtre missionId) et ses dépenses. */
 export const missionBudgetKey = (missionId: number) => [MISSION_BUDGETS_PATH, { missionId }] as const;
@@ -259,7 +253,7 @@ export function MissionBudgetPanel({ missionId, missionStatus, role }: { mission
             <Wallet className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold text-foreground">Budget de mission</h3>
             {budget && (
-              <Badge className={STATUS_CLASSES[budget.status]} data-testid="mission-budget-status">
+              <Badge className={MISSION_BUDGET_STATUS_CLASSES[budget.status]} data-testid="mission-budget-status">
                 {MISSION_BUDGET_STATUS_LABELS[budget.status]}
               </Badge>
             )}
