@@ -8,7 +8,7 @@ import { startContractActors } from "../support/contract-actors";
  * ne vise pas l'objet 1 mais reçoit un 400 lisible ; un id valide mais inconnu reste un 404.
  * Le flux de sortie de stock (issued / onTransition) n'est pas exercé ici : seul l'id est contrôlé.
  */
-const ACTORS = { admin: "admin" } as const;
+const ACTORS = { admin: "admin", technician: "technician", client: "client" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -50,5 +50,16 @@ describe("demandes de pièce et pièces d'OT : identifiant strict", { timeout: 6
         expect(res.status, JSON.stringify(res.body)).toBe(unknown);
       });
     }
+  }
+});
+
+describe("sortie de stock : la garde de rôle passe avant la lecture de l'id", { timeout: 60000 }, () => {
+  for (const actor of ["technician", "client"] as const) {
+    it(`POST /issue avec « 1abc » par ${actor} → 403, pas 400`, async () => {
+      for (const path of ["/api/work-orders/1abc/part-requirements/1/issue", "/api/work-orders/1/part-requirements/1abc/issue"]) {
+        const res = await session.call("POST", path, { actor, body: {} });
+        expect(res.status, `${path} -> ${JSON.stringify(res.body)}`).toBe(403);
+      }
+    });
   }
 });

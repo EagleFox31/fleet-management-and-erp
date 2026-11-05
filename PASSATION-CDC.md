@@ -79,3 +79,7 @@
 - 8 lectures `parseInt(req.params…)` → `parseRouteId` (part-requirements :45 :132 :199 ; work-order-parts :35 :119 :253 :274-275). Entrées FROZEN des deux fichiers retirées. Aucune contrainte de chemin retirée. Flux issued / onTransition inchangé.
 - Les catch relaient désormais l'AppError (`next`). Statuts qui changent : un AppError qui sortait en 500 (by-part, PATCH/DELETE demande, /parts, /issue hors branche stock interne) sort avec son statut ; les AppError déjà gérés dans awaiting-parts et /parts gardent leur statut, corps normalisé (code, requestId).
 - Contrat : `part-requirements-strict-id.contract.test.ts` (13 cas : 400 sur 1abc/1e3/hors int4/0, 404 sur id inconnu). Branche empilée sur #367.
+
+## 2026-11-05 04:04 — #369 : réserves de relecture et sécurité levées
+- isNaN mort retiré (part-requirements PATCH), constantes work-order-parts placées après le dernier import, contrat : /issue avec « 1abc » par technicien et par client → 403 (garde de rôle avant lecture de l'id). Rectif. de rapport : sur /parts le statut des AppError ne change pas, seul « 1abc » passe en 400.
+- #373 (dernière liste hors aa) est empilée sur #369 : fusionner #369 dedans après chaque changement. Reste : admin-users-guard:14 (audit sécurité, en dernier).

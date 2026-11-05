@@ -20,15 +20,15 @@ import {
 } from "../services/work-order-part-request";
 import { isAppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
-
-const WORK_ORDER_ID_INVALID_MESSAGE = "Identifiant d'ordre de travail invalide.";
-const REQUIREMENT_ID_INVALID_MESSAGE = "Identifiant de demande invalide.";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-parts");
 import { partRequirements, parts, users } from "@shared/schema";
 import { alertService } from "../services/alert-service";
 import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
+
+const WORK_ORDER_ID_INVALID_MESSAGE = "Identifiant d'ordre de travail invalide.";
+const REQUIREMENT_ID_INVALID_MESSAGE = "Identifiant de demande invalide.";
 
 const router = Router();
 
