@@ -1367,8 +1367,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Planification non trouvée" });
       }
 
-      // Le formulaire renvoie la fiche entière : id et createdAt sont ignorés.
-      const { id: _id, createdAt: _createdAt, ...schedulePayload } = req.body ?? {};
+      // Fiche entière renvoyée par le formulaire : id, createdAt et updatedAt (posé par trg_maintenance_schedules_touch) sont ignorés.
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...schedulePayload } = req.body ?? {};
       const { data, errors } = prepareColumnUpdate(maintenanceSchedules, schedulePayload);
       if (errors.length > 0) {
         return next(new AppError(400, "Certaines informations de la planification sont invalides.", { fieldErrors: errors }));

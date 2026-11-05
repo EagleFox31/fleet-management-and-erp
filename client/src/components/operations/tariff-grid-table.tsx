@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Tag } from "lucide-react";
 import { AlertModal, HeaderCard, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
@@ -18,6 +18,7 @@ import {
   PRICING_UNITS,
   PRICING_UNIT_LABELS,
   TARIFF_GRID_PATH,
+  TARIFF_PAGE_SIZE_DEFAULT,
   tariffListResponseSchema,
   type PricingUnit,
   type TariffBody,
@@ -78,15 +79,30 @@ const NO_CLIENT = "none";
 
 const xaf = (n: number) => `${new Intl.NumberFormat("fr-FR").format(n)} XAF`;
 
+/** Libellé de la page affichée : « 51-100 sur 130 ». */
+export function pageRangeLabel(p: { total: number; limit: number; offset: number }): string {
+  if (p.total === 0) return "0 sur 0";
+  return `${p.offset + 1}-${Math.min(p.offset + p.limit, p.total)} sur ${p.total}`;
+}
+
 /** Grille tarifaire (O3) : prix suggérés, jamais appliqués seuls. `readOnly` hors admin et direction. */
 export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
   const { toast } = useToast();
   const [activeOnly, setActiveOnly] = useState(true);
+  const [page, setPage] = useState(0);
   const [editing, setEditing] = useState<TariffRow | "new" | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [confirmDeactivate, setConfirmDeactivate] = useState<TariffRow | null>(null);
 
-  const query = useContractQuery(TARIFF_GRID_PATH, tariffListResponseSchema, { activeOnly: String(activeOnly) });
+  const query = useContractQuery(TARIFF_GRID_PATH, tariffListResponseSchema, {
+    activeOnly: String(activeOnly),
+    limit: String(TARIFF_PAGE_SIZE_DEFAULT),
+    offset: String(page * TARIFF_PAGE_SIZE_DEFAULT),
+  });
+  // Dernière page vidée (désactivation d'un tarif en filtre actif) : retour à la page précédente.
+  useEffect(() => {
+    if (page > 0 && query.data && query.data.rows.length === 0) setPage(page - 1);
+  }, [page, query.data]);
   const clients = useQuery<{ id: number; name: string }[]>({ queryKey: ["/api/clients"], enabled: !readOnly });
 
   const done = (title: string) => {
@@ -147,7 +163,10 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={activeOnly} onCheckedChange={(c) => setActiveOnly(c === true)} data-testid="filter-active" />
+          <Checkbox checked={activeOnly} onCheckedChange={(c) => {
+            setActiveOnly(c === true);
+            setPage(0);
+          }} data-testid="filter-active" />
           Tarifs actifs seulement
         </label>
         {!readOnly && (
@@ -165,6 +184,16 @@ export function TariffGridTable({ readOnly = false }: { readOnly?: boolean }) {
           onRowClick={readOnly ? undefined : (t) => open(t)}
           emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Aucun tarif.</p>}
         />
+      )}
+
+      {query.data && query.data.total > query.data.limit && (
+        <div className="flex items-center justify-between text-sm" data-testid="tariff-pager">
+          <span className="text-muted-foreground">{pageRangeLabel(query.data)}</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} data-testid="tariff-prev">Précédent</Button>
+            <Button variant="outline" size="sm" disabled={query.data.offset + query.data.limit >= query.data.total} onClick={() => setPage((p) => p + 1)} data-testid="tariff-next">Suivant</Button>
+          </div>
+        </div>
       )}
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>

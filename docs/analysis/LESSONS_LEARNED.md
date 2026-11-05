@@ -3215,3 +3215,11 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - `tests/unit/client/realtime-satellites.test.ts` : les émetteurs `broadcast?.(` sont recensés ;
   - `e2e/26-mission-budget-panel.spec.ts` : trame reçue par l'autre rôle à chaque étape.
 - **Leçon généralisée** : un test d'événement temps réel vérifie la portée comme le serveur la lit, ou la trame chez un destinataire, jamais le seul appel de l'émetteur. Les autres appels de diffusion sans portée n'ont pas été recensés ici : audit à mener dans un lot dédié.
+## 2026-11-05 — Mutant de SQL d'init neutralisé par la migration jumelle (L2, #497)
+
+- **Contexte** : L2 pose `maintenance_schedules.updated_at` et le déclencheur `trg_maintenance_schedules_touch`. Le SQL vit dans `VEHICLE_LIFECYCLE_SQL` (`server/init-database.ts`) et dans sa migration jumelle `server/db/migrations/20261105_vehicle_lifecycle.sql`.
+- **Cause racine** : le mutant « corps du déclencheur vidé » ne portait que sur `init-database.ts`. Le répertoire `migrations/` est rejoué au démarrage après l'init : la migration jumelle redéfinissait la fonction intacte, et le mutant survivait sans que le test soit en cause. Une écriture Drizzle dans le test renouvelait en plus `updated_at` d'elle-même et masquait l'absence du déclencheur.
+- **Classification** : faux vert de mutation, outillage de test. C'est un near miss : relevé avant livraison.
+- **Résolution** : le mutant porte sur les deux jumeaux. Le cas de contrat écrit en SQL brut, pour que seul le déclencheur renouvelle l'horodatage. Le mutant passe alors au rouge.
+- **Prévention vérifiable** : `tests/unit/server/vehicle-lifecycle-schema.test.ts` exige des jumeaux identiques, donc un mutant d'un seul jumeau échoue d'abord là. Le contrat `vehicle-lifecycle` (« plan désactivé à la main pendant le retrait ») écrit en SQL brut.
+- **Leçon généralisée** : un mutant de SQL d'init doit viser l'init et sa migration jumelle, sinon le rejeu des migrations le neutralise. Un test qui prouve un déclencheur écrit en SQL brut, jamais par l'ORM : l'ORM peut poser lui-même la valeur attendue.

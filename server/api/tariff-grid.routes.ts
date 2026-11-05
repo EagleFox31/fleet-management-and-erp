@@ -6,7 +6,7 @@ import { tariffBodyShape, tariffListQuerySchema, tariffSuggestQuerySchema } from
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
 import { authorize } from "../middleware/auth";
-import { createTariff, deactivateTariff, listTariffs, suggestTariff, updateTariff } from "../services/tariff-grid-service";
+import { createTariff, deactivateTariff, listTariffPage, suggestTariff, updateTariff } from "../services/tariff-grid-service";
 
 const router = Router();
 
@@ -19,7 +19,12 @@ router.get("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID_
   try {
     const query = tariffListQuerySchema.safeParse(req.query);
     if (!query.success) throw new AppError(400, "Filtre invalide.");
-    res.json({ rows: await listTariffs({ clientId: query.data.clientId, activeOnly: query.data.activeOnly === "true" }) });
+    res.json(
+      await listTariffPage(
+        { clientId: query.data.clientId, activeOnly: query.data.activeOnly === "true" },
+        { limit: query.data.limit, offset: query.data.offset },
+      ),
+    );
   } catch (err) {
     next(err);
   }

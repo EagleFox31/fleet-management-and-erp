@@ -464,6 +464,50 @@ BEGIN
   ALTER TABLE vehicle_deletion_effects ADD COLUMN IF NOT EXISTS applied_stamp timestamp;
 EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'vehicle_deletion_effects.applied_stamp non ajoutée, verrou indisponible sous 5 s : restauration en échec jusqu''au prochain démarrage';
+END $$;
+DO $$
+BEGIN
+  -- Colonne ajoutée sans défaut : les lignes existantes restent à NULL, aucune n'est réécrite.
+  -- Le défaut ne vaut ensuite que pour les nouvelles lignes. Bloc gardé : une base convergée n'écrit rien.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'maintenance_schedules' AND column_name = 'updated_at'
+  ) THEN
+    ALTER TABLE maintenance_schedules ADD COLUMN updated_at timestamp;
+    ALTER TABLE maintenance_schedules ALTER COLUMN updated_at SET DEFAULT now();
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'maintenance_schedules.updated_at non ajoutée, verrou de table indisponible sous 5 s : lecture et écriture des plans, suppression douce et restauration en échec jusqu''au prochain démarrage';
+END $$;
+DO $$
+BEGIN
+  -- Tout écrivain renouvelle updated_at : la restauration distingue un plan désactivé par la suppression douce
+  -- d'un plan désactivé à la main pendant le retrait. Posé seulement si la colonne existe.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'maintenance_schedules' AND column_name = 'updated_at'
+  ) THEN
+    CREATE OR REPLACE FUNCTION fn_maintenance_schedules_touch()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $fn$
+    BEGIN
+      NEW.updated_at := now();
+      RETURN NEW;
+    END;
+    $fn$;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_trigger
+      WHERE tgrelid = 'maintenance_schedules'::regclass AND tgname = 'trg_maintenance_schedules_touch' AND NOT tgisinternal
+    ) THEN
+      CREATE OR REPLACE TRIGGER trg_maintenance_schedules_touch
+      BEFORE UPDATE ON maintenance_schedules
+      FOR EACH ROW
+      EXECUTE FUNCTION fn_maintenance_schedules_touch();
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'trg_maintenance_schedules_touch non posé, verrou de table indisponible sous 5 s : réessayé au démarrage suivant';
 END $$;`;
 
 /**
@@ -1280,6 +1324,25 @@ BEGIN
 EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'missions_tariff_grid_id_tariff_grid_id_fk non posée : verrou indisponible';
 END $$;`;
+// O3 lot 3b : historique du prix convenu. Jumelle de server/db/migrations/20261106_mission_price_history.sql.
+export const MISSION_PRICE_HISTORY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS mission_price_history (
+  id serial PRIMARY KEY,
+  mission_id integer NOT NULL,
+  old_price numeric(15,0),
+  new_price numeric(15,0),
+  old_tariff_grid_id integer,
+  new_tariff_grid_id integer,
+  reason text,
+  changed_by integer,
+  changed_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_price_history_mission_id_missions_id_fk FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+  CONSTRAINT mission_price_history_changed_by_users_id_fk FOREIGN KEY (changed_by) REFERENCES users(id),
+  CONSTRAINT mission_price_history_price_check CHECK ((old_price IS NULL OR old_price >= 0) AND (new_price IS NULL OR new_price >= 0))
+);
+CREATE INDEX IF NOT EXISTS mission_price_history_mission_idx ON mission_price_history (mission_id, changed_at);`;
 
 // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
 // Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
@@ -2241,6 +2304,7 @@ export async function initializeDatabase() {
     await pool.query(TARIFF_GRID_SQL);
     // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.
     await pool.query(MISSION_AGREED_PRICE_SQL);
+    await pool.query(MISSION_PRICE_HISTORY_SQL);
     // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
     await pool.query(MISSION_BUDGETS_SQL);
     // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
