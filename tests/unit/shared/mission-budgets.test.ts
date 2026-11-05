@@ -4,6 +4,7 @@ import {
   computeMissionBudget,
   createMissionBudgetRequestSchema,
   isBudgetDateInWindow,
+  missionBudgetDisburseRequestSchema,
   missionBudgetTransitionRequestSchema,
   updateMissionBudgetRequestSchema,
 } from "../../../shared/contracts/mission-budgets";
@@ -93,5 +94,24 @@ describe("L1 : garde-fous de sécurité", () => {
     expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "hier" }).success).toBe(false);
     expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "2026-11-05T10:00:00.000Z", status: "disbursed" }).success).toBe(false);
     expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "2026-11-05T10:00:00.000Z" }).success).toBe(true);
+  });
+});
+
+describe("L1c : contrat de décaissement", () => {
+  const v = "2026-11-05T10:00:00.000Z";
+
+  it("compte de trésorerie facultatif (absent ou null : marquage), entier positif int4 sinon", () => {
+    expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v }).success).toBe(true);
+    expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v, treasuryAccountId: null }).success).toBe(true);
+    expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v, treasuryAccountId: 3 }).success).toBe(true);
+    for (const treasuryAccountId of [0, -1, 1.5, "3", MAX_ID_FOR_TEST + 1]) {
+      expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v, treasuryAccountId }).success, String(treasuryAccountId)).toBe(false);
+    }
+  });
+
+  it("strict : ni montant ni statut ; la version reste requise ; l'approbation n'accepte pas de compte", () => {
+    expect(missionBudgetDisburseRequestSchema.safeParse({ treasuryAccountId: 3 }).success).toBe(false);
+    expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v, amount: 1 }).success).toBe(false);
+    expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: v, treasuryAccountId: 3 }).success).toBe(false);
   });
 });

@@ -610,3 +610,21 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
   - migration jouée deux fois sur la base locale sans erreur, et contrainte validée ;
   - avec un budget orphelin, dans une transaction annulée ensuite, la contrainte reste NOT VALID et le démarrage n'est pas bloqué ;
   - `tsc` : 0 erreur ; unitaires 2860 ; contrat `mission-budgets` 20/20 ; ménage des clés étrangères 3/3.
+
+## 2026-11-05 — Budget de mission (L1c) : décaissement au journal de trésorerie
+
+- **Quoi** : un décaissement avec un compte de trésorerie écrit deux sorties au journal, liées à la mission : FDR + frais annexes, et carburant. Le budget retient la ligne FDR (`treasury_entry_id`).
+- **Comment** :
+  - `treasuryAccountId` est facultatif au décaissement, selon la règle T3 des règlements. Sans compte, seul le marquage est fait. Si le drapeau finance est coupé : 409. Compte inconnu : 404. Compte désactivé : 409. Carte carburant : 400 ;
+  - `linkMissionBudgetDisbursement` (`treasury-links.ts`) s'exécute dans la transaction de la transition, après l'UPDATE conditionnel. Les clés sont `mission-budget:<id>:fdr` et `:carburant`, écrites par `insertLinked` : un rejeu n'écrit rien. Une ligne à montant nul est omise ;
+  - la FK `mission_budgets_treasury_entry_id_treasury_entries_id_fk` est posée NOT VALID puis validée, avec un WARNING en repli. Migration `20261105_mission_budgets_treasury.sql`, jumelle de `MISSION_BUDGETS_TREASURY_SQL`. Elle est listée dans `CDC_RECONCILED_CONSTRAINTS` ;
+  - `cleanup.ts` détache `treasury_entry_id` avant de supprimer des écritures.
+- **Pourquoi** : l'argent remis pour une mission doit apparaître au journal de trésorerie, sur le compte d'où il sort.
+- **Suites connues** :
+  - **mission annulée (décision 0a, lot L1d)** :
+    - avant décaissement, l'annulation se fait sans mouvement ;
+    - après décaissement, le reliquat (décaissé − justifié) est contre-passé vers le compte source, par des clés `:reverse` sur le modèle de `reverseFuelLink` ;
+    - le service est appelé dans la transaction de l'annulation ;
+    - justifié = 0 tant que le lot justificatifs n'existe pas ;
+  - écran : choix du compte au décaissement.
+- **Preuve** : `tsc` : 0 erreur ; unitaires 2865 (2 ignorés) ; contrats complets 2508/2508, dont `mission-budgets` et trésorerie 53/53 ; intégration 351/352. Le seul échec, `lot-recette-schema-idempotence`, compare des compteurs `pg_stat` globaux sur des tables partagées ; rejoué seul avec le code L1c, il passe (2/2) : le second démarrage n'écrit rien.

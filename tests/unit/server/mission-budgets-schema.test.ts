@@ -36,9 +36,10 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
   });
 
   it("chaque colonne et chaque contrainte Drizzle existe dans le SQL, sous le même nom", () => {
-    // destination_id et sa FK sont ajoutées par la migration du barème (L1b).
+    // destination_id et sa FK sont ajoutées par la migration du barème (L1b), la FK trésorerie par L1c.
     const sql = fromMigration() + "\n" + norm(readFileSync("server/db/migrations/20261105_mission_destinations.sql", "utf8"))
-      .replace(/ADD COLUMN IF NOT EXISTS destination_id/, "\n  destination_id");
+      .replace(/ADD COLUMN IF NOT EXISTS destination_id/, "\n  destination_id")
+      + "\n" + norm(readFileSync("server/db/migrations/20261105_mission_budgets_treasury.sql", "utf8"));
     const config = getTableConfig(missionBudgets);
     for (const column of config.columns) expect(sql, column.name).toMatch(new RegExp(`\\n  ${column.name} `));
     const names = [
@@ -49,7 +50,7 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
     for (const name of names) expect(sql, name).toMatch(new RegExp(`CONSTRAINT ${name}\\s`));
   });
 
-  it("colonnes d'audit présentes, lien trésorerie nullable sans FK (branché après T1)", () => {
+  it("colonnes d'audit présentes, lien trésorerie nullable (FK posée par la migration L1c)", () => {
     const sql = fromMigration();
     for (const col of ["created_by", "updated_by", "created_at", "updated_at"]) expect(sql).toContain(`  ${col} `);
     expect(sql).toMatch(/\n  treasury_entry_id integer,\n/);
@@ -81,7 +82,7 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
 
   it("l'écart de contraintes est relu après la création de mission_budgets, pas avant", () => {
     const src = norm(readFileSync("server/init-database.ts", "utf8"));
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_DESTINATIONS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(DESTINATIONS|BUDGETS_TREASURY)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
     expect(src).not.toMatch(/async function applyCdcSchema\(\) \{[^}]*reportCdcConstraintGaps/);
   });
 });
@@ -101,7 +102,7 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
 
   it("init-database porte exactement le SQL de la migration, appliqué après celui des budgets", () => {
     expect(initSql()).toBe(migration());
-    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("additif et idempotent : seed sans réécriture, aucune suppression", () => {
@@ -146,5 +147,41 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
     expect(sql).toContain("VALIDATE CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk");
     expect(sql).toContain("EXCEPTION WHEN foreign_key_violation");
     expect(reconciled).toContain("'mission_budgets_destination_id_mission_destinations_id_fk'");
+  });
+});
+
+describe("L1c : FK trésorerie de mission_budgets, init-database et migration jumelle", () => {
+  const MIGRATION = "server/db/migrations/20261105_mission_budgets_treasury.sql";
+  const FK = "mission_budgets_treasury_entry_id_treasury_entries_id_fk";
+  const migration = () =>
+    norm(norm(readFileSync(MIGRATION, "utf8")).split("\n").filter((line) => !line.startsWith("--")).join("\n"));
+  const initSource = () => norm(readFileSync("server/init-database.ts", "utf8"));
+
+  it("init-database porte exactement le SQL de la migration, appliqué après le barème et avant le relevé", () => {
+    const src = initSource();
+    const marker = "export const MISSION_BUDGETS_TREASURY_SQL = `";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
+    expect(src).toMatch(/await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*\/\/.*\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+  });
+
+  it("les fichiers de migration passent par ordre alphabétique : celui-ci après la création de mission_budgets", () => {
+    expect(["20261105_mission_budgets_treasury.sql", "20261105_mission_budgets.sql"].sort()[0]).toBe("20261105_mission_budgets.sql");
+  });
+
+  it("Drizzle déclare la FK sous le nom posé, NOT VALID puis VALIDATE avec repli, relue au démarrage", () => {
+    expect(getTableConfig(missionBudgets).foreignKeys.map((k) => k.getName())).toContain(FK);
+    const sql = migration();
+    expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    expect(sql).toContain("to_regclass('treasury_entries') IS NULL");
+    expect(sql).toContain(`CONSTRAINT ${FK}\n      FOREIGN KEY (treasury_entry_id) REFERENCES treasury_entries(id) NOT VALID`);
+    expect(sql).toContain(`VALIDATE CONSTRAINT ${FK}`);
+    expect(sql).toContain("EXCEPTION WHEN foreign_key_violation");
+    expect(sql).toContain("EXCEPTION WHEN lock_not_available");
+    expect(sql).not.toMatch(/DELETE |UPDATE |DROP |TRUNCATE /);
+    const src = initSource();
+    const listStart = src.indexOf("export const CDC_RECONCILED_CONSTRAINTS");
+    expect(src.slice(listStart, src.indexOf("];", listStart))).toContain(`'${FK}'`);
   });
 });

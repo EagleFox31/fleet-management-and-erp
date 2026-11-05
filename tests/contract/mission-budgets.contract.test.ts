@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   dailyNeedResponseSchema,
@@ -13,9 +13,10 @@ import {
   missionDestinationsResponseSchema,
 } from "../../shared/contracts/mission-budgets";
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
-import { fuelPrices, missionBudgets, missionDestinations, missions } from "../../shared/schema";
+import { fuelPrices, missionBudgets, missionDestinations, missions, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { db } from "../../server/db";
 import { resolveBudgetFuelPrice } from "../../server/services/mission-budgets-service";
+import { linkMissionBudgetDisbursement } from "../../server/services/treasury-links";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -24,6 +25,8 @@ import { TEST_PREFIX } from "../support/ids";
 /** Niveau C, L1 : budget de mission (drapeau finance), rôles, calcul serveur, transitions, besoin du jour. */
 // Suite en isolate: false : le drapeau est posé puis restauré, sans fuir vers les autres fichiers.
 const previousFlags = process.env.FEATURE_FLAGS;
+/** Comptes de trésorerie créés par ce fichier (L1c). */
+const treasuryAccountIds: number[] = [];
 
 const ROLES = ["admin", "logistics", "management", "secretary", "technician", "driver", "client"] as const;
 // Date du fichier, dans la fenêtre de saisie (± 60 j) : le besoin du jour ne somme que les budgets de ce test.
@@ -121,8 +124,10 @@ beforeAll(async () => {
 afterAll(async () => {
   if (missionIds.length) {
     await db.delete(missionBudgets).where(inArray(missionBudgets.missionId, missionIds));
+    await db.delete(treasuryEntries).where(inArray(treasuryEntries.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
+  if (treasuryAccountIds.length) await db.delete(treasuryAccounts).where(inArray(treasuryAccounts.id, treasuryAccountIds));
   if (destinationIds.length) await db.delete(missionDestinations).where(inArray(missionDestinations.id, destinationIds));
   if (previousPrice === null) await db.delete(fuelPrices).where(eq(fuelPrices.effectiveFrom, DAY));
   else await db.update(fuelPrices).set({ pricePerLiter: previousPrice }).where(eq(fuelPrices.effectiveFrom, DAY));
@@ -412,5 +417,123 @@ describe("Barème par destination (L1b)", { timeout: 120000 }, () => {
     const unlinked = await call("PATCH", missionBudgetPath(created.id), "logistics", { destinationId: null });
     expect(unlinked.status).toBe(200);
     expect(unlinked.body.destinationId).toBeNull();
+  });
+});
+
+describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, () => {
+  const accounts = { bank: 0, cash: 0, inactive: 0, card: 0 };
+
+  async function account(kind: "bank" | "cash" | "fuel_card", isActive = true): Promise<number> {
+    const [row] = await db
+      .insert(treasuryAccounts)
+      .values({
+        code: `${TEST_PREFIX}mb-${kind}-${isActive}-${Date.now()}`,
+        label: `${TEST_PREFIX} ${kind}`,
+        kind,
+        isActive,
+        createdBy: userIds.get("admin")!,
+      })
+      .returning({ id: treasuryAccounts.id });
+    treasuryAccountIds.push(row.id);
+    return row.id;
+  }
+
+  beforeAll(async () => {
+    accounts.bank = await account("bank");
+    accounts.cash = await account("cash");
+    accounts.inactive = await account("bank", false);
+    // Une seule carte active en base (index unique partiel) : une carte existante sert telle quelle.
+    const [card] = await db
+      .select({ id: treasuryAccounts.id })
+      .from(treasuryAccounts)
+      .where(and(eq(treasuryAccounts.kind, "fuel_card"), eq(treasuryAccounts.isActive, true)));
+    accounts.card = card ? card.id : await account("fuel_card");
+  });
+
+  async function approvedBudget(extra: Record<string, unknown> = {}) {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId, extra))).body);
+    const approved = missionBudgetSchema.parse((await call("POST", missionBudgetApprovePath(created.id), "management", seen(created))).body);
+    return { missionId, approved };
+  }
+
+  const entriesOf = (budgetId: number) =>
+    db.select().from(treasuryEntries).where(like(treasuryEntries.requestKey, `mission-budget:${budgetId}:%`));
+
+  it("avec un compte : deux sorties liées à la mission ; le budget retient la ligne FDR ; rejeu sans doublon", async () => {
+    const { missionId, approved } = await approvedBudget();
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: accounts.bank });
+    expect(res.status).toBe(200);
+    const entries = await entriesOf(approved.id);
+    expect(entries).toHaveLength(2);
+    const byKey = new Map(entries.map((e) => [e.requestKey, e]));
+    const fdr = byKey.get(`mission-budget:${approved.id}:fdr`)!;
+    const fuel = byKey.get(`mission-budget:${approved.id}:carburant`)!;
+    // body() : FDR 40 000 + frais annexes 5 000 ; carburant = fuelAmount calculé par le service.
+    expect(fdr).toMatchObject({ accountId: accounts.bank, direction: "out", amount: "45000.00", category: "fdr", missionId, createdBy: userIds.get("management") });
+    expect(fuel).toMatchObject({ accountId: accounts.bank, direction: "out", category: "carburant", missionId });
+    expect(Number(fuel.amount)).toBe(Number(approved.fuelAmount));
+    expect(res.body).toMatchObject({ status: "disbursed", treasuryEntryId: fdr.id });
+
+    // Rejeu HTTP : 409, rien de plus au journal.
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(res.body), treasuryAccountId: accounts.bank })).status).toBe(409);
+    // Rejeu du lien seul : clés déjà prises, aucune seconde ligne, même écriture retenue.
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    const again = await db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, accounts.bank, userIds.get("admin")!));
+    expect(again).toBe(fdr.id);
+    expect(await entriesOf(approved.id)).toHaveLength(2);
+  });
+
+  it("caisse acceptée ; sans FDR ni frais annexes, seule la ligne carburant est écrite et retenue", async () => {
+    const { approved } = await approvedBudget({ fdrAmount: 0, extrasAmount: 0 });
+    const res = await call("POST", missionBudgetDisbursePath(approved.id), "admin", { ...seen(approved), treasuryAccountId: accounts.cash });
+    expect(res.status).toBe(200);
+    const entries = await entriesOf(approved.id);
+    expect(entries.map((e) => e.requestKey)).toEqual([`mission-budget:${approved.id}:carburant`]);
+    expect(res.body.treasuryEntryId).toBe(entries[0].id);
+  });
+
+  it("sans compte (absent ou null) : marquage seul, rien au journal", async () => {
+    for (const extra of [{}, { treasuryAccountId: null }]) {
+      const { approved } = await approvedBudget();
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), ...extra });
+      expect(res.status, JSON.stringify(extra)).toBe(200);
+      expect(res.body).toMatchObject({ status: "disbursed", treasuryEntryId: null });
+      expect(await entriesOf(approved.id)).toHaveLength(0);
+    }
+  });
+
+  it("carte carburant 400, compte désactivé 409, compte inconnu 404 : budget resté approuvé, journal vide", async () => {
+    const cases: Array<[number, number]> = [[accounts.card, 400], [accounts.inactive, 409], [2_000_000_000, 404]];
+    for (const [treasuryAccountId, status] of cases) {
+      const { approved } = await approvedBudget();
+      const res = await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId });
+      expect(res.status, String(treasuryAccountId)).toBe(status);
+      // L'UPDATE conditionnel précède le refus : la transaction l'annule.
+      const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+      expect(row).toMatchObject({ status: "approved", disbursedBy: null, treasuryEntryId: null });
+      expect(await entriesOf(approved.id)).toHaveLength(0);
+    }
+  });
+
+  it("l'approbation refuse un compte (400) ; un identifiant de compte hors plage est refusé (400)", async () => {
+    const missionId = await newMission();
+    const created = missionBudgetSchema.parse((await call("POST", MISSION_BUDGETS_PATH, "logistics", body(missionId))).body);
+    expect((await call("POST", missionBudgetApprovePath(created.id), "management", { ...seen(created), treasuryAccountId: accounts.bank })).status).toBe(400);
+    const { approved } = await approvedBudget();
+    expect((await call("POST", missionBudgetDisbursePath(approved.id), "management", { ...seen(approved), treasuryAccountId: 2_147_483_648 })).status).toBe(400);
+  });
+
+  it("drapeau finance coupé : un compte demandé est refusé (409), sans compte rien n'est écrit", async () => {
+    const { approved } = await approvedBudget();
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, approved.id));
+    process.env.FEATURE_FLAGS = "finance=off";
+    try {
+      await expect(db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, accounts.bank, userIds.get("admin")!))).rejects.toMatchObject({ status: 409 });
+      expect(await db.transaction((tx) => linkMissionBudgetDisbursement(tx as never, row, null, userIds.get("admin")!))).toBeNull();
+    } finally {
+      process.env.FEATURE_FLAGS = "finance=on";
+    }
+    expect(await entriesOf(approved.id)).toHaveLength(0);
   });
 });
