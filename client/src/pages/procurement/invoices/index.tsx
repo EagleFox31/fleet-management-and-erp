@@ -317,7 +317,7 @@ export default function SupplierInvoicesListPage() {
                       <td className="px-4 py-3.5">
                         <span className={`text-sm whitespace-nowrap ${isOverdue ? 'text-red-500 font-semibold' : 'text-gray-500'}`}>
                           {formatDate(invoice.dueDate)}
-                          {isOverdue && <span className="ml-1">⚠</span>}
+                          {isOverdue && <AlertTriangle className="ml-1 inline h-3.5 w-3.5 align-text-bottom" aria-hidden />}
                         </span>
                       </td>
 
