@@ -487,6 +487,29 @@ export function sourceFiles(dir: string): string[] {
 }
 
 /**
+ * Vrai si l'instruction à `index` ne s'exécute pas toujours : corps d'un `if` / `else` / `for` / `while`
+ * (avec ou sans accolades) ou branche d'un `?:`/`&&`. Un `router.use(isStaff)` conditionnel ne protège pas la route.
+ */
+export function isConditionalAt(source: string, index: number): boolean {
+  const head = source.slice(0, index);
+  if (/(?:\bif\s*\((?:[^()]|\([^()]*\))*\)|\belse|\b(?:for|while)\s*\((?:[^()]|\([^()]*\))*\))\s*$/.test(head)) return true;
+  if (/(?:&&|\|\||\?)\s*$/.test(head)) return true;
+  let depth = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    const c = source[i];
+    if (c === "}") depth++;
+    else if (c === "{") {
+      if (depth > 0) {
+        depth--;
+        continue;
+      }
+      if (/(?:\bif\s*\((?:[^()]|\([^()]*\))*\)|\belse(?:\s+if\s*\((?:[^()]|\([^()]*\))*\))?|\b(?:for|while)\s*\((?:[^()]|\([^()]*\))*\))\s*$/.test(source.slice(0, i))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Gardes posées sur tout un routeur par `router.use(garde)` (sans chemin) : identifiants nus,
  * `authorize(...)`, `sessionGuard(...)` et spreads. Les autres appels (`express.json()`) sont du bruit.
  */
@@ -503,6 +526,8 @@ export function routerLevelGuards(rawSource: string, kinds: GuardKinds, before: 
   for (const m of source.matchAll(/\b(\w+)\s*\.\s*use\(/g)) {
     // Express applique les `use` dans l'ordre : un `use` posé après la route ne la couvre pas.
     if (m.index! >= before) break;
+    // un `use` conditionnel (if/else/boucle/&&) ne couvre pas toujours la route : il ne compte pas
+    if (isConditionalAt(source, m.index!)) continue;
     const open = m.index! + m[0].length - 1;
     const close = matchingClose(source, open);
     if (close === -1) continue;
@@ -547,6 +572,19 @@ export function parseMounts(indexSource: string, kinds: GuardKinds): Mount[] {
 const fullPathOf = (file: string, prefix: string, path: string) => (file === "server/routes.ts" ? path : `/api${prefix}${path}`);
 const underPrefix = (fullPath: string, prefix: string) => fullPath === `/api${prefix}` || fullPath.startsWith(`/api${prefix}/`);
 
+/**
+ * Montage d'une variable de routeur : par son nom, sinon le seul montage connu du fichier, mais seulement si cette
+ * variable est le routeur exporté (ou le seul routeur du fichier). Un second routeur non monté n'hérite pas des gardes.
+ */
+export function mountOf<T extends { variable: string }>(fileMounts: T[], routerVar: string, rawSource: string): T | undefined {
+  const byName = fileMounts.find((m) => m.variable === routerVar);
+  if (byName || fileMounts.length !== 1) return byName;
+  const source = stripComments(rawSource);
+  const declared = [...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:express\s*\.\s*)?Router\s*\(/g)].map((m) => m[1]);
+  const exported = source.match(/export\s+default\s+(\w+)/)?.[1];
+  return declared.length <= 1 || exported === routerVar ? fileMounts[0] : undefined;
+}
+
 /** Gardes de base (auth.ts) et montages de `server/api/index.ts`, communs aux scans de routes. */
 function guardContext(serverDir: string, roleConstants: RoleConstants) {
   const baseKinds = classifyAuthGuards(readFileSync(join(serverDir, "middleware", "auth.ts"), "utf8"), roleConstants);
@@ -584,7 +622,7 @@ export function scanOpenGetReads(serverDir: string, roleConstants: RoleConstants
     for (const route of extractGetRoutes(file, raw)) {
       const routerGuards = routerLevelGuards(raw, kinds, route.at);
       // un fichier peut exporter plusieurs routeurs : on rattache par variable, sinon au seul montage connu
-      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      const own = mountOf(fileMounts, route.routerVar, raw);
       const prefix = own?.prefix ?? "";
       const full = { ...route, mountPrefix: prefix, key: `${file} GET ${prefix}${route.path}` };
       seen.add(full.key);
@@ -632,8 +670,9 @@ export function scanShadowedRoutes(serverDir: string) {
     const file = `server/api/${path.slice(join(serverDir, "api").length + 1).replace(/\\/g, "/")}`;
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
     if (fileMounts.length === 0) continue;
-    for (const route of extractRoutes(readFileSync(path, "utf8"))) {
-      const own = fileMounts.find((m) => m.variable === route.routerVar) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+    const raw = readFileSync(path, "utf8");
+    for (const route of extractRoutes(raw)) {
+      const own = mountOf(fileMounts, route.routerVar, raw);
       if (!own) continue;
       apiSignatures.add(routeSignature(route.method, `/api${own.prefix}${route.path}`));
     }
@@ -664,13 +703,23 @@ export function scanClientOpenParamRoutes(serverDir: string, roleConstants: Role
     for (const name of RESTRICTIVE_ALLOWLIST[file] ?? []) kinds.restrictive.add(name);
     const routers = routerVarsOf(source);
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
-    for (const m of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
-      if (!routers.has(m[1]) || (m[3] === "`" && m[4].includes("${")) || !m[4].includes(":")) continue;
-      const open = source.indexOf("(", m.index! + m[1].length);
+    for (const call of source.matchAll(/\b(\w+)\s*\.\s*(get|post|put|patch|delete)\(/g)) {
+      if (!routers.has(call[1])) continue;
+      const open = call.index! + call[0].length - 1;
       const close = matchingClose(source, open);
       if (close === -1) continue;
-      const header = splitTopLevel(source.slice(open + 1, close)).slice(1, -1);
-      const own = fileMounts.find((x) => x.variable === m[1]) ?? (fileMounts.length === 1 ? fileMounts[0] : undefined);
+      const callArgs = splitTopLevel(source.slice(open + 1, close));
+      const first = callArgs[0] ?? "";
+      const literal = first.match(/^(["'`])([^"'`]*)\1$/);
+      // échec fermé : un chemin en gabarit (`${}` -> `:p`) ou illisible (variable, appel) est retenu, jamais ignoré
+      const routePath = literal && !(literal[1] === "`" && literal[2].includes("${")) ? literal[2] : literal ? literal[2].replace(/\$\{[^}]*\}/g, ":p") : `/:illisible(${first.replace(/\s+/g, " ").slice(0, 40)})`;
+      if (!routePath.includes(":")) continue;
+      // un handler seul (`map.get(key)`) n'est pas une route : il faut au moins un chemin et un handler
+      if (callArgs.length < 2) continue;
+      const m = [call[0], call[1], call[2], "", routePath] as unknown as RegExpMatchArray;
+      m.index = call.index;
+      const header = callArgs.slice(1, -1);
+      const own = mountOf(fileMounts, m[1], raw);
       const fullPath = fullPathOf(file, own?.prefix ?? "", m[4]);
       // memes gardes effectives que scanOpenGetReads : montages masquants, montage propre, `router.use` poses avant, en-tete
       const servedAt = file === "server/routes.ts" ? Number.POSITIVE_INFINITY : (own?.order ?? Number.POSITIVE_INFINITY);
