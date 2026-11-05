@@ -66,10 +66,16 @@ describe("identifiant de mission strict", { timeout: 120000 }, () => {
   }
 
   it("identifiant non numérique, même pour le personnel : 400", async () => {
-    for (const bad of ["abc", `${ownId}abc`, "1.5", "0"]) {
+    for (const bad of ["abc", `${ownId}abc`, "1.5", "0", "2147483648", "9007199254740993", "99999999999999999999"]) {
       const res = await session.call("GET", `/api/missions/${bad}`, { actor: "logistics" });
       expect(res.status, `${bad} -> ${JSON.stringify(res.body)}`).toBe(400);
     }
+  });
+
+  it("zéros initiaux : lu comme le même entier, donc même cloison", async () => {
+    const padded = `00${foreignId}`;
+    expect((await session.call("GET", `/api/missions/${padded}`, { actor: "driverA" })).status).toBe(403);
+    expect((await session.call("GET", `/api/missions/00${ownId}`, { actor: "driverA" })).status).toBe(200);
   });
 
   it("non-régression : sa propre mission reste lisible, la mission d'un autre reste refusée", async () => {

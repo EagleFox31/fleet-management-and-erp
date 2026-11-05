@@ -130,10 +130,13 @@ async function findReplayedFuelSubmission(
 }
 
 /** Identifiant de mission d'URL : entier strict (chiffres seuls), sinon 400. Seule lecture de `:id`. */
+/** Plus grand entier de la colonne id (integer Postgres) : au-delà, la base répondrait par une erreur. */
+const MAX_INT4 = 2147483647;
+
 export function parseMissionId(value: unknown): number {
   const text = typeof value === "string" ? value : "";
   const id = Number(text);
-  if (!/^\d+$/.test(text) || !Number.isSafeInteger(id) || id <= 0) {
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(id) || id <= 0 || id > MAX_INT4) {
     throw new AppError(400, "Identifiant de mission invalide.");
   }
   return id;
@@ -1025,9 +1028,6 @@ router.get("/:id", async (req, res) => {
 router.get("/:id/fuel-records", async (req, res) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const [mission] = await db
       .select({
@@ -1079,9 +1079,6 @@ router.get("/:id/fuel-records", async (req, res) => {
 router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
     const actorRole = String(req.user?.role || "").trim().toLowerCase();
@@ -1244,9 +1241,6 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
 router.post("/:id/fuel-records/regularize", async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
     const actorRole = String(req.user?.role || "").trim().toLowerCase();
@@ -1470,9 +1464,6 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
 router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
     const actorRole = String(req.user?.role || "").trim().toLowerCase();
@@ -1582,9 +1573,6 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
 router.get("/:id/launch-readiness", async (req, res) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const [mission] = await db
       .select({
@@ -2256,9 +2244,6 @@ const updateMissionSchema = z.object({
 router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (!Number.isInteger(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const payload = updateMissionSchema.parse(req.body || {});
     if (Object.keys(payload).length === 0) {
@@ -3293,9 +3278,6 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
 router.get("/:id/document-renewal-requests", async (req, res) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (Number.isNaN(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     // Fetch mission + vehicle to scope requests
     const [mission] = await db
@@ -3430,9 +3412,6 @@ router.get("/:id/document-renewal-requests", async (req, res) => {
 router.post("/:id/document-renewal-requests", async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
-    if (Number.isNaN(missionId)) {
-      return res.status(400).json({ message: "ID mission invalide." });
-    }
 
     const actorId = typeof req.session?.userId === "number" ? req.session.userId : null;
     const actorRole = String(req.user?.role || "").trim().toLowerCase();
