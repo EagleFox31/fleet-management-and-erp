@@ -170,6 +170,9 @@ export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics
  * action. Dérogation à `TREASURY_WRITE_ROLES`, décidée le 5 novembre 2026 : le gestionnaire de flotte
  * (logistique) recharge la carte et sait d'où part l'argent. Il ne saisit rien d'autre au journal.
  * Voir docs/journal/tresorerie-t2t3-journal.md.
+ * Aujourd'hui égale à `FUEL_CARD_MANAGER_ROLES`, mais tenue à part exprès : la recharge est gardée par
+ * `isFuelCardManager`, cette liste ne peut qu'en être un sous-ensemble, et ajouter un gestionnaire de
+ * carte ne doit pas lui donner le droit de débiter une banque. Figé par fuel-recharge-source-roles.test.ts.
  */
 export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
 

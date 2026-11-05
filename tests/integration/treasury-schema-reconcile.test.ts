@@ -159,6 +159,60 @@ describe("schéma trésorerie : réconciliation des contraintes", { timeout: 60_
     });
   });
 
+  it("table verrouillée par une autre session : WARNING sous 5 s, démarrage non bloqué ; corrigé au passage suivant", async () => {
+    // Seul cas hors transaction annulée : le verrou doit venir d'une autre session, donc l'état à réparer
+    // est validé en base. Le bloc lui-même le répare à la fin (et au pire, au démarrage suivant).
+    const fkBlock = TREASURY_SCHEMA_STATEMENTS.find((s) => s.includes("confdeltype <> 'n'"))!;
+    const indexBlock = TREASURY_SCHEMA_STATEMENTS.find((s) => s.includes("CREATE UNIQUE INDEX IF NOT EXISTS uq_treasury_accounts_active_fuel_card"))!;
+    expect(fkBlock).toBeTruthy();
+    expect(indexBlock).toBeTruthy();
+    const runner = await pool.connect();
+    const holder = await pool.connect();
+    const notices: string[] = [];
+    runner.on("notice", (n: { message?: string }) => notices.push(String(n.message ?? "")));
+    const vehicleFk = async () =>
+      (
+        await runner.query(
+          `SELECT k.confdeltype FROM pg_constraint k JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+           WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = 'vehicle_id'`,
+        )
+      ).rows[0].confdeltype;
+    const index = async () => (await runner.query(`SELECT to_regclass('uq_treasury_accounts_active_fuel_card') AS r`)).rows[0].r;
+    try {
+      const { rows: [fk] } = await runner.query(
+        `SELECT k.conname FROM pg_constraint k JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+         WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = 'vehicle_id'`,
+      );
+      await runner.query(`ALTER TABLE treasury_entries DROP CONSTRAINT ${fk.conname}, ADD CONSTRAINT ${fk.conname} FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)`);
+      await runner.query(`DROP INDEX IF EXISTS uq_treasury_accounts_active_fuel_card`);
+      // Une lecture ouverte sur treasury_entries bloque le DROP CONSTRAINT ; une écriture ouverte sur
+      // treasury_accounts bloque le CREATE INDEX.
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM treasury_entries LIMIT 1");
+      await holder.query("LOCK TABLE treasury_accounts IN ROW EXCLUSIVE MODE");
+
+      const started = Date.now();
+      await runner.query(fkBlock);
+      await runner.query(indexBlock);
+      expect(Date.now() - started).toBeLessThan(20_000);
+      expect(await vehicleFk()).toBe("a");
+      expect(await index()).toBeNull();
+      expect(notices.filter((m) => m.includes("verrou de table indisponible sous 5 s"))).toHaveLength(2);
+
+      await holder.query("ROLLBACK");
+      await runner.query(fkBlock);
+      await runner.query(indexBlock);
+      expect(await vehicleFk()).toBe("n");
+      expect(await index()).not.toBeNull();
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      holder.release();
+      await runner.query(fkBlock).catch(() => undefined);
+      await runner.query(indexBlock).catch(() => undefined);
+      runner.release();
+    }
+  });
+
   it("des clés de rejeu en double laissent l'unicité absente sans bloquer le démarrage", async () => {
     await withClient(async (client) => {
       await client.query(`ALTER TABLE treasury_entries DROP CONSTRAINT treasury_entries_request_key_key`);

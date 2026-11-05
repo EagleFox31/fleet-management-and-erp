@@ -1345,24 +1345,30 @@ export const TREASURY_SCHEMA_STATEMENTS = [
   `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS supplier_settlement_id integer REFERENCES supplier_invoice_settlements(id) ON DELETE SET NULL`,
   `ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS treasury_account_id integer REFERENCES treasury_accounts(id)`,
   // Deux cartes actives déjà en base : WARNING, l'index attend qu'on en désactive une (démarrage non bloqué).
+  // Verrou de table indisponible sous 5 s : WARNING aussi, l'index est retenté au démarrage suivant.
   `DO $$
 BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
   IF to_regclass('uq_treasury_accounts_active_fuel_card') IS NOT NULL THEN
     RETURN;
   END IF;
   IF (SELECT count(*) FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active) > 1 THEN
     RAISE WARNING 'treasury_accounts : plusieurs cartes carburant actives, index uq_treasury_accounts_active_fuel_card non posé';
   ELSE
-    CREATE UNIQUE INDEX uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
   END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_accounts : index uq_treasury_accounts_active_fuel_card non posé, verrou de table indisponible sous 5 s';
 END $$`,
   // Véhicule ou mission supprimés (restauration de sauvegarde, purge) : l'écriture reste, son lien passe à NULL.
-  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction.
+  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction. Verrou
+  // indisponible sous 5 s : WARNING, rien n'est remplacé (bloc annulé en entier), retenté au démarrage suivant.
   `DO $$
 DECLARE
   c record;
   fk record;
 BEGIN
+  PERFORM set_config('lock_timeout', '5s', true);
   FOR c IN SELECT * FROM (VALUES ('vehicle_id', 'vehicles'), ('mission_id', 'missions')) AS v(col, ref) LOOP
     FOR fk IN
       SELECT k.conname FROM pg_constraint k
@@ -1373,6 +1379,8 @@ BEGIN
         fk.conname, fk.conname, c.col, c.ref);
     END LOOP;
   END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'treasury_entries : FK vehicle_id et mission_id non passées en ON DELETE SET NULL, verrou de table indisponible sous 5 s';
 END $$`,
   // Tables créées par drizzle-kit push, ou avant qu'une contrainte soit déclarée : CREATE TABLE IF NOT EXISTS
   // a été sauté. Même réconciliation que le schéma CDC : CHECK en NOT VALID puis VALIDATE, UNIQUE renommé
