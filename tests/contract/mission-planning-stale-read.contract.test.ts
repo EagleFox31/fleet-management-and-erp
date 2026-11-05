@@ -49,9 +49,10 @@ async function seed(status: string, vehicleId: number, driverId: number, from: D
   return m.id;
 }
 
-async function waitForBlockedWriter() {
+/** Attend qu'une requête soit bloquée PAR la connexion qui tient le verrou (pas par n'importe quel verrou de la base). */
+async function waitForBlockedWriter(holderPid: number) {
   for (let i = 0; i < 200; i++) {
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted AND locktype = 'transactionid'`);
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, [holderPid]);
     if (rows[0].n > 0) return;
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -64,8 +65,9 @@ async function racing<T>(missionId: number, request: () => Promise<T>, swap: (q:
   try {
     await client.query("BEGIN");
     await client.query("SELECT id FROM missions WHERE id = $1 FOR UPDATE", [missionId]);
+    const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
     const pending = request();
-    await waitForBlockedWriter();
+    await waitForBlockedWriter(holderPid);
     await swap((sql, params) => client.query(sql, params));
     await client.query("COMMIT");
     return await pending;
@@ -121,5 +123,25 @@ describe("lecture périmée avant la transaction", { timeout: 120000 }, () => {
     expect(res.body.message).toContain("vient d'être modifiée");
     const [row] = await db.select().from(missions).where(eq(missions.id, mine));
     expect(new Date(row.pickupDate as any).toISOString()).toBe(day(20).toISOString());
+  });
+
+  it("PATCH de dates sur une mission sans affectation : une affectation ajoutée entre-temps est revue : 409, dates inchangées", async () => {
+    const [v, d] = [await vehicle(), await driver()];
+    await seed("assigned", v, d, day(34), day(37)); // occupe (v, d) sur le nouveau créneau
+    const [m] = await db
+      .insert(missions)
+      .values({ orderNumber: uniqueTestToken("MSR"), pickupAddress: "A", deliveryAddress: "B", pickupDate: day(30), deliveryDate: day(31), status: "planned" } as any)
+      .returning();
+    missionIds.push(m.id);
+    const res = await racing(
+      m.id,
+      () => session.call("PATCH", `/api/missions/${m.id}`, { actor: "logistics", body: { pickupDate: day(35).toISOString(), deliveryDate: day(36).toISOString() } }),
+      // Un ajout d'affectation concurrent, contrôlé sur les anciennes dates (libres), valide avant le PATCH.
+      async (q) => void (await q("INSERT INTO assignments (mission_id, vehicle_id, driver_id, status) VALUES ($1, $2, $3, 'pending')", [m.id, v, d])),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toContain("vient d'être modifiée");
+    const [row] = await db.select().from(missions).where(eq(missions.id, m.id));
+    expect(new Date(row.pickupDate as any).toISOString()).toBe(day(30).toISOString());
   });
 });
