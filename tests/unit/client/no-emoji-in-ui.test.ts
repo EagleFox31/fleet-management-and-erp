@@ -24,7 +24,6 @@ const GELES: Record<string, number> = {
   "client/src/components/inventory/part-table.tsx": 3,
   "client/src/components/management/executive-corridor-map.tsx": 1,
   "client/src/components/procurement/procurement-tutorial-modal.tsx": 3,
-  "client/src/components/ui/playful-error-messages.tsx": 22,
   "client/src/components/vehicles/mileage-update-form.tsx": 1,
   "client/src/components/vehicles/vehicle-form.tsx": 6,
   "client/src/components/workflows/vehicle-acquisition-workflow.tsx": 4,
