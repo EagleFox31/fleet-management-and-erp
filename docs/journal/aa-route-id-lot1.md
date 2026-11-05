@@ -57,6 +57,7 @@
 - Pourquoi : `DELETE /api/vehicles/<id>abc` visait le véhicule `<id>`.
 - Correctif de méthode : les deux GET d'OT, d'abord notés comme masqués par `GET /api/work-orders/:id`, sont vivants (`:id` = un seul segment). Ils sont corrigés et non supprimés (voir LESSONS, 2026-11-05).
 - Tester : `route-id-strict-lot5` compte 15 cas. Sur l'ancien code, 15 rouges. Le correctif les rend verts. `former-storage-stubs` reste vert.
+- Réserves de relecture : DELETE users (suppression douce) et DELETE admin/users (définitive) vérifient `deletedAt` nul ; un test cantonne `routeIdOrNaN` à `server/routes.ts`.
 - Hors périmètre : PATCH users (b7) et toggle admin-users (c7, #375).
 
 ## Lot 6 — écritures de `server/routes.ts` (en place)
@@ -74,6 +75,7 @@
 - Tester : `route-id-strict-lot6` couvre 14 cas, dont 3 vérifient que l'objet reste intact (véhicule modifié, véhicule restauré, plein modifié).
   - Ancien code : 14 rouges. Correctif : 14 verts.
   - tsc : 0 erreur. Unitaires : 2440 verts. 45 contrats touchés : 559 verts.
+- Effet de bord assumé : un id `0` répondait 404 (objet absent), il répond désormais 400 (id invalide).
 - Hors périmètre : PATCH users (#379) et toggle admin-users (#375).
 
 ## Lot 7 — lectures de `server/routes.ts` (en place)
