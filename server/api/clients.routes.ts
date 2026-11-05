@@ -10,6 +10,7 @@ import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
 import { STAFF_ROLES, canReadFinanceReceivable } from "@shared/constants/roles";
+import { withoutClientFinanceFields } from "../lib/client-public-columns";
 
 const log = moduleLogger("clients");
 const router = Router();
@@ -21,23 +22,9 @@ type ClientWithCreator = ClientRow & { createdByName: string | null };
 
 const MANAGER_ROLES = ["admin", "secretary", "logistics"] as const;
 
-/** Taux de retenue (lot F1) : données finance, hors de la fiche client vue par le reste du personnel. */
-export const CLIENT_FINANCE_FIELDS = [
-  "withholdingVatRate",
-  "withholdingIsRate",
-  "withholdingIsBase",
-  "withholdingUpdatedBy",
-] as const;
-
-export function withoutFinanceFields<T extends Partial<ClientRow>>(client: T): Omit<T, (typeof CLIENT_FINANCE_FIELDS)[number]> {
-  const copy: Record<string, unknown> = { ...client };
-  for (const field of CLIENT_FINANCE_FIELDS) delete copy[field];
-  return copy as Omit<T, (typeof CLIENT_FINANCE_FIELDS)[number]>;
-}
-
 /** Fiche client telle que la voit l'appelant : taux de retenue réservés aux rôles de lecture finance. */
 function forViewer<T extends Partial<ClientRow>>(client: T, role: string | undefined) {
-  return canReadFinanceReceivable(role) ? client : withoutFinanceFields(client);
+  return canReadFinanceReceivable(role) ? client : withoutClientFinanceFields(client);
 }
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -93,7 +80,7 @@ function broadcastClientUpdate(
     entity: "client",
     entityId: client.id,
     // Diffusé à tout le personnel : sans les taux de retenue.
-    payload: { client: withoutFinanceFields(client) },
+    payload: { client: withoutClientFinanceFields(client) },
     // Fiche d'un client de flotte (coordonnées, créateur) : le personnel, jamais un compte client (§11).
     scope: { type: "roles", roles: [...STAFF_ROLES] },
   });
