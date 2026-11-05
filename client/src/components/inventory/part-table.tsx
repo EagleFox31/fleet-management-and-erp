@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import {
   Edit, Trash2, Clock, Package, Truck, CheckCircle, ArrowRight, User, Wrench, FileText,
-  Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart,
+  Search, ChevronLeft, ChevronRight, AlertCircle, Info, Eye, ShoppingCart, XCircle,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -738,9 +738,9 @@ export function PartTable({ onRowClick }: PartTableProps) {
 
                     {isFinalStatus && (
                       <div className="px-3 py-2 rounded-xl bg-white border border-gray-100 text-sm text-gray-600">
-                        {req.status === 'issued' && '✓ Demande terminée — pièce sortie du stock'}
-                        {req.status === 'cancelled' && '✗ Demande annulée'}
-                        {req.status === 'rejected' && '✗ Demande rejetée'}
+                        {req.status === 'issued' && <><CheckCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande terminée — pièce sortie du stock</>}
+                        {req.status === 'cancelled' && <><XCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande annulée</>}
+                        {req.status === 'rejected' && <><XCircle className="inline h-4 w-4 mr-1 align-text-bottom" aria-hidden />Demande rejetée</>}
                       </div>
                     )}
                   </div>

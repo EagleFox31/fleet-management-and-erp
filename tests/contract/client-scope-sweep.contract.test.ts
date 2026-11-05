@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { SWEEP_ROUTES as SWEEP, type SweepKind, type SweepRoute } from "../support/client-scope-sweep-table";
 
 /**
  * Balayage de la cloison client (AGENTS.md §11, decision #255) : pour chaque route ouverte a un client
@@ -18,26 +19,8 @@ import { uniqueTestToken } from "../support/ids";
  * `attendu` : statut commun. Famille vehicule = 403 ; famille ordre de travail = 404 (convention en vigueur) ;
  * verification de plaque = 200 `{exists:false}` dans les deux cas.
  */
-type Kind = "vehicle" | "plate" | "workOrder" | "wfDocument" | "wfSession";
-type Method = "GET" | "DELETE";
-type Row = { label: string; kind: Kind; path: (id: string | number) => string; attendu: number; method?: Method; lecturePropre?: boolean };
-
-const SWEEP: Row[] = [
-  { label: "documents d'un vehicule", kind: "vehicle", path: (id) => `/api/vehicles/${id}/documents`, attendu: 403 },
-  { label: "historique de statut", kind: "vehicle", path: (id) => `/api/vehicles/${id}/status-history`, attendu: 403 },
-  { label: "historique du kilometrage", kind: "vehicle", path: (id) => `/api/vehicles/${id}/mileage/history`, attendu: 403 },
-  { label: "pleins d'un vehicule", kind: "vehicle", path: (id) => `/api/fuel-records/vehicle/${id}`, attendu: 403 },
-  { label: "verification de plaque", kind: "plate", path: (id) => `/api/vehicles/check/${id}`, attendu: 200 },
-  { label: "document de workflow (lecture)", kind: "wfDocument", path: (id) => `/api/workflows/documents/${id}`, attendu: 403 },
-  { label: "document de workflow (suppression)", kind: "wfDocument", method: "DELETE", lecturePropre: false, path: (id) => `/api/workflows/documents/${id}`, attendu: 403 },
-  { label: "documents d'une session de workflow", kind: "wfSession", path: (id) => `/api/workflows/${id}/documents`, attendu: 200 },
-  { label: "etat d'un brouillon d'acquisition", kind: "wfSession", path: (id) => `/api/workflows/vehicle-acquisition/${id}`, attendu: 200 },
-  { label: "ordre de travail", kind: "workOrder", path: (id) => `/api/work-orders/${id}`, attendu: 404 },
-  { label: "lignes de travail", kind: "workOrder", path: (id) => `/api/work-orders/${id}/items`, attendu: 404 },
-  { label: "pieces de l'ordre de travail", kind: "workOrder", path: (id) => `/api/work-orders/${id}/parts`, attendu: 404 },
-  { label: "rotations de pneus", kind: "workOrder", path: (id) => `/api/work-orders/${id}/tire-rotations`, attendu: 404 },
-  { label: "demandes de pieces en attente", kind: "workOrder", path: (id) => `/api/work-orders/${id}/pending-part-requirements`, attendu: 404 },
-];
+type Kind = SweepKind;
+const pathOf = (row: SweepRoute, id: string | number) => row.template.replace(":id", String(id));
 
 const ACTORS = { admin: "admin", client: "client", other: "client" } as const;
 type Actor = keyof typeof ACTORS;
@@ -50,9 +33,9 @@ const uploadsDir = join(process.cwd(), "uploads", token);
 const workflowIds: number[] = [];
 const documentIds: number[] = [];
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
-let foreign: Record<Kind, string | number> = { vehicle: 0, plate: "", workOrder: 0, wfDocument: 0, wfSession: "" };
-let own: Record<Kind, string | number> = { vehicle: 0, plate: "", workOrder: 0, wfDocument: 0, wfSession: "" };
-const absent: Record<Kind, string | number> = { vehicle: ABSENT, plate: ABSENT_PLATE, workOrder: ABSENT, wfDocument: ABSENT, wfSession: `${token}-session-absente` };
+let foreign: Record<Kind, string | number> = { vehicle: 0, plate: "", workOrder: 0, wfDocument: 0, wfSession: "", user: 0 };
+let own: Record<Kind, string | number> = { vehicle: 0, plate: "", workOrder: 0, wfDocument: 0, wfSession: "", user: 0 };
+const absent: Record<Kind, string | number> = { vehicle: ABSENT, plate: ABSENT_PLATE, workOrder: ABSENT, wfDocument: ABSENT, wfSession: `${token}-session-absente`, user: ABSENT };
 
 beforeAll(async () => {
   session = await startContractActors(ACTORS, ids.userIds);
@@ -76,7 +59,7 @@ beforeAll(async () => {
       .values({ workflowId: workflow.id, sessionId, documentType: "autre", originalName: `${suffix}.pdf`, storedName: `${suffix}.pdf`, filePath, fileSize: 4, mimeType: "application/pdf", uploadedBy: session.userIdOf(owner) })
       .returning();
     documentIds.push(doc.id);
-    return { vehicle: v.id, plate: v.registrationNumber, workOrder: wo.id, wfDocument: doc.id, wfSession: sessionId } as Record<Kind, string | number>;
+    return { vehicle: v.id, plate: v.registrationNumber, workOrder: wo.id, wfDocument: doc.id, wfSession: sessionId, user: session.userIdOf(owner) } as Record<Kind, string | number>;
   };
   foreign = await make("other", "etranger");
   own = await make("client", "propre");
@@ -94,30 +77,39 @@ afterAll(async () => {
   }
 }, 60000);
 
-const shape = (res: { status: number; body: any }) => ({ status: res.status, message: res.body?.message, code: res.body?.code, exists: res.body?.exists });
+const shape = (res: { status: number; body: any }, withBody: boolean) => ({
+  status: res.status,
+  message: res.body?.message,
+  code: res.body?.code,
+  exists: res.body?.exists,
+  ...(withBody ? { body: res.body } : {}),
+});
 
 describe("balayage : un client ne distingue pas l'etranger de l'inexistant", { timeout: 120000 }, () => {
   for (const row of SWEEP) {
-    const method = row.method ?? "GET";
-    it(`${method} ${row.label} : objet d'un autre et objet absent donnent la meme reponse (${row.attendu})`, async () => {
-      const other = await session.call(method, row.path(foreign[row.kind]), { actor: "client" });
-      const none = await session.call(method, row.path(absent[row.kind]), { actor: "client" });
-      expect(other.status, row.path(foreign[row.kind])).toBe(row.attendu);
-      expect(shape(none), row.path(absent[row.kind])).toEqual(shape(other));
+    it(`${row.method} ${row.label} : objet d'un autre et objet absent donnent la meme reponse (${row.attendu})`, async () => {
+      const other = await session.call(row.method, pathOf(row, foreign[row.kind]), { actor: "client" });
+      const none = await session.call(row.method, pathOf(row, absent[row.kind]), { actor: "client" });
+      expect(other.status, pathOf(row, foreign[row.kind])).toBe(row.attendu);
+      expect(shape(none, !!row.comparerCorps), pathOf(row, absent[row.kind])).toEqual(shape(other, !!row.comparerCorps));
     });
   }
 
-  for (const row of SWEEP.filter((r) => r.lecturePropre !== false && (r.method ?? "GET") === "GET")) {
+  for (const row of SWEEP.filter((r) => r.lecturePropre !== false && r.method === "GET")) {
     it(`${row.label} : le client lit son propre objet (200)`, async () => {
-      const res = await session.call("GET", row.path(own[row.kind]), { actor: "client" });
-      expect(res.status, row.path(own[row.kind])).toBe(200);
+      const res = await session.call("GET", pathOf(row, own[row.kind]), { actor: "client" });
+      expect(res.status, pathOf(row, own[row.kind])).toBe(200);
+      if (row.comparerCorps) {
+        expect(row.corpsPropre, `${row.label} : corpsPropre est obligatoire`).toBeTruthy();
+        expect(JSON.stringify(res.body), `${row.label} : le corps doit porter l'objet propre`).toContain(row.corpsPropre as string);
+      }
     });
   }
 
   it("le personnel ne recoit jamais d'erreur serveur sur un identifiant absent", async () => {
-    for (const row of SWEEP.filter((r) => (r.method ?? "GET") === "GET")) {
-      const res = await session.call("GET", row.path(absent[row.kind]), { actor: "admin" });
-      expect([200, 404], row.path(absent[row.kind])).toContain(res.status);
+    for (const row of SWEEP.filter((r) => r.method === "GET")) {
+      const res = await session.call("GET", pathOf(row, absent[row.kind]), { actor: "admin" });
+      expect([200, 403, 404], pathOf(row, absent[row.kind])).toContain(res.status);
     }
   });
 });

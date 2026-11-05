@@ -19,3 +19,9 @@
 
 - **Quoi** : `OUT_OF_SCOPE_MESSAGE` ne nomme plus le véhicule ; `GET /api/vehicles/:id` garde son texte historique (e2e 24).
 - **Pourquoi** : la même réponse sert à l'objet étranger et à l'identifiant absent, le message ne doit donc rien dire de l'objet.
+
+## Garde du balayage : une route ouverte à un client ne peut plus y échapper
+
+- **Quoi** : `scanClientOpenParamRoutes` (`tests/support/route-guard-scan.ts`) liste les routes `isAnyUser` à paramètre ; `tests/unit/server/client-scope-sweep-guard.test.ts` échoue si l'une n'est ni au balayage (`tests/support/client-scope-sweep-table.ts`), ni couverte par un contrat nommé, ni exclue avec sa raison (liste plafonnée à 1).
+- **Comment** : la table du balayage est partagée entre le contrat et la garde. Les lignes 200 comparent aussi le corps. Ligne ajoutée : `GET /api/users/:id` (403 pour un profil étranger comme pour un absent).
+- **Pourquoi** : sans garde, une route ajoutée ouverte à un client pouvait répondre autrement pour l'objet d'un autre et pour un absent. Mutation prouvée : une route `isAnyUser` fictive dans `routes.ts` fait échouer le test. Limite : seule la garde écrite dans l'en-tête de la route est vue.
