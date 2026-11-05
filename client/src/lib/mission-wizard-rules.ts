@@ -1,4 +1,5 @@
 import { getDriverCpcEligibility, type CpcIneligibleCode } from "@shared/constants/driver-cpc-eligibility";
+import { canManageDrivers } from "@shared/constants/roles";
 
 /** Chauffeur tel que renvoyé par GET /api/drivers. */
 export interface WizardDriver {
@@ -34,8 +35,6 @@ export function driverCpcStatusOf(driver: WizardDriver | null | undefined): stri
 /** Préfixe de la raison de blocage CPC (le détail est rendu par `getCpcBlockGuidance`). */
 export const CPC_BLOCK_PREFIX = "Chauffeur non éligible : ";
 
-/** Rôles autorisés par POST /api/drivers/:id/update-cpc (isDriverManager). */
-const CPC_EDITOR_ROLES = ["admin", "logistics", "secretary"];
 
 export interface CpcBlockGuidance {
   title: string;
@@ -62,7 +61,7 @@ export function getCpcBlockGuidance(
     cpcTrainingDate: driver.cpcTrainingDate,
   });
   if (cpc.eligible || !cpc.code) return null;
-  const canEditDriver = !!role && CPC_EDITOR_ROLES.includes(role);
+  const canEditDriver = canManageDrivers(role);
   const why: Record<CpcIneligibleCode, string> = {
     EXPIRED: "La formation CPC de ce chauffeur a expiré : il ne peut pas être affecté à une mission.",
     NOT_VALID: "Ce chauffeur n'est pas à jour de sa formation CPC (statut différent de FORMÉ) : il ne peut pas être affecté à une mission.",
@@ -70,8 +69,8 @@ export function getCpcBlockGuidance(
     FUTURE_DATE: "La date de formation CPC de ce chauffeur est postérieure à aujourd'hui : elle doit être vérifiée avant toute affectation.",
   };
   const action = canEditDriver
-    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, renseignez sa date de formation CPC dans sa fiche chauffeur."
-    : "Choisissez un autre chauffeur, ou demandez à la logistique ou au secrétariat de mettre à jour la date de formation CPC dans sa fiche.";
+    ? "Choisissez un autre chauffeur, ou, si la formation a bien eu lieu, enregistrez la nouvelle date de formation CPC avec le formulaire « Mettre à jour le CPC » (le statut enregistré est alors recalculé)."
+    : "Choisissez un autre chauffeur, ou demandez à la logistique ou au secrétariat de mettre à jour le CPC de ce chauffeur avec le formulaire « Mettre à jour le CPC ».";
   return { title: "CPC non à jour", why: why[cpc.code], action, canEditDriver };
 }
 

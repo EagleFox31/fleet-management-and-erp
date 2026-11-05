@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCpcBlockGuidance } from "@/lib/mission-wizard-rules";
+import { DRIVER_MANAGER_ROLES } from "@shared/constants/roles";
 
 const nonForme = { cpcStatus: "NON FORMÉ", cpcStatusRecorded: "NON FORMÉ" };
 
@@ -14,11 +15,11 @@ describe("explication du blocage CPC (étape 3)", () => {
   });
 
   it("NON FORMÉ : dit pourquoi et propose de corriger la fiche aux rôles autorisés", () => {
-    for (const role of ["admin", "logistics", "secretary"]) {
+    for (const role of DRIVER_MANAGER_ROLES) {
       const g = getCpcBlockGuidance(nonForme, role);
       expect(g?.why).toContain("pas à jour de sa formation CPC");
       expect(g?.canEditDriver).toBe(true);
-      expect(g?.action).toContain("renseignez sa date de formation CPC");
+      expect(g?.action).toContain("enregistrez la nouvelle date de formation CPC");
     }
   });
 
@@ -34,6 +35,12 @@ describe("explication du blocage CPC (étape 3)", () => {
     expect(exp?.why).toContain("expiré");
     const fut = getCpcBlockGuidance({ cpcStatusRecorded: "FORMÉ", cpcTrainingDate: "2999-01-01" }, "admin");
     expect(fut?.why).toContain("postérieure");
+  });
+
+  it("le client lit DRIVER_MANAGER_ROLES, comme isDriverManager côté serveur", () => {
+    for (const role of ["management", "workshop_manager", "driver", "client"]) {
+      expect(getCpcBlockGuidance(nonForme, role)?.canEditDriver).toBe(false);
+    }
   });
 
   it("statut non renseigné", () => {
