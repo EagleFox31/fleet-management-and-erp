@@ -172,6 +172,13 @@ describe("cloison chauffeur sur GET /api/operations", { timeout: 180000 }, () =>
     expect(idsOf(act.body)).toContain(foreign.id);
   });
 
+  it("GET /missions/:id/costs : id lu strictement (400), mission inconnue en 404", async () => {
+    for (const bad of [`${foreign.id}abc`, "0", "-1", "1.5", "99999999999"]) {
+      expectCleanError(await call("GET", `/api/operations/missions/${bad}/costs`, { actor: "admin" }), 400);
+    }
+    expectCleanError(await call("GET", "/api/operations/missions/2147483647/costs", { actor: "admin" }), 404);
+  });
+
   it("le client reste fermé par isStaff", async () => {
     for (const path of ["/missions", "/missions/upcoming", "/missions/active", `/missions/${own.id}/costs`, "/stats/by-client"]) {
       expectCleanError(await call("GET", `/api/operations${path}`, { actor: "client" }), 403);

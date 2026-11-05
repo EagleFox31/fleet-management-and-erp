@@ -11,6 +11,9 @@ import {
 } from "@shared/schema";
 import { eq, asc, desc, and, sql, gte, lte, isNull, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
+
+const log = moduleLogger("operations-service");
 import { canReadPurchasePrice, type PriceReader } from "../lib/vehicle-price-scope";
 import { driverLiveAssignmentFilter, missionsOfDriversFilter, pickMissionAssignment } from "../lib/driver-scope";
 
@@ -473,7 +476,7 @@ export class OperationsService {
    * Calculer les coûts d'une mission
    */
   async calculateMissionCosts(missionId: number, reader?: PriceReader) {
-    console.log(`Calculating costs for mission ${missionId}...`);
+    log.debug({ missionId }, "Calcul des coûts de mission");
 
     const [mission] = await db
       .select()
@@ -482,7 +485,7 @@ export class OperationsService {
       .limit(1);
 
     if (!mission) {
-      throw new Error("Mission non trouvée");
+      throw new AppError(404, "Mission non trouvée.");
     }
 
     const fuelCost = parseFloat(String(mission.actualFuelCost || 0));
