@@ -30,3 +30,9 @@
 ## 2026-11-05 01:11 — c7 : #328 déclencheur de test ciblé validé, attente de #327
 - Réserves de 0a sur #328 traitées. Déclencheur du test d'échec d'insertion ciblé (WHEN sur le véhicule du test), poussé ; 5/5 verts, aucun déclencheur résiduel. 0a a validé sans db-lock.
 - Prochaine étape inchangée : sur annonce de 0a que #327 est fusionnée, merger origin/main, garder isCpcStatusValid, relancer mission-create-assigned et mission-*, npm run check, push, message « mr 328 » à 0a.
+
+## 2026-11-05 01:32 — c7 : conflits de planning à l'écriture (fix/mission-planning-conflict)
+- #328 fusionnée (773b1f8). Branche fix/mission-planning-conflict depuis main : server/services/mission-planning.ts (findPlanningClash, verrou advisory), branché sur POST /api/missions, PATCH /:id (chauffeur, véhicule, dates), POST /:id/assignments, lancement et import.
+- Preuves : contrat mission-planning-conflict-write (9 cas, 6 rouges sans contrôle, rafale rouge 3/3 sans verrou), intégration mission-planning-clash (4), contrats mission-* 189 verts, npm test 2320 verts, npm run check 0 erreur.
+- Suivi noté dans LESSONS : PUT /:id/status ne rejoue pas le contrôle.
+- Prochaine étape : PR prête, avis de 0a.
