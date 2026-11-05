@@ -31,9 +31,9 @@ const STATUS_COLORS: Record<string, string> = {
   planned: "bg-blue-100 text-blue-800",
   assigned: "bg-purple-100 text-purple-800",
   in_progress: "bg-yellow-100 text-yellow-800",
-  delivered: "bg-green-100 text-green-800",
-  completed: "bg-green-600 text-white",
-  cancelled: "bg-red-100 text-red-800",
+  delivered: "bg-success/15 text-success",
+  completed: "bg-success text-success-foreground",
+  cancelled: "bg-destructive/15 text-destructive-text",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -1217,8 +1217,8 @@ export default function MissionDetailsPage() {
     const is404 = isApiError(error, 404) || errorMessage.toLowerCase().includes("not found");
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-          <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+          <div className="h-0.5 bg-gradient-to-r from-success to-success" />
           <div className="p-6">
             <Button variant="ghost" size="sm" className="-ml-1 text-muted-foreground mb-4" onClick={() => setLocation("/missions")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Missions
@@ -1227,7 +1227,7 @@ export default function MissionDetailsPage() {
             <p className="text-sm text-gray-500 mb-4">
               {is404 ? "Cette mission n'existe pas dans la base de données." : "Impossible de charger les détails de la mission."}
             </p>
-            {!is404 && <p className="text-xs text-red-600 font-mono bg-red-50 p-2 rounded mb-4">Erreur: {errorMessage}</p>}
+            {!is404 && <p className="text-xs text-destructive-text font-mono bg-destructive/10 p-2 rounded mb-4">Erreur: {errorMessage}</p>}
             <Button onClick={() => setLocation("/missions")} data-testid="btn-back-error">
               <ArrowLeft className="h-4 w-4 mr-2" /> Retour aux missions
             </Button>
@@ -1240,8 +1240,8 @@ export default function MissionDetailsPage() {
   if (!mission) {
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-          <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+        <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+          <div className="h-0.5 bg-gradient-to-r from-success to-success" />
           <div className="p-6">
             <Button variant="ghost" size="sm" className="-ml-1 text-muted-foreground mb-4" onClick={() => setLocation("/missions")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Missions
@@ -1547,7 +1547,7 @@ export default function MissionDetailsPage() {
         <span
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
             row.isPreDeparture
-              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+              ? "bg-success/10 text-success border border-success/30"
               : "bg-gray-100 text-gray-600 border border-gray-200"
           }`}
         >
@@ -1963,8 +1963,8 @@ export default function MissionDetailsPage() {
   return (
     <div className="space-y-5">
       {/* ── Header card ── */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
-        <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-card">
+        <div className="h-0.5 bg-gradient-to-r from-success to-success" />
         <div className="px-5 py-5 md:px-7 md:py-6">
           <div className="flex items-start justify-between mb-4">
             <Button variant="ghost" size="sm" className="-ml-1 text-muted-foreground" onClick={() => setLocation("/missions")}>
@@ -2019,7 +2019,7 @@ export default function MissionDetailsPage() {
               {primaryMissionAction && canChangeMissionStatus && (
                 <Button
                   size="sm"
-                  className="h-8 px-3 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+                  className="h-8 px-3 text-xs gap-1.5 bg-success hover:brightness-90 text-white"
                   onClick={handlePrimaryMissionAction}
                   disabled={updateMissionStatusMutation.isPending || !canTriggerPrimaryAction}
                   data-testid="button-transition-mission-status-header"
@@ -2037,17 +2037,17 @@ export default function MissionDetailsPage() {
               {STATUS_LABELS[mission.status] || mission.status}
             </span>
             {departureDelay?.type === "late_not_started" && (
-              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-destructive/15 text-destructive-text">
                 <AlertTriangle className="h-3 w-3" /> En retard au départ · {departureDelay.parts}
               </span>
             )}
             {departureDelay?.type === "late_started" && (
-              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-destructive/15 text-destructive-text">
                 <AlertTriangle className="h-3 w-3" /> Départ en retard · {departureDelay.parts}
               </span>
             )}
             {departureDelay?.type === "on_time" && (
-              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+              <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-success/15 text-success">
                 <CheckCircle2 className="h-3 w-3" /> Départ à l'heure
               </span>
             )}
@@ -2055,11 +2055,11 @@ export default function MissionDetailsPage() {
 
           {/* Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center shrink-0">
-              <Truck className="h-5 w-5 text-green-600" />
+            <div className="w-10 h-10 rounded-xl bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
+              <Truck className="h-5 w-5 text-success" />
             </div>
             <div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-green-600">Opérations · Transport</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-success">Opérations · Transport</span>
               <h1 className="text-xl font-bold text-gray-900">{mission.orderNumber}</h1>
               <p className="text-[11px] text-gray-400 mt-0.5">{mission.client?.name || "Client non spécifié"}</p>
             </div>
@@ -2075,8 +2075,8 @@ export default function MissionDetailsPage() {
               <p className="text-[13px] font-bold text-gray-800">{MISSION_TYPE_LABELS[mission.missionType] || "Autre"}</p>
             </div>
             <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-1">
-              <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                <Calendar className="h-4 w-4 text-green-500" />
+              <div className="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
+                <Calendar className="h-4 w-4 text-success" />
               </div>
               <p className="text-[11px] font-medium text-gray-500 mt-1">Date de départ prévu</p>
               <p className="text-[13px] font-bold text-gray-800">{safeFormat(mission.pickupDate, "dd/MM/yyyy")}</p>
@@ -2138,8 +2138,8 @@ export default function MissionDetailsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col">
               {/* Informations Mission */}
-              <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden flex-1">
-                <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+              <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden flex-1">
+                <div className="h-0.5 bg-gradient-to-r from-success to-success" />
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-4">
                     <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -2166,8 +2166,8 @@ export default function MissionDetailsPage() {
                     </div>
                   </div>
                   {mission.specialInstructions && (
-                    <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-xl">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-1">Instructions spéciales</p>
+                    <div className="mt-4 p-3 bg-warning/10 border border-warning/20 rounded-xl">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-warning-text mb-1">Instructions spéciales</p>
                       <p className="text-sm text-gray-700">{mission.specialInstructions}</p>
                     </div>
                   )}
@@ -2177,8 +2177,8 @@ export default function MissionDetailsPage() {
 
             {/* Ressources (même rangée → même hauteur) */}
             <div className="flex flex-col">
-              <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden flex-1">
-                <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+              <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden flex-1">
+                <div className="h-0.5 bg-gradient-to-r from-success to-success" />
                 <div className="px-5 py-4 h-full flex flex-col">
                   <div className="flex items-center gap-2 mb-4">
                     <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -2213,7 +2213,7 @@ export default function MissionDetailsPage() {
                           {typeof mission.assignment.driver.cpcEligible === "boolean" ? (
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block ${
                               mission.assignment.driver.cpcEligible
-                                ? "bg-green-100 text-green-700"
+                                ? "bg-success/15 text-success"
                                 : "bg-orange-100 text-orange-700"
                             }`}>
                               {mission.assignment.driver.cpcStatus}
@@ -2241,12 +2241,12 @@ export default function MissionDetailsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
             <div className="lg:col-span-2 flex flex-col gap-4">
               {/* Itinéraire */}
-              <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-                <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+              <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+                <div className="h-0.5 bg-gradient-to-r from-success to-success" />
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-4">
-                    <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                      <MapPin className="h-3.5 w-3.5 text-green-600" />
+                    <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                      <MapPin className="h-3.5 w-3.5 text-success" />
                     </div>
                     <span className="text-sm font-semibold text-gray-800">Itinéraire</span>
                   </div>
@@ -2266,7 +2266,7 @@ export default function MissionDetailsPage() {
                     </div>
                     <div className="ml-4 border-l-2 border-dashed border-gray-200 h-6" />
                     <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">B</div>
+                      <div className="w-8 h-8 bg-success rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">B</div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs text-gray-400">Destination</p>
                         <p className="text-sm font-medium text-gray-800">{mission.deliveryAddress}</p>
@@ -2302,8 +2302,8 @@ export default function MissionDetailsPage() {
               {(hasCargoCard || showMissionCostCard) && (
                 <div className={`grid grid-cols-1 ${hasCargoCard && showMissionCostCard ? "xl:grid-cols-2" : ""} gap-4 items-stretch`}>
                   {hasCargoCard && (
-                    <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-                      <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+                    <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+                      <div className="h-0.5 bg-gradient-to-r from-success to-success" />
                       <div className="px-5 py-4">
                         <div className="flex items-center gap-2 mb-4">
                           <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center">
@@ -2336,12 +2336,12 @@ export default function MissionDetailsPage() {
                   )}
 
                   {showMissionCostCard && (
-                    <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-                      <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+                    <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+                      <div className="h-0.5 bg-gradient-to-r from-success to-success" />
                       <div className="px-5 py-4">
                         <div className="flex items-center gap-2 mb-3">
-                          <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-                            <Wallet className="h-3.5 w-3.5 text-green-600" />
+                          <div className="w-7 h-7 rounded-lg bg-success/10 flex items-center justify-center">
+                            <Wallet className="h-3.5 w-3.5 text-success" />
                           </div>
                           <span className="text-sm font-semibold text-gray-800">Budgets mission</span>
                         </div>
@@ -2373,13 +2373,13 @@ export default function MissionDetailsPage() {
                           {mission.actualFuelCost && (
                             <div className="flex justify-between items-center py-1.5">
                               <span className="text-xs text-gray-400">Carburant réel</span>
-                              <span className="text-sm font-bold text-green-600">{formatPrice(mission.actualFuelCost)}</span>
+                              <span className="text-sm font-bold text-success">{formatPrice(mission.actualFuelCost)}</span>
                             </div>
                           )}
                           {missionActualFdrCost !== null && (
                             <div className="flex justify-between items-center py-1.5 border-t border-gray-50">
                               <span className="text-xs text-gray-400">FDR réels (clôture)</span>
-                              <span className="text-sm font-bold text-green-600">{formatPrice(missionActualFdrCost)}</span>
+                              <span className="text-sm font-bold text-success">{formatPrice(missionActualFdrCost)}</span>
                             </div>
                           )}
                           {mission.actualFuelQuantity && (
@@ -2438,12 +2438,12 @@ export default function MissionDetailsPage() {
                       mins > 0 ? `${mins} min` : "",
                     ].filter(Boolean).join(" ");
                     departureDelayEl = (
-                      <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-100">
-                        <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                      <div className="flex items-start gap-2.5 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+                        <AlertTriangle className="h-4 w-4 text-destructive-text shrink-0 mt-0.5" />
                         <div>
-                          <p className="text-[11px] font-bold text-red-600 uppercase tracking-widest">En retard au départ</p>
-                          <p className="text-sm font-semibold text-red-700">{parts} de retard</p>
-                          <p className="text-[11px] text-red-400 mt-0.5">
+                          <p className="text-[11px] font-bold text-destructive-text uppercase tracking-widest">En retard au départ</p>
+                          <p className="text-sm font-semibold text-destructive-text">{parts} de retard</p>
+                          <p className="text-[11px] text-destructive-text mt-0.5">
                             Départ prévu le {format(new Date(pickupDate), "dd/MM/yyyy 'à' HH:mm", { locale: fr })} — mission non encore lancée
                           </p>
                         </div>
@@ -2468,12 +2468,12 @@ export default function MissionDetailsPage() {
                         mins > 0 ? `${mins} min` : "",
                       ].filter(Boolean).join(" ");
                       departureDelayEl = (
-                        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-100">
-                          <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+                          <AlertTriangle className="h-4 w-4 text-destructive-text shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-[11px] font-bold text-red-600 uppercase tracking-widest">Départ en retard</p>
-                            <p className="text-sm font-semibold text-red-700">{parts}</p>
-                            <p className="text-[11px] text-red-400 mt-0.5">
+                            <p className="text-[11px] font-bold text-destructive-text uppercase tracking-widest">Départ en retard</p>
+                            <p className="text-sm font-semibold text-destructive-text">{parts}</p>
+                            <p className="text-[11px] text-destructive-text mt-0.5">
                               Prévu {format(new Date(pickupDate), "dd/MM/yyyy 'à' HH:mm", { locale: fr })} · Parti {format(new Date(startedAt), "dd/MM/yyyy 'à' HH:mm", { locale: fr })}
                             </p>
                           </div>
@@ -2481,11 +2481,11 @@ export default function MissionDetailsPage() {
                       );
                     } else {
                       departureDelayEl = (
-                        <div className="flex items-center gap-2.5 p-3 rounded-xl bg-green-50 border border-green-100">
-                          <Clock className="h-4 w-4 text-green-500 shrink-0" />
+                        <div className="flex items-center gap-2.5 p-3 rounded-xl bg-success/10 border border-success/20">
+                          <Clock className="h-4 w-4 text-success shrink-0" />
                           <div>
-                            <p className="text-[11px] font-bold text-green-600 uppercase tracking-widest">Départ à l'heure</p>
-                            <p className="text-[11px] text-green-500 mt-0.5">
+                            <p className="text-[11px] font-bold text-success uppercase tracking-widest">Départ à l'heure</p>
+                            <p className="text-[11px] text-success mt-0.5">
                               {format(new Date(startedAt), "dd/MM/yyyy 'à' HH:mm", { locale: fr })}
                             </p>
                           </div>
@@ -2498,8 +2498,8 @@ export default function MissionDetailsPage() {
                 if (!departureDelayEl && !hasRenewalRequests && !hasChecklist) return null;
 
                 return (
-                  <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden flex-1">
-                    <div className="h-0.5 bg-gradient-to-r from-orange-400 to-amber-400" />
+                  <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden flex-1">
+                    <div className="h-0.5 bg-gradient-to-r from-orange-400 to-warning" />
                     <div className="px-5 py-4">
                       <div className="flex items-center gap-2 mb-3">
                         <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center">
@@ -2521,28 +2521,28 @@ export default function MissionDetailsPage() {
                                     key={check.key}
                                     className={`rounded-xl border px-2.5 py-2 ${
                                       passed
-                                        ? "bg-green-50 border-green-100"
+                                        ? "bg-success/10 border-success/20"
                                         : warning
-                                          ? "bg-amber-50 border-amber-100"
-                                          : "bg-red-50 border-red-100"
+                                          ? "bg-warning/10 border-warning/20"
+                                          : "bg-destructive/10 border-destructive/20"
                                     }`}
                                   >
                                     <div className="flex items-start gap-1.5">
                                       {passed ? (
-                                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-success mt-0.5 shrink-0" />
                                       ) : warning ? (
-                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                                        <AlertTriangle className="h-3.5 w-3.5 text-warning-text mt-0.5 shrink-0" />
                                       ) : (
-                                        <XCircle className="h-3.5 w-3.5 text-red-600 mt-0.5 shrink-0" />
+                                        <XCircle className="h-3.5 w-3.5 text-destructive-text mt-0.5 shrink-0" />
                                       )}
                                       <div className="min-w-0">
                                         <p
                                           className={`text-[11px] font-semibold leading-tight ${
                                             passed
-                                              ? "text-green-700"
+                                              ? "text-success"
                                               : warning
-                                                ? "text-amber-700"
-                                                : "text-red-700"
+                                                ? "text-warning-text"
+                                                : "text-destructive-text"
                                           }`}
                                         >
                                           {check.label}
@@ -2551,10 +2551,10 @@ export default function MissionDetailsPage() {
                                           <p
                                             className={`text-[10px] mt-0.5 leading-tight ${
                                               passed
-                                                ? "text-green-600"
+                                                ? "text-success"
                                                 : warning
-                                                  ? "text-amber-600"
-                                                  : "text-red-600"
+                                                  ? "text-warning-text"
+                                                  : "text-destructive-text"
                                             }`}
                                           >
                                             {check.detail}
@@ -2569,13 +2569,13 @@ export default function MissionDetailsPage() {
                             <div
                               className={`rounded-xl border px-3 py-2.5 ${
                                 launchReadiness?.canLaunch
-                                  ? "bg-green-50 border-green-100"
-                                  : "bg-red-50 border-red-100"
+                                  ? "bg-success/10 border-success/20"
+                                  : "bg-destructive/10 border-destructive/20"
                               }`}
                             >
                               <p
                                 className={`text-[11px] font-semibold ${
-                                  launchReadiness?.canLaunch ? "text-green-700" : "text-red-700"
+                                  launchReadiness?.canLaunch ? "text-success" : "text-destructive-text"
                                 }`}
                               >
                                 {launchReadiness?.canLaunch
@@ -2596,16 +2596,16 @@ export default function MissionDetailsPage() {
                         ) : isLaunchReadinessError ? (
                           <div className="space-y-2.5">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Checklist de lancement</p>
-                            <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2.5">
-                              <p className="text-[11px] font-semibold text-red-700">Checklist non disponible</p>
-                              <p className="text-[11px] text-red-600 mt-0.5 break-words">{launchReadinessErrorMessage}</p>
+                            <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2.5">
+                              <p className="text-[11px] font-semibold text-destructive-text">Checklist non disponible</p>
+                              <p className="text-[11px] text-destructive-text mt-0.5 break-words">{launchReadinessErrorMessage}</p>
                             </div>
                           </div>
                         ) : (
                           <div className="space-y-2.5">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Checklist de lancement</p>
-                            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-                              <p className="text-[11px] text-amber-700">Aucun contrôle de lancement disponible pour cette mission.</p>
+                            <div className="rounded-xl border border-warning/20 bg-warning/10 px-3 py-2.5">
+                              <p className="text-[11px] text-warning-text">Aucun contrôle de lancement disponible pour cette mission.</p>
                             </div>
                           </div>
                         )}
@@ -2614,12 +2614,12 @@ export default function MissionDetailsPage() {
                           <div className="space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Demandes documents en attente</p>
                             {renewalRequests!.map((req: any) => (
-                              <div key={req.id} className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-100">
-                                <FileText className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                              <div key={req.id} className="flex items-start gap-2.5 p-3 rounded-xl bg-warning/10 border border-warning/20">
+                                <FileText className="h-4 w-4 text-warning-text shrink-0 mt-0.5" />
                                 <div className="min-w-0">
-                                  <p className="text-[12px] font-semibold text-amber-800 leading-tight">{req.title}</p>
+                                  <p className="text-[12px] font-semibold text-warning-text leading-tight">{req.title}</p>
                                   {req.createdAt && (
-                                    <p className="text-[11px] text-amber-500 mt-0.5">
+                                    <p className="text-[11px] text-warning-text mt-0.5">
                                       Envoyée le {format(new Date(req.createdAt), "dd/MM/yyyy 'à' HH:mm", { locale: fr })}
                                     </p>
                                   )}
@@ -2628,11 +2628,11 @@ export default function MissionDetailsPage() {
                             ))}
                           </div>
                         ) : documentsAreAllValid ? (
-                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-green-50 border border-green-100">
-                            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-success/10 border border-success/20">
+                            <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" />
                             <div>
-                              <p className="text-[12px] font-semibold text-green-800">Documents véhicule conformes</p>
-                              <p className="text-[11px] text-green-600 mt-0.5">Aucune demande documentaire en attente.</p>
+                              <p className="text-[12px] font-semibold text-success">Documents véhicule conformes</p>
+                              <p className="text-[11px] text-success mt-0.5">Aucune demande documentaire en attente.</p>
                             </div>
                           </div>
                         ) : null}
@@ -2648,7 +2648,7 @@ export default function MissionDetailsPage() {
 
         <TabsContent value="fuel" className="space-y-4 mt-4">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
               <div className="h-0.5 bg-gradient-to-r from-sky-500 to-cyan-400" />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Litres réels</p>
@@ -2660,8 +2660,8 @@ export default function MissionDetailsPage() {
             {/* Consommation: seule tuile technique parmi des tuiles financières.
                 Elle répond à « ce camion consomme-t-il normalement ? », pas à
                 « combien ça a coûté ». Voir docs/plans/fuel-consumption-performance.md */}
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-              <div className="h-0.5 bg-gradient-to-r from-amber-500 to-orange-400" />
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
+              <div className="h-0.5 bg-gradient-to-r from-warning to-orange-400" />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">
                   Consommation
@@ -2680,15 +2680,15 @@ export default function MissionDetailsPage() {
                 </p>
               </div>
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-              <div className="h-0.5 bg-gradient-to-r from-emerald-500 to-green-400" />
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
+              <div className="h-0.5 bg-gradient-to-r from-success to-success" />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Coût réel</p>
                 <p className="mt-2 text-2xl font-bold text-gray-900">{formatPrice(missionFuelTotalCost)}</p>
                 <p className="mt-1 text-xs text-gray-500">Débits carte carburant</p>
               </div>
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
               <div className="h-0.5 bg-gradient-to-r from-violet-500 to-purple-400" />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Budget estimé</p>
@@ -2698,11 +2698,11 @@ export default function MissionDetailsPage() {
                 <p className="mt-1 text-xs text-gray-500">Prévision carburant mission</p>
               </div>
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-              <div className={`h-0.5 ${missionFuelDelta === null ? "bg-gradient-to-r from-gray-300 to-gray-200" : missionFuelDelta >= 0 ? "bg-gradient-to-r from-emerald-500 to-lime-400" : "bg-gradient-to-r from-red-500 to-rose-400"}`} />
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
+              <div className={`h-0.5 ${missionFuelDelta === null ? "bg-gradient-to-r from-gray-300 to-gray-200" : missionFuelDelta >= 0 ? "bg-gradient-to-r from-success to-lime-400" : "bg-gradient-to-r from-destructive to-rose-400"}`} />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Delta budget</p>
-                <p className={`mt-2 text-2xl font-bold ${missionFuelDelta === null ? "text-gray-500" : missionFuelDelta >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                <p className={`mt-2 text-2xl font-bold ${missionFuelDelta === null ? "text-gray-500" : missionFuelDelta >= 0 ? "text-success" : "text-destructive-text"}`}>
                   {missionFuelDelta === null ? "—" : `${missionFuelDelta >= 0 ? "+" : "-"}${formatPrice(Math.abs(missionFuelDelta))}`}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
@@ -2710,8 +2710,8 @@ export default function MissionDetailsPage() {
                 </p>
               </div>
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-              <div className="h-0.5 bg-gradient-to-r from-amber-500 to-orange-400" />
+            <div className="rounded-2xl border border-gray-100 bg-card shadow-sm overflow-hidden">
+              <div className="h-0.5 bg-gradient-to-r from-warning to-orange-400" />
               <div className="p-4">
                 <p className="text-[11px] uppercase tracking-widest font-semibold text-gray-400">Prix suggéré</p>
                 <p className="mt-2 text-2xl font-bold text-gray-900">{fuelUnitPriceSuggestion}</p>
@@ -2721,9 +2721,9 @@ export default function MissionDetailsPage() {
           </div>
 
           {isMissionFuelError ? (
-            <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
-              <p className="text-sm font-semibold text-red-700">Chargement carburant impossible</p>
-              <p className="text-xs text-red-600 mt-1">
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3">
+              <p className="text-sm font-semibold text-destructive-text">Chargement carburant impossible</p>
+              <p className="text-xs text-destructive-text mt-1">
                 {missionFuelError instanceof Error ? missionFuelError.message : "Erreur inconnue"}
               </p>
             </div>
@@ -2731,25 +2731,25 @@ export default function MissionDetailsPage() {
 
           {!isMissionFuelLoading && missionFuelRecords.length === 0 && !["draft", "cancelled"].includes(String(mission.status || "")) ? (
             missionNoRefuelDeclaration ? (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 flex items-start gap-3">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+              <div className="rounded-2xl border border-success/30 bg-success/10 px-4 py-3.5 flex items-start gap-3">
+                <CheckCircle2 className="h-4 w-4 text-success mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-emerald-800">Mission déclarée sans ravitaillement</p>
-                  <p className="text-xs text-emerald-700 mt-1">
+                  <p className="text-sm font-semibold text-success">Mission déclarée sans ravitaillement</p>
+                  <p className="text-xs text-success mt-1">
                     Motif: {missionNoRefuelDeclaration.reason}
                   </p>
-                  <p className="text-xs text-emerald-700 mt-0.5">
+                  <p className="text-xs text-success mt-0.5">
                     Déclarée le {safeFormat(missionNoRefuelDeclaration.declaredAt, "dd/MM/yyyy HH:mm")}
                     {missionNoRefuelDeclaration.declaredRole ? ` · ${missionNoRefuelDeclaration.declaredRole}` : ""}
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 flex items-start gap-3">
-                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3.5 flex items-start gap-3">
+                <AlertTriangle className="h-4 w-4 text-warning-text mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">Aucun plein enregistré pour cette mission</p>
-                  <p className="text-xs text-amber-700 mt-1">
+                  <p className="text-sm font-semibold text-warning-text">Aucun plein enregistré pour cette mission</p>
+                  <p className="text-xs text-warning-text mt-1">
                     Le budget reste prévisionnel tant qu’aucune transaction carte carburant n’est reliée à la mission.
                   </p>
                 </div>
@@ -2773,7 +2773,7 @@ export default function MissionDetailsPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-10 px-4 gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        className="h-10 px-4 gap-2 border-warning/40 text-warning-text hover:bg-warning/10"
                         onClick={() => setOpenNoFuelConfirm(true)}
                         data-testid="button-declare-no-fuel"
                       >
@@ -2782,7 +2782,7 @@ export default function MissionDetailsPage() {
                       </Button>
                     ) : null}
                     <Button
-                      className="h-10 px-4 gap-2 bg-green-600 hover:bg-green-700 text-white"
+                      className="h-10 px-4 gap-2 bg-success hover:brightness-90 text-white"
                       onClick={openMissionFuelDialog}
                       disabled={!mission.assignment?.vehicle?.id}
                       title={!mission.assignment?.vehicle?.id ? "Affectez un véhicule avant d'ajouter un plein." : undefined}
@@ -2803,7 +2803,7 @@ export default function MissionDetailsPage() {
           <div className="mb-3 flex items-center justify-end">
             <Button
               size="sm"
-              className="h-8 px-3 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+              className="h-8 px-3 text-xs gap-1.5 bg-success hover:brightness-90 text-white"
               onClick={() => setOpenInvoiceDialog(true)}
               disabled={!canGenerateClientInvoice}
               title={canGenerateClientInvoice ? "Créer une facture client pour cette mission" : "Disponible une fois la mission livrée"}
@@ -2817,8 +2817,8 @@ export default function MissionDetailsPage() {
         </TabsContent>
 
         <TabsContent value="print">
-          <div className="rounded-2xl border border-gray-100 shadow-sm bg-white overflow-hidden">
-            <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
+          <div className="rounded-2xl border border-gray-100 shadow-sm bg-card overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-success to-success" />
             <div className="p-5 md:p-6 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -2836,7 +2836,7 @@ export default function MissionDetailsPage() {
                     Ouvrir la version imprimable
                   </Button>
                   <Button
-                    className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                    className="gap-2 bg-success hover:brightness-90 text-white"
                     onClick={() => openRoadSheetPrint(true)}
                     data-testid="button-print-road-sheet"
                   >
@@ -2849,7 +2849,7 @@ export default function MissionDetailsPage() {
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 md:p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-[11px] uppercase tracking-wider font-semibold text-green-700">Aperçu document</p>
+                    <p className="text-[11px] uppercase tracking-wider font-semibold text-success">Aperçu document</p>
                     <p className="text-base font-bold text-gray-900">{mission.orderNumber}</p>
                     <p className="text-xs text-gray-500">{mission.client?.name || "Client non spécifié"}</p>
                   </div>
@@ -2859,25 +2859,25 @@ export default function MissionDetailsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-gray-100 bg-white p-3">
+                  <div className="rounded-lg border border-gray-100 bg-card p-3">
                     <p className="text-[11px] text-gray-500">Départ prévu</p>
                     <p className="text-sm font-semibold text-gray-900">{safeFormat(mission.pickupDate, "dd/MM/yyyy HH:mm")}</p>
                   </div>
-                  <div className="rounded-lg border border-gray-100 bg-white p-3">
+                  <div className="rounded-lg border border-gray-100 bg-card p-3">
                     <p className="text-[11px] text-gray-500">Livraison prévue</p>
                     <p className="text-sm font-semibold text-gray-900">{safeFormat(mission.deliveryDate, "dd/MM/yyyy HH:mm")}</p>
                   </div>
-                  <div className="rounded-lg border border-gray-100 bg-white p-3">
+                  <div className="rounded-lg border border-gray-100 bg-card p-3">
                     <p className="text-[11px] text-gray-500">Véhicule</p>
                     <p className="text-sm font-semibold text-gray-900">{missionVehicleLabel}</p>
                   </div>
-                  <div className="rounded-lg border border-gray-100 bg-white p-3">
+                  <div className="rounded-lg border border-gray-100 bg-card p-3">
                     <p className="text-[11px] text-gray-500">Chauffeur</p>
                     <p className="text-sm font-semibold text-gray-900">{missionDriverName}</p>
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-dashed border-gray-200 bg-white p-3 text-xs text-gray-600">
+                <div className="rounded-lg border border-dashed border-gray-200 bg-card p-3 text-xs text-gray-600">
                   Ce document inclut: itinéraire, ressources, budgets, checklist de lancement et zones de signature.
                 </div>
               </div>
@@ -2939,7 +2939,7 @@ export default function MissionDetailsPage() {
             </Button>
             <Button
               type="button"
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-success hover:brightness-90 text-white"
               onClick={submitMissionClosure}
               disabled={updateMissionStatusMutation.isPending}
               data-testid="button-confirm-mission-close-fdr"
@@ -2969,11 +2969,11 @@ export default function MissionDetailsPage() {
           </DialogHeader>
 
           <div className="space-y-3">
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-              <p className="text-xs text-amber-700">
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5">
+              <p className="text-xs text-warning-text">
                 Option 1: déclarer mission sans plein (motif obligatoire).
               </p>
-              <p className="text-xs text-amber-700 mt-1">
+              <p className="text-xs text-warning-text mt-1">
                 Option 2: régulariser immédiatement un plein oublié.
               </p>
             </div>
@@ -3018,7 +3018,7 @@ export default function MissionDetailsPage() {
             </Button>
             <Button
               type="button"
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-success hover:brightness-90 text-white"
               onClick={() =>
                 declareMissionNoFuelMutation.mutate({
                   closeAfterDeclaration: shouldCloseMissionAfterNoFuelDeclaration,
@@ -3060,21 +3060,21 @@ export default function MissionDetailsPage() {
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 px-4 py-3">
+            <div className="rounded-2xl border border-success/20 bg-success/10 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[11px] uppercase tracking-widest font-semibold text-emerald-700">Mission ciblée</p>
-                  <p className="mt-1 text-base font-bold text-emerald-900">{mission.orderNumber}</p>
-                  <p className="text-sm text-emerald-700">
+                  <p className="text-[11px] uppercase tracking-widest font-semibold text-success">Mission ciblée</p>
+                  <p className="mt-1 text-base font-bold text-success">{mission.orderNumber}</p>
+                  <p className="text-sm text-success">
                     {mission.assignment?.vehicle?.registrationNumber || "Véhicule non affecté"}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-widest font-semibold text-emerald-700">Budget carburant</p>
-                  <p className="mt-1 text-base font-bold text-emerald-900">
+                  <p className="text-[11px] uppercase tracking-widest font-semibold text-success">Budget carburant</p>
+                  <p className="mt-1 text-base font-bold text-success">
                     {missionBudgetValues.fuelBudget !== null ? formatPrice(missionBudgetValues.fuelBudget) : "Non renseigné"}
                   </p>
-                  <p className="text-xs text-emerald-700">{fuelUnitPriceSuggestion}</p>
+                  <p className="text-xs text-success">{fuelUnitPriceSuggestion}</p>
                 </div>
               </div>
             </div>
@@ -3206,7 +3206,7 @@ export default function MissionDetailsPage() {
             <Button
               onClick={() => submitMissionFuel()}
               disabled={addMissionFuelMutation.isPending || fuelPriceLoading}
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-success hover:brightness-90 text-white"
               data-testid="button-save-mission-fuel"
             >
               {addMissionFuelMutation.isPending
@@ -3445,7 +3445,7 @@ export default function MissionDetailsPage() {
                     </div>
                     <div className="flex justify-between items-center text-sm mt-2 pt-2 border-t border-gray-100">
                       <span className="font-bold">Montant TTC :</span>
-                      <span className="font-bold text-green-600" data-testid="preview-ttc">{formatPrice(calculateTTC())}</span>
+                      <span className="font-bold text-success" data-testid="preview-ttc">{formatPrice(calculateTTC())}</span>
                     </div>
                   </>
                 )}
@@ -3487,12 +3487,12 @@ export default function MissionDetailsPage() {
 
           <div className="space-y-4">
             {hasMissingBudgetWarning && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-                <p className="text-xs font-semibold text-amber-700">
+              <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5">
+                <p className="text-xs font-semibold text-warning-text">
                   Budgets manquants: {launchMissingBudgetLabels.join(", ")}
                 </p>
                 {!budgetEntryAllowed && (
-                  <p className="mt-1 text-xs text-amber-700" data-testid="text-budget-ask-manager">
+                  <p className="mt-1 text-xs text-warning-text" data-testid="text-budget-ask-manager">
                     Demandez à un gestionnaire (administrateur, logistique ou secrétariat) de les saisir.
                   </p>
                 )}
@@ -3500,11 +3500,11 @@ export default function MissionDetailsPage() {
             )}
 
             {budgetEntryAllowed && hasBudgetSuggestion && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-emerald-700">Suggestion système disponible</p>
-                    <p className="text-[11px] text-emerald-600">
+                    <p className="text-xs font-semibold text-success">Suggestion système disponible</p>
+                    <p className="text-[11px] text-success">
                       Pré-calcul selon distance, type mission, charge, retard et historique carburant.
                       {suggestionConfidenceLabel ? ` ${suggestionConfidenceLabel}.` : ""}
                     </p>
@@ -3513,7 +3513,7 @@ export default function MissionDetailsPage() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                    className="h-7 text-xs border-success/40 text-success hover:bg-success/15"
                     onClick={applyBudgetSuggestionToForm}
                     data-testid="button-apply-budget-suggestion"
                   >
@@ -3546,7 +3546,7 @@ export default function MissionDetailsPage() {
                   {missionBudgetValues[field] === null &&
                     missionBudgetSuggestionValues[field] !== null &&
                     Number.isFinite(missionBudgetSuggestionValues[field]) && (
-                      <p className="text-[11px] text-emerald-600">
+                      <p className="text-[11px] text-success">
                         Suggéré: {formatPrice(Number(missionBudgetSuggestionValues[field] || 0))}
                       </p>
                     )}
@@ -3556,18 +3556,18 @@ export default function MissionDetailsPage() {
             )}
 
             {budgetEntryAllowed && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
               <div className="space-y-1">
-                <p className="text-xs font-medium text-amber-700">
+                <p className="text-xs font-medium text-warning-text">
                   Solde carte carburant actuel: {formatPrice(launchFuelBalance)}
                 </p>
-                <p className="text-xs text-amber-700">
+                <p className="text-xs text-warning-text">
                   Prix utilisé: <span className="font-semibold">{formatPrice(launchFuelUnitPriceUsed).replace(" FCFA", "")} FCFA/L</span>
-                  <span className="ml-1 text-[11px] text-amber-600">
+                  <span className="ml-1 text-[11px] text-warning-text">
                     ({launchFuelUnitPriceSource === "real" ? "réel" : "référence"})
                   </span>
                 </p>
-                <p className="text-xs text-amber-700">
+                <p className="text-xs text-warning-text">
                   Prix réel actuel:
                   <span className="font-semibold ml-1">
                     {launchFuelUnitPriceReal !== null
@@ -3575,7 +3575,7 @@ export default function MissionDetailsPage() {
                       : "indisponible"}
                   </span>
                 </p>
-                <p className="text-xs text-amber-700">
+                <p className="text-xs text-warning-text">
                   Prix de référence: <span className="font-semibold">{formatPrice(launchFuelUnitPriceFallback).replace(" FCFA", "")} FCFA/L</span>
                 </p>
               </div>
