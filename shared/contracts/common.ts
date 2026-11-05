@@ -18,8 +18,14 @@ export const isoDateSchema = z
 /** Horodatage ISO 8601 renvoyé par le serveur. */
 export const isoDateTimeSchema = z.string().datetime({ offset: true });
 
+/** Plus grand id d'une colonne `integer` Postgres : au-delà, la base répondrait 500 (erreur 22003). */
+export const MAX_DB_INTEGER_ID = 2147483647;
+
 /** Identifiant numérique venant d'une query string ou d'un paramètre de route. */
-export const idSchema = z.coerce.number().int().positive();
+export const idSchema = z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID);
+
+/** Identifiant numérique lu dans un corps JSON (nombre, pas de conversion depuis une chaîne). */
+export const bodyIdSchema = z.number().int().positive().max(MAX_DB_INTEGER_ID);
 
 /** Période `from` / `to`, bornes incluses, toutes deux facultatives. */
 export const dateRangeQuerySchema = z

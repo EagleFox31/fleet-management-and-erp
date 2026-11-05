@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import { idSchema } from "@shared/contracts/common";
 import { operationsService } from "../services/operations-service";
 import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
@@ -71,7 +72,7 @@ const broadcastOperationMissionUpdate = (
  * Créer une mission depuis un enregistrement carburant
  */
 const createFromFuelSchema = z.object({
-  fuelRecordId: z.coerce.number().int().positive(),
+  fuelRecordId: idSchema,
   clientName: z.string().trim().min(1),
   orderNumber: z.string().trim().optional(),
   pickupAddress: z.string().trim().optional(),

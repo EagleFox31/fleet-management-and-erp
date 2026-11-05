@@ -4,7 +4,7 @@
  * sans nouvelle table. Drapeau `tire-movements`.
  */
 import { z } from "zod";
-import { dateRangeQuerySchema, isoDateTimeSchema } from "./common";
+import { dateRangeQuerySchema, idSchema, isoDateTimeSchema } from "./common";
 
 export const TIRE_MOVEMENTS_PATH = "/api/tires/movements";
 
@@ -13,8 +13,8 @@ export type TireMovementKind = (typeof TIRE_MOVEMENT_KINDS)[number];
 
 export const tireMovementsQuerySchema = dateRangeQuerySchema.and(
   z.object({
-    tireId: z.coerce.number().int().positive().optional(),
-    vehicleId: z.coerce.number().int().positive().optional(),
+    tireId: idSchema.optional(),
+    vehicleId: idSchema.optional(),
   }),
 );
 
