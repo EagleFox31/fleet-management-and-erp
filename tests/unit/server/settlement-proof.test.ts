@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SETTLEMENT_PROOF_PREFIX,
   isSettlementProofReference,
+  settlementProofFileName,
   settlementProofPath,
 } from "../../../server/lib/settlement-proof";
 
@@ -39,5 +40,28 @@ describe("justificatif de règlement fournisseur : borné à son dossier", () =>
     expect(isSettlementProofReference(42)).toBe(false);
     expect(settlementProofPath(null, root)).toBeNull();
     expect(settlementProofPath(undefined, root)).toBeNull();
+  });
+});
+
+describe("nom disque du justificatif téléversé : toujours accepté à la relecture", () => {
+  it.each([
+    ["nom simple", "facture.pdf", /^facture-U\.pdf$/],
+    ["espace dans l'extension", "scan.p f", /^scan-U\.p_f$/],
+    ["extension longue", "a.verylongextension", /^a-U\.verylonge$/],
+    ["accents et espaces", "Reçu été 2026.PDF", /^Re_u__t__2026-U\.pdf$/],
+    ["séparateurs", "../../x/y.pdf", /^\.\._\.\._x_y-U\.pdf$/],
+    ["séparateur Windows", "..\\a.png", /^\.\._a-U\.png$/],
+    ["espace final", "Facture.PDF ", /^Facture-U\.pdf_$/],
+    ["copie numérotée", "scan.pdf(1)", /^scan-U\.pdf_1_$/],
+    ["accent dans l'extension", "reçu.pdé", /^re_u-U\.pd_$/],
+    ["sans extension", "justificatif", /^justificatif-U\.bin$/],
+    ["point final", "a.", /^a-U\.bin$/],
+    ["vide", "", /^proof-U\.bin$/],
+    ["absent", undefined, /^proof-U\.bin$/],
+    ["nom très long", `${"x".repeat(300)}.pdf`, /^x{40}-U\.pdf$/],
+  ])("%s", (_label, original, expected) => {
+    const name = settlementProofFileName(original as string | undefined, "U");
+    expect(name).toMatch(expected);
+    expect(isSettlementProofReference(`${SETTLEMENT_PROOF_PREFIX}${name}`)).toBe(true);
   });
 });

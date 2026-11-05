@@ -22,6 +22,10 @@ const PROOF_NAME = uniqueTestToken("proofpath");
 // Dossier voisin de uploads/ dont le nom commence par « uploads » : hors périmètre.
 const SIBLING_DIR = path.join(process.cwd(), `uploads-${uniqueTestToken("sibling")}`);
 const SECRET = "TEST-secret-hors-uploads";
+// Fichier existant d'un autre dossier de uploads/ : servi par main, hors périmètre du justificatif.
+const OTHER_UPLOAD_DIR = path.join(process.cwd(), "uploads", "documents");
+const OTHER_UPLOAD_NAME = `${uniqueTestToken("otherdoc")}.pdf`;
+const OTHER_UPLOAD_CONTENT = "TEST-document-autre-dossier";
 
 let server: Server;
 let baseUrl = "";
@@ -64,14 +68,14 @@ async function legacyPayment(proofReference: string) {
 }
 
 /** Règlement avec justificatif téléversé ; renvoie la facture et le règlement créé. */
-async function uploadedSettlement(content = "%PDF-1.4 TEST") {
+async function uploadedSettlement(content = "%PDF-1.4 TEST", fileName = `${PROOF_NAME}.pdf`) {
   const invoice = await approvedInvoice();
   const form = new FormData();
   form.append("amount", "1000");
   form.append("paymentMethod", "virement");
   form.append("paymentReference", uniqueTestToken("ref"));
   form.append("paymentDate", "2026-10-29");
-  form.append("proofFile", new Blob([content], { type: "application/pdf" }), `${PROOF_NAME}.pdf`);
+  form.append("proofFile", new Blob([content], { type: "application/pdf" }), fileName);
   const created = await fetch(`${baseUrl}/api/supplier-invoices/${invoice.id}/settlements`, {
     method: "POST",
     headers: { Cookie: cookie },
@@ -104,10 +108,13 @@ beforeAll(async () => {
 
   fs.mkdirSync(SIBLING_DIR, { recursive: true });
   fs.writeFileSync(path.join(SIBLING_DIR, "secret.txt"), SECRET);
+  fs.mkdirSync(OTHER_UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(OTHER_UPLOAD_DIR, OTHER_UPLOAD_NAME), OTHER_UPLOAD_CONTENT);
 }, 120000);
 
 afterAll(async () => {
   fs.rmSync(SIBLING_DIR, { recursive: true, force: true });
+  fs.rmSync(path.join(OTHER_UPLOAD_DIR, OTHER_UPLOAD_NAME), { force: true });
   if (fs.existsSync(PROOF_DIR)) {
     for (const name of fs.readdirSync(PROOF_DIR).filter((n) => n.startsWith(PROOF_NAME))) {
       fs.unlinkSync(path.join(PROOF_DIR, name));
@@ -149,6 +156,31 @@ describe("justificatif de règlement fournisseur : borné à son dossier", { tim
     const parent = await proofOf(invoice.id, settlement.id);
     expect(parent.status).toBe(404);
     expect(parent.text).not.toContain("dependencies");
+  });
+
+  it("ligne déjà en base vers un fichier existant d'un autre dossier de uploads/ : 404 (avant : 200)", async () => {
+    const { invoice, settlement } = await uploadedSettlement();
+    await db
+      .update(supplierInvoiceSettlements)
+      .set({ proofReference: `/uploads/documents/${OTHER_UPLOAD_NAME}` })
+      .where(eq(supplierInvoiceSettlements.id, settlement.id));
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(404);
+    expect(proof.text).not.toContain(OTHER_UPLOAD_CONTENT);
+    expect(proof.body.message).toBe("Justificatif introuvable");
+  });
+
+  it.each([
+    ["espace dans l'extension", "scan.p f"],
+    ["espace final", "Facture.PDF "],
+    ["copie numérotée", "scan.pdf(1)"],
+    ["accent dans l'extension", "reçu.pdé"],
+    ["extension longue", "justificatif.extensiontreslongue"],
+  ])("téléversement avec un nom inhabituel (%s) : 201 puis servi (200)", async (_label, original) => {
+    const { invoice, settlement } = await uploadedSettlement("%PDF-1.4 EXOTIC", `${PROOF_NAME}-${original}`);
+    const proof = await proofOf(invoice.id, settlement.id);
+    expect(proof.status).toBe(200);
+    expect(proof.text).toBe("%PDF-1.4 EXOTIC");
   });
 
   it("non-régression : le justificatif téléversé est servi (200)", async () => {

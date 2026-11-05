@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { settlementProofPath } from "../lib/settlement-proof";
+import { settlementProofFileName, settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
@@ -245,13 +245,8 @@ const uploadSettlementProof = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, settlementProofUploadDir),
     filename: (_req, file, cb) => {
-      const extension = path.extname(file.originalname || "").toLowerCase();
-      const baseName = (file.originalname || "proof")
-        .replace(/[^a-zA-Z0-9._-]/g, "_")
-        .replace(/\.[^.]+$/, "")
-        .slice(0, 40);
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${baseName || "proof"}-${uniqueSuffix}${extension || ".bin"}`);
+      cb(null, settlementProofFileName(file.originalname, uniqueSuffix));
     },
   }),
   fileFilter: (_req, file, cb) => {
