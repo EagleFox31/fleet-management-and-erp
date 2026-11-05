@@ -76,12 +76,17 @@ describe("ids de route (lot 5) : suppressions strictes", { timeout: 120000 }, ()
     expect(row.deletedAt).toBeNull();
   });
 
-  it("DELETE /api/users/<id>abc laisse l'utilisateur <id> en place", async () => {
+  // DELETE /api/users est une suppression douce (deletedAt) ; DELETE /api/admin/users efface la ligne.
+  it.each([
+    ["/api/users", "suppression douce"],
+    ["/api/admin/users", "suppression définitive"],
+  ])("DELETE %s/<id>abc laisse l'utilisateur <id> actif (%s)", async (prefix) => {
     const target = await createTestUser({ role: "technician" });
     ids.userIds.push(target.id);
-    const response = await fetch(`${baseUrl}/api/users/${target.id}abc`, { method: "DELETE", headers: { Cookie: cookie } });
+    const response = await fetch(`${baseUrl}${prefix}/${target.id}abc`, { method: "DELETE", headers: { Cookie: cookie } });
     expect(response.status).toBe(400);
-    const rows = await db.select({ id: users.id }).from(users).where(eq(users.id, target.id));
+    const rows = await db.select({ deletedAt: users.deletedAt }).from(users).where(eq(users.id, target.id));
     expect(rows).toHaveLength(1);
+    expect(rows[0].deletedAt).toBeNull();
   });
 });
