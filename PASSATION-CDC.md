@@ -79,3 +79,9 @@
 - 8 lectures `parseInt(req.params…)` → `parseRouteId` (part-requirements :45 :132 :199 ; work-order-parts :35 :119 :253 :274-275). Entrées FROZEN des deux fichiers retirées. Aucune contrainte de chemin retirée. Flux issued / onTransition inchangé.
 - Les catch relaient désormais l'AppError (`next`). Statuts qui changent : un AppError qui sortait en 500 (by-part, PATCH/DELETE demande, /parts, /issue hors branche stock interne) sort avec son statut ; les AppError déjà gérés dans awaiting-parts et /parts gardent leur statut, corps normalisé (code, requestId).
 - Contrat : `part-requirements-strict-id.contract.test.ts` (13 cas : 400 sur 1abc/1e3/hors int4/0, 404 sur id inconnu). Branche empilée sur #367.
+
+## 2026-11-05 04:01 — Cliquet id strict, dernière liste hors aa (branche fix/strict-id-last, empilée sur #369)
+- parts-catalog : specifications et variants passés de idParam à parseRouteId, contraintes `([0-9]+)` retirées (aucune route sœur littérale sous /parts/:id/…). vehicles :285 :333 et supplier-invoices (4 lectures, hors celles d'aa) → parseRouteId. FROZEN : vehicles retiré, supplier-invoices 10 → 5 (restent les lignes d'aa).
+- routes.ts `GET /api/parts/:id(\d+)` LAISSÉ : retirer la contrainte masquerait `/api/parts/stock-movements` (déclarée plus bas, l.2664). Le 404 sur « 1abc » y est conservé.
+- Test supplier-invoice-error-details : son « 500 de référence » était un id illisible, désormais 400 ; test réécrit en 400 VALIDATION (la réécriture des 5xx reste couverte par tests/unit/server/error-handler.test.ts).
+- Contrat route-id-strict-last (17 cas). Reste à traiter : admin-users-guard:14 (audit sécurité, en dernier).

@@ -10,8 +10,9 @@ import { createTestSupplier, createTestSupplierInvoice, createTestUser, TEST_USE
  * `{ error, details: error.message }` en 500 et renvoyaient le message brut de multer sur un
  * justificatif refusé. Elles relaient désormais au gestionnaire central.
  *
- * Le cas 500 passait déjà avant le correctif (la garde de sortie du gestionnaire réécrit toute
- * 5xx) : c'est une non-régression. Le cas 400 était rouge.
+ * Le cas « identifiant illisible » servait de 500 de référence ; depuis la lecture stricte des ids
+ * (parseRouteId) il reçoit un 400. La réécriture des 5xx par le gestionnaire central est couverte
+ * ailleurs (tests/unit/server/error-handler.test.ts). Le cas 400 était rouge.
  */
 
 let server: Server;
@@ -42,10 +43,10 @@ afterAll(async () => {
 });
 
 describe("Factures fournisseurs : réponses d'erreur sans détail technique", { timeout: 120000 }, () => {
-  it("une 500 renvoie le message générique et la référence, sans details", async () => {
+  it("un identifiant illisible renvoie un 400 lisible (ancien cas 500), sans details", async () => {
     const res = await fetch(`${baseUrl}/api/supplier-invoices/pas-un-id`, { headers: { Cookie: cookie } });
     const body = await res.json();
-    expect(apiErrorProblems(res.status, body, 500, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(apiErrorProblems(res.status, body, 400, "VALIDATION", res.headers.get("x-request-id"))).toEqual([]);
     expect(body).not.toHaveProperty("details");
     expect(leakText(body)).not.toMatch(TECHNICAL);
   });
