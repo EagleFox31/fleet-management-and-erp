@@ -98,7 +98,7 @@ describe("POST /api/vehicles/:id/documents : refus de fichier", { timeout: 12000
     const json = await res.json().catch(() => null);
     expect(res.status).toBe(400);
     expect(json.message).toBe("Le fichier téléversé est invalide.");
-    expect(JSON.stringify(json)).not.toMatch(/Unexpected end|form|Multipart/i);
+    expect(leakText(json)).not.toMatch(/Unexpected end|form|Multipart/i);
   });
 
   it("extension et MIME cohérents : accepté (201)", async () => {

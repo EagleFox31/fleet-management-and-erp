@@ -8,7 +8,7 @@ import { readRepoFiles, REPO_SCAN_TIMEOUT_MS, repoFiles } from "../support/repo-
  * (`nanoid(10)`). « qrSqlREDR7 » a fait échouer `/sql/i`. Un contrôle de fuite passe par
  * `leakText(body)` (tests/support/api-error.ts), qui retire cette référence.
  */
-const RAW_BODY_LEAK_CHECK = /JSON\.stringify\(\s*[\w.]*body\s*\)\s*\)\s*\.not\.toMatch/;
+const RAW_BODY_LEAK_CHECK = /JSON\.stringify\(\s*(?:await\s+[\w.]+\.json\(\)|[\w.]*(?:body|json))\s*\)\s*\)\s*\.not\.toMatch/i;
 const SELF = "tests/unit/leak-check-hygiene.test.ts";
 
 describe("contrôles de fuite dans les réponses d'erreur", () => {
@@ -22,6 +22,9 @@ describe("contrôles de fuite dans les réponses d'erreur", () => {
   it("le motif reconnaît l'ancien contrôle, quel que soit le nom de la réponse", () => {
     expect(RAW_BODY_LEAK_CHECK.test("expect(JSON.stringify(second.body)).not.toMatch(/sql/i)")).toBe(true);
     expect(RAW_BODY_LEAK_CHECK.test("expect(JSON.stringify(res.body)).not.toMatch(/sql/i)")).toBe(true);
+    expect(RAW_BODY_LEAK_CHECK.test("expect(JSON.stringify(await res.json())).not.toMatch(/sql/i)")).toBe(true);
+    expect(RAW_BODY_LEAK_CHECK.test("expect(JSON.stringify(json)).not.toMatch(/form/i)")).toBe(true);
+    expect(RAW_BODY_LEAK_CHECK.test("expect(JSON.stringify(data.payload)).not.toMatch(/FilePath/)")).toBe(false);
     expect(RAW_BODY_LEAK_CHECK.test("expect(leakText(res.body)).not.toMatch(/sql/i)")).toBe(false);
   });
 
