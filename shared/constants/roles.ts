@@ -305,6 +305,20 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  */
 export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
 
+export function canReadClientBilling(role: string | null | undefined): boolean {
+  return (CLIENT_BILLING_EVENT_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
+ * Guides et cahier de tests servis par `GET /api/documentation` : la route serveur est réservée
+ * à l'admin (`isAdmin`). Un autre rôle ne doit ni émettre la requête ni voir l'onglet.
+ */
+export const DOCUMENTATION_READ_ROLES = ["admin"] as const satisfies readonly AppRole[];
+
+export function canReadDocumentation(role: string | null | undefined): boolean {
+  return (DOCUMENTATION_READ_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
 export function canReadWorkOrderCost(role: string | null | undefined): boolean {
   return (WORK_ORDER_COST_READ_ROLES as readonly string[]).includes(String(role ?? ""));
 }

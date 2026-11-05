@@ -13,7 +13,7 @@ import { statusWhenHigherIsBetter, statusWhenLowerIsBetter } from "@/lib/kpi-sta
 import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
 
 export default function OperationsDashboard() {
-  const { statsSummary, statsByClient, statsByDestination, upcomingMissions, activeMissions } = useOperations();
+  const { statsByClient, statsByDestination, upcomingMissions, activeMissions } = useOperations();
   const [location, setLocation] = useLocation();
 
   type OperationsTab = "missions" | "clients" | "destinations" | "invoices";
@@ -92,13 +92,17 @@ export default function OperationsDashboard() {
         subtitle="Gestion des missions clients et facturation"
         icon={<ClipboardList className="h-5 w-5" />}
       >
-        {statsSummary.isLoading ? (
+        {statsByClient.isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
           </div>
+        ) : statsByClient.isError ? (
+          <p className="text-sm text-muted-foreground" data-testid="kpi-unavailable">
+            Indicateurs momentanément indisponibles.
+          </p>
         ) : (
           <KpiGrid columns={4}>
             <KpiTile

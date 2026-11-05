@@ -2,20 +2,36 @@ import { useQuery } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface FuelConsumption {
+// GET /api/fuel-records/consumption-history : un point par mois sur 12 mois glissants.
+interface FuelConsumptionPoint {
   date: string;
-  totalLiters: number;
-  totalAmount: number;
-  transactionCount: number;
+  quantity: number;
+  cost: number;
+  count: number;
 }
 
 export function FuelConsumptionChart() {
-  const { data: consumption, isLoading } = useQuery<FuelConsumption[]>({
-    queryKey: ["/api/fuel-card/consumption-history"],
+  const { data: history, isLoading, isError } = useQuery<FuelConsumptionPoint[]>({
+    queryKey: ["/api/fuel-records/consumption-history", { period: "year" }],
   });
+
+  const consumption = (Array.isArray(history) ? history : []).map((point) => ({
+    date: point.date,
+    totalLiters: point.quantity,
+    totalAmount: point.cost,
+    transactionCount: point.count,
+  }));
 
   if (isLoading) {
     return <Skeleton className="h-[350px] w-full" />;
+  }
+
+  if (isError) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-gray-500">
+        Consommation carburant momentanément indisponible
+      </div>
+    );
   }
 
   if (!consumption || consumption.length === 0) {
