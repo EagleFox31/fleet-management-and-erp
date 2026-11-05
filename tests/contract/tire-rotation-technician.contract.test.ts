@@ -61,6 +61,8 @@ describe("rotation de pneus : technicien de l'OT", { timeout: 60000 }, () => {
   it("sans technicien : 201, OT sans technicien", async () => {
     const res = await post();
     expect(res.status).toBe(201);
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, res.body.workOrder?.id ?? res.body.rotation?.workOrderId));
+    expect(wo.technicianId).toBeNull();
   });
 
   it("technicien inexistant : 400 lisible, ni OT ni rotation créés", async () => {

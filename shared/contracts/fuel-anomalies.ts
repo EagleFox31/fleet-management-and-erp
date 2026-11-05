@@ -6,11 +6,15 @@
  * remplace le précédent.
  */
 import { z } from "zod";
-import { isoDateSchema, isoDateTimeSchema } from "./common";
+import { isoDateSchema, isoDateTimeSchema, MAX_DB_INTEGER_ID } from "./common";
 
 export const fuelAnomalyPath = (anomalyKey: string) => `/api/fuel-card/anomalies/${encodeURIComponent(anomalyKey)}`;
 
-export const fuelAnomalyKeySchema = z.string().regex(/^[a-z][a-z0-9-]*:\d+$/, "Clé d'anomalie invalide.");
+/** Le plein de la clé sert d'id en base : borné à l'int4, sinon la requête répond 500. */
+export const fuelAnomalyKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]*:\d+$/, "Clé d'anomalie invalide.")
+  .refine((key) => Number(key.slice(key.indexOf(":") + 1)) <= MAX_DB_INTEGER_ID, "Clé d'anomalie invalide.");
 export const fuelAnomalyParamsSchema = z.object({ id: fuelAnomalyKeySchema });
 
 export const FUEL_ANOMALY_STATUSES = ["open", "justified", "confirmed"] as const;

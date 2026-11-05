@@ -517,3 +517,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `bodyIdSchema` et `MAX_DB_INTEGER_ID` dans `shared/contracts/common.ts` ; `idSchema` borné. Les ids d'entrée de quinze routes de `server/api` passent par ces schémas. Nouveau cliquet `zod-id-range-hygiene`.
 - **Pourquoi** : un id au-delà de l'int4 reçu dans la query ou le corps répondait 500. Le filet `routeIdRangeGuard` ne lit que le chemin.
 - **Preuve** : contrat `id-range-query-body` rouge 12/12 sur l'ancien code, vert 15/15 après. Le cliquet passe au rouge si l'on retire une borne.
+
+## 2026-11-05 — Suites de l'audit de #427 et de la relecture de #442
+- **Quoi** : `upload.ts` n'accepte qu'un type MIME déclaré en propre (`Object.hasOwn`). `sendUploadedFile` classe l'échec d'envoi : interruption client (info, sans réponse), introuvable (404), autre (500). Contrat `uploaded-documents-download-headers` : id inconnu, chemin stocké hors de `uploads/`, fichier absent. `partId` du catalogue de pannes et plein de la clé d'anomalie carburant bornés à l'int4. Cliquet `zod-id-range-hygiene` étendu à `shared/schema.ts`, borne exigée `MAX_DB_INTEGER_ID`.
+- **Pourquoi** : `constructor` comme type MIME remontait au prototype. Un fichier disparu entre le contrôle et l'envoi répondait 500, et une interruption côté client était journalisée en erreur. Deux ids hors plage répondaient encore 500.
+- **Preuve** : unitaires rouges sur l'ancien `upload.ts` (2 cas) ; contrats `fault-catalog-lifecycle` et `fuel-anomalies` rouges en 500 sur l'ancien schéma, verts après.

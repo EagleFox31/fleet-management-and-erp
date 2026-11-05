@@ -3129,7 +3129,9 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** :
   - `tests/contract/id-range-query-body.contract.test.ts` : 15 cas, 400 sur le champ id. Rouge sur l'ancien code (500, ou 400 sur un autre champ).
   - Cliquet `tests/unit/server/zod-id-range-hygiene.test.ts` : une propriété nommée comme un id déclarée par `z.number()` ou `z.coerce.number()` sans `.max(`, dans `server/api` ou `shared/contracts`. La liste gelée ne contient que des schémas de réponse. Le test passe au rouge si l'on retire la borne de `fuel-card`.
-- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+- **Reste ouvert** : `server/routes.ts` (gelé) lit encore `technicianId` sans borne ; à reprendre quand la route passera dans un routeur de `server/api/`. Un id déclaré par un schéma intermédiaire, ou sous un nom hors motif, échappe au cliquet.
+  - Complété le 5 novembre 2026 (relecture de la PR) : deux ids échappaient au premier relevé et répondaient 500. `insertFaultCatalogPartSchema.partId` (`shared/schema.ts`, hors du périmètre scanné) et le plein lu dans la clé d'anomalie carburant (`consumption-gap:<id>`, chaîne découpée après validation par regex). Les deux sont bornés à `MAX_DB_INTEGER_ID`, avec un cas au contrat (`fault-catalog-lifecycle`, `fuel-anomalies`), rouge en 500 sur l'ancien code. Le cliquet scanne aussi `shared/schema.ts` et n'accepte plus qu'une borne `.max(MAX_DB_INTEGER_ID)` (ou sa valeur littérale) : une autre borne `.max(` laissait passer la valeur jusqu'à la base.
+  - Toujours hors cliquet : un id extrait d'une chaîne composite (clé, jeton). Le borner dans le schéma de la chaîne, pas au point de lecture.
 - **Leçon généralisée** : un filet posé sur un seul canal (le chemin) ne couvre pas la même valeur reçue par un autre canal (query, corps). La borne appartient au type partagé (`idSchema`), pas à chaque route.
 ## 2026-11-05 — Modifications non commitées perdues : `cd` en échec suivi d'un `git checkout -- .` dans le dépôt principal
 
@@ -3156,3 +3158,15 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - `deploy/backup-db.sh` date le journal et le dump par `printf '%(...)T'` (bash >= 4.2) au lieu de `date`, et n'appelle plus `dirname`. Sortie identique à `date` vérifiée sur 20 cas (5 fuseaux, bascules d'heure d'été). Comportement hors journal inchangé : même code de sortie, même nom de dump, même rétention.
 - **Prévention vérifiable** : 3 suites unitaires complètes vertes (2697 chacune) ; le test 1 vérifie le format de chaque ligne du journal. Le commentaire du `describe` fixe la règle : réduire les processus, ne pas rallonger le délai.
 - **Leçon généralisée** : un test lent sous charge se diagnostique par une mesure prise sous charge, étape par étape, avant de toucher au délai. Pour un test qui lance des processus, le coût à réduire est le nombre de processus, et l'état préalable s'écrit, il ne se rejoue pas.
+## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
+
+- **Contexte** : après l'incident du `git checkout -- .` (entrée « Modifications non commitées perdues : `cd` en échec… », même date), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
+- **Cause racine** : `core.autocrlf=true` sur les postes Windows. Les blobs du dépôt sont en LF, l'arbre de travail est le plus souvent en CRLF. Un outil qui réécrit un fichier en LF, ou un fichier recopié depuis un autre worktree, fait apparaître toutes ses lignes comme changées, alors que le texte est identique.
+- **Classification** : near miss, diagnostic erroné possible (conclure à une perte, ou restaurer et écraser un travail réel).
+- **Résolution** : aucune perte réelle. Les fichiers concernés sont alignés sur les fins de ligne de leur blob HEAD.
+- **Prévention vérifiable** :
+  - Avant de conclure à une perte ou à une réécriture, comparer en ignorant les fins de ligne :
+    `git diff --ignore-cr-at-eol --stat` (ou `git diff -w --stat`). Un fichier qui disparaît de cette liste n'a changé que par ses fins de ligne.
+  - Après une édition par script, si `git diff --stat` montre un fichier réécrit en entier, ramener ses fins de ligne à celles du blob HEAD avant de commiter.
+  - `.gitattributes` : déjà `eol=lf` sur `deploy/*.sh` et `.claude/hooks/*.mjs`, là où un CR casse l'exécution. Pas de `* text=auto` global : le dépôt contient encore un blob CRLF (`tests/support/file-access-scan.ts`, relevé `git ls-files --eol`). Une règle globale le ferait apparaître modifié dans tous les worktrees et imposerait une renormalisation du dépôt, ce qui est hors périmètre ici.
+- **Leçon généralisée** : un diff qui couvre tout un fichier sans raison est d'abord un soupçon de fins de ligne. Il se vérifie en une commande avant toute restauration ou toute alerte de perte.
