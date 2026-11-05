@@ -2,7 +2,11 @@
  * Budget de mission (L1). Drapeau `finance`.
  *
  * Un budget par mission : carburant (litres × prix du jour de `budgetDate`, figé à la saisie),
- * frais de route (FDR) et extras saisis. Aucun barème FDR n'est fourni : montant saisi.
+ * frais de route (FDR) et extras saisis.
+ *
+ * Barème (L1b) : une destination de la liste fermée `mission_destinations`, choisie à la main
+ * (aucun rapprochement avec l'adresse de la mission), pré-remplit les litres et le FDR absents
+ * du corps. Une valeur fournie l'emporte toujours : le barème propose, il n'impose pas.
  * Les montants calculés (`fuelAmount`, `totalAmount`) et le prix unitaire sont posés par le
  * serveur, jamais lus dans le corps.
  *
@@ -17,6 +21,7 @@ export const MISSION_BUDGETS_DAILY_NEED_PATH = "/api/mission-budgets/daily-need"
 export const missionBudgetPath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}`;
 export const missionBudgetApprovePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/approve`;
 export const missionBudgetDisbursePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/disburse`;
+export const MISSION_DESTINATIONS_PATH = "/api/mission-budgets/destinations";
 
 export const MISSION_BUDGET_STATUSES = ["requested", "approved", "disbursed"] as const;
 export type MissionBudgetStatus = (typeof MISSION_BUDGET_STATUSES)[number];
@@ -34,19 +39,33 @@ export const MISSION_BUDGET_MAX_LITERS = 100_000;
 
 const amountSchema = z.number().finite().min(0).max(MISSION_BUDGET_MAX_AMOUNT);
 
-export const createMissionBudgetRequestSchema = z
-  .object({
-    missionId: bodyIdSchema,
-    budgetDate: isoDateSchema,
-    fuelLiters: z.number().finite().min(0).max(MISSION_BUDGET_MAX_LITERS),
-    fdrAmount: amountSchema,
-    extrasAmount: amountSchema.default(0),
-    notes: z.string().trim().max(1000).nullish(),
-  })
-  .strict();
+const missionBudgetFields = z.object({
+  missionId: bodyIdSchema,
+  budgetDate: isoDateSchema,
+  /** Destination du barème (L1b). Absente ou `null` : saisie libre. */
+  destinationId: bodyIdSchema.nullish(),
+  fuelLiters: z.number().finite().min(0).max(MISSION_BUDGET_MAX_LITERS),
+  fdrAmount: amountSchema,
+  extrasAmount: amountSchema.default(0),
+  notes: z.string().trim().max(1000).nullish(),
+});
 
-/** Correction d'un budget encore demandé. La mission ne change pas : un budget par mission. */
-export const updateMissionBudgetRequestSchema = createMissionBudgetRequestSchema
+/** Sans destination, litres et FDR sont obligatoires ; avec, le barème complète ceux qui manquent. */
+export const createMissionBudgetRequestSchema = missionBudgetFields
+  .extend({ fuelLiters: missionBudgetFields.shape.fuelLiters.optional(), fdrAmount: amountSchema.optional() })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.destinationId != null) return;
+    for (const key of ["fuelLiters", "fdrAmount"] as const) {
+      if (v[key] === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "Requis sans destination du barème" });
+    }
+  });
+
+/**
+ * Correction d'un budget encore demandé. La mission ne change pas : un budget par mission.
+ * Changer de destination n'écrase pas les montants déjà saisis : l'écran pré-remplit, le client envoie.
+ */
+export const updateMissionBudgetRequestSchema = missionBudgetFields
   .omit({ missionId: true })
   .partial()
   .strict()
@@ -65,6 +84,7 @@ export const missionBudgetSchema = z.object({
   status: z.enum(MISSION_BUDGET_STATUSES),
   notes: z.string().nullable(),
   treasuryEntryId: bodyIdSchema.nullable(),
+  destinationId: bodyIdSchema.nullable(),
   approvedBy: bodyIdSchema.nullable(),
   approvedAt: isoDateTimeSchema.nullable(),
   disbursedBy: bodyIdSchema.nullable(),
@@ -100,6 +120,18 @@ export const dailyNeedResponseSchema = totalsSchema.extend({
   byStatus: z.record(z.enum(MISSION_BUDGET_STATUSES), totalsSchema),
 });
 
+/** Destination du barème : valeurs de pré-remplissage, toujours modifiables sur le budget. */
+export const missionDestinationSchema = z.object({
+  id: bodyIdSchema,
+  code: z.string(),
+  label: z.string(),
+  fuelLiters: z.number(),
+  fdrAmount: z.number(),
+});
+
+export const missionDestinationsResponseSchema = z.array(missionDestinationSchema);
+
+export type MissionDestination = z.infer<typeof missionDestinationSchema>;
 export type CreateMissionBudgetRequest = z.infer<typeof createMissionBudgetRequestSchema>;
 export type UpdateMissionBudgetRequest = z.infer<typeof updateMissionBudgetRequestSchema>;
 export type MissionBudget = z.infer<typeof missionBudgetSchema>;

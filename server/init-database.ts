@@ -937,6 +937,44 @@ CREATE TABLE IF NOT EXISTS mission_budgets (
 
 CREATE INDEX IF NOT EXISTS idx_mission_budgets_budget_date ON mission_budgets (budget_date);`;
 
+// Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
+// Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
+export const MISSION_DESTINATIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE TABLE IF NOT EXISTS mission_destinations (
+  id serial PRIMARY KEY,
+  code text NOT NULL,
+  label text NOT NULL,
+  fuel_liters numeric(12,2) NOT NULL,
+  fdr_amount numeric(15,2) NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_by integer CONSTRAINT mission_destinations_created_by_users_id_fk REFERENCES users(id),
+  updated_by integer CONSTRAINT mission_destinations_updated_by_users_id_fk REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_destinations_code_unique UNIQUE (code),
+  CONSTRAINT mission_destinations_amounts_check CHECK (fuel_liters >= 0 AND fdr_amount >= 0)
+);
+
+INSERT INTO mission_destinations (code, label, fuel_liters, fdr_amount) VALUES
+  ('ndjamena', 'N''Djamena', 750, 150000),
+  ('kome', 'Komé', 450, 100000),
+  ('sarh', 'Sarh', 700, 150000),
+  ('ngong', 'Ngong', 350, 40000),
+  ('douala', 'Douala', 591, 107000)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE mission_budgets ADD COLUMN IF NOT EXISTS destination_id integer;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'mission_budgets_destination_id_mission_destinations_id_fk') THEN
+    ALTER TABLE mission_budgets
+      ADD CONSTRAINT mission_budgets_destination_id_mission_destinations_id_fk
+      FOREIGN KEY (destination_id) REFERENCES mission_destinations(id);
+  END IF;
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1449,6 +1487,8 @@ export async function initializeDatabase() {
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
     // Budget de mission (L1) — jumelle de server/db/migrations/20261105_mission_budgets.sql.
     await pool.query(MISSION_BUDGETS_SQL);
+    // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
+    await pool.query(MISSION_DESTINATIONS_SQL);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

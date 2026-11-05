@@ -6,9 +6,10 @@ import {
   type DailyNeed,
   type MissionBudget,
   type MissionBudgetStatus,
+  type MissionDestination,
   type UpdateMissionBudgetRequest,
 } from "@shared/contracts/mission-budgets";
-import { missionBudgets, missions, type MissionBudgetRow } from "@shared/schema";
+import { missionBudgets, missionDestinations, missions, type MissionBudgetRow } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
@@ -33,6 +34,7 @@ function toMissionBudget(row: MissionBudgetRow): MissionBudget {
     status: row.status,
     notes: row.notes ?? null,
     treasuryEntryId: row.treasuryEntryId ?? null,
+    destinationId: row.destinationId ?? null,
     approvedBy: row.approvedBy ?? null,
     approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
     disbursedBy: row.disbursedBy ?? null,
@@ -64,6 +66,26 @@ function notify(budget: MissionBudget) {
   broadcast?.("mission_budget_updated", { id: budget.id, missionId: budget.missionId, status: budget.status, budgetDate: budget.budgetDate });
 }
 
+/** Barème FDR (L1b) : destinations actives, par libellé. */
+export async function listMissionDestinations(): Promise<MissionDestination[]> {
+  const rows = await db
+    .select()
+    .from(missionDestinations)
+    .where(eq(missionDestinations.active, true))
+    .orderBy(asc(missionDestinations.label));
+  return rows.map((r) => ({ id: r.id, code: r.code, label: r.label, fuelLiters: Number(r.fuelLiters), fdrAmount: Number(r.fdrAmount) }));
+}
+
+/** Liste fermée : une destination inconnue ou retirée du barème est refusée (400). */
+async function activeDestination(id: number) {
+  const [row] = await db
+    .select()
+    .from(missionDestinations)
+    .where(and(eq(missionDestinations.id, id), eq(missionDestinations.active, true)));
+  if (!row) throw new AppError(400, "Destination inconnue ou retirée du barème.");
+  return row;
+}
+
 export async function listMissionBudgets(filter: { date?: string; status?: MissionBudgetStatus }): Promise<MissionBudget[]> {
   const where: SQL[] = [];
   if (filter.date) where.push(eq(missionBudgets.budgetDate, filter.date));
@@ -85,12 +107,19 @@ export async function getMissionBudget(id: number): Promise<MissionBudget> {
 export async function createMissionBudget(userId: number, input: CreateMissionBudgetRequest): Promise<MissionBudget> {
   const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, input.missionId));
   if (!mission) throw new AppError(404, "Mission introuvable.");
+  // Barème : complète litres et FDR absents du corps ; une valeur fournie l'emporte.
+  const destination = input.destinationId != null ? await activeDestination(input.destinationId) : null;
+  const fuelLiters = input.fuelLiters ?? (destination ? Number(destination.fuelLiters) : undefined);
+  const fdrAmount = input.fdrAmount ?? (destination ? Number(destination.fdrAmount) : undefined);
+  // Garanti par le contrat (litres et FDR requis sans destination) : garde de type seulement.
+  if (fuelLiters === undefined || fdrAmount === undefined) throw new AppError(400, "Litres et FDR requis sans destination du barème.");
   try {
     const [row] = await db
       .insert(missionBudgets)
       .values({
         missionId: input.missionId,
-        ...(await amountColumns(input)),
+        destinationId: destination?.id ?? null,
+        ...(await amountColumns({ budgetDate: input.budgetDate, fuelLiters, fdrAmount, extrasAmount: input.extrasAmount })),
         notes: input.notes ?? null,
         createdBy: userId,
         updatedBy: userId,
@@ -113,6 +142,7 @@ export async function updateMissionBudget(id: number, userId: number, input: Upd
     const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
     if (!current) throw new AppError(404, "Budget de mission introuvable.");
     if (current.status !== "requested") throw new AppError(409, "Ce budget n'est plus modifiable : il a déjà été approuvé.");
+    if (input.destinationId != null) await activeDestination(input.destinationId);
     const merged = {
       budgetDate: input.budgetDate ?? current.budgetDate,
       fuelLiters: input.fuelLiters ?? Number(current.fuelLiters),
@@ -124,6 +154,7 @@ export async function updateMissionBudget(id: number, userId: number, input: Upd
       .set({
         ...(await amountColumns(merged)),
         ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
+        ...(input.destinationId !== undefined ? { destinationId: input.destinationId ?? null } : {}),
         updatedBy: userId,
         updatedAt: new Date(),
       })

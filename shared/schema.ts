@@ -1380,6 +1380,8 @@ export const missionBudgets = pgTable("mission_budgets", {
   status: text("status", { enum: ["requested", "approved", "disbursed"] }).notNull().default("requested"),
   notes: text("notes"),
   treasuryEntryId: integer("treasury_entry_id"),
+  // L1b : destination du barème, choisie à la main ; pré-remplit litres et FDR, toujours modifiables.
+  destinationId: integer("destination_id").references(() => missionDestinations.id),
   approvedBy: integer("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at"),
   disbursedBy: integer("disbursed_by").references(() => users.id),
@@ -1394,6 +1396,24 @@ export const missionBudgets = pgTable("mission_budgets", {
   index("idx_mission_budgets_budget_date").on(table.budgetDate),
 ]);
 export type MissionBudgetRow = typeof missionBudgets.$inferSelect;
+
+// Barème FDR par destination (L1b), liste fermée. Jumelle SQL : MISSION_DESTINATIONS_SQL
+// (server/init-database.ts) et server/db/migrations/20261105_mission_destinations.sql, qui porte le seed.
+export const missionDestinations = pgTable("mission_destinations", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  fuelLiters: numeric("fuel_liters", { precision: 12, scale: 2 }).notNull(),
+  fdrAmount: numeric("fdr_amount", { precision: 15, scale: 2 }).notNull(),
+  active: boolean("active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_destinations_amounts_check", sql`${table.fuelLiters} >= 0 AND ${table.fdrAmount} >= 0`),
+]);
+export type MissionDestinationRow = typeof missionDestinations.$inferSelect;
 
 // Table assignments - Affectation véhicule + chauffeur à une mission
 export const assignments = pgTable("assignments", {
