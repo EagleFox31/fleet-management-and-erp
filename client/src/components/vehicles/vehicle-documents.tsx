@@ -460,7 +460,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
               aria-label="Supprimer le document"
               className="h-8 w-8"
             >
-              <Trash2 className="h-4 w-4 text-destructive" />
+              <Trash2 className="h-4 w-4 text-destructive-text" />
             </Button>
           )}
         </div>
