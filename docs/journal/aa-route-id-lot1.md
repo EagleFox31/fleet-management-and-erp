@@ -175,3 +175,20 @@
 - Tester : `route-id-strict-lot11`, 13 filtres × 3 cas (`12abc` → 400 et son message, hors int4 → 400, id bien formé → 200).
   - Ancien code : 24 rouges sur 39 (les 2 cas hors int4 de `fuel-records` étaient déjà refusés). Correctif : 39 verts, aucune donnée créée hors du compte admin.
   - tsc : 0 erreur. Unitaires : 2448 verts. 64 contrats du périmètre (facturation, achats, carburant, pneus, missions, renouvellements, ids) : 825 verts.
+
+## Lot 12 — 500 de la facturation, portée des cliquets d'id
+
+- Quoi : trois points de relecture des lots 10 et 11.
+  - `billing.routes.ts` : les 7 lectures répondaient `{ error: error.message }` en 500 (AGENTS §10). Elles relaient désormais au gestionnaire central par `next(withLogContext(isAppError(e) ? e : new AppError(500, …, { cause }), { event }))`. `getErrorMessage`, les `console.error` restants et le logger local sont retirés ; la trace est tenue par le gestionnaire central, avec le même libellé d'événement.
+  - Cliquets `route-id-parse-hygiene` et `query-id-parse-hygiene` : repérage partagé (`tests/support/request-id-scan.ts`).
+    - Une variable liée est rattachée à sa déclaration par le vérificateur TypeScript (un fichier, sans lib), au lieu du bloc `parent.parent.parent`. Un nom masqué (`for (const { id } of rows)`, paramètre homonyme) n'est plus compté.
+    - La requête est `req` ou le premier paramètre du handler (`(request, res) =>`).
+    - Conversions vues : `parseInt`, `parseFloat`, `Number`, `Number.parseInt`, `Number.parseFloat`, `+` unaire, avec ou sans `String(…)`.
+    - Cliquet query : nom d'id `id`, `…Id`, `…edBy` ; `sortBy`, `groupBy`, `orderBy` ne sont plus pris.
+  - `server/routes.ts` : `isNaN` mort retiré sur `stock-movements` (déjà refusé par `queryIdOrNaN`).
+- Tester :
+  - `error-500-relay-hygiene` couvre `billing` : rouge sur l'ancien code (500 locale, `console.*`), vert après.
+  - Contrat `billing-error-details` : 7 routes, 500 générique avec référence, sans le message du service. Il passait déjà avant (garde de sortie du gestionnaire) : non-régression.
+  - Nouveaux cas des cliquets : 4 rouges avec l'ancienne implémentation (autre nom de requête, `String(…)`, variable liée sous un autre nom, masquage par paramètre).
+  - Le cliquet query réécrit retrouve sur le code d'avant le lot 11 les mêmes comptes (8 / 5). Les gels n'ont pas bougé.
+  - tsc : 0 erreur. Unitaires : 2453 verts. 23 contrats (facturation, ids, stock) : 239 verts.
