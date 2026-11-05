@@ -6,6 +6,8 @@ import {
   invoiceDepositRequestSchema,
 } from "@shared/contracts/invoices-awaiting-payment";
 import { financeWithholdingsQuerySchema } from "@shared/contracts/finance-withholdings";
+import { financeReceivablesAgingQuerySchema } from "@shared/contracts/finance-receivables-aging";
+import { buildReceivablesAging } from "@shared/finance/receivables-aging";
 import { KPI_MAX_SPAN_MONTHS, isoDateInZone, spanInMonths } from "@shared/contracts/kpi-period";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
@@ -39,6 +41,19 @@ function emit(event: "client_invoice_deposited" | "client_withholding_updated", 
 router.get("/finance/invoices-awaiting-payment", finance, authorize([...FINANCE_RECEIVABLE_READ_ROLES]), async (_req, res, next) => {
   try {
     res.json(await listInvoicesAwaitingPayment());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Balance âgée : factures en attente par tranche d'ancienneté depuis le dépôt, par client. Aucun paramètre. */
+router.get("/finance/receivables-aging", finance, authorize([...FINANCE_RECEIVABLE_READ_ROLES]), async (req, res, next) => {
+  try {
+    if (!financeReceivablesAgingQuerySchema.safeParse(req.query).success) throw new AppError(400, "Paramètre non reconnu.");
+    // Même instant pour la liste et la date affichée : l'ancienneté est cohérente avec `asOf`.
+    const now = new Date();
+    const { items } = await listInvoicesAwaitingPayment(now);
+    res.json(buildReceivablesAging(items, isoDateInZone(now)));
   } catch (err) {
     next(err);
   }
