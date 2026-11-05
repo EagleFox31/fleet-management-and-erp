@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PoolClient } from "@neondatabase/serverless";
 import { db, pool } from "../../server/db";
@@ -54,8 +54,11 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  await cleanupCreated(ids);
-  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  try {
+    await cleanupCreated(ids);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 });
 
 describe("LAG1 : rôle d'administrateur (PATCH /api/users/:id)", { timeout: 60000 }, () => {
@@ -123,7 +126,14 @@ describe("LAG2 : suppression d'un administrateur", { timeout: 60000 }, () => {
   }
 });
 
-describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout: 60000 }, () => {
+// Le trigger « au moins un administrateur actif » interdit la désactivation du dernier admin, que ces cas
+// organisent volontairement : ils sont ignorés (avec explication) quand il est posé. La garantie y est alors
+// couverte par tests/integration/users-keep-active-admin.test.ts.
+const keepAdminTrigger = (
+  await db.execute(sql`SELECT 1 AS present FROM pg_trigger WHERE tgname = 'trg_users_keep_active_admin' AND NOT tgisinternal`)
+).rows.length > 0;
+
+describe.skipIf(keepAdminTrigger)("LAG3 : deux admins se retirent mutuellement en même temps (ignoré si le trigger de base est posé)", { timeout: 60000 }, () => {
   // Chaque test ne doit voir que ses deux admins : les admins actifs sont désactivés avant chaque
   // test. Les nôtres le restent (nettoyés ensuite) ; les préexistants de la base de test (compte du
   // seed) sont rétablis en fin de bloc. Les suites de contrat s'enchaînent sous verrou.
@@ -139,8 +149,12 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     try {
       if (lockHolder) await lockHolder.query("SELECT pg_advisory_unlock_all()").catch(() => undefined);
     } finally {
-      lockHolder?.release(true);
-      if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
+      try {
+        lockHolder?.release(true);
+      } finally {
+        // Toujours rétablir les admins préexistants, quel que soit l'échec d'un test ou du déverrouillage.
+        if (preexisting.size > 0) await db.update(users).set({ deletedAt: null }).where(inArray(users.id, [...preexisting]));
+      }
     }
   });
 
