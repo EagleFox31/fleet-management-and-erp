@@ -1344,36 +1344,6 @@ export const TREASURY_SCHEMA_STATEMENTS = [
   `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS fuel_record_id integer REFERENCES fuel_records(id) ON DELETE SET NULL`,
   `ALTER TABLE treasury_entries ADD COLUMN IF NOT EXISTS supplier_settlement_id integer REFERENCES supplier_invoice_settlements(id) ON DELETE SET NULL`,
   `ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS treasury_account_id integer REFERENCES treasury_accounts(id)`,
-  // Deux cartes actives déjà en base : WARNING, l'index attend qu'on en désactive une (démarrage non bloqué).
-  `DO $$
-BEGIN
-  IF to_regclass('uq_treasury_accounts_active_fuel_card') IS NOT NULL THEN
-    RETURN;
-  END IF;
-  IF (SELECT count(*) FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active) > 1 THEN
-    RAISE WARNING 'treasury_accounts : plusieurs cartes carburant actives, index uq_treasury_accounts_active_fuel_card non posé';
-  ELSE
-    CREATE UNIQUE INDEX uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
-  END IF;
-END $$`,
-  // Véhicule ou mission supprimés (restauration de sauvegarde, purge) : l'écriture reste, son lien passe à NULL.
-  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction.
-  `DO $$
-DECLARE
-  c record;
-  fk record;
-BEGIN
-  FOR c IN SELECT * FROM (VALUES ('vehicle_id', 'vehicles'), ('mission_id', 'missions')) AS v(col, ref) LOOP
-    FOR fk IN
-      SELECT k.conname FROM pg_constraint k
-      JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
-      WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = c.col AND k.confdeltype <> 'n'
-    LOOP
-      EXECUTE format('ALTER TABLE treasury_entries DROP CONSTRAINT %I, ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE SET NULL',
-        fk.conname, fk.conname, c.col, c.ref);
-    END LOOP;
-  END LOOP;
-END $$`,
   // Lot T4 : traites et chèques. Jumelle de shared/schema.ts (paymentInstruments).
   `CREATE TABLE IF NOT EXISTS payment_instruments (
     id serial PRIMARY KEY,
@@ -1406,6 +1376,36 @@ END $$`,
     CONSTRAINT payment_instruments_paid_check CHECK ((status = 'paid') = (paid_at IS NOT NULL AND treasury_entry_id IS NOT NULL))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_payment_instruments_status_due ON payment_instruments (status, due_date)`,
+  // Deux cartes actives déjà en base : WARNING, l'index attend qu'on en désactive une (démarrage non bloqué).
+  `DO $$
+BEGIN
+  IF to_regclass('uq_treasury_accounts_active_fuel_card') IS NOT NULL THEN
+    RETURN;
+  END IF;
+  IF (SELECT count(*) FROM treasury_accounts WHERE kind = 'fuel_card' AND is_active) > 1 THEN
+    RAISE WARNING 'treasury_accounts : plusieurs cartes carburant actives, index uq_treasury_accounts_active_fuel_card non posé';
+  ELSE
+    CREATE UNIQUE INDEX uq_treasury_accounts_active_fuel_card ON treasury_accounts (kind) WHERE kind = 'fuel_card' AND is_active;
+  END IF;
+END $$`,
+  // Véhicule ou mission supprimés (restauration de sauvegarde, purge) : l'écriture reste, son lien passe à NULL.
+  // Une FK posée sans ON DELETE est remplacée sous le même nom, dans une seule instruction.
+  `DO $$
+DECLARE
+  c record;
+  fk record;
+BEGIN
+  FOR c IN SELECT * FROM (VALUES ('vehicle_id', 'vehicles'), ('mission_id', 'missions')) AS v(col, ref) LOOP
+    FOR fk IN
+      SELECT k.conname FROM pg_constraint k
+      JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+      WHERE k.conrelid = 'treasury_entries'::regclass AND k.contype = 'f' AND a.attname = c.col AND k.confdeltype <> 'n'
+    LOOP
+      EXECUTE format('ALTER TABLE treasury_entries DROP CONSTRAINT %I, ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE SET NULL',
+        fk.conname, fk.conname, c.col, c.ref);
+    END LOOP;
+  END LOOP;
+END $$`,
   // Tables créées par drizzle-kit push, ou avant qu'une contrainte soit déclarée : CREATE TABLE IF NOT EXISTS
   // a été sauté. Même réconciliation que le schéma CDC : CHECK en NOT VALID puis VALIDATE, UNIQUE renommé
   // s'il existe sous un autre nom, WARNING plutôt que démarrage bloqué si des lignes existantes dérogent.
