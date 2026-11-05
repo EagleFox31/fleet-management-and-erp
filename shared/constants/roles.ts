@@ -179,10 +179,16 @@ export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
 export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
-/** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve et décaisse. */
+/** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve. */
 export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
-export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+/**
+ * Décaissement et choix du compte source (L1c) : alignés sur FUEL_RECHARGE_SOURCE_ROLES, mais déclarés
+ * à part pour qu'un changement côté carburant ne les déplace pas. Qui approuve ne décaisse pas.
+ */
+export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
+/** Lecture (liste, détail, besoin du jour, destinations) : qui saisit, approuve ou décaisse lit le budget. */
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary"] as const satisfies readonly AppRole[];
 
 /**
  * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.

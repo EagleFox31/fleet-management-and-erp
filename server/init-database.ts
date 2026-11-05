@@ -1147,6 +1147,7 @@ END $$;`;
 // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
 // Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
 export const MISSION_DESTINATIONS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS mission_destinations (
   id serial PRIMARY KEY,
@@ -1240,6 +1241,7 @@ END $$;`;
 // Lien trésorerie du budget de mission (L1c) — jumelle de server/db/migrations/20261105_mission_budgets_treasury.sql.
 // Après MISSION_BUDGETS_SQL ; treasury_entries est créée plus tôt par applyCdcSchema.
 export const MISSION_BUDGETS_TREASURY_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 DO $$
 BEGIN

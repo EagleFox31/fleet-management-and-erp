@@ -108,6 +108,8 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
   it("additif et idempotent : seed sans réécriture, aucune suppression", () => {
     const sql = migration();
     expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    // Verrou de table borné : un démarrage ne reste pas bloqué derrière une transaction longue.
+    expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS mission_destinations");
     expect(sql).toContain("ON CONFLICT (code) DO NOTHING");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS destination_id integer");
@@ -174,6 +176,8 @@ describe("L1c : FK trésorerie de mission_budgets, init-database et migration ju
     expect(getTableConfig(missionBudgets).foreignKeys.map((k) => k.getName())).toContain(FK);
     const sql = migration();
     expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    // Verrou de table borné : un démarrage ne reste pas bloqué derrière une transaction longue.
+    expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
     expect(sql).toContain("to_regclass('treasury_entries') IS NULL");
     expect(sql).toContain(`CONSTRAINT ${FK}\n      FOREIGN KEY (treasury_entry_id) REFERENCES treasury_entries(id) NOT VALID`);
     expect(sql).toContain(`VALIDATE CONSTRAINT ${FK}`);

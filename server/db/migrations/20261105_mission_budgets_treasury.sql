@@ -4,6 +4,7 @@
 -- Après 20261105_mission_budgets.sql (ordre alphabétique : '.' avant '_'). Sans l'une des deux tables,
 -- rien n'est fait : le démarrage suivant pose la contrainte.
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 DO $$
 BEGIN

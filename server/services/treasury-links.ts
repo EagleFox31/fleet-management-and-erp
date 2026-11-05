@@ -223,8 +223,9 @@ const missionBudgetKey = (id: number, line: "carburant" | "fdr") => `mission-bud
 /**
  * Décaissement d'un budget de mission (L1c), dans la transaction de la transition `disbursed` :
  * deux sorties du compte choisi, liées à la mission — carburant, puis FDR et frais annexes.
- * Sans compte : rien n'est écrit (le décaissement reste un marquage). Compte demandé sans drapeau
- * `finance` : 409. Banque ou caisse seulement, jamais la carte carburant : 400.
+ * Finance active : compte obligatoire (400 sans compte), sinon le décaissement ne laisserait aucune
+ * trace à contre-passer. Finance coupée : sans compte, simple marquage ; compte demandé, 409.
+ * Banque ou caisse seulement, jamais la carte carburant : 400.
  * Renvoie l'écriture à retenir sur le budget (FDR, sinon carburant), ou `null` si rien n'est écrit.
  */
 export async function linkMissionBudgetDisbursement(
@@ -233,7 +234,10 @@ export async function linkMissionBudgetDisbursement(
   accountId: number | null | undefined,
   userId: number,
 ): Promise<number | null> {
-  if (!accountId) return null;
+  if (!accountId) {
+    if (isFeatureEnabled("finance")) throw new AppError(400, "Choisissez le compte de trésorerie d'où sort l'argent du budget.");
+    return null;
+  }
   if (!isFeatureEnabled("finance")) throw new AppError(409, "La trésorerie n'est pas activée : laissez le compte de trésorerie vide.");
   const account = await requireActiveAccount(tx as never, accountId);
   if (account.kind !== "bank" && account.kind !== "cash") {

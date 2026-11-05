@@ -8,6 +8,12 @@ import {
   missionBudgetTransitionRequestSchema,
   updateMissionBudgetRequestSchema,
 } from "../../../shared/contracts/mission-budgets";
+import {
+  MISSION_BUDGET_APPROVE_ROLES,
+  MISSION_BUDGET_DISBURSE_ROLES,
+  MISSION_BUDGET_READ_ROLES,
+  MISSION_BUDGET_WRITE_ROLES,
+} from "../../../shared/constants/roles";
 
 describe("L1 : calcul du budget de mission", () => {
   it("carburant = litres × prix du jour ; total = carburant + FDR + extras", () => {
@@ -113,5 +119,17 @@ describe("L1c : contrat de décaissement", () => {
     expect(missionBudgetDisburseRequestSchema.safeParse({ treasuryAccountId: 3 }).success).toBe(false);
     expect(missionBudgetDisburseRequestSchema.safeParse({ expectedUpdatedAt: v, amount: 1 }).success).toBe(false);
     expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: v, treasuryAccountId: 3 }).success).toBe(false);
+  });
+});
+
+describe("L1c : rôles du budget de mission", () => {
+  it("la lecture couvre exactement qui saisit, approuve ou décaisse", () => {
+    const union = new Set<string>([...MISSION_BUDGET_WRITE_ROLES, ...MISSION_BUDGET_APPROVE_ROLES, ...MISSION_BUDGET_DISBURSE_ROLES]);
+    expect([...MISSION_BUDGET_READ_ROLES].sort()).toEqual([...union].sort());
+  });
+
+  it("qui approuve ne décaisse pas, sauf l'administrateur", () => {
+    const disburse = new Set<string>(MISSION_BUDGET_DISBURSE_ROLES);
+    expect(MISSION_BUDGET_APPROVE_ROLES.filter((r) => r !== "admin" && disburse.has(r))).toEqual([]);
   });
 });
