@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 // Plages bornees : emoji et pictogrammes (U+1F000-1FAFF), symboles et dingbats (U+2600-27BF), etoiles et ronds
 // (U+2B50, U+2B55), selecteur d'emoji (U+FE0F) et touche encadree (U+20E3). Les lettres accentuees, les fleches
 // typographiques (U+2190-21FF), les puces, tirets et guillemets ne sont pas touches.
+// Les signes ✓ (2713), ✗ (2717) et ✕ (2715) ne sont pas des emoji Unicode mais des dingbats : ils sont comptes volontairement,
+// AGENTS.md §4 veut les icones Check et X de lucide-react a la place.
 export const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{FE0F}\u{20E3}]/u;
 
 const root = process.cwd();
@@ -55,9 +57,12 @@ describe("aucun nouvel emoji dans client/src", () => {
     expect(Object.entries(counts()).filter(([f, n]) => n > (GELES[f] ?? 0))).toEqual([]);
   });
 
-  it("la liste gelee ne contient que des fichiers qui ont encore des emoji", () => {
+  it("chaque fichier gele est a son compte exact (compte baisse : abaisser GELES)", () => {
     const now = counts();
-    expect(Object.keys(GELES).filter((f) => !now[f]), "fichiers assainis : les retirer de GELES").toEqual([]);
+    const ecarts = Object.keys(GELES)
+      .filter((f) => (now[f] ?? 0) !== GELES[f])
+      .map((f) => `${f} : gele ${GELES[f]}, actuel ${now[f] ?? 0} -> compte baisse : abaisser GELES (ou retirer le fichier)`);
+    expect(ecarts).toEqual([]);
   });
 
   it("le detecteur voit un emoji dans un JSX fictif", () => {

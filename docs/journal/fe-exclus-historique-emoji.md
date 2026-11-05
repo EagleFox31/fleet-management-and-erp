@@ -9,3 +9,9 @@ Le balayage trouve 94 lignes avec emoji dans 22 fichiers de `client/src` (surtou
 
 ## Preuve
 Mutations rouges : emoji dans un JSX fictif (`<p>Bravo …</p>`) dans un nouveau fichier, et emoji ajouté à un fichier gelé. Le détecteur est testé sur emoji, sélecteur FE0F, accents et flèches.
+## Signes comptés
+✓ (U+2713), ✗ (U+2717) et ✕ (U+2715) sont des dingbats, pas des emoji Unicode ; ils sont comptés volontairement : AGENTS.md §4 demande les icônes Check et X de lucide-react.
+
+## Preuve
+- Rouges : emoji dans un JSX fictif (nouveau fichier) ; emoji ajouté à un fichier gelé ; compte gelé de `settings.tsx` relevé de 7 à 8 (test « compte exact », message « compte baissé : abaisser GELES »).
+- Correction de relecture : une première mutation (relever un compte gelé) restait verte, car le test n'exigeait qu'un compte inférieur ou égal. Le cliquet exige maintenant l'égalité exacte.

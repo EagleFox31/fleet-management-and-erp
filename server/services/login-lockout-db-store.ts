@@ -7,6 +7,7 @@ import {
   confirmedLockState,
   EMPTY_LOCK_STATE,
   isLocked,
+  lockKeyOrder,
   reservedLockState,
   type LockState,
   type LockoutStore,
@@ -78,46 +79,6 @@ export class DbLockoutStore implements LockoutStore {
     return rows[0] ? toState(rows[0]) : EMPTY_LOCK_STATE;
   }
 
-  async registerFailure(username: string, now: Date, cfg: LockoutConfig): Promise<LockState> {
-    const until = new Date(now.getTime() + cfg.lockMinutes * 60_000);
-    const { rows } = await pool.query(
-      `INSERT INTO login_attempts_by_username AS t (username_normalized, failed_count, locked_until, last_failed_at, updated_at)
-       VALUES ($1, 1, CASE WHEN 1 >= $4::int THEN $3::timestamp ELSE NULL END, $2::timestamp, $2::timestamp)
-       ON CONFLICT (username_normalized) DO UPDATE SET
-         failed_count = CASE WHEN t.locked_until IS NOT NULL AND t.locked_until <= $2::timestamp THEN 1 ELSE t.failed_count + 1 END,
-         locked_until = CASE
-           WHEN (CASE WHEN t.locked_until IS NOT NULL AND t.locked_until <= $2::timestamp THEN 1 ELSE t.failed_count + 1 END) >= $4::int THEN $3::timestamp
-           WHEN t.locked_until IS NOT NULL AND t.locked_until <= $2::timestamp THEN NULL
-           ELSE t.locked_until END,
-         last_failed_at = $2::timestamp,
-         updated_at = $2::timestamp
-       RETURNING failed_count, locked_until, last_failed_at`,
-      [storedLockoutKey(username), now, until, cfg.maxAttempts],
-    );
-    const state = toState(rows[0]);
-    const target = mirrorTarget(username);
-    const mirror = await pool.query(
-      `UPDATE users SET failed_login_count = $2, locked_until = $3, last_failed_login_at = $4
-       WHERE ${target.where} RETURNING id`,
-      [target.param, state.failedCount, state.lockedUntil, state.lastFailedAt],
-    );
-    // Blocage audite une seule fois : l'echec qui atteint exactement le seuil.
-    if (state.lockedUntil && state.failedCount === cfg.maxAttempts) {
-      const id = mirror.rows[0]?.id as number | undefined;
-      await recordAudit({
-        userId: id ?? null,
-        action: "lock",
-        entityType: "user",
-        // Compte inconnu : l'empreinte, jamais le nom saisi.
-        entityId: id !== undefined ? String(id) : storedLockoutKey(username),
-        method: null,
-        path: null,
-        details: { lockedUntil: state.lockedUntil.toISOString(), failedCount: state.failedCount },
-      });
-    }
-    return state;
-  }
-
   /**
    * Lecture puis ecriture d'un compteur sous verrou consultatif de transaction, pris sur la cle :
    * les tentatives simultanees d'un meme compte passent une par une, y compris quand la ligne
@@ -154,8 +115,7 @@ export class DbLockoutStore implements LockoutStore {
    * qui reecrivait alors l'ancienne valeur (remise a zero ou tentative rendue perdue).
    */
   private async underKeyLock<T>(keys: string | readonly string[], work: (client: PoolClient) => Promise<T>): Promise<T> {
-    // Plusieurs cles : verrous pris dans un ordre fixe, pour qu'un autre ecrivain multi-cles ne s'interbloque pas.
-    const ordered = Array.from(new Set(typeof keys === "string" ? [keys] : keys)).sort();
+    const ordered = lockKeyOrder(keys);
     const client = await pool.connect();
     let broken: Error | undefined;
     try {

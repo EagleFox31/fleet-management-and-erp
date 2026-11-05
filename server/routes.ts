@@ -46,7 +46,7 @@ import { loginUsernameRef } from "./lib/login-identifier";
 import bcrypt from "bcryptjs";
 import { alertService } from "./services/alert-service";
 import { parseReportPeriod } from "./lib/report-period";
-import { routeIdOrNaN } from "./lib/route-id";
+import { queryIdOrNaN, routeIdOrNaN } from "./lib/route-id";
 import { AppError, isAppError } from "./lib/app-error";
 import { withLogContext } from "./lib/error-log-context";
 import { assertFuelRecordLedgerEditable } from "./lib/fuel-record-ledger-lock";
@@ -2675,7 +2675,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Parts History and Analytics Routes
   app.get("/api/parts/stock-movements", isStaff, async (req, res) => {
     try {
-      const partId = req.query.partId ? parseInt(req.query.partId as string) : undefined;
+      const partId = queryIdOrNaN(req.query.partId);
+      if (Number.isNaN(partId)) return res.status(400).json({ message: "ID de pièce invalide" });
       
       if (partId && isNaN(partId)) {
         return res.status(400).json({ message: "ID de pièce invalide" });
@@ -2962,7 +2963,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Récupérer tous les enregistrements de carburant
   app.get("/api/fuel-records", isAnyUser, async (req, res, next) => {
     try {
-      const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
+      const vehicleId = queryIdOrNaN(req.query.vehicleId);
+      if (Number.isNaN(vehicleId)) return res.status(400).json({ message: "ID de véhicule invalide." });
       // Lecture par le service : les pleins supprimés (deleted_at) en sont exclus.
       let fuelRecords: Awaited<ReturnType<typeof fuelService.getFuelRecordsByVehicleId>> = [];
 
@@ -3169,7 +3171,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/fuel-records/consumption-history", isAnyUser, async (req, res, next) => {
     try {
       const period = req.query.period as string || 'month';
-      const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
+      const vehicleId = queryIdOrNaN(req.query.vehicleId);
+      if (Number.isNaN(vehicleId)) return res.status(400).json({ message: "ID de véhicule invalide." });
       
       // Date limite pour la période
       const now = new Date();
@@ -4501,7 +4504,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Tire inspection routes
   app.get("/api/tire-inspections", isStaff, async (req, res) => {
     try {
-      const vehicleTireId = req.query.vehicleTireId ? parseInt(req.query.vehicleTireId as string) : undefined;
+      const vehicleTireId = queryIdOrNaN(req.query.vehicleTireId);
+      if (Number.isNaN(vehicleTireId)) return res.status(400).json({ message: "ID de pneu véhicule invalide" });
       const limit = parseInt(req.query.limit as string) || 20;
       const offset = parseInt(req.query.offset as string) || 0;
       
@@ -4583,7 +4587,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Tire rotation routes
   app.get("/api/tire-rotations", isStaff, async (req, res) => {
     try {
-      const vehicleId = req.query.vehicleId ? parseInt(req.query.vehicleId as string) : undefined;
+      const vehicleId = queryIdOrNaN(req.query.vehicleId);
+      if (Number.isNaN(vehicleId)) return res.status(400).json({ message: "ID de véhicule invalide" });
       const limit = parseInt(req.query.limit as string) || 20;
       const offset = parseInt(req.query.offset as string) || 0;
       
