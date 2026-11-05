@@ -1,5 +1,6 @@
 import { storage } from "../storage";
 import { AppError } from "./app-error";
+import { MAX_DB_INTEGER_ID } from "./route-id";
 import { canAccessOwned, type ScopeReader } from "./client-scope";
 
 /**
@@ -16,7 +17,7 @@ import { canAccessOwned, type ScopeReader } from "./client-scope";
  * Écart connu : GET /api/work-orders/:id bloque aussi un technicien sur l'OT
  * d'un autre technicien (routes.ts, route GET /api/work-orders/:id). Ce helper ne le fait pas.
  */
-export const MAX_DB_INTEGER_ID = 2147483647;
+export { MAX_DB_INTEGER_ID };
 
 /** Un id de colonne `integer` : entier strictement positif tenant sur 32 bits (sinon Postgres répond 500). */
 export function assertValidDbId(value: number, message: string): void {
