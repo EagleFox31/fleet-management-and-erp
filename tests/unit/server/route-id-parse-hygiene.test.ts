@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { MAX_DB_INTEGER_ID, parseRouteId } from "../../../server/lib/route-id";
+import { MAX_DB_INTEGER_ID, parseRouteId, routeIdOrNaN } from "../../../server/lib/route-id";
 import { sourceFiles, stripComments } from "../../support/route-guard-scan";
 
 /**
@@ -35,7 +35,6 @@ const LOOSE_PARAM_READ = /\b(?:Number\.)?parseInt\(\s*req\.params\b|\bNumber\(\s
 const FROZEN: Record<string, number> = {
   "admin-users-guard.routes.ts": 1,
   "document-renewals.routes.ts": 1,
-  "fuel-card.routes.ts": 2,
   "part-requirements.routes.ts": 3,
   "parts-catalog.routes.ts": 3,
   "supplier-invoices.routes.ts": 5,
@@ -43,6 +42,9 @@ const FROZEN: Record<string, number> = {
   "work-order-items.routes.ts": 4,
   "work-order-parts.routes.ts": 5,
 };
+
+/** Lectures lâches restantes dans `server/routes.ts` (gelé). Ne peut que baisser. */
+const ROUTES_TS_FROZEN = 41;
 
 export function countLooseParamReads(source: string): number {
   return (stripComments(source).match(LOOSE_PARAM_READ) ?? []).length;
@@ -217,6 +219,19 @@ describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâc
     const ref = "export function parseRouteId(v: unknown, m: string) { return Number(v); }";
     const importingRef = 'import { parseRouteId } from "../lib/route-id";\nconst a = parseRouteId(req.params.id, "m");';
     expect(countLooseParserCalls("/s/api/a.ts", importingRef, () => ref)).toBe(0);
+  });
+
+  it("server/routes.ts (gelé) : le nombre de lectures lâches ne peut que baisser", () => {
+    // 50 relevées par ce motif le 5 novembre 2026 (origin/main) ; les 9 DELETE passent à routeIdOrNaN (lot 5).
+    expect(countLooseParamReads(readFileSync(join(ROOT, "server/routes.ts"), "utf8"))).toBe(ROUTES_TS_FROZEN);
+  });
+
+  it("routeIdOrNaN : même lecture que parseRouteId, NaN au lieu de lever", () => {
+    expect(routeIdOrNaN("12")).toBe(12);
+    expect(routeIdOrNaN(String(MAX_DB_INTEGER_ID))).toBe(MAX_DB_INTEGER_ID);
+    for (const bad of ["12abc", "0", "-1", "1.5", "1e3", " 7", "0x1F", "", String(MAX_DB_INTEGER_ID + 1), undefined, 12]) {
+      expect(routeIdOrNaN(bad), String(bad)).toBeNaN();
+    }
   });
 
   it("parseRouteId : chiffres seuls, de 1 à l'int4, sinon 400", () => {
