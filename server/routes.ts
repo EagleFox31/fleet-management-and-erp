@@ -4505,31 +4505,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tire-rotations", isWorkshopManager, async (req, res, next) => {
-    try {
-      const { insertTireRotationSchema } = await import("@shared/schema");
-      // OT et auteur sont posés par le serveur ; le formulaire envoie le coût en nombre.
-      const rotationInput = insertTireRotationSchema
-        .omit({ workOrderId: true, performedBy: true, createdBy: true })
-        .extend({
-          cost: z.coerce.number().nonnegative().nullish(),
-          technicianId: z.number().int().positive().nullish(),
-        });
-
-      const rotationData = {
-        ...rotationInput.parse(req.body?.rotation ?? {}),
-        performedBy: req.user?.id,
-      };
-
-      const result = await tiresService.createTireRotation(rotationData);
-      return res.status(201).json(result);
-    } catch (error) {
-      if (error instanceof z.ZodError || error instanceof AppError) return next(error);
-      log.error({ err: error, requestId: req.requestId }, "Create tire rotation error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   app.get("/api/tire-rotations/:id/details", isStaff, async (req, res, next) => {
     try {
       const rotationId = routeIdOrNaN(req.params.id);
