@@ -6,6 +6,7 @@ import { drivers, missions, assignments, clients, vehicles, users } from "@share
 import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { toFieldErrors } from "@shared/errors";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
@@ -448,7 +449,7 @@ class DriverAlreadyLinkedError extends Error {}
 // POST /api/drivers/:id/create-user - Créer un compte utilisateur pour un chauffeur
 router.post("/:id/create-user", isAdmin, async (req, res, next) => {
   try {
-    const driverId = parseInt(req.params.id, 10);
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
     const { pin, email } = req.body;
 
     if (!pin || !/^\d{4}$/.test(String(pin))) {
@@ -514,6 +515,7 @@ router.post("/:id/create-user", isAdmin, async (req, res, next) => {
 
     return res.status(201).json({ user: newUser, message: `Compte créé: ${username}` });
   } catch (error: any) {
+    if (error instanceof AppError) return next(error);
     if (error instanceof DriverAlreadyLinkedError) {
       return res.status(409).json({ message: DRIVER_ALREADY_LINKED });
     }

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { DRIVER_CPC_FORBIDDEN_MESSAGE, redactDriverPersonalData } from "../lib/driver-scope";
 import { withLogContext } from "../lib/error-log-context";
@@ -99,12 +100,8 @@ router.post("/:id/update-cpc", (req, res, next) => {
   next();
 }, isDriverManager, async (req, res, next) => {
   try {
-    const driverId = parseInt(req.params.id);
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
     const { cpcDate } = req.body;
-
-    if (isNaN(driverId)) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
 
     if (!cpcDate) {
       return res.status(400).json({ message: "Date CPC requise" });
@@ -138,6 +135,7 @@ router.post("/:id/update-cpc", (req, res, next) => {
     
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Impossible de mettre à jour la certification CPC.", { cause: error }), { event: "Mise a jour CPC en echec" }));
   }
 });
@@ -161,15 +159,12 @@ router.get("/cpc-statistics", async (req, res, next) => {
  */
 router.get("/:id/cpc-status", async (req, res, next) => {
   try {
-    const driverId = parseInt(req.params.id);
-    
-    if (isNaN(driverId)) {
-      return res.status(400).json({ message: "ID de chauffeur invalide" });
-    }
+    const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
     
     const driver = await cpcTrainingService.getDriverWithCPCStatus(driverId);
     return res.status(200).json(await redactDriverPersonalData(req.user, driver));
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     return next(withLogContext(new AppError(500, "Impossible de charger le chauffeur.", { cause: error }), { event: "Statut CPC du chauffeur en echec" }));
   }
 });
