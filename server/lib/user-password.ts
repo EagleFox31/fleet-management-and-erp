@@ -9,14 +9,17 @@ export const LEGACY_SHA256_RE = /^[a-f0-9]{64}$/;
 
 /**
  * Mot de passe d'une sauvegarde importée. Hash bcrypt ou SHA-256 hérité : repris tel quel.
- * Clair conforme (au moins PASSWORD_MIN_LENGTH caractères) : haché. Vide, absent, trop court ou
+ * Clair conforme (au moins PASSWORD_MIN_LENGTH caractères, sans allure de hash) : haché. Vide, absent, trop court ou
  * non textuel : hash aléatoire inutilisable (colonne NOT NULL), le compte passe par une
  * réinitialisation admin. `onInvalid` ne reçoit rien : ni la valeur, ni sa longueur.
  */
 export async function passwordForRestore(password: unknown, onInvalid?: () => void): Promise<string> {
   if (typeof password === "string") {
     if (BCRYPT_HASH_RE.test(password) || LEGACY_SHA256_RE.test(password)) return password;
-    if (password.length >= PASSWORD_MIN_LENGTH) return bcrypt.hash(password, 10);
+    // Allure de hash hors motif strict ($2 tronque, SHA-256 en majuscules) : hash abime, pas un clair choisi
+    // par quelqu'un. Le hacher ouvrirait un compte dont le "mot de passe" serait cette chaine.
+    const looksLikeHash = password.startsWith("$2") || /^[a-fA-F0-9]{64}$/.test(password);
+    if (!looksLikeHash && password.length >= PASSWORD_MIN_LENGTH) return bcrypt.hash(password, 10);
   }
   onInvalid?.();
   return randomPasswordHash();

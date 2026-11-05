@@ -5,6 +5,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { DRIVER_CPC_FORBIDDEN_MESSAGE, redactDriverPersonalData } from "../lib/driver-scope";
 import { withLogContext } from "../lib/error-log-context";
+import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
 
 const log = moduleLogger("drivers");
 
@@ -112,6 +113,9 @@ router.post("/:id/update-cpc", (req, res, next) => {
     const parsedCpcDate = new Date(cpcDate);
     if (Number.isNaN(parsedCpcDate.getTime())) {
       return next(new AppError(400, "Date CPC invalide."));
+    }
+    if (isCpcTrainingDateInFuture(parsedCpcDate)) {
+      return next(new AppError(400, CPC_TRAINING_DATE_FUTURE_MESSAGE));
     }
 
     const driver = await cpcTrainingService.updateCPCCertification(

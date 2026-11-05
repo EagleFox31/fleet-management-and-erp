@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { describe, expect, it, vi } from "vitest";
 import { BCRYPT_HASH_RE, passwordForRestore } from "../../../server/lib/user-password";
 
@@ -16,11 +17,14 @@ describe("passwordForRestore", () => {
     expect(out).not.toContain("clair-123");
   });
 
-  it("préfixe bcrypt sans hash valide ou SHA-256 majuscule : traité comme clair, donc haché", async () => {
-    for (const v of ["$2b$" + "x".repeat(56), "$2b$10$" + "!".repeat(53), "A".repeat(64)]) {
-      const out = await passwordForRestore(v);
-      expect(out).not.toBe(v);
+  it("allure de hash hors motif strict ($2 abîmé, SHA-256 majuscule) : onInvalid, jamais haché comme un clair", async () => {
+    for (const v of ["$2b$" + "x".repeat(56), "$2b$10$" + "!".repeat(53), "$2y$10$court", "A".repeat(64), "aB".repeat(32)]) {
+      const onInvalid = vi.fn();
+      const out = await passwordForRestore(v, onInvalid);
       expect(out).toMatch(BCRYPT_HASH_RE);
+      expect(onInvalid).toHaveBeenCalledTimes(1);
+      expect(onInvalid.mock.calls[0]).toEqual([]);
+      expect(await bcrypt.compare(v, out)).toBe(false);
     }
   });
 

@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, sql, gte, lte, or, lt, ne, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { isSettlementProofReference } from "../lib/settlement-proof";
 import type { DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
 
 /**
@@ -762,6 +763,10 @@ export class ThreeWayMatchingService {
     const normalizedProofReference = String(data.proofReference || "").trim();
     if (!normalizedProofReference) {
       throw new AppError(400, "Justificatif de règlement obligatoire (image ou PDF).");
+    }
+    // Seul le fichier téléversé fait foi : une référence libre ne serait jamais servie.
+    if (!isSettlementProofReference(normalizedProofReference)) {
+      throw new AppError(400, "Justificatif de règlement invalide : téléversez une image ou un PDF.");
     }
 
     const paymentReference = data.paymentReference.trim();

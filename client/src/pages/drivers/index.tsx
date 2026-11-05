@@ -19,6 +19,7 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageDrivers } from "@shared/constants/roles";
+import { normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { driverLicenseDaysLabel, getDriverLicenseStatus } from "@/lib/driver-license-status";
 import { DriverForm, type DriverFormData } from "@/components/drivers/driver-form";
 
@@ -86,15 +87,15 @@ export default function DriversIndex() {
       driver.employeeNumber?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus =
       statusFilter === "all" ||
-      driver.cpcStatus === statusFilter ||
+      normalizeCpcStatus(driver.cpcStatus) === normalizeCpcStatus(statusFilter) ||
       (statusFilter === "active" && driver.isActive) ||
       (statusFilter === "inactive" && !driver.isActive);
     return matchesSearch && matchesStatus;
   }) || [];
 
   const getStatusBadge = (status: string) => {
-    if (status === 'FORMÉ') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />FORMÉ</span>;
-    if (status === 'À FORMER') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />À FORMER</span>;
+    if (normalizeCpcStatus(status) === 'FORME') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />FORMÉ</span>;
+    if (normalizeCpcStatus(status) === 'A FORMER') return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />À FORMER</span>;
     return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1"><XCircle className="w-3 h-3" />NON FORMÉ</span>;
   };
 
@@ -178,7 +179,7 @@ export default function DriversIndex() {
           />
           <KpiTile
             label="Formés"
-            value={drivers?.filter(d => d.cpcStatus === 'FORMÉ').length || 0}
+            value={drivers?.filter(d => normalizeCpcStatus(d.cpcStatus) === 'FORME').length || 0}
             subValue="CPC à jour"
             icon={<CheckCircle className="h-4 w-4" />}
             iconWrapperClassName="bg-green-50 text-green-600"
@@ -186,7 +187,7 @@ export default function DriversIndex() {
           />
           <KpiTile
             label="À Former"
-            value={drivers?.filter(d => d.cpcStatus === 'À FORMER').length || 0}
+            value={drivers?.filter(d => normalizeCpcStatus(d.cpcStatus) === 'A FORMER').length || 0}
             subValue="Formation à renouveler"
             icon={<Clock className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-500"
@@ -194,7 +195,7 @@ export default function DriversIndex() {
           />
           <KpiTile
             label="Non Formés"
-            value={drivers?.filter(d => d.cpcStatus === 'NON FORMÉ').length || 0}
+            value={drivers?.filter(d => normalizeCpcStatus(d.cpcStatus) === 'NON FORME').length || 0}
             subValue="Sans formation CPC"
             icon={<XCircle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-500"
