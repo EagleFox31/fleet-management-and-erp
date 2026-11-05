@@ -1,5 +1,5 @@
 import { getFuelPriceAt } from "../services/fuel-price-service";
-import { onMissionStatusChange } from "../services/mission-budgets-service";
+import { onMissionStatusChange, resolveLaunchBudget } from "../services/mission-budgets-service";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { Router } from "express";
 import { db } from "../db";
@@ -1714,7 +1714,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
     const driverActive = hasDriver && Boolean(missionAssignment?.driverIsActive);
     const vehicleOperational = hasVehicle && missionAssignment?.vehicleStatus === "operational";
 
-    const missionBudgetPlan = extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost);
+    const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost));
     const fuelBudgetValue = missionBudgetPlan.fuelBudget;
     const roadExpensesBudgetValue = missionBudgetPlan.roadExpensesBudget;
     const contingencyBudgetValue = missionBudgetPlan.contingencyBudget;
@@ -1905,7 +1905,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
         blocking: true,
         detail: hasFuelBudget
           ? `${Math.round(Number(fuelBudgetValue || 0))} FCFA renseigné.`
-          : "Budget carburant non renseigné.",
+          : launchBudgetMissing ?? "Budget carburant non renseigné.",
       },
       {
         key: "budget_road_expenses",
@@ -1914,7 +1914,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
         blocking: true,
         detail: hasRoadExpensesBudget
           ? `${Math.round(Number(roadExpensesBudgetValue || 0))} FCFA renseigné.`
-          : "Budget frais de route non renseigné.",
+          : launchBudgetMissing ?? "Budget frais de route non renseigné.",
       },
       {
         key: "budget_contingency",
@@ -1923,7 +1923,7 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
         blocking: true,
         detail: hasContingencyBudget
           ? `${Math.round(Number(contingencyBudgetValue || 0))} FCFA renseigné.`
-          : "Budget imprévus non renseigné.",
+          : launchBudgetMissing ?? "Budget imprévus non renseigné.",
       },
       {
         key: "fuel_balance",
@@ -3097,13 +3097,13 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
       }
 
       if (targetAssignments.length > 0) {
-        const missionBudgetPlan = extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost);
+        const { plan: missionBudgetPlan, missingDetail: launchBudgetMissing } = await resolveLaunchBudget(missionId, extractMissionBudgetPlan(mission.workflowData, mission.estimatedFuelCost));
         const fuelBudget = missionBudgetPlan.fuelBudget;
         const roadExpensesBudget = missionBudgetPlan.roadExpensesBudget;
         const contingencyBudget = missionBudgetPlan.contingencyBudget;
 
         if (fuelBudget === null || !Number.isFinite(fuelBudget) || fuelBudget <= 0) {
-          launchErrors.push("Budget carburant non renseigné.");
+          launchErrors.push(launchBudgetMissing ?? "Budget carburant non renseigné.");
         } else {
           const fuelBalance = await fuelCardService.getCurrentBalance();
           if (fuelBalance.balance < fuelBudget) {
@@ -3113,11 +3113,11 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           }
         }
 
-        if (roadExpensesBudget === null || !Number.isFinite(roadExpensesBudget) || roadExpensesBudget < 0) {
+        if (!launchBudgetMissing && (roadExpensesBudget === null || !Number.isFinite(roadExpensesBudget) || roadExpensesBudget < 0)) {
           launchErrors.push("Budget frais de route (FDR) non renseigné.");
         }
 
-        if (contingencyBudget === null || !Number.isFinite(contingencyBudget) || contingencyBudget < 0) {
+        if (!launchBudgetMissing && (contingencyBudget === null || !Number.isFinite(contingencyBudget) || contingencyBudget < 0)) {
           launchErrors.push("Budget imprévus non renseigné.");
         }
       }

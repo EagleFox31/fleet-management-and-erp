@@ -16,8 +16,8 @@
 import { KPI_QUERY_KEYS, WAREHOUSE_QUERY_KEYS } from "@shared/contracts/realtime-events";
 
 /**
- * `byId` : clés d'un seul objet, gabarit à `:vehicleId` ou `:registrationNumber` rempli depuis la
- * charge de l'événement (`vehicleId`, `vehicle.registrationNumber`). Sans identifiant dans la charge,
+ * `byId` : clés d'un seul objet, gabarit à `:vehicleId`, `:registrationNumber` ou `:missionId` rempli depuis la
+ * charge de l'événement (`vehicleId`, `vehicle.registrationNumber`, `missionId`). Sans identifiant dans la charge,
  * repli sur `byIdFallbackPrefixes` : on rafraîchit trop plutôt que pas assez.
  */
 type SatelliteGroup = {
@@ -27,7 +27,7 @@ type SatelliteGroup = {
   byIdFallbackPrefixes?: readonly string[];
 };
 
-export type SatellitePayload = { vehicleId?: unknown; vehicle?: { registrationNumber?: unknown } | null } | null | undefined;
+export type SatellitePayload = { vehicleId?: unknown; missionId?: unknown; vehicle?: { registrationNumber?: unknown } | null } | null | undefined;
 
 const MANAGEMENT_DASHBOARD = "/api/management/dashboard";
 
@@ -128,7 +128,7 @@ export const SATELLITE_GROUPS = {
   /** Missions : activité au tableau de bord de gestion. */
   missions: { keys: [MANAGEMENT_DASHBOARD] },
   /** Budget de mission (L1f) : liste, budget d'une mission et ses dépenses, besoin du jour. */
-  missionBudgets: { keys: ["/api/mission-budgets", "/api/mission-budgets/daily-need"] },
+  missionBudgets: { keys: ["/api/mission-budgets", "/api/mission-budgets/daily-need"], byId: ["/api/missions/:missionId/launch-readiness"] },
   /** Échéances documentaires : compteurs de flotte. */
   documents: { keys: ["/api/statistics/fleet"] },
   /** Cloche et listes d'alertes, y compris le filtre par type. */
@@ -211,6 +211,7 @@ export function satelliteTargetsOf(event: string, payload?: SatellitePayload): {
   const prefixes = new Set<string>();
   const ids: Record<string, string | null> = {
     vehicleId: idOf(payload?.vehicleId),
+    missionId: idOf(payload?.missionId),
     registrationNumber: typeof payload?.vehicle?.registrationNumber === "string" && payload.vehicle.registrationNumber.trim() ? payload.vehicle.registrationNumber : null,
   };
   for (const name of EVENT_SATELLITES[event] ?? []) {

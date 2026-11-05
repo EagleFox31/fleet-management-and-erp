@@ -485,3 +485,6 @@ export async function dailyNeed(date: string): Promise<DailyNeed> {
   }
   return { date, ...total, byStatus };
 }
+
+/** Budget lu par la préparation au lancement (L1g), réexporté pour l’import existant de missions.routes.ts. */
+export { launchBudgetOf, resolveLaunchBudget } from "./mission-launch-budget";
