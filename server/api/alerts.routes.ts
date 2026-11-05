@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from "express";
 import { ALERT_READ_ALL_PATH, alertPath } from "@shared/contracts/alerts";
-import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { isAnyUser } from "../middleware/auth";
 import { alertInboxService } from "../services/alert-inbox-service";
 
@@ -11,9 +11,7 @@ import { alertInboxService } from "../services/alert-inbox-service";
  * ou supprimer l'alerte d'un autre.
  */
 function parseAlertId(raw: string): number {
-  const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) throw new AppError(400, "Identifiant d'alerte invalide.");
-  return id;
+  return parseRouteId(raw, "Identifiant d'alerte invalide.");
 }
 
 /** Couche 2 : les autres onglets ou appareils du même compte mettent leur compteur à jour. */

@@ -420,7 +420,7 @@ router.get("/statistics", checkReadPermission, async (req: Request, res: Respons
  */
 router.get("/:id", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     const invoiceData = await threeWayMatchingService.getSupplierInvoiceById(invoiceId);
 
     if (!invoiceData) {
@@ -478,7 +478,7 @@ router.patch("/:id/validate", checkAuth, async (req: Request, res: Response, nex
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     const { notes } = req.body;
 
     const invoiceData = await threeWayMatchingService.getSupplierInvoiceById(invoiceId);
@@ -536,7 +536,7 @@ router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: 
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseRouteId(req.params.id, "Identifiant de facture invalide.");
 
     const updated = await threeWayMatchingService.approveInvoice(
       invoiceId,
@@ -566,10 +566,7 @@ router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: 
  */
 router.get("/:id/settlements", checkReadPermission, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const invoiceId = parseInt(req.params.id);
-    if (Number.isNaN(invoiceId)) {
-      return res.status(400).json({ error: "ID facture invalide" });
-    }
+    const invoiceId = parseRouteId(req.params.id, "ID facture invalide");
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     res.json(settlements);
@@ -821,7 +818,7 @@ router.post("/:id/payment", checkPaymentPermission, async (req: Request, res: Re
       return res.status(401).json({ error: "Utilisateur non authentifié" });
     }
 
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseRouteId(req.params.id, "Identifiant de facture invalide.");
     const { paymentDate, paymentMethod, proofReference } = req.body;
 
     if (!paymentDate || !paymentMethod || !proofReference) {

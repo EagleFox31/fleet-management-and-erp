@@ -97,7 +97,7 @@ const checkEvaluationPermission = async (req: Request & { session: any }, res: R
       return res.status(401).json({ error: "Utilisateur non trouvé" });
     }
 
-    const supplierId = parseInt(req.params.id);
+    const supplierId = parseRouteId(req.params.id, "ID invalide");
     
     // Récupérer le fournisseur pour vérifier sa catégorie
     const supplier = await supplierManagementService.getSupplierById(supplierId);

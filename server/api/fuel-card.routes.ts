@@ -6,6 +6,7 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 
@@ -213,11 +214,7 @@ router.get("/history", async (req, res) => {
 // Statistiques de consommation par véhicule
 router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.vehicleId);
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
+    const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
     const stats = await fuelCardService.getConsumptionStatsByVehicle(vehicleId);
     
@@ -230,11 +227,7 @@ router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
 // Détection d'anomalies de consommation
 router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
   try {
-    const vehicleId = parseInt(req.params.vehicleId);
-    
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({ message: "ID de véhicule invalide" });
-    }
+    const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
     const anomalies = await fuelCardService.detectAnomalies(vehicleId);
     

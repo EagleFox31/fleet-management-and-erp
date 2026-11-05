@@ -1,5 +1,9 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { toApiError } from "@/lib/api-error";
+import { clientLogger } from "@/lib/logger";
+
+/** Message affiché quand une route `/api` répond une page HTML au lieu de JSON. */
+export const INVALID_API_RESPONSE_MESSAGE = "Le serveur a renvoyé une réponse inattendue. Réessayez dans un instant.";
 
 /**
  * Résout les URLs d'API relatives en URLs complètes lorsque l'application s'exécute
@@ -128,9 +132,9 @@ export async function apiRequest(
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
   if (url.startsWith("/api") && contentType.includes("text/html")) {
     const htmlPreview = (await res.text()).replace(/\s+/g, " ").slice(0, 160);
-    throw new Error(
-      `Réponse API invalide (HTML) pour ${method} ${url}. Vérifiez la route backend et redémarrez le serveur. Aperçu: ${htmlPreview}`,
-    );
+    // Le détail (route, extrait HTML) part au journal ; l'écran reçoit un message sans jargon.
+    clientLogger.error("Réponse API invalide (HTML)", { method, url, status: res.status, htmlPreview });
+    throw new Error(INVALID_API_RESPONSE_MESSAGE);
   }
 
   return res;

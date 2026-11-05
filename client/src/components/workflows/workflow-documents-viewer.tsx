@@ -17,6 +17,7 @@ import {
   File
 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
+import { userMessageOf } from '@/lib/api-error';
 
 interface WorkflowDocument {
   id: number;
@@ -71,7 +72,7 @@ export function WorkflowDocumentsViewer({
     onError: (error) => {
       toast({
         title: "Erreur",
-        description: "Erreur lors de la suppression du document.",
+        description: userMessageOf(error, "Erreur lors de la suppression du document."),
         variant: "destructive",
       });
     }

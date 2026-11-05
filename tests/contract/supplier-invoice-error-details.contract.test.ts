@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { threeWayMatchingService } from "../../server/services/three-way-matching-service";
 import { getContractApp } from "../support/app";
 import { apiErrorProblems, leakText, TECHNICAL } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -43,7 +44,12 @@ afterAll(async () => {
 
 describe("Factures fournisseurs : réponses d'erreur sans détail technique", { timeout: 120000 }, () => {
   it("une 500 renvoie le message générique et la référence, sans details", async () => {
-    const res = await fetch(`${baseUrl}/api/supplier-invoices/pas-un-id`, { headers: { Cookie: cookie } });
+    // Un id mal formé répond 400 depuis la lecture stricte des ids : la 500 est provoquée par le service.
+    const spy = vi
+      .spyOn(threeWayMatchingService, "getSupplierInvoiceById")
+      .mockRejectedValueOnce(new Error("invalid input syntax for type integer: \"NaN\""));
+    const res = await fetch(`${baseUrl}/api/supplier-invoices/2147483000`, { headers: { Cookie: cookie } });
+    spy.mockRestore();
     const body = await res.json();
     expect(apiErrorProblems(res.status, body, 500, undefined, res.headers.get("x-request-id"))).toEqual([]);
     expect(body).not.toHaveProperty("details");

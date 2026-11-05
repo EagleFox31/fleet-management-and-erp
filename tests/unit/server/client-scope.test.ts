@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
-import { canAccessOwned, ownerScopeOf } from "../../../server/lib/client-scope";
+import { OUT_OF_SCOPE_MESSAGE, canAccessOwned, ownerScopeOf } from "../../../server/lib/client-scope";
 import { ALL_APP_ROLES } from "../../../shared/constants/roles";
 
 /**
@@ -55,5 +55,12 @@ describe("canAccessOwned", () => {
 
   it("sans utilisateur : refusé", async () => {
     expect(await canAccessOwned(undefined, async () => 42)).toBe(false);
+  });
+});
+
+describe("OUT_OF_SCOPE_MESSAGE", () => {
+  it("ne nomme pas l'objet : la même réponse sert pour un véhicule, un document et un identifiant absent", () => {
+    expect(OUT_OF_SCOPE_MESSAGE).not.toMatch(/véhicule|document/i);
+    expect(OUT_OF_SCOPE_MESSAGE).toMatch(/n'appartient pas à votre compte/);
   });
 });

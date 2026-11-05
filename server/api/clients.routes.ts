@@ -6,6 +6,7 @@ import { insertClientSchema } from "@shared/schema";
 import { authenticate, authorize } from "../middleware/auth";
 import { ZodError } from "zod";
 import { AppError } from "../lib/app-error";
+import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
 import { STAFF_ROLES } from "@shared/constants/roles";
@@ -40,12 +41,8 @@ function parsePositiveInteger(value: unknown): number | null {
   return null;
 }
 
-function parseClientId(rawId: string): number | null {
-  const clientId = Number.parseInt(rawId, 10);
-  if (!Number.isInteger(clientId) || clientId <= 0) {
-    return null;
-  }
-  return clientId;
+function parseClientId(rawId: string): number {
+  return parseRouteId(rawId, "Identifiant client invalide");
 }
 
 function sanitizeUpdateData(
@@ -168,9 +165,6 @@ router.get("/all", authorize([...MANAGER_ROLES]), async (req, res, next) => {
 router.get("/:id", async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
-    if (!clientId) {
-      return res.status(400).json({ message: "Identifiant client invalide" });
-    }
 
     const client = await getClientWithCreator(clientId);
     if (!client) {
@@ -224,9 +218,6 @@ router.post("/", authorize(["admin", "secretary", "logistics"]), async (req, res
 router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
-    if (!clientId) {
-      return res.status(400).json({ message: "Identifiant client invalide" });
-    }
 
     const validatedData = updateClientSchema.parse(req.body ?? {});
     const updateData = sanitizeUpdateData(validatedData);
@@ -269,9 +260,6 @@ router.patch("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
 router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
-    if (!clientId) {
-      return res.status(400).json({ message: "Identifiant client invalide" });
-    }
 
     const [archivedClient] = await db
       .update(clients)
@@ -302,9 +290,6 @@ router.delete("/:id", authorize([...MANAGER_ROLES]), async (req, res, next) => {
 router.patch("/:id/restore", authorize([...MANAGER_ROLES]), async (req, res, next) => {
   try {
     const clientId = parseClientId(req.params.id);
-    if (!clientId) {
-      return res.status(400).json({ message: "Identifiant client invalide" });
-    }
 
     const [restoredClient] = await db
       .update(clients)
