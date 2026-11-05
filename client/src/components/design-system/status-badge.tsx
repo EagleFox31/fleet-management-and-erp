@@ -12,14 +12,14 @@ const STATUS_STYLE = {
   delivered: "bg-sky-100 text-sky-700 border-sky-200",
   issued: "bg-teal-100 text-teal-700 border-teal-200",
   fulfilled: "bg-teal-100 text-teal-700 border-teal-200",
-  paid: "bg-green-100 text-green-700 border-green-200",
-  closed: "bg-green-100 text-green-700 border-green-200",
-  completed: "bg-green-100 text-green-700 border-green-200",
-  cancelled: "bg-red-100 text-red-700 border-red-200",
-  canceled: "bg-red-100 text-red-700 border-red-200",
-  rejected: "bg-red-100 text-red-700 border-red-200",
+  paid: "bg-success/15 text-success border-success/30",
+  closed: "bg-success/15 text-success border-success/30",
+  completed: "bg-success/15 text-success border-success/30",
+  cancelled: "bg-destructive/10 text-destructive-text border-destructive/30",
+  canceled: "bg-destructive/10 text-destructive-text border-destructive/30",
+  rejected: "bg-destructive/10 text-destructive-text border-destructive/30",
   partial: "bg-orange-100 text-orange-700 border-orange-200",
-  disputed: "bg-amber-100 text-amber-700 border-amber-200",
+  disputed: "bg-warning/15 text-warning-text border-warning/40",
 } as const;
 
 const STATUS_LABEL: Record<string, string> = {
