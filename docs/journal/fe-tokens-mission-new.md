@@ -18,4 +18,4 @@ Les couleurs en dur ne suivaient pas le thème sombre de façon cohérente.
 
 ## Pastille « À former » sur le jeton warning-text
 
-La pastille du statut CPC « À former » (étape 3) passe de `text-warning` à `text-warning-text` : `text-warning` sur `bg-warning/10` donnait 1,98:1 en clair, illisible. `--warning-text` (introduit dans la PR du jeton success/warning-text) donne 7,64:1 en clair et 8,20:1 en sombre. L astuce de l étape 3 est en `text-foreground` et l alerte CPC de l assistant en `text-destructive` : rien d autre à basculer. Cette branche embarque le jeton par fusion de feat/design-token-success.
+La pastille du statut CPC « À former » (étape 3) passe de `text-warning` à `text-warning-text` : `text-warning` sur `bg-warning/10` donnait 1,98:1 en clair, illisible. `--warning-text` (introduit dans la PR du jeton success/warning-text) donne 7,64:1 en clair et 8,20:1 en sombre. L'astuce de l'étape 3 est en `text-foreground` et l'alerte CPC de l assistant en `text-destructive` : rien d'autre à basculer. Cette branche embarque le jeton par fusion de feat/design-token-success.
