@@ -46,8 +46,8 @@ const FROZEN: Record<string, number> = {
   "work-order-parts.routes.ts": 5,
 };
 
-/** Lectures lâches restantes dans `server/routes.ts` (gelé). Ne peut que baisser. */
-const ROUTES_TS_FROZEN = 28;
+/** Lectures lâches restantes dans `server/routes.ts` (gelé) : PATCH users et toggle admin-users, traités ailleurs. Ne peut que baisser. */
+const ROUTES_TS_FROZEN = 2;
 
 export function countLooseParamReads(source: string): number {
   return (stripComments(source).match(LOOSE_PARAM_READ) ?? []).length;
