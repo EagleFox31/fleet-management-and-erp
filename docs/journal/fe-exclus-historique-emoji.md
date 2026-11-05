@@ -7,5 +7,9 @@
 ## Constat
 Le balayage trouve 94 lignes avec emoji dans 22 fichiers de `client/src` (surtout `playful-error-messages.tsx`, `use-animated-error.ts`, `technician/fleet-status.tsx`, `settings.tsx`). Elles sont gelées par fichier (cliquet : le compte ne peut que baisser, un nouveau fichier ne peut pas en recevoir, un fichier assaini sort de la liste). La migration vers lucide-react est un lot séparé.
 
+## Signes comptés
+✓ (U+2713), ✗ (U+2717) et ✕ (U+2715) sont des dingbats, pas des emoji Unicode ; ils sont comptés volontairement : AGENTS.md §4 demande les icônes Check et X de lucide-react.
+
 ## Preuve
-Mutations rouges : emoji dans un JSX fictif (`<p>Bravo …</p>`) dans un nouveau fichier, et emoji ajouté à un fichier gelé. Le détecteur est testé sur emoji, sélecteur FE0F, accents et flèches.
+- Rouges : emoji dans un JSX fictif (nouveau fichier) ; emoji ajouté à un fichier gelé ; compte gelé de `settings.tsx` relevé de 7 à 8 (test « compte exact », message « compte baissé : abaisser GELES »).
+- Correction de relecture : une première mutation (relever un compte gelé) restait verte, car le test n'exigeait qu'un compte inférieur ou égal. Le cliquet exige maintenant l'égalité exacte.
