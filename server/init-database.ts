@@ -427,6 +427,40 @@ END $$;
 DROP INDEX IF EXISTS ux_part_specifications_part_name;`;
 
 /**
+ * Cycle de vie du véhicule : journal des désactivations de la suppression douce (vehicle_deletion_effects)
+ * et auteur de la suppression (vehicles.deleted_by). Doit rester identique à
+ * server/db/migrations/20261105_vehicle_lifecycle.sql : tests/unit/server/vehicle-lifecycle-schema.test.ts
+ * compare les deux. Verrou indisponible sous 5 s : WARNING, réessayé au démarrage suivant.
+ */
+export const VEHICLE_LIFECYCLE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS vehicle_deletion_effects (
+    id serial PRIMARY KEY,
+    vehicle_id integer NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    table_name text NOT NULL,
+    row_id integer NOT NULL,
+    column_name text NOT NULL,
+    previous_value jsonb NOT NULL,
+    applied_value jsonb NOT NULL,
+    created_by integer REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
+  );
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'vehicle_deletion_effects non créée, verrou indisponible sous 5 s : suppression douce et restauration en échec jusqu''au prochain démarrage';
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id) ON DELETE SET NULL;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'vehicles.deleted_by non ajoutée, verrou de table indisponible sous 5 s : suppression douce en échec jusqu''au prochain démarrage';
+END $$;`;
+
+/**
  * P3-2 : récépissé provisoire d'une demande de renouvellement (date de validité, fichier, qui et quand).
  * Rend le véhicule éligible jusqu'à receipt_valid_until inclus ; distinct de proof_file_*, preuve de clôture.
  * CHECK document_renewal_requests_receipt_complete : date, chemin, nom et date de dépôt tous NULL ou tous
@@ -1626,20 +1660,8 @@ export async function initializeDatabase() {
     await reportDriverUserIdUniqueGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
-    // Désactivations posées par la suppression douce d'un véhicule, rejouées par sa restauration
-    // (server/services/vehicle-lifecycle-service.ts). Additif et idempotent.
-    await pool.query(`CREATE TABLE IF NOT EXISTS vehicle_deletion_effects (
-  id serial PRIMARY KEY,
-  vehicle_id integer NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
-  table_name text NOT NULL,
-  row_id integer NOT NULL,
-  column_name text NOT NULL,
-  previous_value jsonb NOT NULL,
-  applied_value jsonb NOT NULL,
-  created_by integer REFERENCES users(id) ON DELETE SET NULL,
-  created_at timestamp NOT NULL DEFAULT now(),
-  CONSTRAINT vehicle_deletion_effects_row_key UNIQUE (vehicle_id, table_name, row_id, column_name)
-);`);
+    // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.
+    await pool.query(VEHICLE_LIFECYCLE_SQL);
     // Mot de passe chauffeur dérivé du PIN : remplacé par un secret aléatoire (idempotent, PIN intact).
     await revokePinDerivedDriverPasswords(pool);
     // Liens d'alertes carburant vers une route inexistante : réécrits (idempotent, #297).
