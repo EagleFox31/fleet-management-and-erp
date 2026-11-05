@@ -8,6 +8,7 @@ import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
+import { driverEventScopes } from "../lib/driver-realtime";
 import { toFieldErrors } from "@shared/errors";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
 import { bodyIdSchema } from "@shared/contracts/common";
@@ -120,13 +121,13 @@ function broadcastDriverUpdate(
     return;
   }
 
-  broadcastUpdate(eventType, {
+  for (const scope of driverEventScopes(driver?.userId)) broadcastUpdate(eventType, {
     entity: "driver",
     entityId: driverId,
-    // Diffusion à tous les profils : ni CNI, ni permis, ni date de naissance. Les écrans
+    // Personnel hors chauffeur et chauffeur concerné seuls : ni CNI, ni permis, ni date de naissance. Les écrans
     // resynchronisent par invalidation (useRealTimeSync), ils n'exploitent pas la fiche diffusée.
     payload: { driver: driver ? stripDriverPersonalData(driver) : driver },
-    scope: { type: "broadcast" },
+    scope,
   });
 }
 

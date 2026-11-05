@@ -23,13 +23,9 @@ const KNOWN_BROADCASTS: Record<string, { count: number; why: string }> = {
     count: 3,
     why: "type RealtimeScope (1) + portées par défaut de fuel_price_changed et vehicle_document_type_changed (2), prix et types de papier lus par tous les profils",
   },
-  "server/api/drivers-management.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
-  "server/api/drivers.routes.ts": { count: 1, why: "événements chauffeur suivis par plusieurs profils" },
   "server/api/fuel-card.routes.ts": { count: 1, why: "événements carte carburant suivis par plusieurs profils" },
   "server/api/purchase-orders.routes.ts": { count: 1, why: "commandes fournisseur suivies par plusieurs profils" },
   "server/api/supplier-invoices.routes.ts": { count: 1, why: "factures fournisseur suivies par plusieurs profils" },
-  "server/api/suppliers.routes.ts": { count: 1, why: "fournisseurs suivis par plusieurs profils" },
-  "server/services/tires-service-simplified.ts": { count: 1, why: "pneus suivis par plusieurs profils" },
 };
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
