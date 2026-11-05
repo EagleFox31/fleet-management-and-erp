@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, VEHICLE_PATCH_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { ALL_APP_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -195,7 +195,7 @@ export const isPartsCatalogManager = authorize(['admin', 'warehouse']);
 // les inspections sous `isTechnician`.
 export const isTireCatalogManager = authorize(['admin', 'warehouse']);
 export const isPartRequester = authorize(['admin', 'workshop_manager', 'technician', 'warehouse']);
-export const isDriverManager = authorize(['admin', 'logistics', 'secretary']);
+export const isDriverManager = authorize([...DRIVER_MANAGER_ROLES]);
 export const isFuelCardManager = authorize([...FUEL_CARD_MANAGER_ROLES]);
 // Saisie d'un plein depuis l'écran carburant. Le technicien n'en saisit pas ; le
 // chauffeur passe par sa mission (POST /api/missions/:id/fuel-records).

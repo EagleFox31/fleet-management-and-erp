@@ -8,4 +8,14 @@
 
 **Pourquoi.** Le blocage existait et la garde serveur est la même, mais le retour se limitait à une ligne sans consigne. Ce n'est pas un bug de règle : la garde lit le statut enregistré (`cpcStatusRecorded`), la liste recalcule l'affichage depuis `cpcTrainingDate`.
 
+**Correctifs de relecture.** Les rôles viennent de `DRIVER_MANAGER_ROLES` (`shared/constants/roles.ts`), lue par `isDriverManager` côté serveur et par `canManageDrivers` côté client. La consigne cite le formulaire « Mise à jour des certifications CPC » (bouton « Enregistrer validation »), qui recalcule toujours le statut : `buildDriverPatchPayload` n'envoie pas une date inchangée, donc ressaisir la même date dans la fiche ne débloque rien.
+
+**Deux cas de divergence connus (règle inchangée, question posée à l'utilisatrice).**
+- (a) Affiché « formé » mais bloqué : le statut enregistré n'a jamais été recalculé, la garde lit lui et non l'affichage.
+- (b) Marge de 59 jours : `calculateCPCStatus` enregistre « À FORMER » 59 jours avant l'expiration ; la garde bloque alors que la formation est encore valable. Le commentaire de `driver-cpc-eligibility.ts` affirmait le contraire ; il est corrigé, la règle n'est pas touchée.
+
 **Tester.** `node node_modules/vitest/vitest.mjs run tests/unit/client/mission-wizard-cpc-guidance.test.ts tests/unit/client/mission-wizard-rules.test.ts`.
+
+## Consigne suivable par rôle
+
+Le formulaire « Mise à jour des certifications CPC » n est rendu que sur le tableau de bord du secrétariat (App.tsx : un tableau de bord par rôle ; admin et logistique ont le leur, sans ce formulaire). La consigne dit donc au secrétariat de l utiliser depuis son tableau de bord ; admin, logistique et les autres rôles sont renvoyés vers le secrétariat. POST update-cpc autorise toujours admin et logistique : exposer le formulaire sur la fiche chauffeur (drivers/[id].tsx) est le suivi prévu, la consigne pourra alors pointer vers la fiche.
